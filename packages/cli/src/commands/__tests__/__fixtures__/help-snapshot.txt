@@ -14,7 +14,8 @@ Work:
                            a report
   probe [options] <url>    Send adversarial messages to a live model or agent endpoint and report
                            the ones it obeys
-  sbom                     Generate an SBOM from lockfiles, and check one against known advisories
+  sbom                     Generate an SBOM from lockfiles, check one against known advisories, and
+                           scan model files
   findings [options]       Browse findings and change their status
   threads                  Start, follow and stop threads
   sentinels                Create, run and change Sentinels
@@ -1126,18 +1127,20 @@ Options:
 ### 0 sbom
 Usage: 0 sbom [options] [command]
 
-Generate an SBOM from lockfiles, and check one against known advisories
+Generate an SBOM from lockfiles, check one against known advisories, and scan model files
 
 Options:
-  -h, --help                   display help for command
+  -h, --help                    display help for command
 
 Commands:
-  generate [options] [folder]  Write an SBOM (CycloneDX 1.5 or SPDX 2.3) from the lockfiles in a
-                               folder (npm, pnpm, yarn, Cargo, Go, Python, Ruby, PHP, .NET, Gradle,
-                               Dart, Elixir)
-  check [options] <file>       Look every component of an SBOM up in the public OSV database and
-                               list the advisories
-  help [command]               display help for command
+  generate [options] [folder]   Write an SBOM (CycloneDX 1.5 or SPDX 2.3) from the lockfiles in a
+                                folder (npm, pnpm, yarn, Cargo, Go, Python, Ruby, PHP, .NET, Gradle,
+                                Dart, Elixir)
+  check [options] <file>        Look every component of an SBOM up in the public OSV database and
+                                list the advisories
+  scan-models [options] <path>  Scan model files (pickle, PyTorch, joblib, numpy) for imports that
+                                can run code when loaded
+  help [command]                display help for command
 
 ### 0 sbom check
 Usage: 0 sbom check [options] <file>
@@ -1170,6 +1173,18 @@ Options:
   --ai                 Also list the AI in the folder: models, datasets, hosted model ids and MCP
                        servers, found by reading files as text
   -h, --help           display help for command
+
+### 0 sbom scan-models
+Usage: 0 sbom scan-models [options] <path>
+
+Scan model files (pickle, PyTorch, joblib, numpy) for imports that can run code when loaded
+
+Arguments:
+  path               A model file, or a folder to search for model files
+
+Options:
+  --format <format>  Output: text, json or sarif (default: "text")
+  -h, --help         display help for command
 
 ### 0 scan
 Usage: 0 scan [options] <target>
