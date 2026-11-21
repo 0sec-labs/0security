@@ -14,7 +14,7 @@ import { finishWithError, UsageError } from "./output.js";
 const exec = promisify(execFile);
 const MAX_SARIF_BYTES = 20 * 1024 * 1024;
 const MAX_GZIP_BYTES = 10 * 1024 * 1024;
-const REPO = /^(?!\.{1,2}\/)[A-Za-z0-9_.-]{1,100}\/(?!\.{1,2}$)[A-Za-z0-9_.-]{1,100}$/;
+export const REPO =/^(?!\.{1,2}\/)[A-Za-z0-9_.-]{1,100}\/(?!\.{1,2}$)[A-Za-z0-9_.-]{1,100}$/;
 const SHA = /^[0-9a-f]{40}$/;
 const REF = /^refs\/(heads|tags|pull)\/[A-Za-z0-9._\/-]{1,200}$/;
 

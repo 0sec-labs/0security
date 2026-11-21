@@ -159,6 +159,22 @@ In the browser app, open a finding under **Findings**. The detail panel offers *
 
 A full report carries evidence, proof-of-concept steps and descriptions that can quote source code or secrets. Check it before you pass it to someone else. To bring a report into the browser app, use `0 findings list --import ./report.json --db-path <db>`. Imported findings are marked **discovered** and **unverified**.
 
+## Track findings as GitHub Issues
+
+`0 findings issues` mirrors findings into the issues of a repository, so the team triages them next to the code.
+
+```bash
+0 findings issues --repo acme/app --dry-run     # print the plan, change nothing
+0 findings issues --repo acme/app               # create and sync issues (needs `gh` signed in)
+```
+
+- One issue per finding, matched on later runs by a hidden marker in its body. Running it again updates, never duplicates.
+- Findings you accept or suppress (`0 findings update <id> --status accepted`), and fixed ones, close their issue with a comment. A finding that comes back reopens it.
+- `--min-severity` (default `medium`), `--max` (default 25 changes per run) and `--delay` keep it quiet and inside rate limits.
+- The issue holds only the title, severity, category, location, the attacker-impact sentence and the status. Evidence, requests, responses and proof-of-concept steps are never copied, because they can quote code or secrets; open them locally with `0 findings show <id>`. Report text is neutralised, so a finding cannot mention a person or reference another issue.
+
+To put findings in the Security tab instead, use `0 findings upload`.
+
 ## Limits
 
 - A finding without reproduced evidence is a lead. Check its status and evidence before you report it.

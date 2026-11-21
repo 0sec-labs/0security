@@ -683,6 +683,23 @@ Options:
   --db-path <path>  Destination database; stop its running console before importing
   -h, --help        display help for command
 
+### 0 findings issues (hidden)
+Usage: 0 findings issues [options]
+
+Mirror findings into GitHub Issues, one issue per finding, kept in sync without duplicates
+
+Options:
+  --repo <owner/name>        Repository (default: the current clone's)
+  --min-severity <severity>  Open issues only for findings at or above this: critical, high, medium,
+                             low or info (default: "medium")
+  --max <n>                  Most issues to create, update, close or reopen in one run (default:
+                             "25")
+  --delay <ms>               Wait this long between changes to respect rate limits (default: "1000")
+  --dry-run                  Print what would change and change nothing
+  --db-path <path>           Path to SQLite database (default: the shared database and every scan's)
+  --format <format>          Output: text or json (default: "text")
+  -h, --help                 display help for command
+
 ### 0 findings keys (hidden)
 Usage: 0 findings keys [options] [command]
 

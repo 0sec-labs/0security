@@ -912,7 +912,7 @@ Browse and manage persisted findings
 
 Human triage (`new`, `accepted`, `suppressed`) and verification have independent states. Accepting a finding records the operator's decision; reproduction and fix verification remain separate steps.
 
-Subcommands: [list](#findings-list) · [show](#findings-show) · [update](#findings-update) · [import](#findings-import) · [fix](#findings-fix) · [accept](#findings-accept) · [suppress](#findings-suppress) · [reopen](#findings-reopen) · [export](#findings-export) · [keys](#findings-keys) · [upload](#findings-upload) · [reports](#findings-reports).
+Subcommands: [list](#findings-list) · [show](#findings-show) · [update](#findings-update) · [import](#findings-import) · [fix](#findings-fix) · [accept](#findings-accept) · [suppress](#findings-suppress) · [reopen](#findings-reopen) · [export](#findings-export) · [keys](#findings-keys) · [upload](#findings-upload) · [issues](#findings-issues) · [reports](#findings-reports).
 
 | Option | Registered default | Description |
 | --- | --- | --- |
@@ -1085,6 +1085,31 @@ Put the scan in a pull request check: `0 scan . --diff origin/main --format sari
 | `--ref <ref>` | — | refs/heads/&lt;branch&gt; or refs/pull/&lt;n&gt;/merge (default: the current branch, or GITHUB_REF in Actions) |
 | `--tool <name>` | — | Name the tool shown in GitHub |
 | `--no-wait` | — | Return when GitHub has accepted the upload instead of waiting for it to be processed |
+| `--format <format>` | `text` | Output: text or json |
+
+#### findings issues
+
+Mirror findings into GitHub Issues, one issue per finding, kept in sync without duplicates
+
+```text
+0 findings issues [options]
+```
+
+```bash
+0 findings issues --repo acme/app --dry-run
+0 findings issues --repo acme/app --min-severity high --max 10
+```
+
+Run `--dry-run` first: it prints what would be created, updated, closed or reopened and changes nothing. Each finding family gets one issue, found again on later runs through a hidden `<!-- 0-finding:<key> -->` marker in its body (the key is the finding's fingerprint), so running it again never duplicates. Open findings at or above `--min-severity` (default `medium`) get an issue; an issue is updated when the finding's title, severity or location changed, closed with a comment when the finding is suppressed, accepted, fixed or marked a false positive, and reopened if it comes back. It creates the `security` and `severity:<level>` labels when they are missing; if it cannot, it warns and carries on without them. It only manages issues that carry the `security` label (applying that label needs triage rights), so removing it from an issue detaches that issue and a new one is created for the finding. `--max` (default 25) caps the changes in one run and `--delay` (default 1000 ms) spaces them out for GitHub's rate limits; run again to continue. The issue text holds only the title, severity, category, location (`path:line`), the attacker-impact sentence, the status and a hint for finding the details locally. Evidence, requests, responses and proof-of-concept bodies are never copied, because they can quote code or secrets. Report text is neutralised: no `@mentions`, no `#123` references, no HTML or links. `gh` needs permission to write issues (`issues: write` in Actions). The repository is taken from the clone when `--repo` is not given.
+
+| Option | Registered default | Description |
+| --- | --- | --- |
+| `--repo <owner/name>` | — | Repository (default: the current clone's) |
+| `--min-severity <severity>` | `medium` | Open issues only for findings at or above this: critical, high, medium, low or info |
+| `--max <n>` | `25` | Most issues to create, update, close or reopen in one run |
+| `--delay <ms>` | `1000` | Wait this long between changes to respect rate limits |
+| `--dry-run` | — | Print what would change and change nothing |
+| `--db-path <path>` | — | Path to SQLite database (default: the shared database and every scan's) |
 | `--format <format>` | `text` | Output: text or json |
 
 #### findings export
