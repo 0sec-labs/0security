@@ -73,6 +73,34 @@ Exit codes: `0` done, `1` a finding at or above `--fail-on` or the scan failed, 
 
 The JSON report has `schemaVersion: 1`, the scan's `status` (`complete`, `budget_exhausted`, `timed_out` or `failed`), `counts` by severity, the model's closing `summary`, with `--passes` also `passes` (asked for, finished, failed) and every pass's `threadIds`, and for each finding `foundInPasses`, and for each finding its `severity`, `category`, `location` (a path relative to the scanned folder, with start and end line), `evidence`, `cvssScore` when given and `suggestedFix` when it wrote one. `target` is the same on every machine: the folder's name, or the git URL without any credentials. A finding's `fingerprint` is a hash of its file and first line, so the same place in unchanged code keeps it from scan to scan, whatever the model wrote; it is absent when the finding cites no location. A model does not cite exactly the same lines every run, so match findings between scans loosely (same file, nearby lines) rather than by equality alone. The same report, in any format, is available later with `0 findings export --scan <thread id>`.
 
+### Scan with a different method
+
+`--skill <id>` replaces the default scan method. Two skills cover jobs that a general scan treats only in passing.
+
+**Plan a cryptography migration.** `0 scan ./your-repo --skill crypto-migration --format json -o crypto.json` lists every cryptographic use (algorithm, key size, library, call site, what the output feeds: wire format, stored data, other services, certificates), separates quantum-vulnerable public-key crypto (RSA, ECDH, ECDSA, EdDSA) from weak classical crypto (SHA-1, MD5, DES, ECB, static IVs, hardcoded keys), and records one finding per site with a minimal `suggestedFix`. The closing `summary` holds a migration plan: interoperability and rollout order, key and data migration, versioned formats, hybrid mode (for example X25519 with ML-KEM-768) and tests. The skill does not install a post-quantum library and does not invent function names: where it could not check a library's API in your code, the finding says so. Then fix one site at a time, in a separate work tree and as a pull request:
+
+```bash
+0 findings list
+0 findings fix <id> --test "npm test"
+```
+
+Review each pull request against the plan; a change to a wire format or a stored format needs the other side to accept both versions first.
+
+**Scan a built artifact.** `0 scan` reads a folder, so unpack the artifact into a new empty folder first, without running anything from it:
+
+```bash
+mkdir /tmp/artifact && cd /tmp/artifact
+npm pack acme-utils@2.3.1 && tar -xzf acme-utils-*.tgz --no-same-owner   # npm package
+pip download --no-deps --only-binary :all: acme-utils==1.0 -d . && unzip -q ./*.whl -d unpacked   # Python wheel
+unzip -q app.jar -d unpacked                                                                   # jar
+docker save acme/app:1.0 -o image.tar && mkdir image && tar -xf image.tar -C image             # image layers and config
+mkdir rootfs && docker create --name tmp-export acme/app:1.0 && docker export tmp-export | tar -x -C rootfs   # image filesystem
+docker rm tmp-export
+0 scan /tmp/artifact/package --skill artifact-scan --budget 1   # the unpacked folder
+```
+
+Check an archive before unpacking it: `tar -tzf file.tgz | head` and `unzip -l file.whl` show absolute paths or `..` components, and recent GNU tar and Info-ZIP refuse them by default but older versions may not. Do not extract with `sudo`, and put the folder on a disk with room for it. Extracting as a normal user can drop setuid bits and ownership, so a setuid file may show only as a script that sets the bit itself; the skill checks both. The skill checks install scripts and startup commands, embedded credentials, setuid files, unexpected native binaries, URLs the code contacts, debug leftovers, and the shipped dependencies against the manifest. It runs `0 sbom generate` and `0 sbom check` on the folder, and `syft`, `trivy`, `file`, `strings`, `readelf` and `jq` if they are installed. It never executes anything from the artifact. In a test on a planted npm package the skill found all four planted problems in one run and three in another; a general scan found two. Treat a clean result as not proof, and read what the summary says it could not check.
+
 ### Scan in CI
 
 `0 scan` needs nothing from your machine: no sign-in and no desktop. In a CI job it starts its own console, scans, writes the report and stops the console. It needs a model connection, which on a runner is an API key in the environment (`OPENAI_API_KEY` works with the default model; see [Models](/models/) for other providers).
