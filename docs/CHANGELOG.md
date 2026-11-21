@@ -45,6 +45,7 @@ on the GitHub Release tag.
 
 ### Changed
 
+- The FoxGuard companion that `install.sh` and the container image download is now v0.14.2 (checksum-pinned for every platform). It fixes changed-file scans of non-ASCII file names. On a test app and a Java servlet it reports the same findings as v0.14.0.
 - Less text in the app: shorter Settings descriptions, no subtitle that repeats a page's name, a one-line Memory notice, and shorter dialogs on Computers.
 
 ### Removed
