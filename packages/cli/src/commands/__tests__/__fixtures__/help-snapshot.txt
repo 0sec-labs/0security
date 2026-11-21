@@ -615,6 +615,8 @@ Commands:
                                     for stdin). Nothing in the file is executed.
   fix [options] <finding>           Fix one finding in an isolated git work tree and open a pull
                                     request for review
+  burndown [options]                Work through open findings in batches: one fix branch and pull
+                                    request each, then a report
   evidence [options] <folder>       Write one folder of findings, SARIF, SBOM and fix branches, with
                                     a README that says what it does and does not show
   report-draft [options] <finding>  Write a draft early warning, notification or final report about
@@ -633,6 +635,50 @@ Options:
   --db-path <path>  Path to SQLite database
   --note <text>     Optional triage note
   -h, --help        display help for command
+
+### 0 findings burndown
+Usage: 0 findings burndown [options]
+
+Work through open findings in batches: one fix branch and pull request each, then a report
+
+Options:
+  --severity <levels>             Only these severities (critical, high, medium, low, info;
+                                  comma-separated)
+  --category <category>           Only this category
+  --tool <name>                   Only findings reported by this tool
+  --source <name>                 Alias of --tool
+  --fingerprint <prefix>          Only findings whose fingerprint or id starts with this
+  --limit <n>                     Attempt at most this many findings in this run; the next run
+                                  continues with the rest
+  --repo <dir>                    Git repository the findings are in (default: the current
+                                  directory)
+  --base <branch>                 Branch to start from and open pull requests against (default: the
+                                  remote's default branch)
+  --test <command>                Check to run after each change; repeat for several. A failing
+                                  check makes the pull request a draft
+  --no-pr                         Commit on the fix branches but do not push or open pull requests
+  --concurrency <n>               Fixes at the same time, each in its own work tree (1 to 4)
+                                  (default: "1")
+  --budget <usd>                  Total spend for this run in USD; no new fix starts once it is used
+                                  (default: "10")
+  --per-fix <usd>                 Spend cap for one fix, in USD (default: "3")
+  --max-consecutive-failures <n>  Stop after this many failed fixes in a row (default: "3")
+  --max-failure-rate <fraction>   Stop when the share of failed fixes is above this (after
+                                  --min-attempts) (default: "0.5")
+  --min-attempts <n>              Fixes to attempt before the failure share can stop the run
+                                  (default: "4")
+  --model <model>                 Model for the fix threads (default: gpt-6-luna)
+  --timeout <seconds>             Maximum seconds to wait for one fix (default: "1800")
+  --retry                         Work again on findings that already have a fix branch or pull
+                                  request
+  --dry-run                       List what would be attempted and skipped; change nothing
+  --history                       List the metrics row of each earlier run and exit
+  --engine-url <url>              Attach directly to a running trusted engine
+  --engine-token-env <name>       Environment variable holding the attached engine token
+  --computer <id>                 Use a registered remote computer
+  --computers-config <path>       Operator computer connection registry JSON file
+  --db-path <path>                Control database of the local engine to attach to
+  -h, --help                      display help for command
 
 ### 0 findings evidence
 Usage: 0 findings evidence [options] <folder>
