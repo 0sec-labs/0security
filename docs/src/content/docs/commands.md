@@ -928,7 +928,7 @@ Browse and manage persisted findings
 
 Human triage (`new`, `accepted`, `suppressed`) and verification have independent states. Accepting a finding records the operator's decision; reproduction and fix verification remain separate steps.
 
-Subcommands: [list](#findings-list) · [show](#findings-show) · [update](#findings-update) · [import](#findings-import) · [fix](#findings-fix) · [accept](#findings-accept) · [suppress](#findings-suppress) · [reopen](#findings-reopen) · [export](#findings-export) · [keys](#findings-keys) · [upload](#findings-upload) · [issues](#findings-issues) · [reports](#findings-reports).
+Subcommands: [list](#findings-list) · [show](#findings-show) · [update](#findings-update) · [import](#findings-import) · [fix](#findings-fix) · [evidence](#findings-evidence) · [report-draft](#findings-report-draft) · [accept](#findings-accept) · [suppress](#findings-suppress) · [reopen](#findings-reopen) · [export](#findings-export) · [keys](#findings-keys) · [upload](#findings-upload) · [issues](#findings-issues) · [reports](#findings-reports).
 Subcommands: [list](#findings-list) · [show](#findings-show) · [update](#findings-update) · [import](#findings-import) · [fix](#findings-fix) · [evidence](#findings-evidence) · [report-draft](#findings-report-draft) · [accept](#findings-accept) · [suppress](#findings-suppress) · [reopen](#findings-reopen) · [export](#findings-export) · [keys](#findings-keys) · [upload](#findings-upload) · [reports](#findings-reports).
 
 | Option | Registered default | Description |
