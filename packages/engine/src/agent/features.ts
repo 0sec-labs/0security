@@ -22,7 +22,6 @@
  * A/B run does not depend on reconstructing the flag set by reading source:
  *
  *   env ZERO_FEATURE_PRESET=fp-moat 0 scan …
- *   0 scan --features fp-moat …
  *
  * The preset's membership lives in `agent/feature-presets.ts` and is pinned by
  * test. Applying it never overwrites a flag that is already set, so

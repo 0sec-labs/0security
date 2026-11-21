@@ -4,7 +4,7 @@ One layout primitive, `PageShell` (`packages/web/src/components/page-shell.tsx`)
 
 | Variant | Width | Used by |
 |---|---|---|
-| `list` (default) | 872px, centred, 24px gutters, title at a fixed offset | Agents and Agent detail, Skills (Installed, Browse, detail), Memory, Computers, Extensions, doctor, tools, project, fix, models, connections, Members, API keys, not-found |
+| `list` (default) | 872px, centred, 24px gutters, title at a fixed offset | Agents and Agent detail, Skills (Installed, Browse, detail), Computers, Extensions, doctor, tools, project, fix, models, connections, Members, API keys, not-found |
 | `form` | 672px, same gutters and offset | Settings sections |
 | `full` | edge to edge, header keeps the gutter and offset | Findings (list and board), finding page, thread view |
 
@@ -25,7 +25,6 @@ Measured with headless Chromium against a console started from the worktree (`HO
 | skills-installed | 768 (max 768), x452, pad 24; h1 101/476 22px | 768 (max 768), x244, pad 24; h1 101/268 22px | 768 (max 768), x0, pad 24; h1 92/24 22px |
 | skills-browse | 768 (max 768), x452, pad 24; h1 101/476 22px | 768 (max 768), x244, pad 24; h1 101/268 22px | 768 (max 768), x0, pad 24; h1 92/24 22px |
 | skill-catalog-detail | 768 (max 768), x452, pad 24; no h1 | 768 (max 768), x244, pad 24; no h1 | 768 (max 768), x0, pad 24; no h1 |
-| memory | 768 (max 768), x452, pad 24; h1 101/476 26px | 768 (max 768), x244, pad 24; h1 101/268 26px | 768 (max 768), x0, pad 24; h1 92/24 26px |
 | computers | 768 (max 768), x452, pad 24; h1 101/476 26px | 768 (max 768), x244, pad 24; h1 101/268 26px | 768 (max 768), x0, pad 24; h1 92/24 26px |
 | extensions | 768 (max 768), x452, pad 24; h1 101/476 26px | 768 (max 768), x244, pad 24; h1 101/268 26px | 768 (max 768), x0, pad 24; h1 92/24 26px |
 | settings-general | 768 (max 768), x452, pad 24; h1 101/476 22px | 768 (max 768), x244, pad 24; h1 101/268 22px | 768 (max 768), x0, pad 24; h1 92/24 22px |
@@ -62,7 +61,6 @@ Measured with headless Chromium against a console started from the worktree (`HO
 | skills-installed | 872 (max 872), x400, pad 24; h1 101/424 22px | 774 (max 872), x241, pad 24; h1 101/265 22px | 768 (max 872), x0, pad 24; h1 92/24 22px |
 | skills-browse | 872 (max 872), x400, pad 24; h1 101/424 22px | 774 (max 872), x241, pad 24; h1 101/265 22px | 768 (max 872), x0, pad 24; h1 92/24 22px |
 | skill-catalog-detail | 872 (max 872), x400, pad 24; no h1 | 774 (max 872), x241, pad 24; no h1 | 768 (max 872), x0, pad 24; no h1 |
-| memory | 872 (max 872), x400, pad 24; h1 101/424 22px | 774 (max 872), x241, pad 24; h1 101/265 22px | 768 (max 872), x0, pad 24; h1 92/24 22px |
 | computers | 872 (max 872), x400, pad 24; h1 101/424 22px | 774 (max 872), x241, pad 24; h1 101/265 22px | 768 (max 872), x0, pad 24; h1 92/24 22px |
 | extensions | 872 (max 872), x400, pad 24; h1 101/424 22px | 774 (max 872), x241, pad 24; h1 101/265 22px | 768 (max 872), x0, pad 24; h1 92/24 22px |
 | settings-general | 672 (max 672), x500, pad 24; h1 101/524 22px | 672 (max 672), x292, pad 24; h1 101/316 22px | 672 (max 672), x48, pad 24; h1 92/72 22px |

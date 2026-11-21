@@ -54,7 +54,6 @@
  *
  * Usage:
  *   env ZERO_FEATURE_PRESET=fp-moat 0 scan …
- *   0 scan --features fp-moat …
 
  */
 /** Names of the presets this module knows how to apply. */

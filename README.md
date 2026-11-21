@@ -79,8 +79,7 @@ Only point 0 at systems you own or are authorized to test.
 - **Talk to a security agent** about a folder on your computer or a remote Computer, in a Thread
 - **Review findings** on a board, with source evidence, and export them
 - **Verify fixes**: a finding is marked Verified by or Not verified
-- **Build persistent security agents**: Sentinels are standing threads that wake on a schedule or on every pull request, with skills, memory and automations written as prompts
-- **Keep memory** as plain notes that every thread can read
+- **Build persistent security agents**: Sentinels are standing threads that wake on a schedule or on every pull request, with skills, instructions, their own notes and automations written as prompts
 - **Extend** it with [extensions and skills](https://docs.0.security/extensions/)
 
 <p align="center">

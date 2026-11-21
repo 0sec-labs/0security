@@ -4,8 +4,8 @@ Principles: [tool-philosophy.md](tool-philosophy.md).
 
 ## Result
 
-Eight tools: `bash`, `str_replace`, `finding`, `ask_operator`, `load_skill`, `web_search`,
-`spawn_agent` and `memory` (when Memory is on). Files are read through the shell. `str_replace`
+Seven tools: `bash`, `str_replace`, `finding`, `ask_operator`, `load_skill`, `web_search`
+and `spawn_agent`. Files are read through the shell. `str_replace`
 creates a file when `old_string` is empty. A reply with no tool call ends the turn.
 
 Code: `packages/engine/src/agent/toolset.ts`, wiring in `console/turn-engine/session.ts`.

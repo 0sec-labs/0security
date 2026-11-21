@@ -7,7 +7,7 @@ import { ProviderIcon } from "@/components/provider-icon";
 
 export const setupPrompt = `Help me use 0security for my task from this coding agent. Use the CLI directly when shell access is available.
 
-Discover installed capabilities with 0 --version, 0 --help, relevant subcommand --help, 0 config doctor, and 0 config doctor workbench status --json. Choose among scan, findings, threads, sentinels, skills, memory, models, computers and config for the smallest operation serving my task.
+Discover installed capabilities with 0 --version, 0 --help, relevant subcommand --help, 0 config doctor, and 0 config doctor workbench status --json. Choose among scan, findings, threads, sentinels, skills, models, computers and config for the smallest operation serving my task.
 
 Reuse an existing browser console. If needed, inspect 0 --help and start it with --no-open --ready-json; use its returned URL for /connections and /models. 0's model connection is separate from this coding agent's model session. I complete OAuth/browser or device approval myself. Never request or expose keys, tokens, or credential files in chat; use existing named credential environment variables or the console's credential inputs.
 

@@ -139,7 +139,7 @@ export function registerSentinelsCommand(program: Command, deps: ConsoleCommandD
       return ((await client.request("GET", `${ROOT}/${enc(current.id)}/activations?limit=${limit}`)) as { activations: Array<{ id: string; status: string; trigger?: { kind: string }; startedAt?: string; missionId?: string }> }).activations;
     }, rows => renderTable(rows, [{ header: "ID", value: a => a.id }, { header: "STATUS", value: a => a.status }, { header: "TRIGGER", value: a => a.trigger?.kind }, { header: "STARTED", value: a => a.startedAt }, { header: "THREAD", value: a => a.missionId }])));
 
-  const files = group.command("files").description("Read and edit a Sentinel's instructions and memory files");
+  const files = group.command("files").description("Read and edit a Sentinel's instructions and notes files");
   consoleFlags(files.command("list <id>").description("List files"))
     .action((id: string, options: ConsoleFlags) => withConsole(options, deps, async client => ((await client.request("GET", `${ROOT}/${enc((await sentinel(client, id)).id)}/files`)) as { files: SentinelFile[] }).files,
       rows => renderTable(rows, [{ header: "PATH", value: f => f.path }, { header: "REVISION", value: f => f.revision }, { header: "UPDATED", value: f => f.updatedAt }])));

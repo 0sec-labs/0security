@@ -4,8 +4,8 @@ The evidence and the per-tool table are in [core-toolset.md](core-toolset.md).
 
 ## Principles
 
-1. **Small core.** The model sees eight tools: `bash`, `str_replace`, `finding`,
-   `ask_operator`, `load_skill`, `web_search`, `spawn_agent` and `memory`. Every extra schema costs tokens on every turn and makes
+1. **Small core.** The model sees seven tools: `bash`, `str_replace`, `finding`,
+   `ask_operator`, `load_skill`, `web_search` and `spawn_agent`. Every extra schema costs tokens on every turn and makes
    the model pick worse.
 2. **Shell first.** The model already knows `curl`, `jq`, `git`, `python3`. A
    capability that a shell command can express is not a tool.

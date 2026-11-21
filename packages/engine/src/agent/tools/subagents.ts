@@ -367,7 +367,7 @@ export const subagentModelSelectionSchema = z.object({
 
 /**
  * `spawn_persistent_agent` argument schema — validate-then-reject before any side
- * effect, mirroring the `kernel_run` discipline (see agent/CLAUDE.md). `.strip()`
+ * effect (see agent/AGENTS.md). `.strip()`
  * drops unknown keys a model might emit.
  */
 export const spawnPersistentAgentArgsSchema = subagentModelSelectionSchema

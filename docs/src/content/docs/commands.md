@@ -19,19 +19,21 @@ New to 0? Read the [Quickstart](/) first. Settings and environment variables are
 | Automate | [sentinels](#sentinels) · [api](#api) | [Sentinels](/sentinels/) |
 | Set up and extend | [config](#config) · [config doctor](#config-doctor) · [models](#models) · [models connect](#models-connect) · [skills](#skills) · [computers](#computers) | [Models](/models/), [Extensions](/extensions/), [Computers](/computers/) |
 
-## The nine commands
+## The ten commands
 
-`0` with no arguments opens the web console. Everything else is one of nine commands.
+`0` with no arguments opens the web console. Everything else is one of ten commands.
 
 | Command | What it does | Subcommands |
 | --- | --- | --- |
 | `0 scan` | Scan a folder or git repository for security bugs; prints the findings as a report. | none |
-| `0 findings` | Browse findings and change their status. `--format` exports, `--import` loads a report. | `list`, `show`, `update` |
-| `0 threads` | Start, follow and stop threads. | `list`, `send`, `start`, `stop` |
-| `0 sentinels` | Sentinels and, with `--automation`, saved automations. | `list`, `run`, `set` |
-| `0 skills` | Skills, extensions, MCP servers and connectors. | `list`, `add`, `run` |
+| `0 probe` | Send adversarial messages to a live model or agent endpoint and report the ones it obeys. | none |
+| `0 sbom` | Generate an SBOM from lockfiles, and check one against known advisories. | `generate`, `check` |
+| `0 findings` | Browse findings and change their status. `--format` exports, `--import` loads a report. | `list`, `show`, `update`, `import`, `fix` |
+| `0 threads` | Start, follow and stop threads. | `list`, `show`, `send`, `start`, `stop` |
+| `0 sentinels` | Create, run and change Sentinels. | `list`, `run`, `set` |
+| `0 skills` | Skills and extensions: list, add. | `list`, `add` |
 | `0 models` | Models and provider connections. | `list`, `set`, `connect` |
-| `0 computers` | Remote computers that run 0. | `list`, `add`, `stop` |
+| `0 computers` | Remote computers that run 0. | `list`, `add` (alias `deploy`), `stop` |
 | `0 config` | Settings, API keys, team setup and `config doctor`. | `get`, `set`, `doctor` |
 
 ## Invocation and safety
@@ -61,7 +63,7 @@ These forms run the implementation commands documented in the sections below.
 
 ### findings update
 
-Change a finding's status. `--status accepted` runs `findings accept`, `suppressed` runs `findings suppress`, `open` runs `findings reopen` and `false-positive` runs `findings triage mark-fp`.
+Change a finding's status. `--status accepted` runs `findings accept`, `suppressed` runs `findings suppress`, `open` runs `findings reopen` and `false-positive` suppresses the finding and records `--reason` as its note.
 
 ```text
 0 findings update [options] <id>
@@ -2842,7 +2844,7 @@ List a Sentinel's recent runs.
 
 #### sentinels files
 
-Read and edit a Sentinel's instructions and memory files.
+Read and edit a Sentinel's instructions and notes files.
 
 ```text
 0 sentinels files

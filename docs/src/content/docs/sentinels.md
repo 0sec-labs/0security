@@ -31,7 +31,7 @@ Every wake-up message carries the Sentinel's instructions and skills again, so a
 
 ## The pane and the profile
 
-The pane on the right (toggle it from the header; below 900 pixels it opens as a sheet) shows, in order: the status with **Pause** or **Resume**, **Triggers** with an on/off switch and the next time for each, **Instructions** and **Memory** as readable text with an **Edit** button, and one line for the last 7 days. The **...** menu in the header opens **Profile**: name, job, folder, computer, model, the memory switch, and **Delete**, **Archive** and **Save**.
+The pane on the right (toggle it from the header; below 900 pixels it opens as a sheet) shows, in order: the status with **Pause** or **Resume**, **Triggers** with an on/off switch and the next time for each, **Instructions** and **Notes** as readable text with an **Edit** button, and one line for the last 7 days. The **...** menu in the header opens **Profile**: name, job, folder, computer, model, and **Delete**, **Archive** and **Save**.
 
 ## Presets
 

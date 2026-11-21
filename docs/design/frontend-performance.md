@@ -30,7 +30,7 @@ belongs to the backdrop work. Nothing in this change was expected to move raw lo
   for 50 ms loads its route chunk, and `OperationsApp` prefetches the dashboard for the Findings link and the finding
   detail for a row. The sidebar's thread-row prefetch (`host-sidebar-chat-history.tsx`) is unchanged.
 - Pending rule (`lib/pending-gate.ts`): nothing for 250 ms (`SkeletonPanel` fade delay, Suspense `DelayedFallback`), and a
-  skeleton that has appeared stays at least 500 ms. `usePendingGate(query.isPending)` is applied to Memory, Agents,
+  skeleton that has appeared stays at least 500 ms. `usePendingGate(query.isPending)` is applied to Agents,
   Computers, the Findings landing, and the skill catalog pages.
 - Fonts (`fonts.css`): Latin and Latin Extended subsets of Inter and Geist Mono, `font-display: swap`, Inter Latin
   preloaded from `index.html`. Other scripts fall back to the system font.
