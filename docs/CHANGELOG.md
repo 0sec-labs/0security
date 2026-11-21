@@ -56,6 +56,7 @@ on the GitHub Release tag.
 
 ### Fixed
 
+- An MCP server that lists the same tool name twice is refused with a clear reason ("duplicate tool names; refused") and shown as needing approval, instead of failing with a generic listing error. Duplicate names cannot be used to slip past tool pinning.
 - `0 computers add --target-git` accepts only `https://` URLs (no spaces or quotes); the option help and docs now say so.
 - `0 findings fix` no longer fails its commit on a machine with no git identity (a fresh install, a GitHub Actions runner); it uses a neutral `0 <noreply@0.security>` author unless git has one.
 - `0 scan` with the released binary could not start its own console on a machine where none was running: it waited 30 seconds and gave up (v0.41.0). The console's output now goes to a file instead of a closed stream, and when it stops the scan says why at once. The release smoke test now runs this case.

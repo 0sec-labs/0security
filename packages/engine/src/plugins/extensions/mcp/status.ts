@@ -22,7 +22,9 @@ export function mcpServerStatuses(manifest: ExtensionManifest, pins: Readonly<Re
     const base = { server: decl.name, transport: decl.transport, target: decl.url ?? [decl.command, ...decl.args].join(" ") };
     if (!seen) return { ...base, state: approved ? "approved" : "not-connected", reason: approved ? "" : "not started yet: its tools are reviewed the first time it connects", seenAt: null, tools: Object.entries(approved ?? {}).map(([name, hash]) => ({ name, approvedHash: hash, seenHash: null, state: "approved" })) };
     const blocked = typeof seen.blocked === "string" && seen.blocked.length > 0;
-    const review = blocked && seen.review ? seen.review : reviewHashes(approved, seen.tools);
+    // A blocked record may carry no review (older records): treat every tool it saw as changed rather than "approved".
+    const recomputed = reviewHashes(approved, seen.tools);
+    const review = blocked && seen.review ? seen.review : blocked && !recomputed.needsApproval ? { ...recomputed, changed: Object.keys(seen.tools) } : recomputed;
     const stateOf = (n: string): McpToolStatus["state"] => (review.changed.includes(n) ? "changed" : review.added.includes(n) ? (approved ? "new" : "unreviewed") : review.removed.includes(n) ? "removed" : "approved");
     const names = [...new Set([...Object.keys(seen.tools), ...Object.keys(approved ?? {})])].sort();
     return { ...base, state: blocked || review.needsApproval ? "needs-approval" : "approved", reason: blocked ? (seen.blocked ?? review.reason) : review.reason, seenAt: seen.at, tools: names.map(name => ({ name, approvedHash: approved && Object.hasOwn(approved, name) ? approved[name]! : null, seenHash: Object.hasOwn(seen.tools, name) ? seen.tools[name]! : null, state: stateOf(name) })) };
