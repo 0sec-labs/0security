@@ -14,6 +14,8 @@ on the GitHub Release tag.
 
 ### Added
 
+- `0 sbom generate` now writes hashes (npm, pnpm, yarn, Cargo, Composer, Bundler checksums), the dependency graph (npm, pnpm, yarn, Cargo, poetry, Bundler, Composer) and licenses (npm, Composer) into the CycloneDX SBOM when the lockfile states them. `--format spdx` writes SPDX 2.3 JSON, and `--generator syft|cdxgen|trivy` runs that installed tool for what lockfiles do not cover (exit 2 with install instructions if it is missing).
+
 - `0 findings import <file|->` brings another scanner's SARIF 2.1.0 results in as findings (FoxGuard, CodeQL, Semgrep and others). Each finding keeps the scanner's name, rule, severity, CWE and file and line, shows the scanner as a chip in the Findings list, and is marked as imported and unverified. Importing the same file again changes nothing. Absolute paths become repo-relative under `--root` (default: the current directory); paths outside it are dropped.
 
 - `0 findings fix <finding>` fixes one finding in an isolated git work tree: a thread that follows the new `fix-finding` skill makes the smallest change, the command runs your `--test` checks, commits on a `0/fix-<id>` branch and opens a pull request (a draft when a check fails). Running it again updates the same pull request. It never pushes to the base branch and never merges. `--no-pr` stops after the commit.

@@ -1035,8 +1035,9 @@ Options:
   -h, --help                   display help for command
 
 Commands:
-  generate [options] [folder]  Write a CycloneDX 1.5 SBOM from the lockfiles in a folder (npm, pnpm,
-                               yarn, Cargo, Go, Python, Ruby, PHP, .NET, Gradle, Dart, Elixir)
+  generate [options] [folder]  Write an SBOM (CycloneDX 1.5 or SPDX 2.3) from the lockfiles in a
+                               folder (npm, pnpm, yarn, Cargo, Go, Python, Ruby, PHP, .NET, Gradle,
+                               Dart, Elixir)
   check [options] <file>       Look every component of an SBOM up in the public OSV database and
                                list the advisories
   help [command]               display help for command
@@ -1056,8 +1057,8 @@ Options:
 ### 0 sbom generate
 Usage: 0 sbom generate [options] [folder]
 
-Write a CycloneDX 1.5 SBOM from the lockfiles in a folder (npm, pnpm, yarn, Cargo, Go, Python, Ruby,
-PHP, .NET, Gradle, Dart, Elixir)
+Write an SBOM (CycloneDX 1.5 or SPDX 2.3) from the lockfiles in a folder (npm, pnpm, yarn, Cargo,
+Go, Python, Ruby, PHP, .NET, Gradle, Dart, Elixir)
 
 Arguments:
   folder               Folder to read lockfiles from (default: ".")
@@ -1065,6 +1066,10 @@ Arguments:
 Options:
   -o, --output <file>  Write the SBOM to a file instead of stdout
   --name <name>        Name of the application the SBOM describes (default: the folder's name)
+  --generator <tool>   Who writes the SBOM: builtin (reads lockfiles; default), syft, cdxgen, trivy
+                       (run the installed tool; exit 2 if it is missing) (default: "builtin")
+  --format <format>    Output format: cyclonedx (1.5, default) or spdx (2.3 JSON; builtin generator
+                       only) (default: "cyclonedx")
   --ai                 Also list the AI in the folder: models, datasets, hosted model ids and MCP
                        servers, found by reading files as text
   -h, --help           display help for command
