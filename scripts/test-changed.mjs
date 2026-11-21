@@ -62,7 +62,7 @@ if (full) {
 } else {
   const srcFiles = changed.filter((f) => tracked.has(f) && !/\.(?:md|mdx|png|svg|jpe?g)$/.test(f));
   if (!flag("--no-typecheck"))
-    for (const p of plan.typecheck) steps.push({ name: `typecheck @0/${p}`, ...pnpm("--filter", `@0/${p}`, "exec", "tsc", "--noEmit", ...(p === "bench" ? ["-p", "tsconfig.typecheck.json"] : [])) });
+    for (const p of plan.typecheck) steps.push({ name: `typecheck @0/${p}`, ...pnpm("--filter", `@0/${p}`, "exec", "tsc", "--noEmit") });
   for (const [p, m] of Object.entries(plan.packages)) {
     if (m.mode === "all" || srcFiles.length > 300)
       steps.push({ name: `vitest @0/${p} (whole package: ${m.mode === "all" ? m.reason : ">300 files changed"})`, ...pnpm("--filter", `@0/${p}`, "exec", "vitest", "run") });

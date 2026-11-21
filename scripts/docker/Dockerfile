@@ -4,7 +4,7 @@
 #
 # Multi-stage build:
 #   stage 1 (builder):    node:24 + pnpm, builds the bundled CLI in /app/dist
-#   stage 2 (toolbox):    ubuntu:24.04 + Node 24 + pentest/identity/Foxguard tooling
+#   stage 2 (toolbox):    ubuntu:26.04 + Node 24 + pentest/identity/Foxguard tooling
 #   stage 3 (runtime):    toolbox + CLI — the default target
 #
 #   docker build -f scripts/docker/Dockerfile --target toolbox   →  tooling only, no CLI (useful as smolvm image)
@@ -112,7 +112,7 @@ RUN if [ "$INSTALL_SECLISTS" = "1" ]; then \
 #                committing to a full graph collection
 #   krb5-user    kinit/klist/kdestroy — ticket handling for Kerberos-auth runs
 #                and for feeding TGTs to the impacket scripts below
-#   python3-venv ubuntu:24.04 ships python3 without ensurepip; needed for the
+#   python3-venv ubuntu:26.04 ships python3 without ensurepip; needed for the
 #                venv created in the next layer
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ldap-utils krb5-user python3-venv \
@@ -120,7 +120,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Impacket + Certipy + the BloodHound CE collector come from PyPI, not apt.
 #
-# ubuntu:24.04 marks the system interpreter EXTERNALLY-MANAGED (PEP 668), so a
+# ubuntu:26.04 marks the system interpreter EXTERNALLY-MANAGED (PEP 668), so a
 # bare `pip install` aborts. The two escapes are `--break-system-packages` and a
 # venv; this uses a venv. `--break-system-packages` would let these packages'
 # deep, tightly-pinned dependency trees (certipy-ad pins cryptography and
@@ -181,7 +181,7 @@ COPY scripts/provision-foxguard.sh /tmp/provision-foxguard.sh
 RUN sh /tmp/provision-foxguard.sh && rm /tmp/provision-foxguard.sh
 
 # Create the non-root runtime user and a writable work directory.
-# ubuntu:24.04 ships a default ubuntu user (uid 1000).
+# ubuntu:26.04 ships a default ubuntu user (uid 1000).
 RUN install -d -o ubuntu -g ubuntu /work
 USER ubuntu
 WORKDIR /work
