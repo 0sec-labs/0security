@@ -54,7 +54,7 @@ or `sentinels`). Command modules export a
 
 ## Tools
 
-The model-visible tool list is eight tools; see
+The model-visible tool list is seven tools; see
 [Tool philosophy](tool-philosophy.md) and [Core toolset](core-toolset.md).
 
 ## Where tests live
