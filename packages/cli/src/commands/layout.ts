@@ -86,7 +86,8 @@ const examplesBlock = (lines: readonly string[]): string => `Examples:\n${lines.
 const EXAMPLES: Readonly<Record<string, readonly string[]>> = {
   scan: ["0 scan ~/code/app", "0 scan ~/code/app --format sarif -o scan.sarif --fail-on high", "0 scan https://github.com/acme/app --budget 2 --format json"],
   probe: ["0 probe https://api.example.com/v1/chat/completions -H \"Authorization: Bearer $OPENAI_API_KEY\" --model gpt-4o-mini", "0 probe https://app.example.com/api/chat --body '{\"message\":\"{{prompt}}\"}' --response-path reply", "0 probe https://app.example.com/api/chat --secret sk-live-1234 --format sarif -o probe.sarif --fail-on medium"],
-  sbom: ["0 sbom generate . -o sbom.cdx.json", "0 sbom check sbom.cdx.json", "0 sbom check sbom.cdx.json --format json"],
+  sbom: ["0 sbom generate . -o sbom.cdx.json", "0 sbom check sbom.cdx.json", "0 sbom check sbom.cdx.json --format json", "0 sbom scan-models ./models"],
+  "sbom scan-models": ["0 sbom scan-models ./models", "0 sbom scan-models model.pkl", "0 sbom scan-models . --format sarif > models.sarif"],
   "sbom generate": ["0 sbom generate . -o sbom.cdx.json", "0 sbom generate ~/code/app --name app"],
   "sbom check": ["0 sbom check sbom.cdx.json", "0 sbom check sbom.cdx.json --format json"],
   findings: ["0 findings list --severity high", "0 findings show 3f2a", '0 findings update 3f2a --status accepted --note "known"'],

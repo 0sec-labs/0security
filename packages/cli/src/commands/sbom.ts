@@ -1,11 +1,12 @@
 /**
+ * `0 sbom scan-models <path>` lists the code-running imports in pickle-based model files.
  * `0 sbom generate [folder]` writes a CycloneDX (or SPDX) SBOM from the lockfiles in a folder, or runs syft, cdxgen or trivy; `0 sbom check <file>` looks every
  * component up in the public OSV advisory database. Nothing is installed or run: lockfiles are read as text.
  */
 import { readFileSync, statSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { relative, resolve, sep } from "node:path";
 import type { Command } from "commander";
-import { checkBomAgainstOsv, EXTERNAL_GENERATORS, generateSbom, GeneratorNotInstalledError, LOCKFILES, runExternalGenerator, toSpdx, type Advisory, type ExternalGenerator } from "@0/engine";
+import { checkBomAgainstOsv, EXTERNAL_GENERATORS, generateSbom, GeneratorNotInstalledError, LOCKFILES, modelScanToSarif, runExternalGenerator, scanModelPath, toSpdx, type Advisory, type ExternalGenerator, type ModelFileResult } from "@0/engine";
 import { VERSION } from "@0/engine/shared";
 import { finishWithError, UsageError } from "./output.js";
 
@@ -95,8 +96,47 @@ export async function runCheck(file: string, options: { format?: string }, deps:
   return result.advisories.length ? 1 : 0;
 }
 
+const VERDICT_LABEL: Record<ModelFileResult["verdict"], string> = {
+  dangerous: "DANGEROUS", unrecognised: "unrecognised imports", "none-found": "no dangerous imports found", "not-pickle": "not a pickle format", "not-scanned": "not scanned",
+};
+
+/** `0 sbom scan-models <path>`: reads model files as bytes and lists the imports their pickle streams would run. Exit 1 when any is dangerous. */
+export function runScanModels(path: string, options: { format?: string }, deps: SbomDeps): number {
+  const target = resolve(path);
+  let exists = false;
+  try { statSync(target); exists = true; } catch { /* reported below */ }
+  if (!exists) throw new UsageError(`'${path}' does not exist.`);
+  if (options.format && !["text", "json", "sarif"].includes(options.format)) throw new UsageError("--format must be text, json or sarif.");
+  const report = scanModelPath(target);
+  const dangerous = report.files.filter(file => file.verdict === "dangerous");
+  const folder = statSync(target).isDirectory();
+  const toCwd = (file: ModelFileResult): string => {
+    const absolute = folder ? resolve(target, file.path) : target;
+    const rel = relative(process.cwd(), absolute);
+    return (rel && !rel.startsWith("..") ? rel : absolute).split(sep).join("/");
+  };
+  if (options.format === "json") deps.out(`${JSON.stringify({ root: path, files: report.files, skippedSymlinks: report.skippedSymlinks, truncated: report.truncated }, null, 2)}\n`);
+  else if (options.format === "sarif") deps.out(`${JSON.stringify(modelScanToSarif(report.files, { toolVersion: VERSION, uri: toCwd }), null, 2)}\n`);
+  else {
+    if (!report.files.length) deps.out(`No model files found in ${path}.\n`);
+    const lines: string[] = [];
+    for (const file of report.files) {
+      const shown = folder ? file.path : path;
+      lines.push(`${shown}  [${file.format}${file.protocol !== undefined ? `, protocol ${file.protocol}` : ""}]  ${VERDICT_LABEL[file.verdict]}`);
+      lines.push(`    ${file.summary}`);
+      for (const item of file.findings) lines.push(`    ${item.risk === "dangerous" ? "dangerous" : "unrecognised import"}: ${item.qualified}${item.called ? " (called)" : ""}${item.member ? ` in ${item.member}` : ""} - ${item.reason}`);
+      for (const warning of file.warnings) lines.push(`    warning: ${warning}`);
+    }
+    if (lines.length) deps.out(`${lines.join("\n")}\n`);
+    if (report.files.length) deps.err(`${report.files.length} model file${report.files.length === 1 ? "" : "s"}: ${dangerous.length} dangerous, ${report.files.filter(file => file.verdict === "unrecognised").length} with unrecognised imports, ${report.files.filter(file => file.verdict === "none-found").length} with no dangerous imports found, ${report.files.filter(file => file.verdict === "not-pickle").length} not pickle, ${report.files.filter(file => file.verdict === "not-scanned").length} not scanned.${dangerous.length ? "" : " 'No dangerous imports found' is not a statement that a file is safe."}`);
+  }
+  if (report.truncated) deps.err("The folder was too large to walk completely; some files were not looked at.");
+  if (report.skippedSymlinks) deps.err(`${report.skippedSymlinks} symbolic link${report.skippedSymlinks === 1 ? "" : "s"} not followed.`);
+  return dangerous.length ? 1 : 0;
+}
+
 export function registerSbomCommand(program: Command, deps: SbomDeps = defaults): void {
-  const sbom = program.command("sbom").description("Generate an SBOM from lockfiles, and check one against known advisories");
+  const sbom = program.command("sbom").description("Generate an SBOM from lockfiles, check one against known advisories, and scan model files");
   sbom.command("generate")
     .description("Write an SBOM (CycloneDX 1.5 or SPDX 2.3) from the lockfiles in a folder (npm, pnpm, yarn, Cargo, Go, Python, Ruby, PHP, .NET, Gradle, Dart, Elixir)")
     .argument("[folder]", "Folder to read lockfiles from", ".")
@@ -108,6 +148,15 @@ export function registerSbomCommand(program: Command, deps: SbomDeps = defaults)
     .addHelpText("after", "\nWith the builtin generator nothing is installed or run; lockfiles are read as text. Exit 2 when the folder has no supported lockfile, or the chosen external tool is not installed.")
     .action(async (folder: string, options: GenerateOptions) => {
       try { await runGenerateWith(folder, options, deps); } catch (error) { finishWithError(error, { err: deps.err }, false); }
+    });
+  sbom.command("scan-models")
+    .description("Scan model files (pickle, PyTorch, joblib, numpy) for imports that can run code when loaded")
+    .argument("<path>", "A model file, or a folder to search for model files")
+    .option("--format <format>", "Output: text, json or sarif", "text")
+    .addHelpText("after", "\nFiles are read as bytes: nothing is loaded, imported or executed, and no Python is needed. Content decides the format, not the extension. Safetensors, GGUF, ONNX and TFLite are not pickle formats. 'No dangerous imports found' is not a statement that a file is safe.\nExit codes: 0 nothing dangerous, 1 a file imports something dangerous, 2 usage error.")
+    .action((path: string, options: { format?: string }) => {
+      try { const code = runScanModels(path, options, deps); if (code) process.exitCode = code; }
+      catch (error) { finishWithError(error, { err: deps.err }, options.format === "json"); }
     });
   sbom.command("check")
     .description("Look every component of an SBOM up in the public OSV database and list the advisories")

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { UsageError } from "../output.js";
-import { runCheck, runGenerate, runGenerateWith, type SbomDeps } from "../sbom.js";
+import { runCheck, runGenerate, runGenerateWith, runScanModels, type SbomDeps } from "../sbom.js";
 
 const dirs: string[] = [];
 afterEach(() => dirs.splice(0).forEach(dir => rmSync(dir, { recursive: true, force: true })));
@@ -91,3 +91,42 @@ describe("0 sbom generate --generator and --format", () => {
     await expect(runGenerateWith(".", { generator: "syft", format: "spdx" }, io.deps)).rejects.toThrow("builtin");
   });
 });
+describe("0 sbom scan-models", () => {
+  const models = () => project({ "models/evil.pkl": "cos\nsystem\n(S'echo x'\ntR.", "models/ok.pkl": "N.", "models/w.safetensors": "\u0008\u0000\u0000\u0000\u0000\u0000\u0000\u0000{}      " });
+  it("lists each file with its verdict and the offending import, and exits 1", () => {
+    const io = deps();
+    expect(runScanModels(models(), {}, io.deps)).toBe(1);
+    const text = io.out.join("");
+    expect(text).toContain("evil.pkl  [pickle]");
+    expect(text).toContain("DANGEROUS");
+    expect(text).toContain("dangerous: os.system (called)");
+    expect(text).toContain("ok.pkl  [pickle");
+    expect(text).toContain("no dangerous imports found");
+    expect(io.err.join("")).toContain("1 dangerous");
+  });
+  it("exits 0 for a folder with nothing dangerous, without calling the files safe", () => {
+    const io = deps();
+    const dir = project({ "a.pkl": "N." });
+    expect(runScanModels(dir, {}, io.deps)).toBe(0);
+    expect(io.err.join("")).toContain("is not a statement that a file is safe");
+  });
+  it("prints JSON and SARIF", () => {
+    const dir = models();
+    const json = deps();
+    runScanModels(dir, { format: "json" }, json.deps);
+    expect(JSON.parse(json.out.join("")).files.map((file: { verdict: string }) => file.verdict).sort()).toEqual(["dangerous", "none-found", "not-pickle"]);
+    const sarif = deps();
+    expect(runScanModels(dir, { format: "sarif" }, sarif.deps)).toBe(1);
+    const parsed = JSON.parse(sarif.out.join(""));
+    expect(parsed.version).toBe("2.1.0");
+    expect(parsed.runs[0].results).toHaveLength(1);
+    expect(parsed.runs[0].results[0].locations[0].physicalLocation.artifactLocation.uri).toMatch(/models\/evil\.pkl$/);
+  });
+  it("scans a single file whatever it is called, and rejects a missing path or format", () => {
+    const dir = project({ "payload.dat": "cos\nsystem\n(S'x'\ntR." });
+    expect(() => runScanModels(join(dir, "nope"), {}, deps().deps)).toThrow("does not exist");
+    expect(() => runScanModels(dir, { format: "xml" }, deps().deps)).toThrow("--format");
+    expect(runScanModels(join(dir, "payload.dat"), {}, deps().deps)).toBe(0); // content is not a recognised pickle container for .dat
+  });
+});
+

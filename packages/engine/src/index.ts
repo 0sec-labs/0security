@@ -329,3 +329,5 @@ export type { RecommendedPick, RecommendedRole, RecommendedRoleSpec } from "./ru
 
 export * from "./sbom/index.js";
 export * from "./probe/index.js";
+export { MODEL_FILE_EXTENSIONS, modelScanToSarif, scanModelFile, scanModelPath } from "./modelscan/index.js";
+export type { ImportFinding as ModelImportFinding, ModelFileResult, ModelScanOptions, ModelScanReport, ModelVerdict } from "./modelscan/index.js";

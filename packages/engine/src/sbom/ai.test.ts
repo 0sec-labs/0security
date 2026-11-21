@@ -47,3 +47,15 @@ describe("AI inventory", () => {
     expect(JSON.stringify(one.bom)).toBe(JSON.stringify(two.bom));
   });
 });
+
+describe("AI inventory: pickle scan", () => {
+  it("marks a model file with dangerous imports, and keeps the generic warning for the rest", () => {
+    const dir = folder({ "m/evil.pkl": "cos\nsystem\n(S'echo x'\ntR.", "m/benign.pt": "\u0080\u0002ccollections\nOrderedDict\n)R.", "m/junk.ckpt": "x" });
+    const { components } = detectAi(dir);
+    const risks = (ref: string) => components.find(component => component["bom-ref"] === ref)!.properties.filter(item => item.name === "0:risk").map(item => item.value);
+    expect(risks("ml-file:m/evil.pkl")).toEqual(["pickle-based format: loading can run code", expect.stringContaining("dangerous pickle imports found (loading runs code): os.system")]);
+    expect(risks("ml-file:m/benign.pt")).toEqual(["pickle-based format: loading can run code"]);
+    expect(risks("ml-file:m/junk.ckpt")).toEqual(["pickle-based format: loading can run code"]);
+  });
+});
+

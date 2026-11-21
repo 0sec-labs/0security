@@ -5,6 +5,7 @@
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { extname, join, relative } from "node:path";
+import { scanModelFile } from "../modelscan/index.js";
 
 export interface AiComponent {
   type: "machine-learning-model" | "data";
@@ -26,7 +27,7 @@ const MODEL_FILES: Record<string, { format: string; pickle: boolean }> = {
   ".gguf": { format: "gguf", pickle: false }, ".safetensors": { format: "safetensors", pickle: false }, ".onnx": { format: "onnx", pickle: false },
   ".tflite": { format: "tflite", pickle: false }, ".mlmodel": { format: "coreml", pickle: false }, ".h5": { format: "keras-h5", pickle: false },
   ".pt": { format: "pytorch", pickle: true }, ".pth": { format: "pytorch", pickle: true }, ".ckpt": { format: "checkpoint", pickle: true },
-  ".pkl": { format: "pickle", pickle: true }, ".joblib": { format: "joblib", pickle: true },
+  ".pkl": { format: "pickle", pickle: true }, ".pickle": { format: "pickle", pickle: true }, ".joblib": { format: "joblib", pickle: true },
 };
 const MCP_CONFIGS = new Set(["mcp.json", ".mcp.json", "claude_desktop_config.json", "mcp_config.json"]);
 const MAX_FILES = 8000;
@@ -63,6 +64,14 @@ function listFiles(folder: string): string[] {
   return found;
 }
 
+/** What the pickle scanner found in a model file, as an extra risk property; nothing when it found no dangerous import. */
+function pickleScanRisk(path: string): Array<{ name: string; value: string }> {
+  const scan = scanModelFile(path);
+  if (scan.verdict !== "dangerous") return [];
+  const names = [...new Set(scan.findings.filter(item => item.risk === "dangerous").map(item => item.qualified))];
+  return [{ name: "0:risk", value: clean(`dangerous pickle imports found (loading runs code): ${names.slice(0, 5).join(", ")}${names.length > 5 ? ` and ${names.length - 5} more` : ""}`, 300) }];
+}
+
 export function detectAi(folder: string): { components: AiComponent[]; services: AiService[] } {
   const components = new Map<string, AiComponent>();
   const services = new Map<string, AiService>();
@@ -77,7 +86,7 @@ export function detectAi(folder: string): { components: AiComponent[]; services:
     const extension = extname(name).toLowerCase();
     const model = MODEL_FILES[extension];
     if (model) {
-      add({ type: "machine-learning-model", "bom-ref": `ml-file:${rel}`, name: name, properties: [{ name: "0:source", value: rel }, { name: "0:found-by", value: "model file" }, { name: "0:format", value: model.format }, ...(model.pickle ? [{ name: "0:risk", value: "pickle-based format: loading can run code" }] : [])] });
+      add({ type: "machine-learning-model", "bom-ref": `ml-file:${rel}`, name: name, properties: [{ name: "0:source", value: rel }, { name: "0:found-by", value: "model file" }, { name: "0:format", value: model.format }, ...(model.pickle ? [{ name: "0:risk", value: "pickle-based format: loading can run code" }, ...pickleScanRisk(path)] : [])] });
       continue;
     }
     if (MCP_CONFIGS.has(name) || ((rel.startsWith(".cursor/") || rel.startsWith(".vscode/")) && name === "mcp.json")) {

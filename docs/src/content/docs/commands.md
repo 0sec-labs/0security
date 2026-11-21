@@ -858,13 +858,13 @@ On a real model behind a deliberately weak prompt, three of the ten got through;
 
 ### sbom
 
-Generate an SBOM from lockfiles, and check one against known advisories
+Generate an SBOM from lockfiles, check one against known advisories, and scan model files
 
 ```text
 0 sbom
 ```
 
-Subcommands: [generate](#sbom-generate) · [check](#sbom-check).
+Subcommands: [generate](#sbom-generate) · [check](#sbom-check) · [scan-models](#sbom-scan-models).
 
 #### sbom generate
 
@@ -917,6 +917,26 @@ Lists each advisory with its aliases, severity, the versions that fix it and a o
 | Option | Registered default | Description |
 | --- | --- | --- |
 | `--format <format>` | `text` | Output: text or json |
+
+#### sbom scan-models
+
+Scan model files (pickle, PyTorch, joblib, numpy) for imports that can run code when loaded
+
+```text
+0 sbom scan-models [options] <path>
+```
+
+Pickle-based model files (`.pkl`, `.pickle`, `.joblib`, `.pt`, `.pth`, `.ckpt`, `.bin`, `.npy`, `.npz`, including the `data.pkl` inside a PyTorch zip) run the callables they reference when they are loaded. This command reads the files as bytes, walks the pickle opcodes (protocols 0 to 5, including `GLOBAL`, `STACK_GLOBAL`, `INST`, `OBJ`, `NEWOBJ` and `REDUCE`) and sorts every imported callable into three groups: dangerous (`os.system`, `subprocess.*`, `builtins.eval`/`exec`/`__import__`/`open`, `importlib.*`, `socket.*`, `shutil.*`, network clients, `ctypes.*`, nested `pickle.loads`/`torch.load` and similar), expected (the tensor rebuild helpers, storages, `collections.OrderedDict`, numpy array reconstruction and the like) and unrecognised (on neither list, reported at lower severity because libraries such as scikit-learn pickle their own classes). Nothing is loaded, imported or executed, and no Python is needed. The format comes from the content, not the extension, so a pickle renamed `.safetensors` is still scanned. Reads are bounded: large payloads are skipped without being read, zip directories and decompressed sizes have limits (a zip bomb is reported, not inflated), archive member names are never extracted, and a truncated or malformed file is reported as an incomplete scan instead of an error.
+
+Each file is listed with its format, a verdict (`DANGEROUS`, unrecognised imports, no dangerous imports found, not a pickle format, not scanned) and the offending imports. Safetensors and TFLite are reported as formats with no code execution possible; GGUF and ONNX are reported as not pickle formats. Keras `.h5` and `.keras` files are not scanned, because they can embed Python code. "No dangerous imports found" means exactly that: the scanner can miss what it cannot parse, and it does not say a file is safe or that the weights are trustworthy. `--format sarif` writes one result per dangerous file, located at the file, for code scanning. Exit 1 when any file is dangerous, 2 on a usage error. `0 sbom generate --ai` adds a `0:risk` property to a model file in the inventory when this scan finds it dangerous.
+
+| Argument | Required | Description |
+| --- | --- | --- |
+| `path` | Yes | A model file, or a folder to search for model files |
+
+| Option | Registered default | Description |
+| --- | --- | --- |
+| `--format <format>` | `text` | Output: text, json or sarif |
 
 ### findings
 
