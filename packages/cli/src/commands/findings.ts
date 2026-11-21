@@ -344,7 +344,7 @@ export function registerFindingsCommand(program: Command): void {
           console.log("");
           console.log(`  ${chalk.gray("Related Findings:")}`);
           for (const row of related.slice(0, 20)) {
-            console.log(`  ${chalk.gray(row.id.slice(0, 8))} ${chalk.gray(`scan:${row.scanId.slice(0, 8)}`)} ${chalk.white(row.status)} ${triageColor(row.triageStatus)(String(row.triageStatus ?? "new"))}`);
+            console.log(`  ${chalk.gray(shortFindingId(row.id))} ${chalk.gray(`scan:${row.scanId.slice(0, 8)}`)} ${chalk.white(row.status)} ${triageColor(row.triageStatus)(String(row.triageStatus ?? "new"))}`);
           }
         }
         console.log(`  ${chalk.gray("Continue in chat:")}`);

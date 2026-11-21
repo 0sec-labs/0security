@@ -17,6 +17,7 @@ import { osecDB, resolveOsecDbPath } from "@0/engine/storage";
 import { consoleTransportOptions, type ConsoleTransportOptions } from "../console-client.js";
 import { connect, DEFAULT_SCAN_MODEL } from "./scan.js";
 import { defaultFixDeps, runFix, type FixDeps, type FixOptions, type FixOutcome } from "./fix.js";
+import { shortFindingId } from "../finding-id.js";
 import { finishWithError, UsageError } from "./output.js";
 
 const exec = promisify(execFile);
@@ -28,7 +29,9 @@ const MAX_HISTORY = 500;
 const BUDGET_SPENT = "the total budget is spent";
 export const MAX_CONCURRENCY = 4;
 
-export interface Candidate { id: string; fingerprint: string; title: string; severity: string; category: string; tool: string | null; scanId: string; status: string; triage: string; timestamp: number }
+export interface Candidate { id: string; fingerprint: string; title: string; severity: string; category: string; tool: string | null; scanId: string; status: string; triage: string; timestamp: number;
+  /** Where the finding is, when known; findings at one place in one category are fixed once. */
+  path?: string; startLine?: number }
 
 export type ItemResult = "planned" | "pr-opened" | "pr-updated" | "committed" | "no-change" | "failed" | "skipped";
 export interface BurndownItem {
@@ -110,6 +113,8 @@ export function listOpenCandidates(dbPath: string | undefined): Candidate[] {
         id, fingerprint: String(row.fingerprint ?? id), title: String(row.title), severity: String(row.severity), category: String(row.category),
         tool: typeof row.tool === "string" ? row.tool : null, scanId: String(row.scanId), status: String(row.status), triage: String(row.triageStatus ?? "new"), timestamp: Number(row.timestamp ?? 0),
       };
+      const annotation = db.getFindingReviewFields(id).reviewAnnotation;
+      if (annotation && typeof annotation.path === "string" && annotation.path) { candidate.path = annotation.path; if (typeof annotation.startLine === "number") candidate.startLine = annotation.startLine; }
       const seen = latest.get(candidate.fingerprint);
       if (!seen || seen.timestamp < candidate.timestamp) latest.set(candidate.fingerprint, candidate);
     }
@@ -173,9 +178,15 @@ export async function runBurndown(options: BurndownOptions, deps: BurndownDeps):
 
   const items = new Map<string, BurndownItem>();
   const queue: Candidate[] = [];
+  // The same defect reported twice (a pattern rule and a taint rule, say) gets one fix: the worst of them, which comes first.
+  const firstAt = new Map<string, Candidate>();
   for (const c of selected) {
-    const reason = skipReason(state.findings[recordKey(repo, c.fingerprint)], options);
+    const place = c.path && c.startLine !== undefined ? `${c.path}\u0000${c.startLine}\u0000${c.category.toLowerCase()}` : undefined;
+    const covering = place ? firstAt.get(place) : undefined;
+    if (place && !covering) firstAt.set(place, c);
     const base = { finding: c.id, fingerprint: c.fingerprint, title: c.title, severity: c.severity };
+    if (covering) { items.set(c.id, { ...base, result: "skipped", reason: `same location as ${covering.id}` }); continue; }
+    const reason = skipReason(state.findings[recordKey(repo, c.fingerprint)], options);
     if (reason) items.set(c.id, { ...base, result: "skipped", reason });
     else if (queue.length < limit) queue.push(c);
     else items.set(c.id, { ...base, result: "skipped", reason: "beyond --limit; the next run continues here" });
@@ -264,7 +275,7 @@ export function renderReport(report: BurndownReport): string {
   if (report.items.length) lines.push("");
   for (const i of report.items) {
     const detail = [i.pullRequestUrl, i.draft ? "draft" : undefined, i.branch && !i.pullRequestUrl ? i.branch : undefined, i.reason].filter(Boolean).join("; ");
-    lines.push(`  ${i.result.padEnd(10)} ${i.severity.padEnd(8)} ${i.finding.slice(0, 8)} ${i.title.slice(0, 70)}${detail ? `  [${detail}]` : ""}`);
+    lines.push(`  ${i.result.padEnd(10)} ${i.severity.padEnd(8)} ${shortFindingId(i.finding)} ${i.title.slice(0, 70)}${detail ? `  [${detail}]` : ""}`);
   }
   return lines.join("\n");
 }

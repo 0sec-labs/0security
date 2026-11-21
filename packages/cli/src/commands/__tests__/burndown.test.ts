@@ -21,6 +21,15 @@ function harness(candidates: Candidate[], fix: (id: string, o: FixOptions) => Pr
 }
 
 describe("0 findings burndown", () => {
+  it("fixes findings reported twice at one place once, with the worst severity, and reports the others as covered", async () => {
+    const at = { path: "src/a.ts", startLine: 5 };
+    const all = [candidate(1, { ...at, severity: "medium" }), candidate(2, { ...at, severity: "high" }), candidate(3, { ...at, category: "other" }), candidate(4, { path: "src/a.ts", startLine: 6 }), candidate(5)];
+    const h = harness(all);
+    const report = await runBurndown(options(), h.deps);
+    expect(h.calls.map(c => c[0]).sort()).toEqual(["f-2", "f-3", "f-4", "f-5"]);
+    expect(report.items.find(i => i.finding === "f-1")).toMatchObject({ result: "skipped", reason: "same location as f-2" });
+  });
+
   it("selects open findings by filters, worst first, and drops fixed, false-positive, accepted and suppressed ones", () => {
     const all = [candidate(1, { severity: "low" }), candidate(2, { severity: "critical", tool: "semgrep" }), candidate(3, { status: "fixed" }), candidate(4, { status: "false-positive" }), candidate(5, { triage: "accepted" }), candidate(6, { triage: "suppressed" }), candidate(7)];
     expect(selectCandidates(all, {}).map(c => c.id)).toEqual(["f-2", "f-7", "f-1"]);
