@@ -69,12 +69,30 @@ describe("workbench authority boundary", () => {
     expect(loadWorkbenchConfig(home)).toEqual(config);
     expect(() => saveWorkbenchConfig({ ...config, approvedImages: [{ ...config.approvedImages![0]!, reference: "alpine:latest" }] }, home)).toThrow();
     expect(() => saveWorkbenchConfig({ ...config, approvedImages: [...config.approvedImages!, ...config.approvedImages!] }, home)).toThrow();
-    expect(statSync(workbenchConfigPath(home)).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") expect(statSync(workbenchConfigPath(home)).mode & 0o777).toBe(0o600);
     expect(readFileSync(workbenchConfigPath(home), "utf8")).not.toContain("selected-account");
-    chmodSync(workbenchConfigPath(home), 0o644);
-    expect(() => loadWorkbenchConfig(home)).toThrow();
-    chmodSync(workbenchConfigPath(home), 0o600);
+    if (process.platform !== "win32") {
+      chmodSync(workbenchConfigPath(home), 0o644);
+      expect(() => loadWorkbenchConfig(home)).toThrow();
+      chmodSync(workbenchConfigPath(home), 0o600);
+    }
     writeFileSync(workbenchConfigPath(home), "{broken");
     expect(() => loadWorkbenchConfig(home)).toThrow();
+  });
+
+  it("skips the permission-bit check where the platform has none (Windows) and still checks elsewhere", async () => {
+    const home = temporaryHome();
+    const config: WorkbenchConfig = { schemaVersion: 1, image: "/approved/image.tar", imageDigest: `sha256:${"a".repeat(64)}`, stateRoot: join(home, ".0", "workbench"), providers: ["chatgpt-codex"], github: false, cpus: 2, memoryMb: 4096, storageGb: 20 };
+    saveWorkbenchConfig(config, home);
+    if (process.platform === "win32") return;
+    chmodSync(workbenchConfigPath(home), 0o644);
+    expect(() => loadWorkbenchConfig(home)).toThrow(/private regular file/);
+    const original = Object.getOwnPropertyDescriptor(process, "platform")!;
+    Object.defineProperty(process, "platform", { value: "win32" });
+    try {
+      vi.resetModules();
+      const windows = await import("./workbench.js");
+      expect(windows.loadWorkbenchConfig(home)).toEqual(config);
+    } finally { Object.defineProperty(process, "platform", original); vi.resetModules(); }
   });
 });

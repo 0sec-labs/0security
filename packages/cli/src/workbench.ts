@@ -14,6 +14,8 @@ import { loadGlobalSettings, normalizeSettings, saveSettings } from "./state/set
 import type { TuiSettings } from "./state/settings.js";
 import { FEEDBACK_OPT_OUT_ENV, submissionBlockedReason } from "./state/feedback.js";
 
+// Windows has no POSIX permission bits (Node reports 0666), so the private-mode check only applies elsewhere.
+const HAS_POSIX_PERMISSIONS = process.platform !== "win32";
 const WORKBENCH_INNER_ARGUMENT = "--workbench-inner";
 
 /** Only operator choices belong here; credentials are resolved for one launch. */
@@ -100,7 +102,7 @@ export function loadWorkbenchConfig(home?: string): WorkbenchConfig | undefined 
   if (!existsSync(file)) return undefined;
   try {
     const stat = lstatSync(file);
-    if (!stat.isFile() || stat.isSymbolicLink() || (stat.mode & 0o077) !== 0 || stat.uid !== process.getuid?.()) {
+    if (!stat.isFile() || stat.isSymbolicLink() || (HAS_POSIX_PERMISSIONS && (stat.mode & 0o077) !== 0) || (process.getuid && stat.uid !== process.getuid())) {
       throw new Error("Workbench configuration must be an operator-owned, private regular file (mode 0600).");
     }
     return normalizeWorkbenchConfig(JSON.parse(readFileSync(file, "utf8")));
