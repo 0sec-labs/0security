@@ -30,12 +30,12 @@ const SECTIONS: Readonly<Record<string, Build>> = {
   },
 
   async findings(root) {
-    const [reports, findings, exportCommand, keys, importCommand, fix, upload, issues, draft, evidence] = await Promise.all([
-      import("./reports.js"), import("./findings.js"), import("./findings-export.js"), import("./findings-keys.js"), import("./findings-import.js"), import("./fix.js"), import("./findings-upload.js"), import("./findings-issues.js"), import("./findings-report-draft.js"), import("./findings-evidence.js"),
+    const [reports, findings, exportCommand, keys, importCommand, fix, burndown, upload, issues, draft, evidence] = await Promise.all([
+      import("./reports.js"), import("./findings.js"), import("./findings-export.js"), import("./findings-keys.js"), import("./findings-import.js"), import("./fix.js"), import("./burndown.js"), import("./findings-upload.js"), import("./findings-issues.js"), import("./findings-report-draft.js"), import("./findings-evidence.js"),
     ]);
     reports.registerReportsCommand(root);
     findings.registerFindingsCommand(root);
-    nest(root, "findings", [exportCommand.registerFindingsExportCommand, keys.registerFindingsKeysCommand, importCommand.registerFindingsImportCommand, (parent) => fix.registerFixCommand(parent), (parent) => upload.registerFindingsUploadCommand(parent), (parent) => issues.registerFindingsIssuesCommand(parent), (parent) => draft.registerFindingsReportDraftCommand(parent), (parent) => evidence.registerFindingsEvidenceCommand(parent)]);
+    nest(root, "findings", [exportCommand.registerFindingsExportCommand, keys.registerFindingsKeysCommand, importCommand.registerFindingsImportCommand, (parent) => fix.registerFixCommand(parent), (parent) => burndown.registerBurndownCommand(parent), (parent) => upload.registerFindingsUploadCommand(parent), (parent) => issues.registerFindingsIssuesCommand(parent), (parent) => draft.registerFindingsReportDraftCommand(parent), (parent) => evidence.registerFindingsEvidenceCommand(parent)]);
     adoptCommands(root, "findings");
   },
 

@@ -930,6 +930,7 @@ Human triage (`new`, `accepted`, `suppressed`) and verification have independent
 
 Subcommands: [list](#findings-list) · [show](#findings-show) · [update](#findings-update) · [import](#findings-import) · [fix](#findings-fix) · [evidence](#findings-evidence) · [report-draft](#findings-report-draft) · [accept](#findings-accept) · [suppress](#findings-suppress) · [reopen](#findings-reopen) · [export](#findings-export) · [keys](#findings-keys) · [upload](#findings-upload) · [issues](#findings-issues) · [reports](#findings-reports).
 Subcommands: [list](#findings-list) · [show](#findings-show) · [update](#findings-update) · [import](#findings-import) · [fix](#findings-fix) · [evidence](#findings-evidence) · [report-draft](#findings-report-draft) · [accept](#findings-accept) · [suppress](#findings-suppress) · [reopen](#findings-reopen) · [export](#findings-export) · [keys](#findings-keys) · [upload](#findings-upload) · [reports](#findings-reports).
+Subcommands: [list](#findings-list) · [show](#findings-show) · [update](#findings-update) · [import](#findings-import) · [fix](#findings-fix) · [burndown](#findings-burndown) · [accept](#findings-accept) · [suppress](#findings-suppress) · [reopen](#findings-reopen) · [export](#findings-export) · [keys](#findings-keys) · [upload](#findings-upload) · [reports](#findings-reports).
 
 | Option | Registered default | Description |
 | --- | --- | --- |
@@ -1139,6 +1140,53 @@ Writes `README.md`, `manifest.json` (version, date, commit, models, SHA-256 of e
 | `--db-path <path>` | — | Path to SQLite database |
 | `--json` | — | Print the result as JSON |
 | `--format <format>` | — | Output: text or json Choices: text, json. |
+#### findings burndown
+
+Work through open findings in batches: one fix branch and pull request each, then a report
+
+```text
+0 findings burndown [options]
+```
+
+Selects open findings (not fixed, false positive, accepted or suppressed; one per fingerprint, worst severity first) and runs each through the same flow as [findings fix](#findings-fix): its own git work tree, a branch named `0/fix-<id>`, your `--test` checks, and one pull request, a draft when a check fails. Nothing is pushed to the base branch and nothing is merged. Filter with `--severity`, `--category`, `--tool` (or `--source`), `--scan` and `--fingerprint`, and size a batch with `--limit`.
+
+`--concurrency` (1 to 4) runs fixes side by side, each in its own work tree. `--budget` is the total for the run and `--per-fix` caps one fix; the cap shrinks to what is left of the total, and no fix starts once it is spent. The run stops when `--max-consecutive-failures` fixes fail in a row, or when the share of failures goes above `--max-failure-rate` after `--min-attempts` fixes. A fix fails when the thread changes nothing, errors, or a check fails.
+
+The outcome per finding is kept in `~/.0/burndown.json`, so running the same command again skips findings that already have a pull request (or, with `--no-pr`, a committed branch) and continues with the rest; `--retry` works on them again. The report lists proposed, committed, pull requests opened or updated with their links, checks passing, drafts because a check failed, skipped findings with the reason, cost and time; `--format json` prints it as JSON. Each run also adds a row of metrics (findings attempted, fixes proposed, check result, cost, duration) that `--history` lists. `--dry-run` shows the plan and changes nothing. It edits files on this machine, so it needs the local console and does not accept `--computer` or `--engine-url`.
+
+Exit codes: 0 every attempted fix is verified (or there was nothing to do), 1 a fix failed or the run stopped on failures, 2 usage error, 3 the total budget ran out.
+
+| Option | Registered default | Description |
+| --- | --- | --- |
+| `--severity <levels>` | — | Only these severities (critical, high, medium, low, info; comma-separated) |
+| `--category <category>` | — | Only this category |
+| `--tool <name>` | — | Only findings reported by this tool |
+| `--source <name>` | — | Alias of --tool |
+| `--scan <id>` | — | Only findings of this scan (id prefix) |
+| `--fingerprint <prefix>` | — | Only findings whose fingerprint or id starts with this |
+| `--limit <n>` | — | Attempt at most this many findings in this run; the next run continues with the rest |
+| `--repo <dir>` | — | Git repository the findings are in (default: the current directory) |
+| `--base <branch>` | — | Branch to start from and open pull requests against (default: the remote's default branch) |
+| `--test <command>` | — | Check to run after each change; repeat for several. A failing check makes the pull request a draft |
+| `--no-pr` | — | Commit on the fix branches but do not push or open pull requests |
+| `--concurrency <n>` | `1` | Fixes at the same time, each in its own work tree (1 to 4) |
+| `--budget <usd>` | `10` | Total spend for this run in USD; no new fix starts once it is used |
+| `--per-fix <usd>` | `3` | Spend cap for one fix, in USD |
+| `--max-consecutive-failures <n>` | `3` | Stop after this many failed fixes in a row |
+| `--max-failure-rate <fraction>` | `0.5` | Stop when the share of failed fixes is above this (after --min-attempts) |
+| `--min-attempts <n>` | `4` | Fixes to attempt before the failure share can stop the run |
+| `--model <model>` | — | Model for the fix threads (default: gpt-6-luna) |
+| `--timeout <seconds>` | `1800` | Maximum seconds to wait for one fix |
+| `--retry` | — | Work again on findings that already have a fix branch or pull request |
+| `--dry-run` | — | List what would be attempted and skipped; change nothing |
+| `--history` | — | List the metrics row of each earlier run and exit |
+| `--engine-url <url>` | — | Attach directly to a running trusted engine |
+| `--engine-token-env <name>` | — | Environment variable holding the attached engine token |
+| `--computer <id>` | — | Use a registered remote computer |
+| `--engine <id>` | — |  |
+| `--computers-config <path>` | — | Operator computer connection registry JSON file |
+| `--engines-config <path>` | — |  |
+| `--db-path <path>` | — | Control database of the local engine to attach to |
 
 #### findings upload
 

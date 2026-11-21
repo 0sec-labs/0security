@@ -82,6 +82,8 @@ const defaults: FixDeps = {
   writeFile: (path, text) => writeFileSync(path, text, { mode: 0o600 }),
 };
 
+export const defaultFixDeps: FixDeps = defaults;
+
 /** The same finding always gets the same branch, so a second run updates the same pull request. */
 export function fixBranchName(fingerprint: string): string {
   return `${BRANCH_PREFIX}${createHash("sha256").update(fingerprint).digest("hex").slice(0, 12)}`;
