@@ -91,6 +91,29 @@ describe("0 findings fix", () => {
     expect(body).not.toMatch(/@(?!​)/);
     expect(body).toContain("Opened as a draft");
   });
+
+  it("puts the real checks table before the model's text, labels that text, and drops its own Checks headings", () => {
+    const body = pullRequestBody(finding, "Fixed it.\n## Checks\nnpm test exited with 3\n**Checks** all passed\nChecks:\n\nDone.", [{ command: "npm test", code: 2, output: "boom" }]);
+    expect(body.indexOf("| `npm test` | failed (exit 2) |")).toBeGreaterThan(-1);
+    expect(body.indexOf("failed (exit 2)")).toBeLessThan(body.indexOf("Summary written by the model (not verified)"));
+    expect(body.indexOf("Summary written by the model (not verified)")).toBeLessThan(body.indexOf("Fixed it."));
+    expect(body).not.toContain("exited with 3");
+    expect(body).not.toContain("all passed");
+    expect(body).toContain("Done.");
+    expect(body.match(/### Checks/g)).toHaveLength(1);
+  });
+
+  it("escapes table cells and the command inside <summary>", () => {
+    const body = pullRequestBody({ ...finding, category: "a|b <i>", tool: "t|x" }, undefined, [{ command: "echo </summary><script>", code: 1, output: "o" }]);
+    expect(body).toContain("| high | a\\|b &lt;i&gt; | t\\|x |");
+    expect(body).toContain("<summary>echo &lt;/summary&gt;&lt;script&gt;</summary>");
+    expect(body.match(/<\/summary>/g)).toHaveLength(1);
+  });
+
+  it("hints an id that resolves, not a shared prefix", () => {
+    const scan = `sarif-${"b".repeat(64)}`;
+    expect(pullRequestBody({ ...finding, id: `${scan}-12345678abcdef` }, "s", [])).toContain("Fixes finding 12345678:");
+  });
 });
 
 describe("the commit identity", () => {

@@ -16,7 +16,7 @@ import { fixPrompt, type FixPromptFinding } from "@0/engine/shared";
 import { osecDB, resolveOsecDbPath } from "@0/engine/storage";
 import { consoleTransportOptions, type ConsoleClient, type ConsoleTransportOptions } from "../console-client.js";
 import { connect, DEFAULT_SCAN_MODEL, defaultScanDeps, waitForThread, type ScanDeps } from "./scan.js";
-import { resolveFindingId } from "../finding-id.js";
+import { resolveFindingId, shortFindingId } from "../finding-id.js";
 import { finishWithError, UsageError } from "./output.js";
 import { asJson, finishedThread, usageLine } from "./thread-output.js";
 
@@ -92,22 +92,39 @@ export function fixBranchName(fingerprint: string): string {
 /** Report text goes into a pull request body: stop it from notifying people or referencing other issues. */
 const inert = (text: string): string => text.replace(/@/g, "@\u200b").replace(/(^|\s)#(\d)/g, "$1#\u200b$2");
 
+/** Text for a table cell or an HTML element: no markup, no pipes, one line. */
+const escapeHtml = (text: string): string => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const cell = (text: string): string => inert(escapeHtml(text.replace(/\s+/g, " ").trim())).replace(/\|/g, "\\|").replace(/`/g, "'");
+
+/** The model's own words can claim anything about the checks; leave out any line that is headed "Checks" so the real table stays the only one. */
+const withoutCheckHeadings = (text: string): string => {
+  let skipping = false;
+  return text.split("\n").filter(line => {
+    if (/^\s*(?:(?:#{1,6}|[*_]{1,3})\s*checks?\b|checks?\s*:?\s*$)/i.test(line)) { skipping = true; return false; }
+    if (skipping && (!line.trim() || /^\s*#{1,6}\s/.test(line))) skipping = false;
+    return !skipping;
+  }).join("\n").trim();
+};
+
 export function pullRequestBody(finding: FindingToFix, summary: string | undefined, checks: CheckResult[]): string {
-  const where = finding.path ? `\`${finding.path}${finding.startLine ? `:${finding.startLine}` : ""}\`` : "not given";
-  const rows = checks.length ? checks.map(check => `| \`${check.command.replace(/\|/g, "\\|")}\` | ${check.code === 0 ? "passed" : `failed (exit ${check.code})`} |`).join("\n") : "| none were run | |";
+  const where = finding.path ? `\`${finding.path.replace(/`/g, "'")}${finding.startLine ? `:${finding.startLine}` : ""}\`` : "not given";
+  const rows = checks.length ? checks.map(check => `| \`${escapeHtml(check.command.replace(/`/g, "'").replace(/\s+/g, " ")).replace(/\|/g, "\\|")}\` | ${check.code === 0 ? "passed" : `failed (exit ${check.code})`} |`).join("\n") : "| none were run | |";
   const failed = checks.filter(check => check.code !== 0);
-  const tails = failed.map(check => `<details><summary>${inert(check.command)}</summary>\n\n\`\`\`\n${check.output.slice(-2000).replace(/```/g, "'''")}\n\`\`\`\n</details>`).join("\n");
+  const tails = failed.map(check => `<details><summary>${inert(escapeHtml(check.command.replace(/\s+/g, " ")))}</summary>\n\n\`\`\`\n${check.output.slice(-2000).replace(/```/g, "'''")}\n\`\`\`\n</details>`).join("\n");
+  const modelText = withoutCheckHeadings((summary ?? "").slice(0, 5000));
   return [
-    `Fixes finding ${finding.id.slice(0, 12)}: ${inert(finding.title)}`,
+    `Fixes finding ${shortFindingId(finding.id)}: ${inert(finding.title)}`,
     "",
-    `| Severity | Category | Reported by | Where |\n| --- | --- | --- | --- |\n| ${finding.severity} | ${finding.category} | ${finding.tool ?? "0"} | ${where} |`,
-    "",
-    "### What changed",
-    inert((summary ?? "The change is in the diff.").slice(0, 5000)),
+    `| Severity | Category | Reported by | Where |\n| --- | --- | --- | --- |\n| ${cell(finding.severity)} | ${cell(finding.category)} | ${cell(finding.tool ?? "0")} | ${where} |`,
     "",
     "### Checks",
     `| Command | Result |\n| --- | --- |\n${rows}`,
     ...(tails ? ["", tails] : []),
+    "",
+    "### What changed",
+    "Summary written by the model (not verified). The Checks table above is what 0 ran.",
+    "",
+    inert(modelText || "The change is in the diff."),
     "",
     failed.length ? "Opened as a draft because a check failed. Review it before it is marked ready." : "A person should review this before merging; 0 does not merge.",
   ].join("\n");
