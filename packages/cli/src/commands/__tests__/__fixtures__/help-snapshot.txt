@@ -595,26 +595,31 @@ Usage: 0 findings [options] [command]
 Browse findings and change their status
 
 Options:
-  --db-path <path>         Path to SQLite database
-  --scan <scanId>          Filter by scan ID
-  --severity <severity>    Filter by severity: critical, high, medium, low, info
-  --category <category>    Filter by attack category
-  --status <status>        Filter by status: discovered, verified, confirmed, scored, reported,
-                           fixed, false-positive
-  --triage <triage>        Filter by triage: new, accepted, suppressed
-  --limit <n>              Max findings/groups to show (default: "50")
-  --all                    Show raw finding rows instead of grouped fingerprints (default: false)
-  -h, --help               display help for command
+  --db-path <path>                  Path to SQLite database
+  --scan <scanId>                   Filter by scan ID
+  --severity <severity>             Filter by severity: critical, high, medium, low, info
+  --category <category>             Filter by attack category
+  --status <status>                 Filter by status: discovered, verified, confirmed, scored,
+                                    reported, fixed, false-positive
+  --triage <triage>                 Filter by triage: new, accepted, suppressed
+  --limit <n>                       Max findings/groups to show (default: "50")
+  --all                             Show raw finding rows instead of grouped fingerprints (default:
+                                    false)
+  -h, --help                        display help for command
 
 Commands:
-  list [options]           List findings from the database
-  show [options] <id>      Show detailed information about a finding
-  update [options] <id>    Change a finding's status
-  import [options] <file>  Import findings from another scanner's SARIF 2.1.0 file (use - for
-                           stdin). Nothing in the file is executed.
-  fix [options] <finding>  Fix one finding in an isolated git work tree and open a pull request for
-                           review
-  help [command]           display help for command
+  list [options]                    List findings from the database
+  show [options] <id>               Show detailed information about a finding
+  update [options] <id>             Change a finding's status
+  import [options] <file>           Import findings from another scanner's SARIF 2.1.0 file (use -
+                                    for stdin). Nothing in the file is executed.
+  fix [options] <finding>           Fix one finding in an isolated git work tree and open a pull
+                                    request for review
+  evidence [options] <folder>       Write one folder of findings, SARIF, SBOM and fix branches, with
+                                    a README that says what it does and does not show
+  report-draft [options] <finding>  Write a draft early warning, notification or final report about
+                                    one finding (Markdown; nothing is sent)
+  help [command]                    display help for command
 
 ### 0 findings accept (hidden)
 Usage: 0 findings accept [options] <id>
@@ -628,6 +633,24 @@ Options:
   --db-path <path>  Path to SQLite database
   --note <text>     Optional triage note
   -h, --help        display help for command
+
+### 0 findings evidence
+Usage: 0 findings evidence [options] <folder>
+
+Write one folder of findings, SARIF, SBOM and fix branches, with a README that says what it does and
+does not show
+
+Options:
+  --repo <folder>     Repository the findings are about: adds the SBOM, the commit and the fix
+                      branches
+  --check-advisories  Look the SBOM components up in the public OSV database (the only network use)
+  --include-evidence  Also write evidence and proof-of-concept bodies (can contain working exploit
+                      details)
+  --name <name>       Name of the application the SBOM describes (default: the repository folder's
+                      name)
+  --db-path <path>    Path to SQLite database
+  --format <format>   Output: text or json (choices: "text", "json")
+  -h, --help          display help for command
 
 ### 0 findings export (hidden)
 Usage: 0 findings export [options] [ids...]
@@ -771,6 +794,34 @@ Options:
   --db-path <path>  Path to SQLite database
   --note <text>     Optional triage note
   -h, --help        display help for command
+
+### 0 findings report-draft
+Usage: 0 findings report-draft [options] <finding>
+
+Write a draft early warning, notification or final report about one finding (Markdown; nothing is
+sent)
+
+Options:
+  --stage <stage>                   early-warning, notification, final or all
+  --product <name>                  Product name
+  --manufacturer <name>             Legal name of the manufacturer
+  --contact <text>                  Who submits the report and how to reach them
+  --affected-versions <text>        Affected product versions
+  --exploited-since <when>          When exploitation is known to have started
+  --exploitation-evidence <text>    How you know it is being exploited
+  --malicious-actor <text>          Suspected malicious act or actor, if known
+  --member-states <text>            Member States where the product is available
+  --mitigation <text>               Mitigation taken or recommended
+  --user-measures <text>            What users can do now
+  --corrective-measure <text>       The fix or update available to users
+  --corrective-measure-date <when>  When the corrective measure became available
+  --evidence-file <file>            Name and SHA-256 of a supporting file (its content is never
+                                    copied); repeat for several
+  --facts <file>                    JSON file with the same facts (camelCase keys, for example
+                                    affectedVersions); flags win
+  -o, --output <file>               Write to a file instead of stdout
+  --db-path <path>                  Path to SQLite database
+  -h, --help                        display help for command
 
 ### 0 findings reports (hidden)
 Usage: 0 findings reports [options] [command]

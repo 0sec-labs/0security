@@ -35,7 +35,7 @@ export const GROUP_DESCRIPTIONS: Readonly<Record<string, string>> = {
 /** The only subcommands `--help` shows for each visible command. Everything else stays registered but hidden (see command-grammar.ts). */
 export const VISIBLE_SUBCOMMANDS: Readonly<Record<string, readonly string[]>> = {
   sbom: ["generate", "check"],
-  findings: ["list", "show", "update", "import", "fix"],
+  findings: ["list", "show", "update", "import", "fix", "evidence", "report-draft"],
   threads: ["list", "show", "send", "start", "stop"],
   sentinels: ["list", "run", "set"],
   skills: ["list", "add"],

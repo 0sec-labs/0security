@@ -87,3 +87,19 @@ jobs:
 ```
 
 `0 sbom check` exits 1 when it finds an advisory, so the job fails and you are told. This produces evidence for your own records; it does not by itself make a product compliant.
+
+## Collect evidence and draft vulnerability reports
+
+For the EU Cyber Resilience Act (Regulation (EU) 2024/2847) a manufacturer keeps records of security testing and vulnerability handling, and reports actively exploited vulnerabilities to the authorities. `0` helps with the paperwork. It does not decide anything for you and never claims that a product complies.
+
+`0 findings evidence <folder> --repo .` writes one folder: the findings with their triage state and timestamps (JSON and Markdown), a SARIF file, a CycloneDX SBOM from the lockfiles, the fix branches that exist in the repository, a `manifest.json` with the `0` version, date, commit and a SHA-256 for every file, and a README saying what each file shows and does not show. Add `--check-advisories` to look the SBOM up in the public OSV database (the only network use). Evidence and proof-of-concept bodies stay out unless you pass `--include-evidence`. To keep a record per release, run it in a job and upload the folder as an artifact:
+
+```yaml
+      - run: 0 findings evidence evidence --repo . --check-advisories
+      - uses: actions/upload-artifact@v4
+        with: { name: security-evidence, path: evidence }
+```
+
+The folder shows what was found, how it was triaged and which components are listed. It does not show that the code is free of other weaknesses, that a fix is correct or released, what is deployed, or that any obligation is met. Pull request links are not stored by `0`, so `fixes.md` lists branches only.
+
+When a finding is an actively exploited vulnerability, `0 findings report-draft <finding> --stage early-warning|notification|final` writes the draft text for that stage. It takes the title, severity, location, status and timestamps from the finding and the rest from facts you pass (`--product`, `--affected-versions`, `--exploited-since`, `--exploitation-evidence`, `--mitigation`, `--contact`, `--facts file.json`). Anything you did not supply stays a visible `[to be completed by the manufacturer: ...]` blank, and nothing claims exploitation, user impact or a patch that you did not state. A person reviews the draft and submits it through the channel the authority designates; `0` sends nothing. Article 14 of the Regulation is the starting point: confirm the current requirements and deadlines with the authority and your advisers.

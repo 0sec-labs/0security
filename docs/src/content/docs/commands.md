@@ -929,6 +929,7 @@ Browse and manage persisted findings
 Human triage (`new`, `accepted`, `suppressed`) and verification have independent states. Accepting a finding records the operator's decision; reproduction and fix verification remain separate steps.
 
 Subcommands: [list](#findings-list) · [show](#findings-show) · [update](#findings-update) · [import](#findings-import) · [fix](#findings-fix) · [accept](#findings-accept) · [suppress](#findings-suppress) · [reopen](#findings-reopen) · [export](#findings-export) · [keys](#findings-keys) · [upload](#findings-upload) · [issues](#findings-issues) · [reports](#findings-reports).
+Subcommands: [list](#findings-list) · [show](#findings-show) · [update](#findings-update) · [import](#findings-import) · [fix](#findings-fix) · [evidence](#findings-evidence) · [report-draft](#findings-report-draft) · [accept](#findings-accept) · [suppress](#findings-suppress) · [reopen](#findings-reopen) · [export](#findings-export) · [keys](#findings-keys) · [upload](#findings-upload) · [reports](#findings-reports).
 
 | Option | Registered default | Description |
 | --- | --- | --- |
@@ -1079,6 +1080,65 @@ A thread follows the `fix-finding` skill in a separate work tree of the reposito
 | `--computers-config <path>` | — | Operator computer connection registry JSON file |
 | `--engines-config <path>` | — |  |
 | `--db-path <path>` | — | Control database of the local engine to attach to |
+
+#### findings report-draft
+
+Write a draft early warning, notification or final report about one finding (Markdown; nothing is sent)
+
+```text
+0 findings report-draft [options] <finding>
+```
+
+For a manufacturer that has to tell the authorities about an actively exploited vulnerability (Article 14 of Regulation (EU) 2024/2847, the Cyber Resilience Act; confirm the current requirements and deadlines yourself). The text is built without a model. Each field is copied from the finding record (title, severity, category, location, status, triage state, when the record was created, and the attacker-impact sentence when someone assessed it), copied from a fact you pass with a flag or in a `--facts` JSON file, or left as `[to be completed by the manufacturer: ...]`. Nothing says the vulnerability is exploited, that users are affected or that a fix exists unless you supplied it. `--evidence-file` lists a file's name, size and SHA-256 and never copies its content. The draft says plainly that a person must review it and submit it through the authority's own channel; `0` submits nothing. `--stage all` writes the three stages one after another. The finding can be a full id, an id prefix or `fp:` plus a fingerprint prefix from `0 findings list`.
+
+| Argument | Required | Description |
+| --- | --- | --- |
+| `finding` | Yes |  |
+
+| Option | Registered default | Description |
+| --- | --- | --- |
+| `--stage <stage>` **required** | — | early-warning, notification, final or all |
+| `--product <name>` | — | Product name |
+| `--manufacturer <name>` | — | Legal name of the manufacturer |
+| `--contact <text>` | — | Who submits the report and how to reach them |
+| `--affected-versions <text>` | — | Affected product versions |
+| `--exploited-since <when>` | — | When exploitation is known to have started |
+| `--exploitation-evidence <text>` | — | How you know it is being exploited |
+| `--malicious-actor <text>` | — | Suspected malicious act or actor, if known |
+| `--member-states <text>` | — | Member States where the product is available |
+| `--mitigation <text>` | — | Mitigation taken or recommended |
+| `--user-measures <text>` | — | What users can do now |
+| `--corrective-measure <text>` | — | The fix or update available to users |
+| `--corrective-measure-date <when>` | — | When the corrective measure became available |
+| `--evidence-file <file>` | — | Name and SHA-256 of a supporting file (its content is never copied); repeat for several |
+| `--facts <file>` | — | JSON file with the same facts (camelCase keys, for example affectedVersions); flags win |
+| `-o, --output <file>` | — | Write to a file instead of stdout |
+| `--db-path <path>` | — | Path to SQLite database |
+
+#### findings evidence
+
+Write one folder of findings, SARIF, SBOM and fix branches, with a README that says what it does and does not show
+
+```text
+0 findings evidence [options] <folder>
+```
+
+Writes `README.md`, `manifest.json` (version, date, commit, models, SHA-256 of each file), `findings.json` and `findings.md` (severity, status, triage state and note, timestamps, location), `findings.sarif`, `sbom.cdx.json` (from the lockfiles in `--repo`), `fixes.md` (fix branches that exist in `--repo`) and, with `--check-advisories`, `advisories.json` from the public OSV database. That lookup is the only network use, and only with that flag. Evidence and proof-of-concept bodies are left out unless you pass `--include-evidence`, and then the folder can hold working exploit details. The command writes only those file names inside the folder, refuses a folder that holds other files, a symbolic link, or a folder inside the repository, and removes a file of its own from an earlier run that it did not write this time. The README makes no claim of compliance. It is evidence for your own records, not a conformity assessment.
+
+| Argument | Required | Description |
+| --- | --- | --- |
+| `folder` | Yes |  |
+
+| Option | Registered default | Description |
+| --- | --- | --- |
+| `--repo <folder>` | — | Repository the findings are about: adds the SBOM, the commit and the fix branches |
+| `--check-advisories` | — | Look the SBOM components up in the public OSV database (the only network use) |
+| `--include-evidence` | — | Also write evidence and proof-of-concept bodies (can contain working exploit details) |
+| `--scan <id>` | — | Only the findings of this scan |
+| `--name <name>` | — | Name of the application the SBOM describes (default: the repository folder's name) |
+| `--db-path <path>` | — | Path to SQLite database |
+| `--json` | — | Print the result as JSON |
+| `--format <format>` | — | Output: text or json Choices: text, json. |
 
 #### findings upload
 

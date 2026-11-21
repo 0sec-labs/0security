@@ -92,6 +92,8 @@ const EXAMPLES: Readonly<Record<string, readonly string[]>> = {
   findings: ["0 findings list --severity high", "0 findings show 3f2a", '0 findings update 3f2a --status accepted --note "known"'],
   "findings list": ["0 findings list --severity high --status verified", "0 findings list --format json", "0 findings list --format sarif -o findings.sarif"],
   "findings show": ["0 findings show 3f2a"],
+  "findings evidence": ["0 findings evidence ./evidence --repo .", "0 findings evidence ./evidence --repo . --check-advisories"],
+  "findings report-draft": ["0 findings report-draft 3f2a --stage early-warning --product app --contact \"Jo, security@example.com\"", "0 findings report-draft 3f2a --stage notification --facts facts.json -o notification.md"],
   "findings issues": ["0 findings issues --repo acme/app --dry-run", "0 findings issues --repo acme/app --min-severity high --max 10"],
   "findings update": ['0 findings update 3f2a --status false-positive --reason "test fixture"'],
   threads: ['0 threads start "Map the login flow" --folder ~/code/app --wait', "0 threads list", "0 threads show <id>", '0 threads send <id> "Now the logout path" --wait', "0 threads stop <id>"],

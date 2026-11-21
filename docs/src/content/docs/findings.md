@@ -174,6 +174,7 @@ A full report carries evidence, proof-of-concept steps and descriptions that can
 - The issue holds only the title, severity, category, location, the attacker-impact sentence and the status. Evidence, requests, responses and proof-of-concept steps are never copied, because they can quote code or secrets; open them locally with `0 findings show <id>`. Report text is neutralised, so a finding cannot mention a person or reference another issue.
 
 To put findings in the Security tab instead, use `0 findings upload`.
+`0 findings evidence <folder> --repo .` writes findings with triage state, SARIF, an SBOM and fix branches into one folder with a README that says what it does not show, and `0 findings report-draft <finding> --stage early-warning|notification|final` drafts a report about an actively exploited vulnerability for a person to review and submit. See [Collect evidence and draft vulnerability reports](/ci/#collect-evidence-and-draft-vulnerability-reports). Neither claims compliance.
 
 ## Limits
 
