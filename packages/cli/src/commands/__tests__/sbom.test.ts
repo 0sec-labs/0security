@@ -1,8 +1,9 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { runCheck, runGenerate, type SbomDeps } from "../sbom.js";
+import { UsageError } from "../output.js";
+import { runCheck, runGenerate, runGenerateWith, type SbomDeps } from "../sbom.js";
 
 const dirs: string[] = [];
 afterEach(() => dirs.splice(0).forEach(dir => rmSync(dir, { recursive: true, force: true })));
@@ -19,7 +20,7 @@ describe("0 sbom generate", () => {
   });
   it("is a usage error, with the supported lockfiles and the fallback, when there is nothing to read", () => {
     const io = deps();
-    expect(() => runGenerate(project({ "readme.md": "x" }), {}, io.deps)).toThrow(/package-lock\.json.*syft or cdxgen/);
+    expect(() => runGenerate(project({ "readme.md": "x" }), {}, io.deps)).toThrow(/package-lock\.json.*--generator syft, cdxgen or trivy/);
     expect(() => runGenerate("/no/such/folder", {}, io.deps)).toThrow("is not a folder");
   });
 });
@@ -58,5 +59,35 @@ describe("0 sbom check", () => {
   it("refuses a file that is not an SBOM and says when OSV could not be reached", async () => {
     await expect(runCheck("x", {}, deps({ read: () => "not json" }).deps)).rejects.toThrow("not a JSON SBOM");
     await expect(runCheck("x", {}, deps({ read: () => bom, fetch: vi.fn(async () => { throw new Error("offline"); }) as unknown as typeof fetch }).deps)).rejects.toThrow("Could not check against OSV: offline");
+  });
+});
+
+describe("0 sbom generate --generator and --format", () => {
+  const lock = JSON.stringify({ lockfileVersion: 3, packages: { "": {}, "node_modules/a": { version: "1.0.0", license: "MIT", dependencies: { b: "1" } }, "node_modules/b": { version: "1.0.0" } } });
+  const fakeTool = (name: string, body: string) => { const bin = project({}); writeFileSync(join(bin, name), `#!/bin/sh\n${body}\n`); chmodSync(join(bin, name), 0o755); return { PATH: bin } as NodeJS.ProcessEnv; };
+  const posix = process.platform === "win32" ? it.skip : it;
+  it("writes SPDX 2.3 with --format spdx", async () => {
+    const io = deps();
+    await runGenerateWith(project({ "package-lock.json": lock }), { format: "spdx" }, io.deps);
+    const doc = JSON.parse(io.out.join(""));
+    expect(doc).toMatchObject({ spdxVersion: "SPDX-2.3", dataLicense: "CC0-1.0" });
+    expect(doc.relationships.filter((relation: { relationshipType: string }) => relation.relationshipType === "DEPENDS_ON").length).toBeGreaterThan(1);
+    await expect(runGenerateWith(project({ "package-lock.json": lock }), { format: "spdx", ai: true }, io.deps)).rejects.toThrow("--ai");
+  });
+  posix("runs an installed syft and writes its CycloneDX output", async () => {
+    const env = fakeTool("syft", `printf '%s' '{"bomFormat":"CycloneDX","specVersion":"1.5","components":[{"type":"library","name":"x","version":"1"}]}'`);
+    const io = deps({ env });
+    await runGenerateWith(project({ "readme.md": "x" }), { generator: "syft" }, io.deps);
+    expect(JSON.parse(io.out.join("")).components[0].name).toBe("x");
+    expect(io.err.join("\n")).toContain("1 components from syft");
+  });
+  it("is a usage error (exit 2) with install instructions when the tool is missing, and for unknown generators or formats", async () => {
+    const io = deps({ env: { PATH: project({}) } });
+    const missing = await runGenerateWith(project({ "readme.md": "x" }), { generator: "trivy" }, io.deps).catch((error: unknown) => error);
+    expect(missing).toBeInstanceOf(UsageError);
+    expect((missing as Error).message).toContain("brew install trivy");
+    await expect(runGenerateWith(".", { generator: "nope" }, io.deps)).rejects.toThrow("Unknown generator");
+    await expect(runGenerateWith(".", { format: "xml" }, io.deps)).rejects.toThrow("Unknown format");
+    await expect(runGenerateWith(".", { generator: "syft", format: "spdx" }, io.deps)).rejects.toThrow("builtin");
   });
 });
