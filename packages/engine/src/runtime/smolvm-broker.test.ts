@@ -193,6 +193,24 @@ describe("HTTP sibling broker URL canonicalization and SSRF boundary", () => {
     expect(ipv6.slice(-2)).toEqual(["--", "https://[2606:2800:220:1:248:1893:25c8:1946]/"]);
   });
 
+  it.each([
+    "http://[::ffff:127.0.0.1]/",
+    "http://[::ffff:7f00:1]/",
+    "http://[::ffff:10.0.0.1]/",
+    "http://[::ffff:169.254.169.254]/",
+    "http://example.com/a\\b",
+    "http://example.com/?q=a\\b",
+  ])("refuses IPv4-mapped IPv6 private literals and any backslash, even outside the authority: %j", async target => {
+    await expect(
+      resolveHttpBrokerCommand(declarativeHttpRequest(target), new AbortController().signal, publicDns),
+    ).rejects.toThrow(/HTTP broker/);
+  });
+
+  it("forwards a trailing-dot host identically to --resolve and the URL", async () => {
+    const command = await resolveHttpBrokerCommand(declarativeHttpRequest("http://example.com./x"), new AbortController().signal, publicDns);
+    expect(command.slice(-4)).toEqual(["--resolve", "example.com.:80:93.184.216.34", "--", "http://example.com./x"]);
+  });
+
   it("refuses private, loopback, and mixed DNS answers", async () => {
     const abort = new AbortController();
     await expect(
