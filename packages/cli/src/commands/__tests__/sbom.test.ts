@@ -30,7 +30,8 @@ describe("0 sbom generate --ai", () => {
     const io = deps();
     runGenerate(dir, { ai: true }, io.deps);
     const bom = JSON.parse(io.out.join(""));
-    expect(bom.components.map((component: { type: string }) => component.type).sort()).toEqual(["machine-learning-model", "service"]);
+    expect(bom.components.map((component: { type: string }) => component.type)).toEqual(["machine-learning-model"]);
+    expect(bom.services.map((service: { name: string }) => service.name)).toEqual(["mcp:files"]);
     expect(io.err.join("\n")).toContain("2 AI components");
     expect(() => runGenerate(dir, {}, deps().deps)).toThrow("No supported lockfile");
   });

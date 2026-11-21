@@ -5,7 +5,7 @@
 import { parse as parseYaml } from "yaml";
 
 export interface Component {
-  ecosystem: "npm" | "cargo" | "golang" | "pypi";
+  ecosystem: "npm" | "cargo" | "golang" | "pypi" | "gem" | "composer" | "nuget" | "maven" | "pub" | "hex";
   name: string;
   version: string;
   /** Marked as a development-only dependency by the lockfile, so not part of what ships. */
@@ -133,6 +133,71 @@ export function parseRequirements(source: string): Component[] {
   return found;
 }
 
+/** Gemfile.lock: the `specs:` lists, where each gem is `    name (1.2.3)` (four spaces; its own dependencies are indented further). */
+export function parseGemfileLock(source: string): Component[] {
+  const found: Component[] = [];
+  for (const line of source.split("\n")) {
+    const match = /^ {4}([A-Za-z0-9_.-]+) \((\d[\w.]*?)(?:-(?:x86|x64|arm|aarch|java|ruby|mingw|mswin|universal|darwin|linux|musl)[\w.-]*)?\)$/.exec(line);
+    if (match) found.push({ ecosystem: "gem", name: match[1]!, version: match[2]! });
+  }
+  return found;
+}
+
+export function parseComposerLock(source: string): Component[] {
+  let lock: unknown;
+  try { lock = JSON.parse(source); } catch { return []; }
+  if (!isObject(lock)) return [];
+  const found: Component[] = [];
+  for (const [section, dev] of [["packages", false], ["packages-dev", true]] as const) {
+    for (const entry of Array.isArray(lock[section]) ? lock[section] as unknown[] : []) {
+      if (isObject(entry) && text(entry.name) && text(entry.version)) found.push({ ecosystem: "composer", name: text(entry.name), version: text(entry.version).replace(/^v(?=\d)/, ""), ...(dev ? { dev: true } : {}) });
+    }
+  }
+  return found;
+}
+
+/** NuGet `packages.lock.json`: every target framework lists its dependencies with a resolved version. */
+export function parseNugetLock(source: string): Component[] {
+  let lock: unknown;
+  try { lock = JSON.parse(source); } catch { return []; }
+  if (!isObject(lock) || !isObject(lock.dependencies)) return [];
+  const found: Component[] = [];
+  for (const framework of Object.values(lock.dependencies)) {
+    if (!isObject(framework)) continue;
+    for (const [name, entry] of Object.entries(framework)) if (isObject(entry) && text(entry.resolved) && entry.type !== "Project") found.push({ ecosystem: "nuget", name, version: text(entry.resolved) });
+  }
+  return found;
+}
+
+/** Gradle dependency locking: `group:artifact:version=configuration,...`. */
+export function parseGradleLock(source: string): Component[] {
+  const found: Component[] = [];
+  for (const raw of source.split("\n")) {
+    const match = /^([A-Za-z0-9_.-]+):([A-Za-z0-9_.-]+):([^=\s:]+)=/.exec(raw.trim());
+    if (match) found.push({ ecosystem: "maven", name: `${match[1]}/${match[2]}`, version: match[3]! });
+  }
+  return found;
+}
+
+export function parsePubspecLock(source: string): Component[] {
+  let lock: unknown;
+  try { lock = parseYaml(source, { schema: "core" }); } catch { return []; }
+  if (!isObject(lock) || !isObject(lock.packages)) return [];
+  const found: Component[] = [];
+  for (const [name, entry] of Object.entries(lock.packages)) if (isObject(entry) && text(entry.version) && (entry.source === "hosted" || entry.source === undefined)) found.push({ ecosystem: "pub", name, version: text(entry.version), ...(entry.dependency === "direct dev" ? { dev: true } : {}) });
+  return found;
+}
+
+/** mix.lock: `"name": {:hex, :name, "1.2.3", ...}`. */
+export function parseMixLock(source: string): Component[] {
+  const found: Component[] = [];
+  for (const line of source.split("\n")) {
+    const match = /^\s*"([A-Za-z0-9_]+)":\s*\{:hex,\s*:[A-Za-z0-9_]+,\s*"([^"]+)"/.exec(line);
+    if (match) found.push({ ecosystem: "hex", name: match[1]!, version: match[2]! });
+  }
+  return found;
+}
+
 /** Lockfile name to parser, with the ecosystem label shown to the user. */
 export const LOCKFILES: ReadonlyArray<{ file: string; label: string; parse: (source: string) => Component[] }> = [
   { file: "package-lock.json", label: "npm", parse: parseNpmLock },
@@ -144,4 +209,10 @@ export const LOCKFILES: ReadonlyArray<{ file: string; label: string; parse: (sou
   { file: "poetry.lock", label: "Poetry", parse: parsePoetryLock },
   { file: "Pipfile.lock", label: "Pipenv", parse: parsePipfileLock },
   { file: "requirements.txt", label: "pip (pinned)", parse: parseRequirements },
+  { file: "Gemfile.lock", label: "Bundler", parse: parseGemfileLock },
+  { file: "composer.lock", label: "Composer", parse: parseComposerLock },
+  { file: "packages.lock.json", label: "NuGet", parse: parseNugetLock },
+  { file: "gradle.lockfile", label: "Gradle", parse: parseGradleLock },
+  { file: "pubspec.lock", label: "Dart/Flutter", parse: parsePubspecLock },
+  { file: "mix.lock", label: "Mix", parse: parseMixLock },
 ];

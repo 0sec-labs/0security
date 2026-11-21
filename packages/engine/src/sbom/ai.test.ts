@@ -18,8 +18,8 @@ describe("AI inventory", () => {
     "node_modules/x/ignored.py": 'AutoModel.from_pretrained("ignored/model")',
   });
   it("lists models, datasets, hosted model ids, model files and MCP servers, each with where it was seen", () => {
-    const found = detectAi(dir());
-    const refs = found.map(component => component["bom-ref"]);
+    const { components: found, services } = detectAi(dir());
+    const refs = [...found, ...services].map(component => component["bom-ref"]);
     expect(refs).toEqual(expect.arrayContaining(["hub-model:bert-base-uncased", "hub-model:distilbert/distilbert-base-uncased-finetuned-sst-2-english", "dataset:imdb", "hub-model:org/weights", "hosted-model:gpt-4o-mini", "hosted-model:claude-sonnet-4-6", "ml-file:weights/a.safetensors", "ml-file:weights/b.pt", "ml-file:weights/c.gguf", "mcp:.mcp.json:files", "mcp:.mcp.json:pinned", "mcp:.mcp.json:remote"]));
     expect(refs.some(ref => ref.includes("ignored") || ref.includes("my-custom-thing"))).toBe(false);
     const bert = found.find(component => component.name === "bert-base-uncased")!;
@@ -29,19 +29,21 @@ describe("AI inventory", () => {
     expect(prop(found.find(component => component.name === "gpt-4o-mini")!, "0:provider")).toBe("openai");
   });
   it("flags pickle-based model files and unpinned MCP launchers, and nothing else", () => {
-    const found = detectAi(dir());
-    const by = (ref: string) => found.find(component => component["bom-ref"] === ref)!;
+    const { components: found, services } = detectAi(dir());
+    const by = (ref: string) => [...found, ...services].find(component => component["bom-ref"] === ref)!;
     expect(prop(by("ml-file:weights/b.pt"), "0:risk")).toContain("pickle");
     expect(prop(by("ml-file:weights/a.safetensors"), "0:risk")).toBeUndefined();
     expect(prop(by("mcp:.mcp.json:files"), "0:risk")).toContain("pinned");
     expect(prop(by("mcp:.mcp.json:pinned"), "0:risk")).toBeUndefined();
     expect(prop(by("mcp:.mcp.json:remote"), "0:url")).toBe("https://mcp.example.com/sse");
+    expect((by("mcp:.mcp.json:remote") as { endpoints?: string[] }).endpoints).toEqual(["https://mcp.example.com/sse"]);
   });
   it("is part of the SBOM only when asked for, and the same folder gives the same document", () => {
     const where = dir();
     expect(generateSbom(where, { toolVersion: "0" }).bom.components).toEqual([]);
     const one = generateSbom(where, { toolVersion: "0", ai: true, now: new Date(0) }); const two = generateSbom(where, { toolVersion: "0", ai: true, now: new Date(0) });
-    expect(one.bom.components.length).toBeGreaterThan(8);
+    expect(one.bom.components.length).toBeGreaterThan(6);
+    expect(one.bom.services).toHaveLength(3);
     expect(JSON.stringify(one.bom)).toBe(JSON.stringify(two.bom));
   });
 });

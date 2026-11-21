@@ -35,14 +35,14 @@ export function runGenerate(folder: string, options: { output?: string; name?: s
   try { isFolder = statSync(target).isDirectory(); } catch { /* reported below */ }
   if (!isFolder) throw new UsageError(`'${folder}' is not a folder.`);
   const result = generateSbom(target, { toolVersion: VERSION, ...(options.name ? { name: options.name } : {}), ...(options.ai ? { ai: true } : {}) });
-  if (!result.bom.components.length) {
+  if (!result.bom.components.length && !result.bom.services?.length) {
     const supported = [...new Set(LOCKFILES.map(lock => lock.file))].join(", ");
     throw new UsageError(`No supported lockfile with packages${options.ai ? " and no AI components" : ""} in ${folder}. Supported: ${supported}. For Maven, Gradle, NuGet or container images, generate the SBOM with syft or cdxgen.`);
   }
   const text = `${JSON.stringify(result.bom, null, 2)}\n`;
   if (options.output) { deps.write(resolve(options.output), text); deps.err(`Wrote ${options.output}`); } else deps.out(text);
-  const aiCount = result.bom.components.filter(component => component.type !== "library").length;
-  deps.err(`${result.bom.components.length - aiCount} components from ${result.lockfiles.length} lockfile${result.lockfiles.length === 1 ? "" : "s"}${result.lockfiles.length ? `: ${result.lockfiles.map(lock => `${lock.path} (${lock.label}, ${lock.components})`).join(", ")}` : ""}${options.ai ? `; ${aiCount} AI components (models, datasets, hosted model ids, MCP servers)` : ""}`);
+  const aiCount = result.bom.components.filter(component => component.type !== "library").length + (result.bom.services?.length ?? 0);
+  deps.err(`${result.bom.components.filter(component => component.type === "library").length} components from ${result.lockfiles.length} lockfile${result.lockfiles.length === 1 ? "" : "s"}${result.lockfiles.length ? `: ${result.lockfiles.map(lock => `${lock.path} (${lock.label}, ${lock.components})`).join(", ")}` : ""}${options.ai ? `; ${aiCount} AI components (models, datasets, hosted model ids, MCP servers)` : ""}`);
 }
 
 export async function runCheck(file: string, options: { format?: string }, deps: SbomDeps): Promise<number> {
@@ -68,7 +68,7 @@ export async function runCheck(file: string, options: { format?: string }, deps:
 export function registerSbomCommand(program: Command, deps: SbomDeps = defaults): void {
   const sbom = program.command("sbom").description("Generate an SBOM from lockfiles, and check one against known advisories");
   sbom.command("generate")
-    .description("Write a CycloneDX 1.5 SBOM from the lockfiles in a folder (npm, pnpm, yarn, Cargo, Go, Python)")
+    .description("Write a CycloneDX 1.5 SBOM from the lockfiles in a folder (npm, pnpm, yarn, Cargo, Go, Python, Ruby, PHP, .NET, Gradle, Dart, Elixir)")
     .argument("[folder]", "Folder to read lockfiles from", ".")
     .option("-o, --output <file>", "Write the SBOM to a file instead of stdout")
     .option("--name <name>", "Name of the application the SBOM describes (default: the folder's name)")

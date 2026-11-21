@@ -1019,7 +1019,7 @@ Options:
 
 Commands:
   generate [options] [folder]  Write a CycloneDX 1.5 SBOM from the lockfiles in a folder (npm, pnpm,
-                               yarn, Cargo, Go, Python)
+                               yarn, Cargo, Go, Python, Ruby, PHP, .NET, Gradle, Dart, Elixir)
   check [options] <file>       Look every component of an SBOM up in the public OSV database and
                                list the advisories
   help [command]               display help for command
@@ -1039,7 +1039,8 @@ Options:
 ### 0 sbom generate
 Usage: 0 sbom generate [options] [folder]
 
-Write a CycloneDX 1.5 SBOM from the lockfiles in a folder (npm, pnpm, yarn, Cargo, Go, Python)
+Write a CycloneDX 1.5 SBOM from the lockfiles in a folder (npm, pnpm, yarn, Cargo, Go, Python, Ruby,
+PHP, .NET, Gradle, Dart, Elixir)
 
 Arguments:
   folder               Folder to read lockfiles from (default: ".")

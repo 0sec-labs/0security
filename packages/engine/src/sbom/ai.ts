@@ -7,9 +7,16 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { extname, join, relative } from "node:path";
 
 export interface AiComponent {
-  type: "machine-learning-model" | "data" | "service";
+  type: "machine-learning-model" | "data";
   "bom-ref": string;
   name: string;
+  properties: Array<{ name: string; value: string }>;
+}
+/** A running service the product talks to (an MCP server). CycloneDX lists these apart from components. */
+export interface AiService {
+  "bom-ref": string;
+  name: string;
+  endpoints?: string[];
   properties: Array<{ name: string; value: string }>;
 }
 
@@ -56,8 +63,9 @@ function listFiles(folder: string): string[] {
   return found;
 }
 
-export function detectAi(folder: string): AiComponent[] {
+export function detectAi(folder: string): { components: AiComponent[]; services: AiService[] } {
   const components = new Map<string, AiComponent>();
+  const services = new Map<string, AiService>();
   const add = (component: AiComponent): void => {
     const existing = components.get(component["bom-ref"]);
     if (!existing) components.set(component["bom-ref"], component);
@@ -80,7 +88,7 @@ export function detectAi(folder: string): AiComponent[] {
           const args = Array.isArray(server?.args) ? server.args.map(String) : [];
           const command = [typeof server?.command === "string" ? server.command : "", ...args].join(" ").trim();
           const unpinned = /\bnpx\b.*(?:^|\s)-y\b|\buvx\b|@latest\b|:latest\b/.test(command) && !/@\d+\.\d+\.\d+/.test(command);
-          add({ type: "service", "bom-ref": `mcp:${rel}:${clean(serverName, 80)}`, name: `mcp:${clean(serverName, 80)}`, properties: [{ name: "0:source", value: rel }, { name: "0:found-by", value: "MCP configuration" }, ...(command ? [{ name: "0:launch", value: clean(command) }] : []), ...(typeof server?.url === "string" ? [{ name: "0:url", value: clean(server.url) }] : []), ...(unpinned ? [{ name: "0:risk", value: "launched without a pinned version" }] : [])] });
+          services.set(`mcp:${rel}:${clean(serverName, 80)}`, { "bom-ref": `mcp:${rel}:${clean(serverName, 80)}`, name: `mcp:${clean(serverName, 80)}`, ...(typeof server?.url === "string" && /^https?:\/\//.test(server.url) ? { endpoints: [clean(server.url)] } : {}), properties: [{ name: "0:source", value: rel }, { name: "0:found-by", value: "MCP configuration" }, ...(command ? [{ name: "0:launch", value: clean(command) }] : []), ...(typeof server?.url === "string" ? [{ name: "0:url", value: clean(server.url) }] : []), ...(unpinned ? [{ name: "0:risk", value: "launched without a pinned version" }] : [])] });
         }
       } catch { /* not valid JSON: no servers listed */ }
       continue;
@@ -101,5 +109,6 @@ export function detectAi(folder: string): AiComponent[] {
       add({ type: "machine-learning-model", "bom-ref": `hosted-model:${id}`, name: id, properties: [{ name: "0:source", value: `${rel}:${lineOf(source, match.index ?? 0)}` }, { name: "0:found-by", value: "hosted model id" }, { name: "0:provider", value: provider(id) }] });
     }
   }
-  return [...components.values()].sort((a, b) => (a["bom-ref"] < b["bom-ref"] ? -1 : a["bom-ref"] > b["bom-ref"] ? 1 : 0));
+  const byRef = (a: { "bom-ref": string }, b: { "bom-ref": string }) => (a["bom-ref"] < b["bom-ref"] ? -1 : a["bom-ref"] > b["bom-ref"] ? 1 : 0);
+  return { components: [...components.values()].sort(byRef), services: [...services.values()].sort(byRef) };
 }

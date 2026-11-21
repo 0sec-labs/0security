@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { checkBomAgainstOsv, generateSbom, packageUrl, parseCargoLock, parseGoMod, parseNpmLock, parsePipfileLock, parsePnpmLock, parsePoetryLock, parseRequirements, parseYarnLock } from "./index.js";
+import { checkBomAgainstOsv, generateSbom, packageUrl, parseCargoLock, parseComposerLock, parseGemfileLock, parseGoMod, parseGradleLock, parseMixLock, parseNugetLock, parsePubspecLock, parseNpmLock, parsePipfileLock, parsePnpmLock, parsePoetryLock, parseRequirements, parseYarnLock } from "./index.js";
 
 const dirs: string[] = [];
 afterEach(() => dirs.splice(0).forEach(dir => rmSync(dir, { recursive: true, force: true })));
@@ -47,6 +47,34 @@ describe("lockfile parsers", () => {
     const pipfile = JSON.stringify({ default: { requests: { version: "==2.31.0" } }, develop: { pytest: { version: "==7.4.0" } } });
     expect(parsePipfileLock(pipfile).map(component => `${component.name}@${component.version}${component.dev ? " dev" : ""}`).sort()).toEqual(["pytest@7.4.0 dev", "requests@2.31.0"]);
     expect(names(parseRequirements("# c\nflask==2.3.2 # web\nrequests[security]==2.31.0 ; python_version > '3'\nnumpy>=1.0\n-r other.txt\ngit+https://x/y.git\n"))).toEqual(["flask@2.3.2", "requests@2.31.0"]);
+  });
+});
+
+describe("more ecosystems", () => {
+  it("Bundler: only the specs, not the gems' own dependency lines or platforms' suffixes", () => {
+    const lock = "GEM\n  remote: https://rubygems.org/\n  specs:\n    rails (7.1.2)\n      actionpack (= 7.1.2)\n    nokogiri (1.15.5-x86_64-linux)\n    rack (3.0.8)\n\nPLATFORMS\n  ruby\n";
+    expect(names(parseGemfileLock(lock))).toEqual(["nokogiri@1.15.5", "rack@3.0.8", "rails@7.1.2"]);
+  });
+  it("Composer: packages and dev packages, without a leading v", () => {
+    const lock = JSON.stringify({ packages: [{ name: "Monolog/Monolog", version: "v3.5.0" }], "packages-dev": [{ name: "phpunit/phpunit", version: "10.5.1" }] });
+    expect(parseComposerLock(lock).map(component => `${component.name}@${component.version}${component.dev ? " dev" : ""}`)).toEqual(["Monolog/Monolog@3.5.0", "phpunit/phpunit@10.5.1 dev"]);
+    expect(packageUrl(parseComposerLock(lock)[0]!)).toBe("pkg:composer/monolog/monolog@3.5.0");
+  });
+  it("NuGet: resolved versions per framework, not the project's own references", () => {
+    const lock = JSON.stringify({ version: 1, dependencies: { "net8.0": { "Newtonsoft.Json": { type: "Direct", resolved: "13.0.3" }, "My.Lib": { type: "Project" }, "System.Text.Json": { type: "Transitive", resolved: "8.0.0" } } } });
+    expect(names(parseNugetLock(lock))).toEqual(["Newtonsoft.Json@13.0.3", "System.Text.Json@8.0.0"]);
+  });
+  it("Gradle: group, artifact and version from the lockfile", () => {
+    const lock = "# This is a Gradle generated file for dependency locking.\ncom.google.guava:guava:32.1.3-jre=compileClasspath,runtimeClasspath\norg.slf4j:slf4j-api:2.0.9=runtimeClasspath\nempty=annotationProcessor\n";
+    expect(names(parseGradleLock(lock))).toEqual(["com.google.guava/guava@32.1.3-jre", "org.slf4j/slf4j-api@2.0.9"]);
+    expect(packageUrl(parseGradleLock(lock)[0]!)).toBe("pkg:maven/com.google.guava/guava@32.1.3-jre");
+  });
+  it("Dart: hosted packages with versions, not SDK or path packages", () => {
+    const lock = 'packages:\n  http:\n    dependency: "direct main"\n    source: hosted\n    version: "1.1.0"\n  flutter:\n    dependency: "direct main"\n    source: sdk\n    version: "0.0.0"\n  lints:\n    dependency: "direct dev"\n    source: hosted\n    version: "3.0.0"\n';
+    expect(parsePubspecLock(lock).map(component => `${component.name}@${component.version}${component.dev ? " dev" : ""}`)).toEqual(["http@1.1.0", "lints@3.0.0 dev"]);
+  });
+  it("Mix: hex packages", () => {
+    expect(names(parseMixLock('%{\n  "phoenix": {:hex, :phoenix, "1.7.10", "abc", [:mix], [], "hexpm", "def"},\n  "plug": {:hex, :plug, "1.15.2", "x", [:mix], [], "hexpm", "y"},\n}\n'))).toEqual(["phoenix@1.7.10", "plug@1.15.2"]);
   });
 });
 

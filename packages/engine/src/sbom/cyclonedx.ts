@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
-import { detectAi, type AiComponent } from "./ai.js";
+import { detectAi, type AiComponent, type AiService } from "./ai.js";
 import { LOCKFILES, type Component } from "./parsers.js";
 
 const MAX_LOCKFILE_BYTES = 64 * 1024 * 1024;
@@ -15,6 +15,7 @@ export interface Bom {
   version: 1;
   metadata: { timestamp: string; tools: { components: Array<{ type: "application"; author: string; name: string; version: string }> }; component: { type: "application"; name: string } };
   components: Array<{ type: "library"; "bom-ref": string; name: string; version: string; purl: string; scope?: "excluded" } | AiComponent>;
+  services?: AiService[];
 }
 export interface SbomResult { bom: Bom; lockfiles: Array<{ path: string; label: string; components: number }>; truncated: boolean }
 
@@ -29,6 +30,12 @@ export function packageUrl(component: Component): string {
     }
     case "pypi": return `pkg:pypi/${encode(component.name.toLowerCase().replace(/[._]+/g, "-"))}@${encode(component.version)}`;
     case "cargo": return `pkg:cargo/${encode(component.name)}@${encode(component.version)}`;
+    case "gem": return `pkg:gem/${encode(component.name)}@${encode(component.version)}`;
+    case "nuget": return `pkg:nuget/${encode(component.name)}@${encode(component.version)}`;
+    case "pub": return `pkg:pub/${encode(component.name.toLowerCase())}@${encode(component.version)}`;
+    case "hex": return `pkg:hex/${encode(component.name)}@${encode(component.version)}`;
+    case "composer": return `pkg:composer/${component.name.toLowerCase().split("/").map(encodeURIComponent).join("/")}@${encode(component.version)}`;
+    case "maven": return `pkg:maven/${component.name.split("/").map(encodeURIComponent).join("/")}@${encode(component.version)}`;
     case "golang": return `pkg:golang/${component.name.split("/").map(encodeURIComponent).join("/")}@${encodeURIComponent(component.version)}`;
   }
 }
@@ -69,9 +76,9 @@ export function generateSbom(folder: string, options: { name?: string; toolVersi
       else if (existing.component.dev && !component.dev) delete existing.component.dev;
     }
   }
-  const ai = options.ai ? detectAi(folder) : [];
+  const ai = options.ai ? detectAi(folder) : { components: [], services: [] };
   const sorted = [...byPurl.values()].sort((a, b) => (a.purl < b.purl ? -1 : a.purl > b.purl ? 1 : 0));
-  const digest = createHash("sha256").update([...sorted.map(item => item.purl), ...ai.map(item => item["bom-ref"])].join("\n")).digest("hex");
+  const digest = createHash("sha256").update([...sorted.map(item => item.purl), ...ai.components.map(item => item["bom-ref"]), ...ai.services.map(item => item["bom-ref"])].join("\n")).digest("hex");
   const serial = `urn:uuid:${digest.slice(0, 8)}-${digest.slice(8, 12)}-4${digest.slice(13, 16)}-8${digest.slice(17, 20)}-${digest.slice(20, 32)}`;
   const bom: Bom = {
     bomFormat: "CycloneDX", specVersion: "1.5", serialNumber: serial, version: 1,
@@ -80,7 +87,8 @@ export function generateSbom(folder: string, options: { name?: string; toolVersi
       tools: { components: [{ type: "application", author: "0sec-labs", name: "0", version: options.toolVersion }] },
       component: { type: "application", name: options.name ?? (folder.split(/[\\/]/).filter(Boolean).pop() ?? "application") },
     },
-    components: [...sorted.map(({ component, purl }) => ({ type: "library" as const, "bom-ref": purl, name: component.name, version: component.version, purl, ...(component.dev ? { scope: "excluded" as const } : {}) })), ...ai],
+    components: [...sorted.map(({ component, purl }) => ({ type: "library" as const, "bom-ref": purl, name: component.name, version: component.version, purl, ...(component.dev ? { scope: "excluded" as const } : {}) })), ...ai.components],
+    ...(ai.services.length ? { services: ai.services } : {}),
   };
   return { bom, lockfiles: summary.sort((a, b) => (a.path < b.path ? -1 : 1)), truncated: false };
 }
