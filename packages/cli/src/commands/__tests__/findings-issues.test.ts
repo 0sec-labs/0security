@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
+import { resolveFindingId } from "../../finding-id.js";
 import {
-  buildIssue, findingKey, GitHubIssueTracker, neutralise, planIssueSync, runIssues,
+  buildIssue, findingKey, GitHubIssueTracker, neutralise, neutralisePlain, planIssueSync, runIssues,
   type IssuesDeps, type IssueTracker, type TrackedFinding, type TrackerIssue,
 } from "../findings-issues.js";
 
@@ -85,6 +86,49 @@ describe("planning", () => {
   });
 });
 
+describe("issue title and hint", () => {
+  it("writes the title as plain text: no markdown escapes, but mentions, references, markup and line breaks are defused", () => {
+    const title = buildIssue(finding({ title: "child_process.exec() with `cmd` and *x*\nsecond <b>line</b> @octocat see #123" })).title;
+    expect(title).toContain("child_process.exec() with `cmd` and *x* second bline/b");
+    expect(title).not.toContain("\\");
+    expect(title).not.toMatch(/[<>\n]/);
+    expect(title).not.toMatch(/@(?!\u200b)/);
+    expect(title).not.toMatch(/#(?=\d)/);
+    expect(neutralisePlain("x".repeat(500), 160)).toHaveLength(160);
+    expect(buildIssue(finding({ title: "a_b" })).body).toContain("| high | injection |");
+    expect(neutralise("a_b")).toBe("a\\_b");
+  });
+
+  it("hints an id that `0 findings show` accepts, also for imported findings that share a prefix", () => {
+    const scan = `sarif-${"a".repeat(64)}`;
+    const ids = [`${scan}-1111111122223333aaaabbbb`, `${scan}-9999999988887777ccccdddd`];
+    const body = buildIssue(finding({ id: ids[1]! })).body;
+    const hint = /findings show ([A-Za-z0-9-]+)/.exec(body)![1]!;
+    expect(hint).toBe("99999999");
+    expect(resolveFindingId(ids.map(id => ({ id })), hint)?.id).toBe(ids[1]);
+    expect(buildIssue(finding()).body).toContain("findings show abcdef12`");
+  });
+});
+
+describe("closing", () => {
+  it("updates the body's status in the same change and stays quiet on the next run", () => {
+    const f = finding({ closedBecause: "fixed" });
+    const plan = planIssueSync([f], [issueFor(finding())], "medium");
+    const action = plan.actions[0]!;
+    expect(action.kind).toBe("close");
+    if (action.kind !== "close") return;
+    expect(action.draft.body).toContain("| closed (fixed) |");
+    const after = { ...action.issue, open: false, body: action.draft.body };
+    expect(planIssueSync([f], [after], "medium")).toMatchObject({ actions: [], unchanged: 1 });
+  });
+
+  it("says a suppression was a false positive when the note records it", () => {
+    const comment = (f: TrackedFinding) => { const a = planIssueSync([f], [issueFor(finding())], "medium").actions[0]!; return a.kind === "close" ? a.comment : ""; };
+    expect(comment(finding({ closedBecause: "suppressed", falsePositive: true }))).toContain("suppressed as a false positive");
+    expect(comment(finding({ closedBecause: "suppressed" }))).toContain("now suppressed.");
+  });
+});
+
 function fakeTracker(issues: TrackerIssue[] = [], labelsUsable = ["security", "severity:high", "severity:medium", "severity:critical"]) {
   const calls: string[] = [];
   const tracker: IssueTracker = {
@@ -92,7 +136,7 @@ function fakeTracker(issues: TrackerIssue[] = [], labelsUsable = ["security", "s
     ensureLabels: async () => ({ usable: labelsUsable, warnings: labelsUsable.length ? [] : ["no labels"] }),
     create: async draft => { calls.push(`create ${draft.title} [${draft.labels.join(",")}]`); return 100; },
     update: async (issue, draft) => { calls.push(`update #${issue.number} ${draft.title}`); },
-    close: async (issue, comment, completed) => { calls.push(`close #${issue.number} ${completed ? "completed" : "not_planned"} ${comment.slice(0, 20)}`); },
+    close: async (issue, comment, completed, draft) => { calls.push(`close #${issue.number} ${completed ? "completed" : "not_planned"} ${comment.slice(0, 20)}${draft ? ` body:${draft.body.includes("closed (") ? "closed" : "open"}` : ""}`); },
     reopen: async issue => { calls.push(`reopen #${issue.number}`); },
   };
   return { tracker, calls };
@@ -171,6 +215,16 @@ describe("GitHub tracker over a fake gh", () => {
     const result = await new GitHubIssueTracker("o/r", denied.gh).ensureLabels(["security"]);
     expect(result.usable).toEqual([]);
     expect(result.warnings[0]).toContain("could not create label 'security'");
+  });
+
+  it("sends the closed body with the close call", async () => {
+    const { gh, calls } = fakeGh();
+    const tracker = new GitHubIssueTracker("o/r", gh);
+    const f = finding({ closedBecause: "suppressed" });
+    await tracker.close(issueFor(finding()), "done", false, buildIssue(f));
+    const patch = JSON.parse(calls[1]!.input!) as { state: string; body: string };
+    expect(patch.state).toBe("closed");
+    expect(patch.body).toContain("closed (suppressed)");
   });
 
   it("creates, updates, closes and reopens with the right API calls", async () => {

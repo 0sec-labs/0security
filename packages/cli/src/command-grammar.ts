@@ -45,7 +45,7 @@ function findings(a: Args): string[] | undefined {
       const reason = pull(status.rest, "--reason", true);
       if (!reason.value) return undefined;
       const note = pull(reason.rest, "--note", true);
-      return [...target, a[2], ...note.rest, "--note", reason.value];
+      return [...target, a[2], ...note.rest, "--note", `False positive: ${reason.value}`];
     }
     return [...target, a[2], ...status.rest];
   }

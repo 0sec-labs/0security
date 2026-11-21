@@ -12,6 +12,7 @@ import { createHash } from "node:crypto";
 import type { Command } from "commander";
 import { attackerImpactSentence } from "@0/engine/shared";
 import { FindingsService, listOsecRunDatabasePaths, resolveOsecDbPath } from "@0/engine/storage";
+import { shortFindingId } from "../finding-id.js";
 import { finishWithError, UsageError } from "./output.js";
 import { REPO } from "./findings-upload.js";
 
@@ -35,6 +36,8 @@ export interface TrackedFinding {
   impact?: string;
   /** Why the finding no longer needs work; absent while it is open. */
   closedBecause?: "suppressed" | "accepted" | "fixed" | "false-positive";
+  /** The suppression was recorded as a false positive (its triage note says so). */
+  falsePositive?: boolean;
 }
 
 export interface TrackerIssue { number: number; key: string; title: string; body: string; open: boolean; labels: string[] }
@@ -48,7 +51,8 @@ export interface IssueTracker {
   ensureLabels(labels: string[]): Promise<{ usable: string[]; warnings: string[] }>;
   create(draft: IssueDraft): Promise<number>;
   update(issue: TrackerIssue, draft: IssueDraft): Promise<void>;
-  close(issue: TrackerIssue, comment: string, completed: boolean): Promise<void>;
+  /** Close the issue; `draft` is the closed-state text, so the body's status table stops saying open. */
+  close(issue: TrackerIssue, comment: string, completed: boolean, draft?: IssueDraft): Promise<void>;
   reopen(issue: TrackerIssue, comment: string): Promise<void>;
 }
 
@@ -64,6 +68,13 @@ export function neutralise(text: string, max = 300): string {
     .replace(/([\\`*_[\]()~|!])/g, "\\$1")
     .replace(/@/g, "@​").replace(/#(?=\d)/g, "#​").replace(/\bGH-(?=\d)/gi, "GH​-")
     .replace(/:\/\//g, ":​//").replace(/\bwww\./gi, "www​.");
+}
+
+/** Plain text for places that do not render markdown (issue titles): defused like `neutralise`, but nothing is escaped. */
+export function neutralisePlain(text: string, max = 300): string {
+  return text.replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/[<>]/g, "").replace(/\s+/g, " ").trim().slice(0, max).trim()
+    .replace(/@/g, "@\u200b").replace(/#(?=\d)/g, "#\u200b").replace(/\bGH-(?=\d)/gi, "GH\u200b-")
+    .replace(/:\/\//g, ":\u200b//").replace(/\bwww\./gi, "www\u200b.");
 }
 
 /** A repository-relative path as plain characters, or undefined for anything that names the local machine. */
@@ -86,16 +97,16 @@ export function buildIssue(finding: TrackedFinding): IssueDraft {
     `| Severity | Category | Where | Status |\n| --- | --- | --- | --- |\n| ${severity} | ${neutralise(finding.category, 60)} | ${where} | ${status} |`,
     ...(finding.impact ? ["", `**What an attacker gets:** ${neutralise(finding.impact, 700)}`] : []),
     "",
-    `Mirrored by \`0 findings issues\`. Evidence and proof-of-concept details are not copied here; on the machine that ran the scan, open them with \`0 findings show ${finding.id.slice(0, 12).replace(/[^A-Za-z0-9-]/g, "")}\`.`,
+    `Mirrored by \`0 findings issues\`. Evidence and proof-of-concept details are not copied here; on the machine that ran the scan, open them with \`0 findings show ${shortFindingId(finding.id).replace(/[^A-Za-z0-9-]/g, "")}\`.`,
     "This issue is kept in sync automatically: edits to the title and body are overwritten, and it closes when the finding is fixed, accepted or suppressed.",
   ].join("\n");
-  return { title: `[${severity}] ${neutralise(finding.title, 160)}`, body, labels: labelsFor(severity) };
+  return { title: `[${severity}] ${neutralisePlain(finding.title, 160)}`, body, labels: labelsFor(severity) };
 }
 
 export type IssueAction =
   | { kind: "create"; finding: TrackedFinding; draft: IssueDraft }
   | { kind: "update"; finding: TrackedFinding; draft: IssueDraft; issue: TrackerIssue }
-  | { kind: "close"; finding: TrackedFinding; issue: TrackerIssue; comment: string; completed: boolean }
+  | { kind: "close"; finding: TrackedFinding; issue: TrackerIssue; draft: IssueDraft; comment: string; completed: boolean }
   | { kind: "reopen"; finding: TrackedFinding; draft: IssueDraft; issue: TrackerIssue; comment: string };
 
 const rank = (severity: string): number => SEVERITIES.indexOf(normalSeverity(severity));
@@ -113,7 +124,7 @@ export function planIssueSync(findings: TrackedFinding[], issues: TrackerIssue[]
     const issue = byKey.get(finding.key);
     const draft = buildIssue(finding);
     if (finding.closedBecause) {
-      if (issue?.open) actions.push({ kind: "close", finding, issue, completed: finding.closedBecause === "fixed", comment: `Closed by 0: this finding is now ${finding.closedBecause === "false-positive" ? "marked as a false positive" : finding.closedBecause}. It is reopened if the finding comes back.` });
+      if (issue?.open) actions.push({ kind: "close", finding, issue, draft, completed: finding.closedBecause === "fixed", comment: `Closed by 0: this finding is now ${finding.closedBecause === "false-positive" ? "marked as a false positive" : finding.falsePositive ? "suppressed as a false positive" : finding.closedBecause}. It is reopened if the finding comes back.` });
       else unchanged++;
       continue;
     }
@@ -184,9 +195,9 @@ export class GitHubIssueTracker implements IssueTracker {
     await this.syncLabels(issue, draft.labels);
   }
 
-  async close(issue: TrackerIssue, comment: string, completed: boolean): Promise<void> {
+  async close(issue: TrackerIssue, comment: string, completed: boolean, draft?: IssueDraft): Promise<void> {
     await this.comment(issue.number, comment);
-    await this.patch(issue.number, { state: "closed", state_reason: completed ? "completed" : "not_planned" });
+    await this.patch(issue.number, { state: "closed", state_reason: completed ? "completed" : "not_planned", ...(draft ? { body: draft.body } : {}) });
   }
 
   async reopen(issue: TrackerIssue, comment: string): Promise<void> {
@@ -222,6 +233,7 @@ async function loadTrackedFindings(dbPath: string | undefined): Promise<TrackedF
       ...(annotation && typeof annotation.path === "string" ? { path: annotation.path } : {}),
       ...(annotation && typeof annotation.startLine === "number" ? { startLine: annotation.startLine } : {}),
       ...(impact ? { impact } : {}),
+      ...(triage === "suppressed" && /^false[ -]positive\b/i.test(String((latest as { triageNote?: unknown }).triageNote ?? "").trim()) ? { falsePositive: true } : {}),
       ...(CLOSING_TRIAGE.has(triage) ? { closedBecause: triage as "accepted" | "suppressed" } : CLOSING_STATUS.has(latest.status) ? { closedBecause: latest.status as "fixed" | "false-positive" } : {}),
     });
   }
@@ -293,7 +305,7 @@ export async function runIssues(options: IssuesOptions, deps: IssuesDeps = defau
     try {
       if (action.kind === "create") outcome.issue = await tracker.create(usable(action.draft));
       else if (action.kind === "update") await tracker.update(action.issue, usable(action.draft));
-      else if (action.kind === "close") await tracker.close(action.issue, action.comment, action.completed);
+      else if (action.kind === "close") await tracker.close(action.issue, action.comment, action.completed, action.draft);
       else { await tracker.reopen(action.issue, action.comment); await tracker.update({ ...action.issue, open: true }, usable(action.draft)); }
       deps.err(`${PAST[action.kind]}${outcome.issue ? ` #${outcome.issue}` : ""}: ${outcome.title}`);
     } catch (error) {
