@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { detectAi, type AiComponent, type AiService } from "./ai.js";
-import { LOCKFILES, type Component } from "./parsers.js";
+import { LOCKFILES, type Component, type Hash } from "./parsers.js";
+import { SPDX_LICENSE_IDS } from "./spdx-ids.js";
 
 const MAX_LOCKFILE_BYTES = 64 * 1024 * 1024;
 const MAX_DEPTH = 6;
@@ -14,8 +15,43 @@ export interface Bom {
   serialNumber: string;
   version: 1;
   metadata: { timestamp: string; tools: { components: Array<{ type: "application"; author: string; name: string; version: string }> }; component: { type: "application"; name: string } };
-  components: Array<{ type: "library"; "bom-ref": string; name: string; version: string; purl: string; scope?: "excluded" } | AiComponent>;
+  components: Array<LibraryComponent | AiComponent>;
   services?: AiService[];
+  dependencies?: Array<{ ref: string; dependsOn: string[] }>;
+}
+export type LicenseChoice = { license: { id: string } } | { license: { name: string } } | { expression: string };
+export interface LibraryComponent { type: "library"; "bom-ref": string; name: string; version: string; purl: string; scope?: "excluded"; hashes?: Hash[]; licenses?: LicenseChoice[] }
+
+/**
+ * How one stated license is written: a valid SPDX id as `id`, an SPDX expression (valid ids joined by AND, OR, WITH, with
+ * optional `+` and parentheses) as `expression`, anything else (`UNLICENSED`, `SEE LICENSE IN ...`, a misspelling) as the
+ * `name` the lockfile gave, unchanged. Nothing is corrected or guessed.
+ */
+export function classifyLicense(value: string): LicenseChoice {
+  if (SPDX_LICENSE_IDS.has(value)) return { license: { id: value } };
+  const tokens = value.replace(/([()])/g, " $1 ").split(/\s+/).filter(Boolean);
+  const operand = (token: string) => SPDX_LICENSE_IDS.has(token.replace(/\+$/, "")) || /^LicenseRef-[A-Za-z0-9.-]+$/.test(token);
+  let valid = tokens.length > 1 && /\b(AND|OR|WITH)\b/.test(value);
+  let depth = 0; let expectOperand = true;
+  for (let index = 0; valid && index < tokens.length; index += 1) {
+    const token = tokens[index]!;
+    if (token === "(") { if (!expectOperand) valid = false; depth += 1; }
+    else if (token === ")") { depth -= 1; if (expectOperand || depth < 0) valid = false; }
+    else if (expectOperand) { if (operand(token)) expectOperand = false; else valid = false; }
+    else if (token === "AND" || token === "OR") expectOperand = true;
+    else if (token === "WITH") { const exception = tokens[index + 1]; if (exception && SPDX_LICENSE_IDS.has(exception)) index += 1; else valid = false; }
+    else valid = false;
+  }
+  if (valid && depth === 0 && !expectOperand) return { expression: value };
+  return { license: { name: value } };
+}
+/** A CycloneDX `licenses` array allows either license objects or a single expression, never both. */
+function licenseChoices(values: string[]): LicenseChoice[] {
+  const choices = values.map(classifyLicense);
+  const expression = choices.find(choice => "expression" in choice);
+  if (expression && choices.length === 1) return [expression];
+  // Several stated licenses (Composer's list), or an expression mixed with others: keep each as a named license.
+  return values.map(value => { const choice = classifyLicense(value); return "expression" in choice ? { license: { name: value } } : choice; });
 }
 export interface SbomResult { bom: Bom; lockfiles: Array<{ path: string; label: string; components: number }>; truncated: boolean }
 
@@ -57,11 +93,26 @@ function findLockfiles(folder: string): Array<{ path: string; label: string; par
   return found;
 }
 
+/** Fold what a second lockfile says about the same package into the first: edges are unioned, a hash is kept only where lockfiles agree, licenses come from the first that states them. */
+function mergeFacts(into: Component, from: Component): void {
+  if (from.dependsOn) into.dependsOn = [...(into.dependsOn ?? []), ...from.dependsOn];
+  if (!into.licenses?.length && from.licenses?.length) into.licenses = from.licenses;
+  if (from.hashes) {
+    const kept = [...(into.hashes ?? [])];
+    for (const hash of from.hashes) {
+      const same = kept.findIndex(other => other.alg === hash.alg);
+      if (same < 0) kept.push(hash); else if (kept[same]!.content !== hash.content) kept.splice(same, 1);
+    }
+    into.hashes = kept;
+  }
+}
+
 /** Build a CycloneDX 1.5 SBOM from the lockfiles under a folder. Sorted and de-duplicated, so the same lockfiles give the same SBOM. */
 export function generateSbom(folder: string, options: { name?: string; toolVersion: string; now?: Date; ai?: boolean }): SbomResult {
   const locks = findLockfiles(folder);
   // A pinned requirements.txt next to a lock that already covers the same ecosystem adds noise, not facts.
   const byPurl = new Map<string, { component: Component; purl: string }>();
+  const refs = new Map<string, string>();  // "ecosystem:name@version" -> purl, to turn a lockfile's edges into bom-refs
   const summary: SbomResult["lockfiles"] = [];
   for (const lock of locks) {
     let source: string;
@@ -72,8 +123,12 @@ export function generateSbom(folder: string, options: { name?: string; toolVersi
       const purl = packageUrl(component);
       const existing = byPurl.get(purl);
       // A component is development-only only if every lockfile that lists it says so.
-      if (!existing) byPurl.set(purl, { component: { ...component }, purl });
-      else if (existing.component.dev && !component.dev) delete existing.component.dev;
+      if (!existing) byPurl.set(purl, { component: { ...component, ...(component.dependsOn ? { dependsOn: [...component.dependsOn] } : {}) }, purl });
+      else {
+        if (existing.component.dev && !component.dev) delete existing.component.dev;
+        mergeFacts(existing.component, component);
+      }
+      refs.set(`${component.ecosystem}:${component.name}@${component.version}`, purl);
     }
   }
   const ai = options.ai ? detectAi(folder) : { components: [], services: [] };
@@ -87,8 +142,19 @@ export function generateSbom(folder: string, options: { name?: string; toolVersi
       tools: { components: [{ type: "application", author: "0sec-labs", name: "0", version: options.toolVersion }] },
       component: { type: "application", name: options.name ?? (folder.split(/[\\/]/).filter(Boolean).pop() ?? "application") },
     },
-    components: [...sorted.map(({ component, purl }) => ({ type: "library" as const, "bom-ref": purl, name: component.name, version: component.version, purl, ...(component.dev ? { scope: "excluded" as const } : {}) })), ...ai.components],
+    components: [...sorted.map(({ component, purl }): LibraryComponent => ({
+      type: "library", "bom-ref": purl, name: component.name, version: component.version, purl,
+      ...(component.dev ? { scope: "excluded" as const } : {}),
+      ...(component.hashes?.length ? { hashes: [...component.hashes].sort((a, b) => (a.alg < b.alg ? -1 : 1)) } : {}),
+      ...(component.licenses?.length ? { licenses: licenseChoices(component.licenses) } : {}),
+    })), ...ai.components],
     ...(ai.services.length ? { services: ai.services } : {}),
   };
+  // Only components whose lockfile records a graph get an entry (an empty `dependsOn` says "a leaf"; no entry says "unknown").
+  const dependencies = sorted.filter(({ component }) => component.dependsOn).map(({ component, purl }) => ({
+    ref: purl,
+    dependsOn: [...new Set(component.dependsOn!.flatMap(target => { const ref = refs.get(`${component.ecosystem}:${target.name}@${target.version}`); return ref && ref !== purl ? [ref] : []; }))].sort(),
+  }));
+  if (dependencies.length) bom.dependencies = dependencies;
   return { bom, lockfiles: summary.sort((a, b) => (a.path < b.path ? -1 : 1)), truncated: false };
 }

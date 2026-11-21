@@ -10,10 +10,42 @@ export interface Component {
   version: string;
   /** Marked as a development-only dependency by the lockfile, so not part of what ships. */
   dev?: boolean;
+  /** Checksums of the published artifact, as the lockfile states them (hex digests of a known algorithm). */
+  hashes?: Hash[];
+  /** Components this one depends on, as the lockfile resolves them. Absent: the lockfile does not record a graph. Empty: it does, and this is a leaf. */
+  dependsOn?: Array<{ name: string; version: string }>;
+  /** Licenses exactly as the lockfile states them (an SPDX expression or free text); classified when the SBOM is written. */
+  licenses?: string[];
+}
+export interface Hash { alg: "SHA-1" | "SHA-256" | "SHA-384" | "SHA-512"; content: string }
+
+const SRI_ALGS: Record<string, { alg: Hash["alg"]; bytes: number }> = { sha1: { alg: "SHA-1", bytes: 20 }, sha256: { alg: "SHA-256", bytes: 32 }, sha384: { alg: "SHA-384", bytes: 48 }, sha512: { alg: "SHA-512", bytes: 64 } };
+/** A Subresource Integrity string (`sha512-<base64>`, possibly several, space separated) to hex hashes. A value whose length does not match its algorithm is dropped, not guessed at. */
+export function sriToHashes(value: unknown): Hash[] {
+  if (typeof value !== "string") return [];
+  const found: Hash[] = [];
+  for (const token of value.trim().split(/\s+/)) {
+    const match = /^(sha1|sha256|sha384|sha512)-([A-Za-z0-9+/]+={0,2})(?:\?.*)?$/.exec(token);
+    const spec = match && SRI_ALGS[match[1]!];
+    if (!match || !spec) continue;
+    const bytes = Buffer.from(match[2]!, "base64");
+    // Round-trip check: the string must be canonical base64 of exactly the digest length.
+    if (bytes.length === spec.bytes && bytes.toString("base64") === match[2]) found.push({ alg: spec.alg, content: bytes.toString("hex") });
+  }
+  return found;
+}
+/** A hex digest of a known algorithm, or nothing when it is the wrong length or not hex. */
+export function hexHash(alg: Hash["alg"], value: unknown): Hash[] {
+  const length = { "SHA-1": 40, "SHA-256": 64, "SHA-384": 96, "SHA-512": 128 }[alg];
+  return typeof value === "string" && value.length === length && /^[0-9a-fA-F]+$/.test(value) ? [{ alg, content: value.toLowerCase() }] : [];
 }
 
 const isObject = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
 const text = (value: unknown): string => typeof value === "string" ? value : "";
+
+/** The `name` an npm lockfile path installs: the last `node_modules/` segment. */
+const npmNameOf = (path: string, entry: Record<string, unknown>): string => text(entry.name) || path.split("node_modules/").pop() || "";
+const licenseList = (value: unknown): string[] => typeof value === "string" && value.trim() ? [value.trim()] : Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && !!item.trim()).map(item => item.trim()) : [];
 
 export function parseNpmLock(source: string): Component[] {
   let lock: unknown;
@@ -21,11 +53,32 @@ export function parseNpmLock(source: string): Component[] {
   if (!isObject(lock)) return [];
   const found: Component[] = [];
   if (isObject(lock.packages)) {
-    for (const [path, entry] of Object.entries(lock.packages)) {
+    const packages = lock.packages;
+    // Node resolves a dependency from the package's own node_modules, then each parent's.
+    const resolve = (from: string, dep: string): { name: string; version: string } | undefined => {
+      let base = from;
+      for (;;) {
+        const path = `${base}${base ? "/" : ""}node_modules/${dep}`;
+        const target = packages[path];
+        if (isObject(target) && target.link !== true && text(target.version)) return { name: npmNameOf(path, target), version: text(target.version) };
+        if (!base) return undefined;
+        const cut = base.lastIndexOf("/node_modules/");
+        base = cut >= 0 ? base.slice(0, cut) : "";
+      }
+    };
+    for (const [path, entry] of Object.entries(packages)) {
       if (!path || !isObject(entry) || entry.link === true) continue;
-      const name = text(entry.name) || path.split("node_modules/").pop() || "";
+      const name = npmNameOf(path, entry);
       const version = text(entry.version);
-      if (name && version) found.push({ ecosystem: "npm", name, version, ...(entry.dev === true ? { dev: true } : {}) });
+      if (!name || !version) continue;
+      const dependsOn: Array<{ name: string; version: string }> = [];
+      for (const field of ["dependencies", "optionalDependencies"]) {
+        if (!isObject(entry[field])) continue;
+        for (const dep of Object.keys(entry[field] as object)) { const target = resolve(path, dep); if (target) dependsOn.push(target); }
+      }
+      const hashes = sriToHashes(entry.integrity);
+      const licenses = licenseList(entry.license);
+      found.push({ ecosystem: "npm", name, version, ...(entry.dev === true ? { dev: true } : {}), ...(hashes.length ? { hashes } : {}), dependsOn, ...(licenses.length ? { licenses } : {}) });
     }
     return found;
   }
@@ -34,7 +87,7 @@ export function parseNpmLock(source: string): Component[] {
     for (const [name, entry] of Object.entries(dependencies)) {
       if (!isObject(entry)) continue;
       const version = text(entry.version);
-      if (version && !/^(file:|link:|git|https?:)/.test(version)) found.push({ ecosystem: "npm", name, version, ...(entry.dev === true ? { dev: true } : {}) });
+      if (version && !/^(file:|link:|git|https?:)/.test(version)) { const hashes = sriToHashes(entry.integrity); found.push({ ecosystem: "npm", name, version, ...(entry.dev === true ? { dev: true } : {}), ...(hashes.length ? { hashes } : {}) }); }
       walk(entry.dependencies);
     }
   };
@@ -51,48 +104,167 @@ function pnpmKey(raw: string): { name: string; version: string } | undefined {
   if (slash > 0) return { name: key.slice(0, slash), version: key.slice(slash + 1) };
   return undefined;
 }
+/** A pnpm dependency value: a bare version (`1.2.3`, `1.2.3(peer@1)`, v5 `1.2.3_peer`), or `name@version` / `/name@version` for aliases and v6. `link:` and other non-registry values give nothing. */
+function pnpmDependency(name: string, value: unknown): { name: string; version: string } | undefined {
+  const raw = text(value);
+  if (!raw || /^(link:|file:|workspace:|https?:|git)/.test(raw)) return undefined;
+  if (/^\d/.test(raw)) return { name, version: raw.replace(/\(.*$/, "").replace(/_.*$/, "") };
+  const parsed = pnpmKey(raw);
+  return parsed && /^\d/.test(parsed.version) ? parsed : undefined;
+}
 export function parsePnpmLock(source: string): Component[] {
   let lock: unknown;
   try { lock = parseYaml(source, { schema: "core" }); } catch { return []; }
   if (!isObject(lock) || !isObject(lock.packages)) return [];
-  const found: Component[] = [];
+  // v9 keeps the graph in `snapshots` (one per peer-dependency variant); v5 and v6 keep it on the package itself.
+  const graphSource = isObject(lock.snapshots) ? lock.snapshots : lock.packages;
+  const edges = new Map<string, Map<string, { name: string; version: string }>>();
+  const identity = (parsed: { name: string; version: string }) => `${parsed.name}@${parsed.version}`;
+  for (const [key, entry] of Object.entries(graphSource)) {
+    const parsed = pnpmKey(key);
+    if (!parsed || !/^\d/.test(parsed.version)) continue;
+    const list = edges.get(identity(parsed)) ?? new Map();
+    edges.set(identity(parsed), list);
+    if (!isObject(entry)) continue;
+    for (const field of ["dependencies", "optionalDependencies"]) {
+      if (!isObject(entry[field])) continue;
+      for (const [name, value] of Object.entries(entry[field] as Record<string, unknown>)) { const target = pnpmDependency(name, value); if (target) list.set(identity(target), target); }
+    }
+  }
+  const found = new Map<string, Component>();
   for (const [key, entry] of Object.entries(lock.packages)) {
     const parsed = pnpmKey(key);
-    if (parsed && /^\d/.test(parsed.version)) found.push({ ecosystem: "npm", name: parsed.name, version: parsed.version, ...(isObject(entry) && entry.dev === true ? { dev: true } : {}) });
+    if (!parsed || !/^\d/.test(parsed.version)) continue;
+    const resolution = isObject(entry) && isObject(entry.resolution) ? entry.resolution : {};
+    const hashes = sriToHashes(resolution.integrity);
+    const dev = isObject(entry) && entry.dev === true;
+    const previous = found.get(identity(parsed));
+    if (previous) { if (!previous.hashes?.length && hashes.length) previous.hashes = hashes; continue; }
+    found.set(identity(parsed), { ecosystem: "npm", name: parsed.name, version: parsed.version, ...(dev ? { dev: true } : {}), ...(hashes.length ? { hashes } : {}), ...(edges.has(identity(parsed)) ? { dependsOn: [...edges.get(identity(parsed))!.values()] } : {}) });
   }
-  return found;
+  return [...found.values()];
 }
 
+/**
+ * yarn.lock, classic (`version "1"`, `integrity sha512-...`, `dependencies:` blocks) and Berry (`version: 1`).
+ * Berry's `checksum` is a hash of Yarn's own cache archive, not of the published tarball, so it is not reported.
+ */
 export function parseYarnLock(source: string): Component[] {
-  const found: Component[] = [];
-  let names: string[] = [];
+  interface Block { specs: string[]; name: string; version: string; integrity: string; deps: Array<[string, string]> }
+  const blocks: Block[] = [];
+  let block: Block | undefined;
+  let inDeps = false;
+  const unquote = (value: string) => value.trim().replace(/^"|"$/g, "");
   for (const line of source.split("\n")) {
     if (!line || line.startsWith("#")) continue;
-    if (!/^\s/.test(line) && line.endsWith(":")) {
-      names = line.slice(0, -1).split(",").map(spec => spec.trim().replace(/^"|"$/g, "")).map(spec => { const at = spec.lastIndexOf("@"); return at > 0 ? spec.slice(0, at) : ""; }).filter(Boolean);
+    if (!/^\s/.test(line)) {
+      inDeps = false; block = undefined;
+      if (!line.endsWith(":")) continue;
+      const specs = line.slice(0, -1).split(",").map(unquote).filter(Boolean);
+      const names = specs.map(spec => { const at = spec.lastIndexOf("@"); return at > 0 ? spec.slice(0, at) : ""; }).filter(Boolean);
+      if (names.length) { block = { specs, name: names[0]!, version: "", integrity: "", deps: [] }; blocks.push(block); }
       continue;
     }
-    const version = /^\s+version:?\s+"?([^"\s]+)"?/.exec(line);
-    if (version && names.length) { found.push({ ecosystem: "npm", name: names[0]!, version: version[1]! }); names = []; }
+    if (!block) continue;
+    const indent = /^\s*/.exec(line)![0].length;
+    if (indent <= 2) {
+      inDeps = /^\s+(dependencies|optionalDependencies):\s*$/.test(line);
+      const version = /^\s+version:?\s+"?([^"\s]+)"?/.exec(line);
+      if (version && !block.version) block.version = version[1]!;
+      const integrity = /^\s+integrity:?\s+"?([^"\s]+)"?/.exec(line);
+      if (integrity) block.integrity = integrity[1]!;
+      continue;
+    }
+    if (inDeps) {
+      const dep = /^\s+("[^"]+"|[^\s:"]+):?\s+"?([^"]*?)"?\s*$/.exec(line);
+      if (dep) block.deps.push([unquote(dep[1]!), dep[2]!]);
+    }
+  }
+  const bySpec = new Map<string, { name: string; version: string }>();
+  for (const item of blocks) if (item.version) for (const spec of item.specs) bySpec.set(spec, { name: item.name, version: item.version });
+  const found: Component[] = [];
+  for (const item of blocks) {
+    if (!item.version) continue;
+    const hashes = sriToHashes(item.integrity);
+    const dependsOn = new Map<string, { name: string; version: string }>();
+    for (const [name, range] of item.deps) {
+      const target = bySpec.get(`${name}@${range}`) ?? bySpec.get(`${name}@npm:${range}`);
+      if (target) dependsOn.set(`${target.name}@${target.version}`, target);
+    }
+    found.push({ ecosystem: "npm", name: item.name, version: item.version, ...(hashes.length ? { hashes } : {}), dependsOn: [...dependsOn.values()] });
   }
   return found;
 }
 
 /** `[[package]]` tables with `name = "..."` and `version = "..."`, as in Cargo.lock and poetry.lock. */
-function parsePackageTables(source: string, wanted: (table: Record<string, string>) => boolean): Array<Record<string, string>> {
-  const tables: Array<Record<string, string>> = [];
-  let current: Record<string, string> | undefined;
+interface PackageTable { fields: Record<string, string>; dependencies: string[]; sections: Record<string, string[]>; files: string[] }
+function parsePackageTables(source: string): PackageTable[] {
+  const tables: PackageTable[] = [];
+  let current: PackageTable | undefined;
+  let section = "";
+  let array: string[] | undefined;
   for (const line of source.split("\n")) {
-    if (line.trim() === "[[package]]") { current = {}; tables.push(current); continue; }
-    if (line.startsWith("[")) { current = undefined; continue; }
+    if (array) {
+      if (/^\s*\]/.test(line)) { array = undefined; continue; }
+      const item = /^\s*"([^"]*)"/.exec(line) ?? /^\s*\{.*\bhash\s*=\s*"([^"]*)"/.exec(line);
+      if (item) array.push(item[1]!);
+      continue;
+    }
+    if (line.trim() === "[[package]]") { current = { fields: {}, dependencies: [], sections: {}, files: [] }; tables.push(current); section = ""; continue; }
+    if (line.startsWith("[")) { section = line.trim().replace(/^\[|\]$/g, ""); if (!section.startsWith("package.")) current = undefined; continue; }
+    if (!current) continue;
+    if (section === "package.dependencies") { const pair = /^("[^"]+"|[A-Za-z0-9_.-]+)\s*=/.exec(line); if (pair) current.sections["dependencies"] = [...(current.sections["dependencies"] ?? []), pair[1]!.replace(/^"|"$/g, "")]; continue; }
+    if (section) continue;
     const pair = /^(\w+)\s*=\s*"([^"]*)"/.exec(line);
-    if (pair && current) current[pair[1]!] = pair[2]!;
+    if (pair) { current.fields[pair[1]!] = pair[2]!; continue; }
+    const open = /^(dependencies|files)\s*=\s*\[\s*(.*)$/.exec(line);
+    if (open) {
+      const target = open[1] === "files" ? current.files : current.dependencies;
+      array = target;
+      // A one-line array: `dependencies = ["a", "b"]`.
+      if (open[2]!.includes("]")) { for (const item of open[2]!.matchAll(/"([^"]*)"/g)) target.push(item[1]!); array = undefined; }
+    }
   }
-  return tables.filter(table => table.name && table.version && wanted(table));
+  return tables.filter(table => table.fields.name && table.fields.version);
 }
-// A package with no source is the workspace's own crate, not a dependency.
-export const parseCargoLock = (source: string): Component[] => parsePackageTables(source, table => !!table.source).map(table => ({ ecosystem: "cargo" as const, name: table.name!, version: table.version! }));
-export const parsePoetryLock = (source: string): Component[] => parsePackageTables(source, () => true).map(table => ({ ecosystem: "pypi" as const, name: table.name!, version: table.version! }));
+
+/** Cargo.lock: registry crates only. Each `dependencies` entry is `name`, `name version` or `name version (source)`; `checksum` is the SHA-256 of the .crate file. */
+export function parseCargoLock(source: string): Component[] {
+  const tables = parsePackageTables(source);
+  const crates = tables.filter(table => !!table.fields.source);
+  const byName = new Map<string, PackageTable[]>();
+  for (const table of crates) byName.set(table.fields.name!, [...(byName.get(table.fields.name!) ?? []), table]);
+  return crates.map(table => {
+    const dependsOn = new Map<string, { name: string; version: string }>();
+    for (const entry of table.dependencies) {
+      const [name, version] = entry.split(" ");
+      const candidates = (byName.get(name!) ?? []).filter(candidate => !version || candidate.fields.version === version);
+      // A bare name is only resolved when exactly one version of that crate is locked.
+      if (candidates.length === 1) dependsOn.set(`${name}@${candidates[0]!.fields.version}`, { name: name!, version: candidates[0]!.fields.version! });
+    }
+    const hashes = hexHash("SHA-256", table.fields.checksum);
+    return { ecosystem: "cargo" as const, name: table.fields.name!, version: table.fields.version!, ...(hashes.length ? { hashes } : {}), dependsOn: [...dependsOn.values()] };
+  });
+}
+/**
+ * poetry.lock. A package lists one hash per file (each wheel, the sdist), and a component has one hash, so a hash is
+ * reported only for a package with exactly one file. Poetry records no licenses.
+ */
+export function parsePoetryLock(source: string): Component[] {
+  const tables = parsePackageTables(source);
+  const normalise = (name: string) => name.toLowerCase().replace(/[-_.]+/g, "-");
+  const byName = new Map<string, PackageTable[]>();
+  for (const table of tables) byName.set(normalise(table.fields.name!), [...(byName.get(normalise(table.fields.name!)) ?? []), table]);
+  return tables.map(table => {
+    const dependsOn = new Map<string, { name: string; version: string }>();
+    for (const name of table.sections["dependencies"] ?? []) {
+      const candidates = byName.get(normalise(name)) ?? [];
+      if (candidates.length === 1) dependsOn.set(`${candidates[0]!.fields.name}@${candidates[0]!.fields.version}`, { name: candidates[0]!.fields.name!, version: candidates[0]!.fields.version! });
+    }
+    const only = table.files.length === 1 ? /^sha256:([0-9a-fA-F]{64})$/.exec(table.files[0]!) : null;
+    return { ecosystem: "pypi" as const, name: table.fields.name!, version: table.fields.version!, ...(only ? { hashes: hexHash("SHA-256", only[1]) } : {}), dependsOn: [...dependsOn.values()] };
+  });
+}
 
 export function parseGoMod(source: string): Component[] {
   const found: Component[] = [];
@@ -133,27 +305,64 @@ export function parseRequirements(source: string): Component[] {
   return found;
 }
 
-/** Gemfile.lock: the `specs:` lists, where each gem is `    name (1.2.3)` (four spaces; its own dependencies are indented further). */
+/**
+ * Gemfile.lock: the `specs:` lists, where each gem is `    name (1.2.3)` (four spaces) and its dependencies follow at six.
+ * Hashes come from the `CHECKSUMS` section (Bundler 2.5+) and only for a gem with a single platform variant, since each
+ * platform build has its own checksum.
+ */
 export function parseGemfileLock(source: string): Component[] {
-  const found: Component[] = [];
+  const specLine = /^ {4}([A-Za-z0-9_.-]+) \((\d[\w.]*?)(?:-(?:x86|x64|arm|aarch|java|ruby|mingw|mswin|universal|darwin|linux|musl)[\w.-]*)?\)$/;
+  const gems = new Map<string, { name: string; version: string; deps: Set<string> }>();
+  const order: string[] = [];
+  let current: { deps: Set<string> } | undefined;
+  let section = "";
+  const checksums = new Map<string, string[]>();
   for (const line of source.split("\n")) {
-    const match = /^ {4}([A-Za-z0-9_.-]+) \((\d[\w.]*?)(?:-(?:x86|x64|arm|aarch|java|ruby|mingw|mswin|universal|darwin|linux|musl)[\w.-]*)?\)$/.exec(line);
-    if (match) found.push({ ecosystem: "gem", name: match[1]!, version: match[2]! });
+    if (/^[A-Z]/.test(line)) { section = line.trim(); current = undefined; continue; }
+    if (section === "CHECKSUMS") {
+      const match = /^ {2}([A-Za-z0-9_.-]+) \((\d[\w.]*?)(?:-[\w.-]+)?\)(?: sha256=([0-9a-f]{64}))?$/.exec(line);
+      if (match) checksums.set(`${match[1]}@${match[2]}`, [...(checksums.get(`${match[1]}@${match[2]}`) ?? []), match[3] ?? ""]);
+      continue;
+    }
+    const spec = specLine.exec(line);
+    if (spec) {
+      const key = `${spec[1]}@${spec[2]}`;
+      if (!gems.has(key)) { gems.set(key, { name: spec[1]!, version: spec[2]!, deps: new Set() }); order.push(key); }
+      current = gems.get(key); continue;
+    }
+    const dep = /^ {6}([A-Za-z0-9_.-]+)(?: \(.*\))?$/.exec(line);
+    if (dep && current) current.deps.add(dep[1]!);
+    else if (!/^ {6}/.test(line)) current = undefined;
   }
-  return found;
+  const byName = new Map<string, Array<{ name: string; version: string }>>();
+  for (const gem of gems.values()) byName.set(gem.name, [...(byName.get(gem.name) ?? []), gem]);
+  return order.map(key => {
+    const gem = gems.get(key)!;
+    const dependsOn = [...gem.deps].flatMap(name => { const candidates = byName.get(name) ?? []; return candidates.length === 1 ? [{ name, version: candidates[0]!.version }] : []; });
+    const sums = checksums.get(key);
+    const hashes = sums && sums.length === 1 && sums[0] ? hexHash("SHA-256", sums[0]) : [];
+    return { ecosystem: "gem" as const, name: gem.name, version: gem.version, ...(hashes.length ? { hashes } : {}), dependsOn };
+  });
 }
 
 export function parseComposerLock(source: string): Component[] {
   let lock: unknown;
   try { lock = JSON.parse(source); } catch { return []; }
   if (!isObject(lock)) return [];
-  const found: Component[] = [];
+  const entries: Array<{ entry: Record<string, unknown>; dev: boolean }> = [];
   for (const [section, dev] of [["packages", false], ["packages-dev", true]] as const) {
-    for (const entry of Array.isArray(lock[section]) ? lock[section] as unknown[] : []) {
-      if (isObject(entry) && text(entry.name) && text(entry.version)) found.push({ ecosystem: "composer", name: text(entry.name), version: text(entry.version).replace(/^v(?=\d)/, ""), ...(dev ? { dev: true } : {}) });
-    }
+    for (const entry of Array.isArray(lock[section]) ? lock[section] as unknown[] : []) if (isObject(entry) && text(entry.name) && text(entry.version)) entries.push({ entry, dev });
   }
-  return found;
+  const version = (entry: Record<string, unknown>) => text(entry.version).replace(/^v(?=\d)/, "");
+  const byName = new Map<string, { name: string; version: string }>();
+  for (const { entry } of entries) byName.set(text(entry.name).toLowerCase(), { name: text(entry.name), version: version(entry) });
+  return entries.map(({ entry, dev }) => {
+    // `php`, `ext-*` and `lib-*` requirements are the platform, not packages.
+    const dependsOn = isObject(entry.require) ? Object.keys(entry.require).flatMap(name => { const target = byName.get(name.toLowerCase()); return target ? [target] : []; }) : [];
+    const hashes = isObject(entry.dist) ? hexHash("SHA-1", entry.dist.shasum) : [];
+    const licenses = licenseList(entry.license);
+    return { ecosystem: "composer" as const, name: text(entry.name), version: version(entry), ...(dev ? { dev: true } : {}), ...(hashes.length ? { hashes } : {}), dependsOn, ...(licenses.length ? { licenses } : {}) };
+  });
 }
 
 /** NuGet `packages.lock.json`: every target framework lists its dependencies with a resolved version. */

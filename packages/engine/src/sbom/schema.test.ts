@@ -38,6 +38,22 @@ describe("the SBOM is valid CycloneDX 1.5", () => {
     });
     expect(validate(generateSbom(dir, { toolVersion: "0.0.0" }).bom), problems().join("; ")).toBe(true);
   });
+  it("with hashes, a dependency graph and licenses (id, expression, name, several)", () => {
+    const sri = `sha512-${Buffer.alloc(64, 3).toString("base64")}`;
+    const dir = folder({
+      "package-lock.json": JSON.stringify({ lockfileVersion: 3, packages: { "": {}, "node_modules/a": { version: "1.0.0", integrity: sri, license: "MIT", dependencies: { b: "1" } }, "node_modules/b": { version: "2.0.0", license: "(MIT OR Apache-2.0)" }, "node_modules/c": { version: "3.0.0", license: "SEE LICENSE IN X" } } }),
+      "composer.lock": JSON.stringify({ packages: [{ name: "x/y", version: "1.0.0", dist: { shasum: "b".repeat(40) }, require: { "x/z": "1" }, license: ["MIT", "Custom"] }, { name: "x/z", version: "1.0.0" }] }),
+      "Cargo.lock": `[[package]]\nname = "serde"\nversion = "1.0.190"\nsource = "registry+https://github.com/rust-lang/crates.io-index"\nchecksum = "${"a".repeat(64)}"\ndependencies = [\n "serde_derive",\n]\n\n[[package]]\nname = "serde_derive"\nversion = "1.0.190"\nsource = "registry+https://github.com/rust-lang/crates.io-index"\n`,
+    });
+    const { bom } = generateSbom(dir, { toolVersion: "0.0.0" });
+    expect(bom.dependencies?.length).toBeGreaterThan(3);
+    expect(bom.components.filter(component => component.type === "library" && component.hashes).length).toBe(3);
+    expect(validate(bom), problems().join("; ")).toBe(true);
+  });
+  it("and the validator is real for the new fields: a malformed hash is rejected", () => {
+    const { bom } = generateSbom(folder({ "package-lock.json": JSON.stringify({ packages: { "node_modules/a": { version: "1.0.0" } } }) }), { toolVersion: "0" });
+    expect(validate({ ...bom, components: [{ ...bom.components[0], hashes: [{ alg: "SHA-512", content: "zz" }] }] })).toBe(false);
+  });
   it("with the AI inventory: models and datasets as components, MCP servers as services", () => {
     const dir = folder({ "app.py": 'AutoModel.from_pretrained("org/model")\nload_dataset("imdb")\n', "w/m.safetensors": "x", "w/n.pt": "x", ".mcp.json": JSON.stringify({ mcpServers: { files: { command: "npx", args: ["-y", "srv"] }, remote: { url: "https://mcp.example.com/sse" } } }) });
     const { bom } = generateSbom(dir, { toolVersion: "0.0.0", ai: true });
