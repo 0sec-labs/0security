@@ -21,7 +21,7 @@ A computer owns threads, workspace paths and execution. Choosing another compute
 | `--ssh <user@host>` | SSH target. Uses BatchMode and key auth. |
 | `--ssh-config <path>` | OpenSSH config file for the target. |
 | `--lima <name>` | Lima instance. Default `zero-worker`. |
-| `--target-git <url>` | Repository the worker clones into its workspace. |
+| `--target-git <url>` | HTTPS URL of a Git repository the worker clones into its workspace. Other URL schemes are refused. |
 | `--engine-port <port>` | Computer port on the worker. Default is stable per host. |
 | `--trust-new-host` | Trust and remember the computer's SSH host key the first time you connect. Without it, an unknown computer is refused and the message tells you to check it with `ssh <host>`. |
 | `--forward-provider-key` | Forward this machine's `OPENAI_API_KEY` to the worker. Use only on hosts you own. |

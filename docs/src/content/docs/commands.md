@@ -1301,7 +1301,7 @@ Use `--ssh` for an SSH host alias or `user@host`; otherwise the command uses the
 0 computers add [options]
 ```
 
-Use `--target-git` to clone your repository into the remote workspace. Forwarding
+Use `--target-git` with an `https://` URL to clone your repository into the remote workspace. Forwarding
 `OPENAI_API_KEY` is explicit through `--forward-provider-key`; use it only for a
 host you own. Deployment installs runtime dependencies and starts the engine on
 the remote machine. Inspect the returned backend ID and connection details, then
@@ -1311,7 +1311,7 @@ select that computer in the browser before starting remote work.
 | --- | --- | --- |
 | `--ssh <user@host>` | — | SSH target host (BatchMode; key auth from ssh config/agent) |
 | `--lima <name>` | `zero-worker` | Lima instance name |
-| `--target-git <url>` | — | Repository the remote server clones into the engine folder instead of the bundled demo target |
+| `--target-git <url>` | — | HTTPS URL of a Git repository the remote server clones into the engine folder instead of the bundled demo target |
 | `--ssh-config <path>` | — | OpenSSH config file for the SSH target (e.g. a Lima instance's ssh.config) |
 | `--engine-port <port>` | — | Engine port on the remote server (default: stable port derived from host) |
 | `--trust-new-host` | `false` | Trust and remember the computer's SSH host key if it is not known yet |

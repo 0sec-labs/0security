@@ -45,7 +45,7 @@ export function registerWorkerCommand(program: Command): void {
     .description("Add a remote computer: deploy 0 onto a Linux server (Lima VM or any SSH host) and register it")
     .option("--ssh <user@host>", "SSH target host (BatchMode; key auth from ssh config/agent)")
     .option("--lima <name>", "Lima instance name", "zero-worker")
-    .option("--target-git <url>", "Repository the remote server clones into the engine folder instead of the bundled demo target")
+    .option("--target-git <url>", "HTTPS URL of a Git repository the remote server clones into the engine folder instead of the bundled demo target")
     .option("--ssh-config <path>", "OpenSSH config file for the SSH target (e.g. a Lima instance's ssh.config)")
     .option("--engine-port <port>", "Engine port on the remote server (default: stable port derived from host)")
     .option("--trust-new-host", "Trust and remember the computer's SSH host key if it is not known yet", false)

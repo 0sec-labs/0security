@@ -497,7 +497,7 @@ export function registerDashboardCommand(program: Command): void {
                 }).strict().parse(await readJson(req));
                 try { validateWorkerOptions(body); } catch (cause) {
                   const message = cause instanceof Error ? cause.message : "";
-                  throw new WebRequestError(message.startsWith("--ssh") ? "Enter a host name or user@host." : message.startsWith("--lima") ? "Enter a valid instance name." : message.startsWith("--target-git") ? "Enter a repository URL without spaces or quotes." : "Check the computer details and try again.", 400);
+                  throw new WebRequestError(message.startsWith("--ssh") ? "Enter a host name or user@host." : message.startsWith("--lima") ? "Enter a valid instance name." : message.startsWith("--target-git") ? "Enter an https:// repository URL without spaces or quotes." : "Check the computer details and try again.", 400);
                 }
                 const compiledBinary = import.meta.url.startsWith("file:///$bunfs/") || import.meta.url.startsWith("/$bunfs/");
                 const args = [...(compiledBinary ? [] : [resolveCliEntrypoint()]), "worker", "deploy", ...(body.ssh ? ["--ssh", body.ssh] : ["--lima", body.lima ?? "zero-worker"]), ...(body.targetGit ? ["--target-git", body.targetGit] : []), ...(body.enginePort ? ["--engine-port", String(body.enginePort)] : []), ...(body.forwardProviderKey ? ["--forward-provider-key"] : []), ...(body.trustNewHost ? ["--trust-new-host"] : []), ...(opts.enginesConfig ? ["--engines-config", opts.enginesConfig] : [])];

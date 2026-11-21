@@ -192,8 +192,8 @@ Add a remote computer: deploy 0 onto a Linux server (Lima VM or any SSH host) an
 Options:
   --ssh <user@host>        SSH target host (BatchMode; key auth from ssh config/agent)
   --lima <name>            Lima instance name (default: "zero-worker")
-  --target-git <url>       Repository the remote server clones into the engine folder instead of the
-                           bundled demo target
+  --target-git <url>       HTTPS URL of a Git repository the remote server clones into the engine
+                           folder instead of the bundled demo target
   --ssh-config <path>      OpenSSH config file for the SSH target (e.g. a Lima instance's
                            ssh.config)
   --engine-port <port>     Engine port on the remote server (default: stable port derived from host)
