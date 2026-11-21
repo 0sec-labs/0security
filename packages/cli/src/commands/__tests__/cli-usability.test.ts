@@ -79,6 +79,15 @@ describe("CLI usability", () => {
   });
 });
 
+describe("findings update", () => {
+  it("says --reason is required for a false positive instead of printing only the usage line", async () => {
+    const program = await tree();
+    const argv = resolveInvocation(["findings", "update", "abc", "--status", "false-positive"]);
+    await expect(program.parseAsync(argv, { from: "user" })).rejects.toThrow(/--reason <text> is required with --status false-positive/);
+    expect(resolveInvocation(["findings", "update", "abc", "--status", "false-positive", "--reason", "fixture"]).slice(-2)).toEqual(["--note", "False positive: fixture"]);
+  });
+});
+
 function renderedHelp(command: Command): string {
   const chunks: string[] = [];
   command.configureOutput({ writeOut: (value) => chunks.push(value), writeErr: (value) => chunks.push(value) });

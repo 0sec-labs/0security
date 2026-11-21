@@ -216,7 +216,11 @@ export function applyNewSurface(top: Command): void {
     if (top.commands.some((command) => command.name() === stub.name)) continue;
     const added = top.createCommand(stub.name).description(stub.description).arguments(stub.args).allowUnknownOption().allowExcessArguments();
     for (const [flags, text] of stub.options ?? []) added.option(flags, text);
-    added.action(() => { throw new Error(`${stub.usage ? `Usage: ${stub.usage}. ` : "Incomplete. "}See \`0 ${top.name()} ${stub.name} --help\`.`); });
+    added.action(() => {
+      const opts = added.opts<Record<string, unknown>>();
+      if (top.name() === "findings" && stub.name === "update" && opts["status"] === "false-positive" && !opts["reason"]) throw new Error("--reason <text> is required with --status false-positive: say why the finding is not real, for example 0 findings update <id> --status false-positive --reason \"test fixture\".");
+      throw new Error(`${stub.usage ? `Usage: ${stub.usage}. ` : "Incomplete. "}See \`0 ${top.name()} ${stub.name} --help\`.`);
+    });
     top.addCommand(added);
   }
   // Visible subcommands first, in the documented order.
