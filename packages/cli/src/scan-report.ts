@@ -29,6 +29,8 @@ export interface ScanOutcome {
   budgetExhausted: boolean;
   /** The scan hit --timeout and was cancelled; the findings are partial. */
   timedOut?: boolean;
+  /** --allow-partial: a scan that stopped early exits by its findings, and its report says "partial". */
+  allowPartial?: boolean;
   /** The thread failed or its answer was not backed by its checks. */
   failed: boolean;
   error?: string;
@@ -139,12 +141,24 @@ export function toScanReport(outcome: ScanOutcome, stored: ScanReport): ScanRepo
     summary: { totalAttacks: 0, totalFindings: findings.length, critical: count(findings, "critical"), high: count(findings, "high"), medium: count(findings, "medium"), low: count(findings, "low"), info: count(findings, "info") },
     ...(outcome.coverage ? { coverage: outcome.coverage } : {}),
     // The stored rows carry a note that the export was rebuilt from a legacy record; a scan is not one.
-    warnings: [...(outcome.coverage && !outcome.coverage.complete ? [{ stage: "report" as const, message: `Partial review: ${outcome.coverage.statement}.` }] : []),...(outcome.passes && outcome.passes.failed > 0 ? [{ stage: "report" as const, message: `${outcome.passes.failed} of ${outcome.passes.requested} scan passes could not finish; the findings may be incomplete.` }] : [])].concat(outcome.budgetExhausted ? [{ stage: "report" as const, message: `Stopped at the $${outcome.budgetUsd} budget; findings are partial.` }] : outcome.timedOut ? [{ stage: "report" as const, message: "Stopped at the time limit; findings are partial." }] : []),
+    warnings: [...(outcome.coverage && !outcome.coverage.complete ? [{ stage: "report" as const, message: `Partial review: ${outcome.coverage.statement}.${outcome.coverage.resume ? ` ${outcome.coverage.stoppedBy ? `Stopped by ${outcome.coverage.stoppedBy}. ` : ""}Continue with: ${outcome.coverage.resume}` : ""}` }] : []),...(outcome.passes && outcome.passes.failed > 0 ? [{ stage: "report" as const, message: `${outcome.passes.failed} of ${outcome.passes.requested} scan passes could not finish; the findings may be incomplete.` }] : [])].concat(outcome.budgetExhausted ? [{ stage: "report" as const, message: `Stopped at the $${outcome.budgetUsd} budget; findings are partial.` }] : outcome.timedOut ? [{ stage: "report" as const, message: "Stopped at the time limit; findings are partial." }] : []),
     executionSuccessful: !outcome.failed,
     ...(outcome.costUsd !== undefined ? { estimatedCostUsd: outcome.costUsd } : {}),
     ...(outcome.budgetExhausted ? { costCeilingExceeded: true, exitReason: "cost_ceiling_exceeded" as const } : {}),
     ...(outcome.error ? { error: outcome.error } : {}),
   };
+}
+
+/** Whether the scan stopped before it reviewed everything: the budget, the time limit or units not reached. */
+export function isPartial(outcome: ScanOutcome): boolean {
+  return outcome.budgetExhausted || outcome.timedOut === true || (outcome.coverage !== undefined && !outcome.coverage.complete);
+}
+
+/** The `status` of the JSON report. With --allow-partial every early stop is "partial"; the reason stays in `coverage` and the summary. */
+export function scanStatus(outcome: ScanOutcome): string {
+  if (outcome.failed) return "failed";
+  if (outcome.allowPartial && isPartial(outcome)) return "partial";
+  return outcome.budgetExhausted ? "budget_exhausted" : outcome.timedOut ? "timed_out" : outcome.coverage && !outcome.coverage.complete ? "partial" : "complete";
 }
 
 /** The documented JSON contract of `0 scan --format json`. Field names are stable within a schemaVersion. */
@@ -160,7 +174,7 @@ export function scanJson(outcome: ScanOutcome, stored: readonly Finding[]): Reco
     ...(outcome.costUsd !== undefined ? { costUsd: outcome.costUsd } : {}),
     ...(outcome.threadIds && outcome.threadIds.length > 1 ? { threadIds: outcome.threadIds } : {}),
     ...(outcome.passes && outcome.passes.requested > 1 ? { passes: outcome.passes } : {}),
-    status: outcome.failed ? "failed" : outcome.budgetExhausted ? "budget_exhausted" : outcome.timedOut ? "timed_out" : outcome.coverage && !outcome.coverage.complete ? "partial" : "complete",
+    status: scanStatus(outcome),
     ...(outcome.coverage ? { coverage: outcome.coverage } : {}),
     ...(outcome.error ? { error: outcome.error } : {}),
     ...(outcome.summary ? { summary: outcome.summary } : {}),
@@ -189,10 +203,13 @@ export function scanJson(outcome: ScanOutcome, stored: readonly Finding[]): Reco
   };
 }
 
-/** Exit code: 1 for a failed scan or a finding at or above the threshold, 3 for a budget or time stop, else 0. */
+/**
+ * Exit code: 1 for a failed scan or a finding at or above the threshold, 3 for a scan that stopped before it reviewed
+ * everything (budget, time limit, units not reached), else 0. With `allowPartial` a partial scan exits by its findings only.
+ */
 export function scanExitCode(outcome: ScanOutcome, findings: readonly Finding[], failOn: ScanSeverity | undefined): number {
   if (outcome.failed) return 1;
   if (failOn && findings.some(finding => rank(finding.severity) <= rank(failOn))) return 1;
   // Units not reviewed mean the review is partial, whatever stopped it.
-  return outcome.budgetExhausted || outcome.timedOut || (outcome.coverage !== undefined && !outcome.coverage.complete) ? 3 : 0;
+  return isPartial(outcome) && !outcome.allowPartial ? 3 : 0;
 }

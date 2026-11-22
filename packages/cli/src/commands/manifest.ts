@@ -46,7 +46,7 @@ export const VISIBLE_SUBCOMMANDS: Readonly<Record<string, readonly string[]>> = 
 };
 
 export const TOP_LEVEL_COMMANDS: readonly TopLevelCommand[] = [
-  { name: "scan", aliases: [], description: GROUP_DESCRIPTIONS["scan"]!, options: true, arguments: "<target>" },
+  { name: "scan", aliases: [], description: GROUP_DESCRIPTIONS["scan"]!, options: true, arguments: "[target]" },
   { name: "threat-model", aliases: [], description: GROUP_DESCRIPTIONS["threat-model"]!, options: true, arguments: "[folder]" },
   { name: "probe", aliases: [], description: GROUP_DESCRIPTIONS["probe"]!, options: true, arguments: "<url>" },
   { name: "sbom", aliases: [], description: GROUP_DESCRIPTIONS["sbom"]! },

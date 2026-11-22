@@ -10,7 +10,7 @@ Options:
   -r, --resume <id>                With -p: continue a saved thread
 
 Work:
-  scan [options] <target>          Scan a folder or git repository for security bugs; prints the
+  scan [options] [target]          Scan a folder or git repository for security bugs; prints the
                                    findings as a report
   threat-model [options] [folder]  Draft the repository's threat model as a file for people to
                                    review (optionally as a pull request)
@@ -1246,7 +1246,7 @@ Options:
   -h, --help         display help for command
 
 ### 0 scan
-Usage: 0 scan [options] <target>
+Usage: 0 scan [options] [target]
 
 Scan a folder or git repository for security bugs; prints the findings as a report
 
@@ -1297,6 +1297,10 @@ Options:
   --force                    With --resume: continue even though the folder's git HEAD changed
   --coverage [scan]          Print the coverage ledger of a batched scan of this folder (the latest,
                              or the id given) and exit; --format json for JSON
+  --allow-partial            Exit by the findings alone (0, or 1 with --fail-on) when the scan stops
+                             before it reviews everything; the report still says it is partial
+  --plan                     List the entry points, the batches and a rough cost range for the
+                             folder, then exit; calls no model and writes nothing
   --timeout <seconds>        Maximum seconds to wait for the scan (default: "3600")
   --engine-url <url>         Attach directly to a running trusted engine
   --engine-token-env <name>  Environment variable holding the attached engine token

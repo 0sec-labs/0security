@@ -1372,6 +1372,10 @@ export interface ScanCoverage {
   batches: { total: number; reviewed: number; pending: number };
   /** The first units not reached (at most 100). */
   pendingUnits: Array<{ kind: string; path: string; startLine?: number; name?: string; reason?: string }>;
+  /** What stopped the scan, when it ended with units pending: the budget, the time limit or failed batches. */
+  stoppedBy?: string;
+  /** The command that continues a scan that ended with units pending. */
+  resume?: string;
 }
 
 export interface ScanReport extends ScanPlanExecution {

@@ -58,6 +58,26 @@ describe("scanExitCode", () => {
   it("is 0 when findings are below the threshold", () => expect(scanExitCode(outcome, findings, "critical")).toBe(0));
   it("is 1 for a failed scan", () => expect(scanExitCode({ ...outcome, failed: true }, [], undefined)).toBe(1));
   it("is 3 when the budget ran out and nothing else fired", () => expect(scanExitCode({ ...outcome, budgetExhausted: true }, [], "high")).toBe(3));
+  it("is 3 for a time stop and for units not reached", () => {
+    expect(scanExitCode({ ...outcome, timedOut: true }, [], undefined)).toBe(3);
+    const coverage = { complete: false } as ScanOutcome["coverage"];
+    expect(scanExitCode({ ...outcome, coverage }, [], undefined)).toBe(3);
+  });
+  it("with allowPartial follows the findings alone", () => {
+    const partial = { ...outcome, budgetExhausted: true, allowPartial: true };
+    expect(scanExitCode(partial, [], undefined)).toBe(0);
+    expect(scanExitCode({ ...partial, budgetExhausted: false, timedOut: true }, [], "high")).toBe(0);
+    expect(scanExitCode({ ...partial, budgetExhausted: false, coverage: { complete: false } as ScanOutcome["coverage"] }, [], undefined)).toBe(0);
+    expect(scanExitCode(partial, findings, "high")).toBe(1);
+    expect(scanExitCode({ ...partial, failed: true }, [], undefined)).toBe(1);
+  });
+  it("marks the JSON status partial under allowPartial, whatever stopped the scan", () => {
+    expect(scanJson({ ...outcome, budgetExhausted: true }, []).status).toBe("budget_exhausted");
+    expect(scanJson({ ...outcome, budgetExhausted: true, allowPartial: true }, []).status).toBe("partial");
+    expect(scanJson({ ...outcome, timedOut: true, allowPartial: true }, []).status).toBe("partial");
+    expect(scanJson({ ...outcome, allowPartial: true }, []).status).toBe("complete");
+    expect(scanJson({ ...outcome, failed: true, allowPartial: true }, []).status).toBe("failed");
+  });
 });
 
 describe("a report that reads the same in CI", () => {

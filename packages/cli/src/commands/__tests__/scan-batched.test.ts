@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -114,7 +114,11 @@ describe("batched scan", () => {
     expect(json.coverage.pendingUnits).toHaveLength(8);
     expect(json.summary).toMatch(/^Coverage: reviewed 12 of 20 entry points; 8 not reached/);
     expect(process.exitCode).toBe(3);
-    expect(h.err.join("\n")).toMatch(/Resume with: 0 scan .* --resume scan-/);
+    const stderr = h.err.join("\n");
+    expect(stderr).toMatch(/Stopped by the \$5 budget; 8 of 20 entry points not reached\./);
+    expect(stderr).toMatch(/Continue with: 0 scan \S+ --resume scan-\S+/);
+    expect(stderr).toContain(`Continue with: ${json.coverage.resume}`);
+    expect(json.coverage.stoppedBy).toBe("the $5 budget");
   });
 
   it("says the review is partial in markdown and sarif, never that the target passed", async () => {
@@ -203,6 +207,65 @@ describe("batched scan", () => {
     const none = harness(db);
     await runScan(dir, opts(db, { resume: "latest" }), none.deps);
     expect(none.err.join("\n")).toMatch(/No batched scan of .* to resume/);
+  });
+
+  it("exits 0 with --allow-partial, still says partial, and exits 1 by --fail-on", async () => {
+    const dir = app(20);
+    const db = join(temp(), "db.sqlite");
+    const h = harness(db, n => (n === 2 ? "ceiling" : "ok"));
+    await runScan(dir, opts(db, { allowPartial: true }), h.deps);
+    const json = report(h);
+    expect(process.exitCode).toBeUndefined();
+    expect(json.status).toBe("partial");
+    expect(json.coverage).toMatchObject({ complete: false, entryPoints: { pending: 8 } });
+    expect(json.coverage.resume).toMatch(/^0 scan \S+ --resume scan-/);
+    expect(h.err.join("\n")).toMatch(/8 of 20 entry points not reached/);
+    process.exitCode = undefined;
+    const strict = harness(db, n => (n === 2 ? "ceiling" : "ok"));
+    await runScan(dir, opts(db, { allowPartial: true, failOn: "high" }), strict.deps);
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("names the reason in the hint when a batch fails, and puts the hint in the markdown report", async () => {
+    const dir = app(20);
+    const db = join(temp(), "db.sqlite");
+    const h = harness(db, n => (n === 2 ? "failed" : "ok"));
+    h.deps.loadReport = vi.fn(async () => storedReport([]) as never);
+    await runScan(dir, opts(db, { format: "md" }), h.deps);
+    expect(h.err.join("\n")).toMatch(/Stopped by a failed batch/);
+    expect(h.out.join("")).toMatch(/Continue with: 0 scan \S+ --resume scan-/);
+    expect(process.exitCode).toBe(3);
+  });
+
+  it("quotes a folder with a space in the resume command", async () => {
+    const dir = join(temp(), "my app");
+    mkdirSync(join(dir, "routes"), { recursive: true });
+    for (let i = 0; i < 20; i++) writeFileSync(join(dir, "routes", `r${i}.js`), `app.get('/r${i}', (req, res) => res.send('${i}'));\n`);
+    const db = join(temp(), "db.sqlite");
+    const h = harness(db, n => (n === 2 ? "ceiling" : "ok"));
+    await runScan(dir, opts(db), h.deps);
+    expect(report(h).coverage.resume).toMatch(/^0 scan '.*my app' --resume scan-/);
+  });
+
+  it("--plan lists the folder and starts nothing", async () => {
+    const dir = app(20);
+    const db = join(temp(), "db.sqlite");
+    const h = harness(db);
+    await runScan(dir, opts(db, { plan: true, format: "md" }), h.deps);
+    const text = h.out.join("");
+    expect(text).toMatch(/Entry points: 20 \(http-route 20\)/);
+    expect(text).toMatch(/--batches auto would batch this folder/);
+    expect(text).toMatch(/not a quote/);
+    expect(h.created).toHaveLength(0);
+    expect(h.deps.prePass).not.toHaveBeenCalled();
+    expect(existsSync(db)).toBe(false);
+    const json = harness(db);
+    await runScan(dir, opts(db, { plan: true }), json.deps);
+    expect(JSON.parse(json.out.join(""))).toMatchObject({ entryPoints: 20, batchCount: 4, autoWouldBatch: true });
+    expect(existsSync(db)).toBe(false);
+    const bad = harness(db);
+    await runScan(dir, opts(db, { plan: true, resume: "latest" }), bad.deps);
+    expect(process.exitCode).toBe(2);
   });
 
   it("prints the ledger with --coverage", async () => {

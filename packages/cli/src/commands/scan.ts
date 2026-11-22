@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import type { Command } from "commander";
-import { exportReport, isReportExportFormat, type Batch } from "@0/engine";
+import { buildInventory, exportReport, isReportExportFormat, type Batch } from "@0/engine";
 import { CoverageLedger, coverageSentence, summarizeCoverage } from "@0/engine/storage";
 import { consoleTransportOptions, openConsole, type ConsoleClient, type ConsoleTransportOptions } from "../console-client.js";
 import { homeStateDir, parseSarif, parseScannerList, scanPrompt, scannerArguments, scannerById, scannerTakesRules, SCANNERS, type PrePassLeads, type BatchPromptInfo, type ScanReport } from "@0/engine/shared";
@@ -20,6 +20,8 @@ import { checkRulesScanners, resolveRulePaths } from "../scan-rules.js";
 import { mergePasses, scanExitCode, scanJson, toScanReport, type ScanOutcome } from "../scan-report.js";
 import { coverageReport, runBatches, type BatchOutcome } from "../scan-batches.js";
 import { coverageJson, coverageText, DEFAULT_BATCH_SIZE, planBatchedScan, type BatchedSetup } from "../scan-batched.js";
+import { planScan, planText } from "../scan-plan.js";
+import { resumeHint, type ResumeHint } from "../scan-resume.js";
 import { loadSteering, type Steering } from "../scan-steering.js";
 import { finishWithError, UsageError } from "./output.js";
 import { asJson, finishedThread, lastAssistantText, usageLine, type FinishedThread, type Json } from "./thread-output.js";
@@ -127,7 +129,7 @@ export const defaultScanDeps: ScanDeps = {
 interface ScanOptions extends ConsoleTransportOptions {
   budget: string; diff?: string; prepass?: string; scanner?: string[]; rules?: string[]; format: string; output?: string; timeout: string; failOn?: string; model?: string; skill: string; passes: string;
   context?: string[]; policy?: string[]; orgPolicy?: string[]; repoContext?: boolean;
-  batches?: string; batchSize?: string; concurrency?: string; resume?: string; force?: boolean; coverage?: string | boolean;
+  batches?: string; batchSize?: string; concurrency?: string; resume?: string; force?: boolean; coverage?: string | boolean; allowPartial?: boolean; plan?: boolean;
 }
 
 export interface ResolvedTarget {
@@ -172,7 +174,12 @@ export async function resolveScanTarget(raw: string, deps: Pick<ScanDeps, "clone
 }
 
 function validate(target: string | undefined, options: ScanOptions): void {
-  if (!target?.trim()) throw new UsageError("Supply a folder or a git URL to scan.");
+  if (options.plan) {
+    if (options.resume !== undefined || options.coverage !== undefined) throw new UsageError("--plan lists what a scan would do; drop --resume and --coverage.");
+    if (options.format !== "md" && options.format !== "json") throw new UsageError("--plan prints text, or JSON with --format json.");
+    if (options.output) throw new UsageError("--plan prints to the terminal; drop -o.");
+  }
+  if (!target?.trim() && !options.plan) throw new UsageError("Supply a folder or a git URL to scan.");
   if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(options.skill)) throw new UsageError("--skill must be a skill id such as scan.");
   if (!(FORMATS as readonly string[]).includes(options.format)) throw new UsageError(`--format must be one of: ${FORMATS.join(", ")}.`);
   if (options.format === "pdf" && !options.output) throw new UsageError("PDF is binary; supply -o <file>.");
@@ -194,9 +201,9 @@ function validate(target: string | undefined, options: ScanOptions): void {
   if (options.resume !== undefined) {
     if (options.batches === "off") throw new UsageError("--resume continues a batched scan; drop --batches off.");
     if (options.diff) throw new UsageError("--resume continues the units of an earlier scan; drop --diff.");
-    if (GIT_TARGET.test(target.trim())) throw new UsageError("--resume works on a folder on this machine, not a git URL.");
+    if (GIT_TARGET.test((target ?? "").trim())) throw new UsageError("--resume works on a folder on this machine, not a git URL.");
   }
-  if (options.coverage !== undefined && GIT_TARGET.test(target.trim())) throw new UsageError("--coverage reads the ledger of a folder on this machine, not a git URL.");
+  if (options.coverage !== undefined && GIT_TARGET.test((target ?? "").trim())) throw new UsageError("--coverage reads the ledger of a folder on this machine, not a git URL.");
   if (options.force && options.resume === undefined) throw new UsageError("--force only applies to --resume.");
   const seconds = Number(options.timeout);
   if (!Number.isFinite(seconds) || seconds <= 0) throw new UsageError("--timeout must be a positive number of seconds.");
@@ -327,6 +334,18 @@ async function unexpectedChanges(deps: Pick<ScanDeps, "changedFiles">, folder: s
     : undefined;
 }
 
+/** `--plan`: list the inventory, the batches and a rough cost, and start nothing: no console, no model, no scanner, no database. */
+async function printPlan(resolved: ResolvedTarget, options: ScanOptions, deps: ScanDeps): Promise<void> {
+  let scope: string[] | undefined;
+  if (options.diff) {
+    try { scope = await deps.diffFiles(resolved.folder, options.diff); }
+    catch { throw new UsageError(`'${options.diff}' is not a git ref in ${resolved.label}, or the folder is not a git work tree.`); }
+  }
+  const inventory = buildInventory(resolved.folder, scope ? { only: new Set(scope) } : {});
+  const plan = planScan(inventory, { folder: resolved.label, batchSize: Number(options.batchSize ?? DEFAULT_BATCH_SIZE), batchesMode: options.batches ?? "auto", budgetUsd: Number(options.budget) });
+  deps.out(options.format === "json" ? `${JSON.stringify(plan, null, 2)}\n` : `${planText(plan)}\n`);
+}
+
 /** `--coverage`: print the ledger of a scan of this folder (the latest, or the id given) and start nothing. */
 async function printCoverage(resolved: ResolvedTarget, options: ScanOptions, deps: ScanDeps): Promise<void> {
   const ledger = (deps.openLedger ?? defaultScanDeps.openLedger!)(options.dbPath);
@@ -378,7 +397,9 @@ async function runBatchedScan(ctx: PassContext, setup: BatchedSetup, before: Set
   const units = ledger.units(scan.id);
   const summary = summarizeCoverage(scan.id, units);
   const statement = coverageSentence(summary);
-  const coverage = coverageReport(summary, statement, units);
+  const failures = run.outcomes.filter(item => !item.outcome.reviewed && item.outcome.failed).map(item => item.outcome.error ?? "no reason given");
+  const hint: ResumeHint | undefined = resumeHint(resolved.label, summary, { budgetHit: run.budgetHit, budgetUsd: budget, timedOut: run.timedOut, timeoutSeconds: Number(options.timeout), failures });
+  const coverage = { ...coverageReport(summary, statement, units), ...(hint ? { resume: hint.command, stoppedBy: hint.stoppedBy } : {}) };
   // Findings of every thread of this scan, including the threads an earlier run started and partial batches.
   const threadIds = ledger.getScan(scan.id)?.threadIds ?? [...ran.keys()];
   const stored: ScanReport[] = [];
@@ -402,7 +423,7 @@ async function runBatchedScan(ctx: PassContext, setup: BatchedSetup, before: Set
   const hardError = results.map(result => (!result.budgetExhausted && !result.timedOut ? result.done.error : undefined)).find(Boolean);
   const outcome: ScanOutcome = {
     target: resolved.reportTarget, roots: resolved.roots, threadId: threadIds[0] ?? "none", startedAt, completedAt: deps.now().toISOString(), budgetUsd: budget,
-    ...(costKnown ? { costUsd: cost } : {}), budgetExhausted: run.budgetHit, ...(run.timedOut ? { timedOut: true } : {}), failed,
+    ...(costKnown ? { costUsd: cost } : {}), budgetExhausted: run.budgetHit, ...(run.timedOut ? { timedOut: true } : {}), failed, ...(options.allowPartial ? { allowPartial: true } : {}),
     ...(changedError ? { error: changedError } : failed && hardError ? { error: hardError } : {}),
     // The thread's own summary can say it covered everything; the ledger's account comes first.
     summary: `Coverage: ${statement}.${lead?.done.reply ? `\n\n${lead.done.reply}` : ""}`,
@@ -411,8 +432,7 @@ async function runBatchedScan(ctx: PassContext, setup: BatchedSetup, before: Set
   };
   const base = stored[0] ?? emptyStoredReport(startedAt);
   await writeReport(outcome, merged, { ...base, findings: merged }, `0-scan-${threadIds[0] ?? scan.id}`, options, deps);
-  const resume = summary.complete ? "" : `\nResume with: 0 scan ${resolved.label} --resume ${scan.id}`;
-  deps.err(`${merged.length} finding${merged.length === 1 ? "" : "s"}; ${statement}${run.budgetHit ? `; stopped at the $${budget} budget` : run.timedOut ? `; stopped at the ${options.timeout}s time limit` : ""}${resume}\nUsage: ${count} batch${count === 1 ? "" : "es"}, cost ${costKnown ? `$${cost.toFixed(4)}` : "unknown"}`);
+  deps.err(`${merged.length} finding${merged.length === 1 ? "" : "s"}; ${statement}${hint ? `\n${hint.text}` : ""}\nUsage: ${count} batch${count === 1 ? "" : "es"}, cost ${costKnown ? `$${cost.toFixed(4)}` : "unknown"}`);
   const code = scanExitCode(outcome, merged, options.failOn as typeof SEVERITIES[number] | undefined);
   if (code !== 0) process.exitCode = code;
 }
@@ -424,7 +444,8 @@ export async function runScan(target: string | undefined, options: ScanOptions, 
   let batched: BatchedSetup | undefined;
   try {
     validate(target, options);
-    resolved = await resolveScanTarget(target!, deps);
+    resolved = await resolveScanTarget(target?.trim() ? target : ".", deps);
+    if (options.plan) { await printPlan(resolved, options, deps); return; }
     if (options.coverage !== undefined) { await printCoverage(resolved, options, deps); return; }
     const steering = loadSteering(resolved.folder, options, deps.err);
     if (steering.policies.length && options.skill === "scan") options = { ...options, skill: POLICY_SKILL };
@@ -497,7 +518,7 @@ export async function runScan(target: string | undefined, options: ScanOptions, 
     const firstError = results.map(result => (!result.budgetExhausted && !result.timedOut ? result.done.error : undefined)).find(Boolean);
     const outcome: ScanOutcome = {
       target: resolved.reportTarget, roots: resolved.roots, threadId: results[0]!.threadId, startedAt, completedAt: deps.now().toISOString(), budgetUsd: budget,
-      ...(costKnown ? { costUsd: cost } : {}), budgetExhausted, ...(timedOut ? { timedOut } : {}), failed,
+      ...(costKnown ? { costUsd: cost } : {}), budgetExhausted, ...(timedOut ? { timedOut } : {}), failed, ...(options.allowPartial ? { allowPartial: true } : {}),
       ...(changedError ? { error: changedError } : failed && firstError ? { error: firstError } : {}), ...(lead.done.reply ? { summary: lead.done.reply } : {}),
       ...(customLeads?.length ? { customLeads } : {}),
       ...(total > 1 ? { passes: { requested: total, completed: results.length, failed: failedPasses }, threadIds: results.map(result => result.threadId) } : {}),
@@ -519,7 +540,7 @@ export async function runScan(target: string | undefined, options: ScanOptions, 
 }
 
 export function registerScanCommand(program: Command, deps: ScanDeps = defaultScanDeps): void {
-  consoleTransportOptions(program.command("scan <target>")
+  consoleTransportOptions(program.command("scan [target]")
     .description("Scan a folder or git repository for security bugs; prints the findings as a report")
     .option("--budget <usd>", "Stop when the estimated spend reaches this many USD; partial findings are kept", String(DEFAULT_BUDGET_USD))
     .option("--format <format>", `Report format: ${FORMATS.join(", ")}`, "md")
@@ -542,7 +563,9 @@ export function registerScanCommand(program: Command, deps: ScanDeps = defaultSc
     .option("--resume <scan>", "Continue the units an earlier batched scan of this folder did not reach (a scan id from its report, or latest); refuses when the git HEAD changed unless --force")
     .option("--force", "With --resume: continue even though the folder's git HEAD changed")
     .option("--coverage [scan]", "Print the coverage ledger of a batched scan of this folder (the latest, or the id given) and exit; --format json for JSON")
+    .option("--allow-partial", "Exit by the findings alone (0, or 1 with --fail-on) when the scan stops before it reviews everything; the report still says it is partial")
+    .option("--plan", "List the entry points, the batches and a rough cost range for the folder, then exit; calls no model and writes nothing")
     .option("--timeout <seconds>", "Maximum seconds to wait for the scan", String(DEFAULT_TIMEOUT_SECONDS)))
-    .addHelpText("after", "\nExit codes: 0 done, 1 findings at or above --fail-on or the scan failed, 2 usage error, 3 stopped before it reviewed everything (budget, time limit, or entry points not reached).\nThe scan is a thread: follow it with `0 threads list`.")
+    .addHelpText("after", "\nExit codes: 0 done, 1 findings at or above --fail-on or the scan failed, 2 usage error, 3 stopped before it reviewed everything (budget, time limit, or entry points not reached): not finished, not failed; --allow-partial exits 0 or 1 instead.\nThe scan is a thread: follow it with `0 threads list`.")
     .action(async (target: string, options: ScanOptions) => { await runScan(target, options, deps); });
 }
