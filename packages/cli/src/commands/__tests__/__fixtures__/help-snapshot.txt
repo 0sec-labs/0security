@@ -1179,18 +1179,23 @@ Write an SBOM (CycloneDX 1.5 or SPDX 2.3) from the lockfiles in a folder (npm, p
 Go, Python, Ruby, PHP, .NET, Gradle, Dart, Elixir)
 
 Arguments:
-  folder               Folder to read lockfiles from (default: ".")
+  folder                          Folder to read lockfiles from (default: .)
 
 Options:
-  -o, --output <file>  Write the SBOM to a file instead of stdout
-  --name <name>        Name of the application the SBOM describes (default: the folder's name)
-  --generator <tool>   Who writes the SBOM: builtin (reads lockfiles; default), syft, cdxgen, trivy
-                       (run the installed tool; exit 2 if it is missing) (default: "builtin")
-  --format <format>    Output format: cyclonedx (1.5, default) or spdx (2.3 JSON; builtin generator
-                       only) (default: "cyclonedx")
-  --ai                 Also list the AI in the folder: models, datasets, hosted model ids and MCP
-                       servers, found by reading files as text
-  -h, --help           display help for command
+  -o, --output <file>             Write the SBOM to a file instead of stdout
+  --name <name>                   Name of the application the SBOM describes (default: the folder's
+                                  name)
+  --generator <tool>              Who writes the SBOM: builtin (reads lockfiles; default), syft,
+                                  cdxgen, trivy (run the installed tool; exit 2 if it is missing)
+                                  (default: "builtin")
+  --format <format>               Output format: cyclonedx (1.5, default) or spdx (2.3 JSON; builtin
+                                  generator only) (default: "cyclonedx")
+  --image <reference-or-archive>  Describe a container image instead of a folder: a reference such
+                                  as nginx:1.25, or the path of a docker save archive or OCI layout.
+                                  Needs --generator syft or trivy, which pulls the image
+  --ai                            Also list the AI in the folder: models, datasets, hosted model ids
+                                  and MCP servers, found by reading files as text
+  -h, --help                      display help for command
 
 ### 0 sbom licenses
 Usage: 0 sbom licenses [options] [sbom-file-or-folder]
@@ -1247,8 +1252,10 @@ Options:
                              origin/main), and what they connect to; an empty diff scans nothing
   --prepass <mode>           auto runs the pattern scanners first when they are installed and gives
                              their hits to the scan as leads; off skips them (default: "auto")
-  --scanner <id>             Pattern scanner for the pre-pass (foxguard, semgrep, opengrep); repeat
-                             to use several (default: foxguard)
+  --scanner <id>             Scanner for the pre-pass (foxguard, semgrep, opengrep, gitleaks, trivy,
+                             osv-scanner); repeat or separate with commas to use several (default:
+                             foxguard). gitleaks, trivy and osv-scanner must be installed; secret
+                             values are redacted
   --rules <file-or-folder>   Semgrep or OpenGrep rules for the pre-pass (a file or a folder); repeat
                              for several. Replaces the default rules and needs --scanner semgrep or
                              opengrep. Rules are never read from the scanned folder unless you name

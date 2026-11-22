@@ -167,7 +167,23 @@ To review a change instead of the whole folder, pass `--diff <ref>`, for example
 
 If FoxGuard is installed, the scan runs it first. It takes seconds and costs nothing. The thread treats its hits as leads, checks each against the code, records only the real ones and says which it rejected. A pattern scanner cannot see logic bugs such as a missing ownership check, so the thread still reviews the entry points itself.
 
-FoxGuard ships next to `0`; set `ZERO_FOXGUARD_PATH` to use another copy. Pass `--prepass off` to skip it. `--scanner` adds or replaces scanners (`foxguard`, `semgrep`, `opengrep`); repeat the flag for several. A scanner that is not installed is skipped. A Semgrep rule pack such as `p/default` is downloaded when it runs.
+FoxGuard ships next to `0`; set `ZERO_FOXGUARD_PATH` to use another copy. Pass `--prepass off` to skip it. `--scanner` chooses the scanners (`foxguard`, `semgrep`, `opengrep`, `gitleaks`, `trivy`, `osv-scanner`); repeat the flag or separate ids with commas to run several. A scanner that is not installed is skipped, and 0 says how to install it. A Semgrep rule pack such as `p/default` is downloaded when it runs.
+
+```bash
+0 scan ~/code/app --scanner foxguard,gitleaks,trivy
+```
+
+The default stays FoxGuard alone. The other scanners are not installed with 0. Set `ZERO_GITLEAKS_PATH`, `ZERO_TRIVY_PATH` or `ZERO_OSV_SCANNER_PATH` to use a binary outside your path.
+
+| Scanner | Finds | Reaches the network |
+| --- | --- | --- |
+| `gitleaks` | Secrets in the files of the folder | No |
+| `trivy` | Vulnerable dependencies, misconfigurations such as Terraform and Kubernetes, and secrets | Downloads its databases on first run |
+| `osv-scanner` | Vulnerable dependencies in lockfiles | Sends package names and versions to osv.dev and deps.dev |
+
+Each scanner runs without a shell, on the folder as an absolute path, with a time limit (2 minutes; 5 for trivy, 3 for osv-scanner). One that fails or runs out of time is skipped with a note. A `.gitleaks.toml` or `.trivyignore` inside the folder is honored by the tool, so a repository can hide its own secrets from them.
+
+Secret values stay out of the prompt and the findings. gitleaks runs with `--redact`, and trivy masks values by default. 0 also drops the snippet and any `Match:` line from a secret lead, so the thread sees the rule, the file and the line. The thread can still read the file itself, as it reads any file in the folder. `0 findings import` is unchanged.
 
 `--rules <file-or-folder>` gives Semgrep or OpenGrep your own rules for the pre-pass. Repeat it for several. The scanner runs only those rules, not its default pack, so add `--scanner semgrep` or `--scanner opengrep`. FoxGuard has its own rule format and does not read them, so `--rules` alone is a usage error.
 
@@ -209,7 +225,7 @@ A hit from your rules is a lead like any other. The scan checks it against the c
 | `--passes <n>` | `1` | Scan this many times and merge the findings (a scan misses some issues that another run finds); the budget is split between them, up to 5 |
 | `--diff <ref>` | — | Review only the files that differ from this git ref (for example origin/main), and what they connect to; an empty diff scans nothing |
 | `--prepass <mode>` | `auto` | auto runs the pattern scanners first when they are installed and gives their hits to the scan as leads; off skips them |
-| `--scanner <id>` | — | Pattern scanner for the pre-pass (foxguard, semgrep, opengrep); repeat to use several (default: foxguard) |
+| `--scanner <id>` | — | Scanner for the pre-pass (foxguard, semgrep, opengrep, gitleaks, trivy, osv-scanner); repeat or separate with commas to use several (default: foxguard). gitleaks, trivy and osv-scanner must be installed; secret values are redacted |
 | `--rules <file-or-folder>` | — | Semgrep or OpenGrep rules for the pre-pass (a file or a folder); repeat for several. Replaces the default rules and needs --scanner semgrep or opengrep. Rules are never read from the scanned folder unless you name them |
 | `--context <file>` | — | Give the scan this file (a threat model, notes on who may do what) as lower-priority background; repeat for several. It can steer what the scan weighs but cannot change how it works |
 | `--policy <file-or-folder>` | — | Check the code against these Markdown policies (a file or a folder of .md files) and report pass or fail for each; repeat for several. Runs the policy-check skill |
@@ -983,11 +999,20 @@ Add `--ai` to also list the AI in the folder as CycloneDX components:
 
 The scan reads files as text and downloads nothing. A reference the patterns do not recognise is missed, so treat the list as what was seen, not a complete inventory.
 
-The builtin generator does not read Maven `pom.xml` without a lockfile, CocoaPods, SwiftPM, C and C++ package managers, container images, operating-system packages or compiled binaries. Use `--generator` for those.
+The builtin generator does not read Maven `pom.xml` without a lockfile, CocoaPods, SwiftPM, C and C++ package managers, operating-system packages or compiled binaries. Use `--generator` for those, and `--generator` with `--image` for container images.
 
 `--format spdx` writes SPDX 2.3 JSON instead (builtin generator only). It has one package for the application and one per library, each with its package URL as a `purl` external reference, its checksums, and its license when that is an SPDX id or expression. Free-text license names become `NOASSERTION`. `DESCRIBES` points at the application and `DEPENDS_ON` follows the graph above. The AI inventory is not written to SPDX, and `--ai` is refused with it.
 
-`--generator syft`, `cdxgen` or `trivy` runs that installed tool instead and writes its CycloneDX JSON unchanged. Use it for what the builtin reader does not cover: Maven, container images, operating-system packages and binaries. `--ai` and `--format spdx` are not available with these tools.
+`--generator syft`, `cdxgen` or `trivy` runs that installed tool instead and writes its CycloneDX JSON unchanged. Use it for what the builtin reader does not cover: Maven, operating-system packages and binaries. `--ai` and `--format spdx` are not available with these tools.
+
+To describe a container image, pass `--image` with `syft` or `trivy`. The value is a reference such as `nginx:1.25`, the path of a `docker save` archive, or the path of an OCI image layout folder. Then check the result against known advisories:
+
+```bash
+0 sbom generate --generator syft --image nginx:1.25 -o img.cdx.json
+0 sbom check img.cdx.json
+```
+
+syft or trivy reads the image, from your local Docker daemon or by pulling it from a registry. 0 does not unpack layers itself, so the SBOM is only as complete as that tool's catalogue. `--image` is refused with the builtin generator and with cdxgen, with a folder argument, and with a value that starts with `-`, has spaces, or names a folder that is not an OCI layout. 0 passes the reference after `--`, so it cannot be read as an option.
 
 0 starts the tool without a shell, on the folder as an absolute path, with a 10 minute timeout and a temporary working directory. It executes nothing from the scanned folder itself. If the tool is not installed, 0 prints how to install it and exits 2. The tool's own behaviour, such as network access, is its own. The commands are:
 
@@ -995,13 +1020,15 @@ The builtin generator does not read Maven `pom.xml` without a lockfile, CocoaPod
 syft dir:<folder> -o cyclonedx-json
 cdxgen --lifecycle pre-build --no-install-deps -o <temp file> <folder>
 trivy fs --format cyclonedx --quiet <folder>
+syft -o cyclonedx-json -- <image>
+trivy image --format cyclonedx --quiet -- <image>
 ```
 
 The two cdxgen flags keep it from running the project's package manager. These tools write CycloneDX 1.7, not 1.5, and their component counts differ from the builtin reader, because each also walks the other trees in the folder. Whether trivy fetches its vulnerability database on a first run, and how older cdxgen versions treat those flags, is not verified.
 
 | Argument | Required | Description |
 | --- | --- | --- |
-| `folder` | No | Folder to read lockfiles from |
+| `folder` | No | Folder to read lockfiles from (default: .) |
 
 | Option | Registered default | Description |
 | --- | --- | --- |
@@ -1009,6 +1036,7 @@ The two cdxgen flags keep it from running the project's package manager. These t
 | `--name <name>` | — | Name of the application the SBOM describes (default: the folder's name) |
 | `--generator <tool>` | `builtin` | Who writes the SBOM: builtin (reads lockfiles; default), syft, cdxgen, trivy (run the installed tool; exit 2 if it is missing) |
 | `--format <format>` | `cyclonedx` | Output format: cyclonedx (1.5, default) or spdx (2.3 JSON; builtin generator only) |
+| `--image <reference-or-archive>` | — | Describe a container image instead of a folder: a reference such as nginx:1.25, or the path of a docker save archive or OCI layout. Needs --generator syft or trivy, which pulls the image |
 | `--ai` | — | Also list the AI in the folder: models, datasets, hosted model ids and MCP servers, found by reading files as text |
 
 #### sbom check

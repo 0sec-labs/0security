@@ -6,7 +6,7 @@
 import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { relative, resolve, sep } from "node:path";
 import type { Command } from "commander";
-import { checkBomAgainstOsv, EXTERNAL_GENERATORS, generateSbom, GeneratorNotInstalledError, LOCKFILES, modelScanToSarif, runExternalGenerator, scanModelPath, toSpdx, type Advisory, type ExternalGenerator, type ModelFileResult } from "@0/engine";
+import { checkBomAgainstOsv, EXTERNAL_GENERATORS, generateSbom, GeneratorNotInstalledError, IMAGE_GENERATORS, parseImageSource, LOCKFILES, modelScanToSarif, runExternalGenerator, scanModelPath, toSpdx, type Advisory, type ExternalGenerator, type ImageSource, type ModelFileResult } from "@0/engine";
 import { VERSION } from "@0/engine/shared";
 import { finishWithError, UsageError } from "./output.js";
 import { registerSbomLicenses } from "./sbom-licenses.js";
@@ -33,7 +33,7 @@ const defaults: SbomDeps = {
   },
 };
 
-export interface GenerateOptions { output?: string; name?: string; ai?: boolean; generator?: string; format?: string }
+export interface GenerateOptions { output?: string; name?: string; ai?: boolean; generator?: string; format?: string; image?: string }
 
 function requireFolder(folder: string): string {
   const target = resolve(folder);
@@ -44,20 +44,29 @@ function requireFolder(folder: string): string {
 }
 
 /** `0 sbom generate` for every generator: the built-in lockfile reader, or an installed external tool. */
-export async function runGenerateWith(folder: string, options: GenerateOptions, deps: SbomDeps): Promise<void> {
+export async function runGenerateWith(folder: string | undefined, options: GenerateOptions, deps: SbomDeps): Promise<void> {
   const generator = options.generator ?? "builtin";
   const format = options.format ?? "cyclonedx";
   if (generator !== "builtin" && !(EXTERNAL_GENERATORS as readonly string[]).includes(generator)) throw new UsageError(`Unknown generator '${generator}'. Use builtin, ${EXTERNAL_GENERATORS.join(", ")}.`);
   if (format !== "cyclonedx" && format !== "spdx") throw new UsageError(`Unknown format '${format}'. Use cyclonedx or spdx.`);
+  if (options.image !== undefined) {
+    if (generator === "builtin") throw new UsageError(`--image needs --generator ${IMAGE_GENERATORS.join(" or ")}: the builtin generator reads lockfiles and cannot open an image.`);
+    if (!(IMAGE_GENERATORS as readonly string[]).includes(generator)) throw new UsageError(`--image works with --generator ${IMAGE_GENERATORS.join(" or ")}, not ${generator}.`);
+    if (folder !== undefined) throw new UsageError("Give a folder or --image, not both.");
+  }
   if (generator === "builtin") {
     if (format === "spdx" && options.ai) throw new UsageError("--ai is only available with --format cyclonedx: SPDX 2.3 has no type for models, datasets or MCP servers.");
-    return runGenerate(folder, options, deps);
+    return runGenerate(folder ?? ".", options, deps);
   }
   if (format !== "cyclonedx") throw new UsageError(`--format ${format} is only available with the builtin generator; ${generator} is run for its CycloneDX output.`);
   if (options.ai) throw new UsageError("--ai is only available with the builtin generator.");
-  const target = requireFolder(folder);
+  let image: ImageSource | undefined;
+  if (options.image !== undefined) {
+    try { image = parseImageSource(options.image); } catch (error) { throw new UsageError(error instanceof Error ? error.message : String(error)); }
+  }
+  const target = image ? "" : requireFolder(folder ?? ".");
   let bom: Record<string, unknown>;
-  try { bom = (await runExternalGenerator(generator as ExternalGenerator, target, deps.env ? { env: deps.env } : {})).bom; }
+  try { bom = (await runExternalGenerator(generator as ExternalGenerator, target, { ...(deps.env ? { env: deps.env } : {}), ...(image ? { image } : {}) })).bom; }
   catch (error) { if (error instanceof GeneratorNotInstalledError) throw new UsageError(error.message); throw error; }
   const text = `${JSON.stringify(bom, null, 2)}\n`;
   if (options.output) { deps.write(resolve(options.output), text); deps.err(`Wrote ${options.output}`); } else deps.out(text);
@@ -69,7 +78,7 @@ export function runGenerate(folder: string, options: GenerateOptions, deps: Sbom
   const result = generateSbom(target, { toolVersion: VERSION, ...(options.name ? { name: options.name } : {}), ...(options.ai ? { ai: true } : {}) });
   if (!result.bom.components.length && !result.bom.services?.length) {
     const supported = [...new Set(LOCKFILES.map(lock => lock.file))].join(", ");
-    throw new UsageError(`No supported lockfile with packages${options.ai ? " and no AI components" : ""} in ${folder}. Supported: ${supported}. For Maven, Gradle, NuGet or container images, use --generator syft, cdxgen or trivy.`);
+    throw new UsageError(`No supported lockfile with packages${options.ai ? " and no AI components" : ""} in ${folder}. Supported: ${supported}. For Maven, Gradle or NuGet use --generator syft, cdxgen or trivy; for a container image use --image with --generator syft or trivy.`);
   }
   const text = `${JSON.stringify(options.format === "spdx" ? toSpdx(result.bom) : result.bom, null, 2)}\n`;
   if (options.output) { deps.write(resolve(options.output), text); deps.err(`Wrote ${options.output}`); } else deps.out(text);
@@ -140,11 +149,12 @@ export function registerSbomCommand(program: Command, deps: SbomDeps = defaults)
   const sbom = program.command("sbom").description("Generate an SBOM from lockfiles, check one against known advisories, and scan model files");
   sbom.command("generate")
     .description("Write an SBOM (CycloneDX 1.5 or SPDX 2.3) from the lockfiles in a folder (npm, pnpm, yarn, Cargo, Go, Python, Ruby, PHP, .NET, Gradle, Dart, Elixir)")
-    .argument("[folder]", "Folder to read lockfiles from", ".")
+    .argument("[folder]", "Folder to read lockfiles from (default: .)")
     .option("-o, --output <file>", "Write the SBOM to a file instead of stdout")
     .option("--name <name>", "Name of the application the SBOM describes (default: the folder's name)")
     .option("--generator <tool>", `Who writes the SBOM: builtin (reads lockfiles; default), ${EXTERNAL_GENERATORS.join(", ")} (run the installed tool; exit 2 if it is missing)`, "builtin")
     .option("--format <format>", "Output format: cyclonedx (1.5, default) or spdx (2.3 JSON; builtin generator only)", "cyclonedx")
+    .option("--image <reference-or-archive>", `Describe a container image instead of a folder: a reference such as nginx:1.25, or the path of a docker save archive or OCI layout. Needs --generator ${IMAGE_GENERATORS.join(" or ")}, which pulls the image`)
     .option("--ai", "Also list the AI in the folder: models, datasets, hosted model ids and MCP servers, found by reading files as text")
     .addHelpText("after", "\nWith the builtin generator nothing is installed or run; lockfiles are read as text. Exit 2 when the folder has no supported lockfile, or the chosen external tool is not installed.")
     .action(async (folder: string, options: GenerateOptions) => {

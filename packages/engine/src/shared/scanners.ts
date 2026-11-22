@@ -13,12 +13,21 @@ export interface ScannerSpec {
   pathEnv?: string;
   /** What running it touches beyond the folder, shown to the user. */
   note?: string;
+  /** How to install it; shown when it is not found. */
+  install?: string;
+  /** Seconds it may run before it is stopped. Default 120. */
+  timeoutSeconds?: number;
+  /** It reports secrets. Its leads never carry a snippet or a matched value into the scan prompt. */
+  reportsSecrets?: boolean;
 }
 
 export const SCANNERS: readonly ScannerSpec[] = [
   { id: "foxguard", label: "FoxGuard", command: "foxguard", args: ["--format", "sarif", "{folder}"], pathEnv: "ZERO_FOXGUARD_PATH" },
-  { id: "semgrep", label: "Semgrep", command: "semgrep", args: ["scan", "--sarif", "--quiet", "--metrics", "off", "--config", "{rules}", "{folder}"], pathEnv: "ZERO_SEMGREP_PATH", note: "downloads rules for --config when it is a registry pack" },
-  { id: "opengrep", label: "OpenGrep", command: "opengrep", args: ["scan", "--sarif", "--quiet", "--config", "{rules}", "{folder}"], pathEnv: "ZERO_OPENGREP_PATH" },
+  { id: "semgrep", label: "Semgrep", command: "semgrep", args: ["scan", "--sarif", "--quiet", "--metrics", "off", "--config", "{rules}", "{folder}"], pathEnv: "ZERO_SEMGREP_PATH", install: "brew install semgrep, or see https://semgrep.dev/docs/getting-started/", note: "downloads rules for --config when it is a registry pack" },
+  { id: "opengrep", label: "OpenGrep", command: "opengrep", args: ["scan", "--sarif", "--quiet", "--config", "{rules}", "{folder}"], pathEnv: "ZERO_OPENGREP_PATH", install: "brew install opengrep, or see https://github.com/opengrep/opengrep" },
+  { id: "gitleaks", label: "Gitleaks", command: "gitleaks", args: ["dir", "--report-format", "sarif", "--report-path", "-", "--redact", "--no-banner", "--no-color", "--exit-code", "0", "--log-level", "error", "{folder}"], pathEnv: "ZERO_GITLEAKS_PATH", install: "brew install gitleaks, or see https://github.com/gitleaks/gitleaks#installing", reportsSecrets: true },
+  { id: "trivy", label: "Trivy", command: "trivy", args: ["fs", "--scanners", "vuln,misconfig,secret", "--format", "sarif", "--quiet", "--no-progress", "--disable-telemetry", "{folder}"], pathEnv: "ZERO_TRIVY_PATH", install: "brew install trivy, or see https://trivy.dev/latest/getting-started/installation/", timeoutSeconds: 300, reportsSecrets: true, note: "downloads its vulnerability database on first run" },
+  { id: "osv-scanner", label: "OSV-Scanner", command: "osv-scanner", args: ["scan", "source", "--format", "sarif", "--allow-no-lockfiles", "--verbosity", "error", "-r", "{folder}"], pathEnv: "ZERO_OSV_SCANNER_PATH", install: "brew install osv-scanner, or see https://google.github.io/osv-scanner/installation/", timeoutSeconds: 180, note: "sends package names and versions from lockfiles to osv.dev and deps.dev" },
 ];
 export const DEFAULT_SCANNERS: readonly string[] = ["foxguard"];
 const DEFAULT_RULES = "p/default";
@@ -45,4 +54,15 @@ export function scannerArguments(spec: ScannerSpec, folder: string, rules: reado
     if (spec.args[index + 1] === "{rules}") return list.flatMap(rule => [arg, rule]);
     return [arg === "{folder}" ? folder : arg];
   });
+}
+
+/**
+ * A lead from a scanner that reports secrets, with everything that could hold a secret value removed: the snippet, and any
+ * "Match:" line in the title or text. The scanners are also run with redaction on; this is the second line of defence.
+ */
+export function scrubSecretLead<T extends { snippet?: string; description: string; title: string; ruleId: string }>(lead: T): T {
+  const { snippet: _snippet, ...rest } = lead;
+  const description = lead.description.split("\n").filter(line => !/^\s*(match|secret|code|value)\s*:/i.test(line)).join("\n").trim();
+  const title = /^\s*(match|secret|code|value)\s*:/i.test(lead.title) ? lead.ruleId : lead.title;
+  return { ...rest, title, description: description || title } as T;
 }

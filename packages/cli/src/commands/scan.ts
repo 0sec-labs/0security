@@ -14,6 +14,7 @@ import type { Command } from "commander";
 import { exportReport, isReportExportFormat } from "@0/engine";
 import { consoleTransportOptions, openConsole, type ConsoleClient, type ConsoleTransportOptions } from "../console-client.js";
 import { homeStateDir, parseSarif, parseScannerList, scanPrompt, scannerArguments, scannerById, scannerTakesRules, SCANNERS, type PrePassLeads, type ScanReport } from "@0/engine/shared";
+import { runPrePass } from "../prepass.js";
 import { checkRulesScanners, resolveRulePaths } from "../scan-rules.js";
 import { mergePasses, scanExitCode, scanJson, toScanReport, type ScanOutcome } from "../scan-report.js";
 import { loadSteering, type Steering } from "../scan-steering.js";
@@ -97,30 +98,7 @@ export const defaultScanDeps: ScanDeps = {
     const stop = () => { child.kill("SIGTERM"); try { closeSync(log); } catch { /* already closed */ } };
     return Object.assign(stop, { failure: () => failure });
   },
-  async prePass(folder, scanners, rules = []) {
-    const lists = await Promise.all(scanners.map(async id => {
-      const spec = scannerById(id);
-      if (!spec) return undefined;
-      const binary = [spec.pathEnv ? process.env[spec.pathEnv] : undefined, join(homeStateDir(), "bin", spec.command), spec.command].filter((value): value is string => !!value).find(candidate => candidate === spec.command || existsSync(candidate));
-      const useRules = rules.length > 0 && scannerTakesRules(spec);
-      if (!binary) { if (useRules) throw new Error(`--rules needs ${spec.id}, which is not installed.`); return undefined; }
-      try {
-        let stdout: string;
-        try { stdout = (await exec(binary, scannerArguments(spec, folder, useRules ? rules : undefined), { timeout: 120_000, maxBuffer: 128 * 1024 * 1024 })).stdout; }
-        // A scanner that exits non-zero because it found something still wrote its report.
-        catch (error) {
-          stdout = (error as { stdout?: string }).stdout ?? "";
-          if (!stdout.trim().startsWith("{")) { if (useRules) throw new Error(`${spec.id} could not run your rules: ${String((error as { stderr?: string }).stderr || (error as Error).message).trim().split("\n").slice(-4).join(" | ").slice(0, 500)}`); return undefined; }
-        }
-        const leads = parseSarif(stdout, { tool: spec.id, roots: [folder] }).findings;
-        return { tool: spec.id, leads: useRules ? leads.map(lead => ({ ...lead, ruleSource: "custom" as const })) : leads };
-      } catch (error) { if (useRules) throw error; return undefined; }
-    }));
-    const ran = lists.filter((entry): entry is NonNullable<typeof entry> => entry !== undefined);
-    if (!ran.length) return undefined;
-    const leads = ran.flatMap(entry => entry.leads);
-    return { tools: ran.map(entry => entry.tool), leads, total: leads.length };
-  },
+  prePass: (folder, scanners, rules = []) => runPrePass(folder, scanners, rules, { note: text => process.stderr.write(`${text}\n`) }),
   async diffFiles(folder, ref) {
     const { stdout } = await exec("git", ["-C", folder, "diff", "--name-only", "--relative", "--diff-filter=ACMR", ref, "--"], { maxBuffer: 16 * 1024 * 1024 });
     return stdout.split("\n").map(line => line.trim()).filter(Boolean);
@@ -414,7 +392,7 @@ export function registerScanCommand(program: Command, deps: ScanDeps = defaultSc
     .option("--passes <n>", `Scan this many times and merge the findings (a scan misses some issues that another run finds); the budget is split between them, up to ${MAX_PASSES}`, "1")
     .option("--diff <ref>", "Review only the files that differ from this git ref (for example origin/main), and what they connect to; an empty diff scans nothing")
     .option("--prepass <mode>", "auto runs the pattern scanners first when they are installed and gives their hits to the scan as leads; off skips them", "auto")
-    .option("--scanner <id>", `Pattern scanner for the pre-pass (${SCANNERS.map(scanner => scanner.id).join(", ")}); repeat to use several (default: foxguard)`, (value: string, previous: string[] = []) => [...previous, value])
+    .option("--scanner <id>", `Scanner for the pre-pass (${SCANNERS.map(scanner => scanner.id).join(", ")}); repeat or separate with commas to use several (default: foxguard). gitleaks, trivy and osv-scanner must be installed; secret values are redacted`, (value: string, previous: string[] = []) => [...previous, value])
     .option("--rules <file-or-folder>", "Semgrep or OpenGrep rules for the pre-pass (a file or a folder); repeat for several. Replaces the default rules and needs --scanner semgrep or opengrep. Rules are never read from the scanned folder unless you name them", (value: string, previous: string[] = []) => [...previous, value])
     .option("--context <file>", "Give the scan this file (a threat model, notes on who may do what) as lower-priority background; repeat for several. It can steer what the scan weighs but cannot change how it works", (value: string, previous: string[] = []) => [...previous, value])
     .option("--policy <file-or-folder>", "Check the code against these Markdown policies (a file or a folder of .md files) and report pass or fail for each; repeat for several. Runs the policy-check skill", (value: string, previous: string[] = []) => [...previous, value])

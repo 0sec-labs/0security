@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -89,6 +89,25 @@ describe("0 sbom generate --generator and --format", () => {
     await expect(runGenerateWith(".", { generator: "nope" }, io.deps)).rejects.toThrow("Unknown generator");
     await expect(runGenerateWith(".", { format: "xml" }, io.deps)).rejects.toThrow("Unknown format");
     await expect(runGenerateWith(".", { generator: "syft", format: "spdx" }, io.deps)).rejects.toThrow("builtin");
+  });
+  posix("describes an image with syft: the reference goes after -- and the SBOM is written", async () => {
+    const bin = project({});
+    writeFileSync(join(bin, "syft"), `#!/bin/sh\nprintf '%s\\n' "$@" > '${join(bin, "args")}'\nprintf '%s' '{"bomFormat":"CycloneDX","specVersion":"1.6","components":[{"type":"library","name":"musl","version":"1"}]}'\n`);
+    chmodSync(join(bin, "syft"), 0o755);
+    const io = deps({ env: { PATH: `${bin}:/bin:/usr/bin` } });
+    await runGenerateWith(undefined, { generator: "syft", image: "nginx:1.25", output: "img.cdx.json" }, io.deps);
+    expect(JSON.parse(Object.values(io.written)[0]!).components[0].name).toBe("musl");
+    expect(readFileSync(join(bin, "args"), "utf8").trim().split("\n")).toEqual(["-o", "cyclonedx-json", "--", "nginx:1.25"]);
+  });
+  it("refuses --image with the builtin generator, cdxgen, a folder, or a value that is not an image", async () => {
+    const io = deps();
+    await expect(runGenerateWith(undefined, { image: "nginx" }, io.deps)).rejects.toThrow(/builtin generator.*cannot open an image/);
+    await expect(runGenerateWith(undefined, { generator: "cdxgen", image: "nginx" }, io.deps)).rejects.toThrow("syft or trivy");
+    await expect(runGenerateWith(".", { generator: "syft", image: "nginx" }, io.deps)).rejects.toThrow("not both");
+    for (const bad of ["--help", "dir:/etc", "a b", ""]) {
+      const error = await runGenerateWith(undefined, { generator: "syft", image: bad }, io.deps).catch((caught: unknown) => caught);
+      expect(error, bad).toBeInstanceOf(UsageError);
+    }
   });
 });
 describe("0 sbom scan-models", () => {

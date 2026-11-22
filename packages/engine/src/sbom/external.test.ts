@@ -2,7 +2,7 @@ import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { GeneratorFailedError, GeneratorNotInstalledError, runExternalGenerator } from "./index.js";
+import { GeneratorFailedError, GeneratorNotInstalledError, parseImageSource, runExternalGenerator } from "./index.js";
 
 const dirs: string[] = [];
 afterEach(() => dirs.splice(0).forEach(dir => rmSync(dir, { recursive: true, force: true })));
@@ -54,5 +54,44 @@ describe("runExternalGenerator", () => {
     await expect(runExternalGenerator("syft", tmp(), { env: fake("syft", "echo hello").env })).rejects.toThrow("did not produce JSON");
     await expect(runExternalGenerator("syft", tmp(), { env: fake("syft", "echo '{}'").env })).rejects.toThrow("CycloneDX");
     await expect(runExternalGenerator("syft", tmp(), { env: fake("syft", "exec sleep 5").env, timeoutMs: 200 })).rejects.toBeInstanceOf(GeneratorFailedError);
+  });
+});
+
+describe("container images", () => {
+  const archive = () => { const dir = tmp(); const file = join(dir, "img.tar"); writeFileSync(file, "x"); return file; };
+  it("accepts references and existing archives and refuses anything that could be an option or another source", () => {
+    for (const ok of ["nginx", "nginx:1.25", "library/nginx:1.25", "localhost:5000/app", "ghcr.io/org/app:v1.2-rc.1", `ghcr.io/org/app@sha256:${"a".repeat(64)}`]) expect(parseImageSource(ok)).toEqual({ kind: "reference", value: ok });
+    const file = archive();
+    expect(parseImageSource(file)).toEqual({ kind: "archive", value: file });
+    for (const bad of ["", "--help", "-o", "a b", "a\nb", "dir:src", "file:x", "docker:nginx", "sbom:x.json", "nginx:", "a//b", "./missing.tar", "/missing/img.tar", "x".repeat(600)]) expect(() => parseImageSource(bad), bad).toThrow(GeneratorFailedError);
+  });
+  it("accepts an OCI layout folder and refuses any other folder", () => {
+    const layout = tmp(); writeFileSync(join(layout, "oci-layout"), "{}");
+    expect(parseImageSource(layout)).toEqual({ kind: "oci-layout", value: layout });
+    expect(() => parseImageSource(tmp())).toThrow("not an OCI image layout");
+  });
+  posix("syft: the reference goes after -- as one argument", async () => {
+    const tool = fake("syft", `printf '%s' '${BOM}'`);
+    await runExternalGenerator("syft", "", { env: tool.env, image: parseImageSource("nginx:1.25") });
+    expect(tool.args().slice(0, 4)).toEqual(["-o", "cyclonedx-json", "--", "nginx:1.25"]);
+  });
+  posix("syft: an archive is passed by absolute path and an OCI layout with the oci-dir scheme", async () => {
+    const tool = fake("syft", `printf '%s' '${BOM}'`); const file = archive();
+    await runExternalGenerator("syft", "", { env: tool.env, image: parseImageSource(file) });
+    expect(tool.args()[3]).toBe(file);
+    const layout = tmp(); writeFileSync(join(layout, "oci-layout"), "{}");
+    await runExternalGenerator("syft", "", { env: tool.env, image: parseImageSource(layout) });
+    expect(tool.args()[3]).toBe(`oci-dir:${layout}`);
+  });
+  posix("trivy: image with the reference after --, and --input for an archive", async () => {
+    const tool = fake("trivy", `printf '%s' '${BOM}'`);
+    await runExternalGenerator("trivy", "", { env: tool.env, image: parseImageSource("nginx:1.25") });
+    expect(tool.args().slice(0, 6)).toEqual(["image", "--format", "cyclonedx", "--quiet", "--", "nginx:1.25"]);
+    const file = archive();
+    await runExternalGenerator("trivy", "", { env: tool.env, image: parseImageSource(file) });
+    expect(tool.args().slice(0, 6)).toEqual(["image", "--format", "cyclonedx", "--quiet", "--input", file]);
+  });
+  it("is refused for cdxgen", async () => {
+    await expect(runExternalGenerator("cdxgen", "", { image: { kind: "reference", value: "nginx" } })).rejects.toThrow("syft or trivy");
   });
 });
