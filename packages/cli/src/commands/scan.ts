@@ -15,6 +15,7 @@ import { exportReport, isReportExportFormat } from "@0/engine";
 import { consoleTransportOptions, openConsole, type ConsoleClient, type ConsoleTransportOptions } from "../console-client.js";
 import { homeStateDir, parseSarif, parseScannerList, scanPrompt, scannerArguments, scannerById, SCANNERS, type PrePassLeads, type ScanReport } from "@0/engine/shared";
 import { mergePasses, scanExitCode, scanJson, toScanReport, type ScanOutcome } from "../scan-report.js";
+import { loadSteering, type Steering } from "../scan-steering.js";
 import { finishWithError, UsageError } from "./output.js";
 import { asJson, finishedThread, lastAssistantText, usageLine, type FinishedThread, type Json } from "./thread-output.js";
 
@@ -30,6 +31,8 @@ const MAX_FAILED_POLLS = 12;
 /** Passes that run at the same time: more only crowds the model provider and the console. */
 const MAX_PARALLEL_PASSES = 3;
 const MAX_PASSES = 5;
+/** What `--policy` and `--org-policy` run. */
+const POLICY_SKILL = "policy-check";
 const GIT_TARGET = /^(git@|git:\/\/|ssh:\/\/git@)|\.git$|^https:\/\/(github|gitlab)\.com\//;
 
 /**
@@ -126,6 +129,7 @@ export const defaultScanDeps: ScanDeps = {
 
 interface ScanOptions extends ConsoleTransportOptions {
   budget: string; diff?: string; prepass?: string; scanner?: string[]; format: string; output?: string; timeout: string; failOn?: string; model?: string; skill: string; passes: string;
+  context?: string[]; policy?: string[]; orgPolicy?: string[]; repoContext?: boolean;
 }
 
 export interface ResolvedTarget {
@@ -177,6 +181,7 @@ function validate(target: string | undefined, options: ScanOptions): void {
   if (options.prepass !== undefined && options.prepass !== "auto" && options.prepass !== "off") throw new UsageError("--prepass must be auto or off.");
   if (options.diff !== undefined && (!/^[A-Za-z0-9][A-Za-z0-9._\/~^@{}:-]{0,199}$/.test(options.diff) || options.diff.includes("..."))) throw new UsageError("--diff must be a git ref such as origin/main or HEAD~1.");
   try { parseScannerList(options.scanner); } catch (error) { throw new UsageError(error instanceof Error ? error.message : String(error)); }
+  if ((options.policy?.length || options.orgPolicy?.length) && options.skill !== "scan" && options.skill !== POLICY_SKILL) throw new UsageError(`--policy and --org-policy run the ${POLICY_SKILL} skill; drop --skill ${options.skill}.`);
   const budget = Number(options.budget);
   if (!Number.isFinite(budget) || budget <= 0 || budget > 1000) throw new UsageError("--budget must be a positive USD amount up to 1000.");
   const passes = Number(options.passes);
@@ -207,7 +212,7 @@ export async function connect(options: ConsoleTransportOptions, deps: Pick<ScanD
   throw new Error("Could not start a console within 30s. Start one with `0 --headless` and run the scan again.");
 }
 
-interface PassContext { prePass?: PrePassLeads; scope?: string[]; client: ConsoleClient; deps: ScanDeps; resolved: ResolvedTarget; options: ScanOptions; total: number; budget: number; deadline: number }
+interface PassContext { prePass?: PrePassLeads; scope?: string[]; steering: Steering; client: ConsoleClient; deps: ScanDeps; resolved: ResolvedTarget; options: ScanOptions; total: number; budget: number; deadline: number }
 interface PassResult { threadId: string; done: FinishedThread; stored: ScanReport; budgetExhausted: boolean; timedOut: boolean; costUsd?: number }
 
 /** Poll a thread until it finishes, the deadline passes (it is then cancelled) or the console is lost for too long. */
@@ -255,7 +260,7 @@ async function runPass(ctx: PassContext, index: number): Promise<PassResult> {
   const path = `/api/console/sessions/${encodeURIComponent(id)}`;
   try {
     await client.request("PATCH", `${path}/configuration`, { workspacePath: resolved.folder });
-    await client.request("POST", `${path}/messages`, { text: scanPrompt(resolved.label, options.skill, ctx.prePass, ctx.scope) });
+    await client.request("POST", `${path}/messages`, { text: scanPrompt(resolved.label, options.skill, ctx.prePass, ctx.scope, ctx.steering) });
   } catch (error) {
     // A thread that never started is no use to anyone; do not leave it in the list.
     const removed = await client.request("POST", `${path}/delete`, {}).then(() => true, () => false);
@@ -304,6 +309,8 @@ export async function runScan(target: string | undefined, options: ScanOptions, 
   try {
     validate(target, options);
     resolved = await resolveScanTarget(target!, deps);
+    const steering = loadSteering(resolved.folder, options, deps.err);
+    if (steering.policies.length && options.skill === "scan") options = { ...options, skill: POLICY_SKILL };
     const budget = Number(options.budget);
     const total = Number(options.passes);
     const startedAt = deps.now().toISOString();
@@ -331,7 +338,7 @@ export async function runScan(target: string | undefined, options: ScanOptions, 
       prePass = leads.length ? { ...prePass, leads, total: leads.length } : undefined;
     }
     if (prePass) deps.err(`${prePass.tools.join(", ")} pre-pass: ${prePass.total} lead${prePass.total === 1 ? "" : "s"} for the scan to check`);
-    const ctx: PassContext = { ...(prePass ? { prePass } : {}), ...(scope ? { scope } : {}), client, deps, resolved, options, total, budget: budget / total, deadline: Date.now() + Number(options.timeout) * 1000 };
+    const ctx: PassContext = { steering, ...(prePass ? { prePass } : {}), ...(scope ? { scope } : {}), client, deps, resolved, options, total, budget: budget / total, deadline: Date.now() + Number(options.timeout) * 1000 };
 
     const passErrors: string[] = [];
     const results = (await inPool(total, MAX_PARALLEL_PASSES, async (index): Promise<PassResult | undefined> => {
@@ -398,6 +405,10 @@ export function registerScanCommand(program: Command, deps: ScanDeps = defaultSc
     .option("--diff <ref>", "Review only the files that differ from this git ref (for example origin/main), and what they connect to; an empty diff scans nothing")
     .option("--prepass <mode>", "auto runs the pattern scanners first when they are installed and gives their hits to the scan as leads; off skips them", "auto")
     .option("--scanner <id>", `Pattern scanner for the pre-pass (${SCANNERS.map(scanner => scanner.id).join(", ")}); repeat to use several (default: foxguard)`, (value: string, previous: string[] = []) => [...previous, value])
+    .option("--context <file>", "Give the scan this file (a threat model, notes on who may do what) as lower-priority background; repeat for several. It can steer what the scan weighs but cannot change how it works", (value: string, previous: string[] = []) => [...previous, value])
+    .option("--policy <file-or-folder>", "Check the code against these Markdown policies (a file or a folder of .md files) and report pass or fail for each; repeat for several. Runs the policy-check skill", (value: string, previous: string[] = []) => [...previous, value])
+    .option("--org-policy <folder>", "An organisation's policy folder: evaluated first, and wins when a --policy says otherwise or uses the same id; repeat for several", (value: string, previous: string[] = []) => [...previous, value])
+    .option("--repo-context", "Also read .0/threat-model.md from the scanned folder as context. Off by default: a change under review can edit that file; in CI pass the base branch's copy with --context instead")
     .option("--skill <id>", "Skill that holds the scan method", "scan")
     .option("--model <model>", `Model for the scan thread (default: ${DEFAULT_SCAN_MODEL})`)
     .option("--timeout <seconds>", "Maximum seconds to wait for the scan", String(DEFAULT_TIMEOUT_SECONDS)))

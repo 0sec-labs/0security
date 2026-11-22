@@ -55,6 +55,8 @@ Each finding has a stable link at `/findings/<fingerprint>`.
 0 scan ./your-repo --format sarif -o scan.sarif --fail-on high
 ```
 
+To make a scan weigh business logic and authorization, give it a reviewed threat model (`--context`), and to check the code against your own written rules use `--policy` and `--org-policy`; see [Threat model and policy checks](/threat-model-and-policy/).
+
 A scan is a thread that follows the `scan` skill: it lists every entry point of the code, checks each one, and records what it can show from the code. It appears in `0 threads` and its findings in `0 findings`, under the thread's ID. The target is a folder or a git URL (cloned shallow, then removed). A scan must not edit the code it reads: if the target is a git work tree and the scan changed a file, the scan is reported as failed and names the files. Package names and container images are not scanned.
 
 | Option | What it does |

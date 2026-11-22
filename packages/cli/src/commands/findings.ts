@@ -157,11 +157,11 @@ function statusColor(status: string) {
     : chalk.white;
 }
 
-type PriorityRow = Pick<FindingRow, "id" | "severity" | "cvssScore" | "impactAssessment" | "timestamp">;
+type PriorityRow = Pick<FindingRow, "id" | "category" | "severity" | "cvssScore" | "impactAssessment" | "timestamp">;
 function priorityFinding(row: PriorityRow) {
   let impactAssessment: unknown;
   try { impactAssessment = row.impactAssessment ? JSON.parse(row.impactAssessment) : undefined; } catch { /* Legacy malformed JSON remains unassessed. */ }
-  return { severity: row.severity, cvssScore: row.cvssScore, impactAssessment };
+  return { severity: row.severity, category: row.category, cvssScore: row.cvssScore, impactAssessment };
 }
 function compareRows(a: PriorityRow, b: PriorityRow): number {
   return compareFindingsBySeverity(priorityFinding(a), priorityFinding(b)) || b.timestamp - a.timestamp || b.id.localeCompare(a.id);
@@ -169,7 +169,7 @@ function compareRows(a: PriorityRow, b: PriorityRow): number {
 function renderPriority(row: FindingRow): void {
   console.log(`  ${chalk.white.bold(row.title)}`);
   const attacker = describeAttackerImpact(priorityFinding(row));
-  if (attacker) console.log(`  ${chalk.gray("What an attacker can do:")} ${attacker.can}`);
+  if (attacker) console.log(`  ${chalk.gray(`${attacker.label ?? "What an attacker can do"}:`)} ${attacker.can}`);
   console.log(`  ${chalk.gray("Technical severity:")} ${severityColor(row.severity)(row.severity)}${row.cvssScore != null ? `  CVSS: ${row.cvssScore}` : ""}${row.cvssVector ? `  CVSS vector: ${row.cvssVector}` : ""}  ${statusColor(row.status)(row.status)}  ${triageColor(row.triageStatus)(String(row.triageStatus ?? "new"))}`);
 }
 

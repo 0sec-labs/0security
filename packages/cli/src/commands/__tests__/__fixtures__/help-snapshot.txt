@@ -4,27 +4,29 @@ Usage: 0 [options] [command]
 Security sentinels for your repositories. Run 0 to open the console.
 
 Options:
-  -h, --help               display help for command
-  -p, --print <prompt>     Run one prompt headless: only the answer goes to stdout
-  -c, --continue           With -p: continue the most recent thread
-  -r, --resume <id>        With -p: continue a saved thread
+  -h, --help                       display help for command
+  -p, --print <prompt>             Run one prompt headless: only the answer goes to stdout
+  -c, --continue                   With -p: continue the most recent thread
+  -r, --resume <id>                With -p: continue a saved thread
 
 Work:
-  scan [options] <target>  Scan a folder or git repository for security bugs; prints the findings as
-                           a report
-  probe [options] <url>    Send adversarial messages to a live model or agent endpoint and report
-                           the ones it obeys
-  sbom                     Generate an SBOM from lockfiles, check one against known advisories, and
-                           scan model files
-  findings [options]       Browse findings and change their status
-  threads                  Start, follow and stop threads
-  sentinels                Create, run and change Sentinels
+  scan [options] <target>          Scan a folder or git repository for security bugs; prints the
+                                   findings as a report
+  threat-model [options] [folder]  Draft the repository's threat model as a file for people to
+                                   review (optionally as a pull request)
+  probe [options] <url>            Send adversarial messages to a live model or agent endpoint and
+                                   report the ones it obeys
+  sbom                             Generate an SBOM from lockfiles, check one against known
+                                   advisories, and scan model files
+  findings [options]               Browse findings and change their status
+  threads                          Start, follow and stop threads
+  sentinels                        Create, run and change Sentinels
 
 Setup:
-  skills                   Skills and extensions: list, add
-  models                   Models and provider connections
-  computers                Remote computers that run 0
-  config                   Settings, API keys, team and setup checks (config doctor)
+  skills                           Skills and extensions: list, add
+  models                           Models and provider connections
+  computers                        Remote computers that run 0
+  config                           Settings, API keys, team and setup checks (config doctor)
 
 Run `0 <command>` to list its subcommands; `0 <command> <subcommand> --help` for flags.
 
@@ -1221,6 +1223,17 @@ Options:
                              their hits to the scan as leads; off skips them (default: "auto")
   --scanner <id>             Pattern scanner for the pre-pass (foxguard, semgrep, opengrep); repeat
                              to use several (default: foxguard)
+  --context <file>           Give the scan this file (a threat model, notes on who may do what) as
+                             lower-priority background; repeat for several. It can steer what the
+                             scan weighs but cannot change how it works
+  --policy <file-or-folder>  Check the code against these Markdown policies (a file or a folder of
+                             .md files) and report pass or fail for each; repeat for several. Runs
+                             the policy-check skill
+  --org-policy <folder>      An organisation's policy folder: evaluated first, and wins when a
+                             --policy says otherwise or uses the same id; repeat for several
+  --repo-context             Also read .0/threat-model.md from the scanned folder as context. Off by
+                             default: a change under review can edit that file; in CI pass the base
+                             branch's copy with --context instead
   --skill <id>               Skill that holds the scan method (default: "scan")
   --model <model>            Model for the scan thread (default: gpt-6-luna)
   --timeout <seconds>        Maximum seconds to wait for the scan (default: "3600")
@@ -2216,6 +2229,27 @@ Options:
   --computers-config <path>  Operator computer connection registry JSON file
   --db-path <path>           Control database of the local engine to attach to
   --format <format>          Output: text or json (choices: "text", "json")
+  -h, --help                 display help for command
+
+### 0 threat-model
+Usage: 0 threat-model [options] [folder]
+
+Draft the repository's threat model as a file for people to review (optionally as a pull request)
+
+Options:
+  --pr                       Commit the file on the branch 0/threat-model in a separate git work
+                             tree and open or update a pull request
+  --base <branch>            With --pr: the branch to start from and open the pull request against
+                             (default: the remote's default branch)
+  --format <format>          json prints the outcome as JSON
+  --budget <usd>             Stop when the estimated spend reaches this many USD (default: "3")
+  --model <model>            Model for the thread (default: gpt-6-luna)
+  --timeout <seconds>        Maximum seconds to wait (default: "1800")
+  --engine-url <url>         Attach directly to a running trusted engine
+  --engine-token-env <name>  Environment variable holding the attached engine token
+  --computer <id>            Use a registered remote computer
+  --computers-config <path>  Operator computer connection registry JSON file
+  --db-path <path>           Control database of the local engine to attach to
   -h, --help                 display help for command
 
 ### 0 web (hidden)

@@ -21,6 +21,10 @@ const SECTIONS: Readonly<Record<string, Build>> = {
     (await import("./scan.js")).registerScanCommand(root);
   },
 
+  async "threat-model"(root) {
+    (await import("./threat-model.js")).registerThreatModelCommand(root);
+  },
+
   async probe(root) {
     (await import("./probe.js")).registerProbeCommand(root);
   },

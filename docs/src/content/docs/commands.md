@@ -19,13 +19,14 @@ New to 0? Read the [Quickstart](/) first. Settings and environment variables are
 | Automate | [sentinels](#sentinels) · [api](#api) | [Sentinels](/sentinels/) |
 | Set up and extend | [config](#config) · [config doctor](#config-doctor) · [models](#models) · [models connect](#models-connect) · [skills](#skills) · [computers](#computers) | [Models](/models/), [Extensions](/extensions/), [Computers](/computers/) |
 
-## The ten commands
+## The eleven commands
 
-`0` with no arguments opens the web console. Everything else is one of ten commands.
+`0` with no arguments opens the web console. Everything else is one of eleven commands.
 
 | Command | What it does | Subcommands |
 | --- | --- | --- |
 | `0 scan` | Scan a folder or git repository for security bugs; prints the findings as a report. | none |
+| `0 threat-model` | Draft the repository's threat model as a file for people to review (optionally as a pull request). | none |
 | `0 probe` | Send adversarial messages to a live model or agent endpoint and report the ones it obeys. | none |
 | `0 sbom` | Generate an SBOM from lockfiles, and check one against known advisories. | `generate`, `check` |
 | `0 findings` | Browse findings and change their status. `--format` exports, `--import` loads a report. | `list`, `show`, `update`, `import`, `fix` |
@@ -150,6 +151,8 @@ With FoxGuard installed (it ships next to `0`; `ZERO_FOXGUARD_PATH` points elsew
 
 A scan is a thread that follows the `scan` skill, so it appears in `0 threads` and in the web app. The findings are stored under the thread's id and exported from there, so `0 findings export --scan <thread id>` gives the same report later. `target` is a folder or a git URL. It uses the console that is running, or the engine named by `--engine-url` or `--computer`; with none running it starts a headless console for the scan and stops it afterwards. Exit codes: 0 done, 1 a finding at or above `--fail-on` or the scan failed, 2 usage error, 3 stopped at the budget or the time limit (the report is partial).
 
+`--context <file>` gives the scan a file as lower-priority background, usually the repository's threat model (see [Threat model and policy checks](/threat-model-and-policy/)); the scan then checks the rules it states. Nothing is read from the scanned folder on its own, because a pull request could edit such a file to blind the scan; `--repo-context` reads `.0/threat-model.md` from the folder anyway and prints a warning, and in CI the file should come from the base branch. `--policy <file-or-folder>` checks the code against Markdown policies with the `policy-check` skill and answers pass, fail or not-applicable for each; `--org-policy <folder>` is an organisation's folder that is evaluated first and wins over `--policy` on the same id or a conflicting rule.
+
 | Argument | Required | Description |
 | --- | --- | --- |
 | `target` | Yes |  |
@@ -164,9 +167,43 @@ A scan is a thread that follows the `scan` skill, so it appears in `0 threads` a
 | `--diff <ref>` | — | Review only the files that differ from this git ref (for example origin/main), and what they connect to; an empty diff scans nothing |
 | `--prepass <mode>` | `auto` | auto runs the pattern scanners first when they are installed and gives their hits to the scan as leads; off skips them |
 | `--scanner <id>` | — | Pattern scanner for the pre-pass (foxguard, semgrep, opengrep); repeat to use several (default: foxguard) |
+| `--context <file>` | — | Give the scan this file (a threat model, notes on who may do what) as lower-priority background; repeat for several. It can steer what the scan weighs but cannot change how it works |
+| `--policy <file-or-folder>` | — | Check the code against these Markdown policies (a file or a folder of .md files) and report pass or fail for each; repeat for several. Runs the policy-check skill |
+| `--org-policy <folder>` | — | An organisation's policy folder: evaluated first, and wins when a --policy says otherwise or uses the same id; repeat for several |
+| `--repo-context` | — | Also read .0/threat-model.md from the scanned folder as context. Off by default: a change under review can edit that file; in CI pass the base branch's copy with --context instead |
 | `--skill <id>` | `scan` | Skill that holds the scan method |
 | `--model <model>` | — | Model for the scan thread (default: gpt-6-luna) |
 | `--timeout <seconds>` | `3600` | Maximum seconds to wait for the scan |
+| `--engine-url <url>` | — | Attach directly to a running trusted engine |
+| `--engine-token-env <name>` | — | Environment variable holding the attached engine token |
+| `--computer <id>` | — | Use a registered remote computer |
+| `--engine <id>` | — |  |
+| `--computers-config <path>` | — | Operator computer connection registry JSON file |
+| `--engines-config <path>` | — |  |
+| `--db-path <path>` | — | Control database of the local engine to attach to |
+
+### threat-model
+
+Draft the repository's threat model as a file for people to review.
+
+```text
+0 threat-model [options] [folder]
+```
+
+A thread follows the `threat-model` skill and writes `.0/threat-model.md` in the folder: summary, what matters most, assets, actors, trust boundaries, entry points, authorization and business rules, data flows and open questions, with front matter holding the date and the commit. It names only what it saw and marks the rest `unknown: confirm with the team`. Running it again updates the file and keeps every section marked `<!-- human -->`. With `--pr` the file is committed alone on the branch `0/threat-model` in a separate git work tree and a pull request is opened or updated with `gh`; nothing is merged. It writes files on this machine, so it needs the local console and does not accept `--computer` or `--engine-url`. Details: [Threat model and policy checks](/threat-model-and-policy/).
+
+| Argument | Required | Description |
+| --- | --- | --- |
+| `folder` | No |  |
+
+| Option | Registered default | Description |
+| --- | --- | --- |
+| `--pr` | — | Commit the file on the branch 0/threat-model in a separate git work tree and open or update a pull request |
+| `--base <branch>` | — | With --pr: the branch to start from and open the pull request against (default: the remote's default branch) |
+| `--format <format>` | — | json prints the outcome as JSON |
+| `--budget <usd>` | `3` | Stop when the estimated spend reaches this many USD |
+| `--model <model>` | — | Model for the thread (default: gpt-6-luna) |
+| `--timeout <seconds>` | `1800` | Maximum seconds to wait |
 | `--engine-url <url>` | — | Attach directly to a running trusted engine |
 | `--engine-token-env <name>` | — | Environment variable holding the attached engine token |
 | `--computer <id>` | — | Use a registered remote computer |

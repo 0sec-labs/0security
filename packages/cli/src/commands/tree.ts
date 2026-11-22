@@ -43,11 +43,13 @@ import { registerGithubCommand } from "./github.js";
 import { registerUsageCommand } from "./usage.js";
 import { registerAuditLogCommand } from "./audit-log.js";
 import { registerScanCommand } from "./scan.js";
+import { registerThreatModelCommand } from "./threat-model.js";
 import { registerSbomCommand } from "./sbom.js";
 import { registerProbeCommand } from "./probe.js";
 
 export function registerCommandTree(program: Command): void {
   registerScanCommand(program);
+  registerThreatModelCommand(program);
   registerSbomCommand(program);
   registerProbeCommand(program);
   // Evidence.

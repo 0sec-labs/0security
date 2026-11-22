@@ -39,7 +39,7 @@ export function adoptCommands(program: Command, only?: string): void {
 }
 
 export const HELP_GROUPS: readonly (readonly [string, readonly string[]])[] = [
-  ["Work", ["scan", "probe", "sbom", "findings", "threads", "sentinels"]],
+  ["Work", ["scan", "threat-model", "probe", "sbom", "findings", "threads", "sentinels"]],
   ["Setup", ["skills", "models", "computers", "config"]],
 ];
 
@@ -84,8 +84,9 @@ const examplesBlock = (lines: readonly string[]): string => `Examples:\n${lines.
 
 /** Short, real examples for the visible commands, keyed by command path. */
 const EXAMPLES: Readonly<Record<string, readonly string[]>> = {
-  scan: ["0 scan ~/code/app", "0 scan ~/code/app --format sarif -o scan.sarif --fail-on high", "0 scan https://github.com/acme/app --budget 2 --format json"],
+  scan: ["0 scan ~/code/app", "0 scan ~/code/app --format sarif -o scan.sarif --fail-on high", "0 scan https://github.com/acme/app --budget 2 --format json", "0 scan . --context .0/threat-model.md --policy ./policies --org-policy ~/org-policies"],
   probe: ["0 probe https://api.example.com/v1/chat/completions -H \"Authorization: Bearer $OPENAI_API_KEY\" --model gpt-4o-mini", "0 probe https://app.example.com/api/chat --body '{\"message\":\"{{prompt}}\"}' --response-path reply", "0 probe https://app.example.com/api/chat --secret sk-live-1234 --format sarif -o probe.sarif --fail-on medium"],
+  "threat-model": ["0 threat-model", "0 threat-model ~/code/app --pr", "0 scan ~/code/app --context ~/code/app/.0/threat-model.md"],
   sbom: ["0 sbom generate . -o sbom.cdx.json", "0 sbom check sbom.cdx.json", "0 sbom check sbom.cdx.json --format json", "0 sbom scan-models ./models"],
   "sbom scan-models": ["0 sbom scan-models ./models", "0 sbom scan-models model.pkl", "0 sbom scan-models . --format sarif > models.sarif"],
   "sbom generate": ["0 sbom generate . -o sbom.cdx.json", "0 sbom generate ~/code/app --name app"],
