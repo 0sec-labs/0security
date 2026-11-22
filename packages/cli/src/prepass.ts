@@ -3,7 +3,7 @@
  * into leads. A scanner that is missing, fails or times out is skipped with a note, except where `--rules` needs it.
  */
 import { execFile } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -18,6 +18,8 @@ export interface PrePassIo {
   note?: (text: string) => void;
   /** Overrides every scanner's time limit (tests). */
   timeoutSeconds?: number;
+  /** When true, honors in-repo scanner config and ignore files (.gitleaks.toml, .trivyignore). Off by default. */
+  repoIgnores?: boolean;
 }
 
 function tail(error: unknown): string {
@@ -28,53 +30,76 @@ function tail(error: unknown): string {
 export async function runPrePass(folder: string, scanners: string[], rules: string[] = [], io: PrePassIo = {}): Promise<PrePassLeads | undefined> {
   const env = io.env ?? process.env;
   const note = io.note ?? (() => undefined);
-  const lists = await Promise.all(scanners.map(async id => {
-    const spec = scannerById(id);
-    if (!spec) return undefined;
-    const binary = [spec.pathEnv ? env[spec.pathEnv] : undefined, join(homeStateDir(), "bin", spec.command), spec.command].filter((value): value is string => !!value).find(candidate => candidate === spec.command || existsSync(candidate));
-    const useRules = rules.length > 0 && scannerTakesRules(spec);
-    const missing = () => {
-      if (useRules) throw new Error(`--rules needs ${spec.id}, which is not installed.`);
-      if (spec.install) note(`${spec.id} is not installed, so it was skipped. Install it: ${spec.install}`);
-      return undefined;
-    };
-    if (!binary) return missing();
-    const seconds = io.timeoutSeconds ?? spec.timeoutSeconds ?? DEFAULT_TIMEOUT_SECONDS;
-    // A scanner such as Checkov writes its SARIF to a file in a scratch folder, not to standard output.
-    const out = spec.outputFile ? mkdtempSync(join(tmpdir(), "0-scanner-")) : "";
-    const report = (): string | undefined => { if (!spec.outputFile) return undefined; try { return readFileSync(join(out, spec.outputFile), "utf8"); } catch { return undefined; } };
-    try {
-      let stdout: string;
-      try { stdout = (await exec(binary, scannerArguments(spec, folder, useRules ? rules : undefined, out), { env, timeout: seconds * 1000, maxBuffer: 128 * 1024 * 1024, windowsHide: true })).stdout; if (spec.outputFile) stdout = report() ?? stdout; }
-      // A scanner that exits non-zero because it found something still wrote its report.
-      catch (error) {
-        const failure = error as { stdout?: string; killed?: boolean; signal?: string; code?: string };
-        stdout = report() ?? failure.stdout ?? "";
-        if (!stdout.trim().startsWith("{")) {
-          if (failure.code === "ENOENT") return missing();
-          if (failure.killed || failure.signal === "SIGTERM") {
-            note(`${spec.id} did not finish within ${seconds} seconds and was skipped.`);
-            if (useRules) throw new Error(`${spec.id} did not finish within ${seconds} seconds.`);
+  const repoIgnores = Boolean(io.repoIgnores);
+
+  let scratch = "";
+  let emptyConfig = "";
+  let emptyIgnore = "";
+  let gitleaksConfig = "";
+
+  if (!repoIgnores) {
+    scratch = mkdtempSync(join(tmpdir(), "0-prepass-isolation-"));
+    emptyConfig = join(scratch, "empty");
+    emptyIgnore = join(scratch, "empty");
+    gitleaksConfig = join(scratch, "gitleaks.toml");
+    writeFileSync(emptyConfig, "");
+    writeFileSync(gitleaksConfig, 'title = "0 default gitleaks config"\n\n[extend]\nuseDefault = true\n');
+  }
+
+  try {
+    const lists = await Promise.all(scanners.map(async id => {
+      const spec = scannerById(id);
+      if (!spec) return undefined;
+      const binary = [spec.pathEnv ? env[spec.pathEnv] : undefined, join(homeStateDir(), "bin", spec.command), spec.command].filter((value): value is string => !!value).find(candidate => candidate === spec.command || existsSync(candidate));
+      const useRules = rules.length > 0 && scannerTakesRules(spec);
+      const missing = () => {
+        if (useRules) throw new Error(`--rules needs ${spec.id}, which is not installed.`);
+        if (spec.install) note(`${spec.id} is not installed, so it was skipped. Install it: ${spec.install}`);
+        return undefined;
+      };
+      if (!binary) return missing();
+      const seconds = io.timeoutSeconds ?? spec.timeoutSeconds ?? DEFAULT_TIMEOUT_SECONDS;
+      // A scanner such as Checkov writes its SARIF to a file in a scratch folder, not to standard output.
+      const out = spec.outputFile ? mkdtempSync(join(tmpdir(), "0-scanner-")) : "";
+      const report = (): string | undefined => { if (!spec.outputFile) return undefined; try { return readFileSync(join(out, spec.outputFile), "utf8"); } catch { return undefined; } };
+      try {
+        let stdout: string;
+        const isolationOptions = { repoIgnores, emptyConfig, emptyIgnore, gitleaksConfig };
+        try { stdout = (await exec(binary, scannerArguments(spec, folder, useRules ? rules : undefined, out, isolationOptions), { env, timeout: seconds * 1000, maxBuffer: 128 * 1024 * 1024, windowsHide: true })).stdout; if (spec.outputFile) stdout = report() ?? stdout; }
+        // A scanner that exits non-zero because it found something still wrote its report.
+        catch (error) {
+          const failure = error as { stdout?: string; killed?: boolean; signal?: string; code?: string };
+          stdout = report() ?? failure.stdout ?? "";
+          if (!stdout.trim().startsWith("{")) {
+            if (failure.code === "ENOENT") return missing();
+            if (failure.killed || failure.signal === "SIGTERM") {
+              note(`${spec.id} did not finish within ${seconds} seconds and was skipped.`);
+              if (useRules) throw new Error(`${spec.id} did not finish within ${seconds} seconds.`);
+              return undefined;
+            }
+            if (useRules) throw new Error(`${spec.id} could not run your rules: ${tail(error)}`);
+            note(`${spec.id} failed and was skipped: ${tail(error)}`);
             return undefined;
           }
-          if (useRules) throw new Error(`${spec.id} could not run your rules: ${tail(error)}`);
-          note(`${spec.id} failed and was skipped: ${tail(error)}`);
-          return undefined;
         }
+        const parsed = parseSarif(stdout, { tool: spec.id, roots: [folder] }).findings;
+        const leads = spec.reportsSecrets ? parsed.map(scrubSecretLead) : parsed;
+        return { tool: spec.id, leads: useRules ? leads.map(lead => ({ ...lead, ruleSource: "custom" as const })) : leads };
+      } catch (error) {
+        if (useRules) throw error;
+        note(`${spec.id} output could not be read and was skipped: ${(error as Error).message}`);
+        return undefined;
+      } finally {
+        if (out) rmSync(out, { recursive: true, force: true });
       }
-      const parsed = parseSarif(stdout, { tool: spec.id, roots: [folder] }).findings;
-      const leads = spec.reportsSecrets ? parsed.map(scrubSecretLead) : parsed;
-      return { tool: spec.id, leads: useRules ? leads.map(lead => ({ ...lead, ruleSource: "custom" as const })) : leads };
-    } catch (error) {
-      if (useRules) throw error;
-      note(`${spec.id} output could not be read and was skipped: ${(error as Error).message}`);
-      return undefined;
-    } finally {
-      if (out) rmSync(out, { recursive: true, force: true });
+    }));
+    const ran = lists.filter((entry): entry is NonNullable<typeof entry> => entry !== undefined);
+    if (!ran.length) return undefined;
+    const leads = ran.flatMap(entry => entry.leads);
+    return { tools: ran.map(entry => entry.tool), leads, total: leads.length };
+  } finally {
+    if (scratch) {
+      try { rmSync(scratch, { recursive: true, force: true }); } catch { /* ignore cleanup error */ }
     }
-  }));
-  const ran = lists.filter((entry): entry is NonNullable<typeof entry> => entry !== undefined);
-  if (!ran.length) return undefined;
-  const leads = ran.flatMap(entry => entry.leads);
-  return { tools: ran.map(entry => entry.tool), leads, total: leads.length };
+  }
 }

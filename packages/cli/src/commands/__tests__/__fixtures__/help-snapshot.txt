@@ -1338,6 +1338,9 @@ Options:
   --repo-context             Also read .0/threat-model.md from the scanned folder as context. Off by
                              default: a change under review can edit that file; in CI pass the base
                              branch's copy with --context instead
+  --repo-ignores             Also honor ignore files and scanner configuration from the scanned
+                             folder (.gitleaks.toml, .gitleaksignore, .trivyignore). Off by default:
+                             a change under review can use them to hide secrets or misconfigurations
   --skill <id>               Skill that holds the scan method (default: "scan")
   --model <model>            Model for the scan thread (default: gpt-6-luna)
   --batches <mode>           auto reviews a large folder in batches, one thread per group of entry
