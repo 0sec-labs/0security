@@ -121,8 +121,10 @@ To make a scan weigh business logic and authorization, give it a reviewed threat
 | `--concurrency <n>` | Batches that run at the same time, up to 3 (default 1). |
 | `--resume <scan>` | Continue the entry points an earlier scan did not reach. |
 | `--coverage [scan]` | Print what an earlier scan reviewed and exit. |
+| `--allow-partial` | Exit by the findings alone when the scan stops before it reviews everything. The report still says it is partial. |
+| `--plan` | List the entry points, batches and a rough cost, then exit. Calls no model and writes nothing. |
 
-Exit codes: `0` done, `1` a finding at or above `--fail-on` or the scan failed, `2` usage error, `3` stopped at the budget or the time limit, or entry points were not reached (the report is partial).
+Exit codes: `0` done, `1` a finding at or above `--fail-on` or the scan failed, `2` usage error, `3` not finished: stopped at the budget or the time limit, or entry points were not reached (the report is partial; this is not a failure). `--allow-partial` makes a partial scan exit 0, or 1 with `--fail-on`.
 
 `0 scan` uses the console that is running, or the engine named by `--engine-url` or `--computer`. With none running it starts one and stops it afterwards.
 
@@ -143,14 +145,31 @@ The report says plainly how much was reviewed:
 reviewed 41 of 57 entry points; 16 not reached (budget)
 ```
 
-In JSON this is a `coverage` object with the counts, the counts by kind and the first entry points not reached. SARIF carries it in the run's `properties`. The exit code is 3 whenever anything is not reached, so a pipeline cannot read a partial review as a full one. A folder with no findings and entry points not reached has not been shown to be clean.
+In JSON this is a `coverage` object with the counts, the counts by kind and the first entry points not reached. SARIF carries it in the run's `properties`. The exit code is 3 whenever anything is not reached, so a pipeline cannot read a partial review as a full one. Exit 3 means the scan is not finished. It does not mean the scan failed, and the findings so far are kept. A folder with no findings and entry points not reached has not been shown to be clean.
 
-Continue where a scan stopped. The report and the stderr line print the scan id.
+A job that should not fail on a partial scan adds `--allow-partial`. The exit code then follows the findings alone (0, or 1 with `--fail-on`). The JSON `status` is `partial` and `coverage` stays in the report, so nothing reads it as a full review.
+
+When a scan stops early, it prints what stopped it, how much is left and the exact command that continues it. The same text is in the Markdown report, and in JSON as `coverage.stoppedBy` and `coverage.resume`.
+
+```text
+Stopped by the $5 budget; 16 of 57 entry points not reached.
+Continue with: 0 scan /home/you/code/app --resume scan-1f3a9c
+```
+
+Run that command, or use `latest` for the newest scan of the folder. Read the ledger with `--coverage`:
 
 ```bash
 0 scan ./your-repo --resume latest
 0 scan ./your-repo --coverage
 ```
+
+To see the size of a scan before you run it, use `--plan`. It lists the entry points by kind, the batches `--batch-size` would make, whether `--batches auto` would batch the folder and a rough cost range. It calls no model and no scanner, and writes nothing. `--format json` prints the same as JSON.
+
+```bash
+0 scan ./your-repo --plan
+```
+
+The cost is a guess. It scales one measurement: about $0.035 per batch on a 40-file test app. Cost for large repositories is not measured. It varies 2 to 3 times with the code and the model, and larger files cost more, so treat the range as an order of magnitude and set `--budget` to what you accept to spend.
 
 `--resume` runs only the pending entry points and reports the findings of every thread of that scan. It refuses when the folder's git HEAD changed since the scan began; `--force` continues anyway. `--coverage` prints the ledger: every unit with its status and the reason it was not reached.
 
@@ -162,7 +181,7 @@ The patterns over-match on purpose, and they cannot see a framework they do not 
 
 The JSON report has `schemaVersion: 1` and these fields:
 
-- `status`: `complete`, `partial`, `budget_exhausted`, `timed_out` or `failed`. `partial` means entry points were not reached for a reason other than the budget or time limit.
+- `status`: `complete`, `partial`, `budget_exhausted`, `timed_out` or `failed`. `partial` means entry points were not reached for a reason other than the budget or time limit. With `--allow-partial`, every early stop is `partial`; `coverage.stoppedBy` says why.
 - With batches: `coverage` (`complete`, `statement`, `entryPoints` and `otherGroups` with `total`, `reviewed`, `pending` and `skipped`, `byKind`, `notReached`, `pendingUnits`) and every batch's `threadIds`.
 - `counts` by severity, and the model's closing `summary`.
 - `target`: the folder's name, or the git URL without credentials. It is the same on every machine.

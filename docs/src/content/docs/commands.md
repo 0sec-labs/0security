@@ -137,7 +137,7 @@ Check this machine and the engine. `--fix` repairs the local database. The subco
 Scan a folder or git repository for security bugs and print the findings as a report.
 
 ```text
-0 scan [options] <target>
+0 scan [options] [target]
 ```
 
 Run it on a folder or a git URL:
@@ -155,7 +155,15 @@ Exit codes:
 - 0: done
 - 1: a finding at or above `--fail-on`, or the scan failed
 - 2: usage error
-- 3: stopped at the budget or the time limit, or entry points were not reached; the report is partial
+- 3: not finished. The scan stopped at the budget or the time limit, or entry points were not reached, so the report is partial. This is not a failure. Findings so far are kept, and `--resume` continues the scan
+
+Add `--allow-partial` when a partial scan should not fail the job. The exit code then follows the findings alone: 0, or 1 with `--fail-on`. The report still says it is partial.
+
+To see what a scan involves before you run it, use `--plan`. It lists the entry points, the batches and a rough cost, and calls no model:
+
+```bash
+0 scan ~/code/app --plan
+```
 
 To review a change instead of the whole folder, pass `--diff <ref>`, for example in a pull request job:
 
@@ -209,7 +217,7 @@ A hit from your rules is a lead like any other. The scan checks it against the c
 
 | Argument | Required | Description |
 | --- | --- | --- |
-| `target` | Yes |  |
+| `target` | No |  |
 
 | Option | Registered default | Description |
 | --- | --- | --- |
@@ -234,6 +242,8 @@ A hit from your rules is a lead like any other. The scan checks it against the c
 | `--resume <scan>` | — | Continue the units an earlier batched scan of this folder did not reach (a scan id from its report, or latest); refuses when the git HEAD changed unless --force |
 | `--force` | — | With --resume: continue even though the folder's git HEAD changed |
 | `--coverage [scan]` | — | Print the coverage ledger of a batched scan of this folder (the latest, or the id given) and exit; --format json for JSON |
+| `--allow-partial` | — | Exit by the findings alone (0, or 1 with --fail-on) when the scan stops before it reviews everything; the report still says it is partial |
+| `--plan` | — | List the entry points, the batches and a rough cost range for the folder, then exit; calls no model and writes nothing |
 | `--timeout <seconds>` | `3600` | Maximum seconds to wait for the scan |
 | `--engine-url <url>` | — | Attach directly to a running trusted engine |
 | `--engine-token-env <name>` | — | Environment variable holding the attached engine token |
@@ -261,7 +271,14 @@ Install Checkov with `brew install checkov` or `pipx install checkov`, or set `Z
 
 `--policy <file-or-folder>` checks the code against Markdown policies with the `policy-check` skill and answers pass, fail or not-applicable for each. `--org-policy <folder>` is an organisation's policy folder. It is evaluated first and wins over `--policy` on the same id or a conflicting rule.
 
-A folder with more than 8 entry points, or more than 150 source files, is reviewed in batches: one thread per group of entry points, each recorded in a coverage ledger. The report states what was reviewed, for example `reviewed 41 of 57 entry points; 16 not reached (budget)`, and the exit code is 3 while anything is not reached. Continue with `--resume`, or read the ledger with `--coverage`:
+A folder with more than 8 entry points, or more than 150 source files, is reviewed in batches: one thread per group of entry points, each recorded in a coverage ledger. The report states what was reviewed, for example `reviewed 41 of 57 entry points; 16 not reached (budget)`, and the exit code is 3 while anything is not reached. When a scan stops early, it prints what stopped it, how much is left and the command that continues it:
+
+```text
+Stopped by the $5 budget; 16 of 57 entry points not reached.
+Continue with: 0 scan /home/you/code/app --resume scan-1f3a9c
+```
+
+Run that command, or read the ledger with `--coverage`:
 
 ```bash
 0 scan ~/code/app --resume latest

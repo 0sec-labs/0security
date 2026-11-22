@@ -37,7 +37,7 @@ outputs:
     description: Path of the SARIF file the scan wrote.
     value: ${{ steps.scan.outputs.sarif }}
   exit-code:
-    description: "Exit code of the scan: 0 done, 1 findings at or above fail-on or the scan failed, 2 usage error, 3 stopped at the budget (partial)."
+    description: "Exit code of the scan: 0 done, 1 findings at or above fail-on or the scan failed, 2 usage error, 3 not finished: stopped at the budget or time limit, or entry points not reached (partial). The action does not fail the job on 3."
     value: ${{ steps.scan.outputs.code }}
 runs:
   using: composite
@@ -98,7 +98,7 @@ runs:
       run: |
         case "$CODE" in
           0) ;;
-          3) echo "::warning::The scan stopped at its budget; the findings are partial." ;;
+          3) echo "::warning::The scan stopped before it reviewed everything, so the findings are partial. The job does not fail on this. Raise budget, or continue with: 0 scan <folder> --resume latest" ;;
           1) echo "::error::The scan found a finding at or above fail-on, or it failed. See the log above."; exit 1 ;;
           *) echo "::error::The scan exited with code $CODE."; exit 1 ;;
         esac

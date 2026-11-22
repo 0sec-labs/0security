@@ -51,7 +51,9 @@ Set the key of the provider for your model (see [Models](/models/)). The default
 | `upload` | `true` | Upload to code scanning. Needs `security-events: write`. |
 | `github-token` | the job's token | Token used for the upload. |
 
-Outputs are `sarif` (the file path) and `exit-code`. The exit code is 0 when the scan finishes, 1 when a finding is at or above `fail-on` or the scan fails, 2 for a usage error and 3 when the scan stops at the budget.
+Outputs are `sarif` (the file path) and `exit-code`. The exit code is 0 when the scan finishes, 1 when a finding is at or above `fail-on` or the scan fails, 2 for a usage error and 3 when the scan stops before it reviews everything.
+
+Exit code 3 means the scan is not finished, not that it failed. The action does not fail the job on it. It still uploads the findings so far, and the job log shows a warning that they are partial. A pull request diff is usually small enough to finish within the default budget. For a whole large folder, check the log for the warning, and run `0 scan <folder> --resume latest` with a higher `budget` to finish it. `fail-on` still fails the job on a finding in the part that was reviewed.
 
 ## Add your own rules
 
@@ -149,7 +151,7 @@ pipelines:
             - exit "$code"
 ```
 
-The exit codes are those of `0 scan`: 1 when a finding is at or above `--fail-on` or the scan failed, 2 for a usage error, 3 when the scan stopped at its budget. The scan step always passes so that the publish step can report; the publish step exits with the scan's code.
+The exit codes are those of `0 scan`: 1 when a finding is at or above `--fail-on` or the scan failed, 2 for a usage error, 3 when the scan stopped before it reviewed everything (not a failure; the scripts below map it to 0 after the upload). The scan step always passes so that the publish step can report; the publish step exits with the scan's code.
 
 ### Jenkins
 
