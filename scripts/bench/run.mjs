@@ -16,7 +16,7 @@ export const CONFIGS = ["generic", "skill", "foxguard", "checkov", "checkov-prep
 const DEFAULT_CONFIGS = ["generic", "skill"];
 
 export function parseArgs(argv) {
-  const o = { run: false, dryRun: false, repeat: 1, budget: 0.2, configs: DEFAULT_CONFIGS, fixtures: undefined, model: undefined, out: join(here, "results"), cli: join(repoRoot, "packages/cli/dist/index.js"), timeout: 900, batchSize: 8 };
+  const o = { run: false, dryRun: false, repeat: 1, budget: 0.2, configs: DEFAULT_CONFIGS, fixtures: undefined, model: undefined, out: join(here, "results"), cli: join(repoRoot, "packages/cli/dist/index.js"), timeout: 900, batchSize: 8, concurrency: 1 };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const next = () => { if (i + 1 >= argv.length) throw new Error(`${a} needs a value`); return argv[++i]; };
@@ -31,6 +31,7 @@ export function parseArgs(argv) {
     else if (a === "--cli") o.cli = resolve(next());
     else if (a === "--timeout") o.timeout = Number(next());
     else if (a === "--batch-size") o.batchSize = Number(next());
+    else if (a === "--concurrency") o.concurrency = Number(next());
     else throw new Error(`unknown option ${a}`);
   }
   if (o.run === o.dryRun) throw new Error("pass exactly one of --run (spends model money) or --dry-run (free)");
@@ -82,7 +83,7 @@ export function scanArgs({ fixture, config }, folder, outFile, o) {
   else if (config === "checkov-prepass") args.push("--prepass", "auto", "--scanner", "checkov");
   else args.push("--prepass", "off");
   if (config === "single") args.push("--batches", "off");
-  if (config === "batched") args.push("--batches", "on", "--batch-size", String(o.batchSize));
+  if (config === "batched") args.push("--batches", "on", "--batch-size", String(o.batchSize), "--concurrency", String(o.concurrency));
   if (config === "skill") args.push("--skill", fixture.answer.skill);
   return args;
 }
