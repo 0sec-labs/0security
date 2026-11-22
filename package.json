@@ -34,6 +34,7 @@
     "setup:0verse": "node scripts/setup-0verse.mjs",
     "lint": "pnpm --filter \"!@0/docs\" -r exec tsc --noEmit",
     "check:architecture": "node scripts/check-architecture.mjs",
+    "check:egress-inventory": "node scripts/check-egress-inventory.mjs && node --test scripts/check-egress-inventory.test.mjs",
     "test": "pnpm test:public",
     "test:changed": "node scripts/test-changed.mjs",
     "test:test-changed": "node --test scripts/test-changed.test.mjs",

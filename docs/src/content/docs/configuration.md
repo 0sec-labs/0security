@@ -257,6 +257,7 @@ Any one of these turns telemetry off. Environment variables beat every saved set
 | How | Effect |
 | --- | --- |
 | `ZERO_NO_TELEMETRY=1`, `DO_NOT_TRACK=1` or `ZERO_OFFLINE=1` | Turns off usage metrics and crash reports. Any value except empty, `0`, `false` or `no` counts. An organization can set one for every operator, and it overrides each person's settings. |
+| `ZERO_ENTERPRISE=1` | No-egress mode. Does everything the row above does, and also turns off update checks, model catalog and price lookups, web search, remote extension sources and the other third-party calls. Only the model endpoint you configured, and destinations you name yourself, stay. Project settings cannot change it. See [Data flow and no-egress mode](/data-flow/). |
 | `0 config set analyticsLevel off` | Turns off usage metrics. `ZERO_ANALYTICS_LEVEL=off` does the same for one process. |
 | `0 config set diagnosticReporting off` | Turns off crash reports. Use `ask` to review each one first. |
 | Browser app, Settings, Privacy | The same two switches. |

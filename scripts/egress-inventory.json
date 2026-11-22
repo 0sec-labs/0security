@@ -1,0 +1,457 @@
+{
+  "description": "Every place in packages/ that can make an outbound network call. scripts/check-egress-inventory.mjs fails when a source file matches an outbound pattern and is not listed under `files` here. docs/src/content/docs/data-flow.md is the human-readable view; the same test keeps its destinations in sync.",
+  "entries": [
+    {
+      "id": "usage-analytics-posthog",
+      "class": "automatic",
+      "enterprise": "blocked",
+      "destinations": [
+        "eu.i.posthog.com"
+      ],
+      "files": [
+        "packages/engine/src/telemetry/analytics-pipeline.ts"
+      ],
+      "when": "Batched while a command or the console runs, when analyticsLevel is usage and the build embeds a key.",
+      "sent": "Anonymous counters: version, OS, command name, outcome class.",
+      "disable": "analyticsLevel off, ZERO_NO_TELEMETRY, DO_NOT_TRACK, ZERO_OFFLINE, ZERO_ENTERPRISE."
+    },
+    {
+      "id": "usage-analytics-cloud",
+      "class": "automatic",
+      "enterprise": "blocked",
+      "destinations": [
+        "cloud.0.security"
+      ],
+      "files": [
+        "packages/engine/src/telemetry/analytics-pipeline.ts"
+      ],
+      "when": "Only when cloud credentials are configured.",
+      "sent": "The same usage events, to the signed-in cloud account.",
+      "disable": "Same switches; ZERO_ENTERPRISE also stops cloud credentials from loading."
+    },
+    {
+      "id": "run-contribution",
+      "class": "automatic",
+      "enterprise": "blocked",
+      "destinations": [
+        "cloud.0.security"
+      ],
+      "files": [
+        "packages/engine/src/telemetry/run-contribution.ts"
+      ],
+      "when": "Only with cloud credentials and an explicit contribution permission.",
+      "sent": "A sealed run capture the organization opted into.",
+      "disable": "Same switches; ZERO_ENTERPRISE."
+    },
+    {
+      "id": "crash-and-feedback",
+      "class": "automatic",
+      "enterprise": "blocked",
+      "destinations": [
+        "Sentry ingest (embedded DSN or ZERO_SENTRY_DSN)",
+        "ZERO_FEEDBACK_URL or cloud.0.security"
+      ],
+      "files": [
+        "packages/cli/src/state/feedback.ts"
+      ],
+      "when": "A crash with diagnosticReporting automatic, or a feedback message the operator sends.",
+      "sent": "Redacted crash envelope, or the reviewed feedback text.",
+      "disable": "diagnosticReporting off, ZERO_NO_TELEMETRY, DO_NOT_TRACK, ZERO_OFFLINE, ZERO_ENTERPRISE."
+    },
+    {
+      "id": "update-check",
+      "class": "automatic",
+      "enterprise": "blocked",
+      "destinations": [
+        "api.github.com",
+        "github.com",
+        "raw.githubusercontent.com"
+      ],
+      "files": [
+        "packages/cli/src/utils/update-check.ts"
+      ],
+      "when": "Interactive start-up, console update status, 0 doctor upgrade.",
+      "sent": "A GET for the latest release tag; the installer is downloaded on upgrade.",
+      "disable": "updatePolicy off, ZERO_NO_UPDATE_CHECK, ZERO_OFFLINE, ZERO_ENTERPRISE (CI also skips the check)."
+    },
+    {
+      "id": "model-catalog-sync",
+      "class": "automatic",
+      "enterprise": "blocked",
+      "destinations": [
+        "models.dev"
+      ],
+      "files": [
+        "packages/cli/src/state/model-catalog-sync.ts"
+      ],
+      "when": "Console model picker refresh.",
+      "sent": "A GET of the public model list; nothing about the operator.",
+      "disable": "ZERO_NO_TELEMETRY, DO_NOT_TRACK, ZERO_OFFLINE, ZERO_ENTERPRISE."
+    },
+    {
+      "id": "pricing-discovery",
+      "class": "automatic",
+      "enterprise": "blocked",
+      "destinations": [
+        "openrouter.ai"
+      ],
+      "files": [
+        "packages/engine/src/shared/pricing-discovery.ts"
+      ],
+      "when": "A model has no built-in price.",
+      "sent": "A GET of the public OpenRouter model list.",
+      "disable": "ZERO_NO_TELEMETRY, DO_NOT_TRACK, ZERO_OFFLINE, ZERO_ENTERPRISE."
+    },
+    {
+      "id": "web-search-tool",
+      "class": "feature",
+      "enterprise": "blocked",
+      "destinations": [
+        "mcp.parallel.ai",
+        "html.duckduckgo.com"
+      ],
+      "files": [
+        "packages/engine/src/agent/tools.ts",
+        "packages/engine/src/agent/tools/web-search-parallel.ts"
+      ],
+      "when": "The agent calls web_search (on by default).",
+      "sent": "The model-written search query.",
+      "disable": "ZERO_FEATURE_WEB_SEARCH=0, or ZERO_ENTERPRISE (tool is removed and refuses)."
+    },
+    {
+      "id": "osv-advisory-lookup",
+      "class": "feature",
+      "enterprise": "blocked",
+      "destinations": [
+        "api.osv.dev"
+      ],
+      "files": [
+        "packages/engine/src/sbom/osv.ts"
+      ],
+      "when": "0 sbom check and findings evidence bundles that check advisories.",
+      "sent": "Package URLs of SBOM components.",
+      "disable": "Do not run the check; ZERO_ENTERPRISE refuses the lookup."
+    },
+    {
+      "id": "extension-git-source",
+      "class": "feature",
+      "enterprise": "blocked",
+      "destinations": [
+        "github.com or the https git host in the source"
+      ],
+      "files": [
+        "packages/engine/src/plugins/extensions/adapters/git-source.ts"
+      ],
+      "when": "Installing or updating an extension from a remote git source. Local folders never go out.",
+      "sent": "A shallow git fetch of one pinned commit.",
+      "disable": "Install from a local folder; ZERO_ENTERPRISE refuses remote sources."
+    },
+    {
+      "id": "extension-connector-health",
+      "class": "feature",
+      "enterprise": "blocked",
+      "destinations": [
+        "hosts declared by an installed connector"
+      ],
+      "files": [
+        "packages/engine/src/plugins/extensions/adapters/token-connector.ts"
+      ],
+      "when": "Console shows connector status.",
+      "sent": "A GET with the connector token to its declared health URL.",
+      "disable": "Do not install connectors; ZERO_ENTERPRISE reports health as unknown."
+    },
+    {
+      "id": "smolvm-provision",
+      "class": "feature",
+      "enterprise": "blocked",
+      "destinations": [
+        "github.com"
+      ],
+      "files": [
+        "packages/engine/src/runtime/smolvm-provision.ts"
+      ],
+      "when": "Explicit setup of the macOS sandbox runtime.",
+      "sent": "A GET of a pinned release archive, checked against a fixed hash.",
+      "disable": "Preinstall the runtime; ZERO_ENTERPRISE refuses the download."
+    },
+    {
+      "id": "skills-catalog",
+      "class": "feature",
+      "enterprise": "blocked",
+      "destinations": [
+        "api.github.com"
+      ],
+      "files": [
+        "packages/cli/src/web/skills-catalog.ts"
+      ],
+      "when": "Console skills directory preview or install.",
+      "sent": "Read-only GitHub API calls made through the local gh login.",
+      "disable": "ZERO_ENTERPRISE refuses; the bundled catalog list still shows."
+    },
+    {
+      "id": "github-repository-list",
+      "class": "feature",
+      "enterprise": "blocked",
+      "destinations": [
+        "api.github.com"
+      ],
+      "files": [
+        "packages/cli/src/web/repositories.ts",
+        "packages/cli/src/web/github-auth.ts"
+      ],
+      "when": "Console repository picker and GitHub account status.",
+      "sent": "gh API reads for the signed-in account.",
+      "disable": "ZERO_ENTERPRISE refuses the repository list and token-expiry lookup."
+    },
+    {
+      "id": "github-gh-commands",
+      "class": "feature",
+      "enterprise": "blocked",
+      "destinations": [
+        "GitHub (gh)"
+      ],
+      "files": [
+        "packages/cli/src/host/gh.ts"
+      ],
+      "when": "findings upload (SARIF), sentinel and host integrations that run through the shared gh runner.",
+      "sent": "The SARIF or API request the operator asked for.",
+      "disable": "ZERO_ENTERPRISE refuses to start gh from this runner."
+    },
+    {
+      "id": "windows-evidence-worker",
+      "class": "feature",
+      "enterprise": "blocked",
+      "destinations": [
+        "cloud worker base URL from a grant"
+      ],
+      "files": [
+        "packages/engine/src/cloud/windows-evidence-worker.ts"
+      ],
+      "when": "A cloud-issued Windows evidence job.",
+      "sent": "A bounded evidence envelope for that job.",
+      "disable": "ZERO_ENTERPRISE refuses the request."
+    },
+    {
+      "id": "remote-worker-provisioning",
+      "class": "feature",
+      "enterprise": "blocked",
+      "destinations": [
+        "nodejs.org, apt and npm registries (on the remote computer)"
+      ],
+      "files": [
+        "packages/cli/src/worker-deploy.ts"
+      ],
+      "when": "0 computers add.",
+      "sent": "Package downloads performed by the remote computer.",
+      "disable": "ZERO_ENTERPRISE refuses deployWorker."
+    },
+    {
+      "id": "llm-model-endpoint",
+      "class": "model",
+      "enterprise": "allowed",
+      "destinations": [
+        "the model endpoint the operator configured (provider base URL or gateway)"
+      ],
+      "files": [
+        "packages/engine/src/runtime/llm-api/runtime.ts",
+        "packages/engine/src/runtime/llm-api/transport.ts",
+        "packages/engine/src/runtime/llm-api/azure-region.ts",
+        "packages/engine/src/runtime/provider-model-discovery.ts",
+        "packages/engine/src/runtime/pi/runtime.ts",
+        "packages/engine/src/runtime/pi/policy.ts"
+      ],
+      "when": "Every model call and model-list discovery for the configured provider.",
+      "sent": "Prompts, tool results and code excerpts the model needs. This is the product.",
+      "disable": "Not disabled. Point the provider at a local or in-network gateway."
+    },
+    {
+      "id": "provider-sign-in",
+      "class": "model",
+      "enterprise": "allowed",
+      "destinations": [
+        "the provider the operator signs in to (OpenAI, xAI, Kimi, OpenRouter)"
+      ],
+      "files": [
+        "packages/cli/src/state/device-auth.ts",
+        "packages/cli/src/state/chatgpt-plan-auth.ts",
+        "packages/cli/src/state/chatgpt-plan-store.ts",
+        "packages/engine/src/runtime/llm-api/codex-auth.ts",
+        "packages/engine/src/runtime/siwc-connection.ts",
+        "packages/engine/src/runtime/codex-models.ts",
+        "packages/engine/src/runtime/workbench-provider-broker.ts"
+      ],
+      "when": "Only when the operator chooses subscription or OAuth sign-in for a provider. API-key setups never use it.",
+      "sent": "OAuth exchange and the model requests for that provider.",
+      "disable": "Use an API key and a local gateway; do not sign in."
+    },
+    {
+      "id": "provider-health",
+      "class": "model",
+      "enterprise": "allowed",
+      "destinations": [
+        "the connected provider's own API"
+      ],
+      "files": [
+        "packages/cli/src/web/connection-health.ts",
+        "packages/cli/src/web/connection-meta.ts"
+      ],
+      "when": "Console connection status for a provider the operator connected.",
+      "sent": "A key-validation or usage GET with the saved key.",
+      "disable": "Do not connect that provider."
+    },
+    {
+      "id": "team-sign-in",
+      "class": "operator",
+      "enterprise": "allowed",
+      "destinations": [
+        "the OIDC issuer the operator configured"
+      ],
+      "files": [
+        "packages/cli/src/web/team-auth.ts"
+      ],
+      "when": "Team sign-in on a server the operator runs.",
+      "sent": "OIDC discovery and token exchange.",
+      "disable": "Do not configure OIDC."
+    },
+    {
+      "id": "remote-engines",
+      "class": "operator",
+      "enterprise": "allowed",
+      "destinations": [
+        "engine URLs the operator configured"
+      ],
+      "files": [
+        "packages/cli/src/web/backend-connections.ts",
+        "packages/cli/src/console-embed-client.ts",
+        "packages/cli/src/console-skills-client.ts"
+      ],
+      "when": "Console or CLI talking to an engine on another computer, or the embedded local engine.",
+      "sent": "Console API requests with a bearer token.",
+      "disable": "Use the local engine."
+    },
+    {
+      "id": "mcp-remote-server",
+      "class": "operator",
+      "enterprise": "allowed",
+      "destinations": [
+        "remote MCP servers the operator added"
+      ],
+      "files": [
+        "packages/engine/src/plugins/extensions/mcp/adapters/http.ts"
+      ],
+      "when": "An installed MCP extension with an http or sse transport is used.",
+      "sent": "MCP requests and tool arguments.",
+      "disable": "Do not add remote MCP servers."
+    },
+    {
+      "id": "scan-and-probe-targets",
+      "class": "operator",
+      "enterprise": "allowed",
+      "destinations": [
+        "the git remote or URL named on the command line"
+      ],
+      "files": [
+        "packages/engine/src/http.ts",
+        "packages/engine/src/probe/runner.ts",
+        "packages/cli/src/commands/scan.ts"
+      ],
+      "when": "0 scan with a git URL, 0 probe, and PoC steps against a target the operator authorized.",
+      "sent": "A git clone, or HTTP requests to that target.",
+      "disable": "Scan local paths."
+    },
+    {
+      "id": "source-control-writes",
+      "class": "operator",
+      "enterprise": "allowed",
+      "destinations": [
+        "the git remote and GitHub host of the repository"
+      ],
+      "files": [
+        "packages/cli/src/commands/fix.ts",
+        "packages/cli/src/commands/threat-model.ts",
+        "packages/cli/src/commands/findings-import.ts",
+        "packages/cli/src/host/github.ts",
+        "packages/cli/src/web/sentinel-runner.ts"
+      ],
+      "when": "Explicit findings fix, threat-model publish, findings import and sentinel review commands.",
+      "sent": "A branch push or PR comment the operator asked for.",
+      "disable": "Do not run those commands; use --no-pr."
+    },
+    {
+      "id": "dashboard-dev-proxy",
+      "class": "local",
+      "enterprise": "allowed",
+      "destinations": [
+        "loopback dev server"
+      ],
+      "files": [
+        "packages/cli/src/commands/dashboard.ts",
+        "packages/cli/src/web/dashboard-instance.ts",
+        "packages/cli/src/web/server-mode.ts"
+      ],
+      "when": "Development only, or same-origin requests from the browser page to its own server.",
+      "sent": "Nothing leaves the computer.",
+      "disable": "Not applicable."
+    },
+    {
+      "id": "local-socket",
+      "class": "local",
+      "enterprise": "allowed",
+      "destinations": [
+        "local unix socket"
+      ],
+      "files": [
+        "packages/engine/src/integrations/herdr.ts"
+      ],
+      "when": "Talking to a terminal multiplexer on the same computer.",
+      "sent": "Nothing leaves the computer.",
+      "disable": "Not applicable."
+    },
+    {
+      "id": "no-network-matches",
+      "class": "none",
+      "enterprise": "n/a",
+      "destinations": [],
+      "files": [
+        "packages/engine/src/agent/destructive-classifier.ts"
+      ],
+      "when": "Matches the scan pattern only (text that classifies git commands); it makes no call.",
+      "sent": "Nothing.",
+      "disable": "Not applicable."
+    }
+  ],
+  "knownHosts": [
+    "0.security",
+    "api.anthropic.com",
+    "api.deepseek.com",
+    "api.github.com",
+    "api.kimi.com",
+    "api.openai.com",
+    "api.osv.dev",
+    "api.together.ai",
+    "api.x.ai",
+    "api.z.ai",
+    "auth.kimi.com",
+    "auth.openai.com",
+    "auth.x.ai",
+    "chatgpt.com",
+    "cloud.0.security",
+    "docs.0.security",
+    "duckduckgo.com",
+    "eu.i.posthog.com",
+    "generativelanguage.googleapis.com",
+    "github.com",
+    "html.duckduckgo.com",
+    "httpbin.org",
+    "json.schemastore.org",
+    "mcp.parallel.ai",
+    "models.dev",
+    "nodejs.org",
+    "opencode.ai",
+    "openrouter.ai",
+    "raw.githubusercontent.com",
+    "spdx.org",
+    "token-plan.ap-southeast-1.maas.aliyuncs.com",
+    "trivy.dev"
+  ]
+}
