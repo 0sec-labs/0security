@@ -199,9 +199,9 @@ function formatFinding(finding: Finding): string {
   lines.push("");
   const attacker = describeAttackerImpact(finding);
   if (attacker) {
-    lines.push(`- **What an attacker can do:** ${attacker.can}`);
+    lines.push(`- **${attacker.label ?? "What an attacker can do"}:** ${attacker.can}`);
     if (attacker.who) lines.push(`- **Who can do it:** ${attacker.who}`);
-    lines.push(`- **What they get:** ${attacker.gets}`);
+    if (attacker.gets) lines.push(`- **What they get:** ${attacker.gets}`);
   }
   lines.push(`- **Technical severity:** ${finding.severity}`);
   lines.push(`- **Category:** ${finding.category}`);

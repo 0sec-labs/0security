@@ -56,6 +56,7 @@ const attackCategoryEnum = z.enum([
   "denial-of-service",
   "known-vulnerable-package",
   "supply-chain",
+  "policy-violation",
   "other",
 ]);
 

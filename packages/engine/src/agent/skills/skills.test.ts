@@ -60,6 +60,8 @@ const EXPECTED_SKILL_IDS = [
   "mcp-server-review",
   "crypto-migration",
   "artifact-scan",
+  "threat-model",
+  "policy-check",
 ];
 
 const VALID_ROLES = new Set(["attack", "audit", "review"]);
@@ -207,7 +209,7 @@ describe("Skill Registry", () => {
       expect(attackSkills.length).toBe(EXPECTED_SKILL_IDS.length);
 
       const reviewSkills = listSkillSummaries({ role: "review" }, registry);
-      expect(reviewSkills.length).toBe(24);
+      expect(reviewSkills.length).toBe(26);
       const reviewIds = reviewSkills.map((s) => s.id).sort();
       expect(reviewIds).toEqual([
         "advisory-disclosure",
@@ -227,12 +229,14 @@ describe("Skill Registry", () => {
         "mcp-server-review",
         // Framework-specific methodology packs are review-applicable.
         "nextjs-appsec",
+        "policy-check",
         "pr-diff-review",
         "python-web-appsec",
         "scan",
         "secrets-hunting",
         "seedless-depth-review",
         "supabase-appsec",
+        "threat-model",
         "variant-hunting",
         "workflow-hardening",
       ]);

@@ -16,6 +16,13 @@ describe("what an attacker can do", () => {
     expect(describeAttackerImpact({ impactAssessment: unknown })?.who).toBe("");
     expect(attackerImpactSentence({ impactAssessment: unknown })).not.toContain("Who:");
   });
+  it("describes a policy violation as an exposure, not as an attacker", () => {
+    const policy = { ...assessed, blast_radius: "Customer email addresses are sent to a third-party analytics service.", reachability_tier: "remote-unauth", weaponizability: "info-leak" };
+    expect(describeAttackerImpact({ impactAssessment: policy, category: "policy-violation" })).toEqual({
+      can: "Customer email addresses are sent to a third-party analytics service.", who: "", gets: "", label: "What the violation exposes",
+    });
+    expect(attackerImpactSentence({ impactAssessment: policy, category: "policy-violation" })).toBe("Customer email addresses are sent to a third-party analytics service.");
+  });
   it("says nothing when there is no assessment, a malformed one, or only a heuristic guess", () => {
     expect(describeAttackerImpact({})).toBeUndefined();
     expect(describeAttackerImpact({ impactAssessment: { blast_radius: "" } })).toBeUndefined();

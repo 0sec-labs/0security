@@ -328,6 +328,8 @@ export type AttackCategory =
   // Supply-chain / package categories (audit + malicious-detector)
   | "known-vulnerable-package"
   | "supply-chain"
+  // A written organisation rule (data handling, logging, retention) that the code breaks
+  | "policy-violation"
   | "other";
 
 export interface AttackTemplate {

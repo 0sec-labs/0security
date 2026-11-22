@@ -77,6 +77,8 @@ export const findingsToolDefinitions: Record<string, ToolDefinition> = {
           // Supply-chain / package categories
           "known-vulnerable-package",
           "supply-chain",
+          // A written organisation policy that the code breaks (policy-check skill)
+          "policy-violation",
           "other",
         ],
       },

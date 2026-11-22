@@ -173,9 +173,9 @@ function Properties({ group, family, latest, workflow, status, fingerprint, miss
           </span>
         </Tooltip>
       </Prop>
-      {attacker ? <Prop label="What an attacker can do"><span className="px-2">{attacker.can}</span></Prop> : null}
+      {attacker ? <Prop label={attacker.label ?? "What an attacker can do"}><span className="px-2">{attacker.can}</span></Prop> : null}
       {attacker?.who ? <Prop label="Who can do it"><span className="px-2">{attacker.who}</span></Prop> : null}
-      {attacker ? <Prop label="What they get"><span className="px-2">{attacker.gets}</span></Prop> : null}
+      {attacker?.gets ? <Prop label="What they get"><span className="px-2">{attacker.gets}</span></Prop> : null}
       <Prop label="Category"><span className="min-w-0 truncate px-2">{latest.category || "Uncategorized"}</span></Prop>
       {confidence !== null ? <Prop label="Confidence"><span className="px-2 tabular-nums">{confidence}%</span></Prop> : null}
       {sourceLabel ? <Prop label="Source"><span className="min-w-0 truncate px-2">{sourceLabel}</span></Prop> : null}
