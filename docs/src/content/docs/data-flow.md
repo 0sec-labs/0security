@@ -46,6 +46,8 @@ For a stronger guarantee than a test, also block egress at the network: run 0 in
 | `pricing-discovery` | `openrouter.ai` | A model has no built-in price. | A GET of a public list. | The same. |
 | `web-search-tool` | `mcp.parallel.ai`, `html.duckduckgo.com` | The agent calls `web_search`. | The search query the model wrote. | `ZERO_FEATURE_WEB_SEARCH=0`. |
 | `osv-advisory-lookup` | `api.osv.dev` | `0 sbom check` and evidence bundles with advisories. | Package URLs from the SBOM. | Skip the check. |
+| `sbom-outdated-lookup` | `api.deps.dev` | `0 sbom check --outdated`. | Package names from the SBOM (at most 200). | Do not pass the flag. |
+| `sbom-licenses-resolve` | `api.deps.dev` | `0 sbom licenses --resolve`. | Package names and versions of components with no stated license. | Do not pass the flag. |
 | `extension-git-source` | `github.com` or the https git host you give | Installing or updating an extension from a remote source. | A shallow fetch of one pinned commit. | Install from a local folder. |
 | `extension-connector-health` | Hosts an installed connector declares | The console shows connector status. | A GET carrying the connector token. | Do not install connectors. |
 | `smolvm-provision` | `github.com` | Explicit setup of the macOS sandbox runtime. | A GET of a pinned archive, checked against a fixed hash. | Preinstall the runtime. |

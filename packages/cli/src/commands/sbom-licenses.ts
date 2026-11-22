@@ -6,7 +6,7 @@ import { readFileSync, statSync } from "node:fs";
 import { basename, join, relative, resolve, sep } from "node:path";
 import type { Command } from "commander";
 import { parseDocument } from "yaml";
-import { checkBomLicenses, classifyLicense, generateSbom, licensesToSarif, LOCKFILES, mergePolicies, packageUrl, policyFromDocument, PRESET_NAMES, validatePolicy, type ComponentVerdict, type LicensePolicy, type LicenseReport, type PresetName, type UnknownMode } from "@0/engine";
+import { assertEgressAllowed, checkBomLicenses, classifyLicense, generateSbom, licensesToSarif, LOCKFILES, mergePolicies, packageUrl, policyFromDocument, PRESET_NAMES, validatePolicy, type ComponentVerdict, type LicensePolicy, type LicenseReport, type PresetName, type UnknownMode } from "@0/engine";
 import { VERSION } from "@0/engine/shared";
 import type { SbomDeps } from "./sbom.js";
 import { finishWithError, UsageError } from "./output.js";
@@ -203,6 +203,7 @@ export async function runLicenses(input: string | undefined, options: LicensesOp
     limit = Number(options.resolveLimit);
     if (!Number.isInteger(limit) || limit < 1 || limit > 20_000) throw new UsageError("--resolve-limit must be a whole number from 1 to 20000.");
   }
+  if (options.resolve && !deps.fetch) assertEgressAllowed("api.deps.dev (license lookup)");
   const lookup = options.resolve ? await resolveLicenses(source.bom as { components?: unknown }, limit, deps.fetch ?? fetch) : undefined;
   const report = checkBomLicenses(source.bom, policy, options.excludeDev ? { excludeDev: true } : {});
   if (lookup) for (const component of report.components) if (lookup.resolved.has(component.purl)) component.resolved = true;

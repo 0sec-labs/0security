@@ -418,12 +418,41 @@
       "when": "Matches the scan pattern only (text that classifies git commands); it makes no call.",
       "sent": "Nothing.",
       "disable": "Not applicable."
+    },
+    {
+      "id": "sbom-outdated-lookup",
+      "class": "feature",
+      "enterprise": "blocked",
+      "destinations": [
+        "api.deps.dev"
+      ],
+      "files": [
+        "packages/engine/src/sbom/outdated.ts"
+      ],
+      "when": "0 sbom check --outdated.",
+      "sent": "Package names of SBOM components (at most 200).",
+      "disable": "Do not pass --outdated; ZERO_ENTERPRISE refuses the lookup."
+    },
+    {
+      "id": "sbom-licenses-resolve",
+      "class": "feature",
+      "enterprise": "blocked",
+      "destinations": [
+        "api.deps.dev"
+      ],
+      "files": [
+        "packages/cli/src/commands/sbom-licenses.ts"
+      ],
+      "when": "0 sbom licenses --resolve.",
+      "sent": "Package names and versions of components that state no license.",
+      "disable": "Do not pass --resolve; ZERO_ENTERPRISE refuses the lookup."
     }
   ],
   "knownHosts": [
     "0.security",
     "api.anthropic.com",
     "api.deepseek.com",
+    "api.deps.dev",
     "api.github.com",
     "api.kimi.com",
     "api.openai.com",
@@ -441,6 +470,7 @@
     "eu.i.posthog.com",
     "generativelanguage.googleapis.com",
     "github.com",
+    "google.github.io",
     "html.duckduckgo.com",
     "httpbin.org",
     "json.schemastore.org",
@@ -449,7 +479,9 @@
     "nodejs.org",
     "opencode.ai",
     "openrouter.ai",
+    "osv.dev",
     "raw.githubusercontent.com",
+    "semgrep.dev",
     "spdx.org",
     "token-plan.ap-southeast-1.maas.aliyuncs.com",
     "trivy.dev"

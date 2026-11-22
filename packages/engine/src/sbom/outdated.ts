@@ -2,6 +2,7 @@
  * Find components with a newer release, using the public deps.dev API (https://docs.deps.dev/api/v3/). Opt-in: package
  * names go to api.deps.dev. A newer version is information, not a vulnerability; nothing here says an old version is unsafe.
  */
+import { assertEgressAllowed } from "../policy/enterprise.js";
 import { compareVersions, purlVersion } from "./advisory-facts.js";
 
 export interface OutdatedNote {
@@ -61,6 +62,7 @@ export function depsDevName(purl: string): { system: string; name: string } | un
 }
 
 export async function checkOutdated(bom: unknown, options: OutdatedOptions = {}): Promise<OutdatedResult> {
+  if (!options.fetch && !options.baseUrl) assertEgressAllowed("api.deps.dev (newer versions)");
   const fetcher = options.fetch ?? fetch;
   const base = (options.baseUrl ?? "https://api.deps.dev").replace(/\/$/, "");
   const cap = options.cap ?? OUTDATED_CAP;
