@@ -21,16 +21,18 @@ export interface ScannerSpec {
   timeoutSeconds?: number;
   /** It reports secrets. Its leads never carry a snippet or a matched value into the scan prompt. */
   reportsSecrets?: boolean;
+  /** Arguments to disable discovery of in-repo ignore files and configs (the default). */
+  isolationArgs?: string[];
 }
 
 export const SCANNERS: readonly ScannerSpec[] = [
   { id: "foxguard", label: "FoxGuard", command: "foxguard", args: ["--format", "sarif", "{folder}"], pathEnv: "ZERO_FOXGUARD_PATH" },
   { id: "semgrep", label: "Semgrep", command: "semgrep", args: ["scan", "--sarif", "--quiet", "--metrics", "off", "--config", "{rules}", "{folder}"], pathEnv: "ZERO_SEMGREP_PATH", install: "brew install semgrep, or see https://semgrep.dev/docs/getting-started/", note: "downloads rules for --config when it is a registry pack" },
   { id: "opengrep", label: "OpenGrep", command: "opengrep", args: ["scan", "--sarif", "--quiet", "--config", "{rules}", "{folder}"], pathEnv: "ZERO_OPENGREP_PATH", install: "brew install opengrep, or see https://github.com/opengrep/opengrep" },
-  { id: "gitleaks", label: "Gitleaks", command: "gitleaks", args: ["dir", "--report-format", "sarif", "--report-path", "-", "--redact", "--no-banner", "--no-color", "--exit-code", "0", "--log-level", "error", "{folder}"], pathEnv: "ZERO_GITLEAKS_PATH", install: "brew install gitleaks, or see https://github.com/gitleaks/gitleaks#installing", reportsSecrets: true },
-  { id: "trivy", label: "Trivy", command: "trivy", args: ["fs", "--scanners", "vuln,misconfig,secret", "--format", "sarif", "--quiet", "--no-progress", "--disable-telemetry", "{folder}"], pathEnv: "ZERO_TRIVY_PATH", install: "brew install trivy, or see https://trivy.dev/latest/getting-started/installation/", timeoutSeconds: 300, reportsSecrets: true, note: "downloads its vulnerability database on first run" },
-  { id: "osv-scanner", label: "OSV-Scanner", command: "osv-scanner", args: ["scan", "source", "--format", "sarif", "--allow-no-lockfiles", "--verbosity", "error", "-r", "{folder}"], pathEnv: "ZERO_OSV_SCANNER_PATH", install: "brew install osv-scanner, or see https://google.github.io/osv-scanner/installation/", timeoutSeconds: 180, note: "sends package names and versions from lockfiles to osv.dev and deps.dev" },
-  { id: "checkov", label: "Checkov", command: "checkov", args: ["-d", "{folder}", "-o", "sarif", "--output-file-path", "{out}", "--quiet", "--skip-download"], outputFile: "results_sarif.sarif", pathEnv: "ZERO_CHECKOV_PATH", install: "pip install checkov, or see https://www.checkov.io/", note: "reads Terraform, CloudFormation, Kubernetes, Dockerfiles, GitHub Actions and more" },
+  { id: "gitleaks", label: "Gitleaks", command: "gitleaks", args: ["dir", "--report-format", "sarif", "--report-path", "-", "--redact", "--no-banner", "--no-color", "--exit-code", "0", "--log-level", "error", "{folder}"], isolationArgs: ["--config", "{gitleaksConfig}", "--gitleaks-ignore-path", "{emptyIgnore}"], pathEnv: "ZERO_GITLEAKS_PATH", install: "brew install gitleaks, or see https://github.com/gitleaks/gitleaks#installing", reportsSecrets: true },
+  { id: "trivy", label: "Trivy", command: "trivy", args: ["fs", "--scanners", "vuln,misconfig,secret", "--format", "sarif", "--quiet", "--no-progress", "--disable-telemetry", "{folder}"], isolationArgs: ["--ignorefile", "{emptyIgnore}", "--config", "{emptyConfig}"], pathEnv: "ZERO_TRIVY_PATH", install: "brew install trivy, or see https://trivy.dev/latest/getting-started/installation/", timeoutSeconds: 300, reportsSecrets: true, note: "downloads its vulnerability database on first run" },
+  { id: "osv-scanner", label: "OSV-Scanner", command: "osv-scanner", args: ["scan", "source", "--format", "sarif", "--allow-no-lockfiles", "--verbosity", "error", "-r", "{folder}"], isolationArgs: ["--config", "{emptyConfig}"], pathEnv: "ZERO_OSV_SCANNER_PATH", install: "brew install osv-scanner, or see https://google.github.io/osv-scanner/installation/", timeoutSeconds: 180, note: "sends package names and versions from lockfiles to osv.dev and deps.dev" },
+  { id: "checkov", label: "Checkov", command: "checkov", args: ["-d", "{folder}", "-o", "sarif", "--output-file-path", "{out}", "--quiet", "--skip-download"], isolationArgs: ["--config-file", "{emptyConfig}"], outputFile: "results_sarif.sarif", pathEnv: "ZERO_CHECKOV_PATH", install: "pip install checkov, or see https://www.checkov.io/", note: "reads Terraform, CloudFormation, Kubernetes, Dockerfiles, GitHub Actions and more" },
 ];
 export const DEFAULT_SCANNERS: readonly string[] = ["foxguard"];
 const DEFAULT_RULES = "p/default";
@@ -49,14 +51,41 @@ export function parseScannerList(values: readonly string[] | undefined): string[
 /** True when the scanner takes rule files (`--rules`). FoxGuard has its own rule format and is not given them. */
 export function scannerTakesRules(spec: ScannerSpec): boolean { return spec.args.includes("{rules}"); }
 
+export interface ScannerArgumentsOptions {
+  repoIgnores?: boolean;
+  emptyConfig?: string;
+  emptyIgnore?: string;
+  gitleaksConfig?: string;
+}
+
 /** The arguments for one scanner. `rules` are the user's rule paths; with none, the default pack is used. The scanner is run without a shell. */
-export function scannerArguments(spec: ScannerSpec, folder: string, rules: readonly string[] | string = DEFAULT_RULES, out = ""): string[] {
+export function scannerArguments(spec: ScannerSpec, folder: string, rules: readonly string[] | string = DEFAULT_RULES, out = "", options: ScannerArgumentsOptions = {}): string[] {
   const list = typeof rules === "string" ? [rules] : rules.length ? rules : [DEFAULT_RULES];
-  return spec.args.flatMap((arg, index) => {
+  const baseArgs = spec.args.flatMap((arg, index) => {
     if (arg === "{rules}") return [];
     if (spec.args[index + 1] === "{rules}") return list.flatMap(rule => [arg, rule]);
     return [arg === "{folder}" ? folder : arg === "{out}" ? out : arg];
   });
+  if (options.repoIgnores || !spec.isolationArgs?.length) return baseArgs;
+
+  const emptyConfig = options.emptyConfig ?? "/dev/null";
+  const emptyIgnore = options.emptyIgnore ?? "/dev/null";
+  const gitleaksConfig = options.gitleaksConfig ?? "/dev/null";
+
+  const resolvedIsolation = spec.isolationArgs.map(arg =>
+    arg === "{emptyConfig}" ? emptyConfig
+      : arg === "{emptyIgnore}" ? emptyIgnore
+      : arg === "{gitleaksConfig}" ? gitleaksConfig
+      : arg
+  );
+
+  if (spec.args[spec.args.length - 1] === "{folder}") {
+    const folderIndex = baseArgs.lastIndexOf(folder);
+    if (folderIndex >= 0) {
+      return [...baseArgs.slice(0, folderIndex), ...resolvedIsolation, ...baseArgs.slice(folderIndex)];
+    }
+  }
+  return [...baseArgs, ...resolvedIsolation];
 }
 
 /**

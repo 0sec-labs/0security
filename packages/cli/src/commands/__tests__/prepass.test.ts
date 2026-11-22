@@ -42,9 +42,14 @@ describe("scanner list", () => {
     expect(scannerById("osv-scanner")!.pathEnv).toBe("ZERO_OSV_SCANNER_PATH");
   });
   it("runs each new scanner with the documented flags, redaction on, and the folder last", () => {
-    expect(scannerArguments(scannerById("gitleaks")!, "/w/app")).toEqual(["dir", "--report-format", "sarif", "--report-path", "-", "--redact", "--no-banner", "--no-color", "--exit-code", "0", "--log-level", "error", "/w/app"]);
-    expect(scannerArguments(scannerById("trivy")!, "/w/app")).toEqual(["fs", "--scanners", "vuln,misconfig,secret", "--format", "sarif", "--quiet", "--no-progress", "--disable-telemetry", "/w/app"]);
-    expect(scannerArguments(scannerById("osv-scanner")!, "/w/app")).toEqual(["scan", "source", "--format", "sarif", "--allow-no-lockfiles", "--verbosity", "error", "-r", "/w/app"]);
+    expect(scannerArguments(scannerById("gitleaks")!, "/w/app")).toEqual(["dir", "--report-format", "sarif", "--report-path", "-", "--redact", "--no-banner", "--no-color", "--exit-code", "0", "--log-level", "error", "--config", "/dev/null", "--gitleaks-ignore-path", "/dev/null", "/w/app"]);
+    expect(scannerArguments(scannerById("trivy")!, "/w/app")).toEqual(["fs", "--scanners", "vuln,misconfig,secret", "--format", "sarif", "--quiet", "--no-progress", "--disable-telemetry", "--ignorefile", "/dev/null", "--config", "/dev/null", "/w/app"]);
+    expect(scannerArguments(scannerById("osv-scanner")!, "/w/app")).toEqual(["scan", "source", "--format", "sarif", "--allow-no-lockfiles", "--verbosity", "error", "-r", "--config", "/dev/null", "/w/app"]);
+    expect(scannerArguments(scannerById("checkov")!, "/w/app", undefined, "/tmp/out")).toEqual(["-d", "/w/app", "-o", "sarif", "--output-file-path", "/tmp/out", "--quiet", "--skip-download", "--config-file", "/dev/null"]);
+    expect(scannerArguments(scannerById("gitleaks")!, "/w/app", undefined, "", { repoIgnores: true })).toEqual(["dir", "--report-format", "sarif", "--report-path", "-", "--redact", "--no-banner", "--no-color", "--exit-code", "0", "--log-level", "error", "/w/app"]);
+    expect(scannerArguments(scannerById("trivy")!, "/w/app", undefined, "", { repoIgnores: true })).toEqual(["fs", "--scanners", "vuln,misconfig,secret", "--format", "sarif", "--quiet", "--no-progress", "--disable-telemetry", "/w/app"]);
+    expect(scannerArguments(scannerById("osv-scanner")!, "/w/app", undefined, "", { repoIgnores: true })).toEqual(["scan", "source", "--format", "sarif", "--allow-no-lockfiles", "--verbosity", "error", "-r", "/w/app"]);
+    expect(scannerArguments(scannerById("checkov")!, "/w/app", undefined, "/tmp/out", { repoIgnores: true })).toEqual(["-d", "/w/app", "-o", "sarif", "--output-file-path", "/tmp/out", "--quiet", "--skip-download"]);
     expect(SCANNERS.filter(spec => spec.args.includes("{rules}")).map(spec => spec.id)).toEqual(["semgrep", "opengrep"]);
   });
 });
@@ -56,6 +61,11 @@ describe("runPrePass with fake scanners", () => {
     const output = sarif("gitleaks", [result("aws-access-token", `Match: ${FAKE_SECRET}\nfound in file`, `${folder}/src/a.js`, 3, { snippet: { text: FAKE_SECRET } })]);
     const tool = fakeTool("gitleaks", output, 0);
     const found = await runPrePass(folder, ["gitleaks"], [], { env: { ...process.env, ZERO_GITLEAKS_PATH: tool.bin } });
+    expect(tool.args().slice(0, 11)).toEqual(["dir", "--report-format", "sarif", "--report-path", "-", "--redact", "--no-banner", "--no-color", "--exit-code", "0", "--log-level", "error"]);
+    expect(tool.args()).toContain("--config");
+    expect(tool.args()).toContain("--gitleaks-ignore-path");
+    expect(tool.args().slice(-1)).toEqual([folder]);
+    await runPrePass(folder, ["gitleaks"], [], { env: { ...process.env, ZERO_GITLEAKS_PATH: tool.bin }, repoIgnores: true });
     expect(tool.args()).toEqual(["dir", "--report-format", "sarif", "--report-path", "-", "--redact", "--no-banner", "--no-color", "--exit-code", "0", "--log-level", "error", folder]);
     expect(found?.leads).toHaveLength(1);
     expect(found?.leads[0]).toMatchObject({ tool: "gitleaks", ruleId: "aws-access-token", path: "src/a.js", startLine: 3 });
@@ -165,4 +175,45 @@ describe("runPrePass with the real tools", () => {
     const own = await runPrePass(repo, ["osv-scanner"], [], { timeoutSeconds: 180 });
     expect(own === undefined || Array.isArray(own.leads)).toBe(true);
   }, 360_000);
+});
+
+describe("in-repo ignore files and scanner configuration isolation", () => {
+  it("isolates gitleaks, trivy, osv-scanner, and checkov from in-repo ignore/config files by default", () => {
+    const folder = tmp();
+    // Plant in-repo ignore and config files
+    writeFileSync(join(folder, ".gitleaksignore"), "some-ignore");
+    writeFileSync(join(folder, ".gitleaks.toml"), "[allowlist]\npaths = [\"src/\"]");
+    writeFileSync(join(folder, ".trivyignore"), "AVD-AWS-0092");
+    writeFileSync(join(folder, "trivy.yaml"), "format: json");
+    writeFileSync(join(folder, "osv-scanner.toml"), "IgnoredVulns = [\"CVE-2020-28500\"]");
+    writeFileSync(join(folder, ".checkov.yml"), "framework: [terraform]");
+
+    // gitleaks: default isolation provides empty ignore and explicit default config; repoIgnores drops them
+    const gitleaksDefault = scannerArguments(scannerById("gitleaks")!, folder);
+    expect(gitleaksDefault).toContain("--config");
+    expect(gitleaksDefault).toContain("--gitleaks-ignore-path");
+    const gitleaksHonored = scannerArguments(scannerById("gitleaks")!, folder, undefined, "", { repoIgnores: true });
+    expect(gitleaksHonored).not.toContain("--config");
+    expect(gitleaksHonored).not.toContain("--gitleaks-ignore-path");
+
+    // trivy: default isolation provides empty ignore and empty config; repoIgnores drops them
+    const trivyDefault = scannerArguments(scannerById("trivy")!, folder);
+    expect(trivyDefault).toContain("--ignorefile");
+    expect(trivyDefault).toContain("--config");
+    const trivyHonored = scannerArguments(scannerById("trivy")!, folder, undefined, "", { repoIgnores: true });
+    expect(trivyHonored).not.toContain("--ignorefile");
+    expect(trivyHonored).not.toContain("--config");
+
+    // osv-scanner: default isolation provides empty config; repoIgnores drops it
+    const osvDefault = scannerArguments(scannerById("osv-scanner")!, folder);
+    expect(osvDefault).toContain("--config");
+    const osvHonored = scannerArguments(scannerById("osv-scanner")!, folder, undefined, "", { repoIgnores: true });
+    expect(osvHonored).not.toContain("--config");
+
+    // checkov: default isolation provides empty config; repoIgnores drops it
+    const checkovDefault = scannerArguments(scannerById("checkov")!, folder, undefined, "/tmp/out");
+    expect(checkovDefault).toContain("--config-file");
+    const checkovHonored = scannerArguments(scannerById("checkov")!, folder, undefined, "/tmp/out", { repoIgnores: true });
+    expect(checkovHonored).not.toContain("--config-file");
+  });
 });

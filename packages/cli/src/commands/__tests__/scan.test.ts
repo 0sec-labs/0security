@@ -416,6 +416,19 @@ describe("the pattern-scanner pre-pass", () => {
     expect(process.exitCode).toBe(2);
     process.exitCode = 0;
   });
+
+  it("warns when --repo-ignores is passed and passes repoIgnores: true to prePass", async () => {
+    const dir = folder();
+    const withIgnores = fakes(finished, []);
+    await runScan(dir, options({ repoIgnores: true }), withIgnores.deps);
+    expect(withIgnores.err.join("\n")).toContain("warning: --repo-ignores honors scanner configuration and ignore files from the scanned folder (.gitleaks.toml, .gitleaksignore, .trivyignore). A change under review can use them to hide findings from the pre-pass.");
+    expect(withIgnores.deps.prePass).toHaveBeenCalledWith(dir, ["foxguard"], [], { repoIgnores: true });
+
+    const withoutIgnores = fakes(finished, []);
+    await runScan(dir, options(), withoutIgnores.deps);
+    expect(withoutIgnores.err.join("\n")).not.toContain("--repo-ignores");
+    expect(withoutIgnores.deps.prePass).toHaveBeenCalledWith(dir, ["foxguard"]);
+  });
 });
 
 describe("--diff", () => {
