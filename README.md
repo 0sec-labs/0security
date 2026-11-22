@@ -76,11 +76,21 @@ Only point 0 at systems you own or are authorized to test.
 
 ## What can you do with 0?
 
-- **Talk to a security agent** about a folder on your computer or a remote Computer, in a Thread
-- **Review findings** on a board, with source evidence, and export them
-- **Verify fixes**: a finding is marked Verified by or Not verified
-- **Build persistent security agents**: Sentinels are standing threads that wake on a schedule or on every pull request, with skills, instructions, their own notes and automations written as prompts
-- **Extend** it with [extensions and skills](https://docs.0.security/extensions/)
+0 reviews code, keeps every finding in one place, fixes findings as pull requests and produces the evidence you hand to others. It is one binary and uses your own model keys.
+
+| Job | Command |
+| --- | --- |
+| **Review code**: a fast scanner pass (foxguard by default, or semgrep and opengrep) then a model reviews what it found; `--diff` for a pull request | `0 scan ./repo` |
+| **Keep one list**: import another scanner's SARIF or a repository's GitHub alerts, then triage, suppress and export | `0 findings import report.sarif` |
+| **Fix as pull requests**: one branch and PR per finding, a draft when your checks fail, never a push to your base branch; or work through a backlog in batches | `0 findings fix <id> --test "pnpm test"`, `0 findings burndown` |
+| **Send findings where people work**: GitHub code scanning and GitHub Issues, without duplicates | `0 findings upload`, `0 findings issues` |
+| **Produce evidence**: CycloneDX or SPDX SBOM with hashes, graph and licenses, an AI inventory, advisory check, model-file scan, CRA report drafts and an evidence folder (evidence and drafts only: nothing here claims compliance or submits anything) | `0 sbom generate`, `0 sbom check`, `0 sbom scan-models`, `0 findings evidence`, `0 findings report-draft` |
+| **Review AI apps**: LLM apps and MCP servers by skill, and a live model or agent endpoint by adversarial probe | `0 scan --skill llm-app-review`, `0 probe` |
+| **Steer with your own rules**: a reviewable threat model, and policies checked pass or fail | `0 threat-model`, `0 scan --policy ./policies` |
+
+Other review methods are skills: `crypto-migration`, `artifact-scan`, `mcp-server-review` and more (`0 skills list`). See the [command reference](https://docs.0.security/commands/) and the [CI guide](https://docs.0.security/ci/).
+
+Prefer a browser? `0` starts a local web console with threads, a findings board and Sentinels (standing agents that wake on a schedule or on every pull request). It is optional: everything above works from the terminal and CI.
 
 <p align="center">
   <a href="assets/readme-findings.mp4">
@@ -94,17 +104,9 @@ Only point 0 at systems you own or are authorized to test.
 
 - **Open source**: MIT or Apache-2.0, built in the open
 - **Private**: runs on your computer or in a container, and only the context you send to your chosen model leaves it
-- **Flexible**: any provider key or local OpenAI-compatible server, from the CLI or a coding agent
-- **Evidence first**: every finding links to its source evidence
-- **Verified**: a finding says whether it was verified, and by what
-
-## Coding agents
-
-```bash
-0 sentinels run <id> --task "Review this pull request" --yes
-```
-
-See the [command reference](https://docs.0.security/commands/).
+- **Your model**: any provider key or local OpenAI-compatible server
+- **Evidence first**: every finding links to its source evidence and says whether it was verified
+- **Safe by default**: fixes are branches and pull requests, repository files never steer a scan unless you opt in, and report text cannot notify anyone
 
 ## Learn more
 
