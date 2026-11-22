@@ -1056,20 +1056,27 @@ Reset a finding family back to new
 Import findings from another scanner's SARIF 2.1.0 file (use - for stdin). Nothing in the file is executed.
 
 ```text
-0 findings import [options] <file>
+0 findings import [options] [file]
 ```
 
 Each result becomes a finding that keeps the scanner's name, rule, severity, CWE and file and line. The scan it creates is marked as imported and unverified, and importing the same file again changes nothing. Absolute paths become repo-relative under `--root`; paths outside it are dropped. Stop a running console on the same database first.
 
+`--github owner/repo` imports that repository's code scanning, Dependabot and secret scanning alerts instead of a file (give a file or `--github`, not both). It runs `gh api` with your own `gh auth login` session, so the token never reaches 0 and the 0 GitHub connector is not used or needed; the repository access your login has is what limits the result. `--types` picks the alert kinds, `--state` the alert state (`open`, `dismissed`, `fixed` or `all`) and `--ref` narrows code scanning to a branch. A kind that is switched off for the repository is skipped with a warning. If a later page fails, returns invalid JSON or the 20-page limit is reached, the alerts read so far are still imported, marked incomplete with a warning on stderr, and a failed fetch makes the command exit 1. Running it again imports again when an alert changed on GitHub. Secret alerts record the type, validity and, for the first 50 alerts, the file and line of the first location; the secret value is never requested or stored. Alert text is stripped of control characters and shortened before it is stored.
+
 | Argument | Required | Description |
 | --- | --- | --- |
-| `file` | Yes | SARIF file, or - to read standard input |
+| `file` | No | SARIF file, or - to read standard input |
 
 | Option | Registered default | Description |
 | --- | --- | --- |
+| `--github <owner/repo>` | — | Import code scanning, Dependabot and secret scanning alerts from a GitHub repository, read with your own `gh` login (gh auth login); the 0 GitHub connector is not used |
+| `--state <state>` | `open` | Filter alerts by state: open, dismissed, fixed, all |
+| `--types <types>` | `all` | Comma-separated alert kinds: code-scanning, dependabot, secret-scanning, all |
+| `--ref <branch>` | — | Filter code-scanning alerts by branch or git ref |
 | `--tool <name>` | — | Label for the scanner, overriding the name in the file |
 | `--root <dir>` | — | Folder that was scanned; absolute paths under it become repo-relative (default: the current directory) |
 | `--db-path <path>` | — | Destination database; stop its running console before importing |
+| `--format <format>` | `text` | Output format: text or json |
 
 #### findings fix
 

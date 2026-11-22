@@ -8,6 +8,7 @@ import {
   importSarif,
   parseAlertKinds,
   type GithubAlertState,
+  type GithubAlertsImportResult,
 } from "../report-import.js";
 import { assertLocalEngineAvailable } from "../local-engine.js";
 import { finishWithError, UsageError } from "./output.js";
@@ -65,7 +66,7 @@ export function registerFindingsImportCommand(parent: Command, deps: FindingsImp
   parent.command("import")
     .description("Import findings from another scanner's SARIF 2.1.0 file (use - for stdin) or from GitHub security alerts. Nothing in the file is executed.")
     .argument("[file]", "SARIF file, or - to read standard input")
-    .option("--github <owner/repo>", "Import security alerts from a GitHub repository via GitHub connection")
+    .option("--github <owner/repo>", "Import code scanning, Dependabot and secret scanning alerts from a GitHub repository, read with your own `gh` login (gh auth login); the 0 GitHub connector is not used")
     .option("--state <state>", "Filter alerts by state: open, dismissed, fixed, all", "open")
     .option("--types <types>", "Comma-separated alert kinds: code-scanning, dependabot, secret-scanning, all", "all")
     .option("--ref <branch>", "Filter code-scanning alerts by branch or git ref")
@@ -85,7 +86,7 @@ export function registerFindingsImportCommand(parent: Command, deps: FindingsImp
         const dbPath = resolveOsecDbPath(options.dbPath);
         assertLocalEngineAvailable(options.dbPath);
 
-        let result: { scanId: string; findings: number; alreadyImported: boolean; dbPath: string };
+        let result: { scanId: string; findings: number; alreadyImported: boolean; dbPath: string } & Partial<GithubAlertsImportResult>;
         if (options.github) {
           result = await importGithubAlerts({
             repo: options.github,
@@ -104,11 +105,15 @@ export function registerFindingsImportCommand(parent: Command, deps: FindingsImp
           });
         }
 
+        const warnings = result.warnings ?? [];
+        const incomplete = result.incomplete === true;
+        for (const w of warnings) deps.err(`warning: GitHub ${w.stage}: ${w.message}`);
         if (options.format === "json") {
           deps.out(JSON.stringify(result));
         } else {
-          deps.out(`${result.alreadyImported ? "Already imported" : "Imported"} ${result.findings} finding${result.findings === 1 ? "" : "s"} (${result.scanId.slice(0, 18)}…).`);
+          deps.out(`${result.alreadyImported ? "Already imported" : "Imported"} ${result.findings} finding${result.findings === 1 ? "" : "s"} (${result.scanId.slice(0, 18)}…).${incomplete ? " INCOMPLETE: not every alert could be fetched, see the warnings above." : ""}`);
         }
+        if (result.failed) process.exitCode = 1;
       } catch (error) {
         finishWithError(error, { err: deps.err }, options.format === "json");
       }

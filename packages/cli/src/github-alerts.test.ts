@@ -213,7 +213,7 @@ describe("fetchGithubAlerts", () => {
     expect(alerts.codeScanning).toHaveLength(1);
     expect(alerts.secretScanning).toHaveLength(0);
     expect(alerts.warnings).toEqual([
-      { stage: "secret-scanning", message: "Secret scanning is not enabled for this repository" },
+      { stage: "secret-scanning", kind: "unavailable", message: "Secret scanning is not enabled for this repository" },
     ]);
   });
 
@@ -235,6 +235,8 @@ describe("prepareGithubAlertsImport & importGithubAlerts", () => {
       dependabot: [sampleDependabotAlert],
       secretScanning: [sampleSecretScanningAlert],
       warnings: [],
+      failed: false,
+      incomplete: false,
     };
 
     const prepared = prepareGithubAlertsImport("acme/repo", alerts, { state: "open" });
@@ -370,5 +372,169 @@ describe("0 findings import CLI command", () => {
       dbPath,
     });
     expect(json.scanId).toMatch(/^ci-[a-f0-9]{64}$/);
+  });
+});
+
+describe("partial fetches are reported, not hidden", () => {
+  const full = (n: number) => Array.from({ length: 100 }, (_, i) => ({ ...sampleCodeScanningAlert, number: n * 1000 + i }));
+
+  it("flags a failure on page 2 as failed and incomplete, keeping page 1", async () => {
+    const deps: GithubAlertsDeps = {
+      gh: async args => {
+        if (args[1]?.includes("page=2")) throw new Error("HTTP 502 bad gateway");
+        return JSON.stringify(full(1));
+      },
+    };
+    const alerts = await fetchGithubAlerts({ repo: "acme/repo", types: ["code-scanning"] }, deps);
+    expect(alerts.codeScanning).toHaveLength(100);
+    expect(alerts.failed).toBe(true);
+    expect(alerts.incomplete).toBe(true);
+    expect(alerts.warnings[0]).toMatchObject({ stage: "code-scanning", kind: "failed" });
+    expect(alerts.warnings[0]!.message).toMatch(/page 2.*incomplete/);
+  });
+
+  it("flags bad JSON on a later page", async () => {
+    const deps: GithubAlertsDeps = { gh: async args => args[1]?.includes("page=2") ? "<html>" : JSON.stringify(full(1)) };
+    const alerts = await fetchGithubAlerts({ repo: "acme/repo", types: ["code-scanning"] }, deps);
+    expect(alerts.failed).toBe(true);
+    expect(alerts.warnings[0]!.message).toMatch(/not valid JSON/);
+  });
+
+  it("flags hitting the page cap as truncated and incomplete", async () => {
+    let calls = 0;
+    const deps: GithubAlertsDeps = { gh: async () => { calls++; return JSON.stringify(full(calls)); } };
+    const alerts = await fetchGithubAlerts({ repo: "acme/repo", types: ["code-scanning"] }, deps);
+    expect(calls).toBe(20);
+    expect(alerts.incomplete).toBe(true);
+    expect(alerts.failed).toBe(false);
+    expect(alerts.warnings[0]).toMatchObject({ kind: "truncated" });
+  });
+
+  it("records the partial import as not complete, under its own identity", () => {
+    const base = { codeScanning: [sampleCodeScanningAlert], dependabot: [], secretScanning: [], warnings: [] };
+    const complete = prepareGithubAlertsImport("acme/repo", { ...base, failed: false, incomplete: false });
+    const partial = prepareGithubAlertsImport("acme/repo", {
+      ...base, failed: true, incomplete: true,
+      warnings: [{ stage: "code-scanning", kind: "failed", message: "page 2 failed" }],
+    });
+    expect(partial.scanId).not.toBe(complete.scanId);
+    expect(partial.provenance).toMatchObject({ complete: false });
+    expect(partial.summary).toMatchObject({ executionSuccessful: false, exitReason: "partial-fetch" });
+    expect(complete.provenance).toMatchObject({ complete: true });
+  });
+
+  it("CLI prints the warning on stderr, says INCOMPLETE and exits non-zero on a failed fetch", async () => {
+    const saved = process.exitCode;
+    try {
+      process.exitCode = undefined;
+      const errLines: string[] = [];
+      const outLines: string[] = [];
+      const program = new Command();
+      registerFindingsImportCommand(program, {
+        out: t => outLines.push(t), err: t => errLines.push(t), readInput: () => "",
+        gh: async args => {
+          if (args[1]?.includes("page=2")) throw new Error("HTTP 502");
+          return JSON.stringify(full(1));
+        },
+      });
+      await program.parseAsync(["node", "test", "import", "--github", "acme/repo", "--types", "code-scanning", "--db-path", createDb()]);
+      expect(errLines.join("\n")).toMatch(/warning: GitHub code-scanning: page 2 failed/);
+      expect(outLines.join("\n")).toContain("INCOMPLETE");
+      expect(process.exitCode).toBe(1);
+    } finally {
+      process.exitCode = saved;
+    }
+  });
+});
+
+describe("idempotency covers alert content", () => {
+  it("a changed alert (text, updated_at) gets a new digest; an identical one keeps it", () => {
+    const wrap = (a: GithubSecretScanningAlert): FetchedGithubAlerts => ({ codeScanning: [], dependabot: [], secretScanning: [a], warnings: [], failed: false, incomplete: false });
+    const a = prepareGithubAlertsImport("acme/repo", wrap(sampleSecretScanningAlert));
+    const same = prepareGithubAlertsImport("acme/repo", wrap({ ...sampleSecretScanningAlert }));
+    const updated = prepareGithubAlertsImport("acme/repo", wrap({ ...sampleSecretScanningAlert, updated_at: "2026-04-01T00:00:00Z" }));
+    expect(same.scanId).toBe(a.scanId);
+    expect(updated.scanId).not.toBe(a.scanId);
+
+    const cs = (text: string): FetchedGithubAlerts => ({
+      codeScanning: [{ ...sampleCodeScanningAlert, most_recent_instance: { ...sampleCodeScanningAlert.most_recent_instance, message: { text } } }],
+      dependabot: [], secretScanning: [], warnings: [], failed: false, incomplete: false,
+    });
+    expect(prepareGithubAlertsImport("acme/repo", cs("one")).scanId).not.toBe(prepareGithubAlertsImport("acme/repo", cs("two")).scanId);
+  });
+});
+
+describe("secret scanning locations", () => {
+  const SECRET = "ghp_SUPERSECRETVALUE1234567890";
+  const listDeps = (calls: string[][], locations: (n: number) => string): GithubAlertsDeps => ({
+    gh: async args => {
+      calls.push(args);
+      const endpoint = args[1] ?? "";
+      const m = endpoint.match(/alerts\/(\d+)\/locations/);
+      if (m) return locations(Number(m[1]));
+      // A raw gh would return the secret; the fake ignores --jq to prove the code never keeps it.
+      return JSON.stringify([{ ...sampleSecretScanningAlert, secret: SECRET, locations_url: "https://evil.example/x" }]);
+    },
+  });
+
+  it("fetches the first location, drops the secret, and builds the URL itself", async () => {
+    const calls: string[][] = [];
+    const deps = listDeps(calls, () => JSON.stringify([{ type: "commit", details: { path: "config/.env", start_line: 7, end_line: 7, blob_sha: "x" } }, { details: { path: "other" } }]));
+    const alerts = await fetchGithubAlerts({ repo: "acme/repo", types: ["secret-scanning"] }, deps);
+    expect(JSON.stringify(alerts)).not.toContain(SECRET);
+    expect(alerts.secretScanning[0]!.locations).toEqual([{ details: { path: "config/.env", start_line: 7, end_line: 7 } }]);
+    const locationCall = calls.find(c => c[1]?.includes("/locations"))!;
+    expect(locationCall[1]).toBe("repos/acme/repo/secret-scanning/alerts/303/locations?per_page=1");
+    expect(calls.some(c => c.join(" ").includes("evil.example"))).toBe(false);
+    for (const c of calls) expect(c).toContain("--jq");
+    const prepared = prepareGithubAlertsImport("acme/repo", alerts);
+    expect(prepared.findings[0]!.reviewAnnotation).toEqual({ path: "config/.env", startLine: 7, endLine: 7 });
+    expect(JSON.stringify(prepared)).not.toContain(SECRET);
+  });
+
+  it("degrades to a warning when a lookup fails", async () => {
+    const deps = listDeps([], () => { throw new Error("HTTP 403"); });
+    const alerts = await fetchGithubAlerts({ repo: "acme/repo", types: ["secret-scanning"] }, deps);
+    expect(alerts.secretScanning).toHaveLength(1);
+    expect(alerts.secretScanning[0]!.locations).toBeUndefined();
+    expect(alerts.warnings).toEqual([expect.objectContaining({ kind: "locations", message: expect.stringContaining("1 location lookup failed") })]);
+    expect(alerts.incomplete).toBe(false);
+  });
+
+  it("looks up at most the first 50 alerts", async () => {
+    const calls: string[][] = [];
+    const many = Array.from({ length: 60 }, (_, i) => ({ ...sampleSecretScanningAlert, number: i + 1 }));
+    const deps: GithubAlertsDeps = {
+      gh: async args => { calls.push(args); return args[1]?.includes("/locations") ? "[]" : JSON.stringify(many); },
+    };
+    const alerts = await fetchGithubAlerts({ repo: "acme/repo", types: ["secret-scanning"] }, deps);
+    expect(calls.filter(c => c[1]?.includes("/locations"))).toHaveLength(50);
+    expect(alerts.warnings[0]!.message).toContain("10 alerts beyond the first 50");
+  });
+});
+
+describe("alert text is bounded and stripped of control characters", () => {
+  it("cleans title, description and evidence", () => {
+    const evil = `bad\u001b[31mred\u0000‮text\n${"x".repeat(5000)}`;
+    const alerts: FetchedGithubAlerts = {
+      codeScanning: [{
+        ...sampleCodeScanningAlert,
+        rule: { ...sampleCodeScanningAlert.rule, description: evil },
+        most_recent_instance: { ...sampleCodeScanningAlert.most_recent_instance, message: { text: evil } },
+      }],
+      dependabot: [{ ...sampleDependabotAlert, security_advisory: { ...sampleDependabotAlert.security_advisory, summary: evil, description: evil } }],
+      secretScanning: [], warnings: [], failed: false, incomplete: false,
+    };
+    const findings = prepareGithubAlertsImport("acme/repo", alerts).findings;
+    for (const f of findings) {
+      for (const text of [f.title, f.description, f.evidence.response ?? "", f.evidence.request ?? "", f.evidence.analysis ?? ""]) {
+        expect(text).not.toMatch(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f‮]/);
+      }
+      expect(f.title.length).toBeLessThanOrEqual(200);
+      expect(f.title).not.toContain("\n");
+      expect(f.description.length).toBeLessThanOrEqual(2000);
+      expect((f.evidence.response ?? "").length).toBeLessThanOrEqual(1000);
+    }
+    expect(findings[0]!.description).toContain("[31mred");
   });
 });
