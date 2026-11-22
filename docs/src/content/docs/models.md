@@ -3,15 +3,15 @@ title: Models
 description: Connect a model provider, choose models per role and control how 0 routes model calls.
 ---
 
-0 uses your own model provider. Connect one in the browser or with an environment variable, then pick a model.
+0 runs on your own model provider. Connect one in the browser or with an environment variable, then pick a model.
 
 ## Connect in the browser
 
 1. Run `0` and open **Settings → Models**.
 2. Pick a provider. Paste an API key or follow its sign-in flow.
-3. A connected provider gets its default model automatically. To change it, open **Settings → Models** and pick a **Default model**, or pick a model in a thread with the model picker.
+3. Pick a **Default model**, or keep the one 0 chooses for a new connection.
 
-The model list comes from your connections. **Models** lists every model they serve and flags a connection that needs attention. Under **Providers** on the Models page, you can turn off single models of a connection. Public catalogs add price and context data but do not grant access; a listed model can still be unavailable to your account.
+The model list comes from your connections. It flags a connection that needs attention. Under **Providers**, you can turn off single models of a connection. Public catalogs add price and context data but do not grant access, so a listed model can still be unavailable to your account.
 
 ## Connect from a shell
 
@@ -34,11 +34,9 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 | Moonshot Kimi | `KIMI_API_KEY` |
 | Alibaba Qwen | `QWEN_API_KEY` and `QWEN_BASE_URL` |
 | xAI Grok | `XAI_API_KEY` |
-| OpenCode Zen | `OPENCODE_API_KEY` (`OPENCODE_BASE_URL` to change endpoint) |
+| OpenCode Zen | `OPENCODE_API_KEY` (`OPENCODE_BASE_URL` to change the endpoint) |
 | Together AI | `TOGETHER_API_KEY` ([details](#together-ai)) |
 | Amazon Bedrock | AWS credential chain, pinned with `ZERO_SELECTED_PROVIDER=bedrock` ([details](#amazon-bedrock)) |
-
-Pass `ZERO_*` variables with `env`, for example `env ZERO_CHATGPT_OAUTH_REFRESH_TOKEN=... 0 config doctor`.
 
 Check what 0 found:
 
@@ -46,29 +44,26 @@ Check what 0 found:
 0 config doctor
 ```
 
-<span id="0-doctor--credential-readiness"></span>
-`0 config doctor` prints the CLI version, runtime, operating system and Node.js check, then the API provider status: `configured`, `bad` (found but unusable, with the reason) or `missing`. It also lists `claude`, `codex` and `gemini` CLIs found on `PATH`. It checks local configuration only. The first model request proves the key, model access and quota.
+It prints the CLI version, runtime and Node.js check, then the status of each API provider: `configured`, `bad` (found but unusable, with the reason) or `missing`. It also lists any `claude`, `codex` and `gemini` CLIs on your `PATH`. A provider marked configured has a key, but 0 does not test it until the first request.
 
 ## Choose a model
 
-- **Browser**: the model picker in a thread changes that thread's model while it is idle. **Settings → Models → Default model** sets the default for new threads. Existing threads keep their connection until you change it.
-- **CLI**: pass `--model <id>` or set `ZERO_MODEL`. `--model` wins.
+In the browser, the model picker in a thread changes that thread's model while it is idle. **Settings → Models → Default model** sets the default for new threads.
 
-Use an exact model ID your account supports:
+In the CLI, pass `--model <id>` or set `ZERO_MODEL`. `--model` wins. Use an exact model ID your account supports:
 
 ```bash
 env ZERO_SELECTED_PROVIDER=openai ZERO_MODEL=<model-id> \
   0 -p "Review ./authorized-repo"
 ```
 
-Agents need a model that supports tool calling.
+Choose a model that supports tool calling. Agents need it.
 
 ## Custom and local providers
 
-<span id="custom-ai-providers-including-9router"></span>
-Any OpenAI-compatible Chat Completions server works, local or remote.
+Any OpenAI-compatible Chat Completions server works, local or remote. The model does not need to be in a catalog.
 
-On the Models page, in **Providers**, choose **OpenAI / Custom AI Provider**. Enter the base URL with its version path (for example `http://localhost:20128/v1`), the **Custom model ID** and the API key. HTTP and HTTPS both work. The model does not need to be in any catalog.
+In the browser, open **Providers** on the Models page and choose **OpenAI / Custom AI Provider**. Enter the base URL with its version path (for example `http://localhost:20128/v1`), the **Custom model ID** and the API key. HTTP and HTTPS both work.
 
 In a shell:
 
@@ -80,13 +75,24 @@ export ZERO_SELECTED_PROVIDER="openai"
 0
 ```
 
-0 appends `/chat/completions` to the base URL. Set `OPENAI_WIRE_API=responses` for servers that need the Responses API. Exported values override saved connection settings, and an explicit model choice overrides `OPENAI_MODEL`.
+0 appends `/chat/completions` to the base URL. Set `OPENAI_WIRE_API=responses` for servers that need the Responses API. Exported values override saved connection settings. An explicit model choice overrides `OPENAI_MODEL`.
 
 For OpenCode Go, use its published base URL, such as `https://opencode.ai/inference/go/openai/v1`.
 
+### Ollama
+
+Ollama serves an OpenAI-compatible endpoint. Connect it as a custom provider:
+
+```bash
+OPENAI_BASE_URL=http://localhost:11434/v1 OPENAI_API_KEY=ollama \
+  0 -p "Review ./authorized-repo" --model gemma4:27b
+```
+
+Pull a model that supports tool calling first. A remote Ollama server receives your source context.
+
 ### Enterprise gateway: Bedrock through LiteLLM
 
-Run models in your own AWS account by putting a [LiteLLM](https://docs.litellm.ai) proxy in front of Amazon Bedrock. 0 talks to the proxy as a custom OpenAI-compatible provider, so the proxy holds the AWS credentials and 0 never sees them.
+To run models in your own AWS account, put a [LiteLLM](https://docs.litellm.ai) proxy in front of Amazon Bedrock. 0 treats the proxy as a custom OpenAI-compatible provider. The proxy holds the AWS credentials, so 0 never sees them.
 
 A LiteLLM configuration file that exposes one Bedrock model:
 
@@ -100,7 +106,7 @@ general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
 ```
 
-Start it with `litellm --config config.yaml`, using the AWS credential chain of the host it runs on (an instance role, or `AWS_*` variables). Then point 0 at it:
+Start the proxy with `litellm --config config.yaml`. It uses the AWS credential chain of its host, such as an instance role or `AWS_*` variables. Then point 0 at it:
 
 ```bash
 export OPENAI_BASE_URL="https://litellm.internal.example/v1"
@@ -111,47 +117,33 @@ export ZERO_NO_TELEMETRY=1
 0 -p "Review ./authorized-repo"
 ```
 
-- `ZERO_MODEL` is the proxy's `model_name`, not the Bedrock ID.
-- 0 calls `<base>/chat/completions`. Any other OpenAI-compatible gateway (vLLM, an API management layer, a vendor proxy) uses the same variables.
-- The Bedrock model must support tool use. 0 sends tool definitions in the standard OpenAI `tools` format and reads `tool_calls` back, which LiteLLM translates to and from Bedrock's Converse API.
-- Leave `ZERO_LLM_FALLBACK` unset and do not export other provider keys, so no request can route elsewhere ([Keep model traffic in one region](#data-residency)).
-- Check the route without a scan: `ZERO_RUNTIME_TRACE=1 0 -p "reply with ok"` prints the chosen provider and model on stderr.
+- Set `ZERO_MODEL` to the proxy's `model_name`, not the Bedrock ID.
+- Any other OpenAI-compatible gateway (vLLM, an API management layer, a vendor proxy) uses the same variables.
+- The Bedrock model must support tool use. 0 sends standard OpenAI `tools` definitions, and LiteLLM translates them for Bedrock.
+- Leave `ZERO_LLM_FALLBACK` unset and do not export other provider keys, so no request can route elsewhere. See [Keep model traffic in one region](#keep-model-traffic-in-one-region).
+- To check the route without a scan, run `ZERO_RUNTIME_TRACE=1 0 -p "reply with ok"`. It prints the chosen provider and model on stderr.
 
-#### What leaves the machine
+With `ZERO_NO_TELEMETRY=1`, `DO_NOT_TRACK=1` or `ZERO_OFFLINE=1`, 0 sends no usage counts or crash reports. It also skips the public price and model-catalog lookups, so prices for gateway models show as unknown. Model requests go only to `OPENAI_BASE_URL`.
 
-With `ZERO_NO_TELEMETRY=1` (or `DO_NOT_TRACK=1` or `ZERO_OFFLINE=1`) 0 sends no usage counts or crash reports and skips the public pricing and model-catalog lookups (OpenRouter and Models.dev). Model requests go only to `OPENAI_BASE_URL`. Prices for gateway models show as unknown. Still yours to control: the optional `web_search` tool is off unless `ZERO_FEATURE_WEB_SEARCH=1`, scan targets you point at are contacted by design, and GitHub is contacted only when you scan a GitHub repository.
-
-### Ollama
-
-Ollama serves an OpenAI-compatible endpoint, so connect it as a custom provider:
-
-```bash
-OPENAI_BASE_URL=http://localhost:11434/v1 OPENAI_API_KEY=ollama \
-  0 -p "Review ./authorized-repo" --model gemma4:27b
-```
-
-Pull a model that supports tool calling first. A remote Ollama server receives your source context.
+Some traffic stays under your control. The `web_search` tool is off unless you set `ZERO_FEATURE_WEB_SEARCH=1`. Scan targets are contacted because you point 0 at them. GitHub is contacted only when you scan a GitHub repository.
 
 ## ChatGPT Codex
 
-<span id="chatgpt-codex-authentication"></span>
-On the Models page, in **Providers**, select **ChatGPT Codex** and follow the device sign-in. It runs `codex login --device-auth` and reloads the auth file when done.
+In the browser, open **Providers** on the Models page, select **ChatGPT Codex** and follow the device sign-in.
 
-From a shell, run `codex login`. 0 reads tokens from `~/.codex/auth.json` at startup when no `ZERO_CHATGPT_*` token is set. A signed-in Codex session takes priority over stale `OPENAI_API_KEY` or `AZURE_OPENAI_API_KEY` values in your shell.
+From a shell, run `codex login`. At startup, 0 reads tokens from `~/.codex/auth.json` when no `ZERO_CHATGPT_*` token is set. A signed-in Codex session takes priority over stale `OPENAI_API_KEY` or `AZURE_OPENAI_API_KEY` values in your shell.
 
 | Variable | Use |
 | --- | --- |
-| `ZERO_CODEX_AUTH_JSON_PATH` | Read a different auth file. `ZERO_CHATGPT_AUTH_FILE` is a deprecated alias. |
+| `ZERO_CODEX_AUTH_JSON_PATH` | Read a different auth file. |
 | `ZERO_CHATGPT_ACCESS_TOKEN`, `ZERO_CHATGPT_OAUTH_REFRESH_TOKEN` | Supply tokens directly. The access token is read first. |
 | `ZERO_CHATGPT_ACCOUNT_ID` | Set the account ID. Otherwise it comes from the auth file. |
 
-Codex uses its own auth file, not 0's credential store. It rejects a generic `--api-key`. Choose **OpenAI** for an API-key connection.
+Codex uses its own auth file, not 0's credential store, and rejects a generic `--api-key`. Choose **OpenAI** for an API-key connection.
 
 ## Provider notes
 
 ### Azure OpenAI
-
-<span id="azure-openai-configuration"></span>
 
 Supply the key, the endpoint and the deployment ID, and pin the provider:
 
@@ -169,13 +161,15 @@ env ZERO_SELECTED_PROVIDER=azure ZERO_MODEL="your-deployment-id" \
 | Model | `--model`, then `ZERO_MODEL`. Without a pin, `AZURE_OPENAI_MODEL` or an Azure-backed Codex config model also works. |
 | Wire | `AZURE_OPENAI_WIRE_API`: `chat_completions` (default) or `responses` |
 
-Include `/openai/v1` in a Responses base URL. The model picker lists deployments from your Azure resource through an existing Azure CLI sign-in; it never starts a login. With a key alone, enter the deployment ID by hand. 0 probes the endpoint once for its region; that is a diagnostic, not a residency guarantee.
+Include `/openai/v1` in a Responses base URL. With an existing Azure CLI sign-in, the model picker lists the deployments of your resource. It never starts a login. With a key alone, enter the deployment ID by hand.
+
+0 probes the endpoint once to learn its region. That is a diagnostic, not a residency guarantee.
 
 ### Amazon Bedrock
 
-0 calls Bedrock directly with the AWS SDK, so no proxy sits between 0 and your AWS account. Authentication is the standard AWS credential chain: environment keys, `AWS_PROFILE` (including SSO), an ECS task role, a web identity token or an instance role. Alternatively set `AWS_BEARER_TOKEN_BEDROCK` for a Bedrock API key. No AWS secret is stored in 0's credential file.
+0 calls Bedrock directly with the AWS SDK, with no proxy in between. Authentication uses the standard AWS credential chain: environment keys, `AWS_PROFILE` (including SSO), an ECS task role, a web identity token or an instance role. You can also set `AWS_BEARER_TOKEN_BEDROCK` for a Bedrock API key. 0 stores no AWS secret.
 
-Bedrock is never picked from ambient AWS variables. Pin it and name the model:
+0 never picks Bedrock from ambient AWS variables. Pin it and name the model:
 
 ```bash
 export AWS_PROFILE="audit-prod"
@@ -189,14 +183,14 @@ env ZERO_SELECTED_PROVIDER=bedrock \
 | --- | --- |
 | Credentials | The AWS SDK chain. `AWS_BEARER_TOKEN_BEDROCK` wins when set. |
 | Region | `AWS_REGION`, then `AWS_DEFAULT_REGION`, then the profile's region, then `us-east-1`. |
-| Endpoint | `BEDROCK_BASE_URL` for a VPC endpoint or an internal proxy; otherwise the regional `bedrock-runtime` endpoint. |
+| Endpoint | `BEDROCK_BASE_URL` for a VPC endpoint or an internal proxy. Otherwise the regional `bedrock-runtime` endpoint. |
 | Model | A Bedrock model ID or cross-region inference profile ID your account can invoke. The default is `global.anthropic.claude-sonnet-4-5-20250929-v1:0`. |
 
-The model must support tool use through the Converse API. Bedrock runs on the pi-ai layer; `ZERO_RUNTIME=legacy` does not apply to it. `bedrock:<model>` also works in [`ZERO_LLM_FALLBACK`](#failover) when AWS credentials are configured. Prices for Bedrock models are shown as unknown. The model picker does not list Bedrock models yet; pass the ID with `--model` or `ZERO_MODEL`. To reach Bedrock through a LiteLLM proxy instead, use an [OpenAI-compatible gateway](#custom-and-local-providers).
+The model must support tool use through the Converse API. Prices for Bedrock models show as unknown. The model picker does not list Bedrock models, so pass the ID with `--model` or `ZERO_MODEL`. You can use `bedrock:<model>` in [`ZERO_LLM_FALLBACK`](#failover) when AWS credentials are set. To reach Bedrock through a LiteLLM proxy instead, use an [OpenAI-compatible gateway](#custom-and-local-providers).
 
 ### Together AI
 
-Connect **Together AI** or export `TOGETHER_API_KEY`. The default endpoint is `https://api.together.ai/v1`; set `TOGETHER_BASE_URL` to change it.
+Connect **Together AI** or export `TOGETHER_API_KEY`. The default endpoint is `https://api.together.ai/v1`. Set `TOGETHER_BASE_URL` to change it.
 
 Together model IDs look like other providers' IDs (`Qwen/...`, `deepseek-ai/...`), so 0 never routes to Together by model name. Select it explicitly:
 
@@ -207,43 +201,27 @@ env ZERO_SELECTED_PROVIDER=together ZERO_MODEL=openai/gpt-oss-120b \
 0 -p "Review ./authorized-repo" --model together/openai/gpt-oss-120b
 ```
 
-The `together/` prefix is removed once before the request. The default model is `openai/gpt-oss-120b`. The picker lists chat models with published prices; set `TOGETHER_MODEL_LIST=all` to list every chat model your key can see. Unlisted IDs, including dedicated endpoints, still work with `--model`.
+0 removes the `together/` prefix before the request. The default model is `openai/gpt-oss-120b`. The picker lists chat models with published prices. Set `TOGETHER_MODEL_LIST=all` to list every chat model your key can see. Unlisted IDs, including dedicated endpoints, still work with `--model`.
 
 ### Alibaba Qwen
 
-Set `QWEN_API_KEY` and `QWEN_BASE_URL` for the same product and region shown in your account. QwenCloud, Model Studio, Coding Plan and Token Plan keys are not interchangeable, and 0 does not infer the region. Qwen OAuth is discontinued upstream.
+Set `QWEN_API_KEY` and `QWEN_BASE_URL` for the product and region shown in your account. QwenCloud, Model Studio, Coding Plan and Token Plan keys are not interchangeable, and 0 does not infer the region. Qwen OAuth is discontinued upstream.
 
 ### OpenRouter, xAI and Kimi sign-in
 
-<span id="free-openrouter-model"></span>
+- OpenRouter: browser sign-in creates an API key for you. When OpenRouter is the selected provider, `--model free` maps to `nvidia/nemotron-3-super-120b-a12b:free`.
+- xAI and Kimi: browser sign-in needs a client registered for 0. Set `ZERO_XAI_OAUTH_CLIENT_ID` or `ZERO_KIMI_OAUTH_CLIENT_ID` before the app starts, or use an API key.
 
-- **OpenRouter**: the browser sign-in provisions an API key for you. When OpenRouter is the selected provider, `--model free` maps to `nvidia/nemotron-3-super-120b-a12b:free`.
-- **xAI** and **Kimi**: browser sign-in needs a client registered for 0 in `ZERO_XAI_OAUTH_CLIENT_ID` or `ZERO_KIMI_OAUTH_CLIENT_ID` before the app starts. Otherwise use an API key.
-
-OpenAI, OpenRouter, xAI and Azure accept `OPENAI_WIRE_API`, `OPENROUTER_WIRE_API`, `XAI_WIRE_API` and `AZURE_OPENAI_WIRE_API` set to `chat_completions` or `responses`.
+OpenAI, OpenRouter, xAI and Azure accept `OPENAI_WIRE_API`, `OPENROUTER_WIRE_API`, `XAI_WIRE_API` and `AZURE_OPENAI_WIRE_API`, set to `chat_completions` or `responses`.
 
 ## How 0 picks a provider
 
 With several keys set, 0 resolves the provider in this order:
 
-1. **A pin.** `ZERO_SELECTED_PROVIDER` selects the provider outright. Set `ZERO_MODEL` with it.
-2. **The model name.** `--model` or `ZERO_MODEL` routes by prefix when that provider has a key.
-3. **Ambient priority.** Otherwise the first configured key in the list below wins.
+1. A pin. `ZERO_SELECTED_PROVIDER` selects the provider outright. Set `ZERO_MODEL` with it.
+2. The model name. `--model` or `ZERO_MODEL` routes by prefix when that provider has a key.
+3. Ambient priority. Otherwise the first configured key in the [priority list](#ambient-priority) wins.
 
-### Connection health
-
-A connection is only **Connected** (green) after the provider accepted its key. 0 checks each connection once when you open **Connections** or **Models** and when you start a thread, with a short request that never blocks the page, and reuses the answer for about five minutes. The states are:
-
-| Badge | Meaning |
-| --- | --- |
-| **Connected** | The provider accepted the key. |
-| **Key rejected** | The provider answered 401 or 403. For a key from the environment the row says which variable to set; for a saved key it says to update it. |
-| **Can't reach** | The provider did not answer in time. Check your network or the API endpoint. |
-| **Connected** (grey) | A key is present but the provider has no cheap check (for example Azure OpenAI), so it is not verified. |
-
-A rejected or unreachable provider is never picked as the default model for new threads, and a remembered model from it is skipped. If a message still fails with a rejected key, the thread names the provider and model and offers **Switch to** a model on a working connection (this resends your message) or **Manage connection**. The same states show on **Settings → Diagnostics**.
-
-<span id="provider-pinning"></span>
 ### Pin a provider
 
 `ZERO_SELECTED_PROVIDER` accepts `openrouter`, `anthropic`, `openai`, `azure`, `deepseek`, `chatgpt-codex`, `z-ai`, `kimi`, `qwen`, `xai`, `opencode`, `together` and `bedrock`.
@@ -253,9 +231,8 @@ env ZERO_SELECTED_PROVIDER=deepseek ZERO_MODEL=deepseek-flash \
   0 -p "Review https://example.com"
 ```
 
-Pin when you need a predictable bill, especially with Azure deployment names.
+Pin a provider when you need a predictable bill, especially with Azure deployment names.
 
-<span id="model-routing"></span>
 ### Routing by model name
 
 | Model ID | Provider |
@@ -272,7 +249,7 @@ Pin when you need a predictable bill, especially with Azure deployment names.
 | Exact `deepseek-flash`, `deepseek-v4-flash` | DeepSeek |
 | Known Azure Foundry deployment IDs | Azure |
 
-A match without that provider's key falls through to ambient priority. These are routing rules, not an availability check.
+A match without that provider's key falls through to ambient priority. These rules route. They do not check availability.
 
 ### Ambient priority
 
@@ -289,9 +266,21 @@ A match without that provider's key falls through to ambient priority. These are
 11. Anthropic
 12. Together AI
 
-An explicit `--api-key` without a pin picks by shape: `sk-or-` selects OpenRouter, `sk-ant-` selects Anthropic, and anything else selects OpenAI-compatible access. Prefer environment variables; command-line secrets end up in shell history and process lists.
+An explicit `--api-key` without a pin picks by shape. `sk-or-` selects OpenRouter, `sk-ant-` selects Anthropic, and anything else selects OpenAI-compatible access. Prefer environment variables, because command-line secrets end up in shell history and process lists.
 
-<span id="provider-failover"></span>
+## Connection health
+
+A connection shows **Connected** (green) only after the provider accepts its key. 0 checks each connection with a short request when you open **Connections** or **Models** and when you start a thread. It reuses the answer for about five minutes.
+
+| Badge | Meaning |
+| --- | --- |
+| **Connected** | The provider accepted the key. |
+| **Key rejected** | The provider answered 401 or 403. The row tells you which variable to set, or to update the saved key. |
+| **Can't reach** | The provider did not answer in time. Check your network or the API endpoint. |
+| **Connected** (grey) | A key is present, but the provider has no cheap check (for example Azure OpenAI), so 0 has not verified it. |
+
+0 never picks a rejected or unreachable provider as the default for new threads. If a message fails with a rejected key, the thread names the provider and model. It offers **Switch to** a model on a working connection, which resends your message, or **Manage connection**. **Settings → Diagnostics** shows the same states.
+
 ## Failover
 
 `ZERO_LLM_FALLBACK` lists backup routes for when the primary runs out of retries or hits a plan quota:
@@ -301,38 +290,33 @@ env ZERO_LLM_FALLBACK=deepseek:deepseek-flash,azure:gpt-5-deployment \
   0 -p "Review ./authorized-repo"
 ```
 
-Each entry is `<provider>:<model>`, comma-separated, tried in order. Entries without credentials (or, for Azure, without an endpoint) are skipped. Failover changes who receives your context and who bills you. A cyber access program request disables failover.
+Each entry is `<provider>:<model>`. Entries are comma-separated and tried in order. 0 skips entries without credentials, or for Azure without an endpoint. Failover changes who receives your context and who bills you. A cyber access program request disables failover.
 
 ## Advanced settings
 
 | Variable | Default | Effect |
 | --- | --- | --- |
-| `ZERO_RUNTIME` | `auto` | Provider client. `auto` uses the pi-ai layer for the routes it serves and the built-in client for the rest. `legacy` always uses the built-in client. `pi-ai` forces pi-ai and fails on routes it cannot serve. |
+| `ZERO_RUNTIME` | `auto` | Provider client. `auto` picks the right client per route, `legacy` always uses the built-in client, and `pi-ai` forces the pi-ai client and fails on routes it cannot serve. |
 | `ZERO_RUNTIME_TRACE` | unset | `1` prints the chosen client, provider and model to stderr. |
-| `ZERO_MAX_COMPLETION_TOKENS` | `8192` | Completion tokens requested per call. Positive integer; values above `131072` are clamped. Very small values truncate tool calls. |
+| `ZERO_MAX_COMPLETION_TOKENS` | `8192` | Completion tokens requested per call. Positive integer, clamped to `131072`. Very small values truncate tool calls. |
 
-If a provider misbehaves under `auto`, set `ZERO_RUNTIME=legacy` and report it.
+If a provider misbehaves under `auto`, set `ZERO_RUNTIME=legacy` and report it. Bedrock ignores `legacy`.
 
-<span id="cyber-access-programs-and-daybreak"></span>
 ## Cyber access programs
 
-OpenAI's Daybreak programs need an explicit request. A model name alone does not select one.
+OpenAI's Daybreak programs need an explicit request. A model name alone does not select one. In the browser, use the **Daybreak** control beside the model settings. **Automatic** clears the request.
 
-- **Browser**: use the **Daybreak** control beside the model settings. **Automatic** clears the request.
+The control requests access. It does not grant it. Reports keep the requested program separate from what the provider confirmed. Program-bound calls never fall back to another provider. Do not pass `--api-key` with ChatGPT sign-in.
 
-The control requests access; it does not grant it. Reports keep the requested program separate from what the provider confirmed. Program-bound calls never fall back to another provider. Do not pass `--api-key` with ChatGPT sign-in.
-
-<span id="data-residency"></span>
 ## Keep model traffic in one region
 
-Pin the provider and its endpoint with `ZERO_SELECTED_PROVIDER` and `ZERO_MODEL`, as in the [Azure OpenAI](#azure-openai) example, and leave `ZERO_LLM_FALLBACK` unset.
+Pin the provider and its endpoint with `ZERO_SELECTED_PROVIDER` and `ZERO_MODEL`, as in the [Azure OpenAI](#azure-openai) example. Leave `ZERO_LLM_FALLBACK` unset.
 
-- Setting a provider's variables alone does not guarantee all traffic goes there. Ambient priority and [failover](#failover) can pick other routes.
-- Other lookups still leave: the GitHub API and web search.
+Setting a provider's variables alone does not send all traffic there, because ambient priority and [failover](#failover) can pick other routes. The GitHub API and web search still leave the region.
 
 ## Manage connections from a shell
 
-The same actions as **Settings → Connections** and **Models** are available as commands. Keys come from an environment variable or stdin, never from an argument.
+These commands do what **Settings → Connections** and **Models** do. Keys come from an environment variable or stdin, never from an argument.
 
 ```bash
 0 models connect openai --key-env MY_OPENAI_KEY
@@ -342,10 +326,11 @@ The same actions as **Settings → Connections** and **Models** are available as
 0 models connect openai --remove --yes
 ```
 
-<span id="console-credential-store"></span>
 ## Where credentials live
 
-Keys saved under **Providers** on the Models page are stored in plaintext at `~/.0/credentials.json`, with `0600` file and `0700` folder permissions. Keep that file out of source control and bug reports. A nonblank environment variable wins over the saved key for that provider; Connections marks such a row **From environment** and the saved key **Not in use**. For CI and other automation, pass credentials in the environment.
+Keys saved under **Providers** on the Models page are stored in plaintext at `~/.0/credentials.json`, with `0600` file and `0700` folder permissions. Keep that file out of source control and bug reports.
+
+A nonblank environment variable wins over the saved key for that provider. Connections marks such a row **From environment** and the saved key **Not in use**. In CI and other automation, pass credentials in the environment.
 
 ## Limits
 
