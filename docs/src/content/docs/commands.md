@@ -1304,7 +1304,7 @@ Browse and manage persisted findings
 
 Triage (`new`, `accepted`, `suppressed`) and verification are separate states. Accepting a finding records your decision; reproduction and fix verification are separate steps.
 
-Subcommands: [list](#findings-list) · [show](#findings-show) · [update](#findings-update) · [import](#findings-import) · [fix](#findings-fix) · [burndown](#findings-burndown) · [evidence](#findings-evidence) · [report-draft](#findings-report-draft) · [accept](#findings-accept) · [suppress](#findings-suppress) · [reopen](#findings-reopen) · [export](#findings-export) · [keys](#findings-keys) · [upload](#findings-upload) · [issues](#findings-issues) · [reports](#findings-reports).
+Subcommands: [list](#findings-list) · [show](#findings-show) · [update](#findings-update) · [import](#findings-import) · [fix](#findings-fix) · [burndown](#findings-burndown) · [verify](#findings-verify) · [evidence](#findings-evidence) · [report-draft](#findings-report-draft) · [accept](#findings-accept) · [suppress](#findings-suppress) · [reopen](#findings-reopen) · [export](#findings-export) · [keys](#findings-keys) · [upload](#findings-upload) · [issues](#findings-issues) · [reports](#findings-reports).
 
 | Option | Registered default | Description |
 | --- | --- | --- |
@@ -1631,6 +1631,64 @@ Exit codes:
 | `--computers-config <path>` | — | Operator computer connection registry JSON file |
 | `--engines-config <path>` | — |  |
 | `--db-path <path>` | — | Control database of the local engine to attach to |
+
+#### findings verify
+
+Experimental: re-check findings with a fresh thread each and record a verdict next to them
+
+```text
+0 findings verify [options] [finding...]
+```
+
+Verify re-checks findings the way a second reviewer would. Each finding gets its own thread, or with `--batch` a few findings of one file share one. The thread gets only the finding's title, location, category, description and claimed impact, never the scan that produced it. It follows the experimental `verify-finding` skill: it reads the code, traces the input from an entry point to the sink, looks for a control, and builds a concrete attack or says it cannot. It answers true-positive, false-positive, fixed, uncertain or duplicate (a duplicate is only found inside a batch) with reasoning that cites `path:line`, and an advisory severity.
+
+Pass the folder that was scanned with `--folder` (default: the current directory). A finding whose file is not in that folder is skipped with a reason. Name findings by id or id prefix, or select them with `--severity`, `--category` and `--tool`. Findings that are suppressed, fixed or marked false positive are skipped, and so are findings that already have a verdict unless you pass `--force`. `--limit` caps a run; the next run continues with the rest.
+
+The verdict is stored next to the finding by its id. [findings list](#findings-list) and [findings show](#findings-show) print it, for example `verified: likely false positive`. Severity and status do not change, and the advisory severity is kept apart from the finding's own. A thread that returns no verdict for a finding is recorded as uncertain with the reason `no verdict returned`. A thread that fails to run stores nothing, so the next run tries it again.
+
+`--apply` suppresses a finding only when the verdict is false-positive and it names a control at `path:line` that exists in the folder and the reasoning cites a `path:line` too. The suppression note starts with `False positive (model-verified):` and `0 findings reopen` undoes it. Without `--apply` no status changes.
+
+`--budget` is the total for the run and `--per-finding` caps one finding. `--concurrency` (1 to 3) runs threads side by side. The run stops when `--max-consecutive-failures` threads in a row return no verdict, or when the budget is spent. `--dry-run` lists what would be checked. `--format json` prints the report with counts per verdict, the reasoning, the cost and what `--apply` did.
+
+Verify reads files on this machine, so it needs the local console and rejects `--computer` and `--engine-url`.
+
+Exit codes:
+
+- 0: done
+- 1: a check returned no verdict, or the run stopped on failures
+- 2: usage error
+- 3: the total budget ran out
+
+| Option | Registered default | Description |
+| --- | --- | --- |
+| `--folder <dir>` | — | The folder that was scanned; the threads read the code there (default: the current directory) |
+| `--severity <levels>` | — | Only these severities (critical, high, medium, low, info; comma-separated) |
+| `--category <category>` | — | Only this category |
+| `--tool <name>` | — | Only findings reported by this tool |
+| `--scan <id>` | — | Only findings of this scan (id prefix) |
+| `--limit <n>` | — | Check at most this many findings in this run; the next run continues with the rest |
+| `--force` | — | Check findings again that already have a verdict |
+| `--apply` | — | Suppress findings called false-positive when the verdict cites a control at path:line (default: never change a status) |
+| `--batch <n>` | `1` | Findings in one file that share a thread (1 to 5) |
+| `--concurrency <n>` | `1` | Threads at the same time (1 to 3) |
+| `--budget <usd>` | `2` | Total spend for this run in USD; no new thread starts once it is used |
+| `--per-finding <usd>` | `0.3` | Spend cap for one finding, in USD |
+| `--max-consecutive-failures <n>` | `3` | Stop after this many checks in a row that return no verdict |
+| `--model <model>` | — | Model for the threads (default: gpt-6-luna) |
+| `--timeout <seconds>` | `600` | Maximum seconds to wait for one thread |
+| `--dry-run` | — | List what would be checked and skipped; change nothing |
+| `--format <format>` | — | Output: text or json Choices: text, json. |
+| `--engine-url <url>` | — | Attach directly to a running trusted engine |
+| `--engine-token-env <name>` | — | Environment variable holding the attached engine token |
+| `--computer <id>` | — | Use a registered remote computer |
+| `--engine <id>` | — |  |
+| `--computers-config <path>` | — | Operator computer connection registry JSON file |
+| `--engines-config <path>` | — |  |
+| `--db-path <path>` | — | Control database of the local engine to attach to |
+
+| Argument | Required | Description |
+| --- | --- | --- |
+| `finding` | No |  |
 
 #### findings upload
 

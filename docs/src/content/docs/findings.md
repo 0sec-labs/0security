@@ -329,6 +329,28 @@ On one planted Node app (an old lodash with one vulnerable function called, and 
 
 Add `--outdated` to `0 sbom check` to list newer versions. These are notes, not findings.
 
+## Check findings for false positives
+
+`0 findings verify` is experimental. It re-checks findings with a fresh thread for each one. The thread gets only the finding's own text, reads the code itself, and tries to build a concrete attack. It stores a verdict next to the finding: true-positive, false-positive, fixed, uncertain or duplicate.
+
+Pass the folder that was scanned, so the threads can read the code:
+
+```bash
+0 findings verify --severity high,medium --folder ~/code/app
+```
+
+`0 findings list` and `0 findings show` then print a line such as `verified: likely false positive`. The verdict is advice. The finding's severity and status do not change, and the thread's own severity is stored apart as an advisory severity. A thread that returns no verdict is recorded as uncertain.
+
+To suppress what the threads call false positives, add `--apply`:
+
+```bash
+0 findings verify --apply --folder ~/code/app
+```
+
+With `--apply`, a finding is suppressed only when the verdict is false-positive and it cites a control at `path:line` that exists in the folder. The suppression note starts with `False positive (model-verified):`. Undo it with `0 findings reopen`. Without `--apply`, no status ever changes.
+
+A re-run skips findings that already have a verdict. Add `--force` to check them again. The model can be wrong in both directions, so read the reasoning in `0 findings show` before you rely on a verdict. See [findings verify](/commands/#findings-verify) for budgets and stop rules.
+
 ## Fix a finding
 
 0 fixes a finding in a separate git work tree, so your checkout is never touched. It runs your checks, commits on a branch named `0/fix-<id>` and opens a pull request. The pull request is a draft when a check fails.

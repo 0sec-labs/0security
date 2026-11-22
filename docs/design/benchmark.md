@@ -49,6 +49,28 @@ The wording change to the scan skill that this run measured (require an exploit 
 - The edit also names MD5 and SHA-1 explicitly; python-flask generic recall went 83% to 100% (the weak-hash item).
 - With 3 repeats and these fixtures, only differences larger than the min-max range mean anything. The edit was written after reading clean-app findings, so clean-app is partly tuned on; clean-python was added to give a second sample, but it too shares the unauthenticated-read shape.
 
+## Second-pass verification (`0 findings verify`)
+
+Measured with `node scripts/bench/verify-score.mjs --run --repeat 2`. For each fixture it scans a copy with a fresh home (`--budget 0.5`), runs `0 findings verify --apply` on every finding, and classifies each finding with the matcher: a planted bug, a false positive (a decoy hit, or any finding in a clean app) or neither. Six fixtures (clean-app, clean-python, python-flask, go-http, node-express, llm-app), 2 repeats, default model. Total cost of both rounds about $0.2.
+
+The number to watch is real bugs that the verifier called false-positive, and real bugs that `--apply` would have suppressed.
+
+First round, skill text as first written: 1 of 25 planted-bug findings was called false-positive, and `--apply` suppressed it (a medium finding: unsalted MD5 on `/register`, dismissed because the code shown does not store the hash). Nothing in that reasoning was a control.
+
+The skill was then tightened: the absence of a caller, a write or a route in the folder is not a control, an argument that the impact is small is not a control, and weak primitives and hardcoded secrets are not dismissed because the folder does not show where they are used. Second round, same fixtures:
+
+| Group | Findings | true-positive | false-positive | uncertain |
+| --- | --- | --- | --- | --- |
+| Planted bugs | 25 | 21 | 0 | 4 |
+| Decoy or clean app | 4 | 4 | 0 | 0 |
+| Neither | 6 | 3 | 0 | 3 |
+
+- Real bugs called false-positive: 0 of 25. Real bugs suppressed by `--apply`: 0. The first round had 1 of 25 and 1, so the small sample moved by one finding; do not read 0 as a guarantee.
+- Precision gain: none measured. All 4 findings the benchmark counts as false positives (missing authentication on read routes in the clean apps) were called true-positive, because the thread built a concrete unauthenticated request for each. The first round had 5 such findings, 4 true-positive and 1 uncertain. Those findings are a defensible reading of the code, so the benchmark's "clean" label may be too strict for them; either way the verifier did not remove them.
+- Uncertain was used for 4 planted bugs, 3 other findings and 0 false positives: a hardcoded signing key that no code in the folder uses (go-http), and llm-app findings whose entry point is not in the folder. It answers uncertain rather than guessing, which costs recall in a triage workflow but suppresses nothing.
+- Cost: about $0.001 to $0.002 per finding at the default model, in a thread of its own.
+- This is 25 real-bug findings, 4 false positives and 6 others over 12 scans. It shows the verifier did not dismiss real bugs here and was cautious. It does not show that it removes false positives, because the sample has almost none it could remove. `--apply` has no severity guard: it was not needed in the second round, and it would be added if a real high or critical finding is ever suppressed.
+
 ## What it does not prove
 
 - Seven tiny, synthetic apps with obvious bugs. A high recall here says the scan is not blind, not that it finds bugs in a real codebase; the planted bugs are textbook shapes models have seen.
