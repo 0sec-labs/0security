@@ -4,6 +4,7 @@ import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { advisoriesToSarif, advisoriesToText, checkBomAgainstOsv, checkOutdated, outdatedToText } from "@0/engine";
 import { VERSION } from "@0/engine/shared";
 import { UsageError } from "./output.js";
+import { resolutionLine } from "./sbom-resolution.js";
 import type { SbomDeps } from "./sbom.js";
 
 export interface CheckOptions { format?: string; output?: string; outdated?: boolean }
@@ -48,13 +49,14 @@ export async function runCheckReport(file: string, options: CheckOptions, deps: 
   let text: string;
   if (format === "json") text = `${JSON.stringify({ ...result, ...(outdated ? { outdated } : {}) }, null, 2)}\n`;
   else if (format === "sarif") text = `${JSON.stringify(advisoriesToSarif(result.advisories, { toolVersion: VERSION, locate: componentLocator(bom, resolve(file)) }), null, 2)}\n`;
-  else text = advisoriesToText(result.advisories, result.checked) + (outdated ? `\n${outdatedToText(outdated)}` : "");
+  else text = advisoriesToText(result.advisories, result.checked) + (outdated ? `\n${outdatedToText(outdated)}` : "") + `\n${resolutionLine(result.checked, result.unresolved)}\n`;
   if (options.output) {
     deps.write(resolve(options.output), text);
     deps.err(`Wrote ${options.output}`);
     if (format !== "text") deps.err(`${result.advisories.length} advisories affect ${new Set(result.advisories.map(item => item.purl)).size} of ${result.checked} components`);
     if (format !== "text" && outdated) deps.err(outdatedToText(outdated).trimEnd());
   } else deps.out(text);
+  if (format !== "text") deps.err(resolutionLine(result.checked, result.unresolved));
   if (format === "text" && result.withoutDetails) deps.err(`${result.withoutDetails} advisories are listed by id only (details unavailable or over the limit).`);
   if (result.advisories.some(item => item.malicious)) deps.err("A malicious package is in this SBOM. Remove it and treat machines that installed it as compromised.");
   return result.advisories.length ? 1 : 0;
