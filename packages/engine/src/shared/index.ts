@@ -35,4 +35,4 @@ export * from "./share-safe.js";
 export * from "./removed-runtimes.js";
 export * from "./agent-session.js";
 export { redactSensitiveHeaders, redactAuthHeaders } from "./redact-headers.js";
-export { scanPrompt, prePassBlock, scopeBlock, threatModelPrompt, THREAT_MODEL_PATH, contextBlock, policyBlock, parsePolicyFile, mergePolicies, neutraliseDelimiters, MAX_CONTEXT_FILE_CHARS, MAX_CONTEXT_TOTAL_CHARS, type PrePassLeads, type SteeringFile, type PolicyEntry, type PolicySource } from "./scan-prompt.js";
+export { scanPrompt, prePassBlock, scopeBlock, batchBlock, threatModelPrompt, THREAT_MODEL_PATH, contextBlock, policyBlock, parsePolicyFile, mergePolicies, neutraliseDelimiters, MAX_CONTEXT_FILE_CHARS, MAX_CONTEXT_TOTAL_CHARS, type PrePassLeads, type BatchPromptInfo, type BatchPromptUnit, type SteeringFile, type PolicyEntry, type PolicySource } from "./scan-prompt.js";

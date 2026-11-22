@@ -47,6 +47,23 @@ export function formatMarkdown(report: ScanReport): string {
   if (report.summary.low > 0) lines.push(`- **Low:** ${report.summary.low}`);
   lines.push("");
 
+  const partial = report.coverage !== undefined && !report.coverage.complete;
+  if (report.coverage) {
+    lines.push("## Coverage", "");
+    lines.push(`This scan ran in batches: ${report.coverage.statement}.`);
+    if (partial) {
+      lines.push("", "The scan did not review everything, so the findings below are partial. A missing finding in code that was not reached means nothing.");
+      const shown = report.coverage.pendingUnits.slice(0, 20);
+      if (shown.length) {
+        lines.push("", "Not reached:", "");
+        for (const unit of shown) lines.push(`- ${unit.kind} \`${unit.path}${unit.startLine ? `:${unit.startLine}` : ""}\`${unit.reason ? ` (${unit.reason})` : ""}`);
+        const more = report.coverage.pendingUnits.length - shown.length;
+        if (more > 0) lines.push(`- and ${more} more`);
+      }
+    }
+    lines.push("");
+  }
+
   if (report.warnings.length > 0) {
     lines.push("## Warnings");
     lines.push("");
@@ -76,10 +93,12 @@ export function formatMarkdown(report: ScanReport): string {
       lines.push(formatFinding(finding));
     }
   } else {
-    lines.push(incomplete || report.warnings.length > 0 ? "## No Confirmed Vulnerabilities" : "## No Vulnerabilities Found");
+    lines.push(incomplete || partial || report.warnings.length > 0 ? "## No Confirmed Vulnerabilities" : "## No Vulnerabilities Found");
     lines.push("");
     lines.push(
-      report.warnings.length > 0
+      partial
+        ? `No vulnerabilities were confirmed in the code that was reviewed (${report.coverage!.statement}).`
+        : report.warnings.length > 0
         ? "The scanner did not confirm vulnerabilities, but target validation or probe execution produced warnings."
         : report.reviewChecks?.length
           ? "No security vulnerabilities were found in the inspected scope. Advisory review-check results are reported separately above."

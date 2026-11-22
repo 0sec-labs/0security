@@ -458,3 +458,43 @@ export const trustGraphEdges = sqliteTable(
     index("idx_tge_relation").on(table.relation),
   ]
 );
+
+/** One batched scan of a folder: what was asked and the folder's git HEAD when it began. */
+export const coverageScans = sqliteTable(
+  "coverage_scans",
+  {
+    id: text("id").primaryKey(),
+    folder: text("folder").notNull(),
+    label: text("label").notNull(),
+    gitHead: text("gitHead"),
+    batchSize: integer("batchSize").notNull(),
+    budgetUsd: real("budgetUsd").notNull(),
+    spentUsd: real("spentUsd").notNull().default(0),
+    /** JSON array of every thread this scan started, in order, so a resumed scan still reads the findings of earlier ones. */
+    threadIds: text("threadIds"),
+    createdAt: text("createdAt").notNull(),
+    updatedAt: text("updatedAt").notNull(),
+  },
+  (table) => [index("idx_coverage_scans_folder").on(table.folder, table.createdAt)]
+);
+
+/** The coverage ledger: one row per unit (an entry point or a group of files) of a batched scan. */
+export const coverageUnits = sqliteTable(
+  "coverage_units",
+  {
+    scanId: text("scanId").notNull().references(() => coverageScans.id),
+    unitId: text("unitId").notNull(),
+    kind: text("kind").notNull(),
+    path: text("path").notNull(),
+    startLine: integer("startLine"),
+    name: text("name"),
+    /** JSON array of the files an `other` unit covers. */
+    files: text("files"),
+    batch: integer("batch").notNull().default(0),
+    status: text("status").notNull().default("pending"), // pending | reviewed | skipped
+    reason: text("reason"),
+    threadId: text("threadId"),
+    updatedAt: text("updatedAt").notNull(),
+  },
+  (table) => [index("idx_coverage_units_status").on(table.scanId, table.status)]
+);

@@ -222,8 +222,41 @@ CREATE TABLE IF NOT EXISTS trust_graph_edges (
   updatedAt TEXT NOT NULL,
   UNIQUE(srcKind, srcId, dstKind, dstId, relation)
 );
+
+-- Coverage ledger of a batched scan: which units (entry points, groups of files) were reviewed.
+CREATE TABLE IF NOT EXISTS coverage_scans (
+  id TEXT PRIMARY KEY,
+  folder TEXT NOT NULL,
+  label TEXT NOT NULL,
+  gitHead TEXT,
+  batchSize INTEGER NOT NULL,
+  budgetUsd REAL NOT NULL,
+  spentUsd REAL NOT NULL DEFAULT 0,
+  threadIds TEXT,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS coverage_units (
+  scanId TEXT NOT NULL REFERENCES coverage_scans(id),
+  unitId TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  path TEXT NOT NULL,
+  startLine INTEGER,
+  name TEXT,
+  files TEXT,
+  batch INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'pending',
+  reason TEXT,
+  threadId TEXT,
+  updatedAt TEXT NOT NULL,
+  PRIMARY KEY (scanId, unitId)
+);
 `;
 
+
+export const COVERAGE_INDEXES_SQL = `CREATE INDEX IF NOT EXISTS idx_coverage_scans_folder ON coverage_scans(folder, createdAt);
+CREATE INDEX IF NOT EXISTS idx_coverage_units_status ON coverage_units(scanId, status);`;
 
 export const SCHEMA_INDEXES_SQL = `
 CREATE INDEX IF NOT EXISTS idx_findings_scanId ON findings(scanId);
@@ -262,6 +295,7 @@ CREATE INDEX IF NOT EXISTS idx_pcred_kind ON persistent_credentials(credentialKi
 CREATE INDEX IF NOT EXISTS idx_tge_src ON trust_graph_edges(srcKind, srcId);
 CREATE INDEX IF NOT EXISTS idx_tge_dst ON trust_graph_edges(dstKind, dstId);
 CREATE INDEX IF NOT EXISTS idx_tge_relation ON trust_graph_edges(relation);
+${COVERAGE_INDEXES_SQL}
 `;
 
 /**

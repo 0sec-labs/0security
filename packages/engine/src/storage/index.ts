@@ -29,6 +29,8 @@ export {
   triageMemories,
   persistentCredentials,
   trustGraphEdges,
+  coverageScans,
+  coverageUnits,
   credentialKinds,
   findingStatuses,
   findingTriageStatuses,
@@ -58,6 +60,7 @@ export type {
 export { workflowRestorePolicy, type WorkflowRestoreSuggestion, SecurityWorkflowStore, SecurityWorkflowStoreError, type SecurityWorkflowExecutionUpdate } from "./security-workflows.js";
 export { WorkflowTriggerStore, nextWorkflowTriggerFire, TRIGGER_INTERVAL_MS, type WorkflowTrigger, type WorkflowTriggerCadence } from "./workflow-triggers.js";
 export * from "./learning.js";
+export { CoverageLedger, coverageSentence, summarizeCoverage, type CoverageStatus, type CoverageSummary, type LedgerScan, type LedgerUnit, type NewLedgerUnit } from "./coverage-ledger.js";
 export type { SecurityWorkflowVersion } from "./security-workflows.js";
 export { SENTINEL_CLAIM_STALE_MS, SentinelStore, SentinelStoreError, defaultSentinelFiles } from "./sentinels.js";
 

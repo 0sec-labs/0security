@@ -332,3 +332,5 @@ export * from "./sbom/index.js";
 export * from "./probe/index.js";
 export { MODEL_FILE_EXTENSIONS, modelScanToSarif, scanModelFile, scanModelPath } from "./modelscan/index.js";
 export type { ImportFinding as ModelImportFinding, ModelFileResult, ModelScanOptions, ModelScanReport, ModelVerdict } from "./modelscan/index.js";
+
+export { buildInventory, planBatches, inventorySummaryText, isEntryPointKind, UNIT_KINDS, type Batch, type Inventory, type InventoryOptions, type InventorySummary, type InventoryUnit, type UnitKind } from "./inventory/index.js";

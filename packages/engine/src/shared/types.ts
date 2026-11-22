@@ -1352,7 +1352,31 @@ export interface ReviewCheckResult {
   fix: string;
 }
 
+/** Counts of units (entry points or groups of files) in a scan's coverage ledger. */
+export interface ScanCoverageTally { total: number; reviewed: number; pending: number; skipped: number }
+
+/**
+ * What a batched scan reviewed. `complete` is true only when no unit is pending; a report with `complete: false`
+ * says which entry points were not reached and why.
+ */
+export interface ScanCoverage {
+  scanId: string;
+  complete: boolean;
+  /** For example "reviewed 41 of 57 entry points; 16 not reached (budget)". */
+  statement: string;
+  entryPoints: ScanCoverageTally;
+  otherGroups: ScanCoverageTally;
+  byKind: Record<string, ScanCoverageTally>;
+  /** Entry points not reached, by reason. */
+  notReached: Record<string, number>;
+  batches: { total: number; reviewed: number; pending: number };
+  /** The first units not reached (at most 100). */
+  pendingUnits: Array<{ kind: string; path: string; startLine?: number; name?: string; reason?: string }>;
+}
+
 export interface ScanReport extends ScanPlanExecution {
+  /** Present when the scan ran in batches: what was and was not reviewed. */
+  coverage?: ScanCoverage;
   target: string;
   scanDepth: ScanDepth;
   startedAt: string;

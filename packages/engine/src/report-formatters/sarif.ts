@@ -249,6 +249,8 @@ export function formatSarif(report: ScanReport): string {
             endTimeUtc: report.completedAt,
           },
         ],
+        // What a batched scan reviewed; complete is false when entry points were not reached.
+        ...(report.coverage ? { properties: { coverage: report.coverage } } : {}),
       },
     ],
   };
