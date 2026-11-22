@@ -73,6 +73,7 @@ CREATE TABLE IF NOT EXISTS findings (
   verificationResult TEXT,
   reviewAnnotation TEXT,
   sourceVerification TEXT,
+  modelVerification TEXT,
   tool TEXT,
   timestamp INTEGER NOT NULL
 );
@@ -404,6 +405,10 @@ export function migrateLegacySchema(sqlite: ShimmedDatabase): void {
   }
   if (!colNames.has("tool")) {
     sqlite.exec("ALTER TABLE findings ADD COLUMN tool TEXT");
+  }
+  // Second-pass model verification (`0 findings verify`). Additive and nullable.
+  if (!colNames.has("modelVerification")) {
+    sqlite.exec("ALTER TABLE findings ADD COLUMN modelVerification TEXT");
   }
   // Backfill NULL fingerprint / triageStatus / workflowStatus for rows
   // created before those columns existed.

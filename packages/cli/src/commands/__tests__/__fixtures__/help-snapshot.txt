@@ -621,6 +621,8 @@ Commands:
                                     request for review
   burndown [options]                Work through open findings in batches: one fix branch and pull
                                     request each, then a report
+  verify [options] [finding...]     Experimental: re-check findings with a fresh thread each and
+                                    record a verdict next to them
   evidence [options] <folder>       Write one folder of findings, SARIF, SBOM and fix branches, with
                                     a README that says what it does and does not show
   report-draft [options] <finding>  Write a draft early warning, notification or final report about
@@ -987,6 +989,41 @@ Options:
                          processed
   --format <format>      Output: text or json (default: "text")
   -h, --help             display help for command
+
+### 0 findings verify
+Usage: 0 findings verify [options] [finding...]
+
+Experimental: re-check findings with a fresh thread each and record a verdict next to them
+
+Options:
+  --folder <dir>                  The folder that was scanned; the threads read the code there
+                                  (default: the current directory)
+  --severity <levels>             Only these severities (critical, high, medium, low, info;
+                                  comma-separated)
+  --category <category>           Only this category
+  --tool <name>                   Only findings reported by this tool
+  --limit <n>                     Check at most this many findings in this run; the next run
+                                  continues with the rest
+  --force                         Check findings again that already have a verdict
+  --apply                         Suppress findings called false-positive when the verdict cites a
+                                  control at path:line (default: never change a status)
+  --batch <n>                     Findings in one file that share a thread (1 to 5) (default: "1")
+  --concurrency <n>               Threads at the same time (1 to 3) (default: "1")
+  --budget <usd>                  Total spend for this run in USD; no new thread starts once it is
+                                  used (default: "2")
+  --per-finding <usd>             Spend cap for one finding, in USD (default: "0.3")
+  --max-consecutive-failures <n>  Stop after this many checks in a row that return no verdict
+                                  (default: "3")
+  --model <model>                 Model for the threads (default: gpt-6-luna)
+  --timeout <seconds>             Maximum seconds to wait for one thread (default: "600")
+  --dry-run                       List what would be checked and skipped; change nothing
+  --format <format>               Output: text or json (choices: "text", "json")
+  --engine-url <url>              Attach directly to a running trusted engine
+  --engine-token-env <name>       Environment variable holding the attached engine token
+  --computer <id>                 Use a registered remote computer
+  --computers-config <path>       Operator computer connection registry JSON file
+  --db-path <path>                Control database of the local engine to attach to
+  -h, --help                      display help for command
 
 ### 0 models
 Usage: 0 models [options] [command]

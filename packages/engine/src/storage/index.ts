@@ -48,6 +48,7 @@ export {
   type WorkerStatusDB,
   type CredentialKindDB,
 } from "./schema.js";
+export { MODEL_VERDICTS, parseFindingModelVerification, type FindingModelVerification, type ModelVerdict } from "./finding-helpers.js";
 export type {
   FindingReviewAnnotation,
   PersistedFindingReviewFields,

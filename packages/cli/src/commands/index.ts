@@ -26,6 +26,7 @@ export { registerFindingsImportCommand } from "./findings-import.js";
 export { registerFixCommand } from "./fix.js";
 export { registerThreatModelCommand } from "./threat-model.js";
 export { registerBurndownCommand } from "./burndown.js";
+export { registerVerifyCommand } from "./verify.js";
 export { registerSbomCommand } from "./sbom.js";
 export { registerProbeCommand } from "./probe.js";
 export { registerFindingsUploadCommand } from "./findings-upload.js";

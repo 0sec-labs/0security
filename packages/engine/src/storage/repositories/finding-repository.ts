@@ -5,7 +5,7 @@ import type { Finding, FindingTriageStatus } from "../../shared/index.js";
 import * as schema from "../schema.js";
 import { findingStatuses, type FindingStatusDB } from "../schema.js";
 import { iterateLatestFindingMetadata, getFindingFamilyMetadata, selectFindingFamiliesBySeverity, selectFindingsBySeverity, type RankedFindingOptions } from "../finding-priority.js";
-import { buildFindingFingerprint, type PersistedFindingReviewFields, serializeFindingSourceVerification, serializeFindingVerificationResult, serializeFindingReviewAnnotation, restoreFindingReviewFields, deriveEvidenceFromPocSteps, normalizeWorkflowStatus, type WorkflowStatus } from "../finding-helpers.js";
+import { buildFindingFingerprint, type PersistedFindingReviewFields, type FindingModelVerification, parseFindingModelVerification, serializeFindingModelVerification, serializeFindingSourceVerification, serializeFindingVerificationResult, serializeFindingReviewAnnotation, restoreFindingReviewFields, deriveEvidenceFromPocSteps, normalizeWorkflowStatus, type WorkflowStatus } from "../finding-helpers.js";
 import { Repository } from "./base.js";
 
 export class FindingRepository extends Repository {
@@ -175,6 +175,21 @@ export class FindingRepository extends Repository {
    */
   getFindingReviewFields(findingId: string): PersistedFindingReviewFields {
     return restoreFindingReviewFields(this.owner.getFinding(findingId));
+  }
+
+
+  /** The second-pass model verification of a finding, or undefined when it has none. */
+  getFindingModelVerification(findingId: string): FindingModelVerification | undefined {
+    return parseFindingModelVerification(this.owner.getFinding(findingId)?.modelVerification);
+  }
+
+
+  /** Record a verification next to the finding. Touches no other column. */
+  setFindingModelVerification(findingId: string, verification: FindingModelVerification): void {
+    const result = this.db.update(schema.findings)
+      .set({ modelVerification: serializeFindingModelVerification(verification) })
+      .where(eq(schema.findings.id, findingId)).run();
+    if (result.changes === 0) throw new Error(`Finding ${findingId} not found`);
   }
 
 

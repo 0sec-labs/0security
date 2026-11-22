@@ -1,0 +1,186 @@
+import { describe, expect, it } from "vitest";
+import { applyRefusal, firstSentence, groupFindings, runVerify, type VerifyCandidate, type VerifyDeps, type VerifyOptions } from "../verify.js";
+import type { FindingModelVerification } from "@0/engine/storage";
+
+const cand = (id: string, extra: Partial<VerifyCandidate> = {}): VerifyCandidate => ({
+  id, dbPath: "/db", fingerprint: `fp-${id}`, title: `Title ${id}`, severity: "high", category: "injection", tool: null, description: "d",
+  scanId: "s1", status: "discovered", triage: "new", timestamp: 1, path: "src/a.ts", startLine: 3, ...extra,
+});
+
+const block = (o: unknown) => `\`\`\`json\n${JSON.stringify(o)}\n\`\`\``;
+const options = (extra: Partial<VerifyOptions> = {}): VerifyOptions => ({ folder: "/work", budget: "2", perFinding: "0.3", concurrency: "1", batch: "1", maxConsecutiveFailures: "3", timeout: "60", ...extra });
+
+function harness(candidates: VerifyCandidate[], answer: (message: string, thread: number) => string | undefined, overrides: Partial<{ missing: string[] }> = {}) {
+  const saved = new Map<string, FindingModelVerification>();
+  const suppressed: Array<[string, string]> = [];
+  const messages: string[] = [];
+  let threads = 0;
+  const sessions = new Map<string, string | undefined>();
+  const client = { request: async (method: string, path: string, body?: { text?: string }) => {
+    if (method === "POST" && path.endsWith("/sessions")) { threads++; return { session: { id: `t${threads}` } }; }
+    if (method === "POST" && path.endsWith("/messages")) { messages.push(body!.text!); sessions.set(path.split("/")[4]!, answer(body!.text!, threads)); return {}; }
+    if (method === "GET") {
+      const reply = sessions.get(path.split("/")[4]!);
+      return { snapshot: { session: { status: "ready" }, messages: reply ? [{ role: "assistant", content: [{ type: "text", text: reply }] }] : [], lastOutcome: {}, usage: { costUsd: 0.1 } } };
+    }
+    return {};
+  } };
+  const deps: VerifyDeps = {
+    open: async () => client as never, err: () => {}, sleep: async () => {}, startConsole: async () => () => {}, out: () => {},
+    loadCandidates: () => candidates,
+    save: (c, record) => { saved.set(c.id, record); },
+    suppress: (c, note) => { suppressed.push([c.id, note]); },
+    exists: (_folder, relative) => !(overrides.missing ?? []).includes(relative),
+    now: () => new Date("2026-11-22T00:00:00Z"),
+  };
+  return { deps, saved, suppressed, messages };
+}
+
+const idIn = (message: string) => /"id": "([^"]+)"/.exec(message)![1]!;
+
+describe("runVerify", () => {
+  it("stores a verdict per finding by id and leaves severity and status alone", async () => {
+    const h = harness([cand("a"), cand("b", { path: "src/b.ts" })], m => block({ finding: idIn(m), verdict: "true-positive", severity: "low", reasoning: "Attack built through a.ts:3." }));
+    const report = await runVerify([], options(), h.deps);
+    expect(report.counts["true-positive"]).toBe(2);
+    expect(h.saved.get("a")).toMatchObject({ verdict: "true-positive", advisorySeverity: "low", threadId: "t1" });
+    expect(h.suppressed).toEqual([]);
+    expect(report.items[0]!.severity).toBe("high");
+  });
+
+  it("does not put earlier reasoning or severity in the prompt", async () => {
+    const h = harness([cand("a", { description: "claim text" })], m => block({ finding: idIn(m), verdict: "uncertain", reasoning: "r" }));
+    await runVerify([], options(), h.deps);
+    expect(h.messages[0]).toContain("claim text");
+    expect(h.messages[0]).not.toMatch(/"severity"/);
+  });
+
+  it("records uncertain with a reason when no verdict comes back, and never matches by title", async () => {
+    const h = harness([cand("a")], () => `Title a is fine.\n${block({ finding: "other", verdict: "false-positive", reasoning: "r" })}`);
+    const report = await runVerify([], options(), h.deps);
+    expect(h.saved.get("a")).toMatchObject({ verdict: "uncertain", reasoning: "no verdict returned" });
+    expect(report.items[0]!.verdict).toBe("uncertain");
+  });
+
+  it("stores nothing when the thread gives no answer, so a rerun tries again", async () => {
+    const h = harness([cand("a")], () => undefined);
+    const report = await runVerify([], options(), h.deps);
+    expect(h.saved.size).toBe(0);
+    expect(report.failed).toBe(1);
+  });
+
+  it("skips verified, suppressed, fixed and false-positive findings unless forced", async () => {
+    const verified: FindingModelVerification = { verdict: "fixed", reasoning: "r", verifiedAt: "x" };
+    const rows = [cand("a", { verification: verified }), cand("b", { triage: "suppressed" }), cand("c", { status: "fixed" }), cand("d", { status: "false-positive" }), cand("e")];
+    const h = harness(rows, m => block({ finding: idIn(m), verdict: "true-positive", reasoning: "r" }));
+    const report = await runVerify([], options(), h.deps);
+    expect(h.saved.size).toBe(1);
+    expect(report.items.find(i => i.finding === "a")).toMatchObject({ result: "skipped" });
+    const forced = harness(rows, m => block({ finding: idIn(m), verdict: "true-positive", reasoning: "r" }));
+    await runVerify(["a"], options({ force: true }), forced.deps);
+    expect(forced.saved.has("a")).toBe(true);
+  });
+
+  it("selects by id prefix and by filters", async () => {
+    const rows = [cand("abc123", { severity: "low" }), cand("abd456", { severity: "high" })];
+    const h = harness(rows, m => block({ finding: idIn(m), verdict: "uncertain", reasoning: "r" }));
+    await runVerify([], options({ severity: "high" }), h.deps);
+    expect([...h.saved.keys()]).toEqual(["abd456"]);
+    await expect(runVerify(["ab"], options(), h.deps)).rejects.toThrow(/ambiguous/);
+    await expect(runVerify(["zzz"], options(), h.deps)).rejects.toThrow(/not found/);
+  });
+
+  it("skips findings whose file is not in the folder", async () => {
+    const h = harness([cand("a")], m => block({ finding: idIn(m), verdict: "uncertain", reasoning: "r" }), { missing: ["src/a.ts"] });
+    const report = await runVerify([], options(), h.deps);
+    expect(h.saved.size).toBe(0);
+    expect(report.items[0]!.reason).toMatch(/--folder/);
+  });
+
+  it("does not change status without --apply", async () => {
+    const h = harness([cand("a")], m => block({ finding: idIn(m), verdict: "false-positive", control: "src/guard.ts:9", reasoning: "Blocked by the guard at src/guard.ts:9." }));
+    const report = await runVerify([], options(), h.deps);
+    expect(h.suppressed).toEqual([]);
+    expect(report.applied).toBe(0);
+  });
+
+  it("with --apply suppresses only a false-positive that cites a control", async () => {
+    const h = harness([cand("a"), cand("b", { path: "src/b.ts" }), cand("c", { path: "src/c.ts" })], m => {
+      const id = idIn(m);
+      if (id === "a") return block({ finding: id, verdict: "false-positive", control: "src/guard.ts:9", reasoning: "Blocked by the guard at src/guard.ts:9. More text." });
+      if (id === "b") return block({ finding: id, verdict: "false-positive", reasoning: "Looks safe." });
+      return block({ finding: id, verdict: "true-positive", reasoning: "Real at c.ts:1." });
+    });
+    const report = await runVerify([], options({ apply: true }), h.deps);
+    expect(h.suppressed).toEqual([["a", "False positive (model-verified): Blocked by the guard at src/guard.ts:9."]]);
+    expect(h.saved.get("a")!.applied).toBe(true);
+    expect(report.items.find(i => i.finding === "b")!.applyRefused).toMatch(/no control/);
+    expect(report.applied).toBe(1);
+  });
+
+  it("stops after consecutive threads without a verdict", async () => {
+    const rows = ["a", "b", "c", "d", "e"].map(id => cand(id, { path: `src/${id}.ts` }));
+    const h = harness(rows, () => "no block here");
+    const report = await runVerify([], options({ maxConsecutiveFailures: "2" }), h.deps);
+    expect(report.stoppedReason).toMatch(/2 checks in a row/);
+    expect(report.items.filter(i => i.result === "skipped")).toHaveLength(3);
+  });
+
+  it("stops when the total budget is spent", async () => {
+    const rows = ["a", "b", "c"].map(id => cand(id, { path: `src/${id}.ts` }));
+    const h = harness(rows, m => block({ finding: idIn(m), verdict: "uncertain", reasoning: "r" }));
+    const report = await runVerify([], options({ budget: "0.15", perFinding: "0.1" }), h.deps);
+    expect(report.stoppedReason).toMatch(/budget/);
+    expect(report.verified).toBeLessThan(3);
+  });
+
+  it("batches findings of one file and resolves duplicate-of inside the batch", async () => {
+    const h = harness([cand("a"), cand("b")], m => {
+      return [block({ finding: "a", verdict: "true-positive", reasoning: "r a.ts:3" }), block({ finding: "b", verdict: "duplicate-of a", reasoning: "same" })].join("\n");
+    });
+    const report = await runVerify([], options({ batch: "2" }), h.deps);
+    expect(h.messages).toHaveLength(1);
+    expect(h.saved.get("b")).toMatchObject({ verdict: "duplicate", duplicateOf: "a" });
+    expect(report.counts.duplicate).toBe(1);
+  });
+
+  it("changes nothing on a dry run", async () => {
+    const h = harness([cand("a")], () => undefined);
+    const report = await runVerify([], options({ dryRun: true }), h.deps);
+    expect(report.items[0]!.result).toBe("planned");
+    expect(h.messages).toHaveLength(0);
+  });
+
+  it("rejects bad numbers", async () => {
+    const h = harness([], () => undefined);
+    await expect(runVerify([], options({ concurrency: "4" }), h.deps)).rejects.toThrow(/--concurrency/);
+    await expect(runVerify([], options({ budget: "0" }), h.deps)).rejects.toThrow(/--budget/);
+  });
+});
+
+describe("finding verification display", () => {
+  it("reads the stored column and words the verdict", async () => {
+    const { rowVerification, verificationPhrase } = await import("../../finding-verification.js");
+    const stored = JSON.stringify({ verdict: "false-positive", reasoning: "r", verifiedAt: "x" });
+    expect(verificationPhrase(rowVerification({ modelVerification: stored }))).toBe("verified: likely false positive");
+    expect(rowVerification({ modelVerification: "garbage" })).toBeUndefined();
+    expect(rowVerification({ modelVerification: null })).toBeUndefined();
+    expect(verificationPhrase(undefined)).toBeUndefined();
+  });
+});
+
+describe("helpers", () => {
+  it("groups by file only when asked", () => {
+    expect(groupFindings([cand("a"), cand("b"), cand("c")], 1)).toHaveLength(3);
+    expect(groupFindings([cand("a"), cand("b"), cand("c")], 2).map(g => g.length)).toEqual([2, 1]);
+  });
+  it("takes the first sentence", () => {
+    expect(firstSentence("One thing. Two things.")).toBe("One thing.");
+    expect(firstSentence("no stop")).toBe("no stop");
+  });
+  it("refuses to apply on a missing control file", () => {
+    const record = { verdict: "false-positive" as const, reasoning: "see x.ts:1", control: "x.ts:1" };
+    expect(applyRefusal({ severity: "low" }, record, "/w", () => false)).toMatch(/not in the folder/);
+    expect(applyRefusal({ severity: "low" }, record, "/w", () => true)).toBeUndefined();
+  });
+});

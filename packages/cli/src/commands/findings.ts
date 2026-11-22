@@ -12,6 +12,7 @@ import {
 } from "@0/engine/storage";
 import { buildFindingConsoleCommand } from "../finding-handoff.js";
 import { resolveFindingId, shortFindingId, shortFingerprint } from "../finding-id.js";
+import { rowVerification, verificationPhrase } from "../finding-verification.js";
 
 type FindingsListOptions = {
   dbPath?: string;
@@ -34,6 +35,8 @@ type FindingRow = {
   fingerprint?: string | null;
   triageStatus?: string | null;
   triageNote?: string | null;
+  /** JSON of the second-pass verification from `0 findings verify`; null until verified. */
+  modelVerification?: string | null;
   timestamp: number;
   score?: number | null;
   cvssScore?: number | null;
@@ -166,6 +169,10 @@ function priorityFinding(row: PriorityRow) {
 function compareRows(a: PriorityRow, b: PriorityRow): number {
   return compareFindingsBySeverity(priorityFinding(a), priorityFinding(b)) || b.timestamp - a.timestamp || b.id.localeCompare(a.id);
 }
+function renderVerification(row: FindingRow): void {
+  const phrase = verificationPhrase(rowVerification(row));
+  if (phrase) console.log(`  ${chalk.gray(phrase)}`);
+}
 function renderPriority(row: FindingRow): void {
   console.log(`  ${chalk.white.bold(row.title)}`);
   const attacker = describeAttackerImpact(priorityFinding(row));
@@ -220,6 +227,7 @@ async function renderFindingsList(opts: FindingsListOptions): Promise<void> {
   if (opts.all) {
     for (const f of rows.slice(0, limit)) {
       renderPriority(f);
+      renderVerification(f);
       console.log(`  ${chalk.gray(shortFindingId(f.id))}  ${chalk.gray(f.category)}  ${chalk.gray(`scan:${f.scanId.slice(0, 8)}`)}  ${chalk.gray(`fp:${shortFingerprint(f.fingerprint ?? f.id)}`)}`);
       console.log("");
     }
@@ -228,6 +236,7 @@ async function renderFindingsList(opts: FindingsListOptions): Promise<void> {
   for (const group of groups.slice(0, limit)) {
     const f = group.latest;
     renderPriority(f);
+    renderVerification(f);
     console.log(`  ${chalk.gray(`fp:${shortFingerprint(group.fingerprint)}`)}  ${chalk.gray(f.category)}  ${chalk.gray(`${group.count} hits / ${group.scans} scans`)}  ${chalk.gray(`latest:${f.scanId.slice(0, 8)}`)}`);
     if (f.triageNote) console.log(`  ${chalk.gray("note:")} ${chalk.dim(f.triageNote)}`);
     console.log("");
@@ -304,7 +313,9 @@ export function registerFindingsCommand(program: Command): void {
         const related = finding.fingerprint ? db.getRelatedFindings(finding.fingerprint) as FindingRow[] : [finding];
 
         if (opts.json) {
-          console.log(JSON.stringify({ ...finding, related: related.map((row) => ({ id: row.id, scanId: row.scanId, status: row.status, triage: row.triageStatus ?? "new" })) }, null, 2));
+          const { modelVerification: _raw, ...plain } = finding;
+          const stored = rowVerification(finding);
+          console.log(JSON.stringify({ ...plain, ...(stored ? { verification: stored } : {}), related: related.map((row) => ({ id: row.id, scanId: row.scanId, status: row.status, triage: row.triageStatus ?? "new" })) }, null, 2));
           return;
         }
         console.log("");
@@ -312,6 +323,7 @@ export function registerFindingsCommand(program: Command): void {
         console.log("");
 
         renderPriority(finding);
+        renderVerification(finding);
         console.log(`  ${chalk.gray("Category:")} ${finding.category}`);
         if (finding.score != null) {
           console.log(`  ${chalk.gray("Score:")} ${chalk.cyan(String(finding.score) + "/100")}`);
@@ -325,6 +337,12 @@ export function registerFindingsCommand(program: Command): void {
         console.log(`  ${chalk.gray("Time:")}       ${new Date(finding.timestamp).toISOString()}`);
         if (finding.triageNote) {
           console.log(`  ${chalk.gray("Triage:")}     ${finding.triageNote}`);
+        }
+        const verification = rowVerification(finding);
+        if (verification) {
+          console.log(`  ${chalk.gray("Verification:")} ${verification.verdict}${verification.advisorySeverity ? `, advisory severity ${verification.advisorySeverity}` : ""} (${verification.model ?? "model"}, ${verification.verifiedAt.slice(0, 10)}; advice only, severity and status are unchanged)`);
+          console.log(`  ${chalk.dim(verification.reasoning)}`);
+          if (verification.applied) console.log(`  ${chalk.gray("Suppressed by 0 findings verify --apply.")}`);
         }
         console.log("");
         console.log(`  ${chalk.gray("Description:")}`);

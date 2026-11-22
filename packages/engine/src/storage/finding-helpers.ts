@@ -289,3 +289,42 @@ export type WorkflowStatus =
   | "blocked"
   | "done"
   | "cancelled";
+
+
+export const MODEL_VERDICTS = ["true-positive", "false-positive", "fixed", "uncertain", "duplicate"] as const;
+export type ModelVerdict = typeof MODEL_VERDICTS[number];
+
+/**
+ * What a fresh second-pass thread concluded about one finding. It sits next to the finding and never replaces any of
+ * its fields: `advisorySeverity` is the thread's opinion, the finding's own severity is untouched.
+ */
+export interface FindingModelVerification {
+  verdict: ModelVerdict;
+  reasoning: string;
+  /** Set when the verdict is `duplicate`: the id of the finding this one repeats. */
+  duplicateOf?: string;
+  /** Where the thread says a concrete control is (`path:line`), when it found one. */
+  control?: string;
+  advisorySeverity?: string;
+  model?: string;
+  threadId?: string;
+  costUsd?: number;
+  verifiedAt: string;
+  /** True when `--apply` suppressed the finding on the strength of this verdict. */
+  applied?: boolean;
+}
+
+/** Stored text to record, or undefined when the value is not a usable record: absence stays absence. */
+export function parseFindingModelVerification(value: unknown): FindingModelVerification | undefined {
+  const parsed = parseJsonObjectColumn(value);
+  if (!parsed) return undefined;
+  if (!(MODEL_VERDICTS as readonly string[]).includes(String(parsed.verdict))) return undefined;
+  if (typeof parsed.reasoning !== "string" || typeof parsed.verifiedAt !== "string") return undefined;
+  return parsed as unknown as FindingModelVerification;
+}
+
+export function serializeFindingModelVerification(value: FindingModelVerification): string {
+  const usable = parseFindingModelVerification(value);
+  if (!usable) throw new Error("Not a usable verification record.");
+  return JSON.stringify(usable);
+}

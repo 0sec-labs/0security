@@ -39,7 +39,7 @@ import type {
   TrustGraphEdgeInput,
   TrustGraphEdgeRow,
 } from "./types.js";
-import type { PersistedFindingReviewFields, WorkflowStatus } from "./finding-helpers.js";
+import type { FindingModelVerification, PersistedFindingReviewFields, WorkflowStatus } from "./finding-helpers.js";
 import { createRepositories, type Repositories } from "./repositories/index.js";
 import type { ScanRepository } from "./repositories/scan-repository.js";
 
@@ -213,6 +213,14 @@ export class osecDB {
    */
   getFindingReviewFields(findingId: string): PersistedFindingReviewFields {
     return this.repos.findings.getFindingReviewFields(findingId);
+  }
+
+  getFindingModelVerification(findingId: string): FindingModelVerification | undefined {
+    return this.repos.findings.getFindingModelVerification(findingId);
+  }
+
+  setFindingModelVerification(findingId: string, verification: FindingModelVerification): void {
+    return this.repos.findings.setFindingModelVerification(findingId, verification);
   }
 
   getFindings(scanId: string) {

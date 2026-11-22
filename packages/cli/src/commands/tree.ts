@@ -32,6 +32,7 @@ import { registerFindingsEvidenceCommand } from "./findings-evidence.js";
 import { registerFindingsImportCommand } from "./findings-import.js";
 import { registerFixCommand } from "./fix.js";
 import { registerBurndownCommand } from "./burndown.js";
+import { registerVerifyCommand } from "./verify.js";
 import { registerFindingsUploadCommand } from "./findings-upload.js";
 import { registerFindingsIssuesCommand } from "./findings-issues.js";
 import { registerSentinelsCommand } from "./sentinels.js";
@@ -55,7 +56,7 @@ export function registerCommandTree(program: Command): void {
   // Evidence.
   registerReportsCommand(program);
   registerFindingsCommand(program);
-  nest(program, "findings", [registerFindingsExportCommand, registerFindingsKeysCommand, registerFindingsImportCommand, (parent) => registerFixCommand(parent), (parent) => registerBurndownCommand(parent), (parent) => registerFindingsUploadCommand(parent), (parent) => registerFindingsIssuesCommand(parent), (parent) => registerFindingsReportDraftCommand(parent), (parent) => registerFindingsEvidenceCommand(parent)]);
+  nest(program, "findings", [registerFindingsExportCommand, registerFindingsKeysCommand, registerFindingsImportCommand, (parent) => registerFixCommand(parent), (parent) => registerBurndownCommand(parent), (parent) => registerVerifyCommand(parent), (parent) => registerFindingsUploadCommand(parent), (parent) => registerFindingsIssuesCommand(parent), (parent) => registerFindingsReportDraftCommand(parent), (parent) => registerFindingsEvidenceCommand(parent)]);
   registerWorkflowCommand(program); // also registers `chats` and `automation`
   registerMissionsCommand(program);
   nest(program, "automation", [(parent) => registerAutomationManageCommands(parent)]);

@@ -185,6 +185,11 @@ export const findings = sqliteTable(
      * keep working when it is absent.
      */
     reviewAnnotation: text("reviewAnnotation"),
+    /**
+     * JSON-stringified second-pass model verification (verdict, reasoning, advisory severity, model, thread, time) from
+     * `0 findings verify`. NULL until verified. Advisory: it never changes severity or status by itself.
+     */
+    modelVerification: text("modelVerification"),
     /** Scanner that produced the finding when it was imported (for example `CodeQL`); NULL for findings 0 found itself. */
     tool: text("tool"),
     timestamp: integer("timestamp").notNull(),
