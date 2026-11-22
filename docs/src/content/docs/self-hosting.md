@@ -3,17 +3,15 @@ title: Self-hosting on Azure and AWS
 description: Deploy the sovereign 0 container on Azure and AWS with persistent volumes, cloud secret stores, TLS ingress, automated backups, and upgrades.
 ---
 
-Deploying 0 inside your organisation's cloud tenant ensures that code analysis, finding records, and model conversations stay entirely inside your security perimeter.
-
-This guide details running the official container image (`ghcr.io/0sec-labs/0security`) on **Amazon Web Services (AWS)** and **Microsoft Azure**, using standard cloud building blocks: persistent block storage, managed secret stores, reverse proxy TLS termination, automated backups, and zero-downtime upgrades.
+Run 0 in your own cloud tenant to keep code analysis, findings and model conversations inside your perimeter. This guide runs the official image (`ghcr.io/0sec-labs/0security`) on AWS and Azure with a persistent disk, a secret store, TLS ingress, backups and upgrades.
 
 :::caution[Cloud steps are untested]
-The container, the compose files, the data-disk override and the backup and restore procedure below were checked against the repository (the override was rendered with `docker-compose config`). The AWS and Azure steps (instance and disk setup, IAM and Key Vault, ECS, S3 and Blob uploads, disk snapshot policies) have **not** been run against real cloud accounts. They are marked *untested* where they appear. Try them in a scratch account first and adjust names, device paths and policies to your environment.
+We checked the container, compose files, data-disk override, and backup and restore procedure against the repository. We rendered the override with `docker-compose config`. We have not run the AWS and Azure steps against real accounts: instance and disk setup, IAM and Key Vault, ECS, S3 and Blob uploads, and snapshot policies. Each is marked untested. Try them in a scratch account and adjust names, device paths and policies.
 :::
 
 ## Architecture and constraints
 
-0 is designed as a sovereign, self-contained single-node application:
+0 is a single-node application:
 
 ```
                   Internet / Corporate Network
@@ -42,35 +40,35 @@ The container, the compose files, the data-disk override and the backup and rest
 
 ### The single-node rule
 
-- The 0 web console in server mode uses an embedded SQLite database located at `/data/.0/0.db` inside the container. With the data-disk override below, that is `/data/.0/0.db` on the host's mounted disk too.
-- **Run strictly one replica.** SQLite requires single-process ownership. Never mount the persistent volume to multiple containers or run multi-replica clusters.
-- High availability is achieved through virtual machine automated recovery, storage volume snapshots, and scheduled database backups rather than multi-master clustering.
+- The console stores its data in an embedded SQLite database at `/data/.0/0.db`. With the data-disk override below, that file is on the host's mounted disk.
+- Run one replica. SQLite needs a single owner process, so never mount the volume in more than one container.
+- For recovery, rely on VM auto-recovery, volume snapshots and scheduled database backups.
 
-### Sizing guidelines
+### Sizing
 
 | Sizing | vCPU | RAM | Storage | Typical Cloud Instance |
 |---|---|---|---|---|
-| **Minimum** | 2 | 4 GB | 30 GB SSD | AWS `t3.medium`, Azure `Standard_B2s` |
-| **Standard** | 4 | 8 GB | 60 GB SSD | AWS `t3.xlarge` / `m7g.large`, Azure `Standard_D2s_v5` |
-| **High load** | 8 | 16 GB | 120 GB SSD | AWS `m7g.xlarge`, Azure `Standard_D4s_v5` |
+| Minimum | 2 | 4 GB | 30 GB SSD | AWS `t3.medium`, Azure `Standard_B2s` |
+| Standard | 4 | 8 GB | 60 GB SSD | AWS `t3.xlarge` / `m7g.large`, Azure `Standard_D2s_v5` |
+| High load | 8 | 16 GB | 120 GB SSD | AWS `m7g.xlarge`, Azure `Standard_D4s_v5` |
 
-Add roughly 1 vCPU and 1 to 2 GB memory for each concurrent scan or fix thread.
+Add about 1 vCPU and 1 to 2 GB of memory for each concurrent scan or fix Thread.
 
 ---
 
-## AWS Deployment
+## AWS
 
-### Method 1: Amazon EC2 with Docker Compose (Recommended)
+### Run on EC2 with Docker Compose
 
-Running on EC2 with Docker Compose and an attached Amazon Elastic Block Store (EBS) volume is the most straightforward self-hosted configuration.
+This is the simplest setup: an EC2 instance with an attached EBS volume.
 
 #### 1. Provision storage and compute (untested)
 
-1. **EC2 Instance:** Launch an instance with Ubuntu 24.04 LTS (e.g. `t3.xlarge` or `m7g.large` with ARM64 / x86_64).
-2. **EBS Data Volume:** Attach an Amazon EBS `gp3` volume (e.g. 50 GB) as `/dev/sdf` for application state.
-3. **Format and Mount:**
+1. Launch an Ubuntu 24.04 LTS instance, for example `t3.xlarge` or `m7g.large`.
+2. Attach an EBS `gp3` volume of about 50 GB as `/dev/sdf` for application state.
+3. Format and mount it. The device is `/dev/nvme1n1` or `/dev/xvdf`, depending on the instance generation.
    ```bash
-   sudo mkfs -t ext4 /dev/nvme1n1 # or /dev/xvdf depending on instance generation
+   sudo mkfs -t ext4 /dev/nvme1n1
    sudo mkdir -p /data
    sudo mount /dev/nvme1n1 /data
    echo "/dev/nvme1n1 /data ext4 defaults,nofail 0 2" | sudo tee -a /etc/fstab
@@ -78,18 +76,18 @@ Running on EC2 with Docker Compose and an attached Amazon Elastic Block Store (E
    sudo chmod 700 /data
    ```
 
-#### 2. IAM role and secrets management (untested)
+#### 2. IAM role and secrets (untested)
 
-Never store long-lived cloud or model credentials in plain text git repositories. Use **AWS Systems Manager (SSM) Parameter Store** or **AWS Secrets Manager**.
+Keep credentials out of git. Use AWS Systems Manager (SSM) Parameter Store or AWS Secrets Manager.
 
-1. Store configuration parameters:
+1. Store the secrets:
    ```bash
    aws ssm put-parameter --name "/zero/ZERO_ACCESS_TOKEN" --type "SecureString" --value "$(openssl rand -base64 32)"
    aws ssm put-parameter --name "/zero/ANTHROPIC_API_KEY" --type "SecureString" --value "sk-ant-..."
    aws ssm put-parameter --name "/zero/GH_TOKEN" --type "SecureString" --value "ghp_..."
    ```
 
-2. Attach an IAM role to the EC2 instance with read access:
+2. Attach an IAM role with read access to the EC2 instance:
    ```json
    {
      "Version": "2012-10-17",
@@ -106,7 +104,7 @@ Never store long-lived cloud or model credentials in plain text git repositories
    }
    ```
 
-3. Fetch secrets into the runtime environment on container startup:
+3. Write the secrets to `.env` before the container starts:
    ```bash
    mkdir -p /opt/zero
    aws ssm get-parameters-by-path --path "/zero/" --with-decryption \
@@ -120,7 +118,7 @@ Never store long-lived cloud or model credentials in plain text git repositories
 
 #### 3. Run the application
 
-Clone the repository deployment assets or copy `deploy/compose/`:
+Download the compose files:
 
 ```bash
 cd /opt/zero
@@ -128,13 +126,13 @@ curl -fsSL https://raw.githubusercontent.com/0sec-labs/0security/main/deploy/com
 curl -fsSL https://raw.githubusercontent.com/0sec-labs/0security/main/deploy/compose/Caddyfile -o Caddyfile
 ```
 
-Use the data-disk override so the database lives on the disk you mounted at `/data`, not in the Docker named volume `zero-data` on the root disk:
+Download the data-disk override. It puts the database on the disk you mounted at `/data`, not in the Docker named volume `zero-data` on the root disk:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/0sec-labs/0security/main/deploy/compose/docker-compose.data-disk.yml -o docker-compose.data-disk.yml
 ```
 
-Configure your domain and network parameters in `/opt/zero/.env`:
+Add your domain and network settings to `/opt/zero/.env`:
 
 ```bash
 ZERO_DOMAIN=zero.internal.yourcompany.com
@@ -145,47 +143,47 @@ COMPOSE_FILE=docker-compose.yml:docker-compose.data-disk.yml
 ZERO_DATA_DIR=/data
 ```
 
-`COMPOSE_FILE` makes every later `docker compose` command in this guide use both files. Releases are published as `v0.41.0`, `0.41.0` and `0.41` (see [Tags](/server-mode/#one-shot-prompts)); either full form works for `ZERO_IMAGE_TAG`.
+`COMPOSE_FILE` makes every later `docker compose` command in this guide use both files. `ZERO_IMAGE_TAG` accepts `v0.41.0` or `0.41.0` (see [Tags](/server-mode/#one-shot-prompts)).
 
-Start the container with automatic TLS via Caddy:
+Start the container with automatic TLS through Caddy:
 
 ```bash
 docker compose --profile proxy up -d
 ```
 
-Verify service health, and that the database is on the data disk:
+Check that the service is ready and the database is on the data disk:
 
 ```bash
 curl -fsS http://127.0.0.1:48123/readyz     # {"status":"ready"}
 ls -l /data/.0/0.db                          # the database file is on the mounted disk
 ```
 
-`/readyz` returns `{"status":"ready"}` once the database answers (503 with another status word while starting or stopping). `/healthz` returns `{"status":"ok"}` and only says the process is up.
+`/readyz` returns `{"status":"ready"}` once the database answers, and 503 while the service starts or stops. `/healthz` returns `{"status":"ok"}` and says only that the process is up.
 
 ---
 
-### Method 2: AWS Elastic Container Service (ECS) (untested)
+### Run on ECS (untested)
 
-For container-native environments without managing host operating systems:
+Use ECS to avoid managing host operating systems.
 
-1. **ECS Cluster:** Create an ECS cluster using the EC2 launch type (allows EBS volume attachments).
-2. **Task Definition:** Define a single container task using `ghcr.io/0sec-labs/0security:v0.41.0` (a `0.41.0` tag works too):
-   - Set container mount: Host `/data` mounted to container `/data`.
-   - Set `secrets` mapping directly from AWS Secrets Manager or SSM Parameter Store to environment variables (`ZERO_ACCESS_TOKEN`, `ANTHROPIC_API_KEY`, etc.).
-   - Configure health check: `curl -fsS http://127.0.0.1:48123/healthz || exit 1`.
-3. **Service Deployment:** Create an ECS Service with `desiredCount: 1`. Set minimum healthy percent to `0` and maximum percent to `100` so ECS does not attempt to launch a second simultaneous container on the same volume during deployments.
+1. Create an ECS cluster with the EC2 launch type, which allows EBS attachments.
+2. Define one container task using `ghcr.io/0sec-labs/0security:v0.41.0`:
+   - Mount host `/data` at container `/data`.
+   - Map `secrets` from Secrets Manager or SSM Parameter Store to environment variables such as `ZERO_ACCESS_TOKEN` and `ANTHROPIC_API_KEY`.
+   - Set the health check to `curl -fsS http://127.0.0.1:48123/healthz || exit 1`.
+3. Create a service with `desiredCount: 1`. Set minimum healthy percent to `0` and maximum percent to `100`, so ECS never starts a second container on the same volume during a deploy.
 
 ---
 
-## Azure Deployment
+## Azure
 
-### Method 1: Azure Virtual Machine with Docker Compose
+### Run on a VM with Docker Compose
 
 #### 1. Compute and disk setup (untested)
 
-1. **Virtual Machine:** Deploy an Azure VM running Ubuntu 24.04 LTS (e.g. `Standard_D2s_v5`).
-2. **Data Disk:** Attach a Premium SSD Managed Data Disk (e.g. 64 GB, LRS).
-3. **Mount the disk:**
+1. Deploy an Ubuntu 24.04 LTS VM, for example `Standard_D2s_v5`.
+2. Attach a Premium SSD managed data disk, for example 64 GB, LRS.
+3. Mount the disk:
    ```bash
    sudo parted /dev/sdc --script mklabel gpt mkpart xfspart ext4 0% 100%
    sudo mkfs.ext4 /dev/sdc1
@@ -196,15 +194,15 @@ For container-native environments without managing host operating systems:
    sudo chmod 700 /data
    ```
 
-#### 2. Azure Key Vault integration (untested)
+#### 2. Key Vault (untested)
 
-1. Enable a **System-Assigned Managed Identity** on the Azure VM.
-2. In Azure Key Vault, grant the VM's identity the **Key Vault Secrets User** role.
-3. Store application secrets in Key Vault:
+1. Enable a system-assigned managed identity on the VM.
+2. In Key Vault, grant that identity the Key Vault Secrets User role.
+3. Store these secrets in Key Vault:
    - `ZERO-ACCESS-TOKEN`
    - `AZURE-OPENAI-API-KEY`
    - `GH-TOKEN`
-4. Pull secrets into `.env` at startup:
+4. Write the secrets to `.env` at startup:
    ```bash
    az login --identity --allow-no-subscriptions
    TOKEN=$(az keyvault secret show --vault-name "kv-zero-prod" --name "ZERO-ACCESS-TOKEN" --query value -o tsv)
@@ -222,19 +220,19 @@ For container-native environments without managing host operating systems:
 
 #### 3. Ingress and firewall (untested)
 
-- In the Network Security Group (NSG), allow inbound traffic on TCP ports 80 and 443.
-- Run `docker compose --profile proxy up -d` to terminate TLS via Caddy.
-- Alternatively, place an **Azure Application Gateway** or **Azure Front Door** in front of port 48123 and configure `ZERO_TRUSTED_PROXY` to trust the gateway subnet.
+- In the network security group, allow inbound TCP 80 and 443.
+- Run `docker compose --profile proxy up -d` to terminate TLS with Caddy.
+- Or put an Application Gateway or Front Door in front of port 48123, and set `ZERO_TRUSTED_PROXY` to the gateway subnet.
 
 ---
 
-## Scheduled Backups and Restore
+## Scheduled backups and restore
 
-Findings and audit logs live in the SQLite database `/data/.0/0.db`. This section assumes the data-disk override above, so the host's `/data` is the container's `/data`. If you run the plain compose file (named volume `zero-data`), use the volume-based steps in [Server mode: Back up](/server-mode/#back-up) instead.
+Findings and audit logs live in the SQLite database `/data/.0/0.db`. This section assumes the data-disk override above, so the host's `/data` is the container's `/data`. With the plain compose file (named volume `zero-data`), use the volume steps in [Server mode: Back up](/server-mode/#back-up).
 
 ### 1. Online safe database backup
 
-Never copy a live SQLite file with `cp`. Take the online backup described in [Server mode: Back up](/server-mode/#back-up) (the `node:sqlite` backup command, then `docker compose cp`). It leaves `./zero-backup.db`; date it for retention:
+Never copy a live SQLite file with `cp`. Take the online backup in [Server mode: Back up](/server-mode/#back-up): the `node:sqlite` backup command, then `docker compose cp`. It leaves `./zero-backup.db`. Date it for retention:
 
 ```bash
 mv ./zero-backup.db ./zero-backup-$(date +%F).db
@@ -242,76 +240,78 @@ mv ./zero-backup.db ./zero-backup-$(date +%F).db
 
 ### 2. Offsite upload to cloud object storage (untested)
 
-Schedule a daily cron job to run the backup and push it to object storage:
+Run the backup daily from cron and upload it.
 
-- **AWS S3:**
-  ```bash
-  aws s3 cp ./zero-backup-$(date +%F).db s3://my-org-zero-backups/$(date +%Y)/$(date +%m)/backup-$(date +%F).db \
-    --sse aws:kms --sse-kms-key-id alias/zero-backup-key
-  ```
+AWS S3:
 
-- **Azure Blob Storage:**
-  ```bash
-  az storage blob upload \
-    --account-name "zeroorgbackups" \
-    --container-name "db-backups" \
-    --file "./zero-backup-$(date +%F).db" \
-    --name "$(date +%Y)/$(date +%m)/backup-$(date +%F).db" \
-    --auth-mode login
-  ```
+```bash
+aws s3 cp ./zero-backup-$(date +%F).db s3://my-org-zero-backups/$(date +%Y)/$(date +%m)/backup-$(date +%F).db \
+  --sse aws:kms --sse-kms-key-id alias/zero-backup-key
+```
+
+Azure Blob Storage:
+
+```bash
+az storage blob upload \
+  --account-name "zeroorgbackups" \
+  --container-name "db-backups" \
+  --file "./zero-backup-$(date +%F).db" \
+  --name "$(date +%Y)/$(date +%m)/backup-$(date +%F).db" \
+  --auth-mode login
+```
 
 ### 3. Cloud disk snapshots (untested)
 
-A disk snapshot taken while 0 is running is crash-consistent only. Treat it as a second line behind the database backup above, or stop the service briefly (`docker compose stop zero`) before the snapshot.
+A snapshot taken while 0 runs is crash-consistent only. Use it as a second line behind the database backup, or stop the service briefly first with `docker compose stop zero`.
 
-- **AWS:** Create an Amazon Data Lifecycle Manager (DLM) policy to take daily snapshots of the `/data` EBS volume with a 14-day retention rule.
-- **Azure:** Configure Azure Backup or a disk snapshot policy for the managed data disk.
+- AWS: create an Amazon Data Lifecycle Manager policy for daily snapshots of the `/data` EBS volume, kept 14 days.
+- Azure: configure Azure Backup or a disk snapshot policy for the data disk.
 
 ### 4. Restore procedure
 
-This needs the `sqlite3` command on the host (`sudo apt-get install -y sqlite3`). Run it from `/opt/zero`. The file and database commands were run against a sample database; the compose steps and the data-disk override were not run on a cloud host.
+You need `sqlite3` on the host (`sudo apt-get install -y sqlite3`). Run these steps from `/opt/zero`. We ran the file and database commands against a sample database. We did not run the compose steps and the data-disk override on a cloud host.
 
-1. **Stop the service** so nothing writes to the database:
+1. Stop the service so nothing writes to the database:
    ```bash
    docker compose stop zero
    ```
 
-2. **Move the current database aside and remove its journal files.** A leftover `-wal` or `-shm` file from the old database would be applied to the restored one and corrupt it, so they must not stay in place:
+2. Move the current database aside and remove its journal files. A leftover `-wal` or `-shm` file from the old database would be applied to the restored one and corrupt it:
    ```bash
    sudo mv /data/.0/0.db /data/.0/0.db.before-restore
    sudo rm -f /data/.0/0.db-wal /data/.0/0.db-shm
    ```
-   (If the `mv` fails because there is no database yet, continue.)
+   If the `mv` fails because there is no database yet, continue.
 
-3. **Restore the backup** and set the owner and mode:
+3. Restore the backup and set the owner and mode:
    ```bash
    sudo cp ./zero-backup-2026-11-21.db /data/.0/0.db
    sudo chown 1000:1000 /data/.0/0.db
    sudo chmod 600 /data/.0/0.db
    ```
 
-4. **Check the restored file before starting.** The output must be exactly `ok`. If it is anything else, or an error such as `file is not a database`, do not start the service: repeat step 3 with another backup (your previous database is still at `0.db.before-restore`):
+4. Check the restored file before you start. The output must be exactly `ok`. If it is anything else, or an error such as `file is not a database`, do not start the service. Repeat step 3 with another backup. Your previous database is still at `0.db.before-restore`.
    ```bash
    sudo sqlite3 /data/.0/0.db 'PRAGMA integrity_check'
    ```
 
-5. **Start the service and confirm it is ready:**
+5. Start the service and confirm it is ready:
    ```bash
    docker compose up -d zero
    for i in $(seq 1 30); do curl -fsS http://127.0.0.1:48123/readyz && break; sleep 2; done
    ```
    A good restore prints `{"status":"ready"}`. If the loop ends without it, read `docker compose logs --tail 50 zero`.
 
-6. **Delete `0.db.before-restore`** once you have confirmed the restored data in the app. It contains findings.
+6. Delete `0.db.before-restore` after you confirm the restored data in the app. It contains findings.
 
 ---
 
-## Upgrades and Rollbacks
+## Upgrades and rollbacks
 
 ### Upgrades
 
-1. Take a fresh backup first, as in [Backups](#1-online-safe-database-backup). Keep that file until the upgrade is verified.
-2. Set the new tag in `/opt/zero/.env` (`ZERO_IMAGE_TAG=v` followed by the new version), then follow [Server mode: Upgrade](/server-mode/#upgrade):
+1. Take a fresh backup, as in [Backups](#1-online-safe-database-backup). Keep it until the upgrade is verified.
+2. Set the new tag in `/opt/zero/.env` (`ZERO_IMAGE_TAG=v` followed by the new version). Then pull and recreate, as in [Server mode: Upgrade](/server-mode/#upgrade):
    ```bash
    docker compose pull zero && docker compose up -d zero
    docker compose logs --tail 50 zero
@@ -320,14 +320,14 @@ This needs the `sqlite3` command on the host (`sudo apt-get install -y sqlite3`)
 
 ### Rollbacks
 
-Schema migrations are forward-only, so going back needs the pre-upgrade database. Pin the previous tag in `/opt/zero/.env` (for example `ZERO_IMAGE_TAG=v0.41.0`), then run the [restore procedure](#4-restore-procedure) with the pre-upgrade backup. Step 5 uses `docker compose up -d`, which applies the pinned tag.
+Migrations only go forward, so a rollback needs the pre-upgrade database. Pin the previous tag in `/opt/zero/.env`, for example `ZERO_IMAGE_TAG=v0.41.0`. Then run the [restore procedure](#4-restore-procedure) with the pre-upgrade backup. Step 5 runs `docker compose up -d`, which applies the pinned tag.
 
 ---
 
-## Security Hardening Checklist
+## Security hardening checklist
 
-- [x] **Non-root container execution:** 0 runs under user `ubuntu` (uid 1000). Never override with `user: root`.
-- [x] **Least privilege volume access:** Mount host volume with mode `0700` owned by `1000:1000`.
-- [x] **Protect loopback bind:** When running behind a local reverse proxy (Caddy), bind container port to `127.0.0.1:48123` only. Never expose port 48123 to `0.0.0.0` without TLS termination.
-- [x] **DNS rebinding protection:** Configure `ZERO_ALLOWED_HOSTS` to exactly match your public hostname. Unrecognized `Host` headers receive HTTP 403 Forbidden.
-- [x] **Secure cookie policy:** Set `ZERO_PUBLIC_URL=https://...` so session cookies are stamped with the `Secure` attribute.
+- Run as the `ubuntu` user (uid 1000). Never set `user: root`.
+- Mount the host volume with mode `0700`, owned by `1000:1000`.
+- Behind a local reverse proxy such as Caddy, bind the container port to `127.0.0.1:48123` only. Never expose port 48123 on `0.0.0.0` without TLS termination.
+- Set `ZERO_ALLOWED_HOSTS` to exactly your public hostname. A request with any other `Host` header gets 403.
+- Set `ZERO_PUBLIC_URL=https://...` so session cookies carry the `Secure` attribute.
