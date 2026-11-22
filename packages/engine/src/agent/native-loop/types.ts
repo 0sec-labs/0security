@@ -17,6 +17,10 @@ export interface NativeAgentConfig {
   workerPolicy?: WorkerPolicy;
   /** Preserve exact target identity guards when delegating from the console. */
   consoleSession?: boolean;
+  /** "Ask before running commands" setting propagated to this loop's ToolContext. */
+  approvals?: ToolContext["approvals"];
+  /** Per-action operator approval callback propagated to this loop's ToolContext. */
+  approveTool?: ToolContext["approveTool"];
   /**
    * Agent-to-agent messaging identity and policy, propagated to the tool
    * context so the child messaging tools know who they are and whom they

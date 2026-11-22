@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -1744,5 +1744,183 @@ describe("console planner reconnect", () => {
       expect(result.error).toContain("Usage for the disconnected planner request is unknown");
       expect(runtime.calls).toHaveLength(1);
     } finally { await session.cleanup(); }
+  });
+
+  it("enforces approvals: ask and invokes approveTool for effectful tool calls inside spawned subagents", async () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "turn-subagent-approvals-")));
+    const targetFile = join(dir, "target.txt");
+    writeFileSync(targetFile, "ORIGINAL\n");
+    const childRuntime = new ScriptedRuntime([
+      {
+        content: [
+          {
+            type: "tool_use",
+            id: "sub-edit-1",
+            name: "str_replace",
+            input: { path: "target.txt", old_string: "ORIGINAL", new_string: "BYPASSED" },
+          },
+        ],
+        stopReason: "tool_use",
+        durationMs: 1,
+      },
+      endTurn("Child finished."),
+    ]);
+    let parentTurn = 0;
+    const runtime: NativeRuntime = {
+      type: "api",
+      isAvailable: async () => true,
+      forkForSubagent: async () => childRuntime,
+      executeNative: async () => {
+        parentTurn++;
+        return parentTurn === 1
+          ? {
+              content: [
+                {
+                  type: "tool_use",
+                  id: "spawn-1",
+                  name: "spawn_agent",
+                  input: { task: "Edit target.txt", max_turns: 3 },
+                },
+              ],
+              stopReason: "tool_use",
+              durationMs: 1,
+            }
+          : endTurn("Parent finished.");
+      },
+    };
+    const seenCalls: string[] = [];
+    const session = createConsoleSession({
+      runtime,
+      approvals: "ask",
+      refineObjective: false,
+      approveTool: async (call) => {
+        seenCalls.push(call.name);
+        return call.name === "spawn_agent";
+      },
+    });
+    session.configureWorkspace(dir);
+    try {
+      await session.send("Delegate edit");
+      expect(seenCalls).toEqual(["spawn_agent", "str_replace"]);
+      expect(readFileSync(targetFile, "utf8")).toBe("ORIGINAL\n");
+    } finally {
+      await session.cleanup();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("enforces approvals: ask inside read_only subagents after setApprovals('ask') mid-session", async () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "turn-subagent-ro-ask-")));
+    const targetFile = join(dir, "secret.txt");
+    writeFileSync(targetFile, "SAFE\n");
+    const childRuntime = new ScriptedRuntime([
+      {
+        content: [
+          {
+            type: "tool_use",
+            id: "sub-edit-ro",
+            name: "str_replace",
+            input: { path: "secret.txt", old_string: "SAFE", new_string: "TAMPERED" },
+          },
+        ],
+        stopReason: "tool_use",
+        durationMs: 1,
+      },
+      endTurn("Child done."),
+    ]);
+    let parentTurn = 0;
+    const runtime: NativeRuntime = {
+      type: "api",
+      isAvailable: async () => true,
+      forkForSubagent: async () => childRuntime,
+      executeNative: async () => {
+        parentTurn++;
+        return parentTurn === 1
+          ? {
+              content: [
+                {
+                  type: "tool_use",
+                  id: "spawn-ro",
+                  name: "spawn_agent",
+                  input: { task: "Inspect", read_only: true, max_turns: 3 },
+                },
+              ],
+              stopReason: "tool_use",
+              durationMs: 1,
+            }
+          : endTurn("Done.");
+      },
+    };
+    const seenCalls: string[] = [];
+    const session = createConsoleSession({
+      runtime,
+      approvals: "auto",
+      refineObjective: false,
+      approveTool: async (call) => {
+        seenCalls.push(call.name);
+        return call.name === "spawn_agent";
+      },
+    });
+    session.configureWorkspace(dir);
+    session.setApprovals("ask");
+    try {
+      await session.send("Inspect read-only");
+      expect(seenCalls).toEqual(["spawn_agent", "str_replace"]);
+      expect(readFileSync(targetFile, "utf8")).toBe("SAFE\n");
+    } finally {
+      await session.cleanup();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("fails closed inside subagents under approvals: ask when no approveTool handler is wired", async () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "turn-subagent-no-handler-")));
+    const targetFile = join(dir, "guard.txt");
+    writeFileSync(targetFile, "INTACT\n");
+    const { ToolExecutor } = await import("../agent/tools.js");
+    const executor = new ToolExecutor({
+      target: "http://example.invalid",
+      scanId: "child-no-approve",
+      findings: [],
+      attackResults: [],
+      targetInfo: {},
+      scopePath: dir,
+      workspaceRoot: dir,
+      approvals: "ask",
+    });
+    try {
+      const res = await executor.execute({
+        name: "str_replace",
+        arguments: { path: "guard.txt", old_string: "INTACT", new_string: "MODIFIED" },
+      });
+      expect(res.success).toBe(false);
+      expect(res.error).toContain("refused");
+      expect(readFileSync(targetFile, "utf8")).toBe("INTACT\n");
+
+      const approvedExecutor = new ToolExecutor({
+        target: "http://example.invalid",
+        scanId: "child-with-approve",
+        findings: [],
+        attackResults: [],
+        targetInfo: {},
+        scopePath: dir,
+        workspaceRoot: dir,
+        approvals: "ask",
+        approveTool: async () => true,
+      });
+      try {
+        const okRes = await approvedExecutor.execute({
+          name: "str_replace",
+          arguments: { path: "guard.txt", old_string: "INTACT", new_string: "APPROVED" },
+        });
+        expect(okRes.success).toBe(true);
+        expect(readFileSync(targetFile, "utf8")).toBe("APPROVED\n");
+      } finally {
+        await approvedExecutor.cleanup();
+      }
+    } finally {
+      await executor.cleanup();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

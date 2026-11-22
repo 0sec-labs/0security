@@ -185,6 +185,8 @@ async function runNativeAgentLoopInternal(opts: NativeAgentLoopOptions): Promise
     scanId: config.scanId,
     role: config.role,
     consoleSession: config.consoleSession,
+    approvals: config.approvals,
+    approveTool: config.approveTool,
     workerPolicy: config.workerPolicy,
     diffScopedReview: config.role === "review" && config.singleAgent === true,
     reviewDiffBase: config.reviewDiffBase,
