@@ -24,7 +24,7 @@ const SKIP_TRIAGE = new Set(["suppressed"]);
 export const MAX_VERIFY_CONCURRENCY = 3;
 const BUDGET_SPENT = "the total budget is spent";
 /** `--apply` does not suppress a finding at or above this severity: a person decides those. Set from the measurement in docs/design/benchmark.md. */
-const APPLY_BLOCKED_SEVERITIES: ReadonlySet<string> = new Set<string>();
+const APPLY_BLOCKED_SEVERITIES: ReadonlySet<string> = new Set<string>(["critical", "high"]);
 
 export interface VerifyCandidate {
   id: string; dbPath: string; fingerprint: string; title: string; severity: string; category: string; tool: string | null; description: string;

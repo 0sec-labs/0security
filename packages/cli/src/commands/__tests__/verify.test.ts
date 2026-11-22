@@ -105,7 +105,7 @@ describe("runVerify", () => {
   });
 
   it("with --apply suppresses only a false-positive that cites a control", async () => {
-    const h = harness([cand("a"), cand("b", { path: "src/b.ts" }), cand("c", { path: "src/c.ts" })], m => {
+    const h = harness([cand("a", { severity: "medium" }), cand("b", { path: "src/b.ts", severity: "medium" }), cand("c", { path: "src/c.ts", severity: "medium" })], m => {
       const id = idIn(m);
       if (id === "a") return block({ finding: id, verdict: "false-positive", control: "src/guard.ts:9", reasoning: "Blocked by the guard at src/guard.ts:9. More text." });
       if (id === "b") return block({ finding: id, verdict: "false-positive", reasoning: "Looks safe." });
@@ -116,6 +116,14 @@ describe("runVerify", () => {
     expect(h.saved.get("a")!.applied).toBe(true);
     expect(report.items.find(i => i.finding === "b")!.applyRefused).toMatch(/no control/);
     expect(report.applied).toBe(1);
+  });
+
+  it("with --apply never suppresses a critical or high finding, whatever the verdict says", async () => {
+    const h = harness([cand("a", { severity: "high" }), cand("b", { path: "src/b.ts", severity: "critical" })], m => block({ finding: idIn(m), verdict: "false-positive", control: "src/guard.ts:9", reasoning: "Blocked by the guard at src/guard.ts:9." }));
+    const report = await runVerify([], options({ apply: true }), h.deps);
+    expect(h.suppressed).toEqual([]);
+    expect(report.applied).toBe(0);
+    expect(report.items.every(i => /a person decides/.test(i.applyRefused ?? ""))).toBe(true);
   });
 
   it("stops after consecutive threads without a verdict", async () => {

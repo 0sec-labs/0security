@@ -347,7 +347,7 @@ To suppress what the threads call false positives, add `--apply`:
 0 findings verify --apply --folder ~/code/app
 ```
 
-With `--apply`, a finding is suppressed only when the verdict is false-positive and it cites a control at `path:line` that exists in the folder. The suppression note starts with `False positive (model-verified):`. Undo it with `0 findings reopen`. Without `--apply`, no status ever changes.
+With `--apply`, critical and high findings are never suppressed: a person decides those. A finding of lower severity is suppressed only when the verdict is false-positive and it cites a control at `path:line` that exists in the folder. The suppression note starts with `False positive (model-verified):`. Undo it with `0 findings reopen`. Without `--apply`, no status ever changes.
 
 A re-run skips findings that already have a verdict. Add `--force` to check them again. The model can be wrong in both directions, so read the reasoning in `0 findings show` before you rely on a verdict. See [findings verify](/commands/#findings-verify) for budgets and stop rules.
 

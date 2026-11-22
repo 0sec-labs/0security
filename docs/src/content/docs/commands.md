@@ -1646,7 +1646,7 @@ Pass the folder that was scanned with `--folder` (default: the current directory
 
 The verdict is stored next to the finding by its id. [findings list](#findings-list) and [findings show](#findings-show) print it, for example `verified: likely false positive`. Severity and status do not change, and the advisory severity is kept apart from the finding's own. A thread that returns no verdict for a finding is recorded as uncertain with the reason `no verdict returned`. A thread that fails to run stores nothing, so the next run tries it again.
 
-`--apply` suppresses a finding only when the verdict is false-positive and it names a control at `path:line` that exists in the folder and the reasoning cites a `path:line` too. The suppression note starts with `False positive (model-verified):` and `0 findings reopen` undoes it. Without `--apply` no status changes.
+`--apply` never suppresses a critical or high finding. It suppresses a lower-severity finding only when the verdict is false-positive and it names a control at `path:line` that exists in the folder and the reasoning cites a `path:line` too. The suppression note starts with `False positive (model-verified):` and `0 findings reopen` undoes it. Without `--apply` no status changes.
 
 `--budget` is the total for the run and `--per-finding` caps one finding. `--concurrency` (1 to 3) runs threads side by side. The run stops when `--max-consecutive-failures` threads in a row return no verdict, or when the budget is spent. `--dry-run` lists what would be checked. `--format json` prints the report with counts per verdict, the reasoning, the cost and what `--apply` did.
 
