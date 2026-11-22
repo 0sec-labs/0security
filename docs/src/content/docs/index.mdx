@@ -133,14 +133,6 @@ The installer refuses a binary that does not match the release `checksums.txt`. 
 
 0 found no usable model credential. Connect one in **Settings → Models** or export a key. A provider marked configured has a key, but 0 does not test it until the first request. See [Models](/models/).
 
-### A variable will not export
-
-Some shells reject variable names that start with a digit. Set the variable for one command instead:
-
-```bash
-env ZERO_DB_PATH=/path/to/0.db 0 findings list
-```
-
 ### database is locked
 
 Two processes are writing the same SQLite file. Stop the other one. Do not delete a live database.
