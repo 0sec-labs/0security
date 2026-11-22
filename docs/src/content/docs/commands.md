@@ -228,6 +228,12 @@ A hit from your rules is a lead like any other. The scan checks it against the c
 | `--repo-context` | — | Also read .0/threat-model.md from the scanned folder as context. Off by default: a change under review can edit that file; in CI pass the base branch's copy with --context instead |
 | `--skill <id>` | `scan` | Skill that holds the scan method |
 | `--model <model>` | — | Model for the scan thread (default: gpt-6-luna) |
+| `--batches <mode>` | `auto` | auto reviews a large folder in batches, one thread per group of entry points, and records what each batch covered; on always does; off keeps one thread |
+| `--batch-size <n>` | `8` | Entry points one batch reviews (1 to 50); a folder with more than this many is split under --batches auto |
+| `--concurrency <n>` | `1` | Batches that run at the same time (1 to 3) |
+| `--resume <scan>` | — | Continue the units an earlier batched scan of this folder did not reach (a scan id from its report, or latest); refuses when the git HEAD changed unless --force |
+| `--force` | — | With --resume: continue even though the folder's git HEAD changed |
+| `--coverage [scan]` | — | Print the coverage ledger of a batched scan of this folder (the latest, or the id given) and exit; --format json for JSON |
 | `--timeout <seconds>` | `3600` | Maximum seconds to wait for the scan |
 | `--engine-url <url>` | — | Attach directly to a running trusted engine |
 | `--engine-token-env <name>` | — | Environment variable holding the attached engine token |
