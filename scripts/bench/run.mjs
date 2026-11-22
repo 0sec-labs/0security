@@ -12,11 +12,11 @@ import { mean, scoreFindings, spread, validateAnswer } from "./match.mjs";
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "../..");
 const FIXTURES = join(here, "fixtures");
-export const CONFIGS = ["generic", "skill", "foxguard", "checkov", "checkov-prepass"];
+export const CONFIGS = ["generic", "skill", "foxguard", "checkov", "checkov-prepass", "single", "batched"];
 const DEFAULT_CONFIGS = ["generic", "skill"];
 
 export function parseArgs(argv) {
-  const o = { run: false, dryRun: false, repeat: 1, budget: 0.2, configs: DEFAULT_CONFIGS, fixtures: undefined, model: undefined, out: join(here, "results"), cli: join(repoRoot, "packages/cli/dist/index.js"), timeout: 900 };
+  const o = { run: false, dryRun: false, repeat: 1, budget: 0.2, configs: DEFAULT_CONFIGS, fixtures: undefined, model: undefined, out: join(here, "results"), cli: join(repoRoot, "packages/cli/dist/index.js"), timeout: 900, batchSize: 8 };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const next = () => { if (i + 1 >= argv.length) throw new Error(`${a} needs a value`); return argv[++i]; };
@@ -30,6 +30,7 @@ export function parseArgs(argv) {
     else if (a === "--out") o.out = resolve(next());
     else if (a === "--cli") o.cli = resolve(next());
     else if (a === "--timeout") o.timeout = Number(next());
+    else if (a === "--batch-size") o.batchSize = Number(next());
     else throw new Error(`unknown option ${a}`);
   }
   if (o.run === o.dryRun) throw new Error("pass exactly one of --run (spends model money) or --dry-run (free)");
@@ -80,6 +81,8 @@ export function scanArgs({ fixture, config }, folder, outFile, o) {
   if (config === "foxguard") args.push("--prepass", "auto", "--scanner", "foxguard");
   else if (config === "checkov-prepass") args.push("--prepass", "auto", "--scanner", "checkov");
   else args.push("--prepass", "off");
+  if (config === "single") args.push("--batches", "off");
+  if (config === "batched") args.push("--batches", "on", "--batch-size", String(o.batchSize));
   if (config === "skill") args.push("--skill", fixture.answer.skill);
   return args;
 }
@@ -136,6 +139,8 @@ function runOne(run, repeatIndex, o, foxguard) {
     fixture: run.fixture.name, config: run.config, repeat: repeatIndex + 1, seconds,
     costUsd: report?.costUsd ?? null, status: report?.status ?? `no-report (exit ${proc.status})`,
     error: report ? report.error : (proc.stderr ?? "").slice(-300),
+    // Batched scans only: the plain statement of what was reviewed, and how many threads it took.
+    coverage: report?.coverage?.statement ?? null, threads: report?.threadIds?.length ?? (report ? 1 : null),
     score, workdir: root,
   };
 }
@@ -166,6 +171,8 @@ export function summarize(runs) {
       costMean: mean(costs), costSpread: spread(costs), costTotal: costs.reduce((a, b) => a + b, 0),
       secondsMean: mean(rs.map((r) => r.seconds)), secondsSpread: spread(rs.map((r) => r.seconds)),
       failed: rs.filter((r) => r.status !== "complete").map((r) => r.status),
+      coverage: rs.map((r) => r.coverage).filter(Boolean)[0] ?? null,
+      threadsMean: mean(rs.map((r) => r.threads).filter((x) => x !== null && x !== undefined)),
     };
   });
 }
@@ -182,11 +189,11 @@ export function renderMarkdown(rows, meta) {
     "",
     "Recall is planted bugs found / planted bugs. False positives are findings on a decoy, or any finding in the clean app. Unmatched are findings that are neither (real extra issues or noise; read them). Cells show mean, with the min-max range over repeats in brackets.",
     "",
-    "| fixture | config | recall | found/planted | false pos. | unmatched | cost | time (s) | not complete |",
-    "|---|---|---|---|---|---|---|---|---|",
+    "| fixture | config | recall | found/planted | false pos. | unmatched | cost | time (s) | threads | coverage reported | not complete |",
+    "|---|---|---|---|---|---|---|---|---|---|---|",
   ];
   for (const r of rows) {
-    lines.push(`| ${r.fixture} | ${r.config} | ${pct(r.recallMean)} (${range(r.recallSpread, pct)}) | ${r.foundMean.toFixed(1)}/${r.planted} | ${r.falsePositivesMean.toFixed(1)} (${range(r.falsePositivesSpread, (x) => String(x))}) | ${r.unmatchedMean.toFixed(1)} | ${usd(r.costMean)} (${range(r.costSpread, usd)}) | ${r.secondsMean.toFixed(0)} (${range(r.secondsSpread, (x) => x.toFixed(0))}) | ${r.failed.length ? r.failed.join("; ") : "-"} |`);
+    lines.push(`| ${r.fixture} | ${r.config} | ${pct(r.recallMean)} (${range(r.recallSpread, pct)}) | ${r.foundMean.toFixed(1)}/${r.planted} | ${r.falsePositivesMean.toFixed(1)} (${range(r.falsePositivesSpread, (x) => String(x))}) | ${r.unmatchedMean.toFixed(1)} | ${usd(r.costMean)} (${range(r.costSpread, usd)}) | ${r.secondsMean.toFixed(0)} (${range(r.secondsSpread, (x) => x.toFixed(0))}) | ${r.threadsMean === null || r.threadsMean === undefined ? "-" : r.threadsMean.toFixed(1)} | ${r.coverage ?? "-"} | ${r.failed.length ? r.failed.join("; ") : "-"} |`);
   }
   const byConfig = new Map();
   for (const r of rows) if (r.recallMean !== null) { const l = byConfig.get(r.config) ?? []; l.push(r); byConfig.set(r.config, l); }
@@ -246,7 +253,7 @@ function realRun(o) {
     process.stdout.write(`scan ${run.fixture.name} / ${run.config} / repeat ${rep + 1} ... `);
     const r = runOne(run, rep, o, foxguard);
     runs.push(r);
-    console.log(`${r.status}, ${r.score.found}/${r.score.planted} found, ${r.score.falsePositives} false pos., ${usd(r.costUsd)}, ${r.seconds.toFixed(0)}s`);
+    console.log(`${r.status}, ${r.score.found}/${r.score.planted} found, ${r.score.falsePositives} false pos., ${usd(r.costUsd)}, ${r.seconds.toFixed(0)}s${r.coverage ? `, ${r.coverage}` : ""}`);
   }
   return runs;
 }

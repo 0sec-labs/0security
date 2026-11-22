@@ -100,3 +100,14 @@ test("validateAnswer catches bad keys", () => {
   assert.ok(validateAnswer({ ...answer, items: [{ ...answer.items[0], category: "nope" }] }).some((p) => p.includes("unknown category")));
   assert.ok(validateAnswer({ fixture: "c", clean: true, items: [answer.items[0]], decoys: [] }).length > 0);
 });
+
+test("an item can name other places the same flaw shows, and the authz family reads access-control wording", () => {
+  const key = { fixture: "x", items: [{ id: "ssrf", path: "routes/hook.js", startLine: 20, endLine: 21, category: "ssrf", description: "d", alsoAt: [{ path: "lib/http.js", startLine: 4, endLine: 16 }] }, { id: "idor", path: "routes/orders.js", startLine: 22, endLine: 23, category: "authz", description: "d" }], decoys: [] };
+  const hit = (path, line, category, title) => ({ id: `${path}:${line}`, title, category, location: { path, startLine: line } });
+  assert.deepEqual(scoreFindings(key, [hit("lib/http.js", 9, "ssrf", "SSRF")]).foundIds, ["ssrf"]);
+  assert.deepEqual(scoreFindings(key, [hit("routes/hook.js", 20, "ssrf", "SSRF")]).foundIds, ["ssrf"]);
+  assert.equal(scoreFindings(key, [hit("lib/other.js", 9, "ssrf", "SSRF")]).found, 0);
+  assert.equal(scoreFindings(key, [hit("routes/orders.js", 22, "authorization", "Missing ownership check on order read")]).found, 1);
+  assert.ok(validateAnswer(key, { fileLines: { "routes/hook.js": 30, "lib/http.js": 10, "routes/orders.js": 40 } }).some((p) => p.includes("past the end of lib/http.js")));
+  assert.ok(validateAnswer(key, { fileLines: { "routes/hook.js": 30, "routes/orders.js": 40 } }).some((p) => p.includes("alsoAt file lib/http.js not found")));
+});

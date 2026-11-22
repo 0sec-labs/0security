@@ -30,7 +30,8 @@ function fakes(snapshot: unknown, findings: unknown[] = [storedFinding]) {
   };
   return { deps, client, requests, out, err };
 }
-const options = (extra: Record<string, unknown> = {}) => ({ budget: "5", format: "json", timeout: "60", skill: "scan", passes: "1", ...extra }) as never;
+// These tests run on arbitrary folders such as /tmp; batching has its own tests in scan-batched.test.ts.
+const options = (extra: Record<string, unknown> = {}) => ({ budget: "5", format: "json", timeout: "60", skill: "scan", passes: "1", batches: "off", ...extra }) as never;
 
 describe("headlessConsoleArgs", () => {
   it("runs the script when node runs a .js file, or the compiled binary itself, always on a free port", () => {

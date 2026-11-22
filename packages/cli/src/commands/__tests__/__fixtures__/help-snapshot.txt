@@ -1285,6 +1285,18 @@ Options:
                              branch's copy with --context instead
   --skill <id>               Skill that holds the scan method (default: "scan")
   --model <model>            Model for the scan thread (default: gpt-6-luna)
+  --batches <mode>           auto reviews a large folder in batches, one thread per group of entry
+                             points, and records what each batch covered; on always does; off keeps
+                             one thread (default: "auto")
+  --batch-size <n>           Entry points one batch reviews (1 to 50); a folder with more than this
+                             many is split under --batches auto (default: "8")
+  --concurrency <n>          Batches that run at the same time (1 to 3) (default: "1")
+  --resume <scan>            Continue the units an earlier batched scan of this folder did not reach
+                             (a scan id from its report, or latest); refuses when the git HEAD
+                             changed unless --force
+  --force                    With --resume: continue even though the folder's git HEAD changed
+  --coverage [scan]          Print the coverage ledger of a batched scan of this folder (the latest,
+                             or the id given) and exit; --format json for JSON
   --timeout <seconds>        Maximum seconds to wait for the scan (default: "3600")
   --engine-url <url>         Attach directly to a running trusted engine
   --engine-token-env <name>  Environment variable holding the attached engine token

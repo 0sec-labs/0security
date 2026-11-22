@@ -1,0 +1,22 @@
+{
+  "fixture": "medium-app",
+  "skill": null,
+  "items": [
+    { "id": "ma-xss", "path": "routes/users.js", "startLine": 19, "endLine": 20, "category": "xss", "description": "query parameter and stored display name written into an HTML response without escaping" },
+    { "id": "ma-order-idor", "path": "routes/orders.js", "startLine": 22, "endLine": 23, "category": "authz", "description": "order read by id with no check that it belongs to the signed-in user" },
+    { "id": "ma-sqli", "path": "routes/search.js", "startLine": 15, "endLine": 15, "category": "sqli", "description": "status and sort query parameters concatenated into a SQL string" },
+    { "id": "ma-traversal", "path": "routes/files.js", "startLine": 22, "endLine": 23, "category": "path-traversal", "description": "name query parameter joined to the upload directory and read without a containment check" },
+    { "id": "ma-admin-role", "path": "routes/admin.js", "startLine": 13, "endLine": 15, "category": "authz", "description": "role change route lacks the admin check every other admin route has, so any signed-in user can make themselves admin" },
+    { "id": "ma-cmdi", "path": "services/exporter.js", "startLine": 16, "endLine": 18, "category": "command-injection", "description": "export format from the request body flows into a shell command through a template string", "alsoAt": [{ "path": "routes/reports.js", "startLine": 12, "endLine": 14 }] },
+    { "id": "ma-secret", "path": "config.js", "startLine": 6, "endLine": 6, "category": "secret", "description": "hardcoded signing secret for session tokens" },
+    { "id": "ma-md5", "path": "lib/crypto.js", "startLine": 3, "endLine": 5, "category": "weak-crypto", "description": "passwords hashed with unsalted MD5", "alsoAt": [{ "path": "services/userService.js", "startLine": 4, "endLine": 12 }] },
+    { "id": "ma-ssrf", "path": "routes/notifications.js", "startLine": 19, "endLine": 21, "category": "ssrf", "description": "server posts to a URL taken from the request body with no destination check", "alsoAt": [{ "path": "lib/http.js", "startLine": 4, "endLine": 16 }] },
+    { "id": "ma-pickle", "path": "reports-svc/app.py", "startLine": 27, "endLine": 27, "category": "deserialization", "description": "request body passed to pickle.loads" }
+  ],
+  "decoys": [
+    { "id": "ma-decoy-avatar", "path": "routes/files.js", "startLine": 17, "endLine": 19, "description": "avatar route joins the name through safeJoin, which checks containment" },
+    { "id": "ma-decoy-search", "path": "routes/search.js", "startLine": 7, "endLine": 10, "description": "product search with a parameterised LIKE" },
+    { "id": "ma-decoy-payments", "path": "routes/webhooks.js", "startLine": 14, "endLine": 20, "description": "payment webhook verifies an HMAC with a constant-time compare" },
+    { "id": "ma-decoy-cancel", "path": "routes/orders.js", "startLine": 26, "endLine": 32, "description": "cancel route checks the order belongs to the user" }
+  ]
+}

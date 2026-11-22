@@ -11,12 +11,15 @@ import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import type { Command } from "commander";
-import { exportReport, isReportExportFormat } from "@0/engine";
+import { exportReport, isReportExportFormat, type Batch } from "@0/engine";
+import { CoverageLedger, coverageSentence, summarizeCoverage } from "@0/engine/storage";
 import { consoleTransportOptions, openConsole, type ConsoleClient, type ConsoleTransportOptions } from "../console-client.js";
-import { homeStateDir, parseSarif, parseScannerList, scanPrompt, scannerArguments, scannerById, scannerTakesRules, SCANNERS, type PrePassLeads, type ScanReport } from "@0/engine/shared";
+import { homeStateDir, parseSarif, parseScannerList, scanPrompt, scannerArguments, scannerById, scannerTakesRules, SCANNERS, type PrePassLeads, type BatchPromptInfo, type ScanReport } from "@0/engine/shared";
 import { runPrePass } from "../prepass.js";
 import { checkRulesScanners, resolveRulePaths } from "../scan-rules.js";
 import { mergePasses, scanExitCode, scanJson, toScanReport, type ScanOutcome } from "../scan-report.js";
+import { coverageReport, runBatches, type BatchOutcome } from "../scan-batches.js";
+import { coverageJson, coverageText, DEFAULT_BATCH_SIZE, planBatchedScan, type BatchedSetup } from "../scan-batched.js";
 import { loadSteering, type Steering } from "../scan-steering.js";
 import { finishWithError, UsageError } from "./output.js";
 import { asJson, finishedThread, lastAssistantText, usageLine, type FinishedThread, type Json } from "./thread-output.js";
@@ -35,7 +38,9 @@ const MAX_PARALLEL_PASSES = 3;
 const MAX_PASSES = 5;
 /** What `--policy` and `--org-policy` run. */
 const POLICY_SKILL = "policy-check";
-const GIT_TARGET = /^(git@|git:\/\/|ssh:\/\/git@)|\.git$|^https:\/\/(github|gitlab)\.com\//;
+const BATCH_MODES = ["auto", "on", "off"];
+const MAX_BATCH_SIZE = 50;
+const GIT_TARGET =/^(git@|git:\/\/|ssh:\/\/git@)|\.git$|^https:\/\/(github|gitlab)\.com\//;
 
 /**
  * The arguments that run this same program as a headless console for one scan. `--port 0` takes any free port, so another
@@ -65,6 +70,10 @@ export interface ScanDeps {
   diffFiles(folder: string, ref: string): Promise<string[]>;
   /** Make a folder out of a git URL. Returns the folder and how to remove it. */
   clone(url: string): Promise<{ dir: string; dispose(): void }>;
+  /** The coverage ledger in the findings database (default: the local control database, or --db-path). Used by batched scans. */
+  openLedger?(dbPath?: string): CoverageLedger;
+  /** The commit a folder is on, or undefined when it is not a git work tree. A resumed scan refuses a different one. */
+  gitHead?(folder: string): Promise<string | undefined>;
 }
 export const defaultScanDeps: ScanDeps = {
   open: options => openConsole(options),
@@ -109,11 +118,16 @@ export const defaultScanDeps: ScanDeps = {
     await exec("git", ["-c", "core.hooksPath=/dev/null", "-c", "protocol.ext.allow=never", "clone", "--depth", "1", "--quiet", "--", url, dir]);
     return { dir, dispose: () => rmSync(dir, { recursive: true, force: true }) };
   },
+  openLedger: dbPath => new CoverageLedger(dbPath),
+  async gitHead(folder) {
+    try { return (await exec("git", ["-C", folder, "rev-parse", "HEAD"])).stdout.trim() || undefined; } catch { return undefined; }
+  },
 };
 
 interface ScanOptions extends ConsoleTransportOptions {
   budget: string; diff?: string; prepass?: string; scanner?: string[]; rules?: string[]; format: string; output?: string; timeout: string; failOn?: string; model?: string; skill: string; passes: string;
   context?: string[]; policy?: string[]; orgPolicy?: string[]; repoContext?: boolean;
+  batches?: string; batchSize?: string; concurrency?: string; resume?: string; force?: boolean; coverage?: string | boolean;
 }
 
 export interface ResolvedTarget {
@@ -171,6 +185,19 @@ function validate(target: string | undefined, options: ScanOptions): void {
   if (!Number.isFinite(budget) || budget <= 0 || budget > 1000) throw new UsageError("--budget must be a positive USD amount up to 1000.");
   const passes = Number(options.passes);
   if (!Number.isInteger(passes) || passes < 1 || passes > MAX_PASSES) throw new UsageError(`--passes must be a whole number from 1 to ${MAX_PASSES}.`);
+  if (options.batches !== undefined && !BATCH_MODES.includes(options.batches)) throw new UsageError("--batches must be auto, on or off.");
+  const batchSize = Number(options.batchSize ?? DEFAULT_BATCH_SIZE);
+  if (!Number.isInteger(batchSize) || batchSize < 1 || batchSize > MAX_BATCH_SIZE) throw new UsageError(`--batch-size must be a whole number from 1 to ${MAX_BATCH_SIZE}.`);
+  const concurrency = Number(options.concurrency ?? 1);
+  if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > MAX_PARALLEL_PASSES) throw new UsageError(`--concurrency must be a whole number from 1 to ${MAX_PARALLEL_PASSES}.`);
+  if ((options.batches === "on" || options.resume !== undefined) && passes > 1) throw new UsageError("--passes cannot be combined with batches or --resume; run the scan again to get another pass.");
+  if (options.resume !== undefined) {
+    if (options.batches === "off") throw new UsageError("--resume continues a batched scan; drop --batches off.");
+    if (options.diff) throw new UsageError("--resume continues the units of an earlier scan; drop --diff.");
+    if (GIT_TARGET.test(target.trim())) throw new UsageError("--resume works on a folder on this machine, not a git URL.");
+  }
+  if (options.coverage !== undefined && GIT_TARGET.test(target.trim())) throw new UsageError("--coverage reads the ledger of a folder on this machine, not a git URL.");
+  if (options.force && options.resume === undefined) throw new UsageError("--force only applies to --resume.");
   const seconds = Number(options.timeout);
   if (!Number.isFinite(seconds) || seconds <= 0) throw new UsageError("--timeout must be a positive number of seconds.");
   if (options.failOn !== undefined && !(SEVERITIES as readonly string[]).includes(options.failOn)) throw new UsageError(`--fail-on must be one of: ${SEVERITIES.join(", ")}.`);
@@ -236,16 +263,20 @@ export async function waitForThread(client: ConsoleClient, deps: Pick<ScanDeps, 
 }
 
 /** One scan thread: start it, wait for it, and read what it stored. Throws when the thread cannot run or the console is lost. */
-async function runPass(ctx: PassContext, index: number): Promise<PassResult> {
-  const { client, deps, resolved, options, total, budget, deadline } = ctx;
+interface PassExtra { batch?: BatchPromptInfo; budget?: number; prePass?: PrePassLeads | undefined }
+async function runPass(ctx: PassContext, index: number, extra: PassExtra = {}): Promise<PassResult> {
+  const { client, deps, resolved, options, total, deadline } = ctx;
+  const budget = extra.budget ?? ctx.budget;
+  const prePass = "prePass" in extra ? extra.prePass : ctx.prePass;
   const runtime = { runtime: { model: options.model ?? DEFAULT_SCAN_MODEL } };
-  const title = total > 1 ? `Scan ${resolved.label} (pass ${index + 1} of ${total})` : `Scan ${resolved.label}`;
+  const part = extra.batch ? `batch ${extra.batch.index + 1} of ${extra.batch.total}` : total > 1 ? `pass ${index + 1} of ${total}` : "";
+  const title = part ? `Scan ${resolved.label} (${part})` : `Scan ${resolved.label}`;
   const created = asJson(asJson(await client.request("POST", "/api/console/sessions", { ...runtime, title, costCeilingUsd: budget })).session);
   const id = String(created.id);
   const path = `/api/console/sessions/${encodeURIComponent(id)}`;
   try {
     await client.request("PATCH", `${path}/configuration`, { workspacePath: resolved.folder });
-    await client.request("POST", `${path}/messages`, { text: scanPrompt(resolved.label, options.skill, ctx.prePass, ctx.scope, ctx.steering) });
+    await client.request("POST", `${path}/messages`, { text: scanPrompt(resolved.label, options.skill, prePass, ctx.scope, ctx.steering, extra.batch) });
   } catch (error) {
     // A thread that never started is no use to anyone; do not leave it in the list.
     const removed = await client.request("POST", `${path}/delete`, {}).then(() => true, () => false);
@@ -253,7 +284,7 @@ async function runPass(ctx: PassContext, index: number): Promise<PassResult> {
     const hint = /model/i.test(reason) ? ` Pick another with --model (default ${DEFAULT_SCAN_MODEL}).` : "";
     throw new Error(`${reason}${hint}${removed ? "" : ` (thread ${id} was created; remove it with \`0 threads delete ${id} --yes\`)`}`);
   }
-  deps.err(`scanning ${resolved.label} in thread ${id} (${total > 1 ? `pass ${index + 1} of ${total}, ` : ""}budget $${Number(budget.toFixed(4))})`);
+  deps.err(`scanning ${resolved.label} in thread ${id} (${part ? `${part}, ` : ""}budget $${Number(budget.toFixed(4))})`);
 
   const { snapshot, timedOut } = await waitForThread(client, deps, id, deadline);
   const done = finishedThread(snapshot);
@@ -287,13 +318,114 @@ async function writeReport(outcome: ScanOutcome, merged: ReturnType<typeof merge
   } else deps.out(body);
 }
 
+/** The thread has the same tools as any thread, so it could edit the code it reads. The message to show if it did, else undefined. */
+async function unexpectedChanges(deps: Pick<ScanDeps, "changedFiles">, folder: string, before: Set<string> | undefined): Promise<string | undefined> {
+  const after = before ? await deps.changedFiles(folder) : undefined;
+  const changed = before && after ? [...after].filter(line => !before.has(line)) : [];
+  return changed.length
+    ? `The scan changed ${changed.length} file${changed.length === 1 ? "" : "s"} in the target (${changed.slice(0, 5).map(line => line.slice(3)).join(", ")}${changed.length > 5 ? ", ..." : ""}). A scan must not edit the code it reads; review and revert them.`
+    : undefined;
+}
+
+/** `--coverage`: print the ledger of a scan of this folder (the latest, or the id given) and start nothing. */
+async function printCoverage(resolved: ResolvedTarget, options: ScanOptions, deps: ScanDeps): Promise<void> {
+  const ledger = (deps.openLedger ?? defaultScanDeps.openLedger!)(options.dbPath);
+  try {
+    const wanted = typeof options.coverage === "string" && options.coverage.trim() ? options.coverage.trim() : "latest";
+    const scan = wanted === "latest" ? ledger.latestScan(resolved.folder) : ledger.getScan(wanted);
+    if (!scan) throw new UsageError(wanted === "latest" ? `No batched scan of ${resolved.folder} is recorded. A scan is batched when the folder has more entry points than one thread takes; see --batches.` : `No scan ${wanted} in the findings database.`);
+    const units = ledger.units(scan.id);
+    const body = options.format === "json" ? `${JSON.stringify(coverageJson(scan, units), null, 2)}\n` : `${coverageText(scan, units)}\n`;
+    if (options.output) deps.writeBytes(options.output, new TextEncoder().encode(body)); else deps.out(body);
+  } finally { ledger.close(); }
+}
+
+const emptyStoredReport = (startedAt: string): ScanReport => ({ target: "", scanDepth: "default", startedAt, completedAt: startedAt, durationMs: 0, summary: { totalAttacks: 0, totalFindings: 0, critical: 0, high: 0, medium: 0, low: 0, info: 0 }, findings: [], warnings: [] } as unknown as ScanReport);
+
+/**
+ * The batched flow: one thread per batch of units, a ledger row per unit, and a report that says how much was reviewed.
+ * A unit is reviewed only when its batch's thread finished normally; everything else stays pending with the reason.
+ */
+async function runBatchedScan(ctx: PassContext, setup: BatchedSetup, before: Set<string> | undefined, startedAt: string, budget: number): Promise<void> {
+  const { client, deps, resolved, options } = ctx;
+  const { ledger, scan } = setup;
+  const ran = new Map<string, PassResult>();
+  const count = setup.batches.length;
+  deps.err(`${setup.resumed ? `resuming scan ${scan.id}` : `scan ${scan.id}`}: ${setup.summaryText} ${count ? `${count} batch${count === 1 ? "" : "es"} to run` : "nothing is pending"}`);
+
+  const run = await runBatches({
+    batches: setup.batches, ledger, scanId: scan.id, budgetUsd: budget, deadline: ctx.deadline, concurrency: Number(options.concurrency ?? 1), log: deps.err,
+    run: async (batch: Batch, batchBudget: number): Promise<BatchOutcome> => {
+      // Hits of the pattern scanners that sit in this batch's files are its leads; the others belong to other batches.
+      const files = new Set(batch.units.flatMap(unit => unit.files ?? [unit.path]));
+      const leads = ctx.prePass?.leads.filter(lead => lead.path !== undefined && files.has(lead.path)) ?? [];
+      const prePass = ctx.prePass && leads.length ? { ...ctx.prePass, leads, total: leads.length } : undefined;
+      const info: BatchPromptInfo = { index: batch.index, total: count, units: batch.units, summary: setup.summaryText };
+      const pass = await runPass(ctx, batch.index, { batch: info, budget: batchBudget, prePass });
+      ran.set(pass.threadId, pass);
+      const hardFailure = pass.done.failed && !pass.budgetExhausted && !pass.timedOut;
+      return {
+        threadId: pass.threadId, reviewed: !pass.done.failed && !pass.done.claimBlocked && !pass.budgetExhausted && !pass.timedOut,
+        ...(pass.costUsd !== undefined ? { costUsd: pass.costUsd } : {}), budgetExhausted: pass.budgetExhausted, timedOut: pass.timedOut, failed: hardFailure || pass.done.claimBlocked,
+        ...(pass.done.error ? { error: pass.done.error } : {}),
+      };
+    },
+  });
+  const firstError = run.outcomes.map(item => item.outcome.error).find(Boolean);
+  if (count && !ran.size && run.outcomes.length) throw new Error(`No batch could run${firstError ? `: ${firstError}` : "."}`);
+  for (const item of run.outcomes) if (!item.outcome.reviewed && item.outcome.error && item.outcome.threadId === undefined) deps.err(`batch ${item.batch.index + 1}: ${item.outcome.error}`);
+
+  const units = ledger.units(scan.id);
+  const summary = summarizeCoverage(scan.id, units);
+  const statement = coverageSentence(summary);
+  const coverage = coverageReport(summary, statement, units);
+  // Findings of every thread of this scan, including the threads an earlier run started and partial batches.
+  const threadIds = ledger.getScan(scan.id)?.threadIds ?? [...ran.keys()];
+  const stored: ScanReport[] = [];
+  for (const id of threadIds) {
+    const pass = ran.get(id);
+    if (pass) { stored.push(pass.stored); continue; }
+    try { stored.push(await deps.loadReport(client, id)); }
+    catch (error) { deps.err(`could not read the findings of thread ${id} from an earlier run: ${error instanceof Error ? error.message : String(error)}`); }
+  }
+  // Batches are not passes: the same flaw found from two batches is one finding, with no "found in N passes" note.
+  const merged = mergePasses(stored.map(report => report.findings), resolved.roots).map(({ foundInPasses: _ignored, ...finding }) => finding);
+  const changedError = await unexpectedChanges(deps, resolved.folder, before);
+  if (changedError) deps.err(changedError);
+
+  const customLeads = ctx.prePass?.leads.filter(lead => lead.ruleSource === "custom") ?? [];
+  const results = [...ran.values()];
+  const cost = results.reduce((sum, result) => sum + (result.costUsd ?? 0), 0);
+  const costKnown = results.some(result => result.costUsd !== undefined);
+  const failed = (results.length > 0 && results.every(result => (result.done.failed && !result.budgetExhausted && !result.timedOut) || result.done.claimBlocked)) || changedError !== undefined;
+  const lead = results.reduce<PassResult | undefined>((best, result) => (!best || result.stored.findings.length > best.stored.findings.length ? result : best), undefined);
+  const hardError = results.map(result => (!result.budgetExhausted && !result.timedOut ? result.done.error : undefined)).find(Boolean);
+  const outcome: ScanOutcome = {
+    target: resolved.reportTarget, roots: resolved.roots, threadId: threadIds[0] ?? "none", startedAt, completedAt: deps.now().toISOString(), budgetUsd: budget,
+    ...(costKnown ? { costUsd: cost } : {}), budgetExhausted: run.budgetHit, ...(run.timedOut ? { timedOut: true } : {}), failed,
+    ...(changedError ? { error: changedError } : failed && hardError ? { error: hardError } : {}),
+    // The thread's own summary can say it covered everything; the ledger's account comes first.
+    summary: `Coverage: ${statement}.${lead?.done.reply ? `\n\n${lead.done.reply}` : ""}`,
+    coverage, ...(threadIds.length > 1 ? { threadIds } : {}),
+    ...(customLeads.length ? { customLeads } : {}),
+  };
+  const base = stored[0] ?? emptyStoredReport(startedAt);
+  await writeReport(outcome, merged, { ...base, findings: merged }, `0-scan-${threadIds[0] ?? scan.id}`, options, deps);
+  const resume = summary.complete ? "" : `\nResume with: 0 scan ${resolved.label} --resume ${scan.id}`;
+  deps.err(`${merged.length} finding${merged.length === 1 ? "" : "s"}; ${statement}${run.budgetHit ? `; stopped at the $${budget} budget` : run.timedOut ? `; stopped at the ${options.timeout}s time limit` : ""}${resume}\nUsage: ${count} batch${count === 1 ? "" : "es"}, cost ${costKnown ? `$${cost.toFixed(4)}` : "unknown"}`);
+  const code = scanExitCode(outcome, merged, options.failOn as typeof SEVERITIES[number] | undefined);
+  if (code !== 0) process.exitCode = code;
+}
+
 export async function runScan(target: string | undefined, options: ScanOptions, deps: ScanDeps = defaultScanDeps): Promise<void> {
   let resolved: ResolvedTarget | undefined;
   let client: ConsoleClient | undefined;
   let stopConsole: (() => void) | undefined;
+  let batched: BatchedSetup | undefined;
   try {
     validate(target, options);
     resolved = await resolveScanTarget(target!, deps);
+    if (options.coverage !== undefined) { await printCoverage(resolved, options, deps); return; }
     const steering = loadSteering(resolved.folder, options, deps.err);
     if (steering.policies.length && options.skill === "scan") options = { ...options, skill: POLICY_SKILL };
     const budget = Number(options.budget);
@@ -313,6 +445,12 @@ export async function runScan(target: string | undefined, options: ScanOptions, 
         return;
       }
     }
+    // A folder with more entry points than one thread takes is reviewed in batches, each with a ledger row (docs: Large repositories).
+    batched = await planBatchedScan({
+      folder: resolved.folder, label: resolved.label, mode: options.batches ?? "auto", batchSize: Number(options.batchSize ?? DEFAULT_BATCH_SIZE), ...(options.resume !== undefined ? { resume: options.resume } : {}),
+      ...(options.force ? { force: true } : {}), budgetUsd: budget, passes: total, singleThread: options.skill !== "scan", ...(scope ? { scope } : {}), ...(options.dbPath ? { dbPath: options.dbPath } : {}),
+      openLedger: deps.openLedger ?? defaultScanDeps.openLedger!, gitHead: deps.gitHead ?? defaultScanDeps.gitHead!, err: deps.err,
+    });
     ({ client, stop: stopConsole } = await connect(options, deps));
     // --budget is the total: each pass gets an equal share, so the cost stays predictable however many passes run.
     const scanners = parseScannerList(options.scanner);
@@ -326,6 +464,7 @@ export async function runScan(target: string | undefined, options: ScanOptions, 
     }
     if (prePass) deps.err(`${prePass.tools.join(", ")} pre-pass: ${prePass.total} lead${prePass.total === 1 ? "" : "s"} for the scan to check`);
     const ctx: PassContext = { steering, ...(prePass ? { prePass } : {}), ...(scope ? { scope } : {}), client, deps, resolved, options, total, budget: budget / total, deadline: Date.now() + Number(options.timeout) * 1000 };
+    if (batched) { await runBatchedScan(ctx, batched, before, startedAt, budget); return; }
 
     const passErrors: string[] = [];
     const results = (await inPool(total, MAX_PARALLEL_PASSES, async (index): Promise<PassResult | undefined> => {
@@ -345,11 +484,7 @@ export async function runScan(target: string | undefined, options: ScanOptions, 
     const failedPasses = total - results.length;
     const merged = mergePasses(results.map(result => result.stored.findings), resolved.roots);
     // The thread has the same tools as any thread, so it could edit the code it reads. Say so if it did.
-    const after = before ? await deps.changedFiles(resolved.folder) : undefined;
-    const changed = before && after ? [...after].filter(line => !before.has(line)) : [];
-    const changedError = changed.length
-      ? `The scan changed ${changed.length} file${changed.length === 1 ? "" : "s"} in the target (${changed.slice(0, 5).map(line => line.slice(3)).join(", ")}${changed.length > 5 ? ", ..." : ""}). A scan must not edit the code it reads; review and revert them.`
-      : undefined;
+    const changedError = await unexpectedChanges(deps, resolved.folder, before);
     if (changedError) deps.err(changedError);
 
     const budgetExhausted = results.some(result => result.budgetExhausted);
@@ -378,6 +513,7 @@ export async function runScan(target: string | undefined, options: ScanOptions, 
   } finally {
     client?.dispose();
     stopConsole?.();
+    batched?.ledger.close();
     resolved?.dispose?.();
   }
 }
@@ -400,7 +536,13 @@ export function registerScanCommand(program: Command, deps: ScanDeps = defaultSc
     .option("--repo-context", "Also read .0/threat-model.md from the scanned folder as context. Off by default: a change under review can edit that file; in CI pass the base branch's copy with --context instead")
     .option("--skill <id>", "Skill that holds the scan method", "scan")
     .option("--model <model>", `Model for the scan thread (default: ${DEFAULT_SCAN_MODEL})`)
+    .option("--batches <mode>", "auto reviews a large folder in batches, one thread per group of entry points, and records what each batch covered; on always does; off keeps one thread", "auto")
+    .option("--batch-size <n>", `Entry points one batch reviews (1 to ${MAX_BATCH_SIZE}); a folder with more than this many is split under --batches auto`, String(DEFAULT_BATCH_SIZE))
+    .option("--concurrency <n>", `Batches that run at the same time (1 to ${MAX_PARALLEL_PASSES})`, "1")
+    .option("--resume <scan>", "Continue the units an earlier batched scan of this folder did not reach (a scan id from its report, or latest); refuses when the git HEAD changed unless --force")
+    .option("--force", "With --resume: continue even though the folder's git HEAD changed")
+    .option("--coverage [scan]", "Print the coverage ledger of a batched scan of this folder (the latest, or the id given) and exit; --format json for JSON")
     .option("--timeout <seconds>", "Maximum seconds to wait for the scan", String(DEFAULT_TIMEOUT_SECONDS)))
-    .addHelpText("after", "\nExit codes: 0 done, 1 findings at or above --fail-on or the scan failed, 2 usage error, 3 stopped at the budget.\nThe scan is a thread: follow it with `0 threads list`.")
+    .addHelpText("after", "\nExit codes: 0 done, 1 findings at or above --fail-on or the scan failed, 2 usage error, 3 stopped before it reviewed everything (budget, time limit, or entry points not reached).\nThe scan is a thread: follow it with `0 threads list`.")
     .action(async (target: string, options: ScanOptions) => { await runScan(target, options, deps); });
 }

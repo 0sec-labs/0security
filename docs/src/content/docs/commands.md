@@ -155,7 +155,7 @@ Exit codes:
 - 0: done
 - 1: a finding at or above `--fail-on`, or the scan failed
 - 2: usage error
-- 3: stopped at the budget or the time limit; the report is partial
+- 3: stopped at the budget or the time limit, or entry points were not reached; the report is partial
 
 To review a change instead of the whole folder, pass `--diff <ref>`, for example in a pull request job:
 
@@ -255,6 +255,15 @@ Install Checkov with `brew install checkov` or `pipx install checkov`, or set `Z
 
 `--policy <file-or-folder>` checks the code against Markdown policies with the `policy-check` skill and answers pass, fail or not-applicable for each. `--org-policy <folder>` is an organisation's policy folder. It is evaluated first and wins over `--policy` on the same id or a conflicting rule.
 
+A folder with more than 8 entry points, or more than 150 source files, is reviewed in batches: one thread per group of entry points, each recorded in a coverage ledger. The report states what was reviewed, for example `reviewed 41 of 57 entry points; 16 not reached (budget)`, and the exit code is 3 while anything is not reached. Continue with `--resume`, or read the ledger with `--coverage`:
+
+```bash
+0 scan ~/code/app --resume latest
+0 scan ~/code/app --coverage
+```
+
+`--batches off` keeps one thread. See [Large repositories](/findings/#large-repositories).
+
 | Argument | Required | Description |
 | --- | --- | --- |
 | `target` | Yes |  |
@@ -276,6 +285,12 @@ Install Checkov with `brew install checkov` or `pipx install checkov`, or set `Z
 | `--repo-context` | — | Also read .0/threat-model.md from the scanned folder as context. Off by default: a change under review can edit that file; in CI pass the base branch's copy with --context instead |
 | `--skill <id>` | `scan` | Skill that holds the scan method |
 | `--model <model>` | — | Model for the scan thread (default: gpt-6-luna) |
+| `--batches <mode>` | `auto` | auto reviews a large folder in batches, one thread per group of entry points, and records what each batch covered; on always does; off keeps one thread |
+| `--batch-size <n>` | `8` | Entry points one batch reviews (1 to 50); a folder with more than this many is split under --batches auto |
+| `--concurrency <n>` | `1` | Batches that run at the same time (1 to 3) |
+| `--resume <scan>` | — | Continue the units an earlier batched scan of this folder did not reach (a scan id from its report, or latest); refuses when the git HEAD changed unless --force |
+| `--force` | — | With --resume: continue even though the folder's git HEAD changed |
+| `--coverage [scan]` | — | Print the coverage ledger of a batched scan of this folder (the latest, or the id given) and exit; --format json for JSON |
 | `--timeout <seconds>` | `3600` | Maximum seconds to wait for the scan |
 | `--engine-url <url>` | — | Attach directly to a running trusted engine |
 | `--engine-token-env <name>` | — | Environment variable holding the attached engine token |

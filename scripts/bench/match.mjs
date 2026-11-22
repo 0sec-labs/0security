@@ -14,7 +14,8 @@ const FAMILY_PATTERNS = {
   "weak-crypto": /crypto|\bmd5\b|sha-?1\b|\becb\b|\brsa\b|\bkdf\b|weak (hash|cipher|key)|key size|quantum|pkcs|\bdes\b|unsalted/i,
   xss: /\bxss\b|cross[-_ ]site scripting|html injection|template\.html|unescaped|unsanitized html/i,
   "prompt-injection": /prompt[-_ ]?inj|indirect injection|excessive[-_ ]agency|tool[-_ ]misuse|jailbreak|untrusted (content|text|input|ticket).*(model|prompt|tool|command|shell)|model-controlled|shell tool|agent.*(shell|command)/i,
-  "output-handling": /output[-_ ]?(handling|manipulation)|insecure output|model output|llm output|improper output|(agent|model|llm|assistant)[a-z ]*(reply|response|output).*(html|escap|markup)|unescaped (agent|model|llm|assistant)/i,
+  authz: /authz|authori[sz]ation|access[-_ ]control|\bidor\b|insecure direct|missing (auth|ownership|permission|admin)|broken (access|object)|privilege|forced browsing|unauthori[sz]ed/i,
+  "output-handling":/output[-_ ]?(handling|manipulation)|insecure output|model output|llm output|improper output|(agent|model|llm|assistant)[a-z ]*(reply|response|output).*(html|escap|markup)|unescaped (agent|model|llm|assistant)/i,
   "iac-network": /security[-_ ]group|subnet|route[-_ ]?table|\broute\b|ingress|0\.0\.0\.0|internet gateway|network (exposure|exposed)|publicly (accessible|exposed|reachable)|public (subnet|route|access)|open to the (internet|world)|exposed to the internet/i,
   "iac-iam": /\biam\b|pass-?role|privilege escalation|wildcard (action|resource|permission)|over-?(permissive|broad) (role|polic|permission)|assume-?role/i,
   "iac-privilege": /privileged|host-?path|docker\.sock|docker socket|host-?(network|pid|ipc)|container escape|node (takeover|compromise)|service-?account|security-?context|run(s|ning)? as root/i,
@@ -74,8 +75,10 @@ export function scoreFindings(answer, findings, { tolerance = LINE_TOLERANCE } =
   const candidates = findings.map((_, i) => {
     const w = where[i];
     if (!w) return [];
+    // An item may name other places the same flaw shows (`alsoAt`): the sink in a helper file, the route that reaches it.
+    const spots = (item) => [item, ...(item.alsoAt ?? [])];
     return items
-      .map((item, index) => ({ index, distance: samePath(w.path, item.path) && families[i].has(item.category) ? lineDistance(w.start, w.end, item.startLine, item.endLine) : Infinity }))
+      .map((item, index) => ({ index, distance: families[i].has(item.category) ? Math.min(...spots(item).map((s) => (samePath(w.path, s.path) ? lineDistance(w.start, w.end, s.startLine, s.endLine) : Infinity))) : Infinity }))
       .filter((c) => c.distance <= tolerance)
       .sort((a, b) => a.distance - b.distance)
       .map((c) => c.index);
@@ -146,6 +149,12 @@ export function validateAnswer(answer, { fileLines } = {}) {
     const lines = fileLines?.[entry.path];
     if (lines !== undefined && entry.endLine > lines) problems.push(`${entry.id}: line ${entry.endLine} is past the end of ${entry.path} (${lines} lines)`);
     if (fileLines && lines === undefined) problems.push(`${entry.id}: file ${entry.path} not found`);
+    for (const spot of entry.alsoAt ?? []) {
+      const spotLines = fileLines?.[spot.path];
+      if (!spot.path || !Number.isInteger(spot.startLine) || !Number.isInteger(spot.endLine) || spot.endLine < spot.startLine) problems.push(`${entry.id}: bad alsoAt entry`);
+      else if (fileLines && spotLines === undefined) problems.push(`${entry.id}: alsoAt file ${spot.path} not found`);
+      else if (spotLines !== undefined && spot.endLine > spotLines) problems.push(`${entry.id}: alsoAt line ${spot.endLine} is past the end of ${spot.path} (${spotLines} lines)`);
+    }
   }
   for (const item of answer.items ?? []) {
     if (!FAMILIES.includes(item.category)) problems.push(`${item.id}: unknown category ${item.category} (known: ${FAMILIES.join(", ")})`);

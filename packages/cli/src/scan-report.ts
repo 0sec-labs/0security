@@ -6,7 +6,7 @@
  * (the thread itself or a helper agent), so the report reads the store and never the transcript.
  */
 import { createHash } from "node:crypto";
-import type { Finding, ScanReport } from "@0/engine/shared";
+import type { Finding, ScanCoverage, ScanReport } from "@0/engine/shared";
 import { tagCustomFindings } from "./scan-rules.js";
 
 export const SCAN_REPORT_SCHEMA_VERSION = 1;
@@ -36,6 +36,8 @@ export interface ScanOutcome {
   summary?: string;
   /** Set when more than one pass ran: how many were asked for, finished with a report, and could not finish. */
   passes?: { requested: number; completed: number; failed: number };
+  /** Set when the scan ran in batches: what was and was not reviewed. */
+  coverage?: ScanCoverage;
   /** Every pass's thread, first to last. */
   threadIds?: readonly string[];
   /** Pre-pass hits from rules the user supplied with --rules; findings at the same rule or place are tagged. */
@@ -135,8 +137,9 @@ export function toScanReport(outcome: ScanOutcome, stored: ScanReport): ScanRepo
     durationMs: Math.max(0, Date.parse(outcome.completedAt) - Date.parse(outcome.startedAt)),
     findings,
     summary: { totalAttacks: 0, totalFindings: findings.length, critical: count(findings, "critical"), high: count(findings, "high"), medium: count(findings, "medium"), low: count(findings, "low"), info: count(findings, "info") },
+    ...(outcome.coverage ? { coverage: outcome.coverage } : {}),
     // The stored rows carry a note that the export was rebuilt from a legacy record; a scan is not one.
-    warnings: [...(outcome.passes && outcome.passes.failed > 0 ? [{ stage: "report" as const, message: `${outcome.passes.failed} of ${outcome.passes.requested} scan passes could not finish; the findings may be incomplete.` }] : [])].concat(outcome.budgetExhausted ? [{ stage: "report" as const, message: `Stopped at the $${outcome.budgetUsd} budget; findings are partial.` }] : outcome.timedOut ? [{ stage: "report" as const, message: "Stopped at the time limit; findings are partial." }] : []),
+    warnings: [...(outcome.coverage && !outcome.coverage.complete ? [{ stage: "report" as const, message: `Partial review: ${outcome.coverage.statement}.` }] : []),...(outcome.passes && outcome.passes.failed > 0 ? [{ stage: "report" as const, message: `${outcome.passes.failed} of ${outcome.passes.requested} scan passes could not finish; the findings may be incomplete.` }] : [])].concat(outcome.budgetExhausted ? [{ stage: "report" as const, message: `Stopped at the $${outcome.budgetUsd} budget; findings are partial.` }] : outcome.timedOut ? [{ stage: "report" as const, message: "Stopped at the time limit; findings are partial." }] : []),
     executionSuccessful: !outcome.failed,
     ...(outcome.costUsd !== undefined ? { estimatedCostUsd: outcome.costUsd } : {}),
     ...(outcome.budgetExhausted ? { costCeilingExceeded: true, exitReason: "cost_ceiling_exceeded" as const } : {}),
@@ -157,7 +160,8 @@ export function scanJson(outcome: ScanOutcome, stored: readonly Finding[]): Reco
     ...(outcome.costUsd !== undefined ? { costUsd: outcome.costUsd } : {}),
     ...(outcome.threadIds && outcome.threadIds.length > 1 ? { threadIds: outcome.threadIds } : {}),
     ...(outcome.passes && outcome.passes.requested > 1 ? { passes: outcome.passes } : {}),
-    status: outcome.failed ? "failed" : outcome.budgetExhausted ? "budget_exhausted" : outcome.timedOut ? "timed_out" : "complete",
+    status: outcome.failed ? "failed" : outcome.budgetExhausted ? "budget_exhausted" : outcome.timedOut ? "timed_out" : outcome.coverage && !outcome.coverage.complete ? "partial" : "complete",
+    ...(outcome.coverage ? { coverage: outcome.coverage } : {}),
     ...(outcome.error ? { error: outcome.error } : {}),
     ...(outcome.summary ? { summary: outcome.summary } : {}),
     counts: { total: findings.length, critical: count(findings, "critical"), high: count(findings, "high"), medium: count(findings, "medium"), low: count(findings, "low"), info: count(findings, "info") },
@@ -189,5 +193,6 @@ export function scanJson(outcome: ScanOutcome, stored: readonly Finding[]): Reco
 export function scanExitCode(outcome: ScanOutcome, findings: readonly Finding[], failOn: ScanSeverity | undefined): number {
   if (outcome.failed) return 1;
   if (failOn && findings.some(finding => rank(finding.severity) <= rank(failOn))) return 1;
-  return outcome.budgetExhausted || outcome.timedOut ? 3 : 0;
+  // Units not reviewed mean the review is partial, whatever stopped it.
+  return outcome.budgetExhausted || outcome.timedOut || (outcome.coverage !== undefined && !outcome.coverage.complete) ? 3 : 0;
 }

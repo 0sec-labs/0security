@@ -116,18 +116,54 @@ To make a scan weigh business logic and authorization, give it a reviewed threat
 | `--timeout <seconds>` | Cancel the scan after this long (default 3600) and print what was found. |
 | `--model <model>` | Model for the scan (default `gpt-6-luna`). |
 | `--skill <id>` | Skill that holds the scan method (default `scan`). |
+| `--batches <mode>` | `auto` (default) reviews a large folder in batches, `on` always does, `off` keeps one thread. See [Large repositories](#large-repositories). |
+| `--batch-size <n>` | Entry points one batch reviews (default 8). |
+| `--concurrency <n>` | Batches that run at the same time, up to 3 (default 1). |
+| `--resume <scan>` | Continue the entry points an earlier scan did not reach. |
+| `--coverage [scan]` | Print what an earlier scan reviewed and exit. |
 
-Exit codes: `0` done, `1` a finding at or above `--fail-on` or the scan failed, `2` usage error, `3` stopped at the budget or the time limit (the report is partial).
+Exit codes: `0` done, `1` a finding at or above `--fail-on` or the scan failed, `2` usage error, `3` stopped at the budget or the time limit, or entry points were not reached (the report is partial).
 
 `0 scan` uses the console that is running, or the engine named by `--engine-url` or `--computer`. With none running it starts one and stops it afterwards.
 
 The scan needs a model with working tool calls. In one test, a small model sent most `finding` calls without their title and evidence. Results also vary between runs, so a clean scan is not proof that nothing is there.
 
+### Large repositories
+
+One thread cannot review every entry point of a big repository, and it cannot tell you what it skipped. With more than 8 entry points, or more than 150 source files, `0 scan` splits the work:
+
+1. It lists the entry points without calling a model: routes and handlers (Express, Fastify, Koa, Next, Flask, FastAPI, Django, Go, Spring, Rails, PHP), webhooks, queue and cron consumers, program mains, and the places that deserialize data, accept uploads or run commands. It skips what `.gitignore` ignores and vendored or build folders, and runs nothing from the folder.
+2. Source files no pattern matches are grouped by folder, so every source file belongs to a group. Entry points are reviewed first.
+3. It runs one thread per batch of entry points, one after another. Each thread gets its batch, a short summary of the whole folder, and your `--context` and `--policy` text. The budget left is split between the batches not yet run, with a small minimum.
+4. A batch counts as reviewed only when its thread finished normally. A batch that stopped at its budget, hit the time limit or failed stays pending.
+
+The report says plainly how much was reviewed:
+
+```text
+reviewed 41 of 57 entry points; 16 not reached (budget)
+```
+
+In JSON this is a `coverage` object with the counts, the counts by kind and the first entry points not reached. SARIF carries it in the run's `properties`. The exit code is 3 whenever anything is not reached, so a pipeline cannot read a partial review as a full one. A folder with no findings and entry points not reached has not been shown to be clean.
+
+Continue where a scan stopped. The report and the stderr line print the scan id.
+
+```bash
+0 scan ./your-repo --resume latest
+0 scan ./your-repo --coverage
+```
+
+`--resume` runs only the pending entry points and reports the findings of every thread of that scan. It refuses when the folder's git HEAD changed since the scan began; `--force` continues anyway. `--coverage` prints the ledger: every unit with its status and the reason it was not reached.
+
+The ledger is kept in the local findings database, so `--resume` and `--coverage` work from the machine that ran the scan. `--batches off` keeps one thread and prints no coverage. `--passes` and `--diff` do not combine with `--resume`, and `--passes` does not combine with `--batches on`.
+
+The patterns over-match on purpose, and they cannot see a framework they do not know. A route they miss still falls into a group of other files, but that group gets less attention than an entry point.
+
 ### Read the JSON report
 
 The JSON report has `schemaVersion: 1` and these fields:
 
-- `status`: `complete`, `budget_exhausted`, `timed_out` or `failed`.
+- `status`: `complete`, `partial`, `budget_exhausted`, `timed_out` or `failed`. `partial` means entry points were not reached for a reason other than the budget or time limit.
+- With batches: `coverage` (`complete`, `statement`, `entryPoints` and `otherGroups` with `total`, `reviewed`, `pending` and `skipped`, `byKind`, `notReached`, `pendingUnits`) and every batch's `threadIds`.
 - `counts` by severity, and the model's closing `summary`.
 - `target`: the folder's name, or the git URL without credentials. It is the same on every machine.
 - With `--passes`: `passes` (asked for, finished, failed) and every pass's `threadIds`.
