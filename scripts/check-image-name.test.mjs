@@ -29,3 +29,8 @@ test("old name allowed only in the Docker migration section and changelog", () =
 test("this repository passes", () => {
   assert.deepEqual(checkImageName(join(import.meta.dirname, "..")), []);
 });
+test("old name is rejected behind a spaced GitHub Actions expression", () => {
+  const e = checkImageName(repo({ ".github/workflows/a.yml": "image: ghcr.io/${{ github.repository_owner }}/0:latest\nok: ghcr.io/${{ github.repository_owner }}/0security:latest\n" }));
+  assert.equal(e.length, 1);
+  assert.match(e[0], /a\.yml:1/);
+});

@@ -6,7 +6,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 
-const OLD_IMAGE = /ghcr\.io\/(?:0sec-labs|\$\{?\{?[^/\s]*\}?\}?)\/0(?![\w-])/i;
+const OLD_IMAGE = /ghcr\.io\/(?:0sec-labs|\$\{\{[^}]*\}\}|\$\{?[^/\s]*\}?)\/0(?![\w-])/i;
 const ROOTS = [".github", "scripts", "deploy", "docs/src", "README.md", "packages/engine/docker", "packages/cli/src"];
 const SELF = new Set(["scripts/check-image-name.mjs", "scripts/check-image-name.test.mjs"]);
 const ALLOWED_FILES = new Set(["docs/CHANGELOG.md"]);
