@@ -1,6 +1,6 @@
 ---
 title: Pull request checks (GitHub Action)
-description: Scan only what a pull request changes with the 0 Action, and show the findings in GitHub's Security tab.
+description: Scan only what a pull request changes with the 0 Action, and show the findings in GitHub's Security tab or in Bitbucket Code Insights.
 ---
 
 The 0 Action scans the files a pull request changes and uploads the result to GitHub code scanning. Add it to a workflow to see findings in the repository's **Security** tab and as annotations on the pull request.
@@ -76,6 +76,146 @@ See [scan](/commands/#scan) for the rule format and how findings are marked.
 - Use the default checkout. On a pull request it checks out the merge commit, so comparing with the base branch gives exactly the change.
 - Code scanning needs a supported plan. On private repositories it is part of GitHub Code Security.
 - A clean run means the model found nothing. It does not mean the code is safe. The report says what the scan covered.
+
+## Bitbucket, Jenkins and Azure Pipelines
+
+The Action is GitHub only. Elsewhere, install the same pinned release and run the same three steps: scan the change, upload, fail on severity. Every example below installs a release you pin, and the installer refuses a download whose checksum does not match that release's `checksums.txt`.
+
+These examples were written from the products' public documentation. They have not been run on a live Bitbucket, Jenkins or Azure Pipelines instance, so try them on a branch first.
+
+### Publish to Bitbucket Code Insights
+
+`0 findings upload --to bitbucket-cloud` (or `--to bitbucket-dc` for Data Center) turns the scan into a Code Insights report with one annotation per finding. Scan with `--format json`: that file carries the agent's verdict, rationale and fix guidance, which a SARIF file does not.
+
+```bash
+0 scan . --diff origin/main --format json -o scan.json --fail-on high
+0 findings upload scan.json --to bitbucket-cloud --repo workspace/repo
+```
+
+- With `BITBUCKET_TOKEN` set, the command sends the report and its annotations. Without it, it prints the payload (the report body and the annotation batches) so a CI step can send it. `--print` prints even when the token is set. The token is sent only in the `Authorization` header and is never written to a log.
+- Cloud sends `PUT /2.0/repositories/{workspace}/{repo}/commit/{commit}/reports/{reportId}`, then `POST .../annotations` with at most 100 annotations per request. Data Center sends `PUT {url}/rest/insights/latest/projects/{project}/repos/{repo}/commits/{commit}/reports/{key}`, then `POST .../annotations`.
+- Pass the Data Center server with `--url` or `BITBUCKET_URL`, and the repository as `PROJECT/repo`. Cloud reads `BITBUCKET_WORKSPACE`, `BITBUCKET_REPO_SLUG` and `BITBUCKET_COMMIT` in Pipelines.
+- Findings are deduplicated by file, line and CWE, keeping the most severe. A report holds at most 1000 annotations; the most severe are kept and the count of the rest is printed and written into the report details.
+- Data Center has no `CRITICAL` severity, so critical findings are sent as `HIGH`. `info` findings are sent as `LOW`.
+- Each annotation carries the rule id, the CWE when the agent gave one, the verdict, the rationale and the suggested fix. Data Center has a single message field of 2000 characters, so long text is cut there.
+- Use a token that is allowed to write Code Insights reports for the repository (a repository access token on Cloud, an HTTP access token on Data Center). Check the scopes Bitbucket asks for in Atlassian's documentation.
+
+Re-running for the same commit and report id replaces the report and updates annotations with the same id. Annotations of an earlier run that no longer apply stay until the report is deleted. Reports on Data Center expire after 60 days.
+
+### Bitbucket Pipelines
+
+Add `BITBUCKET_TOKEN` and your model key as secured repository variables.
+
+```yaml
+image: node:22
+
+pipelines:
+  pull-requests:
+    "**":
+      - step:
+          name: 0 security
+          script:
+            - VERSION=0.41.0 # Pin the CLI
+            - export INSTALL_DIR="$HOME/.0/bin" PATH="$HOME/.0/bin:$PATH"
+            - curl -fsSL -o install.sh "https://raw.githubusercontent.com/0sec-labs/0security/v${VERSION}/install.sh"
+            - RELEASE_BASE_URL="https://github.com/0sec-labs/0security/releases/download/v${VERSION}" sh install.sh
+            - git fetch --no-tags --depth=1 origin "+refs/heads/${BITBUCKET_PR_DESTINATION_BRANCH}:refs/remotes/origin/${BITBUCKET_PR_DESTINATION_BRANCH}"
+            - code=0
+            - 0 scan . --diff "origin/${BITBUCKET_PR_DESTINATION_BRANCH}" --format json -o scan.json --fail-on high || code=$?
+            - if [ "$code" -ne 2 ]; then 0 findings upload scan.json --to bitbucket-cloud; fi
+            - if [ "$code" -eq 3 ]; then echo "The scan stopped at its budget; the findings are partial."; code=0; fi
+            - exit "$code"
+          artifacts:
+            - scan.json
+```
+
+The exit codes are those of `0 scan`: 1 when a finding is at or above `--fail-on` or the scan failed, 2 for a usage error, 3 when the scan stopped at its budget.
+
+### Jenkins
+
+A declarative pipeline for a multibranch job. Store the Bitbucket token and model key as Jenkins credentials. Single-quoted `sh` strings keep secrets out of Groovy interpolation.
+
+```groovy
+pipeline {
+  agent any
+  environment {
+    VERSION = '0.41.0' // Pin the CLI
+    INSTALL_DIR = "${WORKSPACE}/.0/bin"
+    BITBUCKET_URL = 'https://bitbucket.example.com' // Data Center only
+  }
+  stages {
+    stage('0 security') {
+      when { changeRequest() }
+      steps {
+        withCredentials([string(credentialsId: 'bitbucket-token', variable: 'BITBUCKET_TOKEN'),
+                         string(credentialsId: 'openai-api-key', variable: 'OPENAI_API_KEY')]) {
+          sh '''
+            set -u
+            curl -fsSL -o install.sh "https://raw.githubusercontent.com/0sec-labs/0security/v${VERSION}/install.sh"
+            RELEASE_BASE_URL="https://github.com/0sec-labs/0security/releases/download/v${VERSION}" sh install.sh
+            export PATH="$INSTALL_DIR:$PATH"
+            git fetch --no-tags --depth=1 origin "+refs/heads/${CHANGE_TARGET}:refs/remotes/origin/${CHANGE_TARGET}"
+            code=0
+            0 scan . --diff "origin/${CHANGE_TARGET}" --format json -o scan.json --fail-on high || code=$?
+            if [ "$code" -ne 2 ]; then
+              0 findings upload scan.json --to bitbucket-dc --repo PROJECT/repo --commit "$GIT_COMMIT"
+            fi
+            [ "$code" -eq 3 ] && code=0
+            exit "$code"
+          '''
+        }
+      }
+    }
+  }
+  post { always { archiveArtifacts artifacts: 'scan.json', allowEmptyArchive: true } }
+}
+```
+
+Use `--to bitbucket-cloud --repo workspace/repo` for Bitbucket Cloud. There is no Jenkins shared library for this yet; the pipeline above is the supported route.
+
+### Azure Pipelines
+
+Azure Pipelines can build a Bitbucket Cloud or GitHub repository. Keep the keys in a variable group or secret variables, and map secrets into the step's `env` because they are not exposed automatically.
+
+```yaml
+trigger: none
+pr:
+  branches:
+    include: [main]
+
+pool:
+  vmImage: ubuntu-latest
+
+steps:
+  - checkout: self
+    fetchDepth: 0
+  - bash: |
+      set -u
+      VERSION=0.41.0 # Pin the CLI
+      export INSTALL_DIR="$HOME/.0/bin" PATH="$HOME/.0/bin:$PATH"
+      curl -fsSL -o install.sh "https://raw.githubusercontent.com/0sec-labs/0security/v${VERSION}/install.sh"
+      RELEASE_BASE_URL="https://github.com/0sec-labs/0security/releases/download/v${VERSION}" sh install.sh
+      base="${TARGET_BRANCH#refs/heads/}"
+      git fetch --no-tags --depth=1 origin "+refs/heads/${base}:refs/remotes/origin/${base}"
+      code=0
+      0 scan . --diff "origin/${base}" --format json -o "$BUILD_ARTIFACTSTAGINGDIRECTORY/scan.json" --fail-on high || code=$?
+      if [ "$code" -ne 2 ] && [ -n "${BITBUCKET_TOKEN:-}" ]; then
+        0 findings upload "$BUILD_ARTIFACTSTAGINGDIRECTORY/scan.json" --to bitbucket-cloud --repo workspace/repo --commit "$SOURCE_VERSION"
+      fi
+      [ "$code" -eq 3 ] && code=0
+      exit "$code"
+    displayName: 0 security scan
+    env:
+      TARGET_BRANCH: $(System.PullRequest.TargetBranch)
+      SOURCE_VERSION: $(Build.SourceVersion)
+      BITBUCKET_TOKEN: $(BITBUCKET_TOKEN)
+      OPENAI_API_KEY: $(OPENAI_API_KEY)
+  - publish: $(Build.ArtifactStagingDirectory)/scan.json
+    artifact: 0-scan
+    condition: always()
+```
+
+The pull request variables depend on the repository host Azure Pipelines builds, and the commit Azure builds on a pull request can be a merge commit that Bitbucket does not know. Pass the pull request's source commit with `--commit` when the report does not show up. Without a Bitbucket token the step still scans and fails on severity, and the artifact holds the findings.
 
 ## Keep an SBOM and check it for advisories
 

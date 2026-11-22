@@ -1587,7 +1587,7 @@ Exit codes:
 
 #### findings upload
 
-Upload a SARIF file to GitHub code scanning, so findings show in the Security tab and on pull requests
+Upload findings to GitHub code scanning (SARIF) or to Bitbucket Code Insights (scan JSON or SARIF)
 
 ```text
 0 findings upload [options] <file>
@@ -1602,13 +1602,19 @@ Run the scan in a pull request check, then upload the result:
 
 The repository, commit and ref come from the clone (`GITHUB_SHA` and `GITHUB_REF` in Actions). The file is compressed, uploaded with `gh` and checked until GitHub has processed it; a refused file is reported with GitHub's reason. GitHub matches alerts by fingerprint, so an upload for a later commit updates them. `gh` needs permission to write security events (`security-events: write` in Actions).
 
+With `--to bitbucket-cloud` or `--to bitbucket-dc` the findings go to Bitbucket Code Insights instead. Upload the file from `0 scan --format json`, which carries the agent's verdict, rationale and fix guidance. With `BITBUCKET_TOKEN` set the report and its annotations are sent; without it the payload is printed. See [Bitbucket, Jenkins and Azure Pipelines](/ci/#bitbucket-jenkins-and-azure-pipelines).
+
 | Argument | Required | Description |
 | --- | --- | --- |
-| `file` | Yes | SARIF 2.1.0 file, for example from `0 scan --format sarif -o scan.sarif` |
+| `file` | Yes | SARIF 2.1.0 file from `0 scan --format sarif -o scan.sarif`; for Bitbucket also `0 scan --format json -o scan.json` |
 
 | Option | Registered default | Description |
 | --- | --- | --- |
-| `--repo <owner/name>` | — | Repository (default: the current clone's) |
+| `--to <target>` | `github` | github (default), bitbucket-cloud or bitbucket-dc |
+| `--url <url>` | — | Bitbucket Data Center base URL (default: BITBUCKET_URL) |
+| `--report-id <id>` | `0-security` | Bitbucket report id or key |
+| `--print` | — | Bitbucket: print the report and annotation payload instead of posting it (also the behaviour without BITBUCKET_TOKEN) |
+| `--repo <owner/name>` | — | Repository (default: the current clone's); Bitbucket: workspace/repo or PROJECT/repo |
 | `--commit <sha>` | — | Commit the results are for (default: HEAD, or GITHUB_SHA in Actions) |
 | `--ref <ref>` | — | refs/heads/&lt;branch&gt; or refs/pull/&lt;n&gt;/merge (default: the current branch, or GITHUB_REF in Actions) |
 | `--tool <name>` | — | Name the tool shown in GitHub |
