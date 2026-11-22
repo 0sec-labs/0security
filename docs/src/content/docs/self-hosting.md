@@ -306,6 +306,39 @@ You need `sqlite3` on the host (`sudo apt-get install -y sqlite3`). Run these st
 
 ---
 
+## Verify a release
+
+Each release publishes the standalone binaries, `checksums.txt`, and a CycloneDX SBOM (`0-sbom.cdx.json`). The release workflow also creates a GitHub build-provenance attestation for every one of those assets, so you can prove that a file was built by this repository's release workflow and not just that it matches a hash someone served you.
+
+With the [GitHub CLI](https://cli.github.com/) installed and logged in (`gh auth login`), download an asset from the [release page](https://github.com/0sec-labs/0security/releases) and verify it:
+
+```bash
+gh attestation verify 0-linux-x64 --repo 0sec-labs/0security
+gh attestation verify checksums.txt --repo 0sec-labs/0security
+```
+
+Then check the binary against the verified checksums:
+
+```bash
+sha256sum --check --ignore-missing checksums.txt
+```
+
+On macOS use `shasum -a 256 --check --ignore-missing checksums.txt` instead.
+
+The install script does the same for you. When `gh` is installed and logged in it verifies the `checksums.txt` attestation before it trusts any hash, and it prints a clear note and falls back to the plain `checksums.txt` check when `gh` is missing. Set `INSTALL_ATTESTATION=require` to fail instead of falling back, or `INSTALL_ATTESTATION=0` to skip the attestation on an air-gapped host or an internal mirror. Neither setting disables the checksum comparison. The FoxGuard companion is always checked against a SHA-256 pinned in the install script.
+
+To audit the dependencies of a release, run the SBOM through the advisory check:
+
+```bash
+0 sbom check 0-sbom.cdx.json
+```
+
+Reproducibility: builds run on GitHub-hosted runners with pinned tool versions and a frozen lockfile, but the binaries are not bit-for-bit reproducible, so the attestation, not a local rebuild, is the evidence of origin. The SBOM lists lockfile dependencies of the tagged source and does not enumerate the bundled runtime.
+
+To report a vulnerability, see the [security policy](https://github.com/0sec-labs/0security/security/policy).
+
+---
+
 ## Upgrades and rollbacks
 
 ### Upgrades
