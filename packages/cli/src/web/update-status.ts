@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { enterpriseMode } from "@0/engine";
 import { homeStateDir } from "@0/engine/shared";
 import { compareVersions } from "../utils/update-check.js";
 import { detectInstallKind, type InstallInfo, type InstallKind } from "../utils/install-origin.js";
@@ -72,7 +73,7 @@ export function readUpdateStatus(options: UpdateStatusOptions): UpdateStatus {
     supervised: options.supervised ?? false, serverMode: options.serverMode ?? false,
     ...(options.error ? { error: options.error } : {}),
   };
-  if (options.policy === "off" || disabled(env.ZERO_OFFLINE) || disabled(env.ZERO_NO_UPDATE_CHECK)) return base;
+  if (options.policy === "off" || disabled(env.ZERO_OFFLINE) || disabled(env.ZERO_NO_UPDATE_CHECK) || enterpriseMode(env)) return base;
   const tag = options.staged ?? cachedLatest(options.stateDir ?? homeStateDir());
   const match = tag ? /^v?(\d+\.\d+\.\d+)$/.exec(tag) : null;
   if (!match) return base;

@@ -29,7 +29,7 @@ const LEVEL_ORDER: Record<AnalyticsLevel, number> = {
 };
 
 /** Env vars that hard-disable analytics regardless of `ZERO_ANALYTICS_LEVEL`. */
-export const ANALYTICS_OPT_OUT_ENV = ["ZERO_OFFLINE", "ZERO_NO_TELEMETRY", "DO_NOT_TRACK"] as const;
+export const ANALYTICS_OPT_OUT_ENV = ["ZERO_OFFLINE", "ZERO_NO_TELEMETRY", "DO_NOT_TRACK", "ZERO_ENTERPRISE"] as const;
 
 /** The env var that selects the tier when nothing opts out. */
 export const ANALYTICS_LEVEL_ENV = "ZERO_ANALYTICS_LEVEL";
