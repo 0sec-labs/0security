@@ -1,0 +1,13 @@
+{
+  "fixture": "llm-app",
+  "skill": "llm-app-review",
+  "items": [
+    { "id": "llm-injection", "path": "agent.py", "startLine": 33, "endLine": 42, "category": "prompt-injection", "description": "customer-written ticket text goes into the prompt and the model can call run_shell, which executes the command it chooses" },
+    { "id": "llm-prompt-secrets", "path": "agent.py", "startLine": 9, "endLine": 12, "category": "secret", "description": "admin password and database URL with credentials placed in the system prompt" },
+    { "id": "llm-output", "path": "agent.py", "startLine": 48, "endLine": 50, "category": "output-handling", "description": "model output inserted into HTML without escaping" },
+    { "id": "llm-apikey", "path": "agent.py", "startLine": 7, "endLine": 7, "category": "secret", "description": "hardcoded model API key" }
+  ],
+  "decoys": [
+    { "id": "llm-decoy-order", "path": "agent.py", "startLine": 27, "endLine": 28, "description": "lookup_order: integer-typed id, returns a fixed JSON shape" }
+  ]
+}

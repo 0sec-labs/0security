@@ -1,0 +1,12 @@
+{
+  "fixture": "go-http",
+  "skill": null,
+  "items": [
+    { "id": "go-sqli", "path": "main.go", "startLine": 22, "endLine": 22, "category": "sqli", "description": "name query parameter concatenated into a SQL string" },
+    { "id": "go-xss", "path": "main.go", "startLine": 33, "endLine": 33, "category": "xss", "description": "user input wrapped in template.HTML, which bypasses escaping" },
+    { "id": "go-secret", "path": "main.go", "startLine": 16, "endLine": 16, "category": "secret", "description": "hardcoded signing key constant" }
+  ],
+  "decoys": [
+    { "id": "go-decoy-count", "path": "main.go", "startLine": 36, "endLine": 40, "description": "count handler uses a placeholder, not concatenation" }
+  ]
+}

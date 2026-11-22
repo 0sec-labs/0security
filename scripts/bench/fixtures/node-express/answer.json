@@ -1,0 +1,13 @@
+{
+  "fixture": "node-express",
+  "skill": null,
+  "items": [
+    { "id": "ne-sqli", "path": "server.js", "startLine": 22, "endLine": 22, "category": "sqli", "description": "owner query parameter concatenated into a SQL string" },
+    { "id": "ne-cmdi", "path": "server.js", "startLine": 30, "endLine": 30, "category": "command-injection", "description": "route parameter and format query flow into exec() through a template string" },
+    { "id": "ne-traversal", "path": "server.js", "startLine": 37, "endLine": 38, "category": "path-traversal", "description": "name query parameter joined to the uploads directory and read without a containment check" },
+    { "id": "ne-secret", "path": "server.js", "startLine": 10, "endLine": 10, "category": "secret", "description": "hardcoded admin token in source" }
+  ],
+  "decoys": [
+    { "id": "ne-decoy-delete", "path": "server.js", "startLine": 41, "endLine": 46, "description": "delete route: integer-validated id and a parameterised query" }
+  ]
+}

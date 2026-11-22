@@ -1,0 +1,13 @@
+{
+  "fixture": "python-flask",
+  "skill": null,
+  "items": [
+    { "id": "pf-ssrf", "path": "app.py", "startLine": 15, "endLine": 16, "category": "ssrf", "description": "server fetches an arbitrary URL taken from the query string" },
+    { "id": "pf-pickle", "path": "app.py", "startLine": 22, "endLine": 23, "category": "deserialization", "description": "pickle.loads on a client-supplied session blob" },
+    { "id": "pf-yaml", "path": "app.py", "startLine": 29, "endLine": 29, "category": "deserialization", "description": "yaml.load with the full Loader on request data" },
+    { "id": "pf-md5", "path": "app.py", "startLine": 34, "endLine": 34, "category": "weak-crypto", "description": "passwords hashed with unsalted MD5" }
+  ],
+  "decoys": [
+    { "id": "pf-decoy-health", "path": "app.py", "startLine": 44, "endLine": 46, "description": "health check requests a fixed internal URL; no user input" }
+  ]
+}

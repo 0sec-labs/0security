@@ -70,6 +70,8 @@ the merge base, `--all` runs everything. Root `package.json`, lockfile,
 suite. It is not a gate: CI and `scripts/ci-local.sh` run everything on main.
 `pnpm hooks:install` (opt-in) adds a pre-push hook that runs it.
 
+To measure whether scans and skills help, `node scripts/bench/run.mjs --dry-run` validates the planted-bug benchmark for free; see `docs/design/benchmark.md` before using `--run`, which spends model money.
+
 For documentation changes, use `pnpm docs:check` and `pnpm build:docs`.
 If CLI declarations changed, regenerate the command reference with
 `pnpm docs:sync` and review the resulting diff.

@@ -1,0 +1,13 @@
+{
+  "fixture": "clean-app",
+  "skill": null,
+  "clean": true,
+  "items": [],
+  "decoys": [
+    { "id": "cl-sql", "path": "server.js", "startLine": 28, "endLine": 31, "description": "parameterised query" },
+    { "id": "cl-html", "path": "server.js", "startLine": 24, "endLine": 38, "description": "escaped HTML output" },
+    { "id": "cl-exec", "path": "server.js", "startLine": 41, "endLine": 49, "description": "execFile with an allow-listed format and integer id" },
+    { "id": "cl-path", "path": "server.js", "startLine": 51, "endLine": 55, "description": "path resolved and checked against the uploads root" },
+    { "id": "cl-token", "path": "server.js", "startLine": 13, "endLine": 19, "description": "token from the environment, constant-time compare" }
+  ]
+}

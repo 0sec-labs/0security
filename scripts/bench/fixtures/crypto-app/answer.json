@@ -1,0 +1,16 @@
+{
+  "fixture": "crypto-app",
+  "skill": "crypto-migration",
+  "items": [
+    { "id": "cr-rsa-size", "path": "vault.py", "startLine": 11, "endLine": 11, "category": "weak-crypto", "description": "1024-bit RSA identity key: too small, and quantum-vulnerable" },
+    { "id": "cr-rsa-wrap", "path": "vault.py", "startLine": 15, "endLine": 15, "category": "weak-crypto", "description": "file key wrapped with RSA PKCS#1 v1.5 encryption; quantum-vulnerable key transport" },
+    { "id": "cr-sig-sha1", "path": "vault.py", "startLine": 19, "endLine": 19, "category": "weak-crypto", "description": "manifest signed with RSA PKCS#1 v1.5 and SHA-1" },
+    { "id": "cr-ecb", "path": "vault.py", "startLine": 23, "endLine": 23, "category": "weak-crypto", "description": "AES in ECB mode" },
+    { "id": "cr-sha1-fp", "path": "vault.py", "startLine": 29, "endLine": 29, "category": "weak-crypto", "description": "SHA-1 used as a file fingerprint" },
+    { "id": "cr-kdf", "path": "vault.py", "startLine": 33, "endLine": 33, "category": "weak-crypto", "description": "password turned into a key with a single unsalted SHA-256" }
+  ],
+  "decoys": [
+    { "id": "cr-decoy-urandom", "path": "vault.py", "startLine": 36, "endLine": 37, "description": "file key from os.urandom: correct" },
+    { "id": "cr-decoy-export", "path": "vault.py", "startLine": 40, "endLine": 41, "description": "exporting a public key as PEM: not secret" }
+  ]
+}
