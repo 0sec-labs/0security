@@ -30,45 +30,189 @@ function splitTop(value: string): string[] {
   parts.push(value.slice(start));
   return parts.map(part => part.trim()).filter(Boolean);
 }
-const braceDepth = (value: string): number => { let depth = 0; let quote = ""; for (const ch of value) { if (quote) { if (ch === quote) quote = ""; } else if (ch === "\"" || ch === "'") quote = ch; else if (ch === "{") depth += 1; else if (ch === "}") depth -= 1; } return depth; };
-/** `a.b = v` sets `{ a: { b: v } }`. */
-function setPath(table: { [key: string]: TomlValue }, dotted: string, value: TomlValue): void {
-  const path = dotted.replace(/^"|"$/g, "").split(".");
-  let target = table;
-  for (const segment of path.slice(0, -1)) { const next = target[segment]; target = typeof next === "object" ? next : (target[segment] = {}); }
-  target[path[path.length - 1]!] = value;
+const braceDepth = (value: string): number => {
+  let depth = 0; let quote = "";
+  for (let i = 0; i < value.length; i += 1) {
+    const ch = value[i]!;
+    if (quote) {
+      if (ch === "\\" && quote === "\"") i += 1;
+      else if (ch === quote) quote = "";
+    } else if (ch === "\"" || ch === "'") quote = ch;
+    else if (ch === "{") depth += 1;
+    else if (ch === "}") depth -= 1;
+  }
+  return depth;
+};
+
+const isDangerousKey = (key: string): boolean => key === "__proto__" || key === "constructor" || key === "prototype";
+
+function unquoteBasic(str: string): string {
+  const inner = str.slice(1, -1);
+  return inner.replace(/\\(["\\/bfnrt]|u[0-9a-fA-F]{4})/g, (_, esc: string) => {
+    if (esc === "\"") return "\"";
+    if (esc === "\\") return "\\";
+    if (esc === "/") return "/";
+    if (esc === "b") return "\b";
+    if (esc === "f") return "\f";
+    if (esc === "n") return "\n";
+    if (esc === "r") return "\r";
+    if (esc === "t") return "\t";
+    if (esc.startsWith("u")) return String.fromCharCode(parseInt(esc.slice(1), 16));
+    return esc;
+  });
 }
+
+function unquoteLiteral(str: string): string {
+  return str.slice(1, -1);
+}
+
+function splitKeyPath(raw: string): string[] {
+  const segments: string[] = [];
+  let current = "";
+  let quote = "";
+  for (let i = 0; i < raw.length; i += 1) {
+    const ch = raw[i]!;
+    if (quote) {
+      current += ch;
+      if (ch === "\\" && quote === "\"") {
+        i += 1;
+        if (i < raw.length) current += raw[i]!;
+      } else if (ch === quote) {
+        quote = "";
+      }
+    } else if (ch === "\"" || ch === "'") {
+      quote = ch;
+      current += ch;
+    } else if (ch === ".") {
+      segments.push(current.trim());
+      current = "";
+    } else {
+      current += ch;
+    }
+  }
+  if (current.trim().length > 0) {
+    segments.push(current.trim());
+  }
+  return segments.map(seg => {
+    if (seg.startsWith("\"") && seg.endsWith("\"") && seg.length >= 2) return unquoteBasic(seg);
+    if (seg.startsWith("'") && seg.endsWith("'") && seg.length >= 2) return unquoteLiteral(seg);
+    return seg;
+  });
+}
+
+function parseKeyValuePair(line: string): { key: string; value: string } | undefined {
+  let quote = "";
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i]!;
+    if (quote) {
+      if (ch === "\\" && quote === "\"") i += 1;
+      else if (ch === quote) quote = "";
+    } else if (ch === "\"" || ch === "'") {
+      quote = ch;
+    } else if (ch === "=") {
+      const key = line.slice(0, i).trim();
+      const value = line.slice(i + 1).trim();
+      if (!key) return undefined;
+      return { key, value };
+    }
+  }
+  return undefined;
+}
+
+/** `a.b = v` sets `{ a: { b: v } }`. */
+function setPath(table: { [key: string]: TomlValue }, rawKey: string, value: TomlValue): void {
+  const path = splitKeyPath(rawKey);
+  if (path.length === 0 || path.some(isDangerousKey)) return;
+  let target = table;
+  for (const segment of path.slice(0, -1)) {
+    const next = Object.prototype.hasOwnProperty.call(target, segment) ? target[segment] : undefined;
+    target = typeof next === "object" && next !== null ? (next as Record<string, TomlValue>) : (target[segment] = Object.create(null));
+  }
+  const last = path[path.length - 1]!;
+  if (!isDangerousKey(last)) {
+    target[last] = value;
+  }
+}
+
 function tomlValue(raw: string): TomlValue {
   const value = raw.trim();
   if (value.startsWith("{")) {
-    const table: { [key: string]: TomlValue } = {};
+    const table: { [key: string]: TomlValue } = Object.create(null);
     for (const part of splitTop(value.slice(1, value.lastIndexOf("}") >= 0 ? value.lastIndexOf("}") : undefined))) {
-      const pair = /^("[^"]+"|[A-Za-z0-9_.-]+)\s*=\s*(.*)$/.exec(part);
+      const pair = parseKeyValuePair(part);
       if (!pair) continue;
-      setPath(table, pair[1]!, tomlValue(pair[2]!));
+      setPath(table, pair.key, tomlValue(pair.value));
     }
     return table;
   }
-  return value.replace(/^(["'])(.*)\1$/, "$2");
+  if (value.startsWith("\"") && value.endsWith("\"") && value.length >= 2) {
+    return unquoteBasic(value);
+  }
+  if (value.startsWith("'") && value.endsWith("'") && value.length >= 2) {
+    return unquoteLiteral(value);
+  }
+  return value;
 }
+
+function toPlainObject<T extends Record<string, unknown>>(obj: T): T {
+  const plain = {} as T;
+  for (const key of Object.keys(obj)) {
+    const val = obj[key];
+    const converted = typeof val === "object" && val !== null && !Array.isArray(val)
+      ? toPlainObject(val as Record<string, unknown>)
+      : val;
+    Object.defineProperty(plain, key, {
+      value: converted,
+      writable: true,
+      enumerable: true,
+      configurable: true,
+    });
+  }
+  return plain;
+}
+
 /** The `[versions]` and `[libraries]` tables of a version catalog. */
 export function parseCatalog(source: string): { versions: Record<string, TomlValue>; libraries: Record<string, TomlValue> } {
-  const tables: Record<string, Record<string, TomlValue>> = { versions: {}, libraries: {} };
+  const tables: Record<string, Record<string, TomlValue>> = {
+    versions: Object.create(null),
+    libraries: Object.create(null),
+  };
   const lines = source.split("\n");
-  let section = ""; let sub = "";
+  let currentTable: Record<string, TomlValue> | undefined = undefined;
+
   for (let index = 0; index < lines.length; index += 1) {
     const line = stripTomlComment(lines[index]!).trim();
     if (!line) continue;
+
     const head = /^\[([^\]]+)\]$/.exec(line);
-    if (head) { const [name, ...rest] = head[1]!.split("."); section = name!.trim(); sub = rest.join(".").trim(); continue; }
-    const pair = /^("[^"]+"|[A-Za-z0-9_.-]+)\s*=\s*(.*)$/.exec(line);
-    if (!pair || !tables[section]) continue;
-    let value = pair[2]!;
-    while (braceDepth(value) > 0 && index + 1 < lines.length) value += ` ${stripTomlComment(lines[++index]!).trim()}`;
-    const key = pair[1]!.replace(/^"|"$/g, "");
-    if (sub) { const holder = tables[section]![sub]; const table = typeof holder === "object" ? holder : (tables[section]![sub] = {}); setPath(table, key, tomlValue(value)); } else tables[section]![key] = tomlValue(value);
+    if (head) {
+      const segments = splitKeyPath(head[1]!.trim());
+      if (segments.length === 0 || segments.some(isDangerousKey) || !Object.prototype.hasOwnProperty.call(tables, segments[0]!)) {
+        currentTable = undefined;
+        continue;
+      }
+      let target = tables[segments[0]!]!;
+      for (const seg of segments.slice(1)) {
+        const next = Object.prototype.hasOwnProperty.call(target, seg) ? target[seg] : undefined;
+        target = typeof next === "object" && next !== null ? (next as Record<string, TomlValue>) : (target[seg] = Object.create(null));
+      }
+      currentTable = target;
+      continue;
+    }
+
+    const pair = parseKeyValuePair(line);
+    if (!pair || !currentTable) continue;
+    let value = pair.value;
+    while (braceDepth(value) > 0 && index + 1 < lines.length) {
+      value += ` ${stripTomlComment(lines[++index]!).trim()}`;
+    }
+    setPath(currentTable, pair.key, tomlValue(value));
   }
-  return { versions: tables.versions!, libraries: tables.libraries! };
+
+  return {
+    versions: toPlainObject(tables.versions!),
+    libraries: toPlainObject(tables.libraries!),
+  };
 }
 
 /** One declared dependency from a catalog or a build script, or why it could not be read. */

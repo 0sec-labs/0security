@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { analyzeMaven, checkBomAgainstOsv, generateSbom, parseCatalog, parseGradleBuild, parseXml } from "./index.js";
 
 const fixtures = join(import.meta.dirname, "fixtures", "jvm");
@@ -90,6 +90,152 @@ describe("Gradle", () => {
     const catalog = parseCatalog('[versions]\nv = { require = "1.0", prefer = "1.1" }\n[libraries.lib]\nmodule = "g:a"\nversion.ref = "v"\n');
     expect(catalog.versions.v).toEqual({ require: "1.0", prefer: "1.1" });
     expect(catalog.libraries.lib).toEqual({ module: "g:a", version: { ref: "v" } });
+  });
+
+  const testPollutionKeys = [
+    "testPollutedVersions",
+    "testPollutedLibraries",
+    "testPollutedInlineQ",
+    "testPollutedInlineB",
+    "testPollutedKey",
+    "testPollutedBareDotted",
+    "testPollutedQuotedDotted",
+    "testPollutedSubtableKey",
+  ];
+  afterEach(() => {
+    for (const key of testPollutionKeys) {
+      delete (Object.prototype as any)[key];
+    }
+  });
+
+  it("safely handles special property keys (__proto__) without mutating Object.prototype", () => {
+    for (const key of testPollutionKeys) {
+      expect((Object.prototype as any)[key]).toBeUndefined();
+    }
+
+    const maliciousCatalog = `
+[versions.__proto__]
+testPollutedVersions = "evil_subtable"
+
+[libraries.__proto__]
+testPollutedLibraries = "evil_lib_subtable"
+
+[versions]
+__proto__ = "evil_version"
+__proto__.testPollutedBareDotted = "evil_bare_dotted"
+"__proto__".testPollutedQuotedDotted = "evil_quoted_dotted"
+safe_ver = "1.2.3"
+inline_evil = { "__proto__.testPollutedInline" = "safe_inline_prop", "__proto__".testPollutedInlineQ = "evil_inline_q", __proto__.testPollutedInlineB = "evil_inline_b", normal_field = "valid" }
+"__proto__.testPollutedKey" = "safe_dotted_key"
+
+[libraries.evil_lib]
+module = "com.example:evil"
+"__proto__".testPollutedSubtableKey = "evil_subtable_key"
+version.ref = "safe_ver"
+`;
+
+    const catalog = parseCatalog(maliciousCatalog);
+
+    for (const key of testPollutionKeys) {
+      expect((Object.prototype as any)[key]).toBeUndefined();
+      expect(({} as any)[key]).toBeUndefined();
+    }
+
+    expect(catalog.versions.safe_ver).toBe("1.2.3");
+    expect(catalog.versions["__proto__.testPollutedKey"]).toBe("safe_dotted_key");
+    expect((catalog.versions.inline_evil as any)["__proto__.testPollutedInline"]).toBe("safe_inline_prop");
+    expect((catalog.versions.inline_evil as any).normal_field).toBe("valid");
+    expect((catalog.versions.inline_evil as any).testPollutedInlineQ).toBeUndefined();
+    expect((catalog.versions.inline_evil as any).testPollutedInlineB).toBeUndefined();
+    expect((catalog.libraries.evil_lib as any).testPollutedSubtableKey).toBeUndefined();
+    expect(catalog.libraries.evil_lib).toEqual({ module: "com.example:evil", version: { ref: "safe_ver" } });
+  });
+
+  it("correctly parses quoted keys with dots, escaped characters, and genuinely dotted paths", () => {
+    const catalogSource = `
+[versions."my.version"]
+require = "1.2.3"
+prefer = "1.2.4"
+
+[versions]
+inline_ver = { "my.version" = "2.3.4", normal = "ok" }
+"__proto__.polluted" = "safe_value"
+"escaped \\" quote" = "val_with_escaped_quote"
+"escaped \\\\ backslash" = "val_with_escaped_backslash"
+'literal.version' = "3.4.5"
+version.ref = "v1"
+
+[libraries]
+"my.library" = "com.example:my-library:1.0.0"
+
+[libraries.my_lib]
+module = "com.example:my-lib"
+version.ref = "my.version"
+`;
+
+    const catalog = parseCatalog(catalogSource);
+
+    // "my.version" in a sub-table
+    expect(catalog.versions["my.version"]).toEqual({ require: "1.2.3", prefer: "1.2.4" });
+
+    // "my.version" in an inline table
+    expect((catalog.versions.inline_ver as any)["my.version"]).toBe("2.3.4");
+    expect((catalog.versions.inline_ver as any).normal).toBe("ok");
+
+    // "my.library" as a top-level key
+    expect(catalog.libraries["my.library"]).toBe("com.example:my-library:1.0.0");
+
+    // version.ref as a genuinely dotted key
+    expect(catalog.versions.version).toEqual({ ref: "v1" });
+    expect(catalog.libraries.my_lib).toEqual({
+      module: "com.example:my-lib",
+      version: { ref: "my.version" },
+    });
+
+    // Quoted literal keys containing dots and escaped characters
+    expect(catalog.versions["__proto__.polluted"]).toBe("safe_value");
+    expect(catalog.versions['escaped " quote']).toBe("val_with_escaped_quote");
+    expect(catalog.versions["escaped \\ backslash"]).toBe("val_with_escaped_backslash");
+    expect(catalog.versions["literal.version"]).toBe("3.4.5");
+  });
+
+  it("preserves ordinary Object.prototype inheritance and standard object methods on returned tables", () => {
+    const catalog = parseCatalog(`
+[versions]
+safe_ver = "1.0.0"
+v = { require = "1.0", prefer = "1.1" }
+
+[libraries.lib]
+module = "g:a"
+version.ref = "v"
+`);
+
+    // Returned versions and libraries have Object.prototype as their prototype
+    expect(Object.getPrototypeOf(catalog.versions)).toBe(Object.prototype);
+    expect(Object.getPrototypeOf(catalog.libraries)).toBe(Object.prototype);
+    expect(Object.getPrototypeOf(catalog.versions.v)).toBe(Object.prototype);
+    expect(Object.getPrototypeOf(catalog.libraries.lib)).toBe(Object.prototype);
+
+    // .hasOwnProperty() works
+    expect(catalog.versions.hasOwnProperty("safe_ver")).toBe(true);
+    expect(catalog.versions.hasOwnProperty("v")).toBe(true);
+    expect(catalog.libraries.hasOwnProperty("lib")).toBe(true);
+    expect((catalog.versions.v as any).hasOwnProperty("require")).toBe(true);
+    expect((catalog.libraries.lib as any).hasOwnProperty("module")).toBe(true);
+
+    // toString() and valueOf() remain available
+    expect(catalog.versions.toString()).toBe("[object Object]");
+    expect(catalog.libraries.toString()).toBe("[object Object]");
+    expect(typeof catalog.versions.valueOf()).toBe("object");
+    expect(typeof catalog.libraries.valueOf()).toBe("object");
+
+    // Existing deep and strict equality expectations remain valid
+    expect(catalog.versions.v).toEqual({ require: "1.0", prefer: "1.1" });
+    expect(catalog.libraries.lib).toEqual({ module: "g:a", version: { ref: "v" } });
+
+    // Safe own properties are preserved and enumerable
+    expect(Object.keys(catalog.versions)).toEqual(["safe_ver", "v"]);
+    expect(Object.keys(catalog.libraries)).toEqual(["lib"]);
   });
 });
 
