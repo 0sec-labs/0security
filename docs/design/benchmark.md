@@ -6,6 +6,7 @@ A small benchmark to measure whether scans and skills help: tiny apps with known
 
 - `scripts/bench/fixtures/<name>/` is one app (under 150 lines) plus `answer.json`. The answer key lists `items` (planted bugs: `id`, `path`, `startLine`, `endLine`, `category`, `description`) and `decoys` (code that looks risky but is safe). `skill` names the skill the fixture is meant for, or `null`. `clean: true` marks the app with no bugs at all.
 - Fixtures: `node-express` (SQL injection, command injection, path traversal, hardcoded secret), `python-flask` (SSRF, pickle, `yaml.load`, MD5), `go-http` (SQL injection, `template.HTML` XSS, hardcoded key), `llm-app` (prompt injection into a shell tool, secrets in the prompt, unescaped model output; skill `llm-app-review`), `crypto-app` (RSA, SHA-1, ECB, weak key derivation; skill `crypto-migration`) `iac-app` (a Terraform module, a Kubernetes manifest, a Dockerfile and a GitHub Actions workflow with nine planted issues, two of them across resources, and seven decoys; skill `iac-review`) and `clean-app` (the same shapes as `node-express`, written safely).
+- Fixtures: `node-express` (SQL injection, command injection, path traversal, hardcoded secret), `python-flask` (SSRF, pickle, `yaml.load`, MD5), `go-http` (SQL injection, `template.HTML` XSS, hardcoded key), `llm-app` (prompt injection into a shell tool, secrets in the prompt, unescaped model output; skill `llm-app-review`), `crypto-app` (RSA, SHA-1, ECB, weak key derivation; skill `crypto-migration`) `clean-app` (the same shapes as `node-express`, written safely) and `clean-python` (a Flask app with different safe patterns: allow-listed SSRF, `safe_load`, scrypt, a SHA-1 cache validator).
 - `run.mjs` copies each fixture without `answer.json` into a temporary folder, so the model cannot read the key. It runs `node packages/cli/dist/index.js scan <copy> --budget <n> --format json -o <out>` with a fresh `HOME` (and XDG directories) per run, then parses the findings.
 - Configurations: `generic` (`--prepass off`), `skill` (`--skill <id>`, only for fixtures that name one), `foxguard` (`--prepass auto --scanner foxguard`, needs foxguard installed). For the infrastructure fixture only: `checkov-prepass` (`--prepass auto --scanner checkov`) and `checkov`, which runs Checkov alone, with no model and no cost, and scores its SARIF with the same matcher. The default is `generic,skill`.
 - Matching (`match.mjs`, pure, unit tested): a finding finds a planted item when the path agrees (suffix match), its line range is within 5 lines of the item's, and it belongs to the item's category family (from the finding's category, then title, then description). Matching is one-to-one, so a single finding never credits two items. A finding on a decoy (within 2 lines), or any finding in the clean app, is a false positive. A finding that is neither is reported as "unmatched" (a real extra issue or noise; read them) and is not counted as a false positive.
@@ -20,6 +21,17 @@ node scripts/bench/run.mjs --run --repeat 2 --budget 0.2   # really scans; print
 ```
 
 `--run` is required to spend money; each scan stops at `--budget`, and the estimate printed is runs times budget. Other options: `--configs generic,skill,foxguard`, `--fixtures a,b`, `--model <id>`, `--out <dir>`, `--timeout <s>`. The dry run is part of `node scripts/run-checks.mjs static`.
+
+## Latest run
+
+The wording change to the scan skill that this run measured (require an exploit path, name weak hashes) is not in the product. With the foxguard pre-pass, which is the default when foxguard is installed, recall fell on two fixtures, and the false-positive gains were small. It stays on the `agent/scan-quality` branch until a larger run settles it. The numbers below say "after" for that edit.
+
+2026-11-22, default model (gpt-6-luna), configs generic and foxguard, 3 repeats, budget $0.5 per scan, cost about $0.2 per full run. Full table: `scripts/bench/results/example.md`.
+
+- Generic scan, mean recall over the five bug fixtures: 88% before and 90% after the scan.yaml edit; foxguard pre-pass: 82% before and 79% after. The foxguard pre-pass did not beat the generic scan on recall (crypto-app and llm-app lower, others equal) and cost slightly more.
+- False positives on the clean apps (generic): clean-app 1.0 to 0.7, clean-python 1.3 to 0.3 per scan. All of them were one class, missing authentication or ownership on read routes, which is a defensible note on apps that really have no auth.
+- The edit also names MD5 and SHA-1 explicitly; python-flask generic recall went 83% to 100% (the weak-hash item).
+- With 3 repeats and these fixtures, only differences larger than the min-max range mean anything. The edit was written after reading clean-app findings, so clean-app is partly tuned on; clean-python was added to give a second sample, but it too shares the unauthenticated-read shape.
 
 ## What it does not prove
 

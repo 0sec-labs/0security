@@ -1,0 +1,15 @@
+{
+  "fixture": "clean-python",
+  "skill": null,
+  "clean": true,
+  "items": [],
+  "decoys": [
+    { "id": "cp-sql", "path": "app.py", "startLine": 31, "endLine": 31, "description": "parameterised query" },
+    { "id": "cp-sql2", "path": "app.py", "startLine": 37, "endLine": 37, "description": "parameterised query with an integer route converter" },
+    { "id": "cp-tpl", "path": "app.py", "startLine": 40, "endLine": 40, "description": "constant template, values passed as autoescaped variables" },
+    { "id": "cp-ssrf", "path": "app.py", "startLine": 45, "endLine": 48, "description": "outbound host checked against an allow-list, redirects off" },
+    { "id": "cp-yaml", "path": "app.py", "startLine": 55, "endLine": 55, "description": "yaml.safe_load" },
+    { "id": "cp-scrypt", "path": "app.py", "startLine": 62, "endLine": 63, "description": "password hashed with scrypt and a random salt" },
+    { "id": "cp-sha1", "path": "app.py", "startLine": 70, "endLine": 70, "description": "SHA-1 of a public file listing as a cache validator, not a security use" }
+  ]
+}
