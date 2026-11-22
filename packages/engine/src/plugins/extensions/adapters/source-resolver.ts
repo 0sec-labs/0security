@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import type { SourceRecord } from "../core/prompt.js";
 import { getBuiltin } from "../core/builtins.js";
 import { err, ok, type Result } from "../core/result.js";
@@ -45,6 +45,6 @@ export class DefaultSourceResolver implements SourceResolver {
 
   fromRecord(record: SourceRecord, pin?: string): Result<ExtensionSource> {
     if (pin !== undefined && !FULL_SHA.test(pin)) return err("bad_source", "Update to a full 40-character commit SHA.");
-    return ok(record.type === "git" ? new GitSource(record.url, pin ?? null, record.url.startsWith("/"), record.subpath) : new LocalSource(record.path));
+    return ok(record.type === "git" ? new GitSource(record.url, pin ?? null, isAbsolute(record.url), record.subpath) : new LocalSource(record.path));
   }
 }

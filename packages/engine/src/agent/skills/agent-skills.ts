@@ -27,7 +27,10 @@ export interface AgentSkillDiscoveryOptions {
 
 /** True when the options carry no allow-list or the allow-list names this skill. */
 export function isAgentSkillAllowed(options: Pick<AgentSkillDiscoveryOptions, "allowedSkillIds"> | undefined, id: string): boolean {
-  return !options?.allowedSkillIds || options.allowedSkillIds.includes(id);
+  if (!options?.allowedSkillIds) return true;
+  if (options.allowedSkillIds.includes(id)) return true;
+  const shortId = id.includes("/") ? id.split("/").pop()! : id;
+  return options.allowedSkillIds.some((allowed) => allowed === shortId || (allowed.includes("/") && allowed.split("/").pop() === id));
 }
 
 export interface AgentSkillMetadata {

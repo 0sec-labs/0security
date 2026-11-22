@@ -1519,7 +1519,7 @@ export class ToolExecutor {
         projectRoot: this.ctx.workspaceRoot ?? this.ctx.scopePath,
         ...(typeof this.ctx.skillDiscoveryOptions === "function" ? this.ctx.skillDiscoveryOptions() : this.ctx.skillDiscoveryOptions),
       });
-      const metadata = discovered.skills.find((candidate) => candidate.id === skillId);
+      const metadata = discovered.skills.find((candidate) => candidate.id === skillId || candidate.name === skillId);
       if (metadata) {
         skill = loadAgentSkill(metadata);
         isFolderSkill = true;
@@ -1556,6 +1556,7 @@ export class ToolExecutor {
       this.ctx.loadedSkills = new Set();
     }
     this.ctx.loadedSkills.add(skillId);
+    this.ctx.loadedSkills.add(skill.id);
 
     // Bus event: skill_loaded — tracks JIT skill usage for A/B testing (#458).
     eventBus.emit("skill_loaded", {

@@ -100,6 +100,26 @@ describe("Skill Tools (#457)", () => {
       expect(output.message).toBe("Skill already loaded");
     });
 
+    it("loads an agent skill by its short name and refuses double-load under both names", async () => {
+      const root = mkdtempSync(join(tmpdir(), "zero-skill-short-"));
+      try {
+        mkdirSync(join(root, "evidence-review"));
+        writeFileSync(join(root, "evidence-review", "SKILL.md"), "---\nname: evidence-review\ndescription: Review collected evidence.\n---\nConfirm the evidence supports each finding.");
+        const executor = new ToolExecutor(makeCtx({ role: "audit", skillDiscoveryOptions: { homeDir: null, mounts: [{ path: root, id: "shared" }] } }));
+        const loaded = await executor.execute({ name: "load_skill", arguments: { skill_id: "evidence-review" } });
+        expect(loaded.success).toBe(true);
+        expect((loaded.output as { content: string }).content).toContain("Confirm the evidence");
+        expect((loaded.output as { name: string }).name).toBe("evidence-review");
+
+        // Refuse double load using the namespaced ID
+        const second = await executor.execute({ name: "load_skill", arguments: { skill_id: "mount/shared/evidence-review" } });
+        expect(second.success).toBe(true);
+        expect((second.output as { kind: string }).kind).toBe("already_loaded");
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
     it("tracks loaded skills across consecutive calls", async () => {
       const ctx = makeCtx({ loadedSkills: new Set() });
       const executor = new ToolExecutor(ctx);

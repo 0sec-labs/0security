@@ -173,7 +173,7 @@ export async function resolveScanTarget(raw: string, deps: Pick<ScanDeps, "clone
 
 function validate(target: string | undefined, options: ScanOptions): void {
   if (!target?.trim()) throw new UsageError("Supply a folder or a git URL to scan.");
-  if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(options.skill)) throw new UsageError("--skill must be a skill id such as scan.");
+  if (!/^[a-z0-9][a-z0-9._-]*(?:\/[a-z0-9][a-z0-9._-]*)*$/.test(options.skill) || options.skill.length > 128) throw new UsageError("--skill must be a skill id such as scan.");
   if (!(FORMATS as readonly string[]).includes(options.format)) throw new UsageError(`--format must be one of: ${FORMATS.join(", ")}.`);
   if (options.format === "pdf" && !options.output) throw new UsageError("PDF is binary; supply -o <file>.");
   if (options.prepass !== undefined && options.prepass !== "auto" && options.prepass !== "off") throw new UsageError("--prepass must be auto or off.");
