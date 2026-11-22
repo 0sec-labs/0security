@@ -636,6 +636,8 @@ export interface Finding {
   status: FindingStatus;
   evidence: Evidence;
   fingerprint?: string;
+  /** `custom` when a rule file the user passed with `0 scan --rules` flagged this place. */
+  ruleSource?: "custom";
   triageStatus?: FindingTriageStatus;
   triageNote?: string;
   /**

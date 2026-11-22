@@ -29,6 +29,8 @@ export interface ImportedFinding {
   /** Stable across runs of the same scanner on the same code. */
   fingerprint: string;
   cwe: string[];
+  /** Set when the rule came from a file the user supplied (`0 scan --rules`), not from the scanner's own rules. */
+  ruleSource?: "custom";
 }
 
 export interface SarifImport {

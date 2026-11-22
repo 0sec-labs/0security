@@ -7,7 +7,7 @@ export interface ScannerSpec {
   label: string;
   /** Executable name looked up on PATH (and, for FoxGuard, next to `0`). */
   command: string;
-  /** Arguments; `{folder}` is replaced by the folder. Must write SARIF to standard output. */
+  /** Arguments; `{folder}` is replaced by the folder, and `--config {rules}` by one `--config <path>` per rule path. Must write SARIF to standard output. */
   args: string[];
   /** Environment variable that names the binary explicitly. */
   pathEnv?: string;
@@ -34,6 +34,15 @@ export function parseScannerList(values: readonly string[] | undefined): string[
   return [...new Set(ids)];
 }
 
-export function scannerArguments(spec: ScannerSpec, folder: string, rules = DEFAULT_RULES): string[] {
-  return spec.args.map(arg => arg === "{folder}" ? folder : arg === "{rules}" ? rules : arg);
+/** True when the scanner takes rule files (`--rules`). FoxGuard has its own rule format and is not given them. */
+export function scannerTakesRules(spec: ScannerSpec): boolean { return spec.args.includes("{rules}"); }
+
+/** The arguments for one scanner. `rules` are the user's rule paths; with none, the default pack is used. The scanner is run without a shell. */
+export function scannerArguments(spec: ScannerSpec, folder: string, rules: readonly string[] | string = DEFAULT_RULES): string[] {
+  const list = typeof rules === "string" ? [rules] : rules.length ? rules : [DEFAULT_RULES];
+  return spec.args.flatMap((arg, index) => {
+    if (arg === "{rules}") return [];
+    if (spec.args[index + 1] === "{rules}") return list.flatMap(rule => [arg, rule]);
+    return [arg === "{folder}" ? folder : arg];
+  });
 }

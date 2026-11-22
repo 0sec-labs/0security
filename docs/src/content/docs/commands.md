@@ -169,6 +169,27 @@ If FoxGuard is installed, the scan runs it first. It takes seconds and costs not
 
 FoxGuard ships next to `0`; set `ZERO_FOXGUARD_PATH` to use another copy. Pass `--prepass off` to skip it. `--scanner` adds or replaces scanners (`foxguard`, `semgrep`, `opengrep`); repeat the flag for several. A scanner that is not installed is skipped. A Semgrep rule pack such as `p/default` is downloaded when it runs.
 
+`--rules <file-or-folder>` gives Semgrep or OpenGrep your own rules for the pre-pass. Repeat it for several. The scanner runs only those rules, not its default pack, so add `--scanner semgrep` or `--scanner opengrep`. FoxGuard has its own rule format and does not read them, so `--rules` alone is a usage error.
+
+A rule file is standard Semgrep YAML:
+
+```yaml
+rules:
+  - id: no-debug-backdoor
+    languages: [javascript]
+    severity: ERROR
+    message: debugBackdoor skips the login check.
+    pattern: debugBackdoor(...)
+```
+
+```bash
+0 scan ~/code/app --scanner semgrep --rules ~/rules/company.yml
+```
+
+A hit from your rules is a lead like any other. The scan checks it against the code and records it only when it is real. A finding at the rule's lines gets `ruleSource: "custom"` in JSON and in the SARIF properties, and its description names the rule id. Semgrep prefixes the id with the rule file's folder.
+
+0 never looks for rules in the scanned folder. A `.semgrep` folder there is ignored unless you name it with `--rules`. See [Add your own rules](/ci/#add-your-own-rules) for CI.
+
 `--context <file>` gives the scan a file as lower-priority background, usually the repository's threat model (see [Threat model and policy checks](/threat-model-and-policy/)). The scan checks the rules it states.
 
 0 never reads that file from the scanned folder on its own, because a pull request could edit it to blind the scan. In CI, pass a copy from the base branch. `--repo-context` reads `.0/threat-model.md` from the folder anyway and prints a warning.
@@ -189,6 +210,7 @@ FoxGuard ships next to `0`; set `ZERO_FOXGUARD_PATH` to use another copy. Pass `
 | `--diff <ref>` | — | Review only the files that differ from this git ref (for example origin/main), and what they connect to; an empty diff scans nothing |
 | `--prepass <mode>` | `auto` | auto runs the pattern scanners first when they are installed and gives their hits to the scan as leads; off skips them |
 | `--scanner <id>` | — | Pattern scanner for the pre-pass (foxguard, semgrep, opengrep); repeat to use several (default: foxguard) |
+| `--rules <file-or-folder>` | — | Semgrep or OpenGrep rules for the pre-pass (a file or a folder); repeat for several. Replaces the default rules and needs --scanner semgrep or opengrep. Rules are never read from the scanned folder unless you name them |
 | `--context <file>` | — | Give the scan this file (a threat model, notes on who may do what) as lower-priority background; repeat for several. It can steer what the scan weighs but cannot change how it works |
 | `--policy <file-or-folder>` | — | Check the code against these Markdown policies (a file or a folder of .md files) and report pass or fail for each; repeat for several. Runs the policy-check skill |
 | `--org-policy <folder>` | — | An organisation's policy folder: evaluated first, and wins when a --policy says otherwise or uses the same id; repeat for several |

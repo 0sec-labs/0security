@@ -1223,6 +1223,10 @@ Options:
                              their hits to the scan as leads; off skips them (default: "auto")
   --scanner <id>             Pattern scanner for the pre-pass (foxguard, semgrep, opengrep); repeat
                              to use several (default: foxguard)
+  --rules <file-or-folder>   Semgrep or OpenGrep rules for the pre-pass (a file or a folder); repeat
+                             for several. Replaces the default rules and needs --scanner semgrep or
+                             opengrep. Rules are never read from the scanned folder unless you name
+                             them
   --context <file>           Give the scan this file (a threat model, notes on who may do what) as
                              lower-priority background; repeat for several. It can steer what the
                              scan weighs but cannot change how it works

@@ -13,7 +13,8 @@ import { promisify } from "node:util";
 import type { Command } from "commander";
 import { exportReport, isReportExportFormat } from "@0/engine";
 import { consoleTransportOptions, openConsole, type ConsoleClient, type ConsoleTransportOptions } from "../console-client.js";
-import { homeStateDir, parseSarif, parseScannerList, scanPrompt, scannerArguments, scannerById, SCANNERS, type PrePassLeads, type ScanReport } from "@0/engine/shared";
+import { homeStateDir, parseSarif, parseScannerList, scanPrompt, scannerArguments, scannerById, scannerTakesRules, SCANNERS, type PrePassLeads, type ScanReport } from "@0/engine/shared";
+import { checkRulesScanners, resolveRulePaths } from "../scan-rules.js";
 import { mergePasses, scanExitCode, scanJson, toScanReport, type ScanOutcome } from "../scan-report.js";
 import { loadSteering, type Steering } from "../scan-steering.js";
 import { finishWithError, UsageError } from "./output.js";
@@ -57,8 +58,8 @@ export interface ScanDeps {
   startConsole(dbPath?: string): Promise<(() => void) & { failure?: () => string | undefined }>;
   /** What `git status` lists in the folder, or undefined when it is not a git work tree. A scan must leave it as it found it. */
   changedFiles(folder: string): Promise<Set<string> | undefined>;
-  /** Run the chosen pattern scanners on the folder for leads, or undefined when none is installed or all fail. Never throws. */
-  prePass(folder: string, scanners: string[]): Promise<PrePassLeads | undefined>;
+  /** Run the chosen pattern scanners on the folder for leads, or undefined when none is installed or all fail. With `rules` (absolute paths, passed to scanners that take them) it throws when such a scanner is missing or cannot run them. */
+  prePass(folder: string, scanners: string[], rules?: string[]): Promise<PrePassLeads | undefined>;
   /** The files that differ from a git ref (added, copied, modified, renamed), relative to the folder. Throws when the ref is not valid there. */
   diffFiles(folder: string, ref: string): Promise<string[]>;
   /** Make a folder out of a git URL. Returns the folder and how to remove it. */
@@ -96,19 +97,24 @@ export const defaultScanDeps: ScanDeps = {
     const stop = () => { child.kill("SIGTERM"); try { closeSync(log); } catch { /* already closed */ } };
     return Object.assign(stop, { failure: () => failure });
   },
-  async prePass(folder, scanners) {
+  async prePass(folder, scanners, rules = []) {
     const lists = await Promise.all(scanners.map(async id => {
       const spec = scannerById(id);
       if (!spec) return undefined;
       const binary = [spec.pathEnv ? process.env[spec.pathEnv] : undefined, join(homeStateDir(), "bin", spec.command), spec.command].filter((value): value is string => !!value).find(candidate => candidate === spec.command || existsSync(candidate));
-      if (!binary) return undefined;
+      const useRules = rules.length > 0 && scannerTakesRules(spec);
+      if (!binary) { if (useRules) throw new Error(`--rules needs ${spec.id}, which is not installed.`); return undefined; }
       try {
         let stdout: string;
-        try { stdout = (await exec(binary, scannerArguments(spec, folder), { timeout: 120_000, maxBuffer: 128 * 1024 * 1024 })).stdout; }
+        try { stdout = (await exec(binary, scannerArguments(spec, folder, useRules ? rules : undefined), { timeout: 120_000, maxBuffer: 128 * 1024 * 1024 })).stdout; }
         // A scanner that exits non-zero because it found something still wrote its report.
-        catch (error) { stdout = (error as { stdout?: string }).stdout ?? ""; if (!stdout.trim().startsWith("{")) return undefined; }
-        return { tool: spec.id, leads: parseSarif(stdout, { tool: spec.id, roots: [folder] }).findings };
-      } catch { return undefined; }
+        catch (error) {
+          stdout = (error as { stdout?: string }).stdout ?? "";
+          if (!stdout.trim().startsWith("{")) { if (useRules) throw new Error(`${spec.id} could not run your rules: ${String((error as { stderr?: string }).stderr || (error as Error).message).trim().split("\n").slice(-4).join(" | ").slice(0, 500)}`); return undefined; }
+        }
+        const leads = parseSarif(stdout, { tool: spec.id, roots: [folder] }).findings;
+        return { tool: spec.id, leads: useRules ? leads.map(lead => ({ ...lead, ruleSource: "custom" as const })) : leads };
+      } catch (error) { if (useRules) throw error; return undefined; }
     }));
     const ran = lists.filter((entry): entry is NonNullable<typeof entry> => entry !== undefined);
     if (!ran.length) return undefined;
@@ -128,7 +134,7 @@ export const defaultScanDeps: ScanDeps = {
 };
 
 interface ScanOptions extends ConsoleTransportOptions {
-  budget: string; diff?: string; prepass?: string; scanner?: string[]; format: string; output?: string; timeout: string; failOn?: string; model?: string; skill: string; passes: string;
+  budget: string; diff?: string; prepass?: string; scanner?: string[]; rules?: string[]; format: string; output?: string; timeout: string; failOn?: string; model?: string; skill: string; passes: string;
   context?: string[]; policy?: string[]; orgPolicy?: string[]; repoContext?: boolean;
 }
 
@@ -180,6 +186,7 @@ function validate(target: string | undefined, options: ScanOptions): void {
   if (options.format === "pdf" && !options.output) throw new UsageError("PDF is binary; supply -o <file>.");
   if (options.prepass !== undefined && options.prepass !== "auto" && options.prepass !== "off") throw new UsageError("--prepass must be auto or off.");
   if (options.diff !== undefined && (!/^[A-Za-z0-9][A-Za-z0-9._\/~^@{}:-]{0,199}$/.test(options.diff) || options.diff.includes("..."))) throw new UsageError("--diff must be a git ref such as origin/main or HEAD~1.");
+  if (options.rules?.length) { try { resolveRulePaths(options.rules); checkRulesScanners(options.scanner, options.prepass); } catch (error) { throw new UsageError(error instanceof Error ? error.message : String(error)); } }
   try { parseScannerList(options.scanner); } catch (error) { throw new UsageError(error instanceof Error ? error.message : String(error)); }
   if ((options.policy?.length || options.orgPolicy?.length) && options.skill !== "scan" && options.skill !== POLICY_SKILL) throw new UsageError(`--policy and --org-policy run the ${POLICY_SKILL} skill; drop --skill ${options.skill}.`);
   const budget = Number(options.budget);
@@ -331,7 +338,9 @@ export async function runScan(target: string | undefined, options: ScanOptions, 
     ({ client, stop: stopConsole } = await connect(options, deps));
     // --budget is the total: each pass gets an equal share, so the cost stays predictable however many passes run.
     const scanners = parseScannerList(options.scanner);
-    let prePass = options.prepass === "off" ? undefined : await deps.prePass(resolved.folder, scanners);
+    const rules = resolveRulePaths(options.rules);
+    let prePass = options.prepass === "off" ? undefined : await deps.prePass(resolved.folder, scanners, ...(rules.length ? [rules] : []));
+    const customLeads = prePass?.leads.filter(lead => lead.ruleSource === "custom");
     if (prePass && scope) {
       const inScope = new Set(scope);
       const leads = prePass.leads.filter(lead => lead.path !== undefined && inScope.has(lead.path));
@@ -377,6 +386,7 @@ export async function runScan(target: string | undefined, options: ScanOptions, 
       target: resolved.reportTarget, roots: resolved.roots, threadId: results[0]!.threadId, startedAt, completedAt: deps.now().toISOString(), budgetUsd: budget,
       ...(costKnown ? { costUsd: cost } : {}), budgetExhausted, ...(timedOut ? { timedOut } : {}), failed,
       ...(changedError ? { error: changedError } : failed && firstError ? { error: firstError } : {}), ...(lead.done.reply ? { summary: lead.done.reply } : {}),
+      ...(customLeads?.length ? { customLeads } : {}),
       ...(total > 1 ? { passes: { requested: total, completed: results.length, failed: failedPasses }, threadIds: results.map(result => result.threadId) } : {}),
     };
 
@@ -405,6 +415,7 @@ export function registerScanCommand(program: Command, deps: ScanDeps = defaultSc
     .option("--diff <ref>", "Review only the files that differ from this git ref (for example origin/main), and what they connect to; an empty diff scans nothing")
     .option("--prepass <mode>", "auto runs the pattern scanners first when they are installed and gives their hits to the scan as leads; off skips them", "auto")
     .option("--scanner <id>", `Pattern scanner for the pre-pass (${SCANNERS.map(scanner => scanner.id).join(", ")}); repeat to use several (default: foxguard)`, (value: string, previous: string[] = []) => [...previous, value])
+    .option("--rules <file-or-folder>", "Semgrep or OpenGrep rules for the pre-pass (a file or a folder); repeat for several. Replaces the default rules and needs --scanner semgrep or opengrep. Rules are never read from the scanned folder unless you name them", (value: string, previous: string[] = []) => [...previous, value])
     .option("--context <file>", "Give the scan this file (a threat model, notes on who may do what) as lower-priority background; repeat for several. It can steer what the scan weighs but cannot change how it works", (value: string, previous: string[] = []) => [...previous, value])
     .option("--policy <file-or-folder>", "Check the code against these Markdown policies (a file or a folder of .md files) and report pass or fail for each; repeat for several. Runs the policy-check skill", (value: string, previous: string[] = []) => [...previous, value])
     .option("--org-policy <folder>", "An organisation's policy folder: evaluated first, and wins when a --policy says otherwise or uses the same id; repeat for several", (value: string, previous: string[] = []) => [...previous, value])

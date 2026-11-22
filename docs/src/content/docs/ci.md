@@ -53,6 +53,23 @@ Set the key of the provider for your model (see [Models](/models/)). The default
 
 Outputs are `sarif` (the file path) and `exit-code`. The exit code is 0 when the scan finishes, 1 when a finding is at or above `fail-on` or the scan fails, 2 for a usage error and 3 when the scan stops at the budget.
 
+## Add your own rules
+
+Pass Semgrep rules you already write with `--rules`. The rules must not come from the pull request, because a change could delete the rule that catches its own bug. Check out the base branch or a separate repository and point to it:
+
+```yaml
+      - uses: actions/checkout@v4
+        with:
+          repository: your-org/security-rules
+          path: rules
+```
+
+```bash
+0 scan . --diff origin/main --scanner semgrep --rules rules/semgrep
+```
+
+See [scan](/commands/#scan) for the rule format and how findings are marked.
+
 ## Limits
 
 - Only pull requests from the same repository work. A fork's pull request has no access to your secrets, so it cannot run a model. Do not use `pull_request_target` to get around this: it runs a model on untrusted code with your key.

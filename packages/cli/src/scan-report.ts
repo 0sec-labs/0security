@@ -7,6 +7,7 @@
  */
 import { createHash } from "node:crypto";
 import type { Finding, ScanReport } from "@0/engine/shared";
+import { tagCustomFindings } from "./scan-rules.js";
 
 export const SCAN_REPORT_SCHEMA_VERSION = 1;
 
@@ -37,6 +38,8 @@ export interface ScanOutcome {
   passes?: { requested: number; completed: number; failed: number };
   /** Every pass's thread, first to last. */
   threadIds?: readonly string[];
+  /** Pre-pass hits from rules the user supplied with --rules; findings at the same rule or place are tagged. */
+  customLeads?: readonly { ruleId: string; path?: string; startLine?: number; endLine?: number }[];
 }
 
 /** A path inside the scanned folder, relative to it with forward slashes; undefined when it points outside. */
@@ -117,9 +120,9 @@ const byRank = (findings: readonly Finding[]): Finding[] => [...findings].sort((
 /** The shared report type the exporter understands (md, sarif, html, pdf), with this scan's facts on top of the stored rows. */
 export function toScanReport(outcome: ScanOutcome, stored: ScanReport): ScanReport {
   const total = outcome.passes?.requested ?? 1;
-  const findings = byRank(stored.findings.map(finding => {
-    const shaped = reportFinding(finding, outcome.roots ?? []);
-    const found = (finding as MergedFinding).foundInPasses;
+  const tagged = tagCustomFindings(stored.findings.map(finding => reportFinding(finding, outcome.roots ?? [])), outcome.customLeads);
+  const findings = byRank(tagged.map(shaped => {
+    const found = (shaped as MergedFinding).foundInPasses;
     // The exporters have no field for it, so say it where every format shows it.
     return total > 1 && found ? { ...shaped, description: `${shaped.description}\n\nFound in ${found} of ${total} scan passes.` } : shaped;
   }));
@@ -143,7 +146,7 @@ export function toScanReport(outcome: ScanOutcome, stored: ScanReport): ScanRepo
 
 /** The documented JSON contract of `0 scan --format json`. Field names are stable within a schemaVersion. */
 export function scanJson(outcome: ScanOutcome, stored: readonly Finding[]): Record<string, unknown> {
-  const findings = byRank(stored.map(finding => reportFinding(finding, outcome.roots ?? [])));
+  const findings = byRank(tagCustomFindings(stored.map(finding => reportFinding(finding, outcome.roots ?? [])), outcome.customLeads));
   return {
     schemaVersion: SCAN_REPORT_SCHEMA_VERSION,
     target: outcome.target,
@@ -164,6 +167,7 @@ export function scanJson(outcome: ScanOutcome, stored: readonly Finding[]): Reco
       // (it does not depend on how the model worded the finding). Absent when the finding cites no location.
       ...(finding.fingerprint?.startsWith("loc:") ? { fingerprint: finding.fingerprint.slice(4) } : {}),
       title: finding.title,
+      ...(finding.ruleSource ? { ruleSource: finding.ruleSource } : {}),
       severity: finding.severity,
       category: finding.category,
       status: finding.status,

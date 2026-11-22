@@ -82,3 +82,14 @@ describe("formatSarif finding keys", () => {
     expect(text).toContain("One wording");
   });
 });
+
+describe("formatSarif custom rules", () => {
+  it("marks a finding that a user-supplied rule flagged, and only that one", () => {
+    const base = { title: "t", description: "d", severity: "high", category: "other", status: "confirmed", evidence: { request: "", response: "", analysis: "" }, timestamp: 1 } as const;
+    const report = { target: "t", scanDepth: "quick", startedAt: "", completedAt: "", durationMs: 0, warnings: [], summary: { totalAttacks: 0, totalFindings: 2, critical: 0, high: 2, medium: 0, low: 0, info: 0 },
+      findings: [{ ...base, id: "a", templateId: "acme.no-backdoor", ruleSource: "custom" }, { ...base, id: "b", templateId: "other" }] } as unknown as ScanReport;
+    const results = JSON.parse(formatSarif(report)).runs[0].results;
+    expect(results[0].properties.ruleSource).toBe("custom");
+    expect(results[1].properties.ruleSource).toBeUndefined();
+  });
+});

@@ -170,6 +170,7 @@ function findingToResult(finding: Finding, target: string): SarifResult {
     status: finding.status,
     evidence: finding.evidence,
   };
+  if (finding.ruleSource) result.properties["ruleSource"] = finding.ruleSource;
   if (finding.impactAssessment) result.properties["impactAssessment"] = finding.impactAssessment;
   if (finding.cvssScore !== undefined) result.properties["cvssScore"] = finding.cvssScore;
   if (finding.cvssVector) result.properties["cvssVector"] = finding.cvssVector;
