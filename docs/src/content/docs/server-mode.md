@@ -21,12 +21,12 @@ ghcr.io/0sec-labs/0security:<sha>
 ghcr.io/0sec-labs/0security:edge      # nightly build of the newest green main commit
 ghcr.io/0sec-labs/0security:v0.41.0   # releases only
 ghcr.io/0sec-labs/0security:0.41.0    # releases only
-ghcr.io/0sec-labs/0security:0.41      # releases only, follows the latest 0.37.x
+ghcr.io/0sec-labs/0security:0.41      # releases only, follows the latest 0.41.x
 ```
 
 **Sources:** [`Dockerfile`](https://github.com/0sec-labs/0security/blob/main/deploy/docker/Dockerfile),
 [`docker-publish.yml`](https://github.com/0sec-labs/0security/blob/main/.github/workflows/docker-publish.yml).
-Use a version tag, a digest or a short-SHA tag when you need repeatable runs. `latest` is the most recent release; use `edge` for the nightly main build.
+Use a version tag (`v0.41.0` and `0.41.0` are the same image), a digest or a short-SHA tag when you need repeatable runs. `latest` is the most recent release; use `edge` for the nightly main build.
 
 ## Image contents
 

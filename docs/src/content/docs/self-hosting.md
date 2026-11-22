@@ -7,6 +7,10 @@ Deploying 0 inside your organisation's cloud tenant ensures that code analysis, 
 
 This guide details running the official container image (`ghcr.io/0sec-labs/0security`) on **Amazon Web Services (AWS)** and **Microsoft Azure**, using standard cloud building blocks: persistent block storage, managed secret stores, reverse proxy TLS termination, automated backups, and zero-downtime upgrades.
 
+:::caution[Cloud steps are untested]
+The container, the compose files, the data-disk override and the backup and restore procedure below were checked against the repository (the override was rendered with `docker-compose config`). The AWS and Azure steps (instance and disk setup, IAM and Key Vault, ECS, S3 and Blob uploads, disk snapshot policies) have **not** been run against real cloud accounts. They are marked *untested* where they appear. Try them in a scratch account first and adjust names, device paths and policies to your environment.
+:::
+
 ## Architecture and constraints
 
 0 is designed as a sovereign, self-contained single-node application:
@@ -38,7 +42,7 @@ This guide details running the official container image (`ghcr.io/0sec-labs/0sec
 
 ### The single-node rule
 
-- The 0 web console in server mode uses an embedded SQLite database located at `/data/.0/0.db`.
+- The 0 web console in server mode uses an embedded SQLite database located at `/data/.0/0.db` inside the container. With the data-disk override below, that is `/data/.0/0.db` on the host's mounted disk too.
 - **Run strictly one replica.** SQLite requires single-process ownership. Never mount the persistent volume to multiple containers or run multi-replica clusters.
 - High availability is achieved through virtual machine automated recovery, storage volume snapshots, and scheduled database backups rather than multi-master clustering.
 
@@ -60,7 +64,7 @@ Add roughly 1 vCPU and 1 to 2 GB memory for each concurrent scan or fix thread.
 
 Running on EC2 with Docker Compose and an attached Amazon Elastic Block Store (EBS) volume is the most straightforward self-hosted configuration.
 
-#### 1. Provision storage and compute
+#### 1. Provision storage and compute (untested)
 
 1. **EC2 Instance:** Launch an instance with Ubuntu 24.04 LTS (e.g. `t3.xlarge` or `m7g.large` with ARM64 / x86_64).
 2. **EBS Data Volume:** Attach an Amazon EBS `gp3` volume (e.g. 50 GB) as `/dev/sdf` for application state.
@@ -74,7 +78,7 @@ Running on EC2 with Docker Compose and an attached Amazon Elastic Block Store (E
    sudo chmod 700 /data
    ```
 
-#### 2. IAM role and secrets management
+#### 2. IAM role and secrets management (untested)
 
 Never store long-lived cloud or model credentials in plain text git repositories. Use **AWS Systems Manager (SSM) Parameter Store** or **AWS Secrets Manager**.
 
@@ -124,6 +128,12 @@ curl -fsSL https://raw.githubusercontent.com/0sec-labs/0security/main/deploy/com
 curl -fsSL https://raw.githubusercontent.com/0sec-labs/0security/main/deploy/compose/Caddyfile -o Caddyfile
 ```
 
+Use the data-disk override so the database lives on the disk you mounted at `/data`, not in the Docker named volume `zero-data` on the root disk:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/0sec-labs/0security/main/deploy/compose/docker-compose.data-disk.yml -o docker-compose.data-disk.yml
+```
+
 Configure your domain and network parameters in `/opt/zero/.env`:
 
 ```bash
@@ -131,7 +141,11 @@ ZERO_DOMAIN=zero.internal.yourcompany.com
 ZERO_PUBLIC_URL=https://zero.internal.yourcompany.com
 ZERO_ALLOWED_HOSTS=zero.internal.yourcompany.com
 ZERO_IMAGE_TAG=v0.41.0
+COMPOSE_FILE=docker-compose.yml:docker-compose.data-disk.yml
+ZERO_DATA_DIR=/data
 ```
+
+`COMPOSE_FILE` makes every later `docker compose` command in this guide use both files. Releases are published as `v0.41.0`, `0.41.0` and `0.41` (see [Tags](/server-mode/#one-shot-prompts)); either full form works for `ZERO_IMAGE_TAG`.
 
 Start the container with automatic TLS via Caddy:
 
@@ -139,20 +153,23 @@ Start the container with automatic TLS via Caddy:
 docker compose --profile proxy up -d
 ```
 
-Verify service health:
+Verify service health, and that the database is on the data disk:
 
 ```bash
-curl -fsS http://127.0.0.1:48123/readyz
+curl -fsS http://127.0.0.1:48123/readyz     # {"status":"ready"}
+ls -l /data/.0/0.db                          # the database file is on the mounted disk
 ```
+
+`/readyz` returns `{"status":"ready"}` once the database answers (503 with another status word while starting or stopping). `/healthz` returns `{"status":"ok"}` and only says the process is up.
 
 ---
 
-### Method 2: AWS Elastic Container Service (ECS)
+### Method 2: AWS Elastic Container Service (ECS) (untested)
 
 For container-native environments without managing host operating systems:
 
 1. **ECS Cluster:** Create an ECS cluster using the EC2 launch type (allows EBS volume attachments).
-2. **Task Definition:** Define a single container task using `ghcr.io/0sec-labs/0security:v0.41.0`:
+2. **Task Definition:** Define a single container task using `ghcr.io/0sec-labs/0security:v0.41.0` (a `0.41.0` tag works too):
    - Set container mount: Host `/data` mounted to container `/data`.
    - Set `secrets` mapping directly from AWS Secrets Manager or SSM Parameter Store to environment variables (`ZERO_ACCESS_TOKEN`, `ANTHROPIC_API_KEY`, etc.).
    - Configure health check: `curl -fsS http://127.0.0.1:48123/healthz || exit 1`.
@@ -164,7 +181,7 @@ For container-native environments without managing host operating systems:
 
 ### Method 1: Azure Virtual Machine with Docker Compose
 
-#### 1. Compute and disk setup
+#### 1. Compute and disk setup (untested)
 
 1. **Virtual Machine:** Deploy an Azure VM running Ubuntu 24.04 LTS (e.g. `Standard_D2s_v5`).
 2. **Data Disk:** Attach a Premium SSD Managed Data Disk (e.g. 64 GB, LRS).
@@ -179,7 +196,7 @@ For container-native environments without managing host operating systems:
    sudo chmod 700 /data
    ```
 
-#### 2. Azure Key Vault integration
+#### 2. Azure Key Vault integration (untested)
 
 1. Enable a **System-Assigned Managed Identity** on the Azure VM.
 2. In Azure Key Vault, grant the VM's identity the **Key Vault Secrets User** role.
@@ -203,7 +220,7 @@ For container-native environments without managing host operating systems:
    chmod 600 /opt/zero/.env
    ```
 
-#### 3. Ingress and firewall
+#### 3. Ingress and firewall (untested)
 
 - In the Network Security Group (NSG), allow inbound traffic on TCP ports 80 and 443.
 - Run `docker compose --profile proxy up -d` to terminate TLS via Caddy.
@@ -213,31 +230,17 @@ For container-native environments without managing host operating systems:
 
 ## Scheduled Backups and Restore
 
-Because findings and audit logs reside in the SQLite database (`/data/.0/0.db`), regular backups are essential.
+Findings and audit logs live in the SQLite database `/data/.0/0.db`. This section assumes the data-disk override above, so the host's `/data` is the container's `/data`. If you run the plain compose file (named volume `zero-data`), use the volume-based steps in [Server mode: Back up](/server-mode/#back-up) instead.
 
 ### 1. Online safe database backup
 
-Never copy an active SQLite database file directly while queries are running. Use the Node.js SQLite backup API to take an atomic online backup without stopping the container:
+Never copy a live SQLite file with `cp`. Take the online backup described in [Server mode: Back up](/server-mode/#back-up) (the `node:sqlite` backup command, then `docker compose cp`). It leaves `./zero-backup.db`; date it for retention:
 
 ```bash
-docker compose exec zero node -e "
-const { DatabaseSync, backup } = require('node:sqlite');
-(async () => {
-  const db = new DatabaseSync('/data/.0/0.db', { readOnly: true });
-  await backup(db, '/data/backup.db');
-  db.close();
-})()"
+mv ./zero-backup.db ./zero-backup-$(date +%F).db
 ```
 
-Extract the backup and set permissions:
-
-```bash
-docker compose cp zero:/data/backup.db ./zero-backup-$(date +%F).db
-docker compose exec zero rm -f /data/backup.db
-chmod 600 zero-backup-*.db
-```
-
-### 2. Offsite upload to cloud object storage
+### 2. Offsite upload to cloud object storage (untested)
 
 Schedule a daily cron job to run the backup and push it to object storage:
 
@@ -257,38 +260,49 @@ Schedule a daily cron job to run the backup and push it to object storage:
     --auth-mode login
   ```
 
-### 3. Cloud disk snapshots
+### 3. Cloud disk snapshots (untested)
 
-Configure automated storage-layer snapshots for disaster recovery:
+A disk snapshot taken while 0 is running is crash-consistent only. Treat it as a second line behind the database backup above, or stop the service briefly (`docker compose stop zero`) before the snapshot.
+
 - **AWS:** Create an Amazon Data Lifecycle Manager (DLM) policy to take daily snapshots of the `/data` EBS volume with a 14-day retention rule.
 - **Azure:** Configure Azure Backup or a disk snapshot policy for the managed data disk.
 
-### 4. Tested step-by-step restore procedure
+### 4. Restore procedure
 
-To restore from a backup:
+This needs the `sqlite3` command on the host (`sudo apt-get install -y sqlite3`). Run it from `/opt/zero`. The file and database commands were run against a sample database; the compose steps and the data-disk override were not run on a cloud host.
 
-1. **Stop the running service:**
+1. **Stop the service** so nothing writes to the database:
    ```bash
    docker compose stop zero
    ```
 
-2. **Restore the database:**
+2. **Move the current database aside and remove its journal files.** A leftover `-wal` or `-shm` file from the old database would be applied to the restored one and corrupt it, so they must not stay in place:
+   ```bash
+   sudo mv /data/.0/0.db /data/.0/0.db.before-restore
+   sudo rm -f /data/.0/0.db-wal /data/.0/0.db-shm
+   ```
+   (If the `mv` fails because there is no database yet, continue.)
+
+3. **Restore the backup** and set the owner and mode:
    ```bash
    sudo cp ./zero-backup-2026-11-21.db /data/.0/0.db
    sudo chown 1000:1000 /data/.0/0.db
    sudo chmod 600 /data/.0/0.db
    ```
 
-3. **Restart the container:**
+4. **Check the restored file before starting.** The output must be exactly `ok`. If it is anything else, or an error such as `file is not a database`, do not start the service: repeat step 3 with another backup (your previous database is still at `0.db.before-restore`):
    ```bash
-   docker compose start zero
+   sudo sqlite3 /data/.0/0.db 'PRAGMA integrity_check'
    ```
 
-4. **Verify instance health:**
+5. **Start the service and confirm it is ready:**
    ```bash
-   curl -fsS http://127.0.0.1:48123/readyz
+   docker compose up -d zero
+   for i in $(seq 1 30); do curl -fsS http://127.0.0.1:48123/readyz && break; sleep 2; done
    ```
-   The endpoint returns `{"status":"ok"}`.
+   A good restore prints `{"status":"ready"}`. If the loop ends without it, read `docker compose logs --tail 50 zero`.
+
+6. **Delete `0.db.before-restore`** once you have confirmed the restored data in the app. It contains findings.
 
 ---
 
@@ -296,41 +310,17 @@ To restore from a backup:
 
 ### Upgrades
 
-1. Always take a fresh backup before upgrading:
+1. Take a fresh backup first, as in [Backups](#1-online-safe-database-backup). Keep that file until the upgrade is verified.
+2. Set the new tag in `/opt/zero/.env` (for example `ZERO_IMAGE_TAG=v0.42.0`), then follow [Server mode: Upgrade](/server-mode/#upgrade):
    ```bash
-   docker compose exec zero node -e "const {DatabaseSync,backup}=require('node:sqlite');(async()=>{const db=new DatabaseSync('/data/.0/0.db',{readOnly:true});await backup(db,'/data/backup.db');db.close()})()"
-   docker compose cp zero:/data/backup.db ./pre-upgrade-backup.db
-   ```
-2. Update the image tag in `/opt/zero/.env` (e.g. `ZERO_IMAGE_TAG=v0.42.0`).
-3. Recreate the container:
-   ```bash
-   docker compose pull zero
-   docker compose up -d zero
-   ```
-4. Database migrations run automatically during startup. Inspect the startup log:
-   ```bash
+   docker compose pull zero && docker compose up -d zero
    docker compose logs --tail 50 zero
    ```
+   Database migrations run on start.
 
 ### Rollbacks
 
-Because SQLite schema migrations are forward-only, rolling back to an older version requires restoring the pre-upgrade database state:
-
-1. Stop the container:
-   ```bash
-   docker compose stop zero
-   ```
-2. Revert the database file:
-   ```bash
-   sudo cp ./pre-upgrade-backup.db /data/.0/0.db
-   sudo chown 1000:1000 /data/.0/0.db
-   sudo chmod 600 /data/.0/0.db
-   ```
-3. Pin the previous image tag in `/opt/zero/.env` (e.g. `ZERO_IMAGE_TAG=v0.41.0`).
-4. Recreate the container with the older image:
-   ```bash
-   docker compose up -d zero
-   ```
+Schema migrations are forward-only, so going back needs the pre-upgrade database. Pin the previous tag in `/opt/zero/.env` (for example `ZERO_IMAGE_TAG=v0.41.0`), then run the [restore procedure](#4-restore-procedure) with the pre-upgrade backup. Step 5 uses `docker compose up -d`, which applies the pinned tag.
 
 ---
 

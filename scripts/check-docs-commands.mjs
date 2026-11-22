@@ -281,6 +281,7 @@ export const UNREAD_ENV_ALLOWLIST = new Map([
   ["ZERO_REMOTE_ENGINE_TOKEN", "operator-chosen name passed to --engine-token-env"],
   ["ZERO_TEAM_OIDC_SECRET", "operator-chosen name referenced by clientSecretEnv"],
   ["ZERO_FINDINGS_API_TOKEN", "operator shell variable in a curl example"],
+  ["ZERO_DATA_DIR", "read only by deploy/compose/docker-compose.data-disk.yml, not by the program"],
   ["ZERO_TEST_BROWSER_ORACLES", "read only by the engine's opt-in test suite"],
   ["ZERO_FEATURE_EGATS", "docs state it is not a current toggle"],
   ["ZERO_FEATURE_TRIAGE_MEMORIES", "docs state it is not a current toggle"],

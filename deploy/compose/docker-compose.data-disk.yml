@@ -1,0 +1,12 @@
+# Keep the 0 data on a host directory (for example a mounted EBS or Azure data disk) instead of the
+# named volume `zero-data`, so backups, snapshots and restores act on the disk you mounted.
+#
+#   echo 'COMPOSE_FILE=docker-compose.yml:docker-compose.data-disk.yml' >> .env
+#   echo 'ZERO_DATA_DIR=/data' >> .env      # the mount point on the host, owned by 1000:1000, mode 0700
+#
+# Compose replaces the base file's mount for /data with this one. See
+# docs/src/content/docs/self-hosting.md.
+services:
+  zero:
+    volumes:
+      - ${ZERO_DATA_DIR:?set ZERO_DATA_DIR to the host directory that holds the data}:/data
