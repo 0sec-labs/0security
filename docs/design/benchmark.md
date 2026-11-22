@@ -5,9 +5,9 @@ A small benchmark to measure whether scans and skills help: tiny apps with known
 ## How it works
 
 - `scripts/bench/fixtures/<name>/` is one app (under 150 lines) plus `answer.json`. The answer key lists `items` (planted bugs: `id`, `path`, `startLine`, `endLine`, `category`, `description`) and `decoys` (code that looks risky but is safe). `skill` names the skill the fixture is meant for, or `null`. `clean: true` marks the app with no bugs at all.
-- Fixtures: `node-express` (SQL injection, command injection, path traversal, hardcoded secret), `python-flask` (SSRF, pickle, `yaml.load`, MD5), `go-http` (SQL injection, `template.HTML` XSS, hardcoded key), `llm-app` (prompt injection into a shell tool, secrets in the prompt, unescaped model output; skill `llm-app-review`), `crypto-app` (RSA, SHA-1, ECB, weak key derivation; skill `crypto-migration`) and `clean-app` (the same shapes as `node-express`, written safely).
+- Fixtures: `node-express` (SQL injection, command injection, path traversal, hardcoded secret), `python-flask` (SSRF, pickle, `yaml.load`, MD5), `go-http` (SQL injection, `template.HTML` XSS, hardcoded key), `llm-app` (prompt injection into a shell tool, secrets in the prompt, unescaped model output; skill `llm-app-review`), `crypto-app` (RSA, SHA-1, ECB, weak key derivation; skill `crypto-migration`) `iac-app` (a Terraform module, a Kubernetes manifest, a Dockerfile and a GitHub Actions workflow with nine planted issues, two of them across resources, and seven decoys; skill `iac-review`) and `clean-app` (the same shapes as `node-express`, written safely).
 - `run.mjs` copies each fixture without `answer.json` into a temporary folder, so the model cannot read the key. It runs `node packages/cli/dist/index.js scan <copy> --budget <n> --format json -o <out>` with a fresh `HOME` (and XDG directories) per run, then parses the findings.
-- Configurations: `generic` (`--prepass off`), `skill` (`--skill <id>`, only for fixtures that name one), `foxguard` (`--prepass auto --scanner foxguard`, needs foxguard installed). The default is `generic,skill`.
+- Configurations: `generic` (`--prepass off`), `skill` (`--skill <id>`, only for fixtures that name one), `foxguard` (`--prepass auto --scanner foxguard`, needs foxguard installed). For the infrastructure fixture only: `checkov-prepass` (`--prepass auto --scanner checkov`) and `checkov`, which runs Checkov alone, with no model and no cost, and scores its SARIF with the same matcher. The default is `generic,skill`.
 - Matching (`match.mjs`, pure, unit tested): a finding finds a planted item when the path agrees (suffix match), its line range is within 5 lines of the item's, and it belongs to the item's category family (from the finding's category, then title, then description). Matching is one-to-one, so a single finding never credits two items. A finding on a decoy (within 2 lines), or any finding in the clean app, is a false positive. A finding that is neither is reported as "unmatched" (a real extra issue or noise; read them) and is not counted as a false positive.
 - The report is Markdown and JSON in `scripts/bench/results/` (git-ignored apart from `example.md`): recall, false positives, unmatched, cost and time per fixture and configuration, as mean with min-max over repeats.
 
@@ -23,12 +23,27 @@ node scripts/bench/run.mjs --run --repeat 2 --budget 0.2   # really scans; print
 
 ## What it does not prove
 
-- Six tiny, synthetic apps with obvious bugs. A high recall here says the scan is not blind, not that it finds bugs in a real codebase; the planted bugs are textbook shapes models have seen.
+- Seven tiny, synthetic apps with obvious bugs. A high recall here says the scan is not blind, not that it finds bugs in a real codebase; the planted bugs are textbook shapes models have seen.
 - The answer key is ours. Findings that are real but unplanted are listed as unmatched, not credited; false positives are only counted on decoys and the clean app, so precision on real code is not measured.
 - A repeat count of 2 to 3 gives a range, not a confidence interval. Treat differences smaller than the spread as noise. Model output varies between runs and between model versions.
 - The category-family and line-proximity matching is heuristic: a correct finding with an unusual category or wrong line can be missed, and a vague one nearby can be credited.
 - Cost and time depend on the model, the provider and load on the day. Compare configurations from the same run.
 - Skill fixtures are written by the same team as the skills; a skill that scores well on its own fixture may have been tuned to it.
+
+## Infrastructure as code
+
+Run on `iac-app`, 3 repeats, `--budget 0.5`, one model (the default). Mean over repeats, min-max in brackets:
+
+| config | recall | false pos. | cost per scan |
+|---|---|---|---|
+| generic | 56% (44-67%) | 0 | $0.009 |
+| skill (`iac-review`) | 67% (56-78%) | 0 | $0.016 |
+| checkov alone | 56% (56%) | 32 (see below) | $0 |
+| generic with `--scanner checkov` | 70% (56-89%) | 0 | $0.019 |
+
+The differences between the model configurations are inside the spread, so none beats another on this fixture. No configuration found `iac-db-via-edge` (a database group that trusts an open group) on its own, and the private-subnet route was found in 1 of 3 skill runs and 2 of 3 Checkov pre-pass runs. Treat the skill as experimental.
+
+Rule scanners report a whole resource as one region, so the matcher credits a Checkov finding when any rule on the resource overlaps a planted line (for example a missing-description rule on the database group). Checkov's `iac-db-via-edge` credit comes from a missing-description rule on that group, not from seeing the exposure, so read its recall as an upper bound of about 4 of 9; the false-positive count is mostly hygiene rules on the decoy Deployment, which Checkov also reports on a hardened container.
 
 ## Adding a fixture
 

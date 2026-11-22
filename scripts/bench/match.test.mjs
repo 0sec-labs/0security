@@ -21,6 +21,18 @@ test("families come from category, title, then description", () => {
   assert.ok(familiesOf({ category: "other", title: "Model-controlled shell tool executes ticket-influenced commands" }).has("prompt-injection"));
 });
 
+test("infrastructure families come from the title", () => {
+  const fam = (title, category = "other") => familiesOf({ category, title });
+  assert.ok(fam("Private subnet routes 0.0.0.0/0 to an internet gateway").has("iac-network"));
+  assert.ok(fam("Database security group reachable through an open group").has("iac-network"));
+  assert.ok(fam("iam:PassRole on Resource * allows privilege escalation").has("iac-iam"));
+  assert.ok(fam("Privileged container mounts docker.sock").has("iac-privilege"));
+  assert.ok(fam("Install script piped into sh in the image build").has("iac-supply"));
+  assert.ok(fam("Script injection from the pull request title in a workflow").has("ci-injection"));
+  assert.ok(fam("pull_request_target checks out untrusted code with secrets").has("ci-injection"));
+  assert.equal(fam("Ensure that the S3 bucket has versioning enabled").has("iac-iam"), false);
+});
+
 test("paths match by suffix, ranges by distance", () => {
   assert.ok(samePath("/tmp/x/app.js", "app.js"));
   assert.ok(samePath("./src/app.js", "src/app.js"));

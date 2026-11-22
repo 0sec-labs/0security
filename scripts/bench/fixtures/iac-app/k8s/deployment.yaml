@@ -1,0 +1,60 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: orders-web
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orders-web
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: orders-web
+  template:
+    metadata:
+      labels:
+        app: orders-web
+    spec:
+      serviceAccountName: orders-web
+      containers:
+        - name: web
+          image: registry.example.test/orders-web@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+          ports:
+            - containerPort: 443
+          securityContext:
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+              add: ["NET_BIND_SERVICE"]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orders-builder
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: orders-builder
+  template:
+    metadata:
+      labels:
+        app: orders-builder
+    spec:
+      containers:
+        - name: builder
+          image: registry.example.test/orders-builder:1.4
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - name: docker
+              mountPath: /var/run/docker.sock
+      volumes:
+        - name: docker
+          hostPath:
+            path: /var/run/docker.sock

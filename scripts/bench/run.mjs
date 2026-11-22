@@ -12,7 +12,7 @@ import { mean, scoreFindings, spread, validateAnswer } from "./match.mjs";
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "../..");
 const FIXTURES = join(here, "fixtures");
-export const CONFIGS = ["generic", "skill", "foxguard"];
+export const CONFIGS = ["generic", "skill", "foxguard", "checkov", "checkov-prepass"];
 const DEFAULT_CONFIGS = ["generic", "skill"];
 
 export function parseArgs(argv) {
@@ -50,20 +50,25 @@ export function loadFixtures(only) {
   });
 }
 
-function fileLines(dir) {
+/** Line counts by path relative to the fixture, including files in sub-folders and dot folders. */
+function fileLines(dir, prefix = "") {
   const out = {};
-  for (const e of readdirSync(dir)) {
-    if (e === "answer.json") continue;
-    out[e] = readFileSync(join(dir, e), "utf8").split("\n").length - (readFileSync(join(dir, e), "utf8").endsWith("\n") ? 1 : 0);
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    if (!prefix && e.name === "answer.json") continue;
+    const rel = prefix ? `${prefix}/${e.name}` : e.name;
+    if (e.isDirectory()) { Object.assign(out, fileLines(join(dir, e.name), rel)); continue; }
+    const text = readFileSync(join(dir, e.name), "utf8");
+    out[rel] = text.split("\n").length - (text.endsWith("\n") ? 1 : 0);
   }
   return out;
 }
 
-/** The (fixture, config) runs that apply: the skill config only exists for fixtures that name a skill. */
+/** The (fixture, config) runs that apply: the skill config only exists for fixtures that name a skill, the checkov configs only for the infrastructure fixture. */
 export function planRuns(fixtures, configs) {
   const plan = [];
   for (const fx of fixtures) for (const config of configs) {
     if (config === "skill" && !fx.answer.skill) continue;
+    if (config.startsWith("checkov") && fx.answer.skill !== "iac-review") continue;
     plan.push({ fixture: fx, config });
   }
   return plan;
@@ -73,6 +78,7 @@ export function scanArgs({ fixture, config }, folder, outFile, o) {
   const args = ["scan", folder, "--budget", String(o.budget), "--format", "json", "-o", outFile, "--timeout", String(o.timeout)];
   if (o.model) args.push("--model", o.model);
   if (config === "foxguard") args.push("--prepass", "auto", "--scanner", "foxguard");
+  else if (config === "checkov-prepass") args.push("--prepass", "auto", "--scanner", "checkov");
   else args.push("--prepass", "off");
   if (config === "skill") args.push("--skill", fixture.answer.skill);
   return args;
@@ -86,6 +92,28 @@ function findFoxguard() {
   return which.status === 0 ? which.stdout.trim() : undefined;
 }
 
+/** Checkov findings from its SARIF, shaped like scan findings so the matcher can score them. */
+export function checkovFindings(sarif) {
+  const out = [];
+  for (const r of sarif.runs ?? []) for (const res of r.results ?? []) {
+    const loc = res.locations?.[0]?.physicalLocation;
+    const region = loc?.region ?? {};
+    out.push({ id: res.ruleId, title: `${res.ruleId} ${res.message?.text ?? ""}`, category: "other", description: "", location: loc ? { path: loc.artifactLocation?.uri ?? "", startLine: region.startLine, endLine: region.endLine } : undefined });
+  }
+  return out;
+}
+
+/** Checkov on its own: no model, so no cost. Its report is a file, so it is read from a scratch folder. */
+function runCheckov(run, repeatIndex, o, folder, root) {
+  const out = join(root, "checkov-out");
+  mkdirSync(out, { recursive: true });
+  const started = Date.now();
+  const proc = spawnSync(process.env.ZERO_CHECKOV_PATH || "checkov", ["-d", folder, "-o", "sarif", "--output-file-path", out, "--quiet", "--skip-download"], { encoding: "utf8", timeout: o.timeout * 1000, cwd: root });
+  let findings = []; let status = "complete"; let error;
+  try { findings = checkovFindings(JSON.parse(readFileSync(join(out, "results_sarif.sarif"), "utf8"))); } catch { status = `no-report (exit ${proc.status})`; error = (proc.stderr ?? "").slice(-300); }
+  return { fixture: run.fixture.name, config: run.config, repeat: repeatIndex + 1, seconds: (Date.now() - started) / 1000, costUsd: 0, status, error, score: scoreFindings(run.fixture.answer, findings), workdir: root };
+}
+
 function runOne(run, repeatIndex, o, foxguard) {
   const root = mkdtempSync(join(tmpdir(), "0-bench-"));
   const home = join(root, "home");
@@ -93,6 +121,7 @@ function runOne(run, repeatIndex, o, foxguard) {
   mkdirSync(home, { recursive: true });
   // The model must not be able to read the answer key: copy the fixture without it.
   cpSync(run.fixture.dir, folder, { recursive: true, filter: (src) => !src.endsWith("answer.json") });
+  if (run.config === "checkov") return runCheckov(run, repeatIndex, o, folder, root);
   const outFile = join(root, "report.json");
   const env = { ...process.env, HOME: home, USERPROFILE: home, XDG_CONFIG_HOME: join(home, "config"), XDG_DATA_HOME: join(home, "data"), XDG_CACHE_HOME: join(home, "cache") };
   if (foxguard) env.ZERO_FOXGUARD_PATH = foxguard;
@@ -200,7 +229,7 @@ function dryRun(o) {
 }
 const relative = (args) => ["packages/cli/dist/index.js", ...args].join(" ");
 // Answer categories are family keys; a real scan labels them with the engine's category names.
-const categoryLabel = (family) => ({ sqli: "sql-injection", secret: "information-disclosure", "weak-crypto": "weak-crypto", deserialization: "unsafe-deserialization", "output-handling": "output-manipulation" })[family] ?? family;
+const categoryLabel = (family) => ({ sqli: "sql-injection", secret: "information-disclosure", "weak-crypto": "weak-crypto", deserialization: "unsafe-deserialization", "output-handling": "output-manipulation", "iac-network": "network exposure: security group", "iac-iam": "iam privilege escalation", "iac-privilege": "privileged container", "iac-supply": "unpinned install script", "ci-injection": "workflow script injection" })[family] ?? family;
 
 function realRun(o) {
   const fixtures = loadFixtures(o.fixtures);
@@ -224,7 +253,7 @@ function realRun(o) {
 
 if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href) {
   let o;
-  try { o = parseArgs(process.argv.slice(2)); } catch (e) { console.error(`${e.message}\nusage: node scripts/bench/run.mjs (--run | --dry-run) [--repeat N] [--budget USD] [--configs generic,skill,foxguard] [--fixtures a,b] [--model id] [--out dir]`); process.exit(2); }
+  try { o = parseArgs(process.argv.slice(2)); } catch (e) { console.error(`${e.message}\nusage: node scripts/bench/run.mjs (--run | --dry-run) [--repeat N] [--budget USD] [--configs generic,skill,foxguard,checkov,checkov-prepass] [--fixtures a,b] [--model id] [--out dir]`); process.exit(2); }
   try {
     const runs = o.dryRun ? dryRun(o) : realRun(o);
     const rows = summarize(runs);

@@ -184,6 +184,7 @@ The default stays FoxGuard alone. The other scanners are not installed with 0. S
 Each scanner runs without a shell, on the folder as an absolute path, with a time limit (2 minutes; 5 for trivy, 3 for osv-scanner). One that fails or runs out of time is skipped with a note. A `.gitleaks.toml` or `.trivyignore` inside the folder is honored by the tool, so a repository can hide its own secrets from them.
 
 Secret values stay out of the prompt and the findings. gitleaks runs with `--redact`, and trivy masks values by default. 0 also drops the snippet and any `Match:` line from a secret lead, so the thread sees the rule, the file and the line. The thread can still read the file itself, as it reads any file in the folder. `0 findings import` is unchanged.
+FoxGuard ships next to `0`; set `ZERO_FOXGUARD_PATH` to use another copy. Pass `--prepass off` to skip it. `--scanner` adds or replaces scanners (`foxguard`, `semgrep`, `opengrep`, `checkov`); repeat the flag for several. A scanner that is not installed is skipped. A Semgrep rule pack such as `p/default` is downloaded when it runs.
 
 `--rules <file-or-folder>` gives Semgrep or OpenGrep your own rules for the pre-pass. Repeat it for several. The scanner runs only those rules, not its default pack, so add `--scanner semgrep` or `--scanner opengrep`. FoxGuard has its own rule format and does not read them, so `--rules` alone is a usage error.
 
@@ -205,6 +206,48 @@ rules:
 A hit from your rules is a lead like any other. The scan checks it against the code and records it only when it is real. A finding at the rule's lines gets `ruleSource: "custom"` in JSON and in the SARIF properties, and its description names the rule id. Semgrep prefixes the id with the rule file's folder.
 
 0 never looks for rules in the scanned folder. A `.semgrep` folder there is ignored unless you name it with `--rules`. See [Add your own rules](/ci/#add-your-own-rules) for CI.
+
+| Argument | Required | Description |
+| --- | --- | --- |
+| `target` | Yes |  |
+
+| Option | Registered default | Description |
+| --- | --- | --- |
+| `--budget <usd>` | `5` | Stop when the estimated spend reaches this many USD; partial findings are kept |
+| `--format <format>` | `md` | Report format: json, md, sarif, html, pdf |
+| `-o, --output <file>` | — | Write the report to a file instead of stdout |
+| `--fail-on <severity>` | — | Exit 1 when a finding is at or above this severity (critical, high, medium, low, info) |
+| `--passes <n>` | `1` | Scan this many times and merge the findings (a scan misses some issues that another run finds); the budget is split between them, up to 5 |
+| `--diff <ref>` | — | Review only the files that differ from this git ref (for example origin/main), and what they connect to; an empty diff scans nothing |
+| `--prepass <mode>` | `auto` | auto runs the pattern scanners first when they are installed and gives their hits to the scan as leads; off skips them |
+| `--scanner <id>` | — | Pattern scanner for the pre-pass (foxguard, semgrep, opengrep, checkov); repeat to use several (default: foxguard) |
+| `--rules <file-or-folder>` | — | Semgrep or OpenGrep rules for the pre-pass (a file or a folder); repeat for several. Replaces the default rules and needs --scanner semgrep or opengrep. Rules are never read from the scanned folder unless you name them |
+| `--context <file>` | — | Give the scan this file (a threat model, notes on who may do what) as lower-priority background; repeat for several. It can steer what the scan weighs but cannot change how it works |
+| `--policy <file-or-folder>` | — | Check the code against these Markdown policies (a file or a folder of .md files) and report pass or fail for each; repeat for several. Runs the policy-check skill |
+| `--org-policy <folder>` | — | An organisation's policy folder: evaluated first, and wins when a --policy says otherwise or uses the same id; repeat for several |
+| `--repo-context` | — | Also read .0/threat-model.md from the scanned folder as context. Off by default: a change under review can edit that file; in CI pass the base branch's copy with --context instead |
+| `--skill <id>` | `scan` | Skill that holds the scan method |
+| `--model <model>` | — | Model for the scan thread (default: gpt-6-luna) |
+| `--timeout <seconds>` | `3600` | Maximum seconds to wait for the scan |
+| `--engine-url <url>` | — | Attach directly to a running trusted engine |
+| `--engine-token-env <name>` | — | Environment variable holding the attached engine token |
+| `--computer <id>` | — | Use a registered remote computer |
+| `--engine <id>` | — |  |
+| `--computers-config <path>` | — | Operator computer connection registry JSON file |
+| `--engines-config <path>` | — |  |
+| `--db-path <path>` | — | Control database of the local engine to attach to |
+
+#### Infrastructure as code
+
+To review Terraform, CloudFormation, Kubernetes manifests, Dockerfiles and GitHub Actions workflows, run Checkov as the pre-pass and load the `iac-review` skill:
+
+```bash
+0 scan ~/code/infra --scanner checkov --skill iac-review
+```
+
+Checkov flags single settings, such as an open port. The skill follows references between resources: a subnet named private whose route table reaches an internet gateway, a database group that trusts an open group, an `iam:PassRole` on `*`, a workflow that runs pull request code with secrets. Checkov hits are leads, and the thread keeps one only when it can show how it is exploitable.
+
+Install Checkov with `brew install checkov` or `pipx install checkov`, or set `ZERO_CHECKOV_PATH`. Checkov runs with `--skip-download`, so it needs no network. The `iac-review` skill is experimental: on one small benchmark fixture it is not yet shown to beat the plain scan (see the [benchmark](https://github.com/0sec-labs/0security/blob/main/docs/design/benchmark.md)).
 
 `--context <file>` gives the scan a file as lower-priority background, usually the repository's threat model (see [Threat model and policy checks](/threat-model-and-policy/)). The scan checks the rules it states.
 

@@ -15,6 +15,11 @@ const FAMILY_PATTERNS = {
   xss: /\bxss\b|cross[-_ ]site scripting|html injection|template\.html|unescaped|unsanitized html/i,
   "prompt-injection": /prompt[-_ ]?inj|indirect injection|excessive[-_ ]agency|tool[-_ ]misuse|jailbreak|untrusted (content|text|input|ticket).*(model|prompt|tool|command|shell)|model-controlled|shell tool|agent.*(shell|command)/i,
   "output-handling": /output[-_ ]?(handling|manipulation)|insecure output|model output|llm output|improper output|(agent|model|llm|assistant)[a-z ]*(reply|response|output).*(html|escap|markup)|unescaped (agent|model|llm|assistant)/i,
+  "iac-network": /security[-_ ]group|subnet|route[-_ ]?table|\broute\b|ingress|0\.0\.0\.0|internet gateway|network (exposure|exposed)|publicly (accessible|exposed|reachable)|public (subnet|route|access)|open to the (internet|world)|exposed to the internet/i,
+  "iac-iam": /\biam\b|pass-?role|privilege escalation|wildcard (action|resource|permission)|over-?(permissive|broad) (role|polic|permission)|assume-?role/i,
+  "iac-privilege": /privileged|host-?path|docker\.sock|docker socket|host-?(network|pid|ipc)|container escape|node (takeover|compromise)|service-?account|security-?context|run(s|ning)? as root/i,
+  "iac-supply": /unpinned|not pinned|pipe[sd]? (into|to) (sh|bash|a shell)|curl[^|]*\|\s*(sh|bash)|install script|:latest|latest tag|remote script|download(s|ed)? and (run|execut)/i,
+  "ci-injection": /(script|shell)[-_ ]?inj|workflow[-_ ]?inj|expression[-_ ]?inj|pull_request_target|pwn[-_ ]?request|untrusted (checkout|code|pull)|github\.event|(workflow|github actions?|pull[-_ ]request|pr title).*(inject|untrusted)|inject.*(workflow|github actions?|pull[-_ ]request|pr title)/i,
 };
 export const FAMILIES = Object.keys(FAMILY_PATTERNS);
 

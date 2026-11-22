@@ -1,0 +1,32 @@
+name: ci
+on:
+  pull_request:
+  pull_request_target:
+    types: [opened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Greet
+        run: echo "Build for ${{ github.sha }}"
+      - name: Title check
+        run: test -n "$TITLE"
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+      - name: Announce
+        run: echo "Checking ${{ github.event.pull_request.title }}"
+
+  test:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request_target'
+    steps:
+      - uses: actions/checkout@a1b2c3d4e5f60718293a4b5c6d7e8f9012345678
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - run: npm ci && npm test
+        env:
+          DEPLOY_TOKEN: ${{ secrets.DEPLOY_TOKEN }}
