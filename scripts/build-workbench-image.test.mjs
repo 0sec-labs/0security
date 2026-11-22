@@ -55,7 +55,7 @@ test("plan-only command succeeds with Docker absent and creates no archive", () 
   assert.equal(JSON.parse(result.stdout).qualification, "not-built");
 });
 test("snapshot and receipt inputs stay consistent with Docker build", () => {
-  const dockerfile = readFileSync(new URL("./docker/Dockerfile.workbench", import.meta.url), "utf8");
+  const dockerfile = readFileSync(new URL("../deploy/docker/Dockerfile.workbench", import.meta.url), "utf8");
   assert.ok(dockerfile.includes(manifest.baseImage)); assert.ok(dockerfile.includes(manifest.aptSnapshot));
   assert.ok(dockerfile.includes("workbench-inventory.mjs"));
   assert.ok(dockerfile.includes("runuser -u zero"));
