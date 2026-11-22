@@ -26,6 +26,7 @@
 
 import { readFileSync, statSync } from "node:fs";
 import { cloudStateDir } from "../shared/index.js";
+import { enterpriseMode } from "../policy/enterprise.js";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -71,6 +72,9 @@ export interface LoadCloudCredentialsOptions {
 
 export function loadCloudCredentials(opts: LoadCloudCredentialsOptions = {}): CloudCredentials {
   const env = opts.env ?? process.env;
+  // Enterprise no-egress mode: cloud credentials are never resolved, so every
+  // cloud-bound sender (analytics ingest, run contribution, feedback) stands down.
+  if (enterpriseMode(env)) throw new CloudAuthMissingError("Cloud access is disabled by ZERO_ENTERPRISE.");
   const warn = opts.warn ?? ((m: string) => process.stderr.write(`${m}\n`));
 
   // 1. Env wins.

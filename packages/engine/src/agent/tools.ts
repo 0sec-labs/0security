@@ -62,6 +62,7 @@ import { resolveBashWallclockCeilingMs, runBashWithWallclock, buildStrReplaceMet
 import { parseVerificationSpecArg, autoVerificationSpec, evaluateSourceVerification, parsePocStepsArg, parseEvidencePathsArg, buildValidationFailureResult } from "./tools/verification.js";
 import { citedSourceHasKnownMarker } from "./tools/probe-helpers.js";
 import { normalizeAttackCategory } from "../shared/finding-schemas.js";
+import { enterpriseMode } from "../policy/enterprise.js";
 import { mcpHostOf, deferredToolsOf, packToolsOf } from "./tools/context-hosts.js";
 
 // ── Tool registry (0#611) ──
@@ -1301,6 +1302,9 @@ export class ToolExecutor {
   ];
 
   private async webSearch(args: Record<string, unknown>): Promise<ToolResult> {
+    if (enterpriseMode()) {
+      return { success: false, output: null, error: "web_search is disabled by ZERO_ENTERPRISE." };
+    }
     if (!(this.ctx.webSearchEnabled ?? featureFlags.webSearch)) {
       return { success: false, output: null, error: "web_search is disabled. Set ZERO_FEATURE_WEB_SEARCH=1 to enable." };
     }

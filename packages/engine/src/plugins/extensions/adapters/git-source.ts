@@ -3,6 +3,7 @@ import { mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { promisify } from "node:util";
+import { enterpriseMode } from "../../../policy/enterprise.js";
 import { LIMITS, gitTreeHash, validateFolder, type FolderFile } from "../core/files.js";
 import { sanitizeName } from "../core/manifest.js";
 import { err, ok, type Result } from "../core/result.js";
@@ -63,6 +64,7 @@ export class GitSource implements ExtensionSource {
   }
 
   async fetch(): Promise<Result<Snapshot>> {
+    if (!this.local && enterpriseMode()) return err("fetch_failed", `Could not fetch ${this.label}: remote extension sources are disabled by ZERO_ENTERPRISE. Use a local folder or git repository.`);
     const work = mkdtempSync(join(tmpdir(), "zero-extension-"));
     try { return await this.#fetchInto(work); }
     catch (error) { return err("fetch_failed", `Could not fetch ${this.label}: ${String((error as Error).message).split("\n")[0]}`); }

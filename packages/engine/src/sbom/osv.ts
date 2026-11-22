@@ -1,3 +1,5 @@
+import { assertEgressAllowed } from "../policy/enterprise.js";
+
 /**
  * Check an SBOM's components against the public OSV database (https://osv.dev). The SBOM and the responses are untrusted
  * text: package URLs are validated and bounded, and every string that comes back is cleaned and truncated before use.
@@ -41,6 +43,7 @@ async function get(fetcher: typeof fetch, url: string): Promise<unknown> {
 }
 
 export async function checkBomAgainstOsv(bom: unknown, options: OsvOptions = {}): Promise<{ checked: number; advisories: Advisory[]; withoutDetails: number }> {
+  if (!options.fetch && !options.baseUrl) assertEgressAllowed("api.osv.dev (advisory lookup)");
   const fetcher = options.fetch ?? fetch;
   const base = (options.baseUrl ?? "https://api.osv.dev").replace(/\/$/, "");
   const components = isObject(bom) && Array.isArray(bom.components) ? bom.components : [];

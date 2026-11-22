@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { VERSION } from "../shared/index.js";
+import { assertEgressAllowed } from "../policy/enterprise.js";
 
 const JOB_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SHA256 = /^[0-9a-f]{64}$/;
@@ -199,6 +200,7 @@ export class WindowsEvidenceWorkerClient {
       this.requireActiveGrant();
       let response: Response;
       try {
+        assertEgressAllowed(this.baseUrl);
         response = await this.fetchImpl(`${this.baseUrl}${args.path}`, args.makeInit());
       } catch (error) {
         throw this.safeError(`Windows evidence ${args.operation} failed`, undefined, error);
