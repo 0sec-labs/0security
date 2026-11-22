@@ -170,6 +170,10 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      # Build-provenance attestations are signed with the workflow's OIDC
+      # identity and stored in the repository's attestation store.
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -189,6 +193,32 @@ jobs:
         run: |
           gh repo clone "${{ github.repository }}" src -- --depth 1 --branch "$TAG"
           node src/scripts/release-notes.mjs --version "${TAG#v}" --out release-notes.md
+      # CycloneDX SBOM of the tagged source tree (lockfiles), written by the
+      # freshly built linux-x64 release binary rather than a separate tool.
+      - name: Generate CycloneDX SBOM
+        run: |
+          set -euo pipefail
+          chmod +x dist-bin/0-linux-x64
+          dist-bin/0-linux-x64 sbom generate src --name 0 --format cyclonedx --output dist-bin/0-sbom.cdx.json
+      # Advisory only: a known advisory in a dependency must be visible, but it
+      # must not block shipping a tagged release. Needs network access to OSV.
+      - name: Check SBOM against OSV (non-blocking)
+        run: |
+          if ! dist-bin/0-linux-x64 sbom check dist-bin/0-sbom.cdx.json; then
+            echo "::warning::0 sbom check reported advisories or could not reach OSV; see the step log"
+          fi
+      # One attestation per release asset, including checksums.txt and the SBOM.
+      # Verify with: gh attestation verify <file> --repo 0sec-labs/0security
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist-bin/0-darwin-arm64
+            dist-bin/0-linux-x64
+            dist-bin/0-linux-arm64
+            dist-bin/0-windows-x64.exe
+            dist-bin/checksums.txt
+            dist-bin/0-sbom.cdx.json
       - name: Create / update the GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -200,6 +230,7 @@ jobs:
             dist-bin/0-linux-arm64
             dist-bin/0-windows-x64.exe
             dist-bin/checksums.txt
+            dist-bin/0-sbom.cdx.json
           )
           if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
             gh release upload "$TAG" "${assets[@]}" --repo "${{ github.repository }}" --clobber
