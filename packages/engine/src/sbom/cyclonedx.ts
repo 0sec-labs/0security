@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative } from "node:path";
+import { basename, join, relative } from "node:path";
 import { detectAi, type AiComponent, type AiService } from "./ai.js";
+import { parseGradleBuild, parseVersionCatalog } from "./gradle.js";
+import { analyzeMaven, type Unresolved } from "./maven.js";
 import { LOCKFILES, type Component, type Hash } from "./parsers.js";
 import { SPDX_LICENSE_IDS } from "./spdx-ids.js";
 
@@ -14,11 +16,13 @@ export interface Bom {
   specVersion: "1.5";
   serialNumber: string;
   version: 1;
-  metadata: { timestamp: string; tools: { components: Array<{ type: "application"; author: string; name: string; version: string }> }; component: { type: "application"; name: string } };
+  metadata: { timestamp: string; tools: { components: Array<{ type: "application"; author: string; name: string; version: string }> }; component: { type: "application"; name: string }; properties?: Array<{ name: string; value: string }> };
   components: Array<LibraryComponent | AiComponent>;
   services?: AiService[];
   dependencies?: Array<{ ref: string; dependsOn: string[] }>;
 }
+/** Metadata property naming one declared dependency, profile, module, parent or BOM that was not analysed, and why. */
+export const UNRESOLVED_PROPERTY = "0:unresolved";
 export type LicenseChoice = { license: { id: string } } | { license: { name: string } } | { expression: string };
 export interface LibraryComponent { type: "library"; "bom-ref": string; name: string; version: string; purl: string; scope?: "excluded"; hashes?: Hash[]; licenses?: LicenseChoice[]; properties?: Array<{ name: string; value: string }> }
 
@@ -53,7 +57,7 @@ function licenseChoices(values: string[]): LicenseChoice[] {
   // Several stated licenses (Composer's list), or an expression mixed with others: keep each as a named license.
   return values.map(value => { const choice = classifyLicense(value); return "expression" in choice ? { license: { name: value } } : choice; });
 }
-export interface SbomResult { bom: Bom; lockfiles: Array<{ path: string; label: string; components: number }>; truncated: boolean }
+export interface SbomResult { bom: Bom; lockfiles: Array<{ path: string; label: string; components: number }>; truncated: boolean; unresolved: Unresolved[] }
 
 /** The package URL for a component: how every SBOM consumer and advisory database names it. */
 export function packageUrl(component: Component): string {
@@ -76,8 +80,10 @@ export function packageUrl(component: Component): string {
   }
 }
 
-function findLockfiles(folder: string): Array<{ path: string; label: string; parse: (source: string) => Component[] }> {
-  const found: Array<{ path: string; label: string; parse: (source: string) => Component[] }> = [];
+interface Found { path: string; label: string; parse: (source: string) => Component[] }
+/** Every file under the folder that the SBOM reader may use, in sorted order, skipping dependency and build folders. */
+function listFiles(folder: string): Array<{ path: string; size: number }> {
+  const found: Array<{ path: string; size: number }> = [];
   const walk = (dir: string, depth: number): void => {
     let entries: string[];
     try { entries = readdirSync(dir).sort(); } catch { return; }
@@ -85,13 +91,13 @@ function findLockfiles(folder: string): Array<{ path: string; label: string; par
       const path = join(dir, name);
       let info; try { info = statSync(path); } catch { continue; }
       if (info.isDirectory()) { if (depth < MAX_DEPTH && !SKIP.has(name) && !name.startsWith(".")) walk(path, depth + 1); continue; }
-      const lock = LOCKFILES.find(candidate => candidate.file === name);
-      if (lock && info.size <= MAX_LOCKFILE_BYTES) found.push({ path, label: lock.label, parse: lock.parse });
+      if (info.size <= MAX_LOCKFILE_BYTES) found.push({ path, size: info.size });
     }
   };
   walk(folder, 0);
   return found;
 }
+const GRADLE_SCRIPTS = new Set(["build.gradle", "build.gradle.kts"]);
 
 /** Fold what a second lockfile says about the same package into the first: edges are unioned, a hash is kept only where lockfiles agree, licenses come from the first that states them. */
 function mergeFacts(into: Component, from: Component): void {
@@ -109,32 +115,61 @@ function mergeFacts(into: Component, from: Component): void {
 
 /** Build a CycloneDX 1.5 SBOM from the lockfiles under a folder. Sorted and de-duplicated, so the same lockfiles give the same SBOM. */
 export function generateSbom(folder: string, options: { name?: string; toolVersion: string; now?: Date; ai?: boolean }): SbomResult {
-  const locks = findLockfiles(folder);
+  const files = listFiles(folder);
+  const locks: Found[] = [];
+  for (const file of files) { const lock = LOCKFILES.find(candidate => candidate.file === basename(file.path)); if (lock) locks.push({ path: file.path, label: lock.label, parse: lock.parse }); }
   // A pinned requirements.txt next to a lock that already covers the same ecosystem adds noise, not facts.
   const byPurl = new Map<string, { component: Component; purl: string; source: string }>();
   const refs = new Map<string, string>();  // "ecosystem:name@version" -> purl, to turn a lockfile's edges into bom-refs
   const summary: SbomResult["lockfiles"] = [];
+  const add = (component: Component, source: string): void => {
+    const purl = packageUrl(component);
+    const existing = byPurl.get(purl);
+    // A component is development-only only if every lockfile that lists it says so.
+    if (!existing) byPurl.set(purl, { component: { ...component, ...(component.dependsOn ? { dependsOn: [...component.dependsOn] } : {}) }, purl, source });
+    else {
+      if (existing.component.dev && !component.dev) delete existing.component.dev;
+      mergeFacts(existing.component, component);
+    }
+    refs.set(`${component.ecosystem}:${component.name}@${component.version}`, purl);
+  };
+  const locked = new Set<string>();
   for (const lock of locks) {
     let source: string;
     try { source = readFileSync(lock.path, "utf8"); } catch { continue; }
     const components = lock.parse(source);
     const lockPath = relative(folder, lock.path) || lock.path;
     summary.push({ path: lockPath, label: lock.label, components: components.length });
-    for (const component of components) {
-      const purl = packageUrl(component);
-      const existing = byPurl.get(purl);
-      // A component is development-only only if every lockfile that lists it says so.
-      if (!existing) byPurl.set(purl, { component: { ...component, ...(component.dependsOn ? { dependsOn: [...component.dependsOn] } : {}) }, purl, source: lockPath.split("\\").join("/") });
-      else {
-        if (existing.component.dev && !component.dev) delete existing.component.dev;
-        mergeFacts(existing.component, component);
-      }
-      refs.set(`${component.ecosystem}:${component.name}@${component.version}`, purl);
-    }
+    for (const component of components) { add(component, lockPath.split("\\").join("/")); if (component.ecosystem === "maven") locked.add(component.name); }
   }
+  // Maven and Gradle declarations: read as text, resolved only from what the repository itself says.
+  const unresolved: Unresolved[] = [];
+  const read = (path: string): string | undefined => { try { return readFileSync(path, "utf8"); } catch { return undefined; } };
+  const rel = (path: string) => (relative(folder, path) || path).split("\\").join("/");
+  const poms = files.filter(file => basename(file.path) === "pom.xml").flatMap(file => { const source = read(file.path); return source === undefined ? [] : [{ path: file.path, rel: rel(file.path), source }]; });
+  const jvm: Array<{ path: string; label: string; components: Component[] }> = [];
+  if (poms.length) { const maven = analyzeMaven(poms); jvm.push(...maven.files); unresolved.push(...maven.unresolved); }
+  for (const file of files) {
+    const name = basename(file.path);
+    const isCatalog = name === "libs.versions.toml" && basename(join(file.path, "..")) === "gradle";
+    if (!isCatalog && !GRADLE_SCRIPTS.has(name)) continue;
+    const source = read(file.path);
+    if (source === undefined) continue;
+    const parsed = isCatalog ? parseVersionCatalog(source, rel(file.path)) : parseGradleBuild(source, rel(file.path));
+    // A Gradle lockfile pins what the build resolved, so it wins over a version declared in a script or catalog.
+    jvm.push({ path: file.path, label: isCatalog ? "Gradle (version catalog)" : "Gradle (build script)", components: parsed.components.filter(component => !locked.has(component.name)) });
+    unresolved.push(...parsed.unresolved.filter(item => !locked.has(item.name.replace(":", "/"))));
+  }
+  for (const file of jvm) {
+    summary.push({ path: relative(folder, file.path) || file.path, label: file.label, components: file.components.length });
+    for (const component of file.components) add(component, (relative(folder, file.path) || file.path).split("\\").join("/"));
+  }
+  const seenUnresolved = new Set<string>();
+  const unresolvedSorted = unresolved.filter(item => { const key = `${item.source}\n${item.name}\n${item.reason}`; if (seenUnresolved.has(key)) return false; seenUnresolved.add(key); return true; })
+    .sort((a, b) => (a.source !== b.source ? (a.source < b.source ? -1 : 1) : a.name !== b.name ? (a.name < b.name ? -1 : 1) : a.reason < b.reason ? -1 : a.reason > b.reason ? 1 : 0));
   const ai = options.ai ? detectAi(folder) : { components: [], services: [] };
   const sorted = [...byPurl.values()].sort((a, b) => (a.purl < b.purl ? -1 : a.purl > b.purl ? 1 : 0));
-  const digest = createHash("sha256").update([...sorted.map(item => item.purl), ...ai.components.map(item => item["bom-ref"]), ...ai.services.map(item => item["bom-ref"])].join("\n")).digest("hex");
+  const digest = createHash("sha256").update([...sorted.map(item => item.purl), ...ai.components.map(item => item["bom-ref"]), ...ai.services.map(item => item["bom-ref"]), ...unresolvedSorted.map(item => `${item.source} ${item.name}`)].join("\n")).digest("hex");
   const serial = `urn:uuid:${digest.slice(0, 8)}-${digest.slice(8, 12)}-4${digest.slice(13, 16)}-8${digest.slice(17, 20)}-${digest.slice(20, 32)}`;
   const bom: Bom = {
     bomFormat: "CycloneDX", specVersion: "1.5", serialNumber: serial, version: 1,
@@ -142,6 +177,7 @@ export function generateSbom(folder: string, options: { name?: string; toolVersi
       timestamp: (options.now ?? new Date()).toISOString(),
       tools: { components: [{ type: "application", author: "0sec-labs", name: "0", version: options.toolVersion }] },
       component: { type: "application", name: options.name ?? (folder.split(/[\\/]/).filter(Boolean).pop() ?? "application") },
+      ...(unresolvedSorted.length ? { properties: unresolvedSorted.map(item => ({ name: UNRESOLVED_PROPERTY, value: `${item.name} (${item.reason}) in ${item.source}` })) } : {}),
     },
     components: [...sorted.map(({ component, purl, source }): LibraryComponent => ({
       type: "library", "bom-ref": purl, name: component.name, version: component.version, purl,
@@ -158,5 +194,5 @@ export function generateSbom(folder: string, options: { name?: string; toolVersi
     dependsOn: [...new Set(component.dependsOn!.flatMap(target => { const ref = refs.get(`${component.ecosystem}:${target.name}@${target.version}`); return ref && ref !== purl ? [ref] : []; }))].sort(),
   }));
   if (dependencies.length) bom.dependencies = dependencies;
-  return { bom, lockfiles: summary.sort((a, b) => (a.path < b.path ? -1 : 1)), truncated: false };
+  return { bom, lockfiles: summary.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : a.label < b.label ? -1 : 1)), truncated: false, unresolved: unresolvedSorted };
 }

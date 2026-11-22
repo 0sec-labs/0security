@@ -1,5 +1,5 @@
 export { LOCKFILES, parseCargoLock, parseComposerLock, parseGemfileLock, parseGoMod, parseGradleLock, parseMixLock, parseNugetLock, parsePubspecLock, parseNpmLock, parsePipfileLock, parsePnpmLock, parsePoetryLock, parseRequirements, parseYarnLock, sriToHashes, type Component, type Hash } from "./parsers.js";
-export { classifyLicense, generateSbom, packageUrl, type Bom, type LibraryComponent, type LicenseChoice, type SbomResult } from "./cyclonedx.js";
+export { classifyLicense, generateSbom, packageUrl, UNRESOLVED_PROPERTY, type Bom, type LibraryComponent, type LicenseChoice, type SbomResult } from "./cyclonedx.js";
 export { checkBomAgainstOsv, type Advisory, type AdvisorySeverity, type OsvOptions } from "./osv.js";
 export { compareVersions, cvss3BaseScore } from "./advisory-facts.js";
 export { toSpdx, type SpdxDocument, type SpdxPackage } from "./spdx.js";
@@ -8,3 +8,5 @@ export { detectAi, type AiComponent, type AiService } from "./ai.js";
 export { checkBomLicenses, judgeComponent, leafText, licensesToSarif, mergePolicies, parseLicenseExpression, policyFromDocument, PRESET_NAMES, PRESETS, validatePolicy, type ComponentVerdict, type LicenseLeaf, type LicenseNode, type LicensePolicy, type LicenseReport, type PackageException, type PresetName, type UnknownMode, type Verdict } from "./license-policy.js";
 export { advisoriesToSarif, advisoriesToText, componentLabel, fixAdvice, sortAdvisories } from "./check-report.js";
 export { checkOutdated, outdatedToText, OUTDATED_CAP, type OutdatedNote, type OutdatedResult } from "./outdated.js";
+export { analyzeMaven, parseXml, type Unresolved } from "./maven.js";
+export { parseCatalog, parseGradleBuild, parseVersionCatalog } from "./gradle.js";

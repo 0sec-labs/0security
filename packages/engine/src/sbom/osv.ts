@@ -52,7 +52,14 @@ async function get(fetcher: typeof fetch, url: string): Promise<unknown> {
   return response.json();
 }
 
-export async function checkBomAgainstOsv(bom: unknown, options: OsvOptions = {}): Promise<{ checked: number; advisories: Advisory[]; withoutDetails: number }> {
+/** What the SBOM says it could not resolve (the `0:unresolved` metadata properties from `0 sbom generate`), cleaned for display. */
+function unresolvedOf(bom: unknown): string[] {
+  const metadata = isObject(bom) && isObject(bom.metadata) ? bom.metadata : {};
+  const properties = Array.isArray(metadata.properties) ? metadata.properties : [];
+  return properties.flatMap(property => isObject(property) && property.name === "0:unresolved" ? [clean(property.value, 400)] : []).filter(Boolean);
+}
+
+export async function checkBomAgainstOsv(bom: unknown, options: OsvOptions = {}): Promise<{ checked: number; advisories: Advisory[]; withoutDetails: number; unresolved: string[] }> {
   if (!options.fetch && !options.baseUrl) assertEgressAllowed("api.osv.dev (advisory lookup)");
   const fetcher = options.fetch ?? fetch;
   const base = (options.baseUrl ?? "https://api.osv.dev").replace(/\/$/, "");
@@ -103,5 +110,5 @@ export async function checkBomAgainstOsv(bom: unknown, options: OsvOptions = {})
       advisories.push({ purl, id, aliases: detail.aliases, summary: detail.summary, severity: malicious ? "critical" : detail.severity, ...(detail.cvss !== undefined ? { cvss: detail.cvss } : {}), malicious, ...fixesFor(detail.affected, purl) });
     }
   }
-  return { checked: purls.length, advisories, withoutDetails: ids.length - detailIds.length + detailIds.filter(id => !details.has(id)).length };
+  return { checked: purls.length, advisories, withoutDetails: ids.length - detailIds.length + detailIds.filter(id => !details.has(id)).length, unresolved: unresolvedOf(bom) };
 }

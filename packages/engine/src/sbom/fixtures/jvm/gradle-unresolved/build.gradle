@@ -1,0 +1,13 @@
+ext { jacksonVersion = '2.15.2' }
+dependencies {
+    implementation 'org.apache.commons:commons-lang3:3.14.0'
+    api group: 'org.yaml', name: 'snakeyaml', version: '2.2'
+    implementation "com.fasterxml.jackson.core:jackson-core:$jacksonVersion"
+    implementation 'org.example:dynamic:1.+'
+    implementation 'org.example:latest:latest.release'
+    implementation 'org.example:unversioned'
+    implementation platform('org.springframework.boot:spring-boot-dependencies:3.2.0')
+    implementation project(':shared')
+    runtimeOnly("org.postgresql:postgresql:42.7.1")
+    testImplementation group: 'junit', name: 'junit', version: junitVersion
+}
