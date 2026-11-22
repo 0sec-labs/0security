@@ -78,6 +78,7 @@ These are not blocked, because you name the destination. Leave them unused to ke
 | `mcp-remote-server` | Remote MCP servers you added | An installed extension with an http or sse transport runs. | MCP requests and tool arguments. |
 | `scan-and-probe-targets` | The git remote or URL on the command line | `0 scan` with a git URL, `0 probe`, authorized proof-of-concept steps. | A git clone, or HTTP requests to that target. |
 | `source-control-writes` | The git remote and GitHub host of your repository | `0 findings fix`, threat-model publishing, findings import, sentinel reviews. | The branch push or comment you asked for. |
+| `bitbucket-code-insights` | `api.bitbucket.org`, or the Bitbucket Data Center URL you pass | `0 findings upload --to bitbucket-cloud` or `--to bitbucket-dc` with `BITBUCKET_TOKEN` set. | A Code Insights report and annotations from the scan's findings. A plain `http://` URL is refused unless the host is this machine or you pass `--allow-insecure-http`. |
 
 ## Local only
 

@@ -1,0 +1,169 @@
+{
+  "payload": {
+    "platform": "bitbucket-cloud",
+    "reportId": "0-security",
+    "report": {
+      "title": "0 security scan",
+      "details": "4 triaged findings after deduplicating by file, line and CWE.",
+      "reporter": "0",
+      "data": [
+        {
+          "title": "Findings",
+          "type": "NUMBER",
+          "value": 4
+        },
+        {
+          "title": "Critical",
+          "type": "NUMBER",
+          "value": 1
+        },
+        {
+          "title": "High",
+          "type": "NUMBER",
+          "value": 1
+        },
+        {
+          "title": "Medium",
+          "type": "NUMBER",
+          "value": 0
+        },
+        {
+          "title": "Low",
+          "type": "NUMBER",
+          "value": 2
+        }
+      ],
+      "result": "FAILED",
+      "report_type": "SECURITY"
+    },
+    "batches": [
+      [
+        {
+          "external_id": "0-ec5f363f05ef8b7202af43db",
+          "annotation_type": "VULNERABILITY",
+          "severity": "CRITICAL",
+          "path": "app/db.py",
+          "line": 12,
+          "title": "SQL injection in order lookup",
+          "summary": "[injection, CWE-89] SQL injection in order lookup",
+          "details": "Rule: injection\nCWE: CWE-89\nVerdict: verified, confidence 92%\n\nThe id query parameter reaches a SQL string.\n\nRationale: Any unauthenticated caller can read the orders table.\n\nFix: Suggested replacement:\ncur.execute(\"select * from orders where id = %s\", (order_id,))"
+        },
+        {
+          "external_id": "0-fc860ba77d92dae06a0bc6f8",
+          "annotation_type": "VULNERABILITY",
+          "severity": "HIGH",
+          "path": "web/view.js",
+          "line": 40,
+          "title": "Reflected XSS in the search view",
+          "summary": "[xss, CWE-79] Reflected XSS in the search view",
+          "details": "Rule: xss\nCWE: CWE-79\nVerdict: verified\n\nThe query is written into the page unescaped.\n\nRationale: The value is passed to innerHTML."
+        },
+        {
+          "external_id": "0-310a4a58c70ca3edc8f67fcb",
+          "annotation_type": "VULNERABILITY",
+          "severity": "LOW",
+          "path": "app/crypto.py",
+          "line": 7,
+          "title": "Weak hash for session ids",
+          "summary": "[crypto] Weak hash for session ids",
+          "details": "Rule: crypto\nVerdict: new\n\nMD5 is used for a session id."
+        },
+        {
+          "external_id": "0-b2e10a5c8357a4e8bc0f4292",
+          "annotation_type": "VULNERABILITY",
+          "severity": "LOW",
+          "title": "Secrets in repository history",
+          "summary": "[secrets] Secrets in repository history",
+          "details": "Rule: secrets\nVerdict: new\n\nA token-like string appears in a past commit."
+        }
+      ]
+    ],
+    "total": 4,
+    "emitted": 4,
+    "dropped": 0
+  },
+  "requests": [
+    {
+      "method": "PUT",
+      "url": "https://api.bitbucket.org/2.0/repositories/acme/app/commit/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/reports/0-security",
+      "body": {
+        "title": "0 security scan",
+        "details": "4 triaged findings after deduplicating by file, line and CWE.",
+        "reporter": "0",
+        "data": [
+          {
+            "title": "Findings",
+            "type": "NUMBER",
+            "value": 4
+          },
+          {
+            "title": "Critical",
+            "type": "NUMBER",
+            "value": 1
+          },
+          {
+            "title": "High",
+            "type": "NUMBER",
+            "value": 1
+          },
+          {
+            "title": "Medium",
+            "type": "NUMBER",
+            "value": 0
+          },
+          {
+            "title": "Low",
+            "type": "NUMBER",
+            "value": 2
+          }
+        ],
+        "result": "FAILED",
+        "report_type": "SECURITY"
+      }
+    },
+    {
+      "method": "POST",
+      "url": "https://api.bitbucket.org/2.0/repositories/acme/app/commit/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/reports/0-security/annotations",
+      "body": [
+        {
+          "external_id": "0-ec5f363f05ef8b7202af43db",
+          "annotation_type": "VULNERABILITY",
+          "severity": "CRITICAL",
+          "path": "app/db.py",
+          "line": 12,
+          "title": "SQL injection in order lookup",
+          "summary": "[injection, CWE-89] SQL injection in order lookup",
+          "details": "Rule: injection\nCWE: CWE-89\nVerdict: verified, confidence 92%\n\nThe id query parameter reaches a SQL string.\n\nRationale: Any unauthenticated caller can read the orders table.\n\nFix: Suggested replacement:\ncur.execute(\"select * from orders where id = %s\", (order_id,))"
+        },
+        {
+          "external_id": "0-fc860ba77d92dae06a0bc6f8",
+          "annotation_type": "VULNERABILITY",
+          "severity": "HIGH",
+          "path": "web/view.js",
+          "line": 40,
+          "title": "Reflected XSS in the search view",
+          "summary": "[xss, CWE-79] Reflected XSS in the search view",
+          "details": "Rule: xss\nCWE: CWE-79\nVerdict: verified\n\nThe query is written into the page unescaped.\n\nRationale: The value is passed to innerHTML."
+        },
+        {
+          "external_id": "0-310a4a58c70ca3edc8f67fcb",
+          "annotation_type": "VULNERABILITY",
+          "severity": "LOW",
+          "path": "app/crypto.py",
+          "line": 7,
+          "title": "Weak hash for session ids",
+          "summary": "[crypto] Weak hash for session ids",
+          "details": "Rule: crypto\nVerdict: new\n\nMD5 is used for a session id."
+        },
+        {
+          "external_id": "0-b2e10a5c8357a4e8bc0f4292",
+          "annotation_type": "VULNERABILITY",
+          "severity": "LOW",
+          "title": "Secrets in repository history",
+          "summary": "[secrets] Secrets in repository history",
+          "details": "Rule: secrets\nVerdict: new\n\nA token-like string appears in a past commit."
+        }
+      ]
+    }
+  ]
+}
