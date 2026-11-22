@@ -3,18 +3,19 @@
  * pull request annotations). The file comes from `0 scan --format sarif` or any scanner. GitHub keys each alert by its
  * fingerprint, so uploading again for a later commit updates the alerts instead of duplicating them.
  */
-import { execFile, spawn } from "node:child_process";
+import { execFile } from "node:child_process";
 import { readFileSync, statSync } from "node:fs";
 import { gzipSync } from "node:zlib";
 import { promisify } from "node:util";
 import type { Command } from "commander";
 import { looksLikeSarif } from "@0/engine/shared";
+import { runGh } from "../host/gh.js";
+import { selectHost } from "../host/index.js";
 import { finishWithError, UsageError } from "./output.js";
 
 const exec = promisify(execFile);
 const MAX_SARIF_BYTES = 20 * 1024 * 1024;
 const MAX_GZIP_BYTES = 10 * 1024 * 1024;
-export const REPO =/^(?!\.{1,2}\/)[A-Za-z0-9_.-]{1,100}\/(?!\.{1,2}$)[A-Za-z0-9_.-]{1,100}$/;
 const SHA = /^[0-9a-f]{40}$/;
 const REF = /^refs\/(heads|tags|pull)\/[A-Za-z0-9._\/-]{1,200}$/;
 
@@ -36,15 +37,7 @@ const defaults: UploadDeps = {
     if (!stat.isFile() || stat.size > MAX_SARIF_BYTES) throw new UsageError("The SARIF file must be a regular file of at most 20 MB.");
     return readFileSync(path, "utf8");
   },
-  gh: (args, input) => new Promise((resolve, reject) => {
-    const child = spawn("gh", args, { stdio: ["pipe", "pipe", "pipe"] });
-    let stdout = ""; let stderr = "";
-    child.stdout.on("data", chunk => { stdout += String(chunk); });
-    child.stderr.on("data", chunk => { stderr += String(chunk); });
-    child.on("error", reject);
-    child.on("close", code => code === 0 ? resolve(stdout) : reject(new Error((stderr || stdout).trim().split("\n")[0] || `gh exited with ${code}`)));
-    child.stdin.end(input ?? "");
-  }),
+  gh: runGh,
   git: async args => (await exec("git", args)).stdout,
 };
 
@@ -61,23 +54,23 @@ export async function runUpload(file: string, options: UploadOptions, deps: Uplo
   const text = deps.readText(file);
   if (!looksLikeSarif(text)) throw new UsageError("This is not a SARIF 2.1.0 file. Make one with `0 scan --format sarif -o scan.sarif`.");
 
-  const repo = options.repo ?? (await deps.gh(["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"]).catch(() => "")).trim();
-  if (!REPO.test(repo)) throw new UsageError("Name the repository with --repo owner/name (or run this inside its clone).");
+  const host = selectHost({ run: deps.gh });
+  const repo = options.repo ?? await host.currentRepo();
+  if (!host.isValidRepo(repo)) throw new UsageError("Name the repository with --repo owner/name (or run this inside its clone).");
   const commit = (options.commit || process.env.GITHUB_SHA || (await deps.git(["rev-parse", "HEAD"]).catch(() => ""))).trim();
   if (!SHA.test(commit)) throw new UsageError("Name the commit with --commit <40-character sha> (or run this inside the clone).");
   let ref = options.ref || process.env.GITHUB_REF || undefined;
   if (!ref) { const branch = (await deps.git(["rev-parse", "--abbrev-ref", "HEAD"]).catch(() => "")).trim(); ref = branch && branch !== "HEAD" ? `refs/heads/${branch}` : undefined; }
   if (!ref || !REF.test(ref)) throw new UsageError("Name the ref with --ref refs/heads/<branch> (or refs/pull/<n>/merge).");
 
-  const body = JSON.stringify({ commit_sha: commit, ref, sarif: packSarif(text), ...(options.tool ? { tool_name: options.tool } : {}) });
-  const response = JSON.parse(await deps.gh(["api", "--method", "POST", `repos/${repo}/code-scanning/sarifs`, "--input", "-"], body)) as { id?: string };
+  const response = await host.uploadSarif(repo, { commit, ref, sarif: packSarif(text), ...(options.tool ? { tool: options.tool } : {}) });
   if (!response.id) throw new Error("GitHub accepted the upload but returned no id.");
   deps.err(`uploaded to ${repo} at ${commit.slice(0, 7)} (${ref})`);
   if (!options.wait) return { id: response.id, status: "pending" };
 
   for (let attempt = 0; attempt < 30; attempt++) {
     await deps.sleep(2000);
-    const state = JSON.parse(await deps.gh(["api", `repos/${repo}/code-scanning/sarifs/${encodeURIComponent(response.id)}`])) as { processing_status?: string; errors?: string[] };
+    const state = await host.sarifStatus(repo, response.id);
     if (state.processing_status === "complete") return { id: response.id, status: "complete" };
     if (state.processing_status === "failed") throw new Error(`GitHub could not process the upload: ${(state.errors ?? []).join("; ").slice(0, 300) || "no reason given"}`);
   }

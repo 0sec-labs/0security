@@ -7,18 +7,21 @@
  * sentence, status). Evidence, requests, responses and proof-of-concept bodies can quote code or secrets, so they are
  * never sent. All report text is neutralised so it cannot mention people, reference other issues or inject markup.
  */
-import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import type { Command } from "commander";
 import { attackerImpactSentence } from "@0/engine/shared";
 import { FindingsService, listOsecRunDatabasePaths, resolveOsecDbPath } from "@0/engine/storage";
 import { shortFindingId } from "../finding-id.js";
 import { finishWithError, UsageError } from "./output.js";
-import { REPO } from "./findings-upload.js";
+import { GitHubIssueTracker } from "../host/github.js";
+import { selectHost, type IssueDraft, type IssueTracker, type TrackerIssue } from "../host/index.js";
+import { runGh } from "../host/gh.js";
+
+export { GitHubIssueTracker };
+export type { IssueDraft, IssueTracker, TrackerIssue };
 
 const SEVERITIES = ["critical", "high", "medium", "low", "info"] as const;
 type Severity = typeof SEVERITIES[number];
-const MARKER = /<!-- 0-finding:([A-Za-z0-9:_.-]{1,80}) -->/;
 const SAFE_KEY = /^[A-Za-z0-9:_.-]{1,80}$/;
 const CLOSING_TRIAGE = new Set(["accepted", "suppressed"]);
 const CLOSING_STATUS = new Set(["fixed", "false-positive"]);
@@ -38,22 +41,6 @@ export interface TrackedFinding {
   closedBecause?: "suppressed" | "accepted" | "fixed" | "false-positive";
   /** The suppression was recorded as a false positive (its triage note says so). */
   falsePositive?: boolean;
-}
-
-export interface TrackerIssue { number: number; key: string; title: string; body: string; open: boolean; labels: string[] }
-export interface IssueDraft { title: string; body: string; labels: string[] }
-
-/** What the command needs from an issue tracker. Another tracker implements this and nothing else changes. */
-export interface IssueTracker {
-  /** Every issue this command manages (those carrying a finding marker). */
-  list(): Promise<TrackerIssue[]>;
-  /** Make sure the labels exist where possible; returns the ones that can be applied, and warnings for the rest. */
-  ensureLabels(labels: string[]): Promise<{ usable: string[]; warnings: string[] }>;
-  create(draft: IssueDraft): Promise<number>;
-  update(issue: TrackerIssue, draft: IssueDraft): Promise<void>;
-  /** Close the issue; `draft` is the closed-state text, so the body's status table stops saying open. */
-  close(issue: TrackerIssue, comment: string, completed: boolean, draft?: IssueDraft): Promise<void>;
-  reopen(issue: TrackerIssue, comment: string): Promise<void>;
 }
 
 /** The key for the marker: the fingerprint itself when it is plainly safe, otherwise a hash of it. */
@@ -83,7 +70,6 @@ function safePath(path: string | undefined): string | undefined {
   return path.replace(/[^A-Za-z0-9._\-/+]/g, "_").slice(0, 300);
 }
 
-const COLOURS: Record<string, string> = { security: "d73a4a", critical: "b60205", high: "d93f0b", medium: "fbca04", low: "0e8a16", info: "c5def5" };
 const normalSeverity = (severity: string): Severity => (SEVERITIES.includes(severity as Severity) ? severity as Severity : "info");
 export function labelsFor(severity: string): string[] { return ["security", `severity:${normalSeverity(severity)}`]; }
 
@@ -149,76 +135,6 @@ export interface IssuesDeps {
 
 const errorLine = (error: unknown): string => (error instanceof Error ? error.message : String(error)).split("\n")[0]!.slice(0, 160);
 
-/** GitHub Issues through the `gh` CLI. */
-export class GitHubIssueTracker implements IssueTracker {
-  constructor(private readonly repo: string, private readonly gh: IssuesDeps["gh"]) {}
-
-  async list(): Promise<TrackerIssue[]> {
-    // Only issues labelled `security` are managed: adding that label needs triage rights, so a stranger cannot
-    // point this command at an issue just by pasting a marker. Pull requests share the issues API; skip them.
-    const jq = '.[] | select(.pull_request | not) | {number, title, body: (.body // ""), open: (.state == "open"), labels: [.labels[].name]}';
-    const text = await this.gh(["api", "--paginate", `repos/${this.repo}/issues?state=all&labels=security&per_page=100`, "--jq", jq]);
-    const issues: TrackerIssue[] = [];
-    for (const line of text.split("\n")) {
-      if (!line.trim()) continue;
-      const row = JSON.parse(line) as Omit<TrackerIssue, "key">;
-      const key = MARKER.exec(row.body)?.[1];
-      if (key) issues.push({ ...row, key });
-    }
-    return issues;
-  }
-
-  async ensureLabels(labels: string[]): Promise<{ usable: string[]; warnings: string[] }> {
-    let existing: Set<string>;
-    try { existing = new Set((await this.gh(["api", "--paginate", `repos/${this.repo}/labels?per_page=100`, "--jq", ".[].name"])).split("\n").map(line => line.trim()).filter(Boolean)); }
-    catch (error) { return { usable: [], warnings: [`could not read the repository's labels (${errorLine(error)}); changing issues without labels`] }; }
-    const usable: string[] = []; const warnings: string[] = [];
-    for (const name of labels) {
-      if (existing.has(name)) { usable.push(name); continue; }
-      const colour = COLOURS[name.startsWith("severity:") ? name.slice(9) : name] ?? "ededed";
-      try {
-        await this.gh(["api", "--method", "POST", `repos/${this.repo}/labels`, "--input", "-"], JSON.stringify({ name, color: colour, description: name === "security" ? "Mirrored from 0 findings" : "Severity of a mirrored 0 finding" }));
-        usable.push(name);
-      } catch (error) { warnings.push(`could not create label '${name}' (${errorLine(error)}); skipping it`); }
-    }
-    return { usable, warnings };
-  }
-
-  async create(draft: IssueDraft): Promise<number> {
-    const created = JSON.parse(await this.gh(["api", "--method", "POST", `repos/${this.repo}/issues`, "--input", "-"], JSON.stringify(draft))) as { number?: number };
-    if (!created.number) throw new Error("GitHub created the issue but returned no number.");
-    return created.number;
-  }
-
-  async update(issue: TrackerIssue, draft: IssueDraft): Promise<void> {
-    await this.patch(issue.number, { title: draft.title, body: draft.body });
-    await this.syncLabels(issue, draft.labels);
-  }
-
-  async close(issue: TrackerIssue, comment: string, completed: boolean, draft?: IssueDraft): Promise<void> {
-    await this.comment(issue.number, comment);
-    await this.patch(issue.number, { state: "closed", state_reason: completed ? "completed" : "not_planned", ...(draft ? { body: draft.body } : {}) });
-  }
-
-  async reopen(issue: TrackerIssue, comment: string): Promise<void> {
-    await this.patch(issue.number, { state: "open" });
-    await this.comment(issue.number, comment);
-  }
-
-  private patch(number: number, body: Record<string, string>): Promise<string> {
-    return this.gh(["api", "--method", "PATCH", `repos/${this.repo}/issues/${number}`, "--input", "-"], JSON.stringify(body));
-  }
-  private comment(number: number, body: string): Promise<string> {
-    return this.gh(["api", "--method", "POST", `repos/${this.repo}/issues/${number}/comments`, "--input", "-"], JSON.stringify({ body }));
-  }
-  /** Add the labels the issue lacks and drop an outdated severity label, leaving labels people added alone. */
-  private async syncLabels(issue: TrackerIssue, wanted: string[]): Promise<void> {
-    const missing = wanted.filter(label => !issue.labels.includes(label));
-    if (missing.length) await this.gh(["api", "--method", "POST", `repos/${this.repo}/issues/${issue.number}/labels`, "--input", "-"], JSON.stringify({ labels: missing }));
-    for (const label of issue.labels) if (label.startsWith("severity:") && !wanted.includes(label)) await this.gh(["api", "--method", "DELETE", `repos/${this.repo}/issues/${issue.number}/labels/${encodeURIComponent(label)}`]);
-  }
-}
-
 async function loadTrackedFindings(dbPath: string | undefined): Promise<TrackedFinding[]> {
   const service = new FindingsService({ sharedDbPath: resolveOsecDbPath(dbPath), ...(dbPath ? { includeRuns: false } : { listPaths: listOsecRunDatabasePaths }) });
   const merged = await service.list(5000);
@@ -240,23 +156,13 @@ async function loadTrackedFindings(dbPath: string | undefined): Promise<TrackedF
   return out;
 }
 
-const runGh: IssuesDeps["gh"] = (args, input) => new Promise((resolve, reject) => {
-  const child = spawn("gh", args, { stdio: ["pipe", "pipe", "pipe"] });
-  let stdout = ""; let stderr = "";
-  child.stdout.on("data", chunk => { stdout += String(chunk); });
-  child.stderr.on("data", chunk => { stderr += String(chunk); });
-  child.on("error", reject);
-  child.on("close", code => code === 0 ? resolve(stdout) : reject(new Error((stderr || stdout).trim().split("\n")[0] || `gh exited with ${code}`)));
-  child.stdin.end(input ?? "");
-});
-
 const defaults: IssuesDeps = {
   out: text => process.stdout.write(`${text}\n`),
   err: text => process.stderr.write(`${text}\n`),
   sleep: ms => new Promise(done => setTimeout(done, ms)),
   gh: runGh,
   loadFindings: loadTrackedFindings,
-  makeTracker: (repo, gh) => new GitHubIssueTracker(repo, gh),
+  makeTracker: (repo, gh) => selectHost({ run: gh }).issues(repo),
 };
 
 export interface IssuesOptions { repo?: string; minSeverity: string; max: string; delay: string; dryRun?: boolean; dbPath?: string; format?: string }
@@ -270,8 +176,9 @@ export async function runIssues(options: IssuesOptions, deps: IssuesDeps = defau
   const max = Number(options.max); const delay = Number(options.delay);
   if (!Number.isInteger(max) || max < 1 || max > 500) throw new UsageError("--max must be a whole number from 1 to 500.");
   if (!Number.isFinite(delay) || delay < 0 || delay > 60000) throw new UsageError("--delay is milliseconds, from 0 to 60000.");
-  const repo = options.repo ?? (await deps.gh(["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"]).catch(() => "")).trim();
-  if (!REPO.test(repo)) throw new UsageError("Name the repository with --repo owner/name (or run this inside its clone).");
+  const host = selectHost({ run: deps.gh });
+  const repo = options.repo ?? await host.currentRepo();
+  if (!host.isValidRepo(repo)) throw new UsageError("Name the repository with --repo owner/name (or run this inside its clone).");
 
   const tracker = deps.makeTracker(repo, deps.gh);
   const findings = await deps.loadFindings(options.dbPath);

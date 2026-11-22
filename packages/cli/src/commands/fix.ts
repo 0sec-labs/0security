@@ -17,6 +17,7 @@ import { osecDB, resolveOsecDbPath } from "@0/engine/storage";
 import { consoleTransportOptions, type ConsoleClient, type ConsoleTransportOptions } from "../console-client.js";
 import { connect, DEFAULT_SCAN_MODEL, defaultScanDeps, waitForThread, type ScanDeps } from "./scan.js";
 import { resolveFindingId, shortFindingId } from "../finding-id.js";
+import { selectHost } from "../host/index.js";
 import { finishWithError, UsageError } from "./output.js";
 import { asJson, finishedThread, usageLine } from "./thread-output.js";
 
@@ -200,20 +201,21 @@ export async function runFix(id: string, options: FixOptions, deps: FixDeps): Pr
     if (!options.pr) { deps.err(`committed on ${branch}; not pushed (--no-pr).`); return outcome; }
 
     // The branch is ours and only ours: never the base, always with a lease so a person's later push is not overwritten.
-    await deps.git(tree, ["push", "--force-with-lease", "--set-upstream", "origin", `${branch}:${branch}`]);
+    const host = selectHost({ run: args => deps.gh(tree, args), git: args => deps.git(tree, args) });
+    await host.pushBranch(branch);
     const bodyFile = join(temp, "body.md");
     deps.writeFile(bodyFile, pullRequestBody(finding, thread.reply, checks));
     const draft = !verified;
-    const existing = JSON.parse((await deps.gh(tree, ["pr", "list", "--head", branch, "--state", "open", "--json", "number,url,isDraft"])) || "[]") as Array<{ number: number; url: string; isDraft: boolean }>;
+    const existing = await host.findOpenPullRequest(branch);
     let url: string; let created = false;
-    if (existing[0]) {
-      url = existing[0].url;
-      await deps.gh(tree, ["pr", "edit", String(existing[0].number), "--body-file", bodyFile]);
-      if (existing[0].isDraft && !draft) await deps.gh(tree, ["pr", "ready", String(existing[0].number)]);
-      if (!existing[0].isDraft && draft) await deps.gh(tree, ["pr", "ready", "--undo", String(existing[0].number)]);
+    if (existing) {
+      url = existing.url;
+      await host.updatePullRequestBody(existing.number, bodyFile);
+      if (existing.isDraft && !draft) await host.setPullRequestReady(existing.number, true);
+      if (!existing.isDraft && draft) await host.setPullRequestReady(existing.number, false);
     } else {
       created = true;
-      url = (await deps.gh(tree, ["pr", "create", "--base", base.name, "--head", branch, "--title", `fix: ${finding.title.slice(0, 120)}`, "--body-file", bodyFile, ...(draft ? ["--draft"] : [])])).trim().split("\n").pop() ?? "";
+      url = await host.createPullRequest({ base: base.name, head: branch, title: `fix: ${finding.title.slice(0, 120)}`, bodyFile, draft });
     }
     return { ...outcome, pullRequest: { url, created, draft } };
   } finally {
