@@ -6,10 +6,11 @@
 import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { relative, resolve, sep } from "node:path";
 import type { Command } from "commander";
-import { checkBomAgainstOsv, EXTERNAL_GENERATORS, generateSbom, GeneratorNotInstalledError, IMAGE_GENERATORS, parseImageSource, LOCKFILES, modelScanToSarif, runExternalGenerator, scanModelPath, toSpdx, type Advisory, type ExternalGenerator, type ImageSource, type ModelFileResult } from "@0/engine";
+import { EXTERNAL_GENERATORS, generateSbom, GeneratorNotInstalledError, IMAGE_GENERATORS, parseImageSource, LOCKFILES, modelScanToSarif, runExternalGenerator, scanModelPath, toSpdx, type ExternalGenerator, type ImageSource, type ModelFileResult } from "@0/engine";
 import { VERSION } from "@0/engine/shared";
 import { finishWithError, UsageError } from "./output.js";
 import { registerSbomLicenses } from "./sbom-licenses.js";
+import { runCheckReport, type CheckOptions } from "./sbom-check.js";
 
 const MAX_SBOM_BYTES = 50 * 1024 * 1024;
 
@@ -86,24 +87,8 @@ export function runGenerate(folder: string, options: GenerateOptions, deps: Sbom
   deps.err(`${result.bom.components.filter(component => component.type === "library").length} components from ${result.lockfiles.length} lockfile${result.lockfiles.length === 1 ? "" : "s"}${result.lockfiles.length ? `: ${result.lockfiles.map(lock => `${lock.path} (${lock.label}, ${lock.components})`).join(", ")}` : ""}${options.ai ? `; ${aiCount} AI components (models, datasets, hosted model ids, MCP servers)` : ""}`);
 }
 
-export async function runCheck(file: string, options: { format?: string }, deps: SbomDeps): Promise<number> {
-  let bom: unknown;
-  try { bom = JSON.parse(deps.read(resolve(file))); } catch (error) { if (error instanceof UsageError) throw error; throw new UsageError(`'${file}' is not a JSON SBOM.`); }
-  const result = await checkBomAgainstOsv(bom, deps.fetch ? { fetch: deps.fetch } : {}).catch(error => { throw new Error(`Could not check against OSV: ${error instanceof Error ? error.message : String(error)}`); });
-  if (options.format === "json") deps.out(`${JSON.stringify(result, null, 2)}\n`);
-  else if (!result.advisories.length) deps.out(`No known advisories for ${result.checked} components (OSV).\n`);
-  else {
-    const byComponent = new Map<string, Advisory[]>();
-    for (const advisory of result.advisories) byComponent.set(advisory.purl, [...(byComponent.get(advisory.purl) ?? []), advisory]);
-    const lines = [`${result.advisories.length} advisories affect ${byComponent.size} of ${result.checked} components (OSV):`, ""];
-    for (const [purl, list] of byComponent) {
-      lines.push(purl);
-      for (const item of list) lines.push(`  ${item.id}${item.aliases.length ? ` (${item.aliases.join(", ")})` : ""}${item.severity ? `  ${item.severity}` : ""}${item.fixed.length ? `  fixed in ${item.fixed.join(", ")}` : ""}${item.summary ? `\n    ${item.summary}` : ""}`);
-    }
-    deps.out(`${lines.join("\n")}\n`);
-    if (result.withoutDetails) deps.err(`${result.withoutDetails} advisories are listed by id only (details unavailable or over the limit).`);
-  }
-  return result.advisories.length ? 1 : 0;
+export async function runCheck(file: string, options: CheckOptions, deps: SbomDeps): Promise<number> {
+  return runCheckReport(file, options, deps);
 }
 
 const VERDICT_LABEL: Record<ModelFileResult["verdict"], string> = {
@@ -172,9 +157,11 @@ export function registerSbomCommand(program: Command, deps: SbomDeps = defaults)
   sbom.command("check")
     .description("Look every component of an SBOM up in the public OSV database and list the advisories")
     .argument("<file>", "CycloneDX SBOM (JSON), for example from `0 sbom generate`")
-    .option("--format <format>", "Output: text or json", "text")
-    .addHelpText("after", "\nThe only network use is the lookup at https://api.osv.dev (package URLs go out; nothing else does).\nExit codes: 0 no advisories, 1 advisories found, 2 usage error.")
-    .action(async (file: string, options: { format?: string }) => {
+    .option("--format <format>", "Output: text, json or sarif (SARIF imports with `0 findings import`)", "text")
+    .option("-o, --output <file>", "Write the result to a file instead of stdout")
+    .option("--outdated", "Also list components with a newer version (looks packages up at https://api.deps.dev; information only, not a vulnerability)")
+    .addHelpText("after", "\nEach advisory shows its severity (unknown when the record has none) and the lowest version that fixes it. OSV malicious-package records (ids starting MAL-) are shown as critical.\nThe network use is the lookup at https://api.osv.dev (package URLs go out; nothing else does). --outdated also sends package names to https://api.deps.dev.\nExit codes: 0 no advisories, 1 advisories found (including any malicious package), 2 usage error. Newer versions never change the exit code.")
+    .action(async (file: string, options: CheckOptions) => {
       try { const code = await runCheck(file, options, deps); if (code) process.exitCode = code; }
       catch (error) { finishWithError(error, { err: deps.err }, options.format === "json"); }
     });

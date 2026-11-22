@@ -40,13 +40,13 @@ describe("0 sbom generate --ai", () => {
 
 describe("0 sbom check", () => {
   const bom = JSON.stringify({ components: [{ purl: "pkg:npm/lodash@4.17.20" }] });
-  const osv = (vulns: unknown[]) => (async (url: string | URL | Request) => String(url).endsWith("querybatch") ? new Response(JSON.stringify({ results: [{ vulns }] })) : new Response(JSON.stringify({ id: "GHSA-1", aliases: ["CVE-1"], summary: "Bad", database_specific: { severity: "HIGH" }, affected: [{ ranges: [{ events: [{ fixed: "4.17.21" }] }] }] }))) as typeof fetch;
+  const osv = (vulns: unknown[]) => (async (url: string | URL | Request) => String(url).endsWith("querybatch") ? new Response(JSON.stringify({ results: [{ vulns }] })) : new Response(JSON.stringify({ id: "GHSA-1", aliases: ["CVE-1"], summary: "Bad", database_specific: { severity: "HIGH" }, affected: [{ ranges: [{ type: "SEMVER", events: [{ fixed: "4.17.21" }] }] }] }))) as typeof fetch;
   it("lists advisories per component and returns 1", async () => {
     const io = deps({ read: () => bom, fetch: osv([{ id: "GHSA-1" }]) });
     expect(await runCheck("sbom.json", {}, io.deps)).toBe(1);
     const text = io.out.join("");
     expect(text).toContain("pkg:npm/lodash@4.17.20");
-    expect(text).toContain("GHSA-1 (CVE-1)  HIGH  fixed in 4.17.21");
+    expect(text).toContain("GHSA-1 (CVE-1)  high  Fixed in 4.17.21.");
   });
   it("returns 0 for a clean SBOM, and prints JSON on request", async () => {
     const clean = deps({ read: () => bom, fetch: osv([]) });
@@ -55,6 +55,25 @@ describe("0 sbom check", () => {
     const json = deps({ read: () => bom, fetch: osv([{ id: "GHSA-1" }]) });
     await runCheck("sbom.json", { format: "json" }, json.deps);
     expect(JSON.parse(json.out.join("")).advisories[0].id).toBe("GHSA-1");
+  });
+  it("writes SARIF located at the lockfile the SBOM names, to a file, and still returns 1", async () => {
+    const dir = project({ "package-lock.json": "{}", "sbom.json": "{}" });
+    const withSource = JSON.stringify({ components: [{ purl: "pkg:npm/lodash@4.17.20", properties: [{ name: "0:source", value: "package-lock.json" }] }] });
+    const io = deps({ read: () => withSource, fetch: osv([{ id: "GHSA-1" }]) });
+    expect(await runCheck(join(dir, "sbom.json"), { format: "sarif", output: join(dir, "x.sarif") }, io.deps)).toBe(1);
+    const sarif = JSON.parse(io.written[join(dir, "x.sarif")]!);
+    expect(sarif.runs[0].results[0].ruleId).toBe("GHSA-1");
+    expect(sarif.runs[0].results[0].message.text).toContain("Fixed in 4.17.21.");
+    expect(sarif.runs[0].results[0].locations[0].physicalLocation.artifactLocation.uri).toMatch(/package-lock\.json$/);
+    expect(io.out).toEqual([]);
+  });
+  it("falls back to the SBOM file when the lockfile is not on disk", async () => {
+    const io = deps({ read: () => JSON.stringify({ components: [{ purl: "pkg:npm/lodash@4.17.20", properties: [{ name: "0:source", value: "gone/package-lock.json" }] }] }), fetch: osv([{ id: "GHSA-1" }]) });
+    await runCheck("sbom.json", { format: "sarif" }, io.deps);
+    expect(JSON.parse(io.out.join("")).runs[0].results[0].locations[0].physicalLocation.artifactLocation.uri).toMatch(/sbom\.json$/);
+  });
+  it("rejects an unknown format", async () => {
+    await expect(runCheck("x", { format: "xml" }, deps().deps)).rejects.toThrow("--format must be");
   });
   it("refuses a file that is not an SBOM and says when OSV could not be reached", async () => {
     await expect(runCheck("x", {}, deps({ read: () => "not json" }).deps)).rejects.toThrow("not a JSON SBOM");

@@ -4,15 +4,25 @@ import { assertEgressAllowed } from "../policy/enterprise.js";
  * Check an SBOM's components against the public OSV database (https://osv.dev). The SBOM and the responses are untrusted
  * text: package URLs are validated and bounded, and every string that comes back is cleaned and truncated before use.
  */
+import { fixesFor, severityOf, type AdvisorySeverity } from "./advisory-facts.js";
+export type { AdvisorySeverity } from "./advisory-facts.js";
+
 export interface Advisory {
   /** The component's package URL. */
   purl: string;
   id: string;
   aliases: string[];
   summary: string;
-  severity?: string;
-  /** Versions that fix it, when the advisory says. */
+  /** From the database's own label or a CVSS 3 vector; `unknown` when the record has neither. A malicious package is always critical. */
+  severity: AdvisorySeverity;
+  /** CVSS 3 base score, when the record has a vector. */
+  cvss?: number;
+  /** True for an OSV malicious-package record (id starts with `MAL-`): the package itself is hostile, not merely buggy. */
+  malicious: boolean;
+  /** Every version that fixes it for this package, lowest first. */
   fixed: string[];
+  /** The lowest fixing version above the installed one. Absent when the record names none. */
+  fixedVersion?: string;
 }
 export interface OsvOptions {
   fetch?: typeof fetch;
@@ -67,7 +77,7 @@ export async function checkBomAgainstOsv(bom: unknown, options: OsvOptions = {})
 
   const ids = [...hits.keys()].sort();
   const detailIds = ids.slice(0, options.maxDetails ?? MAX_DETAILS);
-  const details = new Map<string, { aliases: string[]; summary: string; severity?: string; fixed: string[] }>();
+  const details = new Map<string, { aliases: string[]; summary: string; severity: AdvisorySeverity; cvss?: number; affected: unknown[] }>();
   let next = 0;
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, detailIds.length) }, async () => {
     while (next < detailIds.length) {
@@ -75,18 +85,11 @@ export async function checkBomAgainstOsv(bom: unknown, options: OsvOptions = {})
       try {
         const record = await get(fetcher, `${base}/v1/vulns/${encodeURIComponent(id)}`);
         if (!isObject(record)) continue;
-        const database = isObject(record.database_specific) ? record.database_specific : {};
-        const fixed = new Set<string>();
-        for (const affected of Array.isArray(record.affected) ? record.affected : []) {
-          for (const range of isObject(affected) && Array.isArray(affected.ranges) ? affected.ranges : []) {
-            for (const event of isObject(range) && Array.isArray(range.events) ? range.events : []) if (isObject(event) && typeof event.fixed === "string") fixed.add(clean(event.fixed, 60));
-          }
-        }
         details.set(id, {
           aliases: (Array.isArray(record.aliases) ? record.aliases : []).map(alias => clean(alias, 80)).filter(Boolean).slice(0, 8),
           summary: clean(record.summary, 300) || clean(record.details, 300),
-          ...(clean(database.severity, 20) ? { severity: clean(database.severity, 20) } : {}),
-          fixed: [...fixed].slice(0, 5),
+          ...severityOf(record),
+          affected: Array.isArray(record.affected) ? record.affected.slice(0, 500) : [],
         });
       } catch { /* an advisory whose details cannot be read is still reported by id */ }
     }
@@ -94,8 +97,11 @@ export async function checkBomAgainstOsv(bom: unknown, options: OsvOptions = {})
 
   const advisories: Advisory[] = [];
   for (const id of ids) {
-    const detail = details.get(id) ?? { aliases: [], summary: "", fixed: [] };
-    for (const purl of [...hits.get(id)!].sort()) advisories.push({ purl, id, aliases: detail.aliases, summary: detail.summary, ...(detail.severity ? { severity: detail.severity } : {}), fixed: detail.fixed });
+    const detail = details.get(id) ?? { aliases: [], summary: "", severity: "unknown" as AdvisorySeverity, affected: [] };
+    const malicious = id.startsWith("MAL-");
+    for (const purl of [...hits.get(id)!].sort()) {
+      advisories.push({ purl, id, aliases: detail.aliases, summary: detail.summary, severity: malicious ? "critical" : detail.severity, ...(detail.cvss !== undefined ? { cvss: detail.cvss } : {}), malicious, ...fixesFor(detail.affected, purl) });
+    }
   }
   return { checked: purls.length, advisories, withoutDetails: ids.length - detailIds.length + detailIds.filter(id => !details.has(id)).length };
 }

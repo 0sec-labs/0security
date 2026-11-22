@@ -20,7 +20,7 @@ export interface Bom {
   dependencies?: Array<{ ref: string; dependsOn: string[] }>;
 }
 export type LicenseChoice = { license: { id: string } } | { license: { name: string } } | { expression: string };
-export interface LibraryComponent { type: "library"; "bom-ref": string; name: string; version: string; purl: string; scope?: "excluded"; hashes?: Hash[]; licenses?: LicenseChoice[] }
+export interface LibraryComponent { type: "library"; "bom-ref": string; name: string; version: string; purl: string; scope?: "excluded"; hashes?: Hash[]; licenses?: LicenseChoice[]; properties?: Array<{ name: string; value: string }> }
 
 /**
  * How one stated license is written: a valid SPDX id as `id`, an SPDX expression (valid ids joined by AND, OR, WITH, with
@@ -111,19 +111,20 @@ function mergeFacts(into: Component, from: Component): void {
 export function generateSbom(folder: string, options: { name?: string; toolVersion: string; now?: Date; ai?: boolean }): SbomResult {
   const locks = findLockfiles(folder);
   // A pinned requirements.txt next to a lock that already covers the same ecosystem adds noise, not facts.
-  const byPurl = new Map<string, { component: Component; purl: string }>();
+  const byPurl = new Map<string, { component: Component; purl: string; source: string }>();
   const refs = new Map<string, string>();  // "ecosystem:name@version" -> purl, to turn a lockfile's edges into bom-refs
   const summary: SbomResult["lockfiles"] = [];
   for (const lock of locks) {
     let source: string;
     try { source = readFileSync(lock.path, "utf8"); } catch { continue; }
     const components = lock.parse(source);
-    summary.push({ path: relative(folder, lock.path) || lock.path, label: lock.label, components: components.length });
+    const lockPath = relative(folder, lock.path) || lock.path;
+    summary.push({ path: lockPath, label: lock.label, components: components.length });
     for (const component of components) {
       const purl = packageUrl(component);
       const existing = byPurl.get(purl);
       // A component is development-only only if every lockfile that lists it says so.
-      if (!existing) byPurl.set(purl, { component: { ...component, ...(component.dependsOn ? { dependsOn: [...component.dependsOn] } : {}) }, purl });
+      if (!existing) byPurl.set(purl, { component: { ...component, ...(component.dependsOn ? { dependsOn: [...component.dependsOn] } : {}) }, purl, source: lockPath.split("\\").join("/") });
       else {
         if (existing.component.dev && !component.dev) delete existing.component.dev;
         mergeFacts(existing.component, component);
@@ -142,11 +143,12 @@ export function generateSbom(folder: string, options: { name?: string; toolVersi
       tools: { components: [{ type: "application", author: "0sec-labs", name: "0", version: options.toolVersion }] },
       component: { type: "application", name: options.name ?? (folder.split(/[\\/]/).filter(Boolean).pop() ?? "application") },
     },
-    components: [...sorted.map(({ component, purl }): LibraryComponent => ({
+    components: [...sorted.map(({ component, purl, source }): LibraryComponent => ({
       type: "library", "bom-ref": purl, name: component.name, version: component.version, purl,
       ...(component.dev ? { scope: "excluded" as const } : {}),
       ...(component.hashes?.length ? { hashes: [...component.hashes].sort((a, b) => (a.alg < b.alg ? -1 : 1)) } : {}),
       ...(component.licenses?.length ? { licenses: licenseChoices(component.licenses) } : {}),
+      properties: [{ name: "0:source", value: source }],
     })), ...ai.components],
     ...(ai.services.length ? { services: ai.services } : {}),
   };

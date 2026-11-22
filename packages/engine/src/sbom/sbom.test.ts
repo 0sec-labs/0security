@@ -121,7 +121,7 @@ describe("checkBomAgainstOsv", () => {
       const queries = JSON.parse(String(init?.body)).queries as Array<{ package: { purl: string } }>;
       return new Response(JSON.stringify({ results: queries.map(query => query.package.purl.includes("lodash") ? { vulns: [{ id: "GHSA-1", modified: "x" }, { id: "GHSA-2" }] } : {}) }));
     }
-    if (href.endsWith("/GHSA-1")) return new Response(JSON.stringify({ id: "GHSA-1", aliases: ["CVE-2021-23337"], summary: "Command injection in lodash\u0007", database_specific: { severity: "HIGH" }, affected: [{ ranges: [{ events: [{ introduced: "0" }, { fixed: "4.17.21" }] }] }] }));
+    if (href.endsWith("/GHSA-1")) return new Response(JSON.stringify({ id: "GHSA-1", aliases: ["CVE-2021-23337"], summary: "Command injection in lodash\u0007", database_specific: { severity: "HIGH" }, affected: [{ ranges: [{ type: "SEMVER", events: [{ introduced: "0" }, { fixed: "4.17.21" }] }] }] }));
     return new Response("nope", { status: 500 });
   }) as typeof fetch;
   it("asks once for the valid package URLs, then reads each advisory", async () => {
@@ -130,8 +130,8 @@ describe("checkBomAgainstOsv", () => {
     expect(result.checked).toBe(2);
     expect(calls.filter(call => call.includes("querybatch"))).toHaveLength(1);
     expect(result.advisories).toEqual([
-      { purl: "pkg:npm/lodash@4.17.20", id: "GHSA-1", aliases: ["CVE-2021-23337"], summary: "Command injection in lodash", severity: "HIGH", fixed: ["4.17.21"] },
-      { purl: "pkg:npm/lodash@4.17.20", id: "GHSA-2", aliases: [], summary: "", fixed: [] },
+      { purl: "pkg:npm/lodash@4.17.20", id: "GHSA-1", aliases: ["CVE-2021-23337"], summary: "Command injection in lodash", severity: "high", malicious: false, fixed: ["4.17.21"], fixedVersion: "4.17.21" },
+      { purl: "pkg:npm/lodash@4.17.20", id: "GHSA-2", aliases: [], summary: "", severity: "unknown", malicious: false, fixed: [] },
     ]);
     expect(result.withoutDetails).toBe(1);
   });
