@@ -118,6 +118,18 @@ describe("0 findings upload --to bitbucket-*", () => {
     await expect(runBitbucketUpload("scan.json", { wait: false, to: "bitbucket-dc", url: "https://b.example.com" }, value)).rejects.toThrow("--repo");
   });
 
+  it("refuses to send the token over plaintext HTTP unless told to, and allows loopback", async () => {
+    const calls: string[] = [];
+    const ok: FetchLike = async url => { calls.push(url); return { ok: true, status: 200, text: async () => "" }; };
+    const { value } = deps({ BITBUCKET_TOKEN: "tok" }, ok);
+    const base = { wait: false, to: "bitbucket-dc", repo: "PRJ/app" };
+    await expect(runBitbucketUpload("scan.json", { ...base, url: "http://bitbucket.example.com" }, value)).rejects.toThrow("plaintext HTTP");
+    expect(calls).toHaveLength(0);
+    await expect(runBitbucketUpload("scan.json", { ...base, url: "http://bitbucket.example.com", allowInsecureHttp: true }, value)).resolves.toMatchObject({ published: true });
+    await expect(runBitbucketUpload("scan.json", { ...base, url: "http://localhost:7990" }, value)).resolves.toMatchObject({ published: true });
+    await expect(runBitbucketUpload("scan.json", { ...base, url: "https://bitbucket.example.com" }, value)).resolves.toMatchObject({ published: true });
+  });
+
   it("refuses a file that is neither scan JSON nor SARIF", async () => {
     const { value } = deps({});
     await expect(runBitbucketUpload("x", { wait: false, to: "bitbucket-cloud" }, { ...value, readText: () => "{}" })).rejects.toThrow("0 scan --format json");

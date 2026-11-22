@@ -46,7 +46,7 @@ const defaults: UploadDeps = {
   git: async args => (await exec("git", args)).stdout,
 };
 
-export interface UploadOptions { repo?: string; commit?: string; ref?: string; wait: boolean; tool?: string; format?: string; to?: string; url?: string; reportId?: string; print?: boolean }
+export interface UploadOptions { repo?: string; commit?: string; ref?: string; wait: boolean; tool?: string; format?: string; to?: string; url?: string; reportId?: string; print?: boolean; allowInsecureHttp?: boolean }
 
 const BITBUCKET_TARGETS: Record<string, CodeInsightsPlatform> = { "bitbucket-cloud": "bitbucket-cloud", "bitbucket-dc": "bitbucket-dc" };
 const SLUG = /^[A-Za-z0-9._~-]{1,200}$/;
@@ -82,6 +82,12 @@ export async function runBitbucketUpload(file: string, options: UploadOptions, d
   const baseUrl = options.url || env.BITBUCKET_URL || undefined;
   if (!cloud) {
     if (!baseUrl || !/^https?:\/\/[^\s/]+/.test(baseUrl)) throw new UsageError("Name the Data Center server with --url https://bitbucket.example.com (or BITBUCKET_URL).");
+  }
+  if (baseUrl) {
+    let target: URL;
+    try { target = new URL(baseUrl); } catch { throw new UsageError("--url is not a valid URL."); }
+    const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(target.hostname);
+    if (target.protocol === "http:" && !loopback && !options.allowInsecureHttp) throw new UsageError("Refusing to send the Bitbucket token over plaintext HTTP. Use an https:// URL, or pass --allow-insecure-http for a network you trust.");
   }
   const fetcher = deps.fetch ?? ((url, init) => fetch(url, init));
   const result = await postCodeInsights(payload, { owner, repo, commit, ...(baseUrl ? { baseUrl } : {}) }, token, fetcher);
@@ -131,6 +137,7 @@ export function registerFindingsUploadCommand(parent: Command, deps: UploadDeps 
     .option("--url <url>", "Bitbucket Data Center base URL (default: BITBUCKET_URL)")
     .option("--report-id <id>", "Bitbucket report id or key", "0-security")
     .option("--print", "Bitbucket: print the report and annotation payload instead of posting it (also the behaviour without BITBUCKET_TOKEN)")
+    .option("--allow-insecure-http", "Bitbucket: allow sending the token to an http:// URL that is not on this machine (default: refuse)")
     .option("--repo <owner/name>", "Repository (default: the current clone's); Bitbucket: workspace/repo or PROJECT/repo")
     .option("--commit <sha>", "Commit the results are for (default: HEAD, or GITHUB_SHA in Actions)")
     .option("--ref <ref>", "refs/heads/<branch> or refs/pull/<n>/merge (default: the current branch, or GITHUB_REF in Actions)")
