@@ -1257,9 +1257,9 @@ Options:
   --prepass <mode>           auto runs the pattern scanners first when they are installed and gives
                              their hits to the scan as leads; off skips them (default: "auto")
   --scanner <id>             Scanner for the pre-pass (foxguard, semgrep, opengrep, gitleaks, trivy,
-                             osv-scanner); repeat or separate with commas to use several (default:
-                             foxguard). gitleaks, trivy and osv-scanner must be installed; secret
-                             values are redacted
+                             osv-scanner, checkov); repeat or separate with commas to use several
+                             (default: foxguard). gitleaks, trivy and osv-scanner must be installed;
+                             secret values are redacted
   --rules <file-or-folder>   Semgrep or OpenGrep rules for the pre-pass (a file or a folder); repeat
                              for several. Replaces the default rules and needs --scanner semgrep or
                              opengrep. Rules are never read from the scanned folder unless you name

@@ -484,6 +484,7 @@
     "semgrep.dev",
     "spdx.org",
     "token-plan.ap-southeast-1.maas.aliyuncs.com",
-    "trivy.dev"
+    "trivy.dev",
+    "www.checkov.io"
   ]
 }
