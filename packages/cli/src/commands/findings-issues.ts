@@ -81,7 +81,7 @@ export function buildIssue(finding: TrackedFinding): IssueDraft {
   const body = [
     `<!-- 0-finding:${finding.key} -->`,
     `| Severity | Category | Where | Status |\n| --- | --- | --- | --- |\n| ${severity} | ${neutralise(finding.category, 60)} | ${where} | ${status} |`,
-    ...(finding.impact ? ["", `**What an attacker gets:** ${neutralise(finding.impact, 700)}`] : []),
+    ...(finding.impact ? ["", `**${finding.category === "policy-violation" ? "What the violation exposes" : "What an attacker gets"}:** ${neutralise(finding.impact, 700)}`] : []),
     "",
     `Mirrored by \`0 findings issues\`. Evidence and proof-of-concept details are not copied here; on the machine that ran the scan, open them with \`0 findings show ${shortFindingId(finding.id).replace(/[^A-Za-z0-9-]/g, "")}\`.`,
     "This issue is kept in sync automatically: edits to the title and body are overwritten, and it closes when the finding is fixed, accepted or suppressed.",
