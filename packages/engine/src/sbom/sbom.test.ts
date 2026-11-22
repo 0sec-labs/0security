@@ -111,6 +111,19 @@ describe("generateSbom", () => {
   it("finds nothing in a folder with no supported lockfile", () => {
     expect(generateSbom(folder({ "readme.md": "hi" }), { toolVersion: "0" }).bom.components).toEqual([]);
   });
+  it("reads lockfiles and build scripts with Windows (CRLF) line endings like LF ones", () => {
+    const files = {
+      "yarn.lock": '# yarn lockfile v1\n\nlodash@^4.17.0:\n  version "4.17.20"\n',
+      "berry/yarn.lock": '__metadata:\n  version: 6\n\n"minimist@npm:^1.2.0":\n  version: 1.2.5\n',
+      "Gemfile.lock": "GEM\n  remote: https://rubygems.org/\n  specs:\n    rack (2.2.3)\n\nPLATFORMS\n  ruby\n",
+      "build.gradle": "dependencies {\n    implementation 'org.apache.logging.log4j:log4j-core:2.14.1'\n}\n",
+      "requirements.txt": "flask==2.0.1 \\\n    --hash=sha256:0000000000000000000000000000000000000000000000000000000000000000\n",
+    };
+    const purls = (input: Record<string, string>) => generateSbom(folder(input), { toolVersion: "0" }).bom.components.map(component => component.purl);
+    const expected = ["pkg:gem/rack@2.2.3", "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1", "pkg:npm/lodash@4.17.20", "pkg:npm/minimist@1.2.5", "pkg:pypi/flask@2.0.1"];
+    expect(purls(files)).toEqual(expected);
+    expect(purls(Object.fromEntries(Object.entries(files).map(([path, content]) => [path, content.replace(/\n/g, "\r\n")])))).toEqual(expected);
+  });
 });
 
 describe("checkBomAgainstOsv", () => {

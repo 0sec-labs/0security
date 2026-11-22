@@ -155,7 +155,7 @@ export function parseYarnLock(source: string): Component[] {
   let block: Block | undefined;
   let inDeps = false;
   const unquote = (value: string) => value.trim().replace(/^"|"$/g, "");
-  for (const line of source.split("\n")) {
+  for (const line of source.split(/\r?\n/)) {
     if (!line || line.startsWith("#")) continue;
     if (!/^\s/.test(line)) {
       inDeps = false; block = undefined;
@@ -203,7 +203,7 @@ function parsePackageTables(source: string): PackageTable[] {
   let current: PackageTable | undefined;
   let section = "";
   let array: string[] | undefined;
-  for (const line of source.split("\n")) {
+  for (const line of source.split(/\r?\n/)) {
     if (array) {
       if (/^\s*\]/.test(line)) { array = undefined; continue; }
       const item = /^\s*"([^"]*)"/.exec(line) ?? /^\s*\{.*\bhash\s*=\s*"([^"]*)"/.exec(line);
@@ -269,7 +269,7 @@ export function parsePoetryLock(source: string): Component[] {
 export function parseGoMod(source: string): Component[] {
   const found: Component[] = [];
   let block = false;
-  for (const raw of source.split("\n")) {
+  for (const raw of source.split(/\r?\n/)) {
     const line = raw.replace(/\/\/.*$/, "").trim();
     if (line === "require (") { block = true; continue; }
     if (block && line === ")") { block = false; continue; }
@@ -297,7 +297,7 @@ export function parsePipfileLock(source: string): Component[] {
 
 export function parseRequirements(source: string): Component[] {
   const found: Component[] = [];
-  for (const raw of source.split("\n")) {
+  for (const raw of source.split(/\r?\n/)) {
     const line = raw.replace(/\s+#.*$/, "").replace(/\s*\\$/, "").split(";")[0]!.trim();
     const match = /^([A-Za-z0-9][A-Za-z0-9._-]*)(?:\[[^\]]*\])?\s*==\s*([A-Za-z0-9][A-Za-z0-9._+!-]*)$/.exec(line);
     if (match) found.push({ ecosystem: "pypi", name: match[1]!, version: match[2]! });
@@ -317,7 +317,7 @@ export function parseGemfileLock(source: string): Component[] {
   let current: { deps: Set<string> } | undefined;
   let section = "";
   const checksums = new Map<string, string[]>();
-  for (const line of source.split("\n")) {
+  for (const line of source.split(/\r?\n/)) {
     if (/^[A-Z]/.test(line)) { section = line.trim(); current = undefined; continue; }
     if (section === "CHECKSUMS") {
       const match = /^ {2}([A-Za-z0-9_.-]+) \((\d[\w.]*?)(?:-[\w.-]+)?\)(?: sha256=([0-9a-f]{64}))?$/.exec(line);
@@ -381,7 +381,7 @@ export function parseNugetLock(source: string): Component[] {
 /** Gradle dependency locking: `group:artifact:version=configuration,...`. */
 export function parseGradleLock(source: string): Component[] {
   const found: Component[] = [];
-  for (const raw of source.split("\n")) {
+  for (const raw of source.split(/\r?\n/)) {
     const match = /^([A-Za-z0-9_.-]+):([A-Za-z0-9_.-]+):([^=\s:]+)=/.exec(raw.trim());
     if (match) found.push({ ecosystem: "maven", name: `${match[1]}/${match[2]}`, version: match[3]! });
   }
@@ -400,7 +400,7 @@ export function parsePubspecLock(source: string): Component[] {
 /** mix.lock: `"name": {:hex, :name, "1.2.3", ...}`. */
 export function parseMixLock(source: string): Component[] {
   const found: Component[] = [];
-  for (const line of source.split("\n")) {
+  for (const line of source.split(/\r?\n/)) {
     const match = /^\s*"([A-Za-z0-9_]+)":\s*\{:hex,\s*:[A-Za-z0-9_]+,\s*"([^"]+)"/.exec(line);
     if (match) found.push({ ecosystem: "hex", name: match[1]!, version: match[2]! });
   }
