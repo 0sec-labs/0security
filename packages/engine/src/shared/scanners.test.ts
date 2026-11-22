@@ -12,6 +12,13 @@ describe("scanners", () => {
     expect(scannerArguments(scannerById("foxguard")!, "/work/app")).toEqual(["--format", "sarif", "/work/app"]);
     expect(scannerArguments(scannerById("semgrep")!, "/w", "p/default")).toContain("p/default");
   });
+  it("gives checkov a scratch folder for its report", () => {
+    const spec = scannerById("checkov")!;
+    const args = scannerArguments(spec, "/w", undefined, "/tmp/out");
+    expect(args.slice(0, 2)).toEqual(["-d", "/w"]);
+    expect(args[args.indexOf("--output-file-path") + 1]).toBe("/tmp/out");
+    expect(spec.pathEnv).toBe("ZERO_CHECKOV_PATH");
+  });
   it("names every scanner in the leads block", () => {
     const lead = { tool: "semgrep", ruleId: "r", title: "t", description: "", severity: "high" as const, category: "other" as const, path: "a.ts", startLine: 1, fingerprint: "x", cwe: [] };
     const text = prePassBlock({ tools: ["foxguard", "semgrep"], total: 1, leads: [lead] });

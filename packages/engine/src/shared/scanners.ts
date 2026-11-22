@@ -7,8 +7,10 @@ export interface ScannerSpec {
   label: string;
   /** Executable name looked up on PATH (and, for FoxGuard, next to `0`). */
   command: string;
-  /** Arguments; `{folder}` is replaced by the folder, and `--config {rules}` by one `--config <path>` per rule path. Must write SARIF to standard output. */
+  /** Arguments; `{folder}` is replaced by the folder, and `--config {rules}` by one `--config <path>` per rule path. `{out}` is a scratch folder (see outputFile). Must write SARIF to standard output unless outputFile is set. */
   args: string[];
+  /** For a scanner that writes SARIF to a file instead: the file name inside the `{out}` folder it is given. */
+  outputFile?: string;
   /** Environment variable that names the binary explicitly. */
   pathEnv?: string;
   /** What running it touches beyond the folder, shown to the user. */
@@ -28,6 +30,7 @@ export const SCANNERS: readonly ScannerSpec[] = [
   { id: "gitleaks", label: "Gitleaks", command: "gitleaks", args: ["dir", "--report-format", "sarif", "--report-path", "-", "--redact", "--no-banner", "--no-color", "--exit-code", "0", "--log-level", "error", "{folder}"], pathEnv: "ZERO_GITLEAKS_PATH", install: "brew install gitleaks, or see https://github.com/gitleaks/gitleaks#installing", reportsSecrets: true },
   { id: "trivy", label: "Trivy", command: "trivy", args: ["fs", "--scanners", "vuln,misconfig,secret", "--format", "sarif", "--quiet", "--no-progress", "--disable-telemetry", "{folder}"], pathEnv: "ZERO_TRIVY_PATH", install: "brew install trivy, or see https://trivy.dev/latest/getting-started/installation/", timeoutSeconds: 300, reportsSecrets: true, note: "downloads its vulnerability database on first run" },
   { id: "osv-scanner", label: "OSV-Scanner", command: "osv-scanner", args: ["scan", "source", "--format", "sarif", "--allow-no-lockfiles", "--verbosity", "error", "-r", "{folder}"], pathEnv: "ZERO_OSV_SCANNER_PATH", install: "brew install osv-scanner, or see https://google.github.io/osv-scanner/installation/", timeoutSeconds: 180, note: "sends package names and versions from lockfiles to osv.dev and deps.dev" },
+  { id: "checkov", label: "Checkov", command: "checkov", args: ["-d", "{folder}", "-o", "sarif", "--output-file-path", "{out}", "--quiet", "--skip-download"], outputFile: "results_sarif.sarif", pathEnv: "ZERO_CHECKOV_PATH", install: "pip install checkov, or see https://www.checkov.io/", note: "reads Terraform, CloudFormation, Kubernetes, Dockerfiles, GitHub Actions and more" },
 ];
 export const DEFAULT_SCANNERS: readonly string[] = ["foxguard"];
 const DEFAULT_RULES = "p/default";
@@ -47,12 +50,12 @@ export function parseScannerList(values: readonly string[] | undefined): string[
 export function scannerTakesRules(spec: ScannerSpec): boolean { return spec.args.includes("{rules}"); }
 
 /** The arguments for one scanner. `rules` are the user's rule paths; with none, the default pack is used. The scanner is run without a shell. */
-export function scannerArguments(spec: ScannerSpec, folder: string, rules: readonly string[] | string = DEFAULT_RULES): string[] {
+export function scannerArguments(spec: ScannerSpec, folder: string, rules: readonly string[] | string = DEFAULT_RULES, out = ""): string[] {
   const list = typeof rules === "string" ? [rules] : rules.length ? rules : [DEFAULT_RULES];
   return spec.args.flatMap((arg, index) => {
     if (arg === "{rules}") return [];
     if (spec.args[index + 1] === "{rules}") return list.flatMap(rule => [arg, rule]);
-    return [arg === "{folder}" ? folder : arg];
+    return [arg === "{folder}" ? folder : arg === "{out}" ? out : arg];
   });
 }
 

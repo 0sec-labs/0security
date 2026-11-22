@@ -3,7 +3,8 @@
  * into leads. A scanner that is missing, fails or times out is skipped with a note, except where `--rules` needs it.
  */
 import { execFile } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { homeStateDir, parseSarif, scannerArguments, scannerById, scannerTakesRules, scrubSecretLead, type PrePassLeads } from "@0/engine/shared";
@@ -39,13 +40,16 @@ export async function runPrePass(folder: string, scanners: string[], rules: stri
     };
     if (!binary) return missing();
     const seconds = io.timeoutSeconds ?? spec.timeoutSeconds ?? DEFAULT_TIMEOUT_SECONDS;
+    // A scanner such as Checkov writes its SARIF to a file in a scratch folder, not to standard output.
+    const out = spec.outputFile ? mkdtempSync(join(tmpdir(), "0-scanner-")) : "";
+    const report = (): string | undefined => { if (!spec.outputFile) return undefined; try { return readFileSync(join(out, spec.outputFile), "utf8"); } catch { return undefined; } };
     try {
       let stdout: string;
-      try { stdout = (await exec(binary, scannerArguments(spec, folder, useRules ? rules : undefined), { env, timeout: seconds * 1000, maxBuffer: 128 * 1024 * 1024, windowsHide: true })).stdout; }
+      try { stdout = (await exec(binary, scannerArguments(spec, folder, useRules ? rules : undefined, out), { env, timeout: seconds * 1000, maxBuffer: 128 * 1024 * 1024, windowsHide: true })).stdout; if (spec.outputFile) stdout = report() ?? stdout; }
       // A scanner that exits non-zero because it found something still wrote its report.
       catch (error) {
         const failure = error as { stdout?: string; killed?: boolean; signal?: string; code?: string };
-        stdout = failure.stdout ?? "";
+        stdout = report() ?? failure.stdout ?? "";
         if (!stdout.trim().startsWith("{")) {
           if (failure.code === "ENOENT") return missing();
           if (failure.killed || failure.signal === "SIGTERM") {
@@ -65,6 +69,8 @@ export async function runPrePass(folder: string, scanners: string[], rules: stri
       if (useRules) throw error;
       note(`${spec.id} output could not be read and was skipped: ${(error as Error).message}`);
       return undefined;
+    } finally {
+      if (out) rmSync(out, { recursive: true, force: true });
     }
   }));
   const ran = lists.filter((entry): entry is NonNullable<typeof entry> => entry !== undefined);
