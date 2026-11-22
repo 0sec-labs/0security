@@ -727,7 +727,11 @@ Options:
                              remote's default branch)
   --test <command>           Check to run after the change; repeat for several. A failing check
                              makes the pull request a draft
-  --policy <path>            Policy file of approved libraries and fix rules (.json or .yaml)
+  --policy <file>            Policy file (.json or .yaml) of approved libraries and fix rules; any
+                             path you name, relative to the current directory. Default:
+                             ~/.0/fix-policy.json|yaml|yml
+  --repo-policy              Also read fix-policy.* or .zero/fix-policy.* from the repository being
+                             fixed (untrusted content; off by default)
   --no-pr                    Commit on the fix branch but do not push or open a pull request
   --budget <usd>             Stop when the estimated spend reaches this many USD (default: "3")
   --model <model>            Model for the fix thread (default: gpt-6-luna)

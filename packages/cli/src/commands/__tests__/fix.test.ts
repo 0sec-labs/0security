@@ -11,10 +11,11 @@ import {
   type FindingToFix,
 } from "../fix.js";
 import type { FixPolicy } from "@0/engine/shared";
+import type { LoadedFixPolicy } from "../fix-policy.js";
 
 const finding: FindingToFix = { id: "f-1234567890ab", fingerprint: "sarif-x:abc", title: "SQL injection in search", severity: "high", category: "sql-injection", tool: "foxguard", description: "d", path: "src/db.ts", startLine: 10 };
 
-function harness(overrides: Partial<{ status: string; checks: Record<string, number>; pulls: string; remote: string; policy: FixPolicy }> = {}) {
+function harness(overrides: Partial<{ status: string; checks: Record<string, number>; pulls: string; remote: string; policy: FixPolicy; fromRepo: boolean; loadPolicyArgs: unknown[] }> = {}) {
   const calls: string[] = [];
   const requests: Array<[string, string, unknown]> = [];
   const bodies: string[] = [];
@@ -36,7 +37,7 @@ function harness(overrides: Partial<{ status: string; checks: Record<string, num
     gh: async (_cwd, args) => { calls.push(`gh ${args.join(" ")}`); return args[1] === "list" ? overrides.pulls ?? "[]" : args[1] === "create" ? "https://github.com/o/r/pull/7\n" : ""; },
     check: async (_cwd, command) => ({ command, code: overrides.checks?.[command] ?? 0, output: "out" }),
     loadFinding: () => finding,
-    loadPolicy: () => overrides.policy,
+    loadPolicy: (root, opts) => { overrides.loadPolicyArgs?.push(root, opts); return overrides.policy ? { policy: overrides.policy, source: "/ops/policy.json", fromRepo: overrides.fromRepo ?? false } as LoadedFixPolicy : undefined; },
     makeTemp: () => "/tmp/x", removeTemp: () => {}, writeFile: (_p, text) => { bodies.push(text); },
   };
   return { deps, calls, requests, bodies };
@@ -163,6 +164,26 @@ describe("fix policy injection", () => {
     expect(message.text).toContain("dompurify");
     expect(message.text).toContain("eval (reason: Arbitrary code execution risk)");
     expect(message.text).toContain("Always use parameterized queries for database operations");
+    // The non-negotiable rules come after the policy block.
+    expect(message.text.indexOf("Non-negotiable rules")).toBeGreaterThan(message.text.indexOf("</fix-policy>"));
+  });
+
+  it("asks for the repository's policy only with --repo-policy, and warns that it is untrusted", async () => {
+    const policy: FixPolicy = { rules: ["r"] };
+    const args: unknown[] = [];
+    const opted = harness({ policy, fromRepo: true, loadPolicyArgs: args });
+    const logs: string[] = [];
+    opted.deps.err = line => { logs.push(line); };
+    await runFix("f-1", options({ repoPolicy: true }), opted.deps);
+    expect(args[1]).toMatchObject({ repoPolicy: true });
+    expect(logs.join("\n")).toMatch(/repository being fixed, which is untrusted/);
+    const plainArgs: unknown[] = [];
+    const own = harness({ policy, loadPolicyArgs: plainArgs });
+    const ownLogs: string[] = [];
+    own.deps.err = line => { ownLogs.push(line); };
+    await runFix("f-1", options(), own.deps);
+    expect(plainArgs[1]).not.toMatchObject({ repoPolicy: true });
+    expect(ownLogs.join("\n")).not.toMatch(/untrusted/);
   });
 });
 

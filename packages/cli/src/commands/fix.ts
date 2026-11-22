@@ -7,19 +7,21 @@
  */
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import type { Command } from "commander";
-import { parseDocument } from "yaml";
 import { fixPrompt, type FixPolicy, type FixPromptFinding } from "@0/engine/shared";
+import { loadFixPolicyFile, type FixPolicyOptions, type LoadedFixPolicy } from "./fix-policy.js";
 import { osecDB, resolveOsecDbPath } from "@0/engine/storage";
 import { consoleTransportOptions, type ConsoleClient, type ConsoleTransportOptions } from "../console-client.js";
 import { connect, DEFAULT_SCAN_MODEL, defaultScanDeps, waitForThread, type ScanDeps } from "./scan.js";
 import { resolveFindingId, shortFindingId } from "../finding-id.js";
 import { selectHost } from "../host/index.js";
 import { finishWithError, UsageError } from "./output.js";
+
+export { DEFAULT_FIX_POLICY_FILES, parseFixPolicy, loadFixPolicyFile } from "./fix-policy.js";
 import { asJson, finishedThread, usageLine } from "./thread-output.js";
 
 const exec = promisify(execFile);
@@ -27,15 +29,6 @@ const DEFAULT_BUDGET_USD = 3;
 const DEFAULT_TIMEOUT_SECONDS = 1800;
 const CHECK_TIMEOUT_MS = 10 * 60 * 1000;
 export const BRANCH_PREFIX = "0/fix-";
-
-export const DEFAULT_FIX_POLICY_FILES = [
-  ".zero/fix-policy.json",
-  ".zero/fix-policy.yaml",
-  ".zero/fix-policy.yml",
-  "fix-policy.json",
-  "fix-policy.yaml",
-  "fix-policy.yml",
-];
 
 export interface CheckResult { command: string; code: number; output: string }
 export interface FindingToFix extends FixPromptFinding { fingerprint: string }
@@ -47,61 +40,10 @@ export interface FixDeps extends Pick<ScanDeps, "open" | "err" | "sleep" | "star
   /** Run one check command in the work tree through the shell. Never throws on a failing command. */
   check(cwd: string, command: string): Promise<CheckResult>;
   loadFinding(id: string, dbPath: string | undefined): FindingToFix;
-  loadPolicy(repoRoot: string, policyOption?: string): FixPolicy | undefined;
+  loadPolicy(repoRoot: string, options: FixPolicyOptions): LoadedFixPolicy | undefined;
   makeTemp(): string;
   removeTemp(path: string): void;
   writeFile(path: string, text: string): void;
-}
-
-export function parseFixPolicy(content: string, filename?: string): FixPolicy {
-  let raw: unknown;
-  try {
-    raw = JSON.parse(content);
-  } catch {
-    try {
-      const doc = parseDocument(content, { schema: "core", merge: false });
-      if (doc.errors.length) throw doc.errors[0];
-      raw = doc.toJS();
-    } catch (yamlErr) {
-      throw new UsageError(`Failed to parse fix policy${filename ? ` from ${filename}` : ""}: ${(yamlErr as Error).message}`);
-    }
-  }
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-    throw new UsageError(`Fix policy${filename ? ` in ${filename}` : ""} must be an object with approvedLibraries, forbiddenPatterns, or rules.`);
-  }
-  const obj = raw as Record<string, unknown>;
-  const approvedLibraries = Array.isArray(obj.approvedLibraries) ? obj.approvedLibraries : undefined;
-  const forbiddenPatterns = Array.isArray(obj.forbiddenPatterns) ? obj.forbiddenPatterns : undefined;
-  const rules = Array.isArray(obj.rules) ? obj.rules.map(String) : undefined;
-  const notes = typeof obj.notes === "string" ? obj.notes : undefined;
-  const version = typeof obj.version === "number" ? obj.version : undefined;
-
-  return {
-    ...(version !== undefined ? { version } : {}),
-    ...(approvedLibraries ? { approvedLibraries: approvedLibraries as FixPolicy["approvedLibraries"] } : {}),
-    ...(forbiddenPatterns ? { forbiddenPatterns: forbiddenPatterns as FixPolicy["forbiddenPatterns"] } : {}),
-    ...(rules ? { rules } : {}),
-    ...(notes ? { notes } : {}),
-  };
-}
-
-export function loadFixPolicyFile(repoRoot: string, policyOption?: string): FixPolicy | undefined {
-  if (policyOption) {
-    const resolved = resolve(repoRoot, policyOption);
-    if (!existsSync(resolved)) {
-      throw new UsageError(`Fix policy file not found: ${policyOption}`);
-    }
-    const content = readFileSync(resolved, "utf8");
-    return parseFixPolicy(content, policyOption);
-  }
-  for (const candidate of DEFAULT_FIX_POLICY_FILES) {
-    const fullPath = join(repoRoot, candidate);
-    if (existsSync(fullPath)) {
-      const content = readFileSync(fullPath, "utf8");
-      return parseFixPolicy(content, candidate);
-    }
-  }
-  return undefined;
 }
 
 function resolveRow(rows: Array<Record<string, unknown>>, id: string): Record<string, unknown> {
@@ -140,7 +82,7 @@ const defaults: FixDeps = {
       };
     } finally { db.close(); }
   },
-  loadPolicy: (repoRoot, policyOption) => loadFixPolicyFile(repoRoot, policyOption),
+  loadPolicy: (repoRoot, options) => loadFixPolicyFile(repoRoot, options),
   makeTemp: () => mkdtempSync(join(tmpdir(), "0-fix-")),
   removeTemp: path => rmSync(path, { recursive: true, force: true }),
   writeFile: (path, text) => writeFileSync(path, text, { mode: 0o600 }),
@@ -195,7 +137,7 @@ export function pullRequestBody(finding: FindingToFix, summary: string | undefin
 }
 
 export interface FixOptions extends ConsoleTransportOptions {
-  repo?: string; base?: string; test?: string[]; budget: string; model?: string; timeout: string; pr: boolean; format?: string; policy?: string;
+  repo?: string; base?: string; test?: string[]; budget: string; model?: string; timeout: string; pr: boolean; format?: string; policy?: string; repoPolicy?: boolean;
 }
 
 export interface FixOutcome {
@@ -241,11 +183,13 @@ export async function runFix(id: string, options: FixOptions, deps: FixDeps): Pr
 
     const { client, stop } = await connect(options, deps);
     stopConsole = stop;
-    const policy = deps.loadPolicy(tree, options.policy) ?? deps.loadPolicy(repo, options.policy);
-    if (policy) {
-      const libs = policy.approvedLibraries?.length ?? 0;
-      const rules = policy.rules?.length ?? 0;
-      deps.err(`applying fix policy (${libs} approved ${libs === 1 ? "library" : "libraries"}, ${rules} ${rules === 1 ? "rule" : "rules"})`);
+    const loaded = deps.loadPolicy(repo, options);
+    const policy = loaded?.policy;
+    if (loaded) {
+      const libs = loaded.policy.approvedLibraries?.length ?? 0;
+      const rules = loaded.policy.rules?.length ?? 0;
+      deps.err(`applying fix policy from ${loaded.source} (${libs} approved ${libs === 1 ? "library" : "libraries"}, ${rules} ${rules === 1 ? "rule" : "rules"})`);
+      if (loaded.fromRepo) deps.err("warning: this policy comes from the repository being fixed, which is untrusted; it is guidance for the model, not a safety control");
     }
     const outcomeBase = { finding: finding.id, branch };
     const thread = await runThread(client, deps, tree, finding, options, budget, policy);
@@ -316,7 +260,8 @@ export function registerFixCommand(program: Command, deps: FixDeps = defaults): 
     .option("--repo <dir>", "Git repository the finding is in (default: the current directory)")
     .option("--base <branch>", "Branch to start from and open the pull request against (default: the remote's default branch)")
     .option("--test <command>", "Check to run after the change; repeat for several. A failing check makes the pull request a draft", collect)
-    .option("--policy <path>", "Policy file of approved libraries and fix rules (.json or .yaml)")
+    .option("--policy <file>", "Policy file (.json or .yaml) of approved libraries and fix rules; any path you name, relative to the current directory. Default: ~/.0/fix-policy.json|yaml|yml")
+    .option("--repo-policy", "Also read fix-policy.* or .zero/fix-policy.* from the repository being fixed (untrusted content; off by default)")
     .option("--no-pr", "Commit on the fix branch but do not push or open a pull request")
     .option("--budget <usd>", "Stop when the estimated spend reaches this many USD", String(DEFAULT_BUDGET_USD))
     .option("--model <model>", `Model for the fix thread (default: ${DEFAULT_SCAN_MODEL})`)
