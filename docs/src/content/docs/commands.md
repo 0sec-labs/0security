@@ -869,11 +869,32 @@ Send adversarial messages to a live model or agent endpoint and report the ones 
 0 probe [options] <url>
 ```
 
-Sends ten attacks to the URL you name and reports the ones whose reply shows they worked: a user message that overrides the instructions, fake system markup, instructions hidden in a document or in base64, a role-play jailbreak, reading out the system prompt, asking for credentials, asking for a command to be run, markdown that leaks data when rendered, and raw HTML in the reply. Each attack carries a unique canary, so a hit is a check on the reply (the canary came back, a credential appeared, `uid=` came back from a command) and not another model's opinion. Models vary, so each probe is sent twice by default and one hit counts.
+Probe sends ten attacks to the URL you name and reports the ones whose reply shows they worked:
 
-The request is an OpenAI-style chat body unless you give `--body` with `{{prompt}}` where the message goes, and the reply is found automatically in common JSON shapes or at `--response-path`. Put a key in a header as an environment variable (`-H "Authorization: Bearer $OPENAI_API_KEY"`) so it is not typed on the command line. Give `--secret` a secret you know is in the endpoint's prompt and a reply that contains it is reported as a definite leak. Requests are 300 ms apart and capped at 100 by default. The findings go into the usual reports (`--format md|json|sarif|html|pdf`) and, with `--save`, into `0 findings list`.
+- a user message that overrides the instructions
+- fake system markup
+- instructions hidden in a document
+- instructions encoded in base64
+- a role-play jailbreak
+- reading out the system prompt
+- asking for credentials
+- asking for a command to be run
+- markdown that leaks data when rendered
+- raw HTML in the reply
 
-On a real model behind a deliberately weak prompt, three of the ten got through; behind a hardened prompt none did. A miss means the reply did not show the attack working in those attempts; it does not prove the endpoint is safe against attacks that are not in the list.
+Each attack carries a unique canary, so a hit is a check on the reply (the canary came back, a credential appeared, `uid=` came back from a command), not another model's opinion. Models vary, so each probe is sent twice by default and one hit counts.
+
+```bash
+0 probe https://api.example.com/v1/chat/completions -H "Authorization: Bearer $OPENAI_API_KEY" --format sarif -o probe.sarif
+```
+
+The request is an OpenAI-style chat body. For another shape, pass `--body` with `{{prompt}}` where the message goes. 0 finds the reply in common JSON shapes, or at `--response-path`.
+
+Put a key in a header as an environment variable, as above, so it is not typed on the command line. If you pass `--secret` with a secret that is in the endpoint's prompt, a reply that contains it is reported as a definite leak.
+
+Requests are 300 ms apart and capped at 100 by default. Findings go into the usual reports (`--format md|json|sarif|html|pdf`). With `--save` they also appear in `0 findings list`.
+
+A miss means the reply did not show the attack working in those attempts. It does not prove the endpoint is safe against attacks outside the list.
 
 | Argument | Required | Description |
 | --- | --- | --- |
@@ -915,19 +936,46 @@ Write a CycloneDX 1.5 SBOM from the lockfiles in a folder (npm, pnpm, yarn, Carg
 0 sbom generate [options] [folder]
 ```
 
-Reads `package-lock.json`, `npm-shrinkwrap.json`, `pnpm-lock.yaml`, `yarn.lock`, `Cargo.lock`, `go.mod`, `poetry.lock`, `Pipfile.lock`, pinned `requirements.txt`, `Gemfile.lock`, `composer.lock`, `packages.lock.json`, `gradle.lockfile`, `pubspec.lock` and `mix.lock` anywhere under the folder (skipping `node_modules`, build output and hidden folders). With the default `builtin` generator nothing is installed or run; lockfiles are read as text. Components are identified by package URL, sorted and de-duplicated, so the same lockfiles give the same SBOM. A component is marked `excluded` only when every lockfile that lists it says it is development-only.
+```bash
+0 sbom generate . -o sbom.cdx.json
+```
 
-What the builtin SBOM carries beyond name and version, and only where the lockfile states it (nothing is looked up or guessed):
+The default `builtin` generator reads these lockfiles as text, anywhere under the folder, and installs or runs nothing: `package-lock.json`, `npm-shrinkwrap.json`, `pnpm-lock.yaml`, `yarn.lock`, `Cargo.lock`, `go.mod`, `poetry.lock`, `Pipfile.lock`, pinned `requirements.txt`, `Gemfile.lock`, `composer.lock`, `packages.lock.json`, `gradle.lockfile`, `pubspec.lock` and `mix.lock`. It skips `node_modules`, build output and hidden folders.
 
-- **Hashes** (`hashes`, hex): npm `integrity`, pnpm `resolution.integrity` and yarn classic `integrity` (SHA-512, SHA-384, SHA-256 or SHA-1, converted from base64 only when the length matches the algorithm), Cargo `checksum` (SHA-256), Composer `dist.shasum` (SHA-1), Gemfile.lock `CHECKSUMS` (SHA-256, Bundler 2.5 and later). Poetry gets a hash only for a package with exactly one file, and a gem only when it has a single platform build, because a component has one hash and those have several. Yarn Berry `checksum` is not reported: it is a hash of Yarn's own cache archive, not of the published package. No hash is written for Go, Pipfile, `requirements.txt`, NuGet, Gradle, Dart or Mix. When two lockfiles disagree on a hash, it is left out.
-- **Dependency graph** (top-level `dependencies`): from npm lockfile v2 and v3 (resolved the way Node does), pnpm `snapshots` (v9) or package entries (v5, v6), yarn classic and Berry, Cargo `dependencies`, poetry `[package.dependencies]`, Gemfile.lock spec lines and Composer `require` (platform requirements such as `php` are skipped). Every ref is a component in the SBOM, and entries are sorted. A component whose lockfile records a graph and has no dependencies is listed with an empty `dependsOn`; a component from a lockfile that records no graph (Go, Pipfile, `requirements.txt`, NuGet, Gradle, Dart, Mix, npm lockfile v1) has no entry, which means unknown. The application itself is not given dependencies, so direct versus transitive is not recorded.
-- **Licenses** (`licenses`): npm lockfile v2 and v3 `license` and Composer `license`. A valid SPDX id is written as `id`, a valid SPDX expression as `expression`, and anything else (such as `UNLICENSED`, `SEE LICENSE IN ...` or a differently cased id) as the `name` exactly as stated. Other lockfiles state no license, so none is written; licenses are not fetched from registries.
+Components are identified by package URL, sorted and de-duplicated, so the same lockfiles give the same SBOM. A component is marked `excluded` only when every lockfile that lists it says it is development-only. A folder with no supported lockfile is an error (exit 2).
 
-The supplier of each component is not recorded. `--ai` also lists the AI in the folder as CycloneDX components: model files (`.gguf`, `.safetensors`, `.onnx`, `.pt`, `.pth`, `.ckpt`, `.pkl` and others, with pickle-based formats flagged), hub references in code (`from_pretrained`, `pipeline(..., model=)`, `hf_hub_download`, `load_dataset`), hosted model ids passed to provider SDKs (with the provider), and MCP servers from `.mcp.json` and similar files (an unpinned launcher such as `npx -y` is flagged). It reads files as text and downloads nothing; a reference the patterns do not recognise is missed, so treat the list as what was seen, not a complete inventory. The output is valid CycloneDX 1.5 (checked against the official schema in the tests, with hashes, graph and licenses). The builtin generator does not read Maven `pom.xml` without a lockfile, CocoaPods or SwiftPM, C and C++ package managers, container images, operating-system packages or compiled binaries. A folder with no supported lockfile is an error (exit 2).
+Beyond name and version, the SBOM carries the following, only where the lockfile states it. Nothing is looked up or guessed.
 
-`--format spdx` writes SPDX 2.3 JSON instead (builtin generator only; validated against the official SPDX 2.3 JSON schema in the tests). It has one package for the application and one per library, each with its package URL as a `purl` external reference, its checksums, and its license when that is an SPDX id or expression (free-text license names become `NOASSERTION`, because SPDX would need the license text). `DESCRIBES` points at the application, `DEPENDS_ON` follows the graph above, and the application `DEPENDS_ON` every component that no other component depends on. The AI inventory is not written to SPDX (`--ai` is refused with it), because SPDX 2.3 has no type for models, datasets or MCP servers.
+- Hashes (`hashes`, hex): npm `integrity`, pnpm `resolution.integrity`, yarn classic `integrity`, Cargo `checksum`, Composer `dist.shasum` and Gemfile.lock `CHECKSUMS` (Bundler 2.5 and later). A Poetry package with several files or a gem with several platform builds gets no hash, because a component has one hash. Yarn Berry checksums are not reported, because they hash Yarn's cache archive and not the published package. Go, Pipfile, `requirements.txt`, NuGet, Gradle, Dart and Mix get no hash. When two lockfiles disagree on a hash, it is left out.
+- Dependency graph (top-level `dependencies`): from npm lockfile v2 and v3, pnpm, yarn classic and Berry, Cargo, Poetry, Gemfile.lock and Composer (platform requirements such as `php` are skipped). A component whose lockfile records a graph and lists no dependencies has an empty `dependsOn`. A component from a lockfile that records no graph (Go, Pipfile, `requirements.txt`, NuGet, Gradle, Dart, Mix, npm lockfile v1) has no entry, which means unknown. The application itself gets no dependencies, so direct versus transitive is not recorded.
+- Licenses (`licenses`): from npm lockfile v2 and v3 and Composer. A valid SPDX id is written as `id`, a valid SPDX expression as `expression`, and anything else as the `name` exactly as stated. Other lockfiles state no license, and 0 does not fetch licenses from registries.
 
-`--generator syft`, `cdxgen` or `trivy` runs that installed tool instead and writes its CycloneDX JSON unchanged, for what the builtin reader does not cover (Maven, container images, operating-system packages, binaries). It starts the tool without a shell, with the folder as an absolute path, a 10 minute timeout and a temporary working directory, and executes nothing from the scanned folder itself. If the tool is not installed, the command prints how to install it and exits 2. The invocations are `syft dir:<folder> -o cyclonedx-json`, `cdxgen --lifecycle pre-build --no-install-deps -o <temp file> <folder>` (those two flags are documented as keeping cdxgen from running the project's package manager) and `trivy fs --format cyclonedx --quiet <folder>`. Run for real on this repository with syft 1.57.2, trivy 0.76.2 and a current cdxgen, all three produced a CycloneDX 1.7 document (the builtin reader writes 1.5), with different component counts because each tool also walks the other trees in the folder. Whether trivy fetches its vulnerability database on a first run, and how older cdxgen versions treat those two flags, is not verified. The tools' own behaviour, such as network access, is theirs, and `--ai` and `--format spdx` are not available with them.
+The supplier of each component is not recorded.
+
+Add `--ai` to also list the AI in the folder as CycloneDX components:
+
+- model files (`.gguf`, `.safetensors`, `.onnx`, `.pt`, `.pth`, `.ckpt`, `.pkl` and others), with pickle-based formats flagged
+- hub references in code (`from_pretrained`, `pipeline(..., model=)`, `hf_hub_download`, `load_dataset`)
+- hosted model ids passed to provider SDKs, with the provider
+- MCP servers from `.mcp.json` and similar files, with an unpinned launcher such as `npx -y` flagged
+
+The scan reads files as text and downloads nothing. A reference the patterns do not recognise is missed, so treat the list as what was seen, not a complete inventory.
+
+The builtin generator does not read Maven `pom.xml` without a lockfile, CocoaPods, SwiftPM, C and C++ package managers, container images, operating-system packages or compiled binaries. Use `--generator` for those.
+
+`--format spdx` writes SPDX 2.3 JSON instead (builtin generator only). It has one package for the application and one per library, each with its package URL as a `purl` external reference, its checksums, and its license when that is an SPDX id or expression. Free-text license names become `NOASSERTION`. `DESCRIBES` points at the application and `DEPENDS_ON` follows the graph above. The AI inventory is not written to SPDX, and `--ai` is refused with it.
+
+`--generator syft`, `cdxgen` or `trivy` runs that installed tool instead and writes its CycloneDX JSON unchanged. Use it for what the builtin reader does not cover: Maven, container images, operating-system packages and binaries. `--ai` and `--format spdx` are not available with these tools.
+
+0 starts the tool without a shell, on the folder as an absolute path, with a 10 minute timeout and a temporary working directory. It executes nothing from the scanned folder itself. If the tool is not installed, 0 prints how to install it and exits 2. The tool's own behaviour, such as network access, is its own. The commands are:
+
+```text
+syft dir:<folder> -o cyclonedx-json
+cdxgen --lifecycle pre-build --no-install-deps -o <temp file> <folder>
+trivy fs --format cyclonedx --quiet <folder>
+```
+
+The two cdxgen flags keep it from running the project's package manager. These tools write CycloneDX 1.7, not 1.5, and their component counts differ from the builtin reader, because each also walks the other trees in the folder. Whether trivy fetches its vulnerability database on a first run, and how older cdxgen versions treat those flags, is not verified.
 
 | Argument | Required | Description |
 | --- | --- | --- |
@@ -949,7 +997,7 @@ Look every component of an SBOM up in the public OSV database and list the advis
 0 sbom check [options] <file>
 ```
 
-Lists each advisory with its aliases, severity, the versions that fix it and a one-line summary, grouped by component. The only network use is the lookup at `https://api.osv.dev`: package URLs go out and nothing else does. Exit 0 when there are no advisories and 1 when there are, so a scheduled job can fail or open an issue.
+Each advisory is listed with its aliases, severity, the versions that fix it and a one-line summary, grouped by component. The only network use is the lookup at `https://api.osv.dev`: package URLs go out and nothing else does. Exit 0 when there are no advisories and 1 when there are, so a scheduled job can fail or open an issue.
 
 | Argument | Required | Description |
 | --- | --- | --- |
@@ -967,9 +1015,23 @@ Scan model files (pickle, PyTorch, joblib, numpy) for imports that can run code 
 0 sbom scan-models [options] <path>
 ```
 
-Pickle-based model files (`.pkl`, `.pickle`, `.joblib`, `.pt`, `.pth`, `.ckpt`, `.bin`, `.npy`, `.npz`, including the `data.pkl` inside a PyTorch zip) run the callables they reference when they are loaded. This command reads the files as bytes, walks the pickle opcodes (protocols 0 to 5, including `GLOBAL`, `STACK_GLOBAL`, `INST`, `OBJ`, `NEWOBJ` and `REDUCE`) and sorts every imported callable into three groups: dangerous (`os.system`, `subprocess.*`, `builtins.eval`/`exec`/`__import__`/`open`, `importlib.*`, `socket.*`, `shutil.*`, network clients, `ctypes.*`, nested `pickle.loads`/`torch.load` and similar), expected (the tensor rebuild helpers, storages, `collections.OrderedDict`, numpy array reconstruction and the like) and unrecognised (on neither list, reported at lower severity because libraries such as scikit-learn pickle their own classes). Nothing is loaded, imported or executed, and no Python is needed. The format comes from the content, not the extension, so a pickle renamed `.safetensors` is still scanned. Reads are bounded: large payloads are skipped without being read, zip directories and decompressed sizes have limits (a zip bomb is reported, not inflated), archive member names are never extracted, and a truncated or malformed file is reported as an incomplete scan instead of an error.
+```bash
+0 sbom scan-models ./models
+```
 
-Each file is listed with its format, a verdict (`DANGEROUS`, unrecognised imports, no dangerous imports found, not a pickle format, not scanned) and the offending imports. Safetensors and TFLite are reported as formats with no code execution possible; GGUF and ONNX are reported as not pickle formats. Keras `.h5` and `.keras` files are not scanned, because they can embed Python code. "No dangerous imports found" means exactly that: the scanner can miss what it cannot parse, and it does not say a file is safe or that the weights are trustworthy. `--format sarif` writes one result per dangerous file, located at the file, for code scanning. Exit 1 when any file is dangerous, 2 on a usage error. `0 sbom generate --ai` adds a `0:risk` property to a model file in the inventory when this scan finds it dangerous.
+Pickle-based model files (`.pkl`, `.pickle`, `.joblib`, `.pt`, `.pth`, `.ckpt`, `.bin`, `.npy`, `.npz`, including the `data.pkl` inside a PyTorch zip) run the callables they reference when they are loaded. This command reads the files as bytes and sorts every imported callable into three groups:
+
+- dangerous: `os.system`, `subprocess.*`, `builtins.eval`/`exec`/`__import__`/`open`, `importlib.*`, `socket.*`, `shutil.*`, network clients, `ctypes.*`, nested `pickle.loads`/`torch.load` and similar
+- expected: tensor rebuild helpers, storages, `collections.OrderedDict`, numpy array reconstruction and the like
+- unrecognised: on neither list, reported at lower severity because libraries such as scikit-learn pickle their own classes
+
+Nothing is loaded, imported or executed, and no Python is needed. The format comes from the content, not the extension, so a pickle renamed `.safetensors` is still scanned. Large payloads are skipped without being read, a zip bomb is reported and not inflated, archive member names are never extracted, and a truncated or malformed file is reported as an incomplete scan.
+
+Each file is listed with its format, a verdict (`DANGEROUS`, unrecognised imports, no dangerous imports found, not a pickle format, not scanned) and the offending imports. Safetensors and TFLite are reported as formats that cannot execute code. GGUF and ONNX are reported as not pickle formats. Keras `.h5` and `.keras` files are not scanned, because they can embed Python code.
+
+"No dangerous imports found" means exactly that. The scanner can miss what it cannot parse, and the result does not say a file is safe or that the weights are trustworthy.
+
+`--format sarif` writes one result per dangerous file, located at the file. Exit 1 when any file is dangerous and 2 on a usage error. `0 sbom generate --ai` adds a `0:risk` property to a model file in the inventory when this scan finds it dangerous.
 
 | Argument | Required | Description |
 | --- | --- | --- |
@@ -987,11 +1049,9 @@ Browse and manage persisted findings
 0 findings [options]
 ```
 
-Human triage (`new`, `accepted`, `suppressed`) and verification have independent states. Accepting a finding records the operator's decision; reproduction and fix verification remain separate steps.
+Triage (`new`, `accepted`, `suppressed`) and verification are separate states. Accepting a finding records your decision; reproduction and fix verification are separate steps.
 
 Subcommands: [list](#findings-list) · [show](#findings-show) · [update](#findings-update) · [import](#findings-import) · [fix](#findings-fix) · [burndown](#findings-burndown) · [evidence](#findings-evidence) · [report-draft](#findings-report-draft) · [accept](#findings-accept) · [suppress](#findings-suppress) · [reopen](#findings-reopen) · [export](#findings-export) · [keys](#findings-keys) · [upload](#findings-upload) · [issues](#findings-issues) · [reports](#findings-reports).
-Subcommands: [list](#findings-list) · [show](#findings-show) · [update](#findings-update) · [import](#findings-import) · [fix](#findings-fix) · [evidence](#findings-evidence) · [report-draft](#findings-report-draft) · [accept](#findings-accept) · [suppress](#findings-suppress) · [reopen](#findings-reopen) · [export](#findings-export) · [keys](#findings-keys) · [upload](#findings-upload) · [reports](#findings-reports).
-Subcommands: [list](#findings-list) · [show](#findings-show) · [update](#findings-update) · [import](#findings-import) · [fix](#findings-fix) · [burndown](#findings-burndown) · [accept](#findings-accept) · [suppress](#findings-suppress) · [reopen](#findings-reopen) · [export](#findings-export) · [keys](#findings-keys) · [upload](#findings-upload) · [reports](#findings-reports).
 
 | Option | Registered default | Description |
 | --- | --- | --- |
@@ -1100,9 +1160,20 @@ Import findings from another scanner's SARIF 2.1.0 file (use - for stdin). Nothi
 0 findings import [options] [file]
 ```
 
-Each result becomes a finding that keeps the scanner's name, rule, severity, CWE and file and line. The scan it creates is marked as imported and unverified, and importing the same file again changes nothing. Absolute paths become repo-relative under `--root`; paths outside it are dropped. Stop a running console on the same database first.
+```bash
+0 findings import results.sarif
+0 findings import --github acme/app
+```
 
-`--github owner/repo` imports that repository's code scanning, Dependabot and secret scanning alerts instead of a file (give a file or `--github`, not both). It runs `gh api` with your own `gh auth login` session, so the token never reaches 0 and the 0 GitHub connector is not used or needed; the repository access your login has is what limits the result. `--types` picks the alert kinds, `--state` the alert state (`open`, `dismissed`, `fixed` or `all`) and `--ref` narrows code scanning to a branch. A kind that is switched off for the repository is skipped with a warning. If a later page fails, returns invalid JSON or the 20-page limit is reached, the alerts read so far are still imported, marked incomplete with a warning on stderr, and a failed fetch makes the command exit 1. Running it again imports again when an alert changed on GitHub. Secret alerts record the type, validity and, for the first 50 alerts, the file and line of the first location; the secret value is never requested or stored. Alert text is stripped of control characters and shortened before it is stored.
+Each result becomes a finding that keeps the scanner's name, rule, severity, CWE and file and line. The scan it creates is marked imported and unverified, and importing the same file again changes nothing. Absolute paths become repo-relative under `--root`; paths outside it are dropped. Stop a running console on the same database first.
+
+`--github owner/repo` imports that repository's code scanning, Dependabot and secret scanning alerts instead of a file. Give a file or `--github`, not both.
+
+It runs `gh api` with your own `gh auth login` session, so the token never reaches 0 and the 0 GitHub connector is not used. Your repository access limits the result. `--types` picks the alert kinds, `--state` the alert state (`open`, `dismissed`, `fixed` or `all`) and `--ref` narrows code scanning to a branch. A kind that is switched off for the repository is skipped with a warning.
+
+If a later page fails, returns invalid JSON or the 20-page limit is reached, the alerts read so far are still imported, marked incomplete, with a warning on stderr. A failed fetch makes the command exit 1. Running it again imports again when an alert changed on GitHub.
+
+Secret alerts record the type, validity and, for the first 50 alerts, the file and line of the first location. The secret value is never requested or stored. Alert text is stripped of control characters and shortened before it is stored.
 
 | Argument | Required | Description |
 | --- | --- | --- |
@@ -1127,9 +1198,24 @@ Fix one finding in an isolated git work tree and open a pull request for review
 0 findings fix [options] <finding>
 ```
 
-A thread follows the `fix-finding` skill in a separate work tree of the repository, so your checkout is never touched. It makes the smallest change it can; then the command runs each `--test` check, commits on a branch named `0/fix-<id>` and opens a pull request, as a draft when a check fails. Running it again for the same finding updates the same pull request. Nothing is pushed to the base branch and nothing is merged: a person reviews and merges. Use `--test` for the project's tests and, to re-run the scanner that raised the finding, its own command (for example `foxguard .`). It edits files on this machine, so it needs the local console and does not accept `--computer` or `--engine-url`.
+```bash
+0 findings fix 3f2a --test "pnpm test"
+```
 
-A fix policy (approved libraries, forbidden patterns, rules, notes; JSON or YAML) can steer the thread. It comes only from `--policy <file>` (any path you name) or from your own `~/.0/fix-policy.json|yaml|yml`. A policy file inside the repository being fixed is **not** read unless you pass `--repo-policy`, because whoever controls the repository would then control the prompt; `--repo-policy` prints a warning and a file that links outside the repository is refused. The policy reaches the model as lower-priority guidance (escaped, one line per entry, bounded in size); the rules to never commit, push or merge follow it and override it.
+A thread follows the `fix-finding` skill in a separate git work tree, so your checkout is never touched. It makes the smallest change it can. Then the command runs each `--test` check, commits on a branch named `0/fix-<id>` and opens a pull request, as a draft when a check fails. Running it again for the same finding updates the same pull request.
+
+Nothing is pushed to the base branch and nothing is merged. A person reviews and merges. Use `--test` for the project's tests and, to re-run the scanner that raised the finding, its own command (for example `foxguard .`). The command edits files on this machine, so it needs the local console and rejects `--computer` and `--engine-url`.
+
+Exit codes:
+
+- 0: a verified change, or committed with `--no-pr`
+- 1: no change, or a failed check
+- 2: usage error
+- 3: stopped at the budget or time limit
+
+A fix policy (approved libraries, forbidden patterns, rules, notes; JSON or YAML) can steer the thread. It comes only from `--policy <file>` or from your own `~/.0/fix-policy.json|yaml|yml`.
+
+A policy file inside the repository being fixed is not read unless you pass `--repo-policy`, because whoever controls the repository would then control the prompt. `--repo-policy` prints a warning, and a file that links outside the repository is refused. The policy is lower-priority guidance: the rules to never commit, push or merge override it.
 
 | Argument | Required | Description |
 | --- | --- | --- |
@@ -1162,7 +1248,13 @@ Write a draft early warning, notification or final report about one finding (Mar
 0 findings report-draft [options] <finding>
 ```
 
-For a manufacturer that has to tell the authorities about an actively exploited vulnerability (Article 14 of Regulation (EU) 2024/2847, the Cyber Resilience Act; confirm the current requirements and deadlines yourself). The text is built without a model. Each field is copied from the finding record (title, severity, category, location, status, triage state, when the record was created, and the attacker-impact sentence when someone assessed it), copied from a fact you pass with a flag or in a `--facts` JSON file, or left as `[to be completed by the manufacturer: ...]`. Nothing says the vulnerability is exploited, that users are affected or that a fix exists unless you supplied it. `--evidence-file` lists a file's name, size and SHA-256 and never copies its content. The draft says plainly that a person must review it and submit it through the authority's own channel; `0` submits nothing. `--stage all` writes the three stages one after another. The finding can be a full id, an id prefix or `fp:` plus a fingerprint prefix from `0 findings list`.
+Use this when a manufacturer has to tell the authorities about an actively exploited vulnerability (Article 14 of the Cyber Resilience Act, Regulation (EU) 2024/2847). Confirm the current requirements and deadlines yourself.
+
+The text is built without a model. Each field is copied from the finding record (title, severity, category, location, status, triage state, creation time, and the attacker-impact sentence when someone assessed it), taken from a fact you pass with a flag or in a `--facts` JSON file, or left as `[to be completed by the manufacturer: ...]`. Nothing says the vulnerability is exploited, that users are affected or that a fix exists unless you supplied it.
+
+`--evidence-file` lists a file's name, size and SHA-256 and never copies its content. `--stage all` writes the three stages one after another. The finding can be a full id, an id prefix, or `fp:` plus a fingerprint prefix from `0 findings list`.
+
+The draft says that a person must review it and submit it through the authority's own channel. 0 submits nothing.
 
 | Argument | Required | Description |
 | --- | --- | --- |
@@ -1196,7 +1288,21 @@ Write one folder of findings, SARIF, SBOM and fix branches, with a README that s
 0 findings evidence [options] <folder>
 ```
 
-Writes `README.md`, `manifest.json` (version, date, commit, models, SHA-256 of each file), `findings.json` and `findings.md` (severity, status, triage state and note, timestamps, location), `findings.sarif`, `sbom.cdx.json` (from the lockfiles in `--repo`), `fixes.md` (fix branches that exist in `--repo`) and, with `--check-advisories`, `advisories.json` from the public OSV database. That lookup is the only network use, and only with that flag. Evidence and proof-of-concept bodies are left out unless you pass `--include-evidence`, and then the folder can hold working exploit details. The command writes only those file names inside the folder, refuses a folder that holds other files, a symbolic link, or a folder inside the repository, and removes a file of its own from an earlier run that it did not write this time. The README makes no claim of compliance. It is evidence for your own records, not a conformity assessment.
+The folder holds:
+
+- `README.md`
+- `manifest.json`: version, date, commit, models and the SHA-256 of each file
+- `findings.json` and `findings.md`: severity, status, triage state and note, timestamps, location
+- `findings.sarif`
+- `sbom.cdx.json`, from the lockfiles in `--repo`
+- `fixes.md`: the fix branches that exist in `--repo`
+- `advisories.json` from the public OSV database, only with `--check-advisories`
+
+That lookup is the only network use. Evidence and proof-of-concept bodies are left out unless you pass `--include-evidence`. With it, the folder can hold working exploit details.
+
+The command writes only those file names. It refuses a folder that holds other files, a symbolic link, or a folder inside the repository, and it removes a file of its own from an earlier run that it did not write this time.
+
+The README makes no claim of compliance. The folder is evidence for your own records, not a conformity assessment.
 
 | Argument | Required | Description |
 | --- | --- | --- |
@@ -1220,13 +1326,26 @@ Work through open findings in batches: one fix branch and pull request each, the
 0 findings burndown [options]
 ```
 
-Selects open findings (not fixed, false positive, accepted or suppressed; one per fingerprint, worst severity first) and runs each through the same flow as [findings fix](#findings-fix): its own git work tree, a branch named `0/fix-<id>`, your `--test` checks, and one pull request, a draft when a check fails. Nothing is pushed to the base branch and nothing is merged. Filter with `--severity`, `--category`, `--tool` (or `--source`), `--scan` and `--fingerprint`, and size a batch with `--limit`.
+Burndown selects open findings (not fixed, false positive, accepted or suppressed; one per fingerprint, worst severity first) and runs each through the same flow as [findings fix](#findings-fix): its own git work tree, a branch named `0/fix-<id>`, your `--test` checks, and one pull request, a draft when a check fails. Nothing is pushed to the base branch and nothing is merged.
 
-`--concurrency` (1 to 4) runs fixes side by side, each in its own work tree. `--budget` is the total for the run and `--per-fix` caps one fix; the cap shrinks to what is left of the total, and no fix starts once it is spent. The run stops when `--max-consecutive-failures` fixes fail in a row, or when the share of failures goes above `--max-failure-rate` after `--min-attempts` fixes. A fix fails when the thread changes nothing, errors, or a check fails.
+Filter with `--severity`, `--category`, `--tool` (or `--source`), `--scan` and `--fingerprint`. Size a batch with `--limit`.
 
-The outcome per finding is kept in `~/.0/burndown.json`, so running the same command again skips findings that already have a pull request (or, with `--no-pr`, a committed branch) and continues with the rest; `--retry` works on them again. The report lists proposed, committed, pull requests opened or updated with their links, checks passing, drafts because a check failed, skipped findings with the reason, cost and time; `--format json` prints it as JSON. Each run also adds a row of metrics (findings attempted, fixes proposed, check result, cost, duration) that `--history` lists. `--dry-run` shows the plan and changes nothing. It edits files on this machine, so it needs the local console and does not accept `--computer` or `--engine-url`.
+`--concurrency` (1 to 4) runs fixes side by side, each in its own work tree. `--budget` is the total for the run and `--per-fix` caps one fix. The cap shrinks to what is left of the total, and no fix starts once it is spent.
 
-Exit codes: 0 every attempted fix is verified (or there was nothing to do), 1 a fix failed or the run stopped on failures, 2 usage error, 3 the total budget ran out.
+The run stops when `--max-consecutive-failures` fixes fail in a row, or when the share of failures goes above `--max-failure-rate` after `--min-attempts` fixes. A fix fails when the thread changes nothing, errors, or a check fails.
+
+Run the same command again to continue: findings that already have a pull request (or, with `--no-pr`, a committed branch) are skipped. `--retry` works on them again. `--dry-run` shows the plan and changes nothing.
+
+The report lists what was proposed, committed, opened or updated as pull requests (with links), which checks passed, drafts because a check failed, skipped findings with the reason, cost and time. `--format json` prints it as JSON. Each run also adds a row of metrics (findings attempted, fixes proposed, check result, cost, duration) that `--history` lists.
+
+Burndown edits files on this machine, so it needs the local console and rejects `--computer` and `--engine-url`.
+
+Exit codes:
+
+- 0: every attempted fix is verified, or there was nothing to do
+- 1: a fix failed, or the run stopped on failures
+- 2: usage error
+- 3: the total budget ran out
 
 | Option | Registered default | Description |
 | --- | --- | --- |
@@ -1268,7 +1387,14 @@ Upload a SARIF file to GitHub code scanning, so findings show in the Security ta
 0 findings upload [options] <file>
 ```
 
-Put the scan in a pull request check: `0 scan . --diff origin/main --format sarif -o scan.sarif`, then `0 findings upload scan.sarif`. The repository, commit and ref come from the clone (`GITHUB_SHA` and `GITHUB_REF` in Actions). The file is compressed, uploaded with `gh`, and checked until GitHub has processed it; a refused file is reported with GitHub's reason. GitHub matches alerts by fingerprint, so an upload for a later commit updates them. `gh` needs permission to write security events (`security-events: write` in Actions).
+Run the scan in a pull request check, then upload the result:
+
+```bash
+0 scan . --diff origin/main --format sarif -o scan.sarif
+0 findings upload scan.sarif
+```
+
+The repository, commit and ref come from the clone (`GITHUB_SHA` and `GITHUB_REF` in Actions). The file is compressed, uploaded with `gh` and checked until GitHub has processed it; a refused file is reported with GitHub's reason. GitHub matches alerts by fingerprint, so an upload for a later commit updates them. `gh` needs permission to write security events (`security-events: write` in Actions).
 
 | Argument | Required | Description |
 | --- | --- | --- |
@@ -1296,7 +1422,17 @@ Mirror findings into GitHub Issues, one issue per finding, kept in sync without 
 0 findings issues --repo acme/app --min-severity high --max 10
 ```
 
-Run `--dry-run` first: it prints what would be created, updated, closed or reopened and changes nothing. Each finding family gets one issue, found again on later runs through a hidden `<!-- 0-finding:<key> -->` marker in its body (the key is the finding's fingerprint), so running it again never duplicates. Open findings at or above `--min-severity` (default `medium`) get an issue; an issue is updated when the finding's title, severity or location changed, closed with a comment when the finding is suppressed, accepted, fixed or marked a false positive, and reopened if it comes back. It creates the `security` and `severity:<level>` labels when they are missing; if it cannot, it warns and carries on without them. It only manages issues that carry the `security` label (applying that label needs triage rights), so removing it from an issue detaches that issue and a new one is created for the finding. `--max` (default 25) caps the changes in one run and `--delay` (default 1000 ms) spaces them out for GitHub's rate limits; run again to continue. The issue text holds only the title, severity, category, location (`path:line`), the attacker-impact sentence, the status and a hint for finding the details locally. Evidence, requests, responses and proof-of-concept bodies are never copied, because they can quote code or secrets. Report text is neutralised: no `@mentions`, no `#123` references, no HTML or links. `gh` needs permission to write issues (`issues: write` in Actions). The repository is taken from the clone when `--repo` is not given.
+Run `--dry-run` first. It prints what would be created, updated, closed or reopened and changes nothing.
+
+Each finding family gets one issue. A later run finds it through a hidden `<!-- 0-finding:<key> -->` marker in the body (the key is the finding's fingerprint), so running it again never duplicates. Open findings at or above `--min-severity` (default `medium`) get an issue. An issue is updated when the finding's title, severity or location changes, closed with a comment when the finding is suppressed, accepted, fixed or marked a false positive, and reopened if it comes back.
+
+0 creates the `security` and `severity:<level>` labels when they are missing, and warns and carries on if it cannot. It manages only issues that carry the `security` label (applying it needs triage rights). If you remove the label from an issue, that issue is detached and a new one is created for the finding.
+
+`--max` (default 25) caps the changes in one run and `--delay` (default 1000 ms) spaces them out for GitHub's rate limits. Run again to continue.
+
+The issue text holds only the title, severity, category, location (`path:line`), the attacker-impact sentence, the status and a hint for finding the details locally. Evidence, requests, responses and proof-of-concept bodies are never copied, because they can quote code or secrets. Report text has no `@mentions`, no `#123` references, no HTML and no links.
+
+`gh` needs permission to write issues (`issues: write` in Actions). Without `--repo`, the repository comes from the clone.
 
 | Option | Registered default | Description |
 | --- | --- | --- |
