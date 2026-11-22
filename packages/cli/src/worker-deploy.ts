@@ -1,7 +1,7 @@
 import { execFileSync, spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { defaultEnginesConfigPath } from "./engines-config-path.js";
@@ -40,6 +40,8 @@ export interface WorkerRunner {
   shell(command: string, timeout?: number): string;
   copy(local: string, remote: string): void;
   tunnel(port: number): number | void;
+  /** Private ssh config the last tunnel() call created, recorded so stopping can remove it. */
+  tunnelConfig?: string;
   readonly label: string;
 }
 
@@ -171,17 +173,17 @@ export function createRunner(options: Pick<WorkerDeployOptions, "ssh" | "lima" |
     return {
       label: host,
       shell: (command, timeout = 300_000) => explain(() =>
-        execFile("ssh", ["-o", "BatchMode=yes", "-o", `StrictHostKeyChecking=${hostKeyMode}`, "-o", "ConnectTimeout=15", ...configArgs, "--", host, "bash", "-s"], { input: command, encoding: "utf8", timeout, stdio: ["pipe", "pipe", "pipe"] })),
-      copy: (local, remote) => explain(() => { execFile("scp", ["-q", "-o", "BatchMode=yes", "-o", `StrictHostKeyChecking=${hostKeyMode}`, ...configArgs, "--", local, `${host}:${remote}`], { stdio: ["ignore", "inherit", "pipe"], timeout: 600_000 }); }),
+        execFileSync("ssh", ["-o", "BatchMode=yes", "-o", `StrictHostKeyChecking=${hostKeyMode}`, "-o", "ConnectTimeout=15", ...configArgs, "--", host, "bash", "-s"], { input: command, encoding: "utf8", timeout, stdio: ["pipe", "pipe", "pipe"] })),
+      copy: (local, remote) => explain(() => { execFileSync("scp", ["-q", "-o", "BatchMode=yes", "-o", `StrictHostKeyChecking=${hostKeyMode}`, ...configArgs, "--", local, `${host}:${remote}`], { stdio: ["ignore", "inherit", "pipe"], timeout: 600_000 }); }),
       tunnel: (port) => {
-        const child = spawnProcess("ssh", ["-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-o", "ExitOnForwardFailure=yes", ...configArgs, "-N", "-L", `${port}:127.0.0.1:${port}`, "--", host], { stdio: "ignore", detached: true });
+        const child = spawn("ssh", ["-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-o", "ExitOnForwardFailure=yes", ...configArgs, "-N", "-L", `${port}:127.0.0.1:${port}`, "--", host], { stdio: "ignore", detached: true });
         child.unref();
         return child.pid;
       },
     };
   }
   const vm = options.lima ?? "zero-worker";
-  return {
+  const runner: WorkerRunner = {
     label: vm,
     shell: (command, timeout = 300_000) =>
       execFile("limactl", ["shell", vm, "--", "bash", "-s"], { input: command, encoding: "utf8", timeout }),
@@ -189,6 +191,8 @@ export function createRunner(options: Pick<WorkerDeployOptions, "ssh" | "lima" |
     tunnel: (port) => {
       const stateDir = join(homeStateDir(), "workers");
       mkdirSync(stateDir, { recursive: true, mode: 0o700 });
+      // mkdir's mode does not tighten a directory that already exists.
+      try { chmodSync(stateDir, 0o700); } catch { /* not supported on Windows */ }
       const config = execFile("limactl", ["show-ssh", "--format", "config", vm], { encoding: "utf8" });
       let configPath = "";
       let written = false;
@@ -216,11 +220,15 @@ export function createRunner(options: Pick<WorkerDeployOptions, "ssh" | "lima" |
         try { rmSync(configPath, { force: true }); } catch { /* ignore */ }
       };
       child.once("exit", cleanup);
+      // The tunnel is detached and unref'd, so these listeners only fire while this process lives;
+      // stopManagedTunnel removes the recorded config otherwise.
       child.once("error", cleanup);
       child.unref();
+      runner.tunnelConfig = configPath;
       return child.pid;
     },
   };
+  return runner;
 }
 
 /** Deploy a Zero engine onto a remote worker and register it as a backend. Idempotent. */
@@ -322,7 +330,7 @@ export async function deployWorker(options: WorkerDeployOptions, runner: WorkerR
 
   let previousMetadata: Record<string, unknown> = {};
   try { previousMetadata = JSON.parse(readFileSync(join(stateDir, `${backendId}.json`), "utf8")); } catch { /* first deployment */ }
-  writeFileSync(join(stateDir, `${backendId}.json`), JSON.stringify({ ...previousMetadata, schemaVersion: 1, backendId, autoReconnect: true, ssh: options.ssh, lima: options.ssh ? undefined : options.lima ?? "zero-worker", sshConfig: options.sshConfig, port, tunnelPid, remoteDir: REMOTE_DIR }, null, 2) + "\n", { mode: 0o600 });
+  writeFileSync(join(stateDir, `${backendId}.json`), JSON.stringify({ ...previousMetadata, schemaVersion: 1, backendId, autoReconnect: true, ssh: options.ssh, lima: options.ssh ? undefined : options.lima ?? "zero-worker", sshConfig: options.sshConfig, port, tunnelPid, tunnelConfig: runner.tunnelConfig, remoteDir: REMOTE_DIR }, null, 2) + "\n", { mode: 0o600 });
   process.env[tokenEnv] = token;
   return { backendId, engine: `http://127.0.0.1:${port}/`, target: targetPath, enginesConfig, tokenEnv };
   } finally { rmSync(staging, { recursive: true, force: true }); }
@@ -330,7 +338,7 @@ export async function deployWorker(options: WorkerDeployOptions, runner: WorkerR
 
 export interface ManagedWorker {
   autoReconnect?: boolean;
-  schemaVersion: 1; backendId: string; ssh?: string; lima?: string; sshConfig?: string; port: number; tunnelPid?: number; remoteDir: string;
+  schemaVersion: 1; backendId: string; ssh?: string; lima?: string; sshConfig?: string; port: number; tunnelPid?: number; tunnelConfig?: string; remoteDir: string;
 }
 export function loadManagedWorker(backendId: string): ManagedWorker {
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(backendId)) throw new Error("Invalid engine ID.");
@@ -346,22 +354,24 @@ export function stopManagedTunnel(
   inspect: (pid: number) => { stdout?: string } = pid => spawnSync("ps", ["-p", String(pid), "-o", "comm=", "-o", "args="], { encoding: "utf8" }),
   kill: (pid: number, signal: string | number) => void = (pid, signal) => process.kill(pid, signal),
 ): boolean {
-  if (!Number.isSafeInteger(worker.tunnelPid) || worker.tunnelPid! <= 1) return false;
+  if (!Number.isSafeInteger(worker.tunnelPid) || worker.tunnelPid! <= 1) { removeTunnelConfig(worker.tunnelConfig); return false; }
   const result = inspect(worker.tunnelPid!);
   const command = result.stdout?.trim() ?? "";
   const destination = worker.ssh ?? `lima-${worker.lima}`;
-  if (!/^\S*ssh\s/.test(command) || !command.includes(` ${worker.port}:127.0.0.1:${worker.port} `) || !command.endsWith(` ${destination}`)) return false;
-  const match = /(?:^|\s)-F\s+(\S+)/.exec(command);
-  const configPath = match?.[1];
-  try {
-    kill(worker.tunnelPid!, "SIGTERM");
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== "ESRCH") return false;
+  if (!/^\S*ssh\s/.test(command) || !command.includes(` ${worker.port}:127.0.0.1:${worker.port} `) || !command.endsWith(` ${destination}`)) {
+    // Our tunnel is gone (exited, or the pid now belongs to something else): its config is no longer needed.
+    removeTunnelConfig(worker.tunnelConfig);
+    return false;
   }
-  if (configPath && configPath.startsWith(join(homeStateDir(), "workers"))) {
-    try { rmSync(configPath, { force: true }); } catch { /* ignore */ }
-  }
+  try { kill(worker.tunnelPid!, "SIGTERM"); } catch { return false; }
+  removeTunnelConfig(worker.tunnelConfig);
   return true;
+}
+/** Remove the private ssh config recorded for a tunnel, only if it sits directly in the workers state directory. */
+function removeTunnelConfig(configPath: string | undefined): void {
+  if (!configPath) return;
+  if (dirname(configPath) !== join(homeStateDir(), "workers") || !/^lima-.*\.conf$/.test(basename(configPath))) return;
+  try { rmSync(configPath, { force: true }); } catch { /* ignore */ }
 }
 export async function stopWorker(backendId: string, suppliedRunner?: WorkerRunner): Promise<{ stopped: true; tunnelStopped: boolean; remoteFilesRemoved: false }> {
   const worker = loadManagedWorker(backendId);
@@ -423,7 +433,7 @@ echo 'Managed engine did not become ready.' >&2; exit 1`, 30_000);
     const tunnelPid = runner.tunnel(worker.port);
     if (!Number.isSafeInteger(tunnelPid) || tunnelPid! <= 1) throw new Error("Could not start the SSH tunnel.");
     // Save ownership immediately so a failed connection can be retried or stopped.
-    writeFileSync(join(homeStateDir(), "workers", `${backendId}.json`), JSON.stringify({ ...loadManagedWorker(backendId), tunnelPid }, null, 2) + "\n", { mode: 0o600 });
+    writeFileSync(join(homeStateDir(), "workers", `${backendId}.json`), JSON.stringify({ ...loadManagedWorker(backendId), tunnelPid, tunnelConfig: runner.tunnelConfig }, null, 2) + "\n", { mode: 0o600 });
     let ready = false;
     for (let attempt = 0; attempt < 12; attempt++) {
       if (probe(worker.port)) { ready = true; break; }

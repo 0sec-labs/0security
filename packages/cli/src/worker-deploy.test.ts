@@ -1,12 +1,18 @@
 import { homeStateDir } from "@0/engine/shared";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { execFileSync, type ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { createRunner, deployWorker, explainSshFailure, loadManagedWorker, repairWorker, resolveWorkerDemoRoot, resolveWorkerRepoRoot, stopManagedTunnel, stopWorker, validateWorkerOptions } from "./worker-deploy.js";
+
+const forcedRandom = vi.hoisted(() => [] as Buffer[]);
+vi.mock("node:crypto", async importOriginal => {
+  const actual = await importOriginal<typeof import("node:crypto")>();
+  return { ...actual, randomBytes: ((size: number) => forcedRandom.shift() ?? actual.randomBytes(size)) as typeof actual.randomBytes };
+});
 
 describe("worker deployment assets", () => {
   it("resolves both source and split bundle modules to their package root", () => {
@@ -238,12 +244,22 @@ describe("Lima worker tunnel configuration and isolation", () => {
   }
 
   const cleanupFiles: string[] = [];
+  const realHome = process.env.HOME;
+  let tempHome = "";
+  beforeEach(() => {
+    // Never write into the real ~/.0: state goes under a throwaway HOME.
+    tempHome = mkdtempSync(join(tmpdir(), "lima-tunnel-home-"));
+    process.env.HOME = tempHome;
+    forcedRandom.length = 0;
+  });
   afterEach(() => {
     while (cleanupFiles.length) {
       const file = cleanupFiles.pop();
       if (file) rmSync(file, { force: true, recursive: true });
     }
     vi.restoreAllMocks();
+    if (realHome === undefined) delete process.env.HOME; else process.env.HOME = realHome;
+    rmSync(tempHome, { recursive: true, force: true });
   });
 
   it("creates a uniquely named configuration file inside homeStateDir with 0o600 permissions", () => {
@@ -380,47 +396,90 @@ describe("Lima worker tunnel configuration and isolation", () => {
     expect(existsSync(configPath)).toBe(false);
   });
 
-  it("stops managed tunnel and cleans up its configuration without affecting another active tunnel", () => {
+  const managed = (config: string, extra: Record<string, unknown> = {}) =>
+    ({ schemaVersion: 1 as const, backendId: "b1", lima: "shared", port: 26001, tunnelPid: 60001, tunnelConfig: config, remoteDir: "/tmp/zero-engine", ...extra });
+  const tunnelLine = "ssh -N -L 26001:127.0.0.1:26001 lima-shared\n";
+
+  it("stops managed tunnel and cleans up its recorded configuration without affecting another tunnel", () => {
     const stateDir = join(homeStateDir(), "workers");
     mkdirSync(stateDir, { recursive: true });
-
     const config1 = join(stateDir, "lima-shared-26001-111111111111.conf");
     const config2 = join(stateDir, "lima-shared-26002-222222222222.conf");
     writeFileSync(config1, "Host lima-shared\n", { mode: 0o600 });
     writeFileSync(config2, "Host lima-shared\n", { mode: 0o600 });
-    cleanupFiles.push(config1, config2);
-
-    const worker1 = { schemaVersion: 1 as const, backendId: "b1", lima: "shared", port: 26001, tunnelPid: 60001, remoteDir: "/tmp/zero-engine" };
 
     const mockKill = vi.fn();
-    const mockInspect = vi.fn((_pid: number) => ({ stdout: `ssh -F ${config1} -N -L 26001:127.0.0.1:26001 lima-shared\n` }));
-
-    const stopped = stopManagedTunnel(worker1, mockInspect, mockKill);
-    expect(stopped).toBe(true);
+    expect(stopManagedTunnel(managed(config1), () => ({ stdout: tunnelLine }), mockKill)).toBe(true);
     expect(mockKill).toHaveBeenCalledWith(60001, "SIGTERM");
-
-    // Worker 1 configuration must be deleted
     expect(existsSync(config1)).toBe(false);
-    // Worker 2 configuration must remain intact
     expect(existsSync(config2)).toBe(true);
   });
 
-  it("fails exclusively without overwriting or following existing symbolic links or files", () => {
+  it("removes the configuration when the tunnel is already dead", () => {
     const stateDir = join(homeStateDir(), "workers");
     mkdirSync(stateDir, { recursive: true });
+    const config = join(stateDir, "lima-shared-26001-333333333333.conf");
+    writeFileSync(config, "Host lima-shared\n", { mode: 0o600 });
+    const mockKill = vi.fn();
 
+    expect(stopManagedTunnel(managed(config), () => ({ stdout: "" }), mockKill)).toBe(false);
+    expect(mockKill).not.toHaveBeenCalled();
+    expect(existsSync(config)).toBe(false);
+  });
+
+  it("finds the configuration even when the state directory path contains spaces", () => {
+    process.env.HOME = join(tempHome, "home with spaces");
+    const stateDir = join(homeStateDir(), "workers");
+    mkdirSync(stateDir, { recursive: true });
+    const config = join(stateDir, "lima-shared-26001-444444444444.conf");
+    writeFileSync(config, "Host lima-shared\n", { mode: 0o600 });
+
+    expect(stopManagedTunnel(managed(config), () => ({ stdout: tunnelLine }), vi.fn())).toBe(true);
+    expect(existsSync(config)).toBe(false);
+  });
+
+  it("never removes a recorded path outside the workers directory", () => {
+    const stateDir = join(homeStateDir(), "workers");
+    mkdirSync(join(stateDir, "nested"), { recursive: true });
+    mkdirSync(`${stateDir}-evil`, { recursive: true });
+    const files = [join(tempHome, "lima-outside.conf"), join(stateDir, "nested", "lima-nested.conf"), join(`${stateDir}-evil`, "lima-evil.conf")];
+    for (const file of files) writeFileSync(file, "keep");
+
+    for (const file of files) stopManagedTunnel(managed(file), () => ({ stdout: "" }), vi.fn());
+    for (const file of files) expect(existsSync(file)).toBe(true);
+  });
+
+  it("tightens an existing, too-open workers directory to 0o700", () => {
+    if (process.platform === "win32") return;
+    const stateDir = join(homeStateDir(), "workers");
+    mkdirSync(stateDir, { recursive: true });
+    chmodSync(stateDir, 0o755);
+    const runner = createRunner({ lima: "perm-vm" }, { execFileSync: vi.fn(() => "config") as any, spawn: vi.fn(() => new MockChildProcess() as unknown as ChildProcess) as any });
+    runner.tunnel(28001);
+    expect(statSync(stateDir).mode & 0o777).toBe(0o700);
+  });
+
+  it("does not follow a pre-planted symbolic link at the chosen configuration path", () => {
+    if (process.platform === "win32") return;
+    const stateDir = join(homeStateDir(), "workers");
+    mkdirSync(stateDir, { recursive: true });
     const canary = join(stateDir, "canary-protected.txt");
     writeFileSync(canary, "PROTECTED_CANARY_CONTENT", { mode: 0o600 });
-    cleanupFiles.push(canary);
+    // Make the first candidate name predictable, then plant a symlink there.
+    const planted = Buffer.from("abcdef123456", "hex");
+    forcedRandom.push(planted);
+    const link = join(stateDir, `lima-clash-27001-${planted.toString("hex")}.conf`);
+    symlinkSync(canary, link);
 
-    const existingConf = join(stateDir, "lima-clash-27001-abcdef123456.conf");
-    symlinkSync(canary, existingConf);
-    cleanupFiles.push(existingConf);
+    let usedPath = "";
+    const spawnMock = vi.fn((_cmd: string, args: string[]) => { usedPath = args[1]!; return new MockChildProcess() as unknown as ChildProcess; });
+    const runner = createRunner({ lima: "clash" }, { execFileSync: vi.fn(() => "SSH_CONFIG_CONTENT") as any, spawn: spawnMock as any });
+    runner.tunnel(27001);
 
-    expect(() => {
-      writeFileSync(existingConf, "OVERWRITE_ATTEMPT", { flag: "wx", mode: 0o600 });
-    }).toThrow(/EEXIST/);
-
+    expect(usedPath).not.toBe(link);
+    expect(readFileSync(usedPath, "utf8")).toBe("SSH_CONFIG_CONTENT");
     expect(readFileSync(canary, "utf8")).toBe("PROTECTED_CANARY_CONTENT");
+    expect(lstatSync(link).isSymbolicLink()).toBe(true);
+    expect(runner.tunnelConfig).toBe(usedPath);
   });
 });
