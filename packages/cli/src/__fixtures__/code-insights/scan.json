@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "target": "app",
+  "status": "complete",
+  "findings": [
+    {
+      "id": "f1", "title": "SQL injection in order lookup", "severity": "critical", "category": "injection", "status": "verified",
+      "description": "The id query parameter reaches a SQL string.", "confidence": 0.92,
+      "location": { "path": "./app/db.py", "startLine": 12 },
+      "evidence": { "request": "GET /orders?id=1'", "response": "500", "analysis": "CWE: CWE-89\n\nThe handler concatenates the parameter into the query." },
+      "impact": { "rationale": "Any unauthenticated caller can read the orders table." },
+      "suggestedFix": { "replacement": "cur.execute(\"select * from orders where id = %s\", (order_id,))" }
+    },
+    {
+      "id": "f2", "title": "SQL injection (second report of the same line)", "severity": "medium", "category": "injection", "status": "new",
+      "description": "Same sink, reported again.",
+      "location": { "path": "app/db.py", "startLine": 12 },
+      "evidence": { "request": "", "response": "", "analysis": "CWE: CWE-89" }
+    },
+    {
+      "id": "f3", "title": "Reflected XSS in the search view", "severity": "high", "category": "xss", "status": "verified",
+      "description": "The query is written into the page unescaped.",
+      "location": { "path": "web/view.js", "startLine": 40 },
+      "evidence": { "request": "", "response": "", "analysis": "CWE: CWE-79\n\nThe value is passed to innerHTML." }
+    },
+    {
+      "id": "f4", "title": "Weak hash for session ids", "severity": "low", "category": "crypto", "status": "new",
+      "description": "MD5 is used for a session id.",
+      "location": { "path": "app/crypto.py", "startLine": 7 },
+      "evidence": { "request": "", "response": "", "analysis": "" }
+    },
+    {
+      "id": "f5", "title": "Secrets in repository history", "severity": "info", "category": "secrets", "status": "new",
+      "description": "A token-like string appears in a past commit.",
+      "evidence": { "request": "", "response": "", "analysis": "" }
+    }
+  ]
+}

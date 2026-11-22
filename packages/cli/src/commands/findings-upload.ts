@@ -11,6 +11,7 @@ import type { Command } from "commander";
 import { looksLikeSarif } from "@0/engine/shared";
 import { runGh } from "../host/gh.js";
 import { selectHost } from "../host/index.js";
+import { buildCodeInsights, postCodeInsights, readInsightFindings, type CodeInsightsPlatform, type FetchLike } from "../code-insights.js";
 import { finishWithError, UsageError } from "./output.js";
 
 const exec = promisify(execFile);
@@ -27,6 +28,10 @@ export interface UploadDeps {
   /** Run `gh` with these arguments and an optional request body on standard input. */
   gh(args: string[], input?: string): Promise<string>;
   git(args: string[]): Promise<string>;
+  /** HTTP for the Bitbucket targets; tests replace it. */
+  fetch?: FetchLike;
+  /** Environment for the Bitbucket targets (token, repository, commit); defaults to the process's. */
+  env?: Record<string, string | undefined>;
 }
 const defaults: UploadDeps = {
   out: text => process.stdout.write(`${text}\n`),
@@ -41,7 +46,48 @@ const defaults: UploadDeps = {
   git: async args => (await exec("git", args)).stdout,
 };
 
-export interface UploadOptions { repo?: string; commit?: string; ref?: string; wait: boolean; tool?: string; format?: string }
+export interface UploadOptions { repo?: string; commit?: string; ref?: string; wait: boolean; tool?: string; format?: string; to?: string; url?: string; reportId?: string; print?: boolean }
+
+const BITBUCKET_TARGETS: Record<string, CodeInsightsPlatform> = { "bitbucket-cloud": "bitbucket-cloud", "bitbucket-dc": "bitbucket-dc" };
+const SLUG = /^[A-Za-z0-9._~-]{1,200}$/;
+const REPORT_ID = /^[A-Za-z0-9._-]{1,100}$/;
+
+/**
+ * Publish findings to Bitbucket Code Insights, or print the payload when there is no token (BITBUCKET_TOKEN) or --print is set.
+ * The request bodies are printed as one JSON document: the report and the annotation batches, ready for a CI step to send.
+ */
+export async function runBitbucketUpload(file: string, options: UploadOptions, deps: UploadDeps = defaults): Promise<{ published: boolean; total: number; emitted: number; dropped: number; requests?: number }> {
+  const platform = BITBUCKET_TARGETS[options.to ?? ""];
+  if (!platform) throw new UsageError("--to must be github, bitbucket-cloud or bitbucket-dc.");
+  const env = deps.env ?? process.env;
+  let findings;
+  try { findings = readInsightFindings(deps.readText(file)); } catch (error) { if (error instanceof UsageError) throw error; throw new UsageError(`${error instanceof Error ? error.message : String(error)} Make one with \`0 scan --format json -o scan.json\`.`); }
+  const reportId = options.reportId ?? "0-security";
+  if (!REPORT_ID.test(reportId)) throw new UsageError("--report-id may hold letters, digits, dots, dashes and underscores (at most 100).");
+  const payload = buildCodeInsights(findings, platform, { reportId });
+  const token = (env.BITBUCKET_TOKEN ?? "").trim();
+  if (options.print || !token) {
+    deps.out(JSON.stringify({ platform, reportId, report: payload.report, annotationBatches: payload.batches, annotationsTotal: payload.total, annotationsEmitted: payload.emitted, annotationsDropped: payload.dropped }, null, 2));
+    if (!options.print) deps.err("BITBUCKET_TOKEN is not set: printed the payload instead of posting it.");
+    if (payload.dropped) deps.err(`${payload.dropped} less severe finding(s) are over Bitbucket's ${payload.emitted}-annotation limit and were left out.`);
+    return { published: false, total: payload.total, emitted: payload.emitted, dropped: payload.dropped };
+  }
+
+  const cloud = platform === "bitbucket-cloud";
+  const repoName = options.repo ?? (cloud && env.BITBUCKET_WORKSPACE && env.BITBUCKET_REPO_SLUG ? `${env.BITBUCKET_WORKSPACE}/${env.BITBUCKET_REPO_SLUG}` : "");
+  const [owner, repo, extra] = repoName.split("/");
+  if (!owner || !repo || extra !== undefined || !SLUG.test(owner) || !SLUG.test(repo)) throw new UsageError(`Name the repository with --repo ${cloud ? "workspace/repo" : "PROJECT/repo"}.`);
+  const commit = (options.commit || env.BITBUCKET_COMMIT || env.GIT_COMMIT || (await deps.git(["rev-parse", "HEAD"]).catch(() => ""))).trim();
+  if (!SHA.test(commit)) throw new UsageError("Name the commit with --commit <40-character sha> (or run this inside the clone).");
+  const baseUrl = options.url || env.BITBUCKET_URL || undefined;
+  if (!cloud) {
+    if (!baseUrl || !/^https?:\/\/[^\s/]+/.test(baseUrl)) throw new UsageError("Name the Data Center server with --url https://bitbucket.example.com (or BITBUCKET_URL).");
+  }
+  const fetcher = deps.fetch ?? ((url, init) => fetch(url, init));
+  const result = await postCodeInsights(payload, { owner, repo, commit, ...(baseUrl ? { baseUrl } : {}) }, token, fetcher);
+  deps.err(`published ${payload.emitted} annotation(s) to ${owner}/${repo} at ${commit.slice(0, 7)}${payload.dropped ? `; ${payload.dropped} less severe finding(s) were over the limit` : ""}`);
+  return { published: true, total: payload.total, emitted: payload.emitted, dropped: payload.dropped, requests: result.requests };
+}
 
 /** The SARIF as GitHub wants it: gzip, then base64. */
 export function packSarif(text: string): string {
@@ -79,9 +125,13 @@ export async function runUpload(file: string, options: UploadOptions, deps: Uplo
 
 export function registerFindingsUploadCommand(parent: Command, deps: UploadDeps = defaults): void {
   parent.command("upload")
-    .description("Upload a SARIF file to GitHub code scanning, so findings show in the Security tab and on pull requests")
-    .argument("<file>", "SARIF 2.1.0 file, for example from `0 scan --format sarif -o scan.sarif`")
-    .option("--repo <owner/name>", "Repository (default: the current clone's)")
+    .description("Upload findings to GitHub code scanning (SARIF) or to Bitbucket Code Insights (scan JSON or SARIF)")
+    .argument("<file>", "SARIF 2.1.0 file from `0 scan --format sarif -o scan.sarif`; for Bitbucket also `0 scan --format json -o scan.json`")
+    .option("--to <target>", "github (default), bitbucket-cloud or bitbucket-dc", "github")
+    .option("--url <url>", "Bitbucket Data Center base URL (default: BITBUCKET_URL)")
+    .option("--report-id <id>", "Bitbucket report id or key", "0-security")
+    .option("--print", "Bitbucket: print the report and annotation payload instead of posting it (also the behaviour without BITBUCKET_TOKEN)")
+    .option("--repo <owner/name>", "Repository (default: the current clone's); Bitbucket: workspace/repo or PROJECT/repo")
     .option("--commit <sha>", "Commit the results are for (default: HEAD, or GITHUB_SHA in Actions)")
     .option("--ref <ref>", "refs/heads/<branch> or refs/pull/<n>/merge (default: the current branch, or GITHUB_REF in Actions)")
     .option("--tool <name>", "Name the tool shown in GitHub")
@@ -89,6 +139,13 @@ export function registerFindingsUploadCommand(parent: Command, deps: UploadDeps 
     .option("--format <format>", "Output: text or json", "text")
     .action(async (file: string, options: UploadOptions) => {
       try {
+        if (options.to && options.to !== "github") {
+          const posted = await runBitbucketUpload(file, options, deps);
+          if (!posted.published) return;
+          if (options.format === "json") deps.out(JSON.stringify(posted));
+          else deps.out(`Published ${posted.emitted} of ${posted.total} finding(s) to Bitbucket Code Insights.`);
+          return;
+        }
         const result = await runUpload(file, options, deps);
         if (!result) return;
         if (options.format === "json") deps.out(JSON.stringify(result));
