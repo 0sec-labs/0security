@@ -1088,6 +1088,8 @@ Fix one finding in an isolated git work tree and open a pull request for review
 
 A thread follows the `fix-finding` skill in a separate work tree of the repository, so your checkout is never touched. It makes the smallest change it can; then the command runs each `--test` check, commits on a branch named `0/fix-<id>` and opens a pull request, as a draft when a check fails. Running it again for the same finding updates the same pull request. Nothing is pushed to the base branch and nothing is merged: a person reviews and merges. Use `--test` for the project's tests and, to re-run the scanner that raised the finding, its own command (for example `foxguard .`). It edits files on this machine, so it needs the local console and does not accept `--computer` or `--engine-url`.
 
+A fix policy (approved libraries, forbidden patterns, rules, notes; JSON or YAML) can steer the thread. It comes only from `--policy <file>` (any path you name) or from your own `~/.0/fix-policy.json|yaml|yml`. A policy file inside the repository being fixed is **not** read unless you pass `--repo-policy`, because whoever controls the repository would then control the prompt; `--repo-policy` prints a warning and a file that links outside the repository is refused. The policy reaches the model as lower-priority guidance (escaped, one line per entry, bounded in size); the rules to never commit, push or merge follow it and override it.
+
 | Argument | Required | Description |
 | --- | --- | --- |
 | `finding` | Yes |  |
@@ -1097,6 +1099,8 @@ A thread follows the `fix-finding` skill in a separate work tree of the reposito
 | `--repo <dir>` | — | Git repository the finding is in (default: the current directory) |
 | `--base <branch>` | — | Branch to start from and open the pull request against (default: the remote's default branch) |
 | `--test <command>` | — | Check to run after the change; repeat for several. A failing check makes the pull request a draft |
+| `--policy <file>` | — | Policy file (.json or .yaml) of approved libraries and fix rules; any path you name, relative to the current directory. Default: ~/.0/fix-policy.json\|yaml\|yml |
+| `--repo-policy` | — | Also read fix-policy.* or .zero/fix-policy.* from the repository being fixed (untrusted content; off by default) |
 | `--no-pr` | — | Commit on the fix branch but do not push or open a pull request |
 | `--budget <usd>` | `3` | Stop when the estimated spend reaches this many USD |
 | `--model <model>` | — | Model for the fix thread (default: gpt-6-luna) |
