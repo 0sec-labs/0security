@@ -39,32 +39,27 @@ New to 0? Read the [Quickstart](/) first. Settings and environment variables are
 
 ## Invocation and safety
 
-Run commands as `0 <command>`. Check your release with `0 --version` and
-command-specific `--help`.
+Run commands as `0 <command>`. Run `0 --version` for your release and `0 <command> --help` for a command's flags.
 
 The browser app's chat uses the same words as slash commands: `/threads list`,
 `/findings list`, `/models default` and `/config get` mirror `0 threads list`,
 `0 findings list`, `0 models set` and `0 config get`. See [Slash commands](/threads/#slash-commands).
 
-Option tables show registration defaults. **— means no default is registered**:
-a handler may resolve configuration or require an explicit value. Inverse
-`--no-*` options show the underlying positive boolean default. See
-[Configuration](/configuration/) for environment and runtime resolution.
+Option tables show the default each flag is registered with. A dash means no default is registered: the command may read it from configuration or require a value. A `--no-*` option shows the default of the positive flag. See [Configuration](/configuration/) for environment variables.
 
 - With no arguments, `0` opens the browser app. No account is needed. See [Browser app](/threads/).
 - `0 -p "<prompt>"` runs one headless chat prompt. `0 -c` continues the last chat and `0 --resume <id>` a saved one.
-- `0 --help` lists the 8 top-level commands.
-- Use explicit commands in automation. Recognizable bare targets are routed automatically; ambiguous input is refused.
-- Provider authentication, target authentication, filesystem access, and execution isolation have independent controls.
-- The operator-global SmolVM profile runs the entire CLI inside an online Kali guest, preserving original arguments and terminal streams. `workbench` and `config` remain host management commands. No Colima/Docker daemon is needed at runtime; failures never choose host execution implicitly.
+- `0 --help` lists the eleven commands.
+- Use explicit commands in automation. 0 routes a recognizable bare target to a command and refuses ambiguous input.
+- With the SmolVM workbench profile on, the whole CLI runs inside an online Kali guest. `workbench` and `config` stay on the host, and a failure never falls back to host execution.
 
-## Replacements for moved commands
+## Shortcut commands
 
-These forms run the implementation commands documented in the sections below.
+These forms run the commands documented in the sections below.
 
 ### findings update
 
-Change a finding's status. `--status accepted` runs `findings accept`, `suppressed` runs `findings suppress`, `open` runs `findings reopen` and `false-positive` suppresses the finding and records `--reason` as its note.
+Change a finding's status to `accepted`, `suppressed`, `open` or `false-positive`. A false positive needs `--reason`, which is saved as its note.
 
 ```text
 0 findings update [options] <id>
@@ -83,7 +78,7 @@ Change a finding's status. `--status accepted` runs `findings accept`, `suppress
 
 ### models set
 
-Show or choose the default model. It takes the arguments of `models default`.
+Show or choose the default model. It takes the same arguments as `models default`.
 
 ```text
 0 models set [options] [model]
@@ -99,7 +94,7 @@ Show or choose the default model. It takes the arguments of `models default`.
 
 ### models connect
 
-Add a provider connection (`0 models connect <provider>`), or `--list`, `--test` and `--remove` one. These run `models connections add|list|test|remove`.
+Add a provider connection, or list, test or remove one with `--list`, `--test` and `--remove`. These run `models connections add`, `list`, `test` and `remove`.
 
 ```text
 0 models connect [options] [provider]
@@ -119,7 +114,7 @@ Add a provider connection (`0 models connect <provider>`), or `--list`, `--test`
 
 ### config doctor
 
-Check this machine and the engine. `config doctor upgrade`, `config doctor workbench` and `config doctor checks` reach the subcommands of `doctor`; `--fix` repairs the local database.
+Check this machine and the engine. `--fix` repairs the local database. The subcommands of `doctor` also work here: `config doctor upgrade`, `config doctor workbench` and `config doctor checks`.
 
 ```text
 0 config doctor [options] [checks...]
@@ -145,13 +140,40 @@ Scan a folder or git repository for security bugs and print the findings as a re
 0 scan [options] <target>
 ```
 
-`--diff <ref>` reviews a change instead of the whole folder: only the files that differ from the ref (committed or not) and the code they connect to, for example `0 scan . --diff origin/main --format sarif -o scan.sarif` in a pull request job. The folder must be a git work tree. An empty diff starts no thread and writes an empty report.
+Run it on a folder or a git URL:
 
-With FoxGuard installed (it ships next to `0`; `ZERO_FOXGUARD_PATH` points elsewhere), the scan first runs it on the folder, which takes seconds and costs nothing, and gives its hits to the thread as leads: the thread checks each one against the code, records only the real ones and says which it rejected. A pattern scanner flags some safe code and cannot see logic bugs such as a missing ownership check, so the thread still reviews the entry points itself. `--prepass off` skips it. `--scanner` adds or replaces scanners (`foxguard`, `semgrep`, `opengrep`; repeat the flag for several); a scanner that is not installed is skipped. A Semgrep rule pack such as `p/default` is downloaded when it runs.
+```bash
+0 scan ~/code/app --format sarif -o scan.sarif --fail-on high
+```
 
-A scan is a thread that follows the `scan` skill, so it appears in `0 threads` and in the web app. The findings are stored under the thread's id and exported from there, so `0 findings export --scan <thread id>` gives the same report later. `target` is a folder or a git URL. It uses the console that is running, or the engine named by `--engine-url` or `--computer`; with none running it starts a headless console for the scan and stops it afterwards. Exit codes: 0 done, 1 a finding at or above `--fail-on` or the scan failed, 2 usage error, 3 stopped at the budget or the time limit (the report is partial).
+A scan is a thread that follows the `scan` skill, so it appears in `0 threads` and in the web app. Findings are stored under the thread id, and `0 findings export --scan <thread id>` gives the same report later.
 
-`--context <file>` gives the scan a file as lower-priority background, usually the repository's threat model (see [Threat model and policy checks](/threat-model-and-policy/)); the scan then checks the rules it states. Nothing is read from the scanned folder on its own, because a pull request could edit such a file to blind the scan; `--repo-context` reads `.0/threat-model.md` from the folder anyway and prints a warning, and in CI the file should come from the base branch. `--policy <file-or-folder>` checks the code against Markdown policies with the `policy-check` skill and answers pass, fail or not-applicable for each; `--org-policy <folder>` is an organisation's folder that is evaluated first and wins over `--policy` on the same id or a conflicting rule.
+The scan uses the running console, or the engine named by `--engine-url` or `--computer`. With none running, it starts a headless console and stops it afterwards.
+
+Exit codes:
+
+- 0: done
+- 1: a finding at or above `--fail-on`, or the scan failed
+- 2: usage error
+- 3: stopped at the budget or the time limit; the report is partial
+
+To review a change instead of the whole folder, pass `--diff <ref>`, for example in a pull request job:
+
+```bash
+0 scan . --diff origin/main --format sarif -o scan.sarif
+```
+
+0 reviews the files that differ from the ref (committed or not) and the code they connect to. The folder must be a git work tree. An empty diff starts no thread and writes an empty report.
+
+If FoxGuard is installed, the scan runs it first. It takes seconds and costs nothing. The thread treats its hits as leads, checks each against the code, records only the real ones and says which it rejected. A pattern scanner cannot see logic bugs such as a missing ownership check, so the thread still reviews the entry points itself.
+
+FoxGuard ships next to `0`; set `ZERO_FOXGUARD_PATH` to use another copy. Pass `--prepass off` to skip it. `--scanner` adds or replaces scanners (`foxguard`, `semgrep`, `opengrep`); repeat the flag for several. A scanner that is not installed is skipped. A Semgrep rule pack such as `p/default` is downloaded when it runs.
+
+`--context <file>` gives the scan a file as lower-priority background, usually the repository's threat model (see [Threat model and policy checks](/threat-model-and-policy/)). The scan checks the rules it states.
+
+0 never reads that file from the scanned folder on its own, because a pull request could edit it to blind the scan. In CI, pass a copy from the base branch. `--repo-context` reads `.0/threat-model.md` from the folder anyway and prints a warning.
+
+`--policy <file-or-folder>` checks the code against Markdown policies with the `policy-check` skill and answers pass, fail or not-applicable for each. `--org-policy <folder>` is an organisation's policy folder. It is evaluated first and wins over `--policy` on the same id or a conflicting rule.
 
 | Argument | Required | Description |
 | --- | --- | --- |
@@ -190,7 +212,18 @@ Draft the repository's threat model as a file for people to review.
 0 threat-model [options] [folder]
 ```
 
-A thread follows the `threat-model` skill and writes `.0/threat-model.md` in the folder: summary, what matters most, assets, actors, trust boundaries, entry points, authorization and business rules, data flows and open questions, with front matter holding the date and the commit. It names only what it saw and marks the rest `unknown: confirm with the team`. Running it again updates the file and keeps every section marked `<!-- human -->`. With `--pr` the file is committed alone on the branch `0/threat-model` in a separate git work tree and a pull request is opened or updated with `gh`; nothing is merged. It writes files on this machine, so it needs the local console and does not accept `--computer` or `--engine-url`. Details: [Threat model and policy checks](/threat-model-and-policy/).
+A thread follows the `threat-model` skill and writes `.0/threat-model.md` in the folder. The file has a summary, what matters most, assets, actors, trust boundaries, entry points, authorization and business rules, data flows and open questions. Front matter holds the date and the commit.
+
+```bash
+0 threat-model
+0 threat-model ~/code/app --pr
+```
+
+The file names only what the thread saw and marks the rest `unknown: confirm with the team`. Running it again updates the file and keeps every section marked `<!-- human -->`.
+
+With `--pr`, the file is committed alone on the branch `0/threat-model` in a separate git work tree, and `gh` opens or updates a pull request. Nothing is merged.
+
+It writes files on this machine, so it needs the local console and rejects `--computer` and `--engine-url`. See [Threat model and policy checks](/threat-model-and-policy/).
 
 | Argument | Required | Description |
 | --- | --- | --- |
@@ -252,25 +285,19 @@ Call an admitted HTTP API on a running engine without sending a model prompt.
 0 api [options] [path]
 ```
 
-Select either `--engine <id>` from an operator-managed registry, or both
-`--engine-url <url>` and `--engine-token-env <name>` for direct attachment.
-The optional path defaults to `/api/backend/handshake`; it must be an admitted
-`/api/` route. The client checks the selected engine's identity and advertised
-capabilities before dispatch. Missing credentials, unsupported routes, redirects,
-and capability mismatches fail without falling back to local execution.
+Pick the engine with `--engine <id>` from an operator-managed registry, or with both `--engine-url <url>` and `--engine-token-env <name>`. The path defaults to `/api/backend/handshake` and must be an admitted `/api/` route.
 
-The default method is GET. Use an explicit write method and `--data` for a
-mutation; JSON input can be inline or `@file`, with regular files and serialized
-bodies limited to 1 MB. GET and HEAD reject request bodies. Pass the name of an
-environment variable for the bearer credential, never the credential as an
-argument. Existing server authentication and approval checks still apply.
+```bash
+0 api /api/backend/handshake --engine-url http://127.0.0.1:48123 --engine-token-env ZERO_ENGINE_TOKEN
+```
 
-Responses are JSON envelopes with `ok`, HTTP `status`, and `data`; text exports
-appear as strings. Errors produce a nonzero exit and a JSON diagnostic on stderr.
-Successful HTTP submission does not mean queued work has finished: retain the
-returned resource ID, inspect its status, and cancel explicitly when needed.
-This command is not a binary-download or event-stream client. Browser appearance
-and interactive OAuth consent remain browser operations.
+Before it sends the request, 0 checks the engine's identity and advertised capabilities. A missing credential, an unsupported route, a redirect or a capability mismatch fails. It never falls back to local execution.
+
+The default method is GET. For a change, set an explicit method and `--data`. JSON can be inline or `@file`; files and serialized bodies are limited to 1 MB, and GET and HEAD reject bodies. Pass the name of an environment variable for the bearer credential, never the credential itself. The server's authentication and approval checks still apply.
+
+Responses are JSON envelopes with `ok`, HTTP `status` and `data`. Text exports appear as strings. An error exits nonzero and prints a JSON diagnostic on stderr.
+
+A successful request does not mean queued work has finished. Keep the returned resource ID, check its status, and cancel explicitly if needed. The command does not download binaries, stream events or complete browser OAuth consent.
 
 | Argument | Required | Description |
 | --- | --- | --- |
@@ -287,8 +314,7 @@ and interactive OAuth consent remain browser operations.
 
 ### findings reports
 
-Import retained CI artifacts into a chosen local browser workspace without
-starting an assessment.
+Import retained CI artifacts into a local browser workspace without starting an assessment.
 
 ```text
 0 findings reports
@@ -298,11 +324,9 @@ Subcommands: [import](#findings-reports-import) · [export](#findings-reports-ex
 
 #### findings reports import
 
-Read a JSON report and optional `run.json`, validate them, and retain a passive
-snapshot in the explicitly selected database. Stop the engine using that database
-before importing, then open `0 web --db-path <same-path>`. The same report and
-metadata import only once. Imported findings remain discovered and unverified by
-this engine; importing does not restore execution state or authorize fixes.
+Read a JSON report and an optional `run.json`, validate them, and keep a passive snapshot in the database you select. Stop any engine using that database first, then open `0 web --db-path <same-path>`. The same report and metadata import once.
+
+Imported findings stay discovered and unverified. Importing does not restore execution state or authorize fixes.
 
 ```text
 0 findings reports import [options] <report>
@@ -319,13 +343,9 @@ this engine; importing does not restore execution state or authorize fixes.
 
 #### findings reports export
 
-Write a share-safe copy of a JSON report. The copy is built from an allowlist: it
-keeps the target, summary and, for each finding, the id, title, severity, category,
-status, fingerprint, CVSS, confidence and source location. It drops evidence, PoC
-steps, agent transcripts, triage notes, suggested code and local absolute paths, and
-it removes credentials, query strings and fragments from URL targets. Free-text
-descriptions are left out unless you pass `--include-description`. The command only
-writes the copy; it sends nothing anywhere.
+Write a share-safe copy of a JSON report. The copy keeps the target, summary and, for each finding, the id, title, severity, category, status, fingerprint, CVSS, confidence and source location. It drops evidence, PoC steps, agent transcripts, triage notes, suggested code and local absolute paths, and strips credentials, query strings and fragments from URL targets.
+
+Free-text descriptions are left out unless you pass `--include-description`. The command only writes the copy; it sends nothing.
 
 ```text
 0 findings reports export [options] <report>
@@ -734,9 +754,7 @@ Show the local log of privileged actions: connection and settings changes, exten
 
 ### doctor workbench
 
-Set up and inspect the online SmolVM security workbench on
-Apple Silicon macOS. The local Linux guest contains 0, the security tools and
-the browser; Docker is not required to run the workbench.
+Set up and inspect the online SmolVM security workbench on Apple Silicon macOS. The local Linux guest contains 0, the security tools and the browser. Docker is not required.
 
 ```text
 0 doctor workbench
@@ -746,11 +764,7 @@ Subcommands: [run-agent](#doctor-workbench-run-agent) · [console-agent](#doctor
 
 #### doctor workbench run-agent
 
-Internal, hidden entrypoint for the host-controlled CLI engine inside an admitted
-Linux SmolVM workbench. It exchanges framed controller messages over standard
-input/output; it is not an interactive command or a host-side launch shortcut.
-Normal CLI commands select this entrypoint automatically when the workbench
-profile is enabled. Direct invocation outside an admitted guest is refused.
+Internal entrypoint for the CLI engine inside the workbench guest. Normal commands select it automatically when the workbench profile is on. Outside an admitted guest it is refused.
 
 ```text
 0 doctor workbench run-agent
@@ -758,11 +772,7 @@ profile is enabled. Direct invocation outside an admitted guest is refused.
 
 #### doctor workbench console-agent
 
-Internal, hidden entrypoint for the host-controlled chat engine inside an
-admitted Linux SmolVM workbench. The host owns the terminal/browser UI and
-forwards requests, events and approvals over the framed controller transport.
-Use `0 -p` or `0` to start a chat; do not invoke this transport endpoint
-manually. Direct invocation outside an admitted guest is refused.
+Internal entrypoint for the chat engine inside the workbench guest. Use `0 -p` or `0` to start a chat. Outside an admitted guest it is refused.
 
 ```text
 0 doctor workbench console-agent
@@ -770,8 +780,7 @@ manually. Direct invocation outside an admitted guest is refused.
 
 #### doctor workbench setup
 
-Verify/provision the signed native runtime, approve a local archive by digest,
-and persist the operator-global SmolVM profile.
+Verify or provision the signed native runtime, approve a local archive by digest, and save the operator-global SmolVM profile.
 
 ```text
 0 doctor workbench setup [options]
@@ -790,16 +799,11 @@ and persist the operator-global SmolVM profile.
 | `--storage <GiB>` | — | Guest private writable storage in GiB |
 | `--sandbox-image <reference=archive>` | — | Approve an immutable image reference for brokered isolated container actions; repeat for multiple images |
 
-The supported provider grant is `chatgpt-codex`: model requests go through the
-host broker, and credentials stay on the host. GitHub credential forwarding is
-refused. The host HOME, SSH configuration and Docker socket are not mounted
-into the guest.
+The supported provider grant is `chatgpt-codex`: model requests go through the host broker and credentials stay on the host. GitHub credential forwarding is refused. The host HOME, SSH configuration and Docker socket are not mounted into the guest.
 
 #### doctor workbench status
 
-Read configuration, native runtime readiness, image approval, effective privacy,
-network mode, broker resource ceilings and retained guest admission. Does not
-download or launch a VM or reveal credential values.
+Show configuration, native runtime readiness, image approval, effective privacy, network mode, broker resource ceilings and retained guest admission. It does not download or launch a VM or reveal credential values.
 
 ```text
 0 doctor workbench status [options]
