@@ -1614,6 +1614,7 @@ With `--to bitbucket-cloud` or `--to bitbucket-dc` the findings go to Bitbucket 
 | `--url <url>` | — | Bitbucket Data Center base URL (default: BITBUCKET_URL) |
 | `--report-id <id>` | `0-security` | Bitbucket report id or key |
 | `--print` | — | Bitbucket: print the report and annotation payload instead of posting it (also the behaviour without BITBUCKET_TOKEN) |
+| `--allow-insecure-http` | — | Bitbucket: allow sending the token to an http:// URL that is not on this machine (default: refuse) |
 | `--repo <owner/name>` | — | Repository (default: the current clone's); Bitbucket: workspace/repo or PROJECT/repo |
 | `--commit <sha>` | — | Commit the results are for (default: HEAD, or GITHUB_SHA in Actions) |
 | `--ref <ref>` | — | refs/heads/&lt;branch&gt; or refs/pull/&lt;n&gt;/merge (default: the current branch, or GITHUB_REF in Actions) |
