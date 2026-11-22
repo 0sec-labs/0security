@@ -311,7 +311,7 @@ This needs the `sqlite3` command on the host (`sudo apt-get install -y sqlite3`)
 ### Upgrades
 
 1. Take a fresh backup first, as in [Backups](#1-online-safe-database-backup). Keep that file until the upgrade is verified.
-2. Set the new tag in `/opt/zero/.env` (for example `ZERO_IMAGE_TAG=v0.42.0`), then follow [Server mode: Upgrade](/server-mode/#upgrade):
+2. Set the new tag in `/opt/zero/.env` (`ZERO_IMAGE_TAG=v` followed by the new version), then follow [Server mode: Upgrade](/server-mode/#upgrade):
    ```bash
    docker compose pull zero && docker compose up -d zero
    docker compose logs --tail 50 zero
