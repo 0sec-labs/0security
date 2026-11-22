@@ -3,18 +3,18 @@ title: Configuration
 description: Settings, environment variables, telemetry, updates and the security model.
 ---
 
-Settings, credentials and run state are separate. This page covers settings and the environment. Provider keys and model routing are on [Models](/models/).
+0 reads settings from files, environment variables and command-line flags. This page covers those, plus telemetry, updates and the security model. Provider keys and model routing are on [Models](/models/).
 
 ## Quick start
 
 ```bash
-0 config get                    # effective settings, each labelled default, global or project
-0 config get --export ./settings.json  # write the effective settings as JSON
+0 config get                              # effective settings, each labelled default, global or project
+0 config get --export ./settings.json     # write the effective settings as JSON
 0 config set --from-file ./settings.json  # merge into the global layer
-0 config doctor upgrade                        # install the latest release
+0 config doctor upgrade                   # install the latest release
 ```
 
-Resolution order, highest first: command-line flag, environment variable, project settings, global settings, built-in default.
+0 resolves each setting in this order, highest first: command-line flag, environment variable, project settings, global settings, built-in default.
 
 ## Execution profile
 
@@ -33,7 +33,7 @@ Set up the workbench, then start the app:
 0
 ```
 
-Setup downloads the pinned VM runtime and approves a digest-pinned local image archive. It never trusts a mutable registry tag. The native runtime is qualified on Apple Silicon macOS.
+Setup downloads the pinned VM runtime and approves a local image archive by its digest. It never trusts a mutable registry tag. The native runtime is qualified on Apple Silicon macOS.
 
 | `setup` option | Default | Effect |
 | --- | --- | --- |
@@ -41,11 +41,11 @@ Setup downloads the pinned VM runtime and approves a digest-pinned local image a
 | `--state <directory>` | `~/.0/workbench` | VM state, image approval and guest data. |
 | `--workspace <directory>` | current directory per launch | Host folder mounted at `/workspace` in the guest. |
 | `--provider <id>` | none | Grant a host provider account to the guest. Repeat to grant several. `0 config doctor workbench providers` lists the IDs. |
-| `--no-github` | | Revoke the GitHub token grant. Forwarding a GitHub token is refused. |
+| `--no-github` | | Revoke the GitHub token grant. 0 refuses to forward a GitHub token. |
 | `--cpus`, `--memory <MiB>`, `--storage <GiB>` | `2`, `4096`, `20` | Guest resources. |
 | `--sandbox-image <reference=archive>` | none | Approve a `repository@sha256:<64 hex>` image for isolated container actions. Repeat for more. |
 
-Change it later:
+Change the setup later:
 
 ```bash
 0 config doctor workbench configure --provider openai,anthropic --no-github   # replace grants
@@ -55,43 +55,41 @@ Change it later:
 0 config doctor workbench disable                                             # return to local; keeps image and state
 ```
 
-Rules:
-
-- Choices live in `~/.0/workbench.json` (owner-only). Credential values are never stored there.
-- The guest sees only granted providers. Host HOME, SSH keys, Docker sockets and other environment variables are not forwarded.
-- If the runtime, image or admission check fails, launch is refused. It never falls back to the host.
+- Your choices live in `~/.0/workbench.json`, readable only by you. It holds no credential values.
+- The guest sees only the providers you grant. Your home folder, SSH keys, Docker sockets and other environment variables are not forwarded.
+- If the runtime, image or admission check fails, 0 refuses to launch. It never falls back to the host.
 - Project settings cannot change the profile. A change applies at the next launch.
-- `0 config doctor workbench status` is read-only and never downloads anything.
+- `0 config doctor workbench status` is read-only and downloads nothing.
 
 ## State directory
 
-Per-user state lives in `~/.0`.
+0 keeps per-user state in `~/.0`.
 
 | Path | Purpose |
 | --- | --- |
-| `tui-settings.json` | Global settings (legacy filename). |
+| `tui-settings.json` | Global settings. |
 | `credentials.json` | Stored API keys, mode `0600`. |
 | `console-sessions/` | One transcript JSON per thread. |
 | `engines.json` | Registered remote computers. See [Computers](/computers/). |
 | `workbench.json` | Workbench choices. |
 | `last-update-check` | Cache for update checks. |
 | `feedback.md` | Locally staged feedback. |
-| `diagnostics/pending/` | Crash reports waiting for your review (only with `diagnosticReporting` set to `ask`), mode `0600`. At most 10, oldest removed first. |
-| `analytics-id` | The random install ID used for anonymous usage counts. Delete it to start a new one. |
+| `diagnostics/pending/` | Crash reports waiting for your review, mode `0600`. Used only when `diagnosticReporting` is `ask`. Holds at most 10, oldest removed first. |
+| `analytics-id` | The random install ID for anonymous usage counts. Delete it to start a new one. |
 | `analytics-sent.log` | A copy of every usage payload this machine sent. |
 | `telemetry-notice` | Marks that the one-time telemetry notice was shown. Delete it to see the notice again. |
 
 Project settings live in `<project>/.0/tui-settings.json`.
 
-Overrides: `--db-path` over `ZERO_DB_PATH` sets the database file. Moving one path does not move the others.
+Set the database file with `--db-path` or `ZERO_DB_PATH`. `--db-path` wins. Moving one path does not move the others.
 
-A running console is tied to one folder and owns its database. Commands such as `0 skills list` and `0 threads list` run from another folder stop with `This console is for <folder>. Run the command there, or add --db-path <path>.`
+A running console is tied to one folder and owns its database. If you run `0 skills list` or `0 threads list` from another folder, it stops with `This console is for <folder>. Run the command there, or add --db-path <path>.`
 
-Thread transcripts hold target hostnames, findings and raw request and response bodies, including any cookies or tokens a tool echoed. They are not scrubbed or encrypted. File permissions (`0600` files, `0700` directory) are the only protection.
+Thread transcripts hold target hostnames, findings and raw request and response bodies, including any cookies or tokens a tool echoed. 0 does not scrub or encrypt them. File permissions (`0600` files, `0700` directory) are the only protection.
 
 ## The `0 config` command
 
-`0 config` reads and writes computer settings. Appearance is set in the browser app under Settings.
+`0 config` reads and writes computer settings. Set appearance in the browser app under Settings.
 
 ```bash
 0 config get
@@ -100,24 +98,30 @@ Thread transcripts hold target hostnames, findings and raw request and response 
 0 config set --reset [keys...] --yes
 0 config get --export [file] [--global]
 0 config set --from-file <file> [--global | --project] [--yes]
-0 config set <key> <value> [--yes]
 ```
 
-Layers, highest first: project, global, default. Unknown keys are dropped and invalid values reset to the default when settings load.
+Settings resolve in layers, highest first: project, global, default. When settings load, 0 drops unknown keys and resets invalid values to the default.
 
-Some settings are operator-global, and a project can never change them: `analyticsLevel`, `diagnosticReporting`, `updatePolicy`, onboarding state, development source updates, `executionProfile` and `approvals`.
+A project cannot change these settings: `analyticsLevel`, `diagnosticReporting`, `updatePolicy`, onboarding state, development source updates, `executionProfile` and `approvals`.
 
-`0 config set --from-file <file>` refuses to change security-sensitive settings unless you pass `--yes`: `executionProfile`, `allowModelSelfExtension`, `allowDevSourceUpdates`, `allowSubagentPeerMessaging` and `allowSubagentOperatorMessaging`. It prints each rejected change.
+`0 config set --from-file <file>` refuses to change these security-sensitive settings unless you pass `--yes`: `executionProfile`, `allowModelSelfExtension`, `allowDevSourceUpdates`, `allowSubagentPeerMessaging` and `allowSubagentOperatorMessaging`. It prints each rejected change.
 
-Two conversation settings are worth knowing. `titleInstructions` (up to 500 characters) guides automatic thread titles, for example a language or style. `archiveIdleDays` (0 = off, 365 at most, global only) archives saved threads idle for that many days when the app starts.
+Two conversation settings are worth knowing:
+
+- `titleInstructions` guides automatic thread titles, for example a language or style. It takes up to 500 characters.
+- `archiveIdleDays` archives saved threads idle for that many days when the app starts. Use `0` for off and at most `365`. It is global only.
 
 ### Ask before running commands
 
-`approvals` is `auto` (default: threads and Sentinels run commands without asking) or `ask` (each command or change is put to you first). It is **Ask before running commands** under **Settings → Helpers**, and `--approvals ask|auto` on `0 -p` overrides it for one run. It is the only place asking first is decided: threads and Sentinels have one mode (shell access) and follow this setting. Reset all leaves it alone.
+`approvals` is `auto` or `ask`. With `auto`, the default, threads and Sentinels run commands without asking. With `ask`, 0 puts each command or change to you first.
+
+Set it with **Ask before running commands** under **Settings → Helpers**. To override it for one run, pass `--approvals ask|auto` to `0 -p`. Threads and Sentinels follow this one setting. Reset all leaves it alone.
 
 ### Development source updates
 
-Enable **Development source updates** (`allowDevSourceUpdates`) only for a source checkout you trust. It reloads changed computer code between turns, and that code runs with the full access of the console process, including your credentials. Start a development console from the checkout with `./scripts/0dev.sh web`. A build failure stops launch. For frontend work, run `pnpm dev`.
+Enable **Development source updates** (`allowDevSourceUpdates`) only for a source checkout you trust. It reloads changed computer code between turns, and that code runs with the full access of the console process, including your credentials.
+
+Start a development console from the checkout with `./scripts/0dev.sh web`. A build failure stops the launch. For frontend work, run `pnpm dev`.
 
 ## Environment variables
 
@@ -127,10 +131,10 @@ Set them inline, for example `env ZERO_LOG_FORMAT=json 0`.
 
 | Variable | Effect |
 | --- | --- |
-| `ZERO_LOG_FORMAT=json` | NDJSON operational records on stderr. Lifecycle and cost metadata only, no prompts, responses, tool data or finding evidence. Not uploaded. |
+| `ZERO_LOG_FORMAT=json` | Write operational records as NDJSON on stderr. They hold lifecycle and cost metadata only, and are not uploaded. |
 | `ZERO_DB_PATH` | Database file. |
 | `ZERO_SUPPRESS_PROVIDER_STARTUP_LOG=1` | Hide the `Provider:` startup line. |
-| `ZERO_RUNTIME_TRACE=1` | Print the runtime implementation, provider and model to stderr. |
+| `ZERO_RUNTIME_TRACE=1` | Print the runtime, provider and model to stderr. |
 
 ### Retries and timeouts
 
@@ -143,7 +147,7 @@ Set them inline, for example `env ZERO_LOG_FORMAT=json 0`.
 | `ZERO_LLM_429_MAX_RETRIES` | `12` | Retries for rate limits. |
 | `ZERO_LLM_429_MAX_RETRY_WAIT_MS` | `300000` | Total backoff cap for rate limits. |
 
-Auth errors (401, 403) are never retried. The run fails with the provider error instead of reporting a clean "0 findings". Cancelling a run stops it for good.
+0 never retries auth errors (401, 403). The run fails with the provider error instead of reporting a clean "0 findings". Cancelling a run stops it for good.
 
 ### Parallel agents
 
@@ -154,25 +158,30 @@ Auth errors (401, 403) are never retried. The run fails with the provider error 
 | `ZERO_SUBAGENT_CONCURRENCY` | `32` | Helpers running at once per batch. |
 | `ZERO_SUBAGENT_MAX_DEPTH` | `8` | Nested subagent depth. |
 
-Values are positive integers. Restart the computer after changing them. Provider rate limits still apply.
+Values are positive integers. Restart the computer after you change them. Provider rate limits still apply.
 
-These limits also exist as settings: `subagentConcurrency` (1-128, default 32), `subagentMaxDepth` (1-16, default 8) and `subagentFanOut` (1-4096, default 1024). The `ZERO_SUBAGENT_*` variables win over them, and a project can only lower them.
+Three of these limits are also settings: `subagentConcurrency` (1-128, default 32), `subagentMaxDepth` (1-16, default 8) and `subagentFanOut` (1-4096, default 1024). The `ZERO_SUBAGENT_*` variables win over them. A project can only lower them.
 
 ### Feature gates
 
-`ZERO_FEATURE_MULTIMODAL` and `ZERO_FEATURE_WEB_SEARCH` turn those features on or off. Enabling a gate does not supply its credentials or tools.
+| Variable | Effect |
+| --- | --- |
+| `ZERO_FEATURE_MULTIMODAL` | Turn multimodal input on or off. |
+| `ZERO_FEATURE_WEB_SEARCH` | Turn the `web_search` tool on or off. |
+
+A gate does not supply the credentials or tools its feature needs.
 
 ### Dashboard
 
-Set these on the process that runs `0`.
+Set this on the process that runs `0`.
 
 | Variable | Default | Effect |
 | --- | --- | --- |
-| `ZERO_CSP` | `enforce` | Content-Security-Policy mode: `enforce`, `report-only` or `off`. Leave it on. The page embeds the control token. |
+| `ZERO_CSP` | `enforce` | Content-Security-Policy mode: `enforce`, `report-only` or `off`. Leave it on, because the page embeds the control token. |
 
 ### Deprecated names
 
-The old name still works. 0 copies it to the new name and prints one notice on stderr. Set `ZERO_NO_DEPRECATION_WARNINGS=1` to silence it.
+A deprecated name still works. 0 copies it to the new name and prints one notice on stderr. Set `ZERO_NO_DEPRECATION_WARNINGS=1` to silence the notice.
 
 | Deprecated | Use |
 | --- | --- |
@@ -181,7 +190,7 @@ The old name still works. 0 copies it to the new name and prints one notice on s
 
 ## Telemetry
 
-0security is one product with two interfaces, the terminal and the browser app, over one engine. Telemetry is **automatic by default** in official release builds. It has two parts, each with its own switch, and both follow the same data boundary below.
+In official release builds, 0security sends anonymous usage counts and crash reports by default. Each has its own switch, and both follow the data boundary below.
 
 | Setting | Default | Values |
 | --- | --- | --- |
@@ -189,15 +198,15 @@ The old name still works. 0 copies it to the new name and prints one notice on s
 | **Problem reports** (`diagnosticReporting`) | `automatic` | `off`, `ask`, `automatic` |
 | **Updates** (`updatePolicy`) | `automatic` | `off`, `notify`, `automatic` |
 
-Each setting is global to your computer. Project settings cannot change them. A saved `off` is always kept. A saved `ask` or `automatic` for problem reports is kept too. The one exception is an `ask` that was only the old default: installs upgraded from a version where `ask` was the default, with no recorded choice, now use `automatic`. Choose `ask` again with `0 config set diagnosticReporting ask` or in the browser app under Settings, Privacy, and it stays.
+Each setting is global to your computer, and project settings cannot change it. 0 keeps a saved `off`, `ask` or `automatic`. An install with no recorded choice uses `automatic`. To choose `ask`, run `0 config set diagnosticReporting ask` or use the browser app under Settings, Privacy.
 
 ### First-run notice
 
-The first time you run the CLI or `0`, 0security prints one notice to stderr saying that it sends anonymous usage counts and crash reports, with a link here and how to opt out. It is printed once per install, only when stderr is a terminal, and never in CI, with `--format json`, `--json` or other machine formats, with `ZERO_LOG_FORMAT=json`, or when telemetry is already off. The browser app shows the same disclosure under Settings, Privacy, next to the switches.
+The first time you run the CLI or `0`, 0security prints one notice to stderr. It says that 0security sends anonymous usage counts and crash reports, links here and shows how to opt out. 0 prints it once per install, and only when stderr is a terminal. It never prints in CI, with `--format json`, `--json` or other machine formats, with `ZERO_LOG_FORMAT=json`, or when telemetry is already off. The browser app shows the same disclosure under Settings, Privacy.
 
 ### Usage metrics
 
-When `analyticsLevel` is `usage`, a release build sends anonymous counts directly to 0security's PostHog project in the EU (`https://eu.i.posthog.com`). No account or cloud token is needed. Each `usage` event carries exactly these fields:
+When `analyticsLevel` is `usage`, a release build sends anonymous counts directly to 0security's PostHog project in the EU (`https://eu.i.posthog.com`). You need no account or cloud token. Each `usage` event carries exactly these fields:
 
 | Field | Meaning |
 | --- | --- |
@@ -210,44 +219,46 @@ When `analyticsLevel` is `usage`, a release build sends anonymous counts directl
 | `os`, `arch`, `runtime` | Operating system, CPU architecture, and `node` or `bun`. |
 | `$lib`, `$geoip_disable`, `$process_person_profile`, `$ip` | Fixed values (`0security`, `true`, `false`, `null`) that turn off IP lookup and person profiles. |
 
-The event also has a timestamp and a `distinct_id`, which is a random UUID (the install ID). It is not derived from your name, email, hostname, MAC address or machine ID. Counts are sent as increments, a short while after they happen and when the process exits. A send is fire-and-forget with a 3 second limit, no retries, and failures are silent.
+The event also has a timestamp and a `distinct_id`, which is a random UUID (the install ID). It is not derived from your name, email, hostname, MAC address or machine ID. 0 sends counts as increments, shortly after they happen and when the process exits. A send has a 3 second limit and no retries, and failures are silent.
 
-PostHog discards IP addresses (`anonymize_ips` is on for the project) and 0security disables GeoIP lookup. To get a new install ID, delete `~/.0/analytics-id`. Every payload sent is also recorded in `~/.0/analytics-sent.log`, without the project key.
+PostHog discards IP addresses, and 0security disables GeoIP lookup. To get a new install ID, delete `~/.0/analytics-id`. `~/.0/analytics-sent.log` records every payload sent, without the project key.
 
-If you are signed in with a 0security cloud token (`ZERO_CLOUD_TOKEN` or `~/.0/cloud.env`), usage goes to the authenticated cloud endpoint instead, and nothing is sent to PostHog, so nothing is counted twice. The `commands` and `full` levels of `ZERO_ANALYTICS_LEVEL` exist only for that authenticated path and are never sent to PostHog.
+If you are signed in with a 0security cloud token (`ZERO_CLOUD_TOKEN` or `~/.0/cloud.env`), usage goes to the authenticated cloud endpoint instead. Nothing goes to PostHog, so nothing is counted twice. The `commands` and `full` levels of `ZERO_ANALYTICS_LEVEL` exist only for that path.
 
 ### What is never collected
 
-Never in any telemetry: targets, URLs, hostnames, IP addresses, file paths, finding titles, descriptions or evidence, prompts, model output, chat messages, tool arguments or results, source code, credentials, environment variables, usernames, or error message text. Every string passes through the same redaction step before it leaves the process, and the usage fields above are an explicit allowlist, so a new field cannot be sent without a deliberate change.
+No telemetry includes any of these: targets, URLs, hostnames, IP addresses, file paths, finding titles, descriptions or evidence, prompts, model output, chat messages, tool arguments or results, source code, credentials, environment variables, usernames, or error message text.
+
+Every string passes through one redaction step before it leaves the process. The usage fields above are an explicit allowlist, so a new field cannot be sent without a deliberate change.
 
 ### Crash reports
 
-The terminal and the browser app are two interfaces over one 0security process, so they share one crash reporter and one destination. A report carries a `surface` tag (`cli` or `web`) and nothing else about which interface produced it. It is captured in two places:
+The terminal and the browser app share one crash reporter and one destination. A report carries a `surface` tag (`cli` or `web`) and nothing else about which interface produced it. 0 captures reports in two places:
 
-- **Computer process.** A last-resort handler for uncaught exceptions and unhandled rejections. It never changes what happens on a crash: the error is still printed to stderr and the exit code is still `1`. The exit waits at most two seconds for reporting.
-- **Browser app.** An error boundary and window error listeners. The page sends only a closed error category and locations inside the built app bundle. The computer validates them again before building the report. Repeated errors are collapsed to one report per minute, at most five per page session.
+- Computer process. A last-resort handler catches uncaught exceptions and unhandled rejections. The error is still printed to stderr and the exit code is still `1`. The exit waits at most two seconds for reporting.
+- Browser app. An error boundary and window error listeners send only a closed error category and locations inside the built app bundle. The computer validates them again. 0 collapses repeated errors to one report per minute, at most five per page session.
 
 Your `diagnosticReporting` choice decides what happens to a report:
 
 | Value | What happens |
 | --- | --- |
-| `off` | The report is dropped. Nothing is stored or sent. |
-| `ask` | The report is stored locally in `~/.0/diagnostics/pending/`. Nothing is sent until you preview the exact body in the browser app (Settings, Feedback) and confirm. |
-| `automatic` | The report is sent once, with a short timeout. A failure is ignored. This is the default. |
+| `off` | 0 drops the report. Nothing is stored or sent. |
+| `ask` | 0 stores the report in `~/.0/diagnostics/pending/`. It sends nothing until you preview the exact body in the browser app (Settings, Feedback) and confirm. |
+| `automatic` | 0 sends the report once, with a short timeout, and ignores a failure. This is the default. |
 
-A report contains the error class (for example `TypeError`), the 0security version and release channel, Node version, operating system, CPU architecture, the surface, the name of the command that was running (only from the built-in command list, never arguments) and scrubbed locations inside 0security's own code. It never contains error messages, command output, file paths, targets, hostnames, findings, source code or credentials.
+A report contains the error class (for example `TypeError`), the 0security version and release channel, Node version, operating system, CPU architecture, the surface, and the name of the running command from the built-in list, never its arguments. It also holds scrubbed locations inside 0security's own code. It never contains error messages, command output, file paths, targets, hostnames, findings, source code or credentials.
 
 `0 config doctor` prints one line when reports are waiting. `0 config doctor --discard-reports` deletes them without sending anything.
 
-### Opting out
+### Opt out of telemetry
 
-Any one of these turns telemetry off, and the environment variables beat every saved setting:
+Any one of these turns telemetry off. Environment variables beat every saved setting.
 
 | How | Effect |
 | --- | --- |
-| `ZERO_NO_TELEMETRY=1`, `DO_NOT_TRACK=1` or `ZERO_OFFLINE=1` | Everything off: usage and crash reports. Set to any value other than empty, `0`, `false` or `no`. An organization can set one of these for every operator, and it overrides each person's settings. |
-| `0 config set analyticsLevel off` | No usage metrics. Also `ZERO_ANALYTICS_LEVEL=off` for one process. |
-| `0 config set diagnosticReporting off` | No crash reports. Use `ask` to review each one first. |
+| `ZERO_NO_TELEMETRY=1`, `DO_NOT_TRACK=1` or `ZERO_OFFLINE=1` | Turns off usage metrics and crash reports. Any value except empty, `0`, `false` or `no` counts. An organization can set one for every operator, and it overrides each person's settings. |
+| `0 config set analyticsLevel off` | Turns off usage metrics. `ZERO_ANALYTICS_LEVEL=off` does the same for one process. |
+| `0 config set diagnosticReporting off` | Turns off crash reports. Use `ask` to review each one first. |
 | Browser app, Settings, Privacy | The same two switches. |
 
 ```bash
@@ -256,17 +267,15 @@ export ZERO_NO_TELEMETRY=1
 0 config set diagnosticReporting off
 ```
 
-Change them in the browser app under Settings, Helpers. Every payload that is sent over HTTP is also recorded in `~/.0/analytics-sent.log`.
+### Send telemetry to your own projects
 
-### Destinations and overrides
+Release builds embed the PostHog project key and the Sentry DSN, and so does the published Docker image. Source builds, pull-request builds and a `docker build` without the build secrets embed neither, so they send nothing. To send telemetry to your own projects, set:
 
-Release builds embed the PostHog project key and the Sentry DSN when they are built, and so does the published Docker image. Source builds, including a `docker build` of the Dockerfile that does not pass the build secrets, and pull-request builds embed neither, so they send nothing. You can point telemetry at your own projects:
+- `ZERO_ANALYTICS_POSTHOG_KEY`: a PostHog project key (`phc_` followed by letters and digits). An empty value turns off the direct PostHog path.
+- `ZERO_ANALYTICS_POSTHOG_HOST`: the PostHog host. It must be `https`, or `http` on `localhost`, `127.0.0.1` or `::1`. Any other value turns off the path.
+- `ZERO_SENTRY_DSN`: your own HTTPS Sentry project for crash reports. An empty value turns them off.
 
-- `ZERO_ANALYTICS_POSTHOG_KEY` is a PostHog project key (`phc_` followed by letters and digits). An empty value turns the direct PostHog path off.
-- `ZERO_ANALYTICS_POSTHOG_HOST` is the PostHog host. It must be `https`, or `http` on `localhost`, `127.0.0.1` or `::1` for local testing. Anything else disables the path.
-- `ZERO_SENTRY_DSN` overrides the crash report destination with your own HTTPS Sentry project. An empty value disables it.
-
-`/feedback <message>` in a thread saves a note locally in `~/.0/feedback.md`. Nothing is sent until you confirm a staged payload. `ZERO_FEEDBACK_URL` points sending at your own HTTPS relay. Do not put a Slack webhook URL there.
+`/feedback <message>` in a thread saves a note in `~/.0/feedback.md`. 0 sends nothing until you confirm a staged payload. To send feedback to your own HTTPS relay, set `ZERO_FEEDBACK_URL`. Do not put a Slack webhook URL there.
 
 ## Update checks
 
@@ -274,36 +283,43 @@ At startup, 0 checks GitHub for a newer release, at most once every 24 hours. Wh
 
 | Policy | Behavior |
 | --- | --- |
-| `automatic` | Default, also for installs that never chose. Runs the installer before starting, then tells you to restart. This can delay startup by a few seconds. A running `0` does the same in the background (see below). |
+| `automatic` | Default. Runs the installer before starting, then tells you to restart. This can delay startup by a few seconds. A running `0` also updates in the background ([see below](#update-a-running-console)). |
 | `notify` | Prints `Update available: <old> → <new>. Run 0 config doctor upgrade.` In the console, the update card waits for your click. |
-| `off` | No request. |
+| `off` | Makes no request. |
 
-Only an explicit global choice moves a setting off `automatic`. An install that never picked one, including one with an unrelated saved settings file, follows the default; an explicit `notify` or `off` is kept.
+Only an explicit global choice moves the setting off `automatic`.
 
-The check runs only in an interactive terminal. It is skipped when `CI`, `ZERO_NO_UPDATE_CHECK` or `ZERO_OFFLINE` is set to a non-empty value other than `0` or `false`. Project settings cannot change the policy. Automatic installation is not available on Windows. Download a release instead.
+The check runs only in an interactive terminal. It is skipped when `CI`, `ZERO_NO_UPDATE_CHECK` or `ZERO_OFFLINE` is set to a non-empty value other than `0` or `false`. Project settings cannot change the policy. Windows has no automatic installation, so download a release instead.
 
 ```bash
 0 config doctor upgrade                    # install the latest release now
 0 config doctor upgrade --version v0.10.0  # pin a release
-env ZERO_NO_UPDATE_CHECK=1 0 # skip the check for one run
+env ZERO_NO_UPDATE_CHECK=1 0               # skip the check for one run
 ```
 
-The installer is the same `install.sh` used for a fresh install. Repeated attempts for one release tag are rate limited. An update replaces the folder the running binary lives in when that folder is writable, otherwise `~/.0/bin` (override with `--install-dir` or `ZERO_INSTALL_DIR`).
+The upgrade runs the same `install.sh` as a fresh install. 0 rate limits repeated attempts for one release tag. It replaces the folder the running binary lives in when that folder is writable. Otherwise it installs to `~/.0/bin`. Override the folder with `--install-dir` or `ZERO_INSTALL_DIR`.
 
-### Updating a running console
+If GitHub is offline, rate limited or unreachable, 0 starts with the old version and checks again the next day.
 
-`0` can run for days, so it does not wait for the next start. For a standalone `0` binary in a writable folder (a managed install):
+To point the check and the installer at a mirror, set `ZERO_UPDATE_ORIGIN`. The mirror must serve `/latest`, `/install.sh` and `/releases/download/<tag>/<asset>`.
 
-- Every six hours, with up to ten percent of random spread, it asks for the newest release. The answer is cached in `last-update-check`, shared with the command line, and a failed or offline check is ignored until the next pass. With **Automatic**, it installs the verified release in the background only while no thread is running, then shows **Restart to finish updating**.
-- The **Update available** card has **Update and restart**. It runs the same installer as `0 config doctor upgrade` (checksum verified, atomic swap in the folder of the running binary), then shuts the console down cleanly and starts the same command again with the same port, `--db-path` and `--asset-dir`. The page shows **Updating…**, reconnects on its own and reports **Updated to <version>**. If threads are running it asks first, because the restart stops them. Only one update runs at a time, and only the browser console can start one (an attached engine or tool is refused).
-- With **Automatic**, server mode off and no service manager, the console also restarts by itself once nothing has run for 10 minutes. In [server mode](/server-mode/) it never restarts itself: it shows the card instead.
-- Under launchd, systemd or pm2 (detected from the environment, or set `ZERO_SUPERVISED=1` or `0`), the console exits with code 0 after installing and expects the service manager to start it again: use `KeepAlive` (launchd), `Restart=always` (systemd) or pm2's default. It never starts a second copy.
+### Update a running console
 
-The card never offers a button that cannot work. Docker images are replaced, never changed in place (`docker pull ghcr.io/0sec-labs/0security:latest`, then recreate the container); a source checkout updates with `git pull` and a rebuild; an npm install must move to the standalone binary; a binary in a read-only folder or on Windows shows `0 config doctor upgrade`.
+`0` can run for days, so it does not wait for the next start. This applies to a standalone `0` binary in a writable folder (a managed install).
 
-`ZERO_UPDATE_ORIGIN` points the check and the installer at a mirror or a test server that serves `/latest`, `/install.sh` and `/releases/download/<tag>/<asset>`. It is not set normally.
+- Every six hours, with up to ten percent random spread, the console asks for the newest release and caches the answer in `last-update-check`. With **Automatic**, it installs the verified release in the background only while no thread is running. Then it shows **Restart to finish updating**.
+- The **Update available** card has **Update and restart**. It runs the same installer as `0 config doctor upgrade`, with a checksum check and an atomic swap. Then it restarts the same command with the same port, `--db-path` and `--asset-dir`. The page shows **Updating…**, reconnects on its own and reports **Updated to <version>**. If threads are running, it asks first, because the restart stops them.
+- With **Automatic**, server mode off and no service manager, the console also restarts by itself after 10 minutes of inactivity. In [server mode](/server-mode/) it never restarts itself and shows the card instead.
+- Under launchd, systemd or pm2, the console exits with code 0 after installing and expects the service manager to start it again. 0 detects these from the environment. You can set `ZERO_SUPERVISED=1` or `0` to override. Use `KeepAlive` (launchd), `Restart=always` (systemd) or pm2's default.
 
-The check never blocks startup for long and never retries within a day. It asks the GitHub API, then the release page redirect (no API quota), then the API by repository id. When GitHub is offline, rate limited or unreachable, 0 starts normally with the old version and checks again the next day.
+Only the browser console can start an update. An attached engine or tool is refused. Only one update runs at a time.
+
+The card offers a button only when it can work:
+
+- Docker images are replaced, not changed in place. Run `docker pull ghcr.io/0sec-labs/0security:latest`, then recreate the container.
+- A source checkout updates with `git pull` and a rebuild.
+- An npm install must move to the standalone binary.
+- A binary in a read-only folder, or on Windows, shows `0 config doctor upgrade`.
 
 ## Execution boundary
 
@@ -311,7 +327,7 @@ The default shell executor runs on your host. It is not a firewall, container or
 
 ## Cost estimates
 
-0 shows estimated model cost on each thread. Provider and infrastructure costs are yours; set a spending limit with your provider.
+0 shows estimated model cost on each thread. Provider and infrastructure costs are yours. Set a spending limit with your provider.
 
 The estimator prices input, output, cached-input and cache-write tokens from a bundled rate table. An unknown model price is unknown, not zero.
 
@@ -321,36 +337,36 @@ The estimator prices input, output, cached-input and cache-write tokens from a b
 
 ## Security model
 
-0 runs as you, with bash. The agent can do what you can do in a terminal; the defences are approvals, the sandbox when you use one, and the prompts below. This page covers third-party code and text: extensions, MCP servers and skills.
+0 runs as you, with bash. The agent can do what you can do in a terminal. Your defences are approvals, the sandbox when you use one, and the controls below. This section covers third-party code and text: extensions, MCP servers and skills.
 
 ### Extensions and MCP
 
-An extension or MCP server you add runs other people's code as your user. 0 puts an explicit review in front of it. It does not sandbox it. Setup is in [Extensions](/extensions/).
+An extension or MCP server you add runs other people's code as your user. 0 puts an explicit review in front of it but does not sandbox it. Setup is in [Extensions](/extensions/).
 
-- **Pinned by commit.** A git extension is fetched without running anything and pinned to a full 40-character commit. Branches, tags and short SHAs are refused. The installed folder is hashed; if it changes on disk, it is blocked until you review it again. Local folders are pinned by content hash.
-- **The install prompt.** It shows `repo @ commit`, the licence, the file list, hidden-Unicode flags and what the extension can do: scripts it ships, MCP servers (command or URL, variable names), services it calls (hosts, read or write). The click echoes the commit, and the server re-checks that the revision it installs is the one you saw. Approving is yours: a command run by a thread, or without a terminal, is refused. The audit log records `extension.install` with the commit and capabilities.
-- **Updates re-prompt.** Any change, even one new script, shows the folder diff and a capability delta and asks again. There is no silent auto-update of third-party extensions. Built-ins update with the binary.
-- **Per-tool MCP pins.** The first time an MCP server connects you approve its tools; 0 stores a sha256 of each tool's name, description, input schema and annotations. If any tool is changed, new or removed, the whole server is blocked until you approve again. MCP servers start only when the model first loads them, run through `beforeCommand` (your approvals), and their output is labelled untrusted and capped. Details are in [MCP servers in extensions](/extensions/#servers-bundled-in-an-extension).
-- **Environment allowlist.** A process gets a scrubbed environment plus only the variable names the extension declared and you approved. Provider keys are never passed unless declared and shown in the prompt. Loader variables (`LD_PRELOAD`, `DYLD_*`, `NODE_OPTIONS`) are always rejected. A connection token reaches only a declared variable.
-- **Repo config is a suggestion.** A repository's `.0/` or `.claude/` files cannot install or enable anything.
-- **Network.** Remote MCP servers need https (plain http only to loopback); hosts that resolve to private, loopback, link-local or metadata addresses are refused and redirects are not followed.
+- Commit pins. 0 fetches a git extension without running anything and pins it to a full 40-character commit. It refuses branches, tags and short SHAs. It hashes the installed folder and blocks the extension until you review it again if the folder changes. It pins local folders by content hash.
+- The install prompt. It shows `repo @ commit`, the licence, the file list, hidden-Unicode flags and what the extension can do: scripts it ships, MCP servers (command or URL, variable names), and services it calls (hosts, read or write). Your click echoes the commit, and the server checks that the revision it installs is the one you saw. Only you can approve. 0 refuses an install requested by a thread or without a terminal. The audit log records `extension.install` with the commit and capabilities.
+- Updates prompt again. Any change, even one new script, shows the folder diff and a capability delta and asks again. Third-party extensions never update silently. Built-ins update with the binary.
+- Per-tool MCP pins. The first time an MCP server connects, you approve its tools. 0 stores a sha256 of each tool's name, description, input schema and annotations. If any tool is changed, new or removed, 0 blocks the whole server until you approve again. MCP servers start only when the model first loads them, and run through `beforeCommand` (your approvals). 0 labels their output untrusted and caps it. See [MCP servers in extensions](/extensions/#servers-bundled-in-an-extension).
+- Environment allowlist. A process gets a scrubbed environment plus only the variable names the extension declared and you approved. 0 never passes provider keys unless the extension declares them and the prompt shows them. 0 always rejects loader variables (`LD_PRELOAD`, `DYLD_*`, `NODE_OPTIONS`). A connection token reaches only a declared variable.
+- Repo config is a suggestion. A repository's `.0/` or `.claude/` files cannot install or enable anything.
+- Network. Remote MCP servers need https (plain http only to loopback). 0 refuses hosts that resolve to private, loopback, link-local or metadata addresses, and does not follow redirects.
 
 #### Residual risk
 
 - An approved extension or MCP server can read your files, use your network and run programs as your user. Approval is informed consent, not isolation. Use a Computer or SmolVM when you need isolation.
 - A commit pin shows you got the code you reviewed, not that it is safe. Review the repository, not only the manifest.
-- There are no signatures or publisher identity. A catalog entry marked verified means 0 curated it and pinned its commit.
-- An MCP server sees what the agent sends it, and its tool names, descriptions and results can contain prompt injection.
+- Extensions have no signatures or publisher identity. A catalog entry marked verified means 0 curated it and pinned its commit.
+- An MCP server sees what the agent sends it. Its tool names, descriptions and results can contain prompt injection.
 
 Skills from GitHub get the same treatment: a pinned snapshot, a preview and an explicit click. See [Skills](/skills/#adding-skills-from-github).
 
 ### Who can approve
 
-Approval routes are browser-only: agent callers get `403 browser_only`, so an agent cannot add or approve its own tools. In team mode only the workspace owner can use them (`403 owner_required`).
+Approval routes work only from the browser. Agent callers get `403 browser_only`, so an agent cannot add or approve its own tools. In team mode, only the workspace owner can use them (`403 owner_required`).
 
 Report problems through the [security policy](https://github.com/0sec-labs/0security/blob/main/.github/SECURITY.md).
 
 ## Limits
 
 - Cost figures are estimates, and unknown model prices count as unknown, not zero.
-- Operational logs are written to stderr. Collect them with your runner or container logging.
+- 0 writes operational logs to stderr. Collect them with your runner or container logging.
