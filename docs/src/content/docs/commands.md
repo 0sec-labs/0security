@@ -1011,7 +1011,7 @@ Subcommands: [generate](#sbom-generate) · [check](#sbom-check) · [licenses](#s
 
 #### sbom generate
 
-Write a CycloneDX 1.5 SBOM from the lockfiles in a folder (npm, pnpm, yarn, Cargo, Go, Python, Ruby, PHP, .NET, Gradle, Dart, Elixir)
+Write a CycloneDX 1.5 SBOM from the lockfiles in a folder (npm, pnpm, yarn, Cargo, Go, Python, Ruby, PHP, .NET, Maven, Gradle, Dart, Elixir)
 
 ```text
 0 sbom generate [options] [folder]
@@ -1023,7 +1023,16 @@ Write a CycloneDX 1.5 SBOM from the lockfiles in a folder (npm, pnpm, yarn, Carg
 
 The default `builtin` generator reads these lockfiles as text, anywhere under the folder, and installs or runs nothing: `package-lock.json`, `npm-shrinkwrap.json`, `pnpm-lock.yaml`, `yarn.lock`, `Cargo.lock`, `go.mod`, `poetry.lock`, `Pipfile.lock`, pinned `requirements.txt`, `Gemfile.lock`, `composer.lock`, `packages.lock.json`, `gradle.lockfile`, `pubspec.lock` and `mix.lock`. It skips `node_modules`, build output and hidden folders.
 
-Components are identified by package URL, sorted and de-duplicated, so the same lockfiles give the same SBOM. A component is marked `excluded` only when every lockfile that lists it says it is development-only. A folder with no supported lockfile is an error (exit 2).
+Components are identified by package URL, sorted and de-duplicated, so the same lockfiles give the same SBOM. A component is marked `excluded` only when every lockfile that lists it says it is development-only. A folder with no supported lockfile and nothing unresolved is an error (exit 2).
+
+It also reads Maven and Gradle declarations as text, with the same rules: nothing is run (no `mvn`, no `gradle`), nothing is downloaded, and output is sorted. Components are looked up in OSV as `pkg:maven/<groupId>/<artifactId>@<version>`.
+
+- `pom.xml`: direct dependencies, with versions taken from the literal version, `<properties>`, `<dependencyManagement>`, and a parent POM or imported BOM, but only when that parent or BOM is in the repository (the `relativePath`, or any POM in the folder with the same coordinates and version). Every `pom.xml` under the folder is read, so a multi-module project is aggregated; a child's own properties override its parent's. Modules of the repository are not listed as third-party components, and `test` scope is marked `excluded`.
+- `gradle.lockfile`, `gradle/libs.versions.toml` and the dependency lines of `build.gradle` and `build.gradle.kts`: a version is read only when it is a literal. When `gradle.lockfile` pins an artifact, the lockfile's version is used and a declared version of the same artifact is dropped. A version catalog is read as declared, so an entry the build never uses is still listed.
+
+What is not analysed is listed as unresolved, never guessed: profiles (their dependencies and properties), a parent POM or imported BOM that is not in the repository, a version from a property that no POM in the repository defines (including `env.` and system properties), version ranges and `LATEST`/`RELEASE`, a dependency with no managed version, a declared module with no POM, and in Gradle a variable, a dynamic version (`1.+`, a range, `latest.release`), a missing version, a `platform(...)` BOM and an unknown `version.ref`. The final line of `generate` reads `resolved N, unresolved M` (components with a known version, and items skipped), followed by the first 20 skipped items. The SBOM records each as a `0:unresolved` metadata property, and `0 sbom check` prints the same line from them.
+
+This is a declaration reader, not a build. It does not resolve transitive dependencies, private registries or mirrors, or `settings.xml`, and it makes no claim about whether vulnerable code is reachable.
 
 Beyond name and version, the SBOM carries the following, only where the lockfile states it. Nothing is looked up or guessed.
 
@@ -1042,11 +1051,11 @@ Add `--ai` to also list the AI in the folder as CycloneDX components:
 
 The scan reads files as text and downloads nothing. A reference the patterns do not recognise is missed, so treat the list as what was seen, not a complete inventory.
 
-The builtin generator does not read Maven `pom.xml` without a lockfile, CocoaPods, SwiftPM, C and C++ package managers, operating-system packages or compiled binaries. Use `--generator` for those, and `--generator` with `--image` for container images.
+The builtin generator does not read CocoaPods, SwiftPM, C and C++ package managers, operating-system packages or compiled binaries. Use `--generator` for those, and `--generator` with `--image` for container images.
 
 `--format spdx` writes SPDX 2.3 JSON instead (builtin generator only). It has one package for the application and one per library, each with its package URL as a `purl` external reference, its checksums, and its license when that is an SPDX id or expression. Free-text license names become `NOASSERTION`. `DESCRIBES` points at the application and `DEPENDS_ON` follows the graph above. The AI inventory is not written to SPDX, and `--ai` is refused with it.
 
-`--generator syft`, `cdxgen` or `trivy` runs that installed tool instead and writes its CycloneDX JSON unchanged. Use it for what the builtin reader does not cover: Maven, operating-system packages and binaries. `--ai` and `--format spdx` are not available with these tools.
+`--generator syft`, `cdxgen` or `trivy` runs that installed tool instead and writes its CycloneDX JSON unchanged. Use it for what the builtin reader does not cover, such as transitive Maven and Gradle resolution, operating-system packages and binaries. `--ai` and `--format spdx` are not available with these tools.
 
 To describe a container image, pass `--image` with `syft` or `trivy`. The value is a reference such as `nginx:1.25`, the path of a `docker save` archive, or the path of an OCI image layout folder. Then check the result against known advisories:
 

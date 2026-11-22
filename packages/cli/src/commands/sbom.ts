@@ -1,7 +1,7 @@
 /**
  * `0 sbom scan-models <path>` lists the code-running imports in pickle-based model files.
  * `0 sbom generate [folder]` writes a CycloneDX (or SPDX) SBOM from the lockfiles in a folder, or runs syft, cdxgen or trivy; `0 sbom check <file>` looks every
- * component up in the public OSV advisory database. Nothing is installed or run: lockfiles are read as text.
+ * component up in the public OSV advisory database. Nothing is installed or run: lockfiles, pom.xml and Gradle files are read as text.
  */
 import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { relative, resolve, sep } from "node:path";
@@ -11,6 +11,7 @@ import { VERSION } from "@0/engine/shared";
 import { finishWithError, UsageError } from "./output.js";
 import { registerSbomLicenses } from "./sbom-licenses.js";
 import { runCheckReport, type CheckOptions } from "./sbom-check.js";
+import { resolutionLine } from "./sbom-resolution.js";
 
 const MAX_SBOM_BYTES = 50 * 1024 * 1024;
 
@@ -77,14 +78,15 @@ export async function runGenerateWith(folder: string | undefined, options: Gener
 export function runGenerate(folder: string, options: GenerateOptions, deps: SbomDeps): void {
   const target = requireFolder(folder);
   const result = generateSbom(target, { toolVersion: VERSION, ...(options.name ? { name: options.name } : {}), ...(options.ai ? { ai: true } : {}) });
-  if (!result.bom.components.length && !result.bom.services?.length) {
-    const supported = [...new Set(LOCKFILES.map(lock => lock.file))].join(", ");
-    throw new UsageError(`No supported lockfile with packages${options.ai ? " and no AI components" : ""} in ${folder}. Supported: ${supported}. For Maven, Gradle or NuGet use --generator syft, cdxgen or trivy; for a container image use --image with --generator syft or trivy.`);
+  if (!result.bom.components.length && !result.bom.services?.length && !result.unresolved.length) {
+    const supported = [...new Set([...LOCKFILES.map(lock => lock.file), "pom.xml", "build.gradle", "build.gradle.kts", "gradle/libs.versions.toml"])].join(", ");
+    throw new UsageError(`No supported lockfile with packages${options.ai ? " and no AI components" : ""} in ${folder}. Supported: ${supported}. For Swift or C/C++ use --generator syft, cdxgen or trivy; for a container image use --image with --generator syft or trivy.`);
   }
   const text = `${JSON.stringify(options.format === "spdx" ? toSpdx(result.bom) : result.bom, null, 2)}\n`;
   if (options.output) { deps.write(resolve(options.output), text); deps.err(`Wrote ${options.output}`); } else deps.out(text);
   const aiCount = result.bom.components.filter(component => component.type !== "library").length + (result.bom.services?.length ?? 0);
   deps.err(`${result.bom.components.filter(component => component.type === "library").length} components from ${result.lockfiles.length} lockfile${result.lockfiles.length === 1 ? "" : "s"}${result.lockfiles.length ? `: ${result.lockfiles.map(lock => `${lock.path} (${lock.label}, ${lock.components})`).join(", ")}` : ""}${options.ai ? `; ${aiCount} AI components (models, datasets, hosted model ids, MCP servers)` : ""}`);
+  deps.err(resolutionLine(result.bom.components.filter(component => component.type === "library").length, result.unresolved.map(item => `${item.name} (${item.reason}) in ${item.source}`)));
 }
 
 export async function runCheck(file: string, options: CheckOptions, deps: SbomDeps): Promise<number> {
@@ -133,7 +135,7 @@ export function runScanModels(path: string, options: { format?: string }, deps: 
 export function registerSbomCommand(program: Command, deps: SbomDeps = defaults): void {
   const sbom = program.command("sbom").description("Generate an SBOM from lockfiles, check one against known advisories, and scan model files");
   sbom.command("generate")
-    .description("Write an SBOM (CycloneDX 1.5 or SPDX 2.3) from the lockfiles in a folder (npm, pnpm, yarn, Cargo, Go, Python, Ruby, PHP, .NET, Gradle, Dart, Elixir)")
+    .description("Write an SBOM (CycloneDX 1.5 or SPDX 2.3) from the lockfiles in a folder (npm, pnpm, yarn, Cargo, Go, Python, Ruby, PHP, .NET, Maven, Gradle, Dart, Elixir)")
     .argument("[folder]", "Folder to read lockfiles from (default: .)")
     .option("-o, --output <file>", "Write the SBOM to a file instead of stdout")
     .option("--name <name>", "Name of the application the SBOM describes (default: the folder's name)")

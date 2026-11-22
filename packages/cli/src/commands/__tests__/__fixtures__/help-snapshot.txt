@@ -1159,7 +1159,7 @@ Options:
 Commands:
   generate [options] [folder]               Write an SBOM (CycloneDX 1.5 or SPDX 2.3) from the
                                             lockfiles in a folder (npm, pnpm, yarn, Cargo, Go,
-                                            Python, Ruby, PHP, .NET, Gradle, Dart, Elixir)
+                                            Python, Ruby, PHP, .NET, Maven, Gradle, Dart, Elixir)
   check [options] <file>                    Look every component of an SBOM up in the public OSV
                                             database and list the advisories
   licenses [options] [sbom-file-or-folder]  Check the licenses in an SBOM, or in a folder's
@@ -1188,7 +1188,7 @@ Options:
 Usage: 0 sbom generate [options] [folder]
 
 Write an SBOM (CycloneDX 1.5 or SPDX 2.3) from the lockfiles in a folder (npm, pnpm, yarn, Cargo,
-Go, Python, Ruby, PHP, .NET, Gradle, Dart, Elixir)
+Go, Python, Ruby, PHP, .NET, Maven, Gradle, Dart, Elixir)
 
 Arguments:
   folder                          Folder to read lockfiles from (default: .)

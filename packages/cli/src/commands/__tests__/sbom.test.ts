@@ -25,6 +25,32 @@ describe("0 sbom generate", () => {
   });
 });
 
+describe("0 sbom resolved and unresolved summary", () => {
+  const pom = "<project><modelVersion>4.0.0</modelVersion><groupId>g</groupId><artifactId>app</artifactId><version>1</version><dependencies>"
+    + "<dependency><groupId>org.apache.commons</groupId><artifactId>commons-text</artifactId><version>1.11.0</version></dependency>"
+    + "<dependency><groupId>org.example</groupId><artifactId>unmanaged</artifactId></dependency></dependencies></project>";
+  it("generate prints 'resolved N, unresolved M' and what was not analysed, and the SBOM carries it to check", async () => {
+    const io = deps();
+    runGenerate(project({ "pom.xml": pom }), {}, io.deps);
+    const err = io.err.join("\n");
+    expect(err).toContain("resolved 1, unresolved 1");
+    expect(err).toContain("not analysed: org.example:unmanaged (no version");
+    const bom = io.out.join("");
+    const calls: string[] = [];
+    const fetcher = (async (url: string | URL | Request) => { calls.push(String(url)); return new Response(JSON.stringify({ results: [{}] })); }) as typeof fetch;
+    const check = deps({ read: () => bom, fetch: fetcher });
+    expect(await runCheck("sbom.json", {}, check.deps)).toBe(0);
+    expect(check.out.join("")).toContain("resolved 1, unresolved 1");
+    expect(check.out.join("")).toContain("org.example:unmanaged");
+    expect(calls).toHaveLength(1);
+  });
+  it("a folder whose only content is unresolved still produces an SBOM instead of an error", () => {
+    const io = deps();
+    runGenerate(project({ "build.gradle": "dependencies { implementation 'a:b' }" }), {}, io.deps);
+    expect(io.err.join("\n")).toContain("resolved 0, unresolved 1");
+  });
+});
+
 describe("0 sbom generate --ai", () => {
   it("adds the AI in the folder, and is not an error when there is no lockfile but there is AI", () => {
     const dir = project({ "app.py": 'm = AutoModel.from_pretrained("org/model")\n', ".mcp.json": JSON.stringify({ mcpServers: { files: { command: "npx", args: ["-y", "srv"] } } }) });
