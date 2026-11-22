@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
+import { homeStateDir } from "@0/engine/shared";
 import { McpHost, connectMcpServers, parseMcpConfig, sanitizedEnv, type McpServerConfig } from "@0/engine";
 
 function findZeroverse(start: string): string | undefined {
@@ -23,7 +23,7 @@ export function consoleMcpConfig(workspaceRoot: string, env: NodeJS.ProcessEnv =
   const root = explicit ? resolve(explicit) : findZeroverse(workspaceRoot) ?? findZeroverse(dirname(fileURLToPath(import.meta.url)));
   if (!root) return [];
   if (!existsSync(join(root, "src/zeroverse/mcp.py"))) throw new Error(`0verse MCP source not found at ${root}`);
-  const runtimePath = env.ZERO_0VERSE_RUNTIME_CONFIG ?? join(homedir(), ".0/zeroverse-runtime.json");
+  const runtimePath = env.ZERO_0VERSE_RUNTIME_CONFIG ?? join(homeStateDir(), "zeroverse-runtime.json");
   let runtime: Record<string, string> = {};
   if (existsSync(runtimePath)) {
     try {

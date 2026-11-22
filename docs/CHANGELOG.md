@@ -63,6 +63,8 @@ on the GitHub Release tag.
 
 ### Fixed
 
+- Pending crash reports, feedback, scanner binaries and the 0verse runtime config now live under the same state folder as everything else, so they follow `HOME` on Windows too.
+- A Lima worker's private ssh config is now kept in the 0 state folder with owner-only permissions, can no longer be pre-created or swapped by another user, and is removed when the worker's tunnel is stopped or already gone.
 - `0 findings issues`, `0 fix` and `0 findings burndown`, found by an end-to-end run: issue titles are plain text (no backslash escapes), id hints resolve for imported findings, a closed issue's status table says closed, the pull request body shows the real Checks table before the model's labelled summary and escapes table cells and command text, `0 findings update --status false-positive` without `--reason` says that `--reason` is required, and burndown fixes findings reported twice at one place and category once.
 - An MCP server that lists the same tool name twice is refused with a clear reason ("duplicate tool names; refused") and shown as needing approval, instead of failing with a generic listing error. Duplicate names cannot be used to slip past tool pinning.
 - `0 computers add --target-git` accepts only `https://` URLs (no spaces or quotes); the option help and docs now say so.
