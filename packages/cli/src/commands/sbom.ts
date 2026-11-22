@@ -9,6 +9,7 @@ import type { Command } from "commander";
 import { checkBomAgainstOsv, EXTERNAL_GENERATORS, generateSbom, GeneratorNotInstalledError, LOCKFILES, modelScanToSarif, runExternalGenerator, scanModelPath, toSpdx, type Advisory, type ExternalGenerator, type ModelFileResult } from "@0/engine";
 import { VERSION } from "@0/engine/shared";
 import { finishWithError, UsageError } from "./output.js";
+import { registerSbomLicenses } from "./sbom-licenses.js";
 
 const MAX_SBOM_BYTES = 50 * 1024 * 1024;
 
@@ -167,4 +168,5 @@ export function registerSbomCommand(program: Command, deps: SbomDeps = defaults)
       try { const code = await runCheck(file, options, deps); if (code) process.exitCode = code; }
       catch (error) { finishWithError(error, { err: deps.err }, options.format === "json"); }
     });
+  registerSbomLicenses(sbom, deps);
 }

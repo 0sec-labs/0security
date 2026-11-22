@@ -28,7 +28,7 @@ New to 0? Read the [Quickstart](/) first. Settings and environment variables are
 | `0 scan` | Scan a folder or git repository for security bugs; prints the findings as a report. | none |
 | `0 threat-model` | Draft the repository's threat model as a file for people to review (optionally as a pull request). | none |
 | `0 probe` | Send adversarial messages to a live model or agent endpoint and report the ones it obeys. | none |
-| `0 sbom` | Generate an SBOM from lockfiles, and check one against known advisories. | `generate`, `check` |
+| `0 sbom` | Generate an SBOM from lockfiles, check one against known advisories, and check its licenses against a policy. | `generate`, `check`, `licenses` |
 | `0 findings` | Browse findings and change their status. `--format` exports, `--import` loads a report. | `list`, `show`, `update`, `import`, `fix` |
 | `0 threads` | Start, follow and stop threads. | `list`, `show`, `send`, `start`, `stop` |
 | `0 sentinels` | Create, run and change Sentinels. | `list`, `run`, `set` |
@@ -948,7 +948,7 @@ Generate an SBOM from lockfiles, check one against known advisories, and scan mo
 0 sbom
 ```
 
-Subcommands: [generate](#sbom-generate) · [check](#sbom-check) · [scan-models](#sbom-scan-models).
+Subcommands: [generate](#sbom-generate) · [check](#sbom-check) · [licenses](#sbom-licenses) · [scan-models](#sbom-scan-models).
 
 #### sbom generate
 
@@ -1028,6 +1028,89 @@ Each advisory is listed with its aliases, severity, the versions that fix it and
 | Option | Registered default | Description |
 | --- | --- | --- |
 | `--format <format>` | `text` | Output: text or json |
+
+#### sbom licenses
+
+Check the licenses in an SBOM, or in a folder's lockfiles, against an allow or deny policy
+
+```text
+0 sbom licenses [options] [sbom-file-or-folder]
+```
+
+```bash
+0 sbom licenses . --preset permissive
+0 sbom licenses sbom.cdx.json --deny 'GPL-*,AGPL-*' --format sarif > licenses.sarif
+0 sbom licenses . --policy license-policy.yaml --resolve
+```
+
+Pass a CycloneDX SBOM file, or a folder. For a folder, 0 reads the lockfiles as in [sbom generate](#sbom-generate) and checks the result. The output lists each component as denied, not allowed, unknown or allowed. The output and this page are information from lockfiles and registries. They are not legal advice.
+
+Components with no license data are unknown. Only npm lockfiles (`package-lock.json` v2 and v3) and `composer.lock` state licenses. A pnpm, yarn, Cargo, Go, Python, Ruby or NuGet lockfile gives none, so a check of such a repository is mostly unknown until you add `--resolve`. 0 prints a notice when more than half the components are unknown.
+
+`--resolve` looks up each component that states no license on [deps.dev](https://deps.dev). It sends the package name and version and nothing else, makes up to 8 requests at a time, and stops after `--resolve-limit` components (default 2000). It covers npm, Cargo, Go, PyPI, RubyGems, NuGet and Maven. Components from other ecosystems stay unknown. Looked-up components are marked `[deps.dev]`.
+
+On this repository, a check with `--preset permissive` found 1088 of 1107 components unknown. With `--resolve` 11 stayed unknown, 30 were not allowed (LGPL, MPL-2.0, OFL-1.1, CC-BY-4.0 and Unicode-3.0 licenses) and 1066 were allowed.
+
+| Argument | Required | Description |
+| --- | --- | --- |
+| `sbom-file-or-folder` | No | CycloneDX SBOM (JSON), or a folder to read lockfiles from |
+
+| Option | Registered default | Description |
+| --- | --- | --- |
+| `--preset <name>` | — | Start from a preset: permissive or no-copyleft |
+| `--policy <file>` | — | Policy file (JSON or YAML): allow, deny, allowByPackage (with a reason), unknown |
+| `--allow <ids>` | — | Comma list of SPDX ids to allow; any license not listed is not allowed |
+| `--deny <ids>` | — | Comma list of SPDX ids to deny; a trailing * matches a family, for example GPL-* |
+| `--unknown <mode>` | — | What a component with no usable license data does: warn (default), fail or allow |
+| `--resolve` | — | Look up the license of components that state none on deps.dev (network; sends package names and versions) |
+| `--resolve-limit <n>` | — | With --resolve, look up at most this many components (default 2000) |
+| `--exclude-dev` | — | Skip components that are development-only |
+| `--format <format>` | `text` | Output: text, json or sarif |
+
+##### Write a policy
+
+A policy is an allow list, a deny list, exceptions and a rule for unknown licenses. Start from a preset, a policy file, or the `--allow` and `--deny` flags. They combine: lists are joined, and a license on the deny list is denied even if it is also allowed.
+
+- `--preset permissive` allows MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, 0BSD, Unlicense, CC0-1.0, Zlib, BlueOak-1.0.0 and Python-2.0. Every other license is not allowed. Unknown is `warn`.
+- `--preset no-copyleft` denies the GPL, AGPL, LGPL, SSPL and EUPL families. Every other license is allowed. Weak copyleft such as MPL-2.0, EPL-2.0 and CC-BY-SA is not denied. Unknown is `warn`.
+
+A policy file is JSON or YAML:
+
+```yaml
+# license-policy.yaml
+preset: no-copyleft
+allow: []
+deny:
+  - SSPL-*
+  - CC-BY-NC-4.0
+allowByPackage:
+  - package: pkg:npm/some-library
+    version: 2.1.0
+    reason: Dual-licensed, we use it under MIT.
+  - package: internal-tool
+    licenses: [LGPL-3.0-or-later]
+    reason: Linked dynamically and not distributed.
+unknown: warn
+```
+
+- `allow` and `deny` hold SPDX ids. Ids are case-sensitive. An id ending in `*` matches a family, for example `GPL-*`. `GPL-2.0-only WITH Classpath-exception-2.0` names a license with an exception, and it beats a rule about the license alone.
+- If `allow` has any entry, every license not listed is not allowed. Without an allow list, every license not denied is allowed.
+- `allowByPackage` waives one component, named by name, package URL or package URL with version. `reason` is required. With `licenses`, the entry allows only those ids for that component instead of waiving it.
+- `unknown` is `warn` (listed, exit 0), `fail` (listed, exit 1) or `allow` (counted only). The flag `--unknown` overrides the file.
+
+An unrecognised key or id is a usage error, so a typo does not weaken the policy.
+
+##### How licenses are judged
+
+0 evaluates SPDX expressions. In `MIT OR Apache-2.0` you choose, so one allowed side is enough. In `GPL-2.0-only AND MIT` you need both, so both must be allowed. A deny applies to an `OR` only when every side is denied. `GPL-2.0+` and `GPL-2.0-or-later` are the same license, as are `GPL-2.0` and `GPL-2.0-only`. For other licenses, `Apache-2.0+` counts as `Apache-2.0`. Operators are upper case.
+
+A component that lists several licenses as separate entries is treated as needing all of them, because CycloneDX does not say whether they are alternatives. Write an expression with `OR` if you mean a choice.
+
+A license `name` in free text, an `id` that is not on the SPDX list, and an expression 0 cannot parse are unknown. 0 does not match them against ids, so `{ "license": { "name": "MIT" } }` is unknown.
+
+Use `--exclude-dev` to skip components that are development-only. A violation is a denied or not-allowed component, or an unknown one when `unknown` is `fail`. 0 exits 1 on any violation, 0 otherwise, and 2 on a usage error.
+
+`--format json` lists every component with its verdict. `--format sarif` writes one result per violating component, and per unknown component unless `unknown` is `allow`. The rule id is `license/<spdx-id>` (`license/unknown` for unknown), the location is the lockfile that lists the component (the SBOM file when you pass one), and the fingerprint is stable between runs. Import it with `0 findings import licenses.sarif`.
 
 #### sbom scan-models
 

@@ -90,6 +90,7 @@ const EXAMPLES: Readonly<Record<string, readonly string[]>> = {
   sbom: ["0 sbom generate . -o sbom.cdx.json", "0 sbom check sbom.cdx.json", "0 sbom check sbom.cdx.json --format json", "0 sbom scan-models ./models"],
   "sbom scan-models": ["0 sbom scan-models ./models", "0 sbom scan-models model.pkl", "0 sbom scan-models . --format sarif > models.sarif"],
   "sbom generate": ["0 sbom generate . -o sbom.cdx.json", "0 sbom generate ~/code/app --name app"],
+  "sbom licenses": ["0 sbom licenses . --preset permissive", "0 sbom licenses sbom.cdx.json --deny 'GPL-*,AGPL-*'", "0 sbom licenses . --policy license-policy.yaml --resolve --format sarif > licenses.sarif"],
   "sbom check": ["0 sbom check sbom.cdx.json", "0 sbom check sbom.cdx.json --format json"],
   findings: ["0 findings list --severity high", "0 findings show 3f2a", '0 findings update 3f2a --status accepted --note "known"'],
   "findings list": ["0 findings list --severity high --status verified", "0 findings list --format json", "0 findings list --format sarif -o findings.sarif"],
