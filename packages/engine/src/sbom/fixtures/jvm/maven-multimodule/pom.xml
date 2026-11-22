@@ -7,9 +7,9 @@
   <packaging>pom</packaging>
   <modules>
     <module>bom</module>
-    <module>services/api</module>
-    <module>services/worker</module>
-    <module>services/missing</module>
+    <module>modules/api</module>
+    <module>modules/worker</module>
+    <module>modules/missing</module>
   </modules>
   <properties>
     <jackson.version>2.15.2</jackson.version>

@@ -27,7 +27,7 @@ describe("Maven pom.xml", () => {
   it("lists profiles, missing modules, missing parents and BOMs, ranges and undefined properties as unresolved", () => {
     expect(unresolved("maven-multimodule")).toEqual([
       "pom.xml: commons-collections:commons-collections",
-      "pom.xml: module:services/missing",
+      "pom.xml: module:modules/missing",
     ]);
     expect(purls("maven-unresolved")).toEqual(["pkg:maven/org.apache.commons/commons-text@1.11.0"]);
     expect(unresolved("maven-unresolved")).toEqual([
