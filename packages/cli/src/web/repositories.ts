@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { assertEgressAllowed } from "@0/engine";
 import { promisify } from "node:util";
 
 const execute = promisify(execFile);
@@ -21,7 +22,7 @@ export interface RepositoriesResponse {
 export interface RepositoryGh { run(args: string[]): Promise<{ stdout: string }> }
 export interface RepositoryAccountStatus { available: boolean; connected: boolean; account: string | null }
 
-export const defaultRepositoryGh: RepositoryGh = { run: args => execute("gh", args, { timeout: 60_000, maxBuffer: 16_000_000 }).then(({ stdout }) => ({ stdout })) };
+export const defaultRepositoryGh: RepositoryGh = { run: args => (assertEgressAllowed("GitHub (repository list)"), execute("gh", args, { timeout: 60_000, maxBuffer: 16_000_000 }).then(({ stdout }) => ({ stdout }))) };
 
 const jq = "[.[] | {f: .full_name, v: (.visibility // (if .private then \"private\" else \"public\" end)), b: .default_branch, u: .html_url, a: .archived}] | .[] | @json";
 

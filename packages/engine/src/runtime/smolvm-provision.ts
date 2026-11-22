@@ -4,6 +4,7 @@ import { constants, createWriteStream } from "node:fs";
 import { chmod, copyFile, lstat, mkdir, open, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { homeStateDir } from "../shared/paths.js";
+import { assertEgressAllowed } from "../policy/enterprise.js";
 import { dirname, isAbsolute, join } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -86,6 +87,7 @@ export async function resolveSmolvmRuntime(options: SmolvmRuntimeOptions = {}): 
     const staging = join(root, "runtime", `.provision-${randomBytes(8).toString("hex")}`);
     await privateSmolvmDirectory(staging);
     try {
+      assertEgressAllowed("github.com (SmolVM release download)");
       const response = await fetch(URL, { signal: options.signal });
       if (!response.ok || !response.body) throw new Error(`Pinned SmolVM download failed (HTTP ${response.status})`);
       const archive = join(staging, "bundle.tar.gz");

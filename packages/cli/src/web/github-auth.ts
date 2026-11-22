@@ -1,6 +1,7 @@
 import { execFile, spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
 import { hostname } from "node:os";
+import { enterpriseMode } from "@0/engine";
 import { promisify } from "node:util";
 import { ConsoleGatewayError } from "./console-gateway.js";
 import { audit } from "./audit.js";
@@ -81,6 +82,8 @@ export class GitHubPublicationAuth {
     const cached = this.#expiry;
     if (cached && cached.account === account && Date.now() - cached.at < EXPIRY_CACHE_MS) return cached.value;
     let value: string | null = null;
+    // Informational only; enterprise no-egress mode never asks GitHub for it.
+    if (enterpriseMode()) return null;
     try {
       const { stdout } = await execute("gh", ["api", "--include", "--hostname", "github.com", "user"], { timeout: 10_000, maxBuffer: 1_000_000 });
       value = parseTokenExpiry(stdout.slice(0, stdout.indexOf("\n\n") >= 0 ? stdout.indexOf("\n\n") : undefined));

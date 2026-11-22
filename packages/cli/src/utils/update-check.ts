@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { homeStateDir } from "@0/engine/shared";
-import { parseFlag, type FlagParseOptions } from "@0/engine";
+import { enterpriseMode, parseFlag, type FlagParseOptions } from "@0/engine";
 import { loadLayeredSettings } from "../state/settings.js";
 import { terminalProgress } from "./terminal-progress.js";
 
@@ -100,12 +100,17 @@ function disabled(value: string | undefined): boolean {
   return value !== undefined && parseFlag(value, LEGACY_DISABLE_FLAG);
 }
 
+/** Offline, update-check opt-out, or enterprise no-egress mode (ZERO_ENTERPRISE). */
+function updatesOff(env: NodeJS.ProcessEnv): boolean {
+  return disabled(env["ZERO_OFFLINE"]) || disabled(env["ZERO_NO_UPDATE_CHECK"]) || enterpriseMode(env);
+}
+
 export function shouldRunCheck(
   env: NodeJS.ProcessEnv = process.env,
   isTty = Boolean(process.stdout.isTTY),
   policy?: UpdatePolicy,
 ): boolean {
-  if (!isTty || disabled(env.CI) || disabled(env["ZERO_OFFLINE"]) || disabled(env["ZERO_NO_UPDATE_CHECK"])) return false;
+  if (!isTty || disabled(env.CI) || updatesOff(env)) return false;
   if (policy !== undefined) return policy !== "off";
   return env["ZERO_UPDATE_CHECK"] === "1";
 }
@@ -162,6 +167,7 @@ function stableTag(value: unknown): string | null {
 }
 
 async function fetchTagFrom(source: LatestSource, timeoutMs: number): Promise<string | null> {
+  if (enterpriseMode()) return null;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -196,7 +202,7 @@ const attemptedAutomaticTags = new Set<string>();
 /** One canonical installer, shared by explicit upgrade and startup auto-update. */
 export async function performAutoUpdate(options: AutoUpdateOptions = {}): Promise<AutoUpdateResult> {
   if (process.platform === "win32") return { success: false, installed: false, error: "Automatic installation is unavailable on Windows; download a release from https://github.com/0sec-labs/0security/releases/latest." };
-  if (disabled(process.env["ZERO_OFFLINE"]) || disabled(process.env["ZERO_NO_UPDATE_CHECK"])) {
+  if (updatesOff(process.env)) {
     return { success: false, installed: false, error: "Updates are disabled by the current offline/update policy." };
   }
   if (installInProgress) return { success: false, installed: false, error: "An update is already in progress." };
@@ -335,7 +341,7 @@ export function resolveUpdatePolicy(): UpdatePolicy {
 
 /** Environment switches that disable every update lookup and install, whatever the policy. */
 export function updatesDisabledByEnvironment(env: NodeJS.ProcessEnv = process.env): boolean {
-  return disabled(env["ZERO_OFFLINE"]) || disabled(env["ZERO_NO_UPDATE_CHECK"]);
+  return updatesOff(env);
 }
 
 export function isStableNewer(tag: string | null | undefined, current: string): tag is string {

@@ -96,7 +96,7 @@ async function fetchCatalog(impl: PricingDiscoveryFetch): Promise<Map<string, Mo
  * add a shared -> telemetry edge to the engine directory cycle. Keep in sync.
  */
 function networkOptedOut(env: NodeJS.ProcessEnv = process.env): boolean {
-  return ["ZERO_OFFLINE", "ZERO_NO_TELEMETRY", "DO_NOT_TRACK"].some(name => {
+  return ["ZERO_OFFLINE", "ZERO_NO_TELEMETRY", "DO_NOT_TRACK", "ZERO_ENTERPRISE"].some(name => {
     const v = env[name]?.trim().toLowerCase();
     return v !== undefined && v !== "" && v !== "0" && v !== "false" && v !== "no";
   });

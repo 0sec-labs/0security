@@ -213,7 +213,7 @@ export class UpdateManager {
     if (!this.#install.managed) {
       throw new UpdateError(409, "not_managed", this.#install.instruction ?? "This install cannot update itself.", { install: this.#install.kind, instruction: this.#install.instruction });
     }
-    if (updatesDisabledByEnvironment(this.#o.env)) throw new UpdateError(409, "updates_disabled", "Updates are disabled by ZERO_OFFLINE or ZERO_NO_UPDATE_CHECK.");
+    if (updatesDisabledByEnvironment(this.#o.env)) throw new UpdateError(409, "updates_disabled", "Updates are disabled by ZERO_OFFLINE, ZERO_NO_UPDATE_CHECK or ZERO_ENTERPRISE.");
     if (this.#applying || this.#restarted) throw new UpdateError(409, "update_in_progress", "An update is already in progress.");
     const tag = this.#staged ?? readCheckCache()?.latestVersion;
     if (!isStableNewer(tag, this.#o.current)) throw new UpdateError(409, "up_to_date", "0security is already up to date.");

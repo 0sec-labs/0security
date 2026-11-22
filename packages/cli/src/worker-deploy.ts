@@ -5,6 +5,7 @@ import { basename, dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { defaultEnginesConfigPath } from "./engines-config-path.js";
+import { assertEgressAllowed } from "@0/engine";
 import { homeStateDir } from "@0/engine/shared";
 
 interface WorkerDeployOptions {
@@ -234,6 +235,8 @@ export function createRunner(options: Pick<WorkerDeployOptions, "ssh" | "lima" |
 /** Deploy a Zero engine onto a remote worker and register it as a backend. Idempotent. */
 export async function deployWorker(options: WorkerDeployOptions, runner: WorkerRunner = createRunner(options)): Promise<WorkerDeployResult> {
   validateWorkerOptions(options);
+  // Provisioning installs Node, apt packages and npm dependencies from public mirrors on the remote computer.
+  assertEgressAllowed("nodejs.org, apt and npm registries (remote worker provisioning)");
   const repoRoot = options.repoRoot ?? resolveWorkerRepoRoot();
   const port = options.enginePort ?? 20000 + Number.parseInt(createHash("sha256").update(runner.label).digest("hex").slice(0, 4), 16) % 20000;
   const token = createHash("sha256").update(randomBytes(32)).digest("hex");

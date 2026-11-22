@@ -11,6 +11,7 @@ export const GROUPS = {
   static: [
     "pnpm check:architecture",
     "node --test scripts/check-architecture.test.mjs",
+    "pnpm check:egress-inventory",
     "pnpm check:no-npm-publish",
     "pnpm check:script-quotes",
     "pnpm check:workflow-triggers",

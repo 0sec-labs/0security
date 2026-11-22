@@ -38,6 +38,7 @@
  * `UNINSTRUMENTED_LAYERS`), because a layer we cannot observe cannot be part
  * of a moat claim.
  */
+import { enterpriseMode } from "../policy/enterprise.js";
 import { parseFlag, type FlagParseOptions } from "../config/env.js";
 import { FEATURE_PRESETS, resolveFeaturePreset } from "./feature-presets.js";
 
@@ -75,7 +76,7 @@ export const features = {
   /** Inject prior attempt findings when retrying (LLM-summarized progress handoff) */
   get progressHandoff(): boolean { return env("ZERO_FEATURE_PROGRESS_HANDOFF", true); },
   /** Allow the agent to search the web for CVE details, docs, and technique references */
-  get webSearch(): boolean { return env("ZERO_FEATURE_WEB_SEARCH", true); },
+  get webSearch(): boolean { return !enterpriseMode() && env("ZERO_FEATURE_WEB_SEARCH", true); },
   /**
    * EGATS specialist routing (#557, HPTSA-inspired). When ON, an EGATS branch
    * whose hypothesis names a concrete vuln class (SQLi/XSS/SSRF/SSTI/IDOR/

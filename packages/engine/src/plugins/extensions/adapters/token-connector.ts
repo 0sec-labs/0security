@@ -3,6 +3,7 @@
  * declared health URL (when it declares one), stored in {@link ConnectionSecrets} under the declared variable, and
  * filled into a script's environment only when the extension declared the name and the operator approved it.
  */
+import { enterpriseMode } from "../../../policy/enterprise.js";
 import { hostAllowed, type ConnectorDecl, type ConnectorStatus } from "../core/connector.js";
 import type { ConnectionSecrets, ConnectorAuthPort } from "../ports.js";
 
@@ -17,7 +18,7 @@ export class TokenConnector implements ConnectorAuthPort {
 
   async #probe(token: string): Promise<ConnectorStatus["health"]> {
     const h = this.decl.health;
-    if (h.type !== "http") return "unknown";
+    if (h.type !== "http" || enterpriseMode()) return "unknown";
     try {
       const url = new URL(h.url);
       // Re-checked at use: the declared host list is the only place a token can be sent.

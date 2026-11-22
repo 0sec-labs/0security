@@ -292,7 +292,7 @@ function resolveFeedbackTarget(
  * is added as the name people reach for, and `DO_NOT_TRACK` is honoured
  * because it is the cross-tool standard.
  */
-export const FEEDBACK_OPT_OUT_ENV = ["ZERO_OFFLINE", "ZERO_NO_TELEMETRY", "DO_NOT_TRACK"] as const;
+export const FEEDBACK_OPT_OUT_ENV = ["ZERO_OFFLINE", "ZERO_NO_TELEMETRY", "DO_NOT_TRACK", "ZERO_ENTERPRISE"] as const;
 
 /** Request timeout. Short: this is a courtesy call behind a human keystroke. */
 const FEEDBACK_TIMEOUT_MS = 5000;

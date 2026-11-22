@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { validateAgentSkillContent } from "@0/engine";
+import { assertEgressAllowed, validateAgentSkillContent } from "@0/engine";
 import { z } from "zod";
 import catalogData from "./skills-catalog.generated.json" with { type: "json" };
 import { SkillsError, type SkillOrigin, type SkillsStore } from "./skills.js";
@@ -43,6 +43,7 @@ export function loadCatalog(): CatalogFile { return catalogData as unknown as Ca
 export type GhRunner = (path: string) => Promise<string>;
 const run = promisify(execFile);
 export const ghApi: GhRunner = async path => {
+  assertEgressAllowed("api.github.com (skills catalog)");
   const { stdout } = await run("gh", ["api", "-H", "Accept: application/vnd.github+json", path], { encoding: "utf8", timeout: 30_000, maxBuffer: 32 * 1024 * 1024 });
   return stdout;
 };
