@@ -1047,7 +1047,35 @@ Look every component of an SBOM up in the public OSV database and list the advis
 0 sbom check [options] <file>
 ```
 
-Each advisory is listed with its aliases, severity, the versions that fix it and a one-line summary, grouped by component. The only network use is the lookup at `https://api.osv.dev`: package URLs go out and nothing else does. Exit 0 when there are no advisories and 1 when there are, so a scheduled job can fail or open an issue.
+Each advisory is listed under its component with its aliases, severity, the version that fixes it and a one-line summary, most severe first. Exit 0 when there are no advisories and 1 when there are, so a scheduled job can fail or open an issue.
+
+```bash
+0 sbom generate . -o sbom.cdx.json
+0 sbom check sbom.cdx.json
+```
+
+```text
+lodash 4.17.15  pkg:npm/lodash@4.17.15
+  GHSA-35jh-r3h4-6jhm (CVE-2021-23337)  high (CVSS 7.2)  Fixed in 4.17.21.
+    Command Injection in lodash
+```
+
+The fixed version is the lowest version above the installed one that the advisory names for that package. If the advisory names none, the line says `No fixed version known.` Severity comes from the database's own label, or from a CVSS 3 vector when there is no label. A record with neither, or with only a CVSS 4 vector, shows `unknown`.
+
+A package that OSV lists as malicious (an id that starts with `MAL-`) is shown as `MALICIOUS PACKAGE` at critical severity, under a banner line. Remove it, and treat any machine or pipeline that installed it as compromised. It makes the exit code 1 like any advisory.
+
+`--format sarif` writes one result per vulnerable component and advisory. The rule id is the advisory id, the level follows severity, and the message names the fixed version. The location is the lockfile the component came from when the SBOM records it (`0 sbom generate` does), and the SBOM file otherwise. Write it to a file and import it:
+
+```bash
+0 sbom check sbom.cdx.json --format sarif -o deps.sarif
+0 findings import deps.sarif
+```
+
+Importing the same results again changes nothing. `--format json` writes the advisories with their fixed version, severity and a `malicious` flag.
+
+Add `--outdated` to also list components that have a newer version. This looks each package up at `https://api.deps.dev`, so package names go out. It checks at most 200 components, runtime dependencies first, and says how many it skipped. Each note shows the latest version and how far behind the installed one is. A newer version is information only. It does not mean the installed one is unsafe, and it never changes the exit code.
+
+The network use is the lookup at `https://api.osv.dev`: package URLs go out and nothing else does.
 
 | Argument | Required | Description |
 | --- | --- | --- |
@@ -1055,7 +1083,9 @@ Each advisory is listed with its aliases, severity, the versions that fix it and
 
 | Option | Registered default | Description |
 | --- | --- | --- |
-| `--format <format>` | `text` | Output: text or json |
+| `--format <format>` | `text` | Output: text, json or sarif (SARIF imports with `0 findings import`) |
+| `-o, --output <file>` | — | Write the result to a file instead of stdout |
+| `--outdated` | — | Also list components with a newer version (looks packages up at https://api.deps.dev; information only, not a vulnerability) |
 
 #### sbom licenses
 

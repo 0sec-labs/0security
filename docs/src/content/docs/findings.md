@@ -241,6 +241,39 @@ Each result becomes a finding that keeps the scanner's name, rule, severity, CWE
 
 Stop a running console on the same database before you import. See [findings import](/commands/#findings-import) for every option.
 
+## Dependencies
+
+Check the packages your project uses against known advisories, import the results as findings, and fix them with a version bump.
+
+```bash
+0 sbom generate . -o sbom.cdx.json
+0 sbom check sbom.cdx.json --format sarif -o deps.sarif
+0 findings import deps.sarif
+```
+
+Each finding is one package and one advisory. It shows the severity, the fixed version and the lockfile it came from. A malicious package is a critical finding.
+
+To bump a package, fix the finding:
+
+```bash
+0 findings fix 3f2a --test "npm test"
+```
+
+The fix raises the package to the lowest fixed version in the manifest, and refreshes the lockfile with your project's own package manager when it is installed. It changes nothing else.
+
+To estimate whether your code calls the vulnerable part, run the experimental `dependency-reachability` skill. Give it the advisories as context:
+
+```bash
+0 sbom check sbom.cdx.json --format json -o advisories.json
+0 scan . --skill dependency-reachability --context advisories.json
+```
+
+Each advisory gets a verdict: reachable, not-reached or cannot-tell, with the file and line it rests on. The verdict is a model's reading of the code, not a proof. It can be wrong in both directions, and not-reached does not mean safe. See [scan a folder](#scan-a-folder) for the scan options.
+
+On one planted Node app (an old lodash with one vulnerable function called, and an old package imported but never used), seven advisories got six correct verdicts and one cautious cannot-tell in the second run. The first run recorded only five of the seven. That is one small fixture and two runs, so it says nothing about accuracy on your code.
+
+Add `--outdated` to `0 sbom check` to list newer versions. These are notes, not findings.
+
 ## Fix a finding
 
 0 fixes a finding in a separate git work tree, so your checkout is never touched. It runs your checks, commits on a branch named `0/fix-<id>` and opens a pull request. The pull request is a draft when a check fails.

@@ -28,9 +28,19 @@ content: |
   ### 2. Change the least
 
   - Remove the cause, not the symptom: parameterize the query, encode the output, check the owner, verify the signature. Do not add a filter that only blocks the sample input.
-  - Touch only the files the fix needs. No reformatting, no renames, no dependency upgrades, no refactors, no fixes for other findings you notice (mention them in your summary instead).
+  - Touch only the files the fix needs. No reformatting, no renames, no dependency upgrades (except the one a dependency finding asks for, see below), no refactors, no fixes for other findings you notice (mention them in your summary instead).
   - Keep behaviour and public interfaces for every legitimate caller. Follow the style of the surrounding code.
   - Add or update one test that fails before the change and passes after it, in the project's existing test setup. If there is no test setup, say so; do not create a framework.
+
+  ### Dependency findings
+
+  If the finding is about a vulnerable dependency (its text names a package, a version and an advisory id such as GHSA-, CVE- or MAL-, and it cites a lockfile or manifest), the fix is a version bump, and the rules above change like this:
+
+  - Bump the package to the lowest version that fixes the advisory. Use the "Fixed in" version from the finding. If it says no fixed version is known, change nothing and say so. For a MAL- advisory (a malicious package), remove the dependency and any import of it instead, and say that anything that installed it should be treated as compromised.
+  - Edit the manifest (`package.json`, `requirements.txt`, `Cargo.toml`, `go.mod` and so on) so the declared range allows the fixed version. Keep the project's pinning style: a pinned version stays pinned (for example `npm install --save-exact`), a range stays a range. For a transitive dependency, bump the direct dependency that pulls it in, or use the package manager's own override field, and say which.
+  - Refresh the lockfile only with the project's own package manager (the one whose lockfile is in the repository: `npm`, `pnpm`, `yarn`, `cargo`, `go`, `pip`, `poetry`, `bundle`), only if that tool is installed, and only for that one package (for example `npm install lodash@4.17.21 --package-lock-only`). Never write lockfile entries or integrity hashes by hand. If the tool is missing or the command fails, change the manifest only and say that the lockfile still needs refreshing.
+  - Keep the change to the manifest and the lockfile. Do not run a general upgrade, do not touch other packages, and do not add a test of your own.
+  - Run the project's tests (the command the task names, or the project's test script) and report the result.
 
   ### 3. Check
 
