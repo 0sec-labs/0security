@@ -83,6 +83,26 @@ describe("0 skills add / 0 skills extensions (local fixture repo, temp HOME)", (
     expect(text).toContain("could not migrate 1"); expect(text).toContain("skip plugin old-one");
     expect(await run("extensions", "import")).toContain("(earlier run)");
   });
+
+  it("installs an Agent Skills folder as a skill enabled by default and reviews bundled scripts", async () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "ext-agent-skill-"))); made.push(dir);
+    mkdirSync(join(dir, "scripts"), { recursive: true });
+    writeFileSync(join(dir, "SKILL.md"), "---\nname: audit-auth\ndescription: Audit authentication endpoints.\n---\nReview auth flows.\n");
+    writeFileSync(join(dir, "scripts", "check.sh"), "#!/bin/sh\necho check\n");
+
+    const preview = await run("add", dir, "--preview");
+    expect(code).toBe(0);
+    expect(preview).toMatch(/runs commands.*scripts\/check\.sh/);
+    expect(preview).toContain("audit-auth");
+
+    const res = await run("add", dir, "--yes");
+    expect(code).toBe(0);
+    expect(res).toContain("Installed skill audit-auth");
+    expect(res).not.toContain("Not enabled");
+
+    const list = await run("extensions", "list");
+    expect(list).toMatch(/audit-auth\s+local\s+enabled/);
+  });
 });
 
 describe("approvals are the operator's", () => {

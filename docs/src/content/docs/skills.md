@@ -23,14 +23,16 @@ Every action on the Skills page has a command. With the console running, command
 0 skills list
 0 skills catalog --search handoff
 0 skills add mattpocock~skills~handoff --yes
+0 skills add ./my-skill --yes
 0 skills import ./code-review
 0 skills edit code-review --file ./SKILL.md
 0 skills export code-review -o code-review.skill.json
 0 skills link ~/team-skills
 0 skills delete code-review --yes
+0 scan . --skill my-skill
 ```
 
-`skills add` shows a review first. `--yes` installs the commit you reviewed. `skills import` takes a folder with `SKILL.md` or an exported bundle. `skills link` mounts a folder without copying it.
+`skills add` accepts an Agent Skills folder (`SKILL.md` with name and description front matter, optional scripts and references) or git repository, showing a review first. `--yes` installs and enables the skill. `0 scan . --skill <id>` loads and runs the skill instructions during a scan. Bundled scripts are resources and never run on skill load; running them through bash requires approved extension matching. `skills import` takes a folder with `SKILL.md` or an exported bundle. `skills link` mounts a folder without copying it.
 
 ## Folder format
 

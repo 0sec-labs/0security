@@ -16,7 +16,7 @@ export const isBareRepo = (source: string): boolean => /^[A-Za-z0-9][A-Za-z0-9._
 
 /** `source@<40 hex>`, an https URL, a path or a bare owner/repo: handled here. Catalog ids and owner/repo/path stay on the catalog flow. */
 export function isExtensionSource(source: string): boolean {
-  return /@[0-9a-f]{40}$/.test(source) || /^https:\/\//i.test(source) || /^(\/|\.\/|\.\.\/|~\/)/.test(source) || existsSync(resolve(source)) || isBareRepo(source);
+  return /@[0-9a-f]{40}$/.test(source) || /^https:\/\//i.test(source) || /^(\/|\.\/|\.\.\/|~\/|[A-Za-z]:[\\\/])/.test(source) || existsSync(resolve(source)) || isBareRepo(source);
 }
 
 const fail = (io: CommandIo, options: OutputOptions, message: string, code = EXIT_FAILURE) => { io.err(options.json ? JSON.stringify({ error: message }) : message); io.setExitCode(code); };
@@ -61,11 +61,14 @@ async function reviewAndCommit(svc: ExtensionService, io: CommandIo, options: Op
     showPrompt(io, options, p, "");
     if (!await confirmAtTerminal()) { io.err("Not installed."); io.setExitCode(EXIT_USAGE); return; }
   } else if (options.yes !== true) { showPrompt(io, options, p, p.snapshot.source.type === "git" && !pinnedInput ? `Re-run with \`0 skills add ${source}@${p.prompt.revision} --yes\` to install this exact revision.` : `Re-run with --yes to install this exact revision (${p.prompt.revision}).`); io.setExitCode(EXIT_USAGE); return; }
-  if (!operatorOnly(io, options, "install an extension")) return;
+  const isSkill = p.prompt.format === "skill-folder";
+  if (!operatorOnly(io, options, isSkill ? "install a skill" : "install an extension")) return;
   if (!pinnedInput && p.snapshot.source.type === "git") return fail(io, options, `Refusing to install an unpinned commit with --yes. Pin it: ${source}@${p.prompt.revision}`, EXIT_USAGE);
-  const done = svc.installer.commit(p, approvalFor(p, options.enable ? (options.project ? { scope: "project" as const, project: resolve(options.project) } : { scope: "global" as const }) : undefined));
+  const enableOption = options.enable ?? (isSkill ? true : undefined);
+  const enableScope = enableOption ? (options.project ? { scope: "project" as const, project: resolve(options.project) } : { scope: "global" as const }) : undefined;
+  const done = svc.installer.commit(p, approvalFor(p, enableScope));
   if (!done.ok) return fail(io, options, done.error.message);
-  emit(io, options, { installed: true, name: done.value.name, revision: done.value.revision, enabled: options.enable === true }, () => `Installed extension ${done.value.name} at ${done.value.revision.slice(0, 12)}.${options.enable ? "" : ` Not enabled: \`0 skills extensions enable ${done.value.name}\`.`}`);
+  emit(io, options, { installed: true, name: done.value.name, revision: done.value.revision, enabled: Boolean(enableOption) }, () => isSkill ? `Installed skill ${done.value.name} at ${done.value.revision.slice(0, 12)}.` : `Installed extension ${done.value.name} at ${done.value.revision.slice(0, 12)}.${options.enable ? "" : ` Not enabled: \`0 skills extensions enable ${done.value.name}\`.`}`);
 }
 
 /** Returns "not-extension" (and prints nothing) when a bare owner/repo has no extension or skill layout, so the caller can try the catalog flow. */

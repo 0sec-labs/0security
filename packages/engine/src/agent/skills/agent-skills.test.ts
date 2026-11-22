@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { discoverAgentSkills, loadAgentSkill, validateAgentSkillContent } from "./agent-skills.js";
+import { discoverAgentSkills, isAgentSkillAllowed, loadAgentSkill, validateAgentSkillContent } from "./agent-skills.js";
 
 const temporary: string[] = [];
 function temp() { const dir = mkdtempSync(join(tmpdir(), "zero-agent-skills-")); temporary.push(dir); return dir; }
@@ -54,14 +54,23 @@ describe("standard Agent Skills", () => {
   it("rejects symlink escapes and entrypoint replacement between discovery and loading", () => {
     const mount = temp(), outside = temp();
     const external = skill(outside, "external");
-    symlinkSync(external, join(mount, "external"));
+    try {
+      symlinkSync(external, join(mount, "external"), process.platform === "win32" ? "junction" : "dir");
+    } catch {
+      return; // symlinks not permitted in this environment
+    }
     const directory = skill(mount, "valid");
     const found = discoverAgentSkills({ homeDir: null, mounts: [{ path: mount }] });
     expect(found.skills).toHaveLength(1);
     expect(found.diagnostics[0]?.message).toContain("outside");
     rmSync(join(directory, "SKILL.md"));
-    symlinkSync(join(external, "SKILL.md"), join(directory, "SKILL.md"));
-    expect(() => loadAgentSkill(found.skills[0]!)).toThrow("location changed");
+    try {
+      symlinkSync(join(external, "SKILL.md"), join(directory, "SKILL.md"), "file");
+      expect(() => loadAgentSkill(found.skills[0]!)).toThrow("location changed");
+    } catch (e: any) {
+      if (e?.code === "EPERM") return;
+      throw e;
+    }
   });
 
   it("reports malformed folders while continuing valid discovery", () => {
@@ -91,5 +100,13 @@ describe("standard Agent Skills", () => {
     expect(found.skills).toHaveLength(1);
     expect(found.diagnostics[0]?.message).toContain("differs");
     expect(loadAgentSkill(found.skills[0]!).content).toContain("Read the reference.");
+  });
+
+  it("enforces allow-lists by full ID or short name", () => {
+    expect(isAgentSkillAllowed(undefined, "project/my-skill")).toBe(true);
+    expect(isAgentSkillAllowed({ allowedSkillIds: ["my-skill"] }, "project/my-skill")).toBe(true);
+    expect(isAgentSkillAllowed({ allowedSkillIds: ["project/my-skill"] }, "my-skill")).toBe(true);
+    expect(isAgentSkillAllowed({ allowedSkillIds: ["extension/demo/alpha"] }, "alpha")).toBe(true);
+    expect(isAgentSkillAllowed({ allowedSkillIds: ["other-skill"] }, "project/my-skill")).toBe(false);
   });
 });

@@ -1,6 +1,6 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_SCAN_MODEL, headlessConsoleArgs, resolveScanTarget, runScan, withoutCredentials, type ScanDeps } from "../scan.js";
 
@@ -56,7 +56,7 @@ describe("resolveScanTarget", () => {
   it("names a folder target by its folder name, and keeps its real path to make finding paths relative", async () => {
     const dir = folder();
     const target = await resolveScanTarget(dir, { clone: vi.fn() });
-    expect(target.reportTarget).toBe(dir.split("/").pop());
+    expect(target.reportTarget).toBe(basename(dir));
     expect(target.reportTarget).not.toContain("/");
     expect(target.roots).toContain(dir);
   });
@@ -247,12 +247,20 @@ describe("runScan", () => {
   });
 
   it("rejects bad options before opening a thread", async () => {
-    for (const bad of [{ budget: "0" }, { budget: "abc" }, { format: "xml" }, { failOn: "urgent" }, { timeout: "-1" }, { skill: "../x" }, { format: "pdf" }, { passes: "0" }, { passes: "6" }, { passes: "1.5" }, { passes: "abc" }]) {
+    for (const bad of [{ budget: "0" }, { budget: "abc" }, { format: "xml" }, { failOn: "urgent" }, { timeout: "-1" }, { skill: "../x" }, { skill: "skill/" }, { skill: "/skill" }, { skill: "a".repeat(129) }, { format: "pdf" }, { passes: "0" }, { passes: "6" }, { passes: "1.5" }, { passes: "abc" }]) {
       const { deps, client } = fakes(finishedSnapshot());
       await runScan(folder(), options(bad), deps);
       expect(client.request, JSON.stringify(bad)).not.toHaveBeenCalled();
       expect(process.exitCode).toBe(2);
       process.exitCode = undefined;
+    }
+  });
+
+  it("accepts namespaced and custom skill ids in --skill", async () => {
+    for (const skill of ["custom-skill", "extension/audit-auth/audit-auth", "mount/shared/evidence-review", "personal/my-skill"]) {
+      const { deps, requests } = fakes(finishedSnapshot());
+      await runScan(folder(), options({ skill }), deps);
+      expect(requests.find(([method, path]) => method === "POST" && path.endsWith("/messages"))![2]).toMatchObject({ text: expect.stringContaining(`\`${skill}\` skill`) });
     }
   });
 
@@ -397,22 +405,24 @@ describe("the pattern-scanner pre-pass", () => {
   });
 
   it("runs the scanners that were asked for, foxguard by default, and refuses an unknown one", async () => {
+    const tmp = resolve("/tmp");
     const byDefault = fakes(finished, []);
-    await runScan("/tmp", options(), byDefault.deps);
-    expect(byDefault.deps.prePass).toHaveBeenCalledWith("/tmp", ["foxguard"]);
+    await runScan(tmp, options(), byDefault.deps);
+    expect(byDefault.deps.prePass).toHaveBeenCalledWith(tmp, ["foxguard"]);
     const several = fakes(finished, []);
-    await runScan("/tmp", options({ scanner: ["foxguard", "semgrep,opengrep"] }), several.deps);
-    expect(several.deps.prePass).toHaveBeenCalledWith("/tmp", ["foxguard", "semgrep", "opengrep"]);
+    await runScan(tmp, options({ scanner: ["foxguard", "semgrep,opengrep"] }), several.deps);
+    expect(several.deps.prePass).toHaveBeenCalledWith(tmp, ["foxguard", "semgrep", "opengrep"]);
     const bad = fakes(finished, []);
-    await runScan("/tmp", options({ scanner: ["nope"] }), bad.deps);
+    await runScan(tmp, options({ scanner: ["nope"] }), bad.deps);
     expect(process.exitCode).toBe(2);
     expect(bad.err.join("\n")).toContain("Unknown scanner 'nope'");
     process.exitCode = 0;
   });
 
   it("refuses an unknown mode", async () => {
+    const tmp = resolve("/tmp");
     const { deps } = fakes(finished, []);
-    await runScan("/tmp", options({ prepass: "maybe" }), deps);
+    await runScan(tmp, options({ prepass: "maybe" }), deps);
     expect(process.exitCode).toBe(2);
     process.exitCode = 0;
   });
@@ -436,11 +446,12 @@ describe("--diff", () => {
   const lead = (path: string) => ({ tool: "foxguard", ruleId: "r", title: "t", description: "d", severity: "high" as const, category: "other" as const, path, startLine: 1, fingerprint: `sarif:${path}`, cwe: [] });
 
   it("scopes the scan to the changed files, and keeps only the leads inside them", async () => {
+    const tmp = resolve("/tmp");
     const { deps, requests } = fakes(finished, []);
     (deps.diffFiles as ReturnType<typeof vi.fn>).mockResolvedValue(["src/a.ts", "src/b.ts"]);
     (deps.prePass as ReturnType<typeof vi.fn>).mockResolvedValue({ tools: ["foxguard"], total: 2, leads: [lead("src/a.ts"), lead("src/unchanged.ts")] });
-    await runScan("/tmp", options({ diff: "origin/main" }), deps);
-    expect(deps.diffFiles).toHaveBeenCalledWith("/tmp", "origin/main");
+    await runScan(tmp, options({ diff: "origin/main" }), deps);
+    expect(deps.diffFiles).toHaveBeenCalledWith(tmp, "origin/main");
     const text = (requests.find(([, path]) => path.endsWith("/messages"))![2] as { text: string }).text;
     expect(text).toContain("review of a change");
     expect(text).toContain("<changed-files>\nsrc/a.ts\nsrc/b.ts\n</changed-files>");
