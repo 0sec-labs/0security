@@ -1586,15 +1586,19 @@ Delete the local SQLite database and optionally reseed the verification workbenc
 | `--db-path <path>` | — | Path to SQLite database |
 | `--seed <preset>` | `verification` | Seed preset to load after reset |
 
-Reset also removes `<db>-journal` and the `<db>.lock` directory left by the SQLite WASM engine. It refuses, and deletes nothing, when the database path is a directory (check `ZERO_DB_PATH` and `--db-path`), when the process recorded in `<db>.lock/pid` is still alive, or when the lock has no owner information and was modified in the last 5 minutes. Symlinks are removed as links and never followed; recursive deletion applies only to the `.lock` path. The browser's reset-database route shares this behavior and can return an error for a held lock.
+Reset also removes the database's `-journal` file and `.lock` directory. It refuses, and deletes nothing, when:
+
+- the database path is a directory (check `ZERO_DB_PATH` and `--db-path`)
+- the process recorded in `<db>.lock/pid` is still alive
+- the lock has no owner information and changed in the last 5 minutes
+
+Symlinks are removed as links and never followed. The browser's reset-database action behaves the same way and can return an error for a held lock.
 
 ## Automation & integration
 
 ### computers
 
-Add and manage remote computers. A computer is a remote 0 engine that runs
-threads and automations on its host; select it in the browser's computer menu
-to work there. `worker` still works as an older name.
+Add and manage remote computers. A computer is a remote 0 engine that runs threads and automations on its host. Select it in the browser's computer menu to work there.
 
 ```text
 0 computers
@@ -1624,20 +1628,23 @@ List the registered remote computers with their host and whether 0 deployed them
 
 #### computers add
 
-Also available as `computers add`. Deploy the built CLI engine onto a running Linux Lima instance or an SSH host and
-register its connection locally. Run `pnpm build` in a source checkout first.
-Use `--ssh` for an SSH host alias or `user@host`; otherwise the command uses the
-`zero-worker` Lima instance. SSH deployment uses noninteractive key authentication.
+Deploy the built CLI engine onto a running Linux Lima instance or an SSH host and register its connection locally. Run `pnpm build` in a source checkout first.
+
+```bash
+0 computers add --ssh me@build-box
+```
+
+Use `--ssh` for an SSH host alias or `user@host`. Without it, the command uses the `zero-worker` Lima instance. SSH deployment uses noninteractive key authentication.
 
 ```text
 0 computers add [options]
 ```
 
-Use `--target-git` with an `https://` URL to clone your repository into the remote workspace. Forwarding
-`OPENAI_API_KEY` is explicit through `--forward-provider-key`; use it only for a
-host you own. Deployment installs runtime dependencies and starts the engine on
-the remote machine. Inspect the returned backend ID and connection details, then
-select that computer in the browser before starting remote work.
+Use `--target-git` with an `https://` URL to clone your repository into the remote workspace. Deployment installs runtime dependencies and starts the engine on the remote machine.
+
+`--forward-provider-key` sends your `OPENAI_API_KEY` to the remote engine. Use it only for a host you own.
+
+Check the returned backend ID and connection details, then select that computer in the browser before starting remote work.
 
 | Option | Registered default | Description |
 | --- | --- | --- |
@@ -1654,13 +1661,7 @@ Aliases: `deploy`.
 
 #### computers repair
 
-Also available as `computers reconnect`.
-
-Reconnect a previously deployed worker using its saved deployment metadata and
-credentials. The command starts the retained managed engine if needed and
-recreates its owned SSH tunnel. It preserves remote files and refuses to replace
-an unrelated process or an occupied engine port. If the deployment files are
-missing, deploy the worker again.
+Reconnect a deployed computer from its saved deployment details. The command starts the retained engine if needed and recreates its SSH tunnel. It keeps remote files and refuses to replace an unrelated process or an occupied engine port. If the deployment files are missing, add the computer again.
 
 ```text
 0 computers repair <id>
@@ -1677,11 +1678,7 @@ Aliases: `reconnect`.
 
 #### computers stop
 
-Stop a worker engine that Zero deployed and disconnect its owned local tunnel.
-The command verifies the saved deployment metadata, remote working directory,
-PID and process command before sending a termination signal. It retains the
-remote workspace and the saved backend registration so the worker can be
-redeployed later.
+Stop a computer that 0 deployed and close its local tunnel. Before it signals the process, the command checks the saved deployment details, the remote working directory, and the process ID and command. The remote workspace and the saved registration stay, so you can add the computer again later.
 
 ```text
 0 computers stop <id>
@@ -1712,9 +1709,7 @@ Run `0 computers list` to see the IDs.
 
 #### computers hosts
 
-List SSH host aliases discovered from `~/.ssh/config`, with their resolved host
-and user when present. This lists configuration entries rather than checking
-connectivity or whether each host supports a Linux engine.
+List SSH host aliases from `~/.ssh/config`, with their resolved host and user. It does not check connectivity or whether a host can run a Linux engine.
 
 ```text
 0 computers hosts
@@ -2318,7 +2313,7 @@ Delete a saved automation and its schedules.
 
 ### threads
 
-Inspect and control the same live sessions used by the browser. Attach with --engine or --engine-url/--engine-token-env, or use the discovered local engine. Session operations preserve current engine admission grants.
+Inspect and control the same live threads the browser uses. Attach with `--engine`, or with `--engine-url` and `--engine-token-env`, or use the discovered local engine. These commands keep the engine's current admission grants.
 
 ```text
 0 threads
@@ -2517,7 +2512,9 @@ Read engine session events after an optional nonnegative cursor. Cursors belong 
 
 #### threads force-stop
 
-Explicitly stop a qualified session's owned execution process and registered resources. Use the exact **live** ID from `0 threads list`; this command never restores a saved chat or substitutes a replacement session. The owning engine checks authorization and supervisor availability. Unsupported execution returns an error, and unconfirmed teardown remains quarantined. No automatic escalation or replay occurs.
+Stop a session's owned execution process and registered resources. Use the exact live ID from `0 threads list`. The command never restores a saved chat or substitutes a replacement session.
+
+The owning engine checks authorization and supervisor availability. Unsupported execution returns an error, and teardown that is not confirmed stays quarantined. Nothing is escalated or replayed automatically.
 
 ```text
 0 threads force-stop [options] <id>
@@ -2528,7 +2525,7 @@ Explicitly stop a qualified session's owned execution process and registered res
 0 threads force-stop LIVE_SESSION_ID --engine-url http://127.0.0.1:48123 --engine-token-env ZERO_ENGINE_TOKEN
 ```
 
-Force stop is available for qualified Bun sessions on macOS/Linux; completed external effects are not undone. Inspect `0 threads show` after an error before taking another action.
+Force stop works for qualified Bun sessions on macOS and Linux. Completed external effects are not undone. After an error, run `0 threads show` before you take another action.
 
 | Argument | Required | Description |
 | --- | --- | --- |
@@ -2918,7 +2915,18 @@ Make Sentinels match the YAML files in a folder. Shows what would change; --appl
 0 sentinels sync [options] <folder>
 ```
 
-Each `*.yaml` file is one Sentinel: name, mission, instructions, skills, model, folder, and automations with their triggers (see [Sentinels as files](/sentinels/#sentinels-as-files)). Without `--apply` nothing is written. A new Sentinel is created paused and a new trigger disabled, a changed model or skill list sends an active Sentinel back to review, and a Sentinel that is not in the folder is left alone. Stop a running console on the same database first.
+```bash
+0 sentinels sync ./sentinels
+0 sentinels sync ./sentinels --apply
+```
+
+Each `*.yaml` file is one Sentinel: name, mission, instructions, skills, model, folder, and automations with their triggers (see [Sentinels as files](/sentinels/#sentinels-as-files)). Without `--apply` nothing is written.
+
+- A new Sentinel is created paused and a new trigger disabled.
+- A changed model or skill list sends an active Sentinel back to review.
+- A Sentinel that is not in the folder is left alone.
+
+Stop a running console on the same database first.
 
 | Argument | Required | Description |
 | --- | --- | --- |
@@ -3456,17 +3464,13 @@ Create the secret, or replace it; the old one keeps working for 5 minutes. Print
 0 config team
 ```
 
-Provision opt-in accounts for a customer-controlled team engine. Account-free local
-use remains the default. Creating a config does not activate it on a running host.
-See [Team workspaces](/computers/) for roles and deployment boundaries.
+Provision opt-in accounts for a team engine you control. Local use without accounts stays the default. Creating a config does not activate it on a running host. See [Team workspaces](/computers/) for roles and deployment boundaries.
 
 Subcommands: [init](#config-team-init) · [add-user](#config-team-add-user) · [list](#config-team-list).
 
 ### config team init
 
-Create a private configuration with the first owner account. The password is read
-from protected terminal input or stdin; it is stored as a salted password hash.
-No email invitation is sent. Then start `0 web --team-config <path>`.
+Create a private configuration with the first owner account. The password comes from protected terminal input or stdin and is stored as a salted hash. No email invitation is sent. Then start `0 web --team-config <path>`.
 
 ```text
 0 config team init [options]
@@ -3481,9 +3485,7 @@ No email invitation is sent. Then start `0 web --team-config <path>`.
 
 ### config team add-user
 
-Add an explicit account to a private configuration. Assign `owner`, `editor` or
-`viewer`; viewer access does not grant agent control. Restart the team engine to
-load configuration changes. Password input is not a command-line argument.
+Add an account to a private configuration with the role `owner`, `editor` or `viewer`. A viewer cannot control agents. Restart the team engine to load changes. The password is never a command-line argument.
 
 ```text
 0 config team add-user [options]
@@ -3498,8 +3500,7 @@ load configuration changes. Password input is not a command-line argument.
 
 ### config team list
 
-List configured account IDs, display names and roles without password hashes.
-The configuration must remain a private regular file.
+List account IDs, display names and roles. Password hashes are not shown. The configuration must be a private regular file.
 
 ```text
 0 config team list [options]
