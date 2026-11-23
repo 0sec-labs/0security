@@ -140,6 +140,44 @@ The differences between the model configurations are inside the spread, so none 
 
 Rule scanners report a whole resource as one region, so the matcher credits a Checkov finding when any rule on the resource overlaps a planted line (for example a missing-description rule on the database group). Checkov's `iac-db-via-edge` credit comes from a missing-description rule on that group, not from seeing the exposure, so read its recall as an upper bound of about 4 of 9; the false-positive count is mostly hygiene rules on the decoy Deployment, which Checkov also reports on a hardened container.
 
+## Second opinion with `--known`
+
+`scripts/bench/second-opinion.mjs` measures whether `0 scan --known <sarif>` finds planted bugs that a baseline tool misses (issue 516). For each fixture with planted items it runs the baseline tool, scores that tool's own SARIF against the answer key with the same matcher, then scans the fixture with and without `--known <that SARIF>`. The generic scan is the same two runs for both tools. `--prepass off`, the default model, a fresh `HOME` per run, `--budget 0.5`.
+
+Measured on 2026-11-22. Baselines: foxguard and Semgrep (`p/default`). 2 repeats per arm, except `medium-app` with foxguard only and 1 repeat (a scan of it takes 15 to 25 minutes). Semgrep was not run on `medium-app`. Total model cost about $0.8 as reported by the scans, plus one `medium-app` scan that was stopped and rerun.
+
+What the baselines miss on these fixtures (planted items of 4 to 10 per fixture):
+
+| fixture | foxguard misses | Semgrep misses |
+|---|---|---|
+| node-express | 1 of 4 | 1 of 4 |
+| python-flask | 0 of 4 | 0 of 4 |
+| go-http | 2 of 3 | 1 of 3 |
+| crypto-app | 4 of 6 | 3 of 6 |
+| llm-app | 4 of 4 | 4 of 4 |
+| iac-app | 9 of 9 | 5 of 9 |
+| medium-app | 5 of 10 | not run |
+
+Items the baseline missed that the scan found, summed over runs (the denominator is the missed items times the repeats):
+
+| baseline | generic scan | scan with `--known` |
+|---|---|---|
+| foxguard, 7 fixtures | 26 of 45 (58%) | 31 of 45 (69%) |
+| Semgrep, 6 fixtures | 13 of 28 (46%) | 12 of 28 (43%) |
+
+Share of the reported findings that are new (not matching a known item by file, 5 lines and category family):
+
+| baseline | generic scan | scan with `--known` |
+|---|---|---|
+| foxguard | 33 of 61 (54%) | 44 of 54 (81%) |
+| Semgrep | 12 of 43 (28%) | 16 of 25 (64%) |
+
+- With foxguard as the baseline, recall of the missed items rose from 58% to 69%, and most of the gain is `iac-app` (9 to 13 of 18) plus one item on `medium-app`. With Semgrep as the baseline it did not rise (46% to 43%). The samples are small and the spread between two repeats is larger than these differences, so this does not show that `--known` finds more of what a baseline misses.
+- What the data does show: the share of new findings goes up a lot, because the scan stops re-reporting what the baseline already found. On the same fixtures the scan found fewer planted items overall with the flag (foxguard runs 48 of 70 without, 36 of 70 with; Semgrep runs 40 of 60 without, 17 of 60 with), as intended. The flag is for a team that already collects the baseline's findings, not a replacement for them.
+- In the reports I read, every match with a known item also carried the scan's own analysis, so it was marked `confirmedIndependently`. `already-known` without that mark did not appear.
+- Which items count as missed comes from the benchmark matcher applied to the tool's SARIF, so a tool finding that the matcher does not credit counts as a miss. A generic run failed on `crypto-app` and one on `llm-app` (the thread's answer was not backed by its checks), and the `medium-app` run with the flag stopped partial; they are included.
+- The same limits as above apply: tiny synthetic fixtures with textbook bugs, an answer key we wrote, and a model that varies between runs.
+
 ## Adding a fixture
 
 1. Create `scripts/bench/fixtures/<name>/` with a small app (under 150 lines) in its own language. Keep each bug on a few lines and add at least one decoy: safe code shaped like a bug.

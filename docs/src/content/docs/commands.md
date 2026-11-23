@@ -253,6 +253,10 @@ A hit from your rules is a lead like any other. The scan checks it against the c
 | `--coverage [scan]` | — | Print the coverage ledger of a batched scan of this folder (the latest, or the id given) and exit; --format json for JSON |
 | `--allow-partial` | — | Exit by the findings alone (0, or 1 with --fail-on) when the scan stops before it reviews everything; the report still says it is partial |
 | `--plan` | — | List the entry points, the batches and a rough cost range for the folder, then exit; calls no model and writes nothing |
+| `--tiers <file>` | — | An operator's tier map (YAML or JSON) that sets the budget, batches and skill for this repository, or skips it. Default: scan-tiers.yaml\|yml\|json in the 0 state folder. Never read from the scanned folder on its own; in CI read it from the base branch |
+| `--fail-on-skip` | — | Exit 1 when the tier map skips this scan (default: exit 0, with the skip stated in the report) |
+| `--known <sarif>` | — | SARIF from other tools: the scan is told what is already known and looks for what they missed; findings are labelled new or already-known (confirmedIndependently when the scan analysed it itself). Repeat for several |
+| `--only-new` | — | With --known: leave findings that match a known item out of the report |
 | `--timeout <seconds>` | `3600` | Maximum seconds to wait for the scan |
 | `--engine-url <url>` | — | Attach directly to a running trusted engine |
 | `--engine-token-env <name>` | — | Environment variable holding the attached engine token |
@@ -295,6 +299,65 @@ Run that command, or read the ledger with `--coverage`:
 ```
 
 `--batches off` keeps one thread. See [Large repositories](/findings/#large-repositories).
+
+#### Set the effort per repository
+
+Not every repository deserves the same scan. A tier map is a file you own that maps repositories to a tier: `critical`, `standard`, `light` or `skip`. Each tier sets the budget, the batches mode and the skill, and whether the pattern scanners are enough.
+
+```yaml
+version: 1
+default: standard
+tiers:
+  critical: { budget: 20, batches: on, reason: handles payments }
+  light: { prepassOnly: true, reason: scanners are enough here }
+  skip: { reason: archived }
+repositories:
+  - repo: your-org/payments
+    tier: critical
+  - repo: your-org/archive-*
+    tier: skip
+  - path: ~/code/experiments/**
+    tier: light
+    reason: throwaway code
+```
+
+Name the file with `--tiers`, or save it as scan-tiers.yaml, scan-tiers.yml or scan-tiers.json in the 0 state folder (`~/.0`). 0 never reads a tier file from the folder it scans, because a change could edit its own tier.
+
+```bash
+0 scan ~/code/payments --tiers ~/security/scan-tiers.yaml
+```
+
+0 finds the target's repository from its `origin` remote (or from the git URL you pass) and its folder path. The most specific entry wins: an exact repository, then an exact path, then the first pattern in the file that matches, then `default` (`standard` when the file names none). A `*` matches inside one name or folder; `**` matches across folders.
+
+The scan prints the tier and the reason on stderr and records them in the report: `tier` in JSON, in the SARIF run properties and in the Markdown header. Settings are chosen in this order: a flag you type (such as `--budget 2`, or one set in the environment), then the tier, then the `workflows` defaults in your operator settings, then the built-in default. 0 says when a flag overrides the tier. A tier's `skill` is resolved like `--skill`: a bare name of an installed skill becomes its full id when the scan starts. `--plan` shows the tier too.
+
+A tier given in the file replaces only the settings it names; the others keep their built-in values: `critical` 20 USD with batches on, `standard` 5 USD with batches auto, `light` 1 USD with one thread.
+
+A `skip` tier runs nothing. The report says `skipped by tier <name>: <reason>`, the JSON `status` is `skipped`, and the exit code is 0. Add `--fail-on-skip` to exit 1 instead, so a missing scan cannot pass for a clean one. A skipped scan and a pre-pass-only scan each write a line to the run metrics file with status `skipped` or `prepass_only`.
+
+With `prepassOnly: true`, only the pattern scanners run, with no model and no cost. They run as in any scan, including `--scanner`, `--rules` and `--repo-ignores`. Their hits are reported as findings labelled `Pre-pass only, not reviewed by a model.` The JSON `status` is `prepass_only`. If no scanner can run, the scan fails; it does not report a clean result.
+
+#### Get a second opinion
+
+Code often passes other scanners before it reaches you. `--known` takes their SARIF so the scan does not repeat them. Repeat the flag for several files.
+
+```bash
+semgrep scan --sarif --config p/default -o semgrep.sarif .
+0 scan . --known semgrep.sarif --format json -o scan.json
+```
+
+The thread gets a bounded list of what is known (location, rule and a one-line message) as lower-priority data. It is asked to look for other classes of bug, especially authorization and business-logic flaws, and to record a listed item only with its own evidence.
+
+The report labels each finding with a `knownStatus`, in JSON, in the SARIF result properties and in the Markdown:
+
+- `new`: no known item at that place.
+- `already-known`: a known item in the same file, within 5 lines, of the same kind of flaw.
+
+An already-known finding also gets `confirmedIndependently: true` when the scan recorded its own analysis of the code, not only a copy of the list. The report counts new, already-known and confirmed-independently findings. `--only-new` leaves the matched findings out of the report, the counts and the `--fail-on` check, and says how many it hid.
+
+`--known` is not stored with a batched scan. When you continue one with `--resume`, pass `--known` again, or the remaining batches run without it.
+
+Paths in a known file must be relative to the scanned folder, or absolute inside it. Items outside it, or with no location, are given to the scan but never matched. How much `--known` helps depends on the code and the baseline: see the [benchmark](https://github.com/0sec-labs/0security/blob/main/docs/design/benchmark.md#second-opinion-with---known).
 
 | Argument | Required | Description |
 | --- | --- | --- |

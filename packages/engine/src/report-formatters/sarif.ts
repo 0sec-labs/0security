@@ -181,6 +181,9 @@ function findingToResult(finding: Finding, target: string): SarifResult {
     evidence: finding.evidence,
   };
   if (finding.ruleSource) result.properties["ruleSource"] = finding.ruleSource;
+  if (finding.knownStatus) result.properties["knownStatus"] = finding.knownStatus;
+  if (finding.knownBy) result.properties["knownBy"] = finding.knownBy;
+  if (finding.confirmedIndependently) result.properties["confirmedIndependently"] = true;
   if (finding.impactAssessment) result.properties["impactAssessment"] = finding.impactAssessment;
   if (finding.cvssScore !== undefined) result.properties["cvssScore"] = finding.cvssScore;
   if (finding.cvssVector) result.properties["cvssVector"] = finding.cvssVector;
@@ -260,7 +263,8 @@ export function formatSarif(report: ScanReport): string {
           },
         ],
         // What a batched scan reviewed; complete is false when entry points were not reached.
-        ...(report.coverage ? { properties: { coverage: report.coverage } } : {}),
+        // The tier map's decision and the known set of a second-opinion scan.
+        ...(report.coverage || report.tier || report.known ? { properties: { ...(report.coverage ? { coverage: report.coverage } : {}), ...(report.tier ? { tier: report.tier } : {}), ...(report.known ? { known: report.known } : {}) } } : {}),
       },
     ],
   };

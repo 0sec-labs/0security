@@ -14,7 +14,7 @@ export const METRICS_FILE = "metrics.ndjson";
 export const METRICS_MAX_BYTES = 1024 * 1024;
 export const METRIC_COMMANDS = ["scan", "fix", "verify"] as const;
 export type MetricCommand = (typeof METRIC_COMMANDS)[number];
-const STATUSES = ["ok", "budget", "timeout", "failed"] as const;
+const STATUSES = ["ok", "budget", "timeout", "failed", "skipped", "prepass_only"] as const;
 export type MetricStatus = (typeof STATUSES)[number];
 const MAX_IDS = 50;
 

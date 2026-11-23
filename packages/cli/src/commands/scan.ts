@@ -14,15 +14,17 @@ import type { Command } from "commander";
 import { buildInventory, discoverAgentSkills, exportReport, getSkillById, isReportExportFormat, resolveAgentSkillName, type Batch } from "@0/engine";
 import { CoverageLedger, coverageSentence, summarizeCoverage } from "@0/engine/storage";
 import { consoleTransportOptions, openConsole, type ConsoleClient, type ConsoleTransportOptions } from "../console-client.js";
-import { homeStateDir, parseSarif, parseScannerList, scanPrompt, scannerArguments, scannerById, scannerTakesRules, SCANNERS, type PrePassLeads, type BatchPromptInfo, type ScanReport } from "@0/engine/shared";
+import { homeStateDir, parseSarif, parseScannerList, scanPrompt, scannerArguments, scannerById, scannerTakesRules, SCANNERS, type KnownItem, type PrePassLeads, type BatchPromptInfo, type ScanReport } from "@0/engine/shared";
 import { runPrePass } from "../prepass.js";
 import { checkRulesScanners, resolveRulePaths } from "../scan-rules.js";
-import { mergePasses, scanExitCode, scanJson, toScanReport, type ScanOutcome } from "../scan-report.js";
+import { markKnown, mergePasses, scanExitCode, scanJson, toScanReport, type ScanOutcome } from "../scan-report.js";
 import { coverageReport, runBatches, type BatchOutcome } from "../scan-batches.js";
 import { coverageJson, coverageText, DEFAULT_BATCH_SIZE, planBatchedScan, type BatchedSetup } from "../scan-batched.js";
 import { planScan, planText } from "../scan-plan.js";
 import { resumeHint, type ResumeHint } from "../scan-resume.js";
 import { loadSteering, type Steering } from "../scan-steering.js";
+import { applyTierSettings, loadTierMap, repoIdentifier, resolveTier, settingsSentence, tierSentence, type ResolvedTier } from "../scan-tiers.js";
+import { knownIn, leadsToFindings, loadKnown, type KnownSet } from "../scan-known.js";
 import { finishWithError, UsageError } from "./output.js";
 import { appendRunMetric, type RunMetric } from "../run-metrics.js";
 import { applyWorkflowDefaults } from "../workflow-defaults.js";
@@ -82,6 +84,8 @@ export interface ScanDeps {
   gitHead?(folder: string): Promise<string | undefined>;
   /** Record one run in the metrics file (counts and ids only). Absent in tests, so they write nothing. */
   metrics?(record: Omit<RunMetric, "version" | "ci">): void;
+  /** The URL of the folder's `origin` remote, or undefined. Used to find the folder's tier. */
+  gitRemote?(folder: string): Promise<string | undefined>;
 }
 export const defaultScanDeps: ScanDeps = {
   open: options => openConsole(options),
@@ -132,13 +136,22 @@ export const defaultScanDeps: ScanDeps = {
   async gitHead(folder) {
     try { return (await exec("git", ["-C", folder, "rev-parse", "HEAD"])).stdout.trim() || undefined; } catch { return undefined; }
   },
+  async gitRemote(folder) {
+    try { return (await exec("git", ["-C", folder, "remote", "get-url", "origin"])).stdout.trim() || undefined; } catch { return undefined; }
+  },
 };
 
 interface ScanOptions extends ConsoleTransportOptions {
   budget: string; diff?: string; prepass?: string; scanner?: string[]; rules?: string[]; format: string; output?: string; timeout: string; failOn?: string; model?: string; skill: string; passes: string;
   context?: string[]; policy?: string[]; orgPolicy?: string[]; repoContext?: boolean; repoIgnores?: boolean;
   batches?: string; batchSize?: string; concurrency?: string; resume?: string; force?: boolean; coverage?: string | boolean; allowPartial?: boolean; plan?: boolean;
+  tiers?: string; failOnSkip?: boolean; known?: string[]; onlyNew?: boolean;
+  /** The option names the person typed (budget, batches, skill). Tier settings never override these. When unset, an option that differs from its default counts as typed. */
+  explicit?: string[];
 }
+const FLAG_DEFAULTS: Record<string, string> = { budget: String(DEFAULT_BUDGET_USD), batches: "auto", skill: "scan" };
+const explicitFlags = (options: ScanOptions): Set<string> =>
+  new Set(options.explicit ?? Object.keys(FLAG_DEFAULTS).filter(name => (options as unknown as Record<string, string | undefined>)[name] !== FLAG_DEFAULTS[name]));
 
 export interface ResolvedTarget {
   /** Where the code is on this machine. */
@@ -219,6 +232,8 @@ function validate(target: string | undefined, options: ScanOptions): void {
   const concurrency = Number(options.concurrency ?? 1);
   if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > MAX_PARALLEL_PASSES) throw new UsageError(`--concurrency must be a whole number from 1 to ${MAX_PARALLEL_PASSES}.`);
   if ((options.batches === "on" || options.resume !== undefined) && passes > 1) throw new UsageError("--passes cannot be combined with batches or --resume; run the scan again to get another pass.");
+  if (options.onlyNew && !options.known?.length) throw new UsageError("--only-new needs --known <sarif>.");
+  if (options.known?.length && (options.policy?.length || options.orgPolicy?.length)) throw new UsageError("--known is for scans; it cannot be combined with --policy or --org-policy.");
   if (options.resume !== undefined) {
     if (options.batches === "off") throw new UsageError("--resume continues a batched scan; drop --batches off.");
     if (options.diff) throw new UsageError("--resume continues the units of an earlier scan; drop --diff.");
@@ -252,7 +267,7 @@ export async function connect(options: ConsoleTransportOptions, deps: Pick<ScanD
   throw new Error("Could not start a console within 30s. Start one with `0 --headless` and run the scan again.");
 }
 
-interface PassContext { prePass?: PrePassLeads; scope?: string[]; steering: Steering; client: ConsoleClient; deps: ScanDeps; resolved: ResolvedTarget; options: ScanOptions; total: number; budget: number; deadline: number }
+interface PassContext { prePass?: PrePassLeads; scope?: string[]; known?: KnownItem[]; extras: Partial<ScanOutcome>; steering: Steering; client: ConsoleClient; deps: ScanDeps; resolved: ResolvedTarget; options: ScanOptions; total: number; budget: number; deadline: number }
 interface PassResult { threadId: string; done: FinishedThread; stored: ScanReport; budgetExhausted: boolean; timedOut: boolean; costUsd?: number }
 
 /** Poll a thread until it finishes, the deadline passes (it is then cancelled) or the console is lost for too long. */
@@ -291,7 +306,7 @@ export async function waitForThread(client: ConsoleClient, deps: Pick<ScanDeps, 
 }
 
 /** One scan thread: start it, wait for it, and read what it stored. Throws when the thread cannot run or the console is lost. */
-interface PassExtra { batch?: BatchPromptInfo; budget?: number; prePass?: PrePassLeads | undefined }
+interface PassExtra { batch?: BatchPromptInfo; budget?: number; prePass?: PrePassLeads | undefined; known?: KnownItem[] }
 async function runPass(ctx: PassContext, index: number, extra: PassExtra = {}): Promise<PassResult> {
   const { client, deps, resolved, options, total, deadline } = ctx;
   const budget = extra.budget ?? ctx.budget;
@@ -304,7 +319,7 @@ async function runPass(ctx: PassContext, index: number, extra: PassExtra = {}): 
   const path = `/api/console/sessions/${encodeURIComponent(id)}`;
   try {
     await client.request("PATCH", `${path}/configuration`, { workspacePath: resolved.folder });
-    await client.request("POST", `${path}/messages`, { text: scanPrompt(resolved.label, options.skill, prePass, ctx.scope, ctx.steering, extra.batch) });
+    await client.request("POST", `${path}/messages`, { text: scanPrompt(resolved.label, options.skill, prePass, ctx.scope, ctx.steering, extra.batch, "known" in extra ? extra.known : ctx.known) });
   } catch (error) {
     // A thread that never started is no use to anyone; do not leave it in the list.
     const removed = await client.request("POST", `${path}/delete`, {}).then(() => true, () => false);
@@ -332,8 +347,9 @@ async function inPool<T>(count: number, limit: number, task: (index: number) => 
 
 /** Format the report and write it to --output or standard output. */
 async function writeReport(outcome: ScanOutcome, merged: ReturnType<typeof mergePasses>, stored: ScanReport, name: string, options: ScanOptions, deps: Pick<ScanDeps, "out" | "err" | "writeBytes" | "metrics">): Promise<void> {
-  if (outcome.threadId !== "none") {
-    const status = outcome.failed ? "failed" : outcome.timedOut ? "timeout" : outcome.budgetExhausted ? "budget" : "ok";
+  // An empty-diff scan (thread "none") writes no line. A tier skip and a pre-pass-only run do: they are runs the operator chose.
+  if (outcome.threadId !== "none" || outcome.tier?.skipped || outcome.tier?.prepassOnly) {
+    const status = outcome.failed ? "failed" : outcome.tier?.skipped ? "skipped" : outcome.tier?.prepassOnly ? "prepass_only" : outcome.timedOut ? "timeout" : outcome.budgetExhausted ? "budget" : "ok";
     deps.metrics?.({ at: outcome.startedAt, command: "scan", model: options.model ?? DEFAULT_SCAN_MODEL, budgetUsd: outcome.budgetUsd, costUsd: outcome.costUsd ?? null, durationSeconds: Math.max(0, Math.round((Date.parse(outcome.completedAt) - Date.parse(outcome.startedAt)) / 1000)), findingsAttempted: null, findingsProposed: merged.length, checksPassed: null, tokens: null, status, findingIds: merged.map(finding => finding.id) });
   }
   let body: Uint8Array | string;
@@ -360,14 +376,14 @@ async function unexpectedChanges(deps: Pick<ScanDeps, "changedFiles">, folder: s
 }
 
 /** `--plan`: list the inventory, the batches and a rough cost, and start nothing: no console, no model, no scanner, no database. */
-async function printPlan(resolved: ResolvedTarget, options: ScanOptions, deps: ScanDeps): Promise<void> {
+async function printPlan(resolved: ResolvedTarget, options: ScanOptions, deps: ScanDeps, tier?: ResolvedTier): Promise<void> {
   let scope: string[] | undefined;
   if (options.diff) {
     try { scope = await deps.diffFiles(resolved.folder, options.diff); }
     catch { throw new UsageError(`'${options.diff}' is not a git ref in ${resolved.label}, or the folder is not a git work tree.`); }
   }
   const inventory = buildInventory(resolved.folder, scope ? { only: new Set(scope) } : {});
-  const plan = planScan(inventory, { folder: resolved.label, batchSize: Number(options.batchSize ?? DEFAULT_BATCH_SIZE), batchesMode: options.batches ?? "auto", budgetUsd: Number(options.budget) });
+  const plan = planScan(inventory, { folder: resolved.label, batchSize: Number(options.batchSize ?? DEFAULT_BATCH_SIZE), batchesMode: options.batches ?? "auto", budgetUsd: Number(options.budget), ...(tier ? { tier: tierInfo(tier) } : {}) });
   deps.out(options.format === "json" ? `${JSON.stringify(plan, null, 2)}\n` : `${planText(plan)}\n`);
 }
 
@@ -405,7 +421,7 @@ async function runBatchedScan(ctx: PassContext, setup: BatchedSetup, before: Set
       const leads = ctx.prePass?.leads.filter(lead => lead.path !== undefined && files.has(lead.path)) ?? [];
       const prePass = ctx.prePass && leads.length ? { ...ctx.prePass, leads, total: leads.length } : undefined;
       const info: BatchPromptInfo = { index: batch.index, total: count, units: batch.units, summary: setup.summaryText };
-      const pass = await runPass(ctx, batch.index, { batch: info, budget: batchBudget, prePass });
+      const pass = await runPass(ctx, batch.index, { batch: info, budget: batchBudget, prePass, ...(ctx.known ? { known: knownIn(ctx.known, files) } : {}) });
       ran.set(pass.threadId, pass);
       const hardFailure = pass.done.failed && !pass.budgetExhausted && !pass.timedOut;
       return {
@@ -454,11 +470,72 @@ async function runBatchedScan(ctx: PassContext, setup: BatchedSetup, before: Set
     summary: `Coverage: ${statement}.${lead?.done.reply ? `\n\n${lead.done.reply}` : ""}`,
     coverage, ...(threadIds.length > 1 ? { threadIds } : {}),
     ...(customLeads.length ? { customLeads } : {}),
+    ...ctx.extras,
   };
   const base = stored[0] ?? emptyStoredReport(startedAt);
   await writeReport(outcome, merged, { ...base, findings: merged }, `0-scan-${threadIds[0] ?? scan.id}`, options, deps);
+  noteKnown(outcome, merged, deps);
   deps.err(`${merged.length} finding${merged.length === 1 ? "" : "s"}; ${statement}${hint ? `\n${hint.text}` : ""}\nUsage: ${count} batch${count === 1 ? "" : "es"}, cost ${costKnown ? `$${cost.toFixed(4)}` : "unknown"}`);
   const code = scanExitCode(outcome, merged, options.failOn as typeof SEVERITIES[number] | undefined);
+  if (code !== 0) process.exitCode = code;
+}
+
+/** The part of a resolved tier the report carries. */
+const tierInfo = ({ settings: _settings, file: _file, ...info }: ResolvedTier) => info;
+
+/** On stderr: how many findings are new, already known and confirmed independently. */
+function noteKnown(outcome: ScanOutcome, merged: Parameters<typeof markKnown>[1], deps: Pick<ScanDeps, "err">): void {
+  const { summary } = markKnown(outcome, merged);
+  if (!summary) return;
+  const { new: fresh, alreadyKnown, confirmedIndependently } = summary.findings;
+  deps.err(`known findings: ${fresh} new, ${alreadyKnown} already known (${confirmedIndependently} confirmed independently)${summary.hidden ? `; ${summary.hidden} hidden by --only-new` : ""}`);
+}
+
+/** The tier map for this target: which tier applies, or undefined when no tier map exists. Says on stderr which tier applied and why. */
+async function pickTier(resolved: ResolvedTarget, target: string, options: ScanOptions, deps: ScanDeps): Promise<ResolvedTier | undefined> {
+  const map = loadTierMap(options.tiers, homeStateDir());
+  if (!map) return undefined;
+  const isUrl = GIT_TARGET.test(target.trim());
+  const remote = isUrl ? target.trim() : await (deps.gitRemote ?? defaultScanDeps.gitRemote!)(resolved.folder);
+  const repo = repoIdentifier(remote);
+  const path = isUrl ? undefined : realPath(resolved.folder).replace(/\\/g, "/");
+  // A tier file that sits inside the scanned folder can be edited by the change under review.
+  if (options.tiers && !isUrl) {
+    const root = `${realPath(resolved.folder).replace(/\\/g, "/").replace(/\/+$/, "")}/`;
+    if (realPath(resolve(options.tiers)).replace(/\\/g, "/").startsWith(root)) deps.err(`warning: --tiers ${options.tiers} is inside the folder being scanned. Whoever can change that folder can change its tier. In CI read the tier file from the base branch or a separate checkout.`);
+  }
+  return resolveTier(map, { ...(repo ? { repo } : {}), ...(path ? { path } : {}) });
+}
+
+/** The pre-pass as the main scan runs it: main's isolation arguments, and the warning when --repo-ignores lets the folder's own ignore files in. */
+async function runPrePassFor(deps: ScanDeps, folder: string, options: ScanOptions): Promise<PrePassLeads | undefined> {
+  if (options.repoIgnores) deps.err("warning: --repo-ignores makes the pre-pass scanners read configuration and ignore files from the scanned folder (.foxguard.yml, .semgrepignore, .gitleaks.toml, .gitleaksignore, .trivyignore, osv-scanner.toml, .checkov.yaml). A change under review can use them to hide findings. Inline suppressions such as gitleaks:allow, nosemgrep and trivy:ignore apply with or without this flag.");
+  const scanners = parseScannerList(options.scanner);
+  const rules = resolveRulePaths(options.rules);
+  return options.repoIgnores
+    ? deps.prePass(folder, scanners, rules, { repoIgnores: true })
+    : rules.length ? deps.prePass(folder, scanners, rules) : deps.prePass(folder, scanners);
+}
+
+/** A tier that runs the pattern scanners only: no console, no model. The leads become findings that say so. */
+async function runPrePassOnly(resolved: ResolvedTarget, options: ScanOptions, deps: ScanDeps, scope: string[] | undefined, extras: Partial<ScanOutcome>, startedAt: string): Promise<void> {
+  let prePass = await runPrePassFor(deps, resolved.folder, options);
+  if (prePass && scope) {
+    const inScope = new Set(scope);
+    const leads = prePass.leads.filter(lead => lead.path !== undefined && inScope.has(lead.path));
+    prePass = { ...prePass, leads, total: leads.length };
+  }
+  const budget = Number(options.budget);
+  const base = { target: resolved.reportTarget, roots: resolved.roots, threadId: "none", startedAt, completedAt: deps.now().toISOString(), budgetUsd: budget, budgetExhausted: false, ...(options.allowPartial ? { allowPartial: true } : {}) };
+  // With no scanner at all nothing was reviewed: that is a failure, not a clean result.
+  const outcome: ScanOutcome = prePass
+    ? { ...base, failed: false, summary: `Pre-pass only (${extras.tier?.name ?? "tier"}): ${prePass.tools.join(", ")} reported ${prePass.total} hit${prePass.total === 1 ? "" : "s"}. No model reviewed the code.`, ...extras }
+    : { ...base, failed: true, error: `Tier ${extras.tier?.name ?? ""} runs the pattern scanners only, but none could run. Install one (for example foxguard) or choose another tier.`, ...extras };
+  const findings = prePass ? leadsToFindings(prePass.leads, deps.now()) : [];
+  await writeReport(outcome, findings, { ...emptyStoredReport(startedAt), findings }, "0-scan-prepass", options, deps);
+  noteKnown(outcome, findings, deps);
+  deps.err(prePass ? `${findings.length} pre-pass finding${findings.length === 1 ? "" : "s"}, not reviewed by a model` : outcome.error!);
+  const code = scanExitCode(outcome, findings, options.failOn as typeof SEVERITIES[number] | undefined);
   if (code !== 0) process.exitCode = code;
 }
 
@@ -470,8 +547,36 @@ export async function runScan(target: string | undefined, options: ScanOptions, 
   try {
     validate(target, options);
     resolved = await resolveScanTarget(target?.trim() ? target : ".", deps);
-    if (options.plan) { await printPlan(resolved, options, deps); return; }
+    // The operator's tier map decides budget, batches and skill unless a flag was typed, and may skip the scan.
+    let tier: ResolvedTier | undefined;
+    if (options.coverage === undefined) {
+      tier = await pickTier(resolved, target?.trim() ? target : ".", options, deps);
+      if (tier) {
+        const applied = applyTierSettings(options, tier, explicitFlags(options));
+        options = applied.options;
+        deps.err(`${tierSentence(tier)}: ${settingsSentence(tier)}`);
+        for (const note of applied.notes) deps.err(note);
+        if (tier.prepassOnly && options.prepass === "off") throw new UsageError(`tier ${tier.name} runs the pattern scanners only; drop --prepass off.`);
+      }
+    }
+    if (options.plan) { await printPlan(resolved, options, deps, tier); return; }
     if (options.coverage !== undefined) { await printCoverage(resolved, options, deps); return; }
+    const known: KnownSet | undefined = options.known?.length ? loadKnown(options.known, resolved.roots) : undefined;
+    if (known) deps.err(`known: ${known.items.length} item${known.items.length === 1 ? "" : "s"} from ${known.tools.join(", ") || "the given files"}; the scan is told to look for what they missed`);
+    const extras: Partial<ScanOutcome> = {
+      ...(tier ? { tier: tierInfo(tier), ...(options.failOnSkip ? { failOnSkip: true } : {}) } : {}),
+      ...(known ? { known: { items: known.items, tools: known.tools, ...(options.onlyNew ? { onlyNew: true } : {}) } } : {}),
+    };
+    if (tier?.skipped) {
+      // A scan that did not run says so, in every format, and exits 0 unless --fail-on-skip.
+      const at = deps.now().toISOString();
+      deps.err(`skipped by tier ${tier.name}${tier.reason ? `: ${tier.reason}` : ""}`);
+      const outcome: ScanOutcome = { target: resolved.reportTarget, roots: resolved.roots, threadId: "none", startedAt: at, completedAt: at, budgetUsd: Number(options.budget), budgetExhausted: false, failed: false, summary: `skipped by tier ${tier.name}${tier.reason ? `: ${tier.reason}` : ""}`, ...extras };
+      await writeReport(outcome, [], emptyStoredReport(at), "0-scan-skipped", options, deps);
+      const code = scanExitCode(outcome, [], undefined);
+      if (code !== 0) process.exitCode = code;
+      return;
+    }
     const steering = loadSteering(resolved.folder, options, deps.err);
     if (steering.policies.length && options.skill === "scan") options = { ...options, skill: POLICY_SKILL };
     if (deps.resolveSkill) options = { ...options, skill: deps.resolveSkill(options.skill) };
@@ -492,6 +597,7 @@ export async function runScan(target: string | undefined, options: ScanOptions, 
         return;
       }
     }
+    if (tier?.prepassOnly) { await runPrePassOnly(resolved, options, deps, scope, extras, startedAt); return; }
     // A folder with more entry points than one thread takes is reviewed in batches, each with a ledger row (docs: Large repositories).
     batched = await planBatchedScan({
       folder: resolved.folder, label: resolved.label, mode: options.batches ?? "auto", batchSize: Number(options.batchSize ?? DEFAULT_BATCH_SIZE), ...(options.resume !== undefined ? { resume: options.resume } : {}),
@@ -500,18 +606,7 @@ export async function runScan(target: string | undefined, options: ScanOptions, 
     });
     ({ client, stop: stopConsole } = await connect(options, deps));
     // --budget is the total: each pass gets an equal share, so the cost stays predictable however many passes run.
-    if (options.repoIgnores) {
-      deps.err("warning: --repo-ignores makes the pre-pass scanners read configuration and ignore files from the scanned folder (.foxguard.yml, .semgrepignore, .gitleaks.toml, .gitleaksignore, .trivyignore, osv-scanner.toml, .checkov.yaml). A change under review can use them to hide findings. Inline suppressions such as gitleaks:allow, nosemgrep and trivy:ignore apply with or without this flag.");
-    }
-    const scanners = parseScannerList(options.scanner);
-    const rules = resolveRulePaths(options.rules);
-    let prePass = options.prepass === "off"
-      ? undefined
-      : await (options.repoIgnores
-        ? deps.prePass(resolved.folder, scanners, rules, { repoIgnores: true })
-        : rules.length
-          ? deps.prePass(resolved.folder, scanners, rules)
-          : deps.prePass(resolved.folder, scanners));
+    let prePass = options.prepass === "off" ? undefined : await runPrePassFor(deps, resolved.folder, options);
     const customLeads = prePass?.leads.filter(lead => lead.ruleSource === "custom");
     if (prePass && scope) {
       const inScope = new Set(scope);
@@ -519,7 +614,7 @@ export async function runScan(target: string | undefined, options: ScanOptions, 
       prePass = leads.length ? { ...prePass, leads, total: leads.length } : undefined;
     }
     if (prePass) deps.err(`${prePass.tools.join(", ")} pre-pass: ${prePass.total} lead${prePass.total === 1 ? "" : "s"} for the scan to check`);
-    const ctx: PassContext = { steering, ...(prePass ? { prePass } : {}), ...(scope ? { scope } : {}), client, deps, resolved, options, total, budget: budget / total, deadline: Date.now() + Number(options.timeout) * 1000 };
+    const ctx: PassContext = { extras, ...(known ? { known: known.items } : {}), steering, ...(prePass ? { prePass } : {}), ...(scope ? { scope } : {}), client, deps, resolved, options, total, budget: budget / total, deadline: Date.now() + Number(options.timeout) * 1000 };
     if (batched) { await runBatchedScan(ctx, batched, before, startedAt, budget); return; }
 
     const passErrors: string[] = [];
@@ -557,9 +652,11 @@ export async function runScan(target: string | undefined, options: ScanOptions, 
       ...(changedError ? { error: changedError } : failed && firstError ? { error: firstError } : {}), ...(lead.done.reply ? { summary: lead.done.reply } : {}),
       ...(customLeads?.length ? { customLeads } : {}),
       ...(total > 1 ? { passes: { requested: total, completed: results.length, failed: failedPasses }, threadIds: results.map(result => result.threadId) } : {}),
+      ...ctx.extras,
     };
 
     await writeReport(outcome, merged, { ...results[0]!.stored, findings: merged }, `0-scan-${results[0]!.threadId}`, options, deps);
+    noteKnown(outcome, merged, deps);
     const usage = results.length === 1 ? usageLine(results[0]!.done.usage) : `Usage: ${results.length} passes, cost ${costKnown ? `$${cost.toFixed(4)}` : "unknown"}`;
     deps.err(`${merged.length} finding${merged.length === 1 ? "" : "s"}${total > 1 ? ` from ${results.length} of ${total} passes` : ""}${budgetExhausted ? `, stopped at the $${budget} budget (partial)` : timedOut ? `, stopped at the ${options.timeout}s time limit (partial)` : ""}\n${usage}`);
     const code = scanExitCode(outcome, merged, options.failOn as typeof SEVERITIES[number] | undefined);
@@ -601,7 +698,16 @@ export function registerScanCommand(program: Command, deps: ScanDeps = defaultSc
     .option("--coverage [scan]", "Print the coverage ledger of a batched scan of this folder (the latest, or the id given) and exit; --format json for JSON")
     .option("--allow-partial", "Exit by the findings alone (0, or 1 with --fail-on) when the scan stops before it reviews everything; the report still says it is partial")
     .option("--plan", "List the entry points, the batches and a rough cost range for the folder, then exit; calls no model and writes nothing")
+    .option("--tiers <file>", "An operator's tier map (YAML or JSON) that sets the budget, batches and skill for this repository, or skips it. Default: scan-tiers.yaml|yml|json in the 0 state folder. Never read from the scanned folder on its own; in CI read it from the base branch")
+    .option("--fail-on-skip", "Exit 1 when the tier map skips this scan (default: exit 0, with the skip stated in the report)")
+    .option("--known <sarif>", "SARIF from other tools: the scan is told what is already known and looks for what they missed; findings are labelled new or already-known (confirmedIndependently when the scan analysed it itself). Repeat for several", (value: string, previous: string[] = []) => [...previous, value])
+    .option("--only-new", "With --known: leave findings that match a known item out of the report")
     .option("--timeout <seconds>", "Maximum seconds to wait for the scan", String(DEFAULT_TIMEOUT_SECONDS)))
     .addHelpText("after", "\nExit codes: 0 done, 1 findings at or above --fail-on or the scan failed, 2 usage error, 3 stopped before it reviewed everything (budget, time limit, or entry points not reached): not finished, not failed; --allow-partial exits 0 or 1 instead.\nThe scan is a thread: follow it with `0 threads list`.")
-    .action(async (target: string, options: ScanOptions, command: Command) => { await runScan(target, applyWorkflowDefaults("scan", options, command), deps); });
+    .action(async (target: string, options: ScanOptions, command: Command) => {
+      // Precedence: a flag you typed (or set in the environment) > the tier map > the operator's workflow defaults > the built-in default.
+      // Workflow defaults fill budget and model here; runScan lets a tier replace them unless the flag was typed.
+      const typed = ["budget", "batches", "skill"].filter(name => ["cli", "env"].includes(String(command.getOptionValueSource(name))));
+      await runScan(target, { ...applyWorkflowDefaults("scan", options, command), explicit: typed }, deps);
+    });
 }

@@ -638,6 +638,12 @@ export interface Finding {
   fingerprint?: string;
   /** `custom` when a rule file the user passed with `0 scan --rules` flagged this place. */
   ruleSource?: "custom";
+  /** With `0 scan --known`: whether another tool already reported this flaw. */
+  knownStatus?: "new" | "already-known";
+  /** An already-known finding the scan recorded with its own analysis of the code. */
+  confirmedIndependently?: boolean;
+  /** The known item an already-known or independently confirmed finding matches. */
+  knownBy?: { tool: string; ruleId: string; path: string; startLine: number };
   triageStatus?: FindingTriageStatus;
   triageNote?: string;
   /** ISO time an accepted risk lapses. See `effectiveTriageStatus`. */
@@ -1382,9 +1388,39 @@ export interface ScanCoverage {
   resume?: string;
 }
 
+/** The tier an operator's tier map gave a scan, and why (`0 scan --tiers`). */
+export interface ScanTierInfo {
+  name: string;
+  /** How the tier was chosen: an exact repository or path, a pattern, or the default. */
+  source: "exact-repo" | "exact-path" | "glob" | "default";
+  /** The repository identifier or path pattern that matched; absent for the default. */
+  match?: string;
+  reason?: string;
+  /** The tier skipped the scan: nothing was reviewed. */
+  skipped?: boolean;
+  /** Only the pattern scanners ran; no model reviewed the code. */
+  prepassOnly?: boolean;
+}
+
+/** What a second-opinion scan (`0 scan --known`) was told and what came of it. */
+export interface ScanKnownSummary {
+  /** Tools named in the known files. */
+  tools: string[];
+  /** Known items given to the scan. */
+  total: number;
+  /** `alreadyKnown` counts every finding that matches a known item; `confirmedIndependently` is the part of them the scan analysed itself. */
+  findings: { new: number; alreadyKnown: number; confirmedIndependently: number };
+  /** Findings left out of this report by --only-new. */
+  hidden?: number;
+}
+
 export interface ScanReport extends ScanPlanExecution {
   /** Present when the scan ran in batches: what was and was not reviewed. */
   coverage?: ScanCoverage;
+  /** Present when a tier map applied to the scan. */
+  tier?: ScanTierInfo;
+  /** Present when the scan ran with `--known`. */
+  known?: ScanKnownSummary;
   target: string;
   scanDepth: ScanDepth;
   startedAt: string;

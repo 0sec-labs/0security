@@ -72,6 +72,23 @@ Pass Semgrep rules you already write with `--rules`. The rules must not come fro
 
 See [scan](/commands/#scan) for the rule format and how findings are marked.
 
+## Set the effort per repository
+
+A tier map decides how much a repository gets scanned, or whether it is skipped. See [scan](/commands/#set-the-effort-per-repository) for the file. In CI the tier file must not come from the pull request, because a change could lower its own tier and skip its own scan. Read it from the base branch or a separate checkout:
+
+```yaml
+      - uses: actions/checkout@v4
+        with:
+          repository: your-org/security-config
+          path: security-config
+```
+
+```bash
+0 scan . --diff origin/main --tiers security-config/scan-tiers.yaml --fail-on-skip
+```
+
+The Action has no tier input, so run the CLI steps yourself as in the examples below. 0 warns when the tier file sits inside the folder it scans. `--fail-on-skip` fails the job when the tier skips the scan, so a missing scan is visible.
+
 ## Limits
 
 - Only pull requests from the same repository work. A fork's pull request has no access to your secrets, so it cannot run a model. Do not use `pull_request_target` to get around this: it runs a model on untrusted code with your key.

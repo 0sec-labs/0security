@@ -6,7 +6,7 @@
  * (the thread itself or a helper agent), so the report reads the store and never the transcript.
  */
 import { createHash } from "node:crypto";
-import type { Finding, ScanCoverage, ScanReport } from "@0/engine/shared";
+import { classifyKnown, type Finding, type KnownItem, type ScanCoverage, type ScanKnownSummary, type ScanReport, type ScanTierInfo } from "@0/engine/shared";
 import { tagCustomFindings } from "./scan-rules.js";
 
 export const SCAN_REPORT_SCHEMA_VERSION = 1;
@@ -42,6 +42,12 @@ export interface ScanOutcome {
   coverage?: ScanCoverage;
   /** Every pass's thread, first to last. */
   threadIds?: readonly string[];
+  /** The tier map's decision for this scan, when a tier map applied. */
+  tier?: ScanTierInfo;
+  /** `--fail-on-skip`: a scan the tier skipped exits 1. */
+  failOnSkip?: boolean;
+  /** `--known`: what other tools already reported. Findings are labelled against it; `onlyNew` leaves the matched ones out. */
+  known?: { items: readonly KnownItem[]; tools: readonly string[]; onlyNew?: boolean };
   /** Pre-pass hits from rules the user supplied with --rules; findings at the same rule or place are tagged. */
   customLeads?: readonly { ruleId: string; path?: string; startLine?: number; endLine?: number }[];
 }
@@ -118,6 +124,17 @@ export function mergePasses(passes: readonly (readonly Finding[])[], roots: read
   return clusters.map(cluster => (passes.length > 1 ? { ...cluster.best, foundInPasses: cluster.passes.size } : cluster.best));
 }
 
+/** The findings with their status against the known set, those already known left out with --only-new, and the counts of all of them. */
+export function markKnown<T extends Finding>(outcome: ScanOutcome, findings: readonly T[]): { findings: T[]; summary?: ScanKnownSummary } {
+  if (!outcome.known) return { findings: [...findings] };
+  const marked = classifyKnown(findings, outcome.known.items) as unknown as T[];
+  const tally = { new: 0, alreadyKnown: 0, confirmedIndependently: 0 };
+  for (const finding of marked) { if (finding.knownStatus === "new") tally.new++; else { tally.alreadyKnown++; if (finding.confirmedIndependently) tally.confirmedIndependently++; } }
+  const kept = outcome.known.onlyNew ? marked.filter(finding => finding.knownStatus === "new") : marked;
+  const hidden = marked.length - kept.length;
+  return { findings: kept, summary: { tools: [...outcome.known.tools], total: outcome.known.items.length, findings: tally, ...(hidden ? { hidden } : {}) } };
+}
+
 const count = (findings: readonly Finding[], severity: ScanSeverity) => findings.filter(finding => finding.severity === severity).length;
 const byRank = (findings: readonly Finding[]): Finding[] => [...findings].sort((a, b) => rank(a.severity) - rank(b.severity) || a.title.localeCompare(b.title));
 
@@ -125,7 +142,8 @@ const byRank = (findings: readonly Finding[]): Finding[] => [...findings].sort((
 export function toScanReport(outcome: ScanOutcome, stored: ScanReport): ScanReport {
   const total = outcome.passes?.requested ?? 1;
   const tagged = tagCustomFindings(stored.findings.map(finding => reportFinding(finding, outcome.roots ?? [])), outcome.customLeads);
-  const findings = byRank(tagged.map(shaped => {
+  const known = markKnown(outcome, tagged);
+  const findings = byRank(known.findings.map(shaped => {
     const found = (shaped as MergedFinding).foundInPasses;
     // The exporters have no field for it, so say it where every format shows it.
     return total > 1 && found ? { ...shaped, description: `${shaped.description}\n\nFound in ${found} of ${total} scan passes.` } : shaped;
@@ -140,8 +158,10 @@ export function toScanReport(outcome: ScanOutcome, stored: ScanReport): ScanRepo
     findings,
     summary: { totalAttacks: 0, totalFindings: findings.length, critical: count(findings, "critical"), high: count(findings, "high"), medium: count(findings, "medium"), low: count(findings, "low"), info: count(findings, "info") },
     ...(outcome.coverage ? { coverage: outcome.coverage } : {}),
+    ...(outcome.tier ? { tier: outcome.tier } : {}),
+    ...(known.summary ? { known: known.summary } : {}),
     // The stored rows carry a note that the export was rebuilt from a legacy record; a scan is not one.
-    warnings: [...(outcome.coverage && !outcome.coverage.complete ? [{ stage: "report" as const, message: `Partial review: ${outcome.coverage.statement}.${outcome.coverage.resume ? ` ${outcome.coverage.stoppedBy ? `Stopped by ${outcome.coverage.stoppedBy}. ` : ""}Continue with: ${outcome.coverage.resume}` : ""}` }] : []),...(outcome.passes && outcome.passes.failed > 0 ? [{ stage: "report" as const, message: `${outcome.passes.failed} of ${outcome.passes.requested} scan passes could not finish; the findings may be incomplete.` }] : [])].concat(outcome.budgetExhausted ? [{ stage: "report" as const, message: `Stopped at the $${outcome.budgetUsd} budget; findings are partial.` }] : outcome.timedOut ? [{ stage: "report" as const, message: "Stopped at the time limit; findings are partial." }] : []),
+    warnings: [...(outcome.tier?.skipped ? [{ stage: "report" as const, message: `Skipped by tier ${outcome.tier.name}${outcome.tier.reason ? `: ${outcome.tier.reason}` : ""}. Nothing was scanned.` }] : []), ...(outcome.tier?.prepassOnly ? [{ stage: "report" as const, message: `Tier ${outcome.tier.name} is pre-pass only: the findings are scanner hits, not reviewed by a model.` }] : []), ...(outcome.coverage && !outcome.coverage.complete ? [{ stage: "report" as const, message: `Partial review: ${outcome.coverage.statement}.${outcome.coverage.resume ? ` ${outcome.coverage.stoppedBy ? `Stopped by ${outcome.coverage.stoppedBy}. ` : ""}Continue with: ${outcome.coverage.resume}` : ""}` }] : []),...(outcome.passes && outcome.passes.failed > 0 ? [{ stage: "report" as const, message: `${outcome.passes.failed} of ${outcome.passes.requested} scan passes could not finish; the findings may be incomplete.` }] : [])].concat(outcome.budgetExhausted ? [{ stage: "report" as const, message: `Stopped at the $${outcome.budgetUsd} budget; findings are partial.` }] : outcome.timedOut ? [{ stage: "report" as const, message: "Stopped at the time limit; findings are partial." }] : []),
     executionSuccessful: !outcome.failed,
     ...(outcome.costUsd !== undefined ? { estimatedCostUsd: outcome.costUsd } : {}),
     ...(outcome.budgetExhausted ? { costCeilingExceeded: true, exitReason: "cost_ceiling_exceeded" as const } : {}),
@@ -157,13 +177,16 @@ export function isPartial(outcome: ScanOutcome): boolean {
 /** The `status` of the JSON report. With --allow-partial every early stop is "partial"; the reason stays in `coverage` and the summary. */
 export function scanStatus(outcome: ScanOutcome): string {
   if (outcome.failed) return "failed";
+  if (outcome.tier?.skipped) return "skipped";
+  if (outcome.tier?.prepassOnly) return "prepass_only";
   if (outcome.allowPartial && isPartial(outcome)) return "partial";
   return outcome.budgetExhausted ? "budget_exhausted" : outcome.timedOut ? "timed_out" : outcome.coverage && !outcome.coverage.complete ? "partial" : "complete";
 }
 
 /** The documented JSON contract of `0 scan --format json`. Field names are stable within a schemaVersion. */
 export function scanJson(outcome: ScanOutcome, stored: readonly Finding[]): Record<string, unknown> {
-  const findings = byRank(tagCustomFindings(stored.map(finding => reportFinding(finding, outcome.roots ?? [])), outcome.customLeads));
+  const known = markKnown(outcome, tagCustomFindings(stored.map(finding => reportFinding(finding, outcome.roots ?? [])), outcome.customLeads));
+  const findings = byRank(known.findings);
   return {
     schemaVersion: SCAN_REPORT_SCHEMA_VERSION,
     target: outcome.target,
@@ -176,6 +199,8 @@ export function scanJson(outcome: ScanOutcome, stored: readonly Finding[]): Reco
     ...(outcome.passes && outcome.passes.requested > 1 ? { passes: outcome.passes } : {}),
     status: scanStatus(outcome),
     ...(outcome.coverage ? { coverage: outcome.coverage } : {}),
+    ...(outcome.tier ? { tier: outcome.tier } : {}),
+    ...(known.summary ? { known: known.summary } : {}),
     ...(outcome.error ? { error: outcome.error } : {}),
     ...(outcome.summary ? { summary: outcome.summary } : {}),
     counts: { total: findings.length, critical: count(findings, "critical"), high: count(findings, "high"), medium: count(findings, "medium"), low: count(findings, "low"), info: count(findings, "info") },
@@ -186,6 +211,9 @@ export function scanJson(outcome: ScanOutcome, stored: readonly Finding[]): Reco
       ...(finding.fingerprint?.startsWith("loc:") ? { fingerprint: finding.fingerprint.slice(4) } : {}),
       title: finding.title,
       ...(finding.ruleSource ? { ruleSource: finding.ruleSource } : {}),
+      ...(finding.knownStatus ? { knownStatus: finding.knownStatus } : {}),
+      ...(finding.confirmedIndependently ? { confirmedIndependently: true } : {}),
+      ...(finding.knownBy ? { knownBy: finding.knownBy } : {}),
       severity: finding.severity,
       category: finding.category,
       status: finding.status,
@@ -209,6 +237,9 @@ export function scanJson(outcome: ScanOutcome, stored: readonly Finding[]): Reco
  */
 export function scanExitCode(outcome: ScanOutcome, findings: readonly Finding[], failOn: ScanSeverity | undefined): number {
   if (outcome.failed) return 1;
+  if (outcome.tier?.skipped) return outcome.failOnSkip ? 1 : 0;
+  // With --only-new, a finding that was already known does not fail the run.
+  findings = markKnown(outcome, findings.map(finding => reportFinding(finding, outcome.roots ?? []))).findings;
   if (failOn && findings.some(finding => rank(finding.severity) <= rank(failOn))) return 1;
   // Units not reviewed mean the review is partial, whatever stopped it.
   return isPartial(outcome) && !outcome.allowPartial ? 3 : 0;

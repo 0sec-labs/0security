@@ -1,4 +1,5 @@
 import type { ImportedFinding } from "./sarif-import.js";
+import { knownBlock, type KnownItem } from "./known-findings.js";
 
 /** A pattern scanner's hits, as a block a scan thread can check. The hits are leads, not findings. */
 export interface PrePassLeads { tools: string[]; leads: ImportedFinding[]; total: number }
@@ -73,7 +74,7 @@ export const MAX_CONTEXT_TOTAL_CHARS = 60_000;
 export const MAX_POLICY_CHARS = 6_000;
 export const MAX_POLICY_TOTAL_CHARS = 80_000;
 
-const OUR_TAGS = "steering-context|context|policies|policy|leads|changed-files|batch-units|finding";
+const OUR_TAGS = "steering-context|context|policies|policy|leads|changed-files|batch-units|known-findings|finding";
 /**
  * Make text unable to close or fake a delimiter: every closing tag loses its slash (a zero-width space is
  * inserted), and so does any opening tag that carries one of our delimiter names. Control characters go.
@@ -208,7 +209,7 @@ export function threatModelPrompt(target: string, options: { exists: boolean }):
  * The message that turns a thread into a scan. `0 scan` and `/scan` in chat send the same text, so a
  * scan reads the same wherever it starts: load the scan skill, record findings with locations, summarise.
  */
-export function scanPrompt(target: string, skill = "scan", prePass?: PrePassLeads, scope?: readonly string[], steering: { context?: readonly SteeringFile[]; policies?: readonly PolicyEntry[] } = {}, batch?: BatchPromptInfo): string {
+export function scanPrompt(target: string, skill = "scan", prePass?: PrePassLeads, scope?: readonly string[], steering: { context?: readonly SteeringFile[]; policies?: readonly PolicyEntry[] } = {}, batch?: BatchPromptInfo, known?: readonly KnownItem[]): string {
   const context = contextBlock(steering.context ?? []);
   const policies = policyBlock(steering.policies ?? []);
   return [
@@ -221,6 +222,7 @@ export function scanPrompt(target: string, skill = "scan", prePass?: PrePassLead
     ...(scope ? [scopeBlock(scope)] : []),
     ...(batch ? [batchBlock(target, batch)] : []),
     ...(prePassBlock(prePass) ? [prePassBlock(prePass)] : []),
+    ...(known?.length ? [knownBlock(known)] : []),
     "Finish with a short summary of what you covered and what you did not.",
   ].join("\n");
 }

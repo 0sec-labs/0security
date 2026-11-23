@@ -3,6 +3,7 @@
  * and no database is touched. The cost range is a rough estimate from one measurement and is stated as such.
  */
 import { planBatches, UNIT_KINDS, type Inventory } from "@0/engine";
+import type { ScanTierInfo } from "@0/engine/shared";
 import { shouldBatch } from "./scan-batched.js";
 
 /** About $0.28 for 8 batches of one fixture (docs/design/benchmark.md, batched scans on medium-app): $0.035 a batch. */
@@ -56,9 +57,11 @@ export interface ScanPlan {
   budgetUsd: number;
   estimate: { lowUsd: number; highUsd: number; threads: number; verdict: BudgetVerdict; basis: string };
   notes: string[];
+  /** The tier map's decision, when a tier map applies; a skipped or pre-pass-only tier means no model would run. */
+  tier?: ScanTierInfo;
 }
 
-export interface PlanOptions { folder: string; batchSize: number; batchesMode: string; budgetUsd: number }
+export interface PlanOptions { folder: string; batchSize: number; batchesMode: string; budgetUsd: number; tier?: ScanTierInfo }
 
 /** The plan of a folder from its inventory. Pure. */
 export function planScan(inventory: Inventory, options: PlanOptions): ScanPlan {
@@ -80,6 +83,7 @@ export function planScan(inventory: Inventory, options: PlanOptions): ScanPlan {
     batchSize: options.batchSize, batchCount, batchesMode: options.batchesMode, wouldBatch, autoWouldBatch, budgetUsd: options.budgetUsd,
     estimate: { lowUsd: Number(estimate.lowUsd.toFixed(4)), highUsd: Number(estimate.highUsd.toFixed(4)), threads, verdict: estimate.verdict, basis: estimate.basis },
     notes,
+    ...(options.tier ? { tier: options.tier } : {}),
   };
 }
 
@@ -89,6 +93,7 @@ export function planText(plan: ScanPlan): string {
   const budget = `$${Number(plan.budgetUsd.toFixed(4))}`;
   const lines = [
     `Plan for ${plan.folder}`,
+    ...(plan.tier ? [`Tier: ${plan.tier.name}${plan.tier.reason ? ` (${plan.tier.reason})` : ""}${plan.tier.skipped ? ". A scan would be skipped: no model, scanner or report of findings." : plan.tier.prepassOnly ? ". A scan would run the pattern scanners only: no model." : ""}`] : []),
     "This lists the folder only. No model, scanner or database was used.",
     "",
     `Source files: ${plan.sourceFiles}`,

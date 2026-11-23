@@ -31,6 +31,7 @@ export function formatMarkdown(report: ScanReport): string {
   lines.push(`| Target | ${report.target} |`);
   lines.push(`| Started | ${report.startedAt} |`);
   lines.push(`| Duration | ${(report.durationMs / 1000).toFixed(1)}s |`);
+  if (report.tier) lines.push(`| Tier | ${report.tier.name}${report.tier.reason ? `: ${report.tier.reason.replace(/[|\r\n]+/g, " ")}` : ""} |`);
   lines.push("");
   if (incomplete) lines.push("Assessment did not complete successfully. Results may be incomplete.", "");
 
@@ -46,6 +47,16 @@ export function formatMarkdown(report: ScanReport): string {
   if (report.summary.medium > 0) lines.push(`- **Medium:** ${report.summary.medium}`);
   if (report.summary.low > 0) lines.push(`- **Low:** ${report.summary.low}`);
   lines.push("");
+
+  if (report.tier?.skipped) {
+    lines.push("## Scan skipped", "", `Skipped by tier ${report.tier.name}${report.tier.reason ? `: ${report.tier.reason}` : ""}. Nothing was scanned, so this report says nothing about the code.`, "");
+  } else if (report.tier?.prepassOnly) {
+    lines.push("## Pre-pass only", "", `Tier ${report.tier.name} runs the pattern scanners only. The findings below are scanner hits, not reviewed by a model; the code was not otherwise reviewed.`, "");
+  }
+  if (report.known) {
+    const counts = report.known.findings;
+    lines.push("## Known findings", "", `Given ${report.known.total} known item${report.known.total === 1 ? "" : "s"} from ${report.known.tools.join(", ") || "other tools"}. This report has ${counts.new} new and ${counts.alreadyKnown} already known findings; ${counts.confirmedIndependently} of the known ones were confirmed independently.${report.known.hidden ? ` ${report.known.hidden} finding${report.known.hidden === 1 ? " is" : "s are"} hidden by --only-new.` : ""}`, "");
+  }
 
   const partial = report.coverage !== undefined && !report.coverage.complete;
   if (report.coverage) {
@@ -93,10 +104,13 @@ export function formatMarkdown(report: ScanReport): string {
       lines.push(formatFinding(finding));
     }
   } else {
+    if (report.tier?.skipped) return lines.join("\n");
     lines.push(incomplete || partial || report.warnings.length > 0 ? "## No Confirmed Vulnerabilities" : "## No Vulnerabilities Found");
     lines.push("");
     lines.push(
-      partial
+      report.tier?.prepassOnly
+        ? "The pattern scanners reported nothing. No model reviewed this code."
+        : partial
         ? `No vulnerabilities were confirmed in the code that was reviewed (${report.coverage!.statement}).`
         : report.warnings.length > 0
         ? "The scanner did not confirm vulnerabilities, but target validation or probe execution produced warnings."
@@ -225,6 +239,10 @@ function formatFinding(finding: Finding): string {
   lines.push(`- **Technical severity:** ${finding.severity}`);
   lines.push(`- **Category:** ${finding.category}`);
   lines.push(`- **Status:** ${finding.status}`);
+  if (finding.knownStatus) {
+    const by = finding.knownBy ? ` (${finding.knownBy.tool} ${finding.knownBy.ruleId} at ${finding.knownBy.path}:${finding.knownBy.startLine})` : "";
+    lines.push(`- **Known status:** ${finding.knownStatus}${finding.confirmedIndependently ? ", confirmed independently" : ""}${by}`);
+  }
   // Severity justification: a bare "high" is an assertion; a CVSS vector is a
   // claim a vendor can check. Rendered only when actually present — this
   // formatter never synthesises one.
