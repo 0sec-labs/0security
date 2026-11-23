@@ -5,7 +5,7 @@ import { DAY_MS } from "./units.js";
  * Triggers for Sentinel-owned automations. A trigger starts a run of one automation (workflow definition)
  * on behalf of its owner Sentinel. Schedules use wall-clock time in an IANA timezone.
  */
-export const SENTINEL_TRIGGER_KINDS = ["schedule", "manual", "github-pr"] as const;
+export const SENTINEL_TRIGGER_KINDS = ["schedule", "manual", "github-pr", "release", "check-completed"] as const;
 export type SentinelTriggerKind = (typeof SENTINEL_TRIGGER_KINDS)[number];
 /** Older records may hold kinds that were removed (push, webhook, finding events); they are kept disabled and hidden. */
 export const isSentinelTriggerKind = (kind: string): kind is SentinelTriggerKind => (SENTINEL_TRIGGER_KINDS as readonly string[]).includes(kind);
@@ -50,11 +50,46 @@ export const SentinelGithubPrConfigSchema = z.strictObject({
 });
 export type SentinelGithubPrConfig = z.output<typeof SentinelGithubPrConfigSchema>;
 
+const githubRepo = z.string().trim().regex(/^(?!\.{1,2}\/)[A-Za-z0-9_.-]{1,100}\/(?!\.{1,2}$)[A-Za-z0-9_.-]{1,100}$/, "Use owner/name.");
+const gitRefPart = z.string().trim().min(1).max(200).regex(/^[A-Za-z0-9._\/-]+$/, "Use letters, digits and . _ / - only.");
+const pollMs = z.number().int().min(MIN_GITHUB_POLL_MS).max(3_600_000).default(300_000);
+
+/** Where a run posts its summary. `none` (the default) posts nothing: runs stay in the Sentinel. */
+export const SENTINEL_REPORT_MODES = ["none", "commit-status", "comment"] as const;
+export type SentinelReportMode = (typeof SENTINEL_REPORT_MODES)[number];
+const report = z.enum(SENTINEL_REPORT_MODES).default("none");
+
+/** A published GitHub release, or a pushed tag that starts with `tagPrefix`. */
+export const SentinelReleaseConfigSchema = z.strictObject({
+  repo: githubRepo,
+  /** `release`: a published (not draft) release. `tag`: a tag that was pushed. */
+  on: z.enum(["release", "tag"]).default("release"),
+  tagPrefix: z.string().trim().max(40).regex(/^[A-Za-z0-9._\/-]*$/, "Use letters, digits and . _ / - only.").default("v"),
+  pollMs,
+  report,
+});
+export type SentinelReleaseConfig = z.output<typeof SentinelReleaseConfigSchema>;
+
+/** A check run or check suite that finished. Polling reads the tip of `branch` (or the default branch); the webhook sees every commit. */
+export const SentinelCheckConfigSchema = z.strictObject({
+  repo: githubRepo,
+  branch: gitRefPart.optional(),
+  /** `failure`: only a failed or timed-out check. */
+  conclusion: z.enum(["any", "failure"]).default("any"),
+  /** Only the check with this exact name. */
+  checkName: z.string().trim().min(1).max(100).optional(),
+  pollMs,
+  report,
+});
+export type SentinelCheckConfig = z.output<typeof SentinelCheckConfigSchema>;
+
 export const SentinelTriggerCreateSchema = z.strictObject({
   automationId: z.string().min(1).max(128).regex(/^[A-Za-z0-9_-]+$/),
   kind: z.enum(SENTINEL_TRIGGER_KINDS),
   schedule: SentinelScheduleSchema.optional(),
   github: SentinelGithubPrConfigSchema.optional(),
+  release: SentinelReleaseConfigSchema.optional(),
+  check: SentinelCheckConfigSchema.optional(),
   enabled: z.boolean().default(false),
 });
 export type SentinelTriggerCreate = z.output<typeof SentinelTriggerCreateSchema>;
@@ -66,10 +101,12 @@ export interface SentinelTrigger {
   kind: SentinelTriggerKind;
   schedule?: SentinelSchedule;
   github?: SentinelGithubPrConfig;
+  release?: SentinelReleaseConfig;
+  check?: SentinelCheckConfig;
   enabled: boolean;
   version: number;
   nextFireAt: string | null;
-  /** github-pr: PR number -> last handled head SHA; bounded. Absent until the first (baseline) poll. */
+  /** github-pr: PR number -> last handled head SHA; release: tag or release id -> commit; check-completed: check id -> head SHA. Bounded. Absent until the first (baseline) poll. */
   cursor?: Record<string, string>;
   lastStatus?: string;
   lastError?: string;
@@ -80,6 +117,9 @@ export interface SentinelTrigger {
   createdAt: string;
   updatedAt: string;
 }
+
+/** The poll interval of a trigger that watches GitHub, or undefined for other kinds. */
+export const sentinelPollMs = (trigger: Pick<SentinelTrigger, "github" | "release" | "check">): number | undefined => (trigger.github ?? trigger.release ?? trigger.check)?.pollMs;
 
 // ---------- cron / wall-clock arithmetic ----------
 

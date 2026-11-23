@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Clock, GitPullRequest, Play, Plus } from "lucide-react";
+import { CircleCheck, Clock, GitPullRequest, Play, Plus, Tag } from "lucide-react";
 import { errorText } from "@/lib/api-error";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -12,7 +12,7 @@ import { AddTriggerDialog } from "./add-trigger-dialog";
 import { ScheduleFields } from "./schedule-fields";
 import { SentinelDocument } from "./sentinel-document";
 
-const KIND_ICON = { schedule: Clock, "github-pr": GitPullRequest, manual: Play } as const;
+const KIND_ICON = { schedule: Clock, "github-pr": GitPullRequest, manual: Play, release: Tag, "check-completed": CircleCheck } as const;
 const WEEK = 7 * 86_400_000;
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -58,7 +58,7 @@ function TriggerRow({ sentinel, trigger, readOnly, onEnable }: { sentinel: Senti
     const schedule = parsed.request.schedule;
     void change(async () => { await updateTrigger.mutateAsync({ id: sentinel.id, triggerId: trigger.id, version: trigger.version, schedule }); setEditing(null); });
   };
-  const when = !trigger.enabled ? "Off" : trigger.nextFireAt ? `Next ${displayTime(trigger.nextFireAt, trigger.schedule?.timezone)}` : trigger.kind === "github-pr" ? "Watching" : "On";
+  const when = !trigger.enabled ? "Off" : trigger.nextFireAt ? `Next ${displayTime(trigger.nextFireAt, trigger.schedule?.timezone)}` : trigger.kind === "schedule" || trigger.kind === "manual" ? "On" : "Watching";
   return <li className="py-2">
     <div className="flex items-center gap-2.5">
       <Icon aria-hidden="true" className="size-3.5 shrink-0 text-icon-muted" />

@@ -3653,8 +3653,8 @@ Add a trigger for an automation the Sentinel owns; disabled unless --enable --ye
 | Option | Registered default | Description |
 | --- | --- | --- |
 | `--automation <id>` | — | What the trigger starts (default: the only one this Sentinel owns) |
-| `--kind <kind>` | — | schedule \| manual \| github-pr |
-| `--file <path>` | — | Trigger JSON object with schedule or github settings |
+| `--kind <kind>` | — | schedule \| manual \| github-pr \| release \| check-completed |
+| `--file <path>` | — | Trigger JSON object with schedule, github, release or check settings |
 | `--enable` | — | Enable immediately |
 | `--yes` | — | Confirm that an enabled trigger was reviewed |
 | `--frequency <frequency>` | — | schedule: minutes, hourly, daily, weekdays, weekly, cron |

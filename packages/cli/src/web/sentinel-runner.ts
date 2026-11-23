@@ -1,10 +1,15 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { SentinelStore, type SecurityWorkflowStore } from "@0/engine/storage";
+import { assertEgressAllowed } from "@0/engine";
 import { audit } from "./audit.js";
+import {
+  CHECKS_JQ, RELEASES_JQ, TAGS_JQ, checksFromPoll, isCommitSha, isSafeRef, matchesCheck, matchesRelease, releasesFromPoll, statusContext, statusFor, tagsFromPoll,
+  type GithubEvent,
+} from "./sentinel-github-events.js";
 import { diffRightLines, inlineMarker, planInlineSuggestions, type SuggestionFinding } from "./pr-review.js";
 import {
-  nextSentinelFire, sentinelNeedsReview, sentinelReviewFingerprint,
+  nextSentinelFire, sentinelNeedsReview, sentinelPollMs, sentinelReviewFingerprint,
   type ShareSafeReport, type Sentinel, type SentinelActivation, type SentinelTrigger, type SecurityWorkflow,
 } from "@0/engine/shared";
 import { consoleExecutionProfile } from "../console-execution.js";
@@ -15,6 +20,9 @@ const MAX_SEED_FILE_CHARS = 16_000;
 const MISSED_GRACE_MS = 60_000;
 const MAX_PR_LAUNCHES_PER_POLL = 3;
 const MAX_PR_DIFF_CHARS = 14_000;
+const MAX_EVENT_LAUNCHES_PER_POLL = 3;
+/** The trigger cursor keeps 200 entries. A poll that returns more could not be remembered, so it is refused instead of replayed. */
+const MAX_POLLED_EVENTS = 190;
 /** Pull request comments: at most one per pull request per minute and 30 per hour for the whole engine. */
 const prCommentMinGapMs = () => { const value = Number(process.env.ZERO_PR_COMMENT_MIN_GAP_MS); return Number.isFinite(value) && value >= 0 ? value : 60_000; };
 const PR_COMMENT_MAX_PER_HOUR = 30;
@@ -68,7 +76,13 @@ export interface SentinelMissionRuntime {
 export const agentsPersistentThreadFromEnv = (): boolean => !/^(0|false|off|no)$/i.test((process.env.ZERO_AGENTS_PERSISTENT_THREAD ?? "").trim());
 /** Minimal `gh` seam (same shape as the engine's GhClient). Credentials stay in gh's own store. */
 export interface SentinelGhClient { run(args: string[]): Promise<{ stdout: string }> }
-const defaultSentinelGh = (): SentinelGhClient => ({ run: args => execute("gh", args, { timeout: 30_000, maxBuffer: 4_000_000 }).then(({ stdout }) => ({ stdout })) });
+const defaultSentinelGh = (): SentinelGhClient => ({ run: async args => { assertEgressAllowed("GitHub (gh)"); const { stdout } = await execute("gh", args, { timeout: 30_000, maxBuffer: 4_000_000 }); return { stdout }; } });
+
+/**
+ * Where a finished run posts its summary. A pull request number means one comment (found by a hidden marker, edited in place).
+ * `mode: "status"` means a commit status on the commit, or on the commit `ref` points to (a tag, resolved when posting).
+ */
+export type SummaryTarget = { repo: string; headSha: string; fork: boolean } & ({ pr: number; mode?: "comment" } | { pr?: number; mode: "status"; ref?: string });
 
 export interface SentinelActor { userId: string; displayName: string; role?: "owner" | "editor" | "viewer"; onMissionCreated?: (missionId: string) => void }
 export class SentinelRunError extends Error {
@@ -92,7 +106,7 @@ export interface LaunchOptions {
   /** Extra untrusted context fenced into the seed (for example the pull request diff). */
   context?: { label: string; text: string };
   /** Post (or edit in place) one summary comment on this pull request when the run completes. */
-  comment?: { repo: string; pr: number; headSha: string; fork: boolean };
+  comment?: SummaryTarget;
   /** How the trigger arrived (`schedule`, `poll`, `check`, `webhook`); recorded on the turn ledger. */
   via?: string;
   /** Unique per Sentinel in the turn ledger (the cause: trigger and occurrence, or trigger, pull request and head commit). */
@@ -175,6 +189,21 @@ export class SentinelRunner {
       && trigger.github.repo.toLowerCase() === repo.toLowerCase() && (!trigger.github.baseBranch || trigger.github.baseBranch === baseBranch));
   }
 
+  /** Enabled release and check triggers this event belongs to. Used only to locate triggers for a webhook delivery. */
+  eventTriggers(event: GithubEvent): SentinelTrigger[] {
+    return this.#store.listTriggers().filter(trigger => trigger.enabled && (trigger.kind === "release" ? trigger.release !== undefined && matchesRelease(trigger.release, event) : trigger.kind === "check-completed" && trigger.check !== undefined && matchesCheck(trigger.check, event)));
+  }
+
+  /** Starts one release or check trigger for an event a signed webhook delivered. Same gates and idempotency key as polling. */
+  async deliverEvent(triggerId: string, event: GithubEvent): Promise<boolean> {
+    if (this.#closed) return false;
+    const nowMs = this.#now();
+    const due = this.#store.requestCheck(triggerId, nowMs);
+    if (!due) return false;
+    await this.#fire(due, nowMs, "webhook", event);
+    return true;
+  }
+
   /** Is the one-standing-thread delivery on (the default)? */
   get persistentThread(): boolean { return this.#persistent(); }
 
@@ -247,11 +276,11 @@ export class SentinelRunner {
     }
   }
 
-  async #fire(due: SentinelTrigger, nowMs: number, via: "poll" | "check" | "webhook" = "poll"): Promise<void> {
+  async #fire(due: SentinelTrigger, nowMs: number, via: "poll" | "check" | "webhook" = "poll", pushed?: GithubEvent): Promise<void> {
     const sentinel = this.#store.get(due.sentinelId);
     if (!sentinel) { this.#store.deleteTrigger(due.id); return; }
     const nextFireAt = due.kind === "schedule" && due.schedule ? isoAt(nextSentinelFire(due.schedule, nowMs))
-      : due.kind === "github-pr" && due.github ? isoAt(nowMs + due.github.pollMs) : null;
+      : (due.kind === "github-pr" || due.kind === "release" || due.kind === "check-completed") && sentinelPollMs(due) !== undefined ? isoAt(nowMs + sentinelPollMs(due)!) : null;
     const claimed = this.#store.claimTrigger(due.id, nextFireAt, nowMs);
     if (!claimed?.activeClaim) return;
     const release = (update: Parameters<SentinelStore["releaseTrigger"]>[2]) => this.#store.releaseTrigger(claimed.id, claimed.activeClaim!, update, this.#now());
@@ -262,6 +291,7 @@ export class SentinelRunner {
       if (sentinel.status !== "active") { release({ lastStatus: "paused" }); return; }
       if (sentinelNeedsReview(sentinel)) { release({ lastStatus: "needs_review", lastError: "Model, tools or skills changed. Review and acknowledge the Sentinel before it runs on its own." }); return; }
       if (due.kind === "github-pr") { await this.#pollPullRequests(claimed, sentinel, automation, release, via); return; }
+      if (due.kind === "release" || due.kind === "check-completed") { await this.#runGithubEvents(claimed, sentinel, automation, release, via, pushed); return; }
       if (this.#persistent()) {
         const outcome = await this.#deliverSafely({ sentinel, origin: "schedule", via: "schedule", trigger: { id: due.id, kind: "schedule" }, automation, idempotencyKey: `schedule:${due.id}:${due.nextFireAt ?? nowMs}`, ...(due.nextFireAt ? { scheduledFor: due.nextFireAt } : {}) });
         release(this.#turnRelease(outcome, due.id));
@@ -376,6 +406,92 @@ export class SentinelRunner {
     );
   }
 
+  /** Events for a release or check trigger: the one a webhook delivered, or what the poll finds that the cursor has not seen. */
+  async #pollEvents(trigger: SentinelTrigger): Promise<GithubEvent[]> {
+    const run = async (args: string[]) => (await this.#gh.run(args)).stdout;
+    if (trigger.release) {
+      const config = trigger.release;
+      const found = config.on === "release"
+        ? releasesFromPoll(config.repo, await run(["api", `repos/${config.repo}/releases?per_page=100`, "--jq", RELEASES_JQ]))
+        : tagsFromPoll(config.repo, await run(["api", "--paginate", `repos/${config.repo}/git/matching-refs/tags/${config.tagPrefix}`, "--jq", TAGS_JQ]));
+      return found.filter(event => matchesRelease(config, event));
+    }
+    const config = trigger.check!;
+    const branch = config.branch ?? (await run(["api", `repos/${config.repo}`, "--jq", ".default_branch"])).trim();
+    if (!isSafeRef(branch)) throw new Error("The default branch name is not usable.");
+    return checksFromPoll(config.repo, branch, await run(["api", "--paginate", `repos/${config.repo}/commits/${branch}/check-runs?per_page=100`, "--jq", CHECKS_JQ])).filter(event => matchesCheck(config, event));
+  }
+
+  /** Where this trigger's result goes, or nothing when reporting is off (the default). */
+  #reportTarget(trigger: SentinelTrigger, event: GithubEvent): SummaryTarget | undefined {
+    const mode = (trigger.release ?? trigger.check)?.report ?? "none";
+    if (mode === "none") return undefined;
+    if (mode === "comment" && event.pr) return { repo: event.repo, pr: event.pr, headSha: event.sha ?? "", fork: false };
+    // A tag has no pull request to comment on, and a tag push can point at a tag object: the status goes on the commit the tag resolves to.
+    if (event.kind === "release") return event.tag ? { repo: event.repo, mode: "status", headSha: "", ref: event.tag, fork: false } : undefined;
+    return event.sha ? { repo: event.repo, mode: "status", headSha: event.sha, fork: false, ...(event.pr ? { pr: event.pr } : {}) } : undefined;
+  }
+
+  async #runGithubEvents(trigger: SentinelTrigger, sentinel: Sentinel, automation: SecurityWorkflow, release: (update: { lastStatus?: string; lastError?: string; lastActivationId?: string; cursor?: Record<string, string> }) => unknown, via: string, pushed?: GithubEvent): Promise<void> {
+    const isEnabled = () => this.#store.getTrigger(trigger.id)?.enabled === true;
+    let events: GithubEvent[];
+    if (pushed) {
+      // Only what this trigger's own settings accept: a delivery is never trusted to say which trigger it is for.
+      const fits = trigger.release ? matchesRelease(trigger.release, pushed) : trigger.check ? matchesCheck(trigger.check, pushed) : false;
+      if (!fits) { release({}); return; }
+      events = [pushed];
+    } else {
+      try {
+        events = await this.#pollEvents(trigger);
+        if (events.length > MAX_POLLED_EVENTS) throw new Error(`More than ${MAX_POLLED_EVENTS} matching items. Use the webhook or a narrower filter.`);
+      } catch (error) {
+        release({ lastStatus: "blocked", lastError: `GitHub could not be read with the connected gh account: ${message(error)}`.slice(0, 1000) });
+        return;
+      }
+    }
+    if (!isEnabled()) { release({}); return; }
+    const seen = { ...(trigger.cursor ?? {}) };
+    if (!pushed && !trigger.cursor) {
+      // First poll only records what exists; it never launches a run for old releases or checks.
+      for (const event of events) seen[event.key] = event.sha ?? "seen";
+      release({ lastStatus: "baseline", cursor: seen });
+      return;
+    }
+    let launched = 0; let lastActivationId: string | undefined; let lastError: string | undefined; let lastStatus = "idle";
+    for (const event of events) {
+      if (!isEnabled()) break;
+      if (seen[event.key] !== undefined) continue;
+      if (launched >= MAX_EVENT_LAUNCHES_PER_POLL) break;
+      const idempotencyKey = `github:${trigger.id}:${event.kind}:${event.key}`;
+      const target = this.#reportTarget(trigger, event);
+      const remember = () => { if (trigger.cursor) seen[event.key] = event.sha ?? "seen"; };
+      if (this.#persistent()) {
+        const outcome = await this.#deliverSafely({
+          sentinel, origin: "github", via, trigger: { id: trigger.id, kind: trigger.kind as "release" | "check-completed" }, automation, event: event.fields, idempotencyKey,
+          ...(target ? { comment: target } : {}),
+        });
+        const update = this.#turnRelease(outcome, trigger.id);
+        if (!isEnabled()) { if (outcome.status === "queued" || outcome.status === "duplicate" || (outcome.status === "skipped" && outcome.consumed)) remember(); break; }
+        if (outcome.status === "refused") { lastStatus = update.lastStatus ?? "error"; lastError = update.lastError; break; }
+        if (outcome.status === "skipped" && !outcome.consumed) { lastStatus = update.lastStatus ?? "waiting"; lastError = update.lastError; break; }
+        remember();
+        if (outcome.status === "queued") { launched += 1; if (update.lastStatus) lastStatus = update.lastStatus; }
+        continue;
+      }
+      const result = await this.#launchSafely(sentinel.id, {
+        trigger: { kind: trigger.kind as "release" | "check-completed", automationId: automation.id, triggerId: trigger.id, event: event.fields },
+        automation, autonomous: true, via, idempotencyKey, ...(target ? { comment: target } : {}),
+      });
+      if (!result.ok) { lastStatus = result.kind; lastError = result.reason; break; }
+      remember(); launched += 1; lastActivationId = result.activation.id; lastStatus = "running";
+    }
+    const current = this.#store.getTrigger(trigger.id);
+    const preserveTurnOutcome = Boolean(current && ((!current.enabled && current.lastStatus === "failing") || (this.#persistent() && current.lastStatus !== "starting" && !lastError)));
+    release(preserveTurnOutcome
+      ? (trigger.cursor ? { cursor: seen } : {})
+      : { lastStatus, ...(lastError ? { lastError } : { lastError: undefined }), ...(lastActivationId ? { lastActivationId } : {}), ...(trigger.cursor ? { cursor: seen } : {}) });
+  }
+
   /** The diff comes from GitHub's API through gh. Nothing from the pull request is ever cloned, checked out or executed here. */
   async #diff(repo: string, pr: number): Promise<string | undefined> {
     try { return (await this.#gh.run(["pr", "diff", String(pr), "--repo", repo])).stdout.slice(0, MAX_PR_DIFF_CHARS) || undefined; }
@@ -383,8 +499,8 @@ export class SentinelRunner {
   }
 
   /** One summary comment per pull request and Sentinel, found by a hidden marker and edited in place on later pushes. */
-  async #postSummary(sentinel: Sentinel, comment: NonNullable<LaunchOptions["comment"]>, missionId: string, recordId: string, exclude?: ReadonlySet<string>, isTurn = false): Promise<void> {
-    const subject = `${comment.repo}#${comment.pr}`;
+  async #postSummary(sentinel: Sentinel, comment: SummaryTarget, missionId: string, recordId: string, exclude?: ReadonlySet<string>, isTurn = false): Promise<void> {
+    const subject = comment.mode === "status" ? `${comment.repo}@${(comment.ref ?? comment.headSha).slice(0, 40)}` : `${comment.repo}#${comment.pr}`;
     const nowMs = this.#now();
     while (this.#commentLog.length && nowMs - this.#commentLog[0]! > 3_600_000) this.#commentLog.shift();
     const gapKey = `${sentinel.id}:${subject}`;
@@ -393,6 +509,7 @@ export class SentinelRunner {
     if (limited) { audit({ actor: `sentinel:${sentinel.id}`, action: "sentinel.pr.comment", subject, outcome: "denied", detail: { sentinelId: sentinel.id, reason: limited } }); return; }
     this.#commentLog.push(nowMs); this.#commentLast.set(gapKey, nowMs);
     if (this.#commentLast.size > 500) this.#commentLast.delete(this.#commentLast.keys().next().value!);
+    if (comment.mode === "status") { await this.#postStatus(sentinel, comment, missionId, recordId, subject, exclude, isTurn); return; }
     const marker = prCommentMarker(sentinel.id);
     const body = renderPrComment(sentinel.name, marker, comment, (this.#missions.findings?.(missionId) ?? []).filter(finding => !exclude || !finding.id || !exclude.has(finding.id)));
     try {
@@ -411,10 +528,33 @@ export class SentinelRunner {
   }
 
   /**
+   * A commit status (`POST repos/{repo}/statuses/{sha}`): the least privileged way back to GitHub, because it needs only the status
+   * permission of a normal token. One context per Sentinel, so the newest status replaces the line and nothing piles up. The
+   * description is built from finding counts, never from model text.
+   */
+  async #postStatus(sentinel: Sentinel, target: Extract<SummaryTarget, { mode: "status" }>, missionId: string, recordId: string, subject: string, exclude: ReadonlySet<string> | undefined, isTurn: boolean): Promise<void> {
+    try {
+      let sha = target.headSha;
+      if (!isCommitSha(sha)) {
+        if (!target.ref || !isSafeRef(target.ref)) throw new Error("No commit to report on.");
+        sha = (await this.#gh.run(["api", `repos/${target.repo}/commits/${target.ref}`, "--jq", ".sha"])).stdout.trim();
+        if (!isCommitSha(sha)) throw new Error("The tag does not point to a commit.");
+      }
+      const result = statusFor((this.#missions.findings?.(missionId) ?? []).filter(finding => !exclude || !finding.id || !exclude.has(finding.id)));
+      await this.#gh.run(["api", "--method", "POST", `repos/${target.repo}/statuses/${sha}`, "-f", `state=${result.state}`, "-f", `context=${statusContext(sentinel.name)}`, "-f", `description=${result.description}`]);
+      audit({ actor: `sentinel:${sentinel.id}`, action: "sentinel.github.status", subject, detail: { sentinelId: sentinel.id, state: result.state } });
+    } catch (error) {
+      audit({ actor: `sentinel:${sentinel.id}`, action: "sentinel.github.status", subject, outcome: "denied", detail: { sentinelId: sentinel.id, reason: message(error).slice(0, 200) } });
+      const failure = `The commit status could not be posted: ${message(error)}`.slice(0, 500);
+      try { if (isTurn) this.#store.updateTurn(recordId, { note: failure }); else this.#store.updateActivation(recordId, { error: failure }); } catch { /* deleted */ }
+    }
+  }
+
+  /**
    * Suggestions the author can apply with one click: a review comment on each changed line a finding has a replacement for.
    * Comments from an earlier push whose finding is gone are removed. A failure here never undoes the summary.
    */
-  async #postInline(sentinel: Sentinel, comment: NonNullable<LaunchOptions["comment"]>, missionId: string, exclude?: ReadonlySet<string>): Promise<void> {
+  async #postInline(sentinel: Sentinel, comment: Extract<SummaryTarget, { pr: number }> & { mode?: "comment" }, missionId: string, exclude?: ReadonlySet<string>): Promise<void> {
     if (comment.fork || !this.#missions.suggestions) return;
     const subject = `${comment.repo}#${comment.pr}`;
     try {
@@ -468,7 +608,7 @@ export class SentinelRunner {
       sharedHome = options.automation?.runIn === "sentinel-home";
       const title = `${sentinel.name}: ${options.automation ? options.automation.name : "run"}`;
       missionId = home;
-      const prRepo = options.trigger.kind === "github-pr" ? options.trigger.event?.["repo"] : undefined;
+      const prRepo = isGithubKind(options.trigger.kind) ? options.trigger.event?.["repo"] : undefined;
       checkout = !sharedHome && typeof prRepo === "string" ? await this.#checkout(prRepo) : undefined;
       if (!sharedHome) {
         missionId = this.#missions.create({ ...this.#missionConfig(sentinel, title, checkout), parentSessionId: home }).id;
@@ -480,7 +620,7 @@ export class SentinelRunner {
     }
     const baseline = this.#missions.usage?.(missionId)?.costUsd ?? 0;
     const activation = this.#store.updateActivation(reservation.id, {
-      missionId, parentMissionId: home, ...(options.trigger.kind === "github-pr" ? { note: this.#executionNote(checkout) } : {}),
+      missionId, parentMissionId: home, ...(isGithubKind(options.trigger.kind) ? { note: this.#executionNote(checkout, options.trigger.kind) } : {}),
     });
     if (options.autonomous) audit({ actor: `sentinel:${sentinelId}`, action: "sentinel.run", subject: sentinel.name, detail: { sentinelId, trigger: typeof options.trigger === "string" ? options.trigger : undefined } });
     const seed = this.#seed(sentinel, options);
@@ -501,8 +641,9 @@ export class SentinelRunner {
    * allowlisted environment (no provider keys or tokens; see agent/sanitized-env.ts). Under the SmolVM execution profile
    * the console gateway already runs every thread in the sandbox; otherwise the run is on the host and says so.
    */
-  #executionNote(checkout: string | undefined): string {
+  #executionNote(checkout: string | undefined, kind = "github-pr"): string {
     const where = this.#executionProfile() === "smolvm" ? "Runs in the SmolVM sandbox." : "Runs on this host: no sandbox is enabled.";
+    if (kind !== "github-pr") return `${where} ${checkout ? `Folder: the checked-out folder ${checkout}, in its current state (not necessarily the tagged or checked commit).` : "No local checkout of this repository was found, so the run only sees the event data."}`;
     return `${where} ${checkout ? `Folder: the checked-out folder ${checkout}.` : "No local checkout of this repository was found, so the run only sees the pull request diff."}`;
   }
 
@@ -603,7 +744,9 @@ export class SentinelRunner {
   }
 }
 
-const oneLine = (text: string, max: number) => text.replace(/[a-z][a-z0-9+.-]*:\/\/\S+/gi, "(link removed)").replace(/[\r\n\t]+/g, " ").replace(/[<>`\[\]]/g, "").replace(/@/g, "@\u200b").slice(0, max).trim();
+const isGithubKind = (kind: string) => kind === "github-pr" || kind === "release" || kind === "check-completed";
+/** One line for GitHub: no links, markup, @mentions or #123 references. */
+const oneLine = (text: string, max: number) => text.replace(/[a-z][a-z0-9+.-]*:\/\/\S+/gi, "(link removed)").replace(/[\r\n\t]+/g, " ").replace(/[<>`\[\]]/g, "").replace(/@/g, "@\u200b").replace(/#(?=\w)/g, "#\u200b").slice(0, max).trim();
 const SEVERITY_ORDER = ["critical", "high", "medium", "low", "info"];
 
 /** The comment carries share-safe fields only: severity, title, category and a repository-relative location. No evidence, PoC steps or local paths. */

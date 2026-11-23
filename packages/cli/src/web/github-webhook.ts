@@ -1,4 +1,5 @@
-// GitHub webhook receiver for server mode: an accelerator for the Sentinel `github-pr` trigger.
+// GitHub webhook receiver for server mode: an accelerator for the Sentinel `github-pr` trigger, and the push source for the
+// `release` and `check-completed` triggers (release published, tag pushed, check run or suite completed).
 //
 // The route is the ONE anonymous API path in server mode (GitHub cannot sign in), so everything here is
 // defensive. Order of checks, cheapest first and always before any JSON parsing:
@@ -17,6 +18,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { dirname, join } from "node:path";
 import { audit } from "./audit.js";
 import { json } from "./dashboard-http.js";
+import { GITHUB_EVENT_ALLOWLIST, parseGithubWebhook, type GithubEvent } from "./sentinel-github-events.js";
 
 export const GITHUB_WEBHOOK_PATH = "/api/webhooks/github";
 export const WEBHOOK_MAX_BODY_BYTES = 1_000_000;
@@ -135,6 +137,10 @@ export interface WebhookDispatcher {
   targets(repo: string, baseBranch: string): WebhookTarget[];
   /** The poller's own check routine for one trigger. Resolves false when the trigger is off or busy. */
   check(triggerId: string): Promise<boolean>;
+  /** Enabled `release` and `check-completed` triggers this event belongs to (repository allowlist and trigger filters). */
+  eventTargets?(event: GithubEvent): WebhookTarget[];
+  /** Start one trigger's run for this event, through the same gates and idempotency key the poller uses. Resolves false when the trigger is off or busy. */
+  deliver?(triggerId: string, event: GithubEvent): Promise<boolean>;
 }
 
 export interface WebhookOptions {
@@ -236,10 +242,11 @@ export class GitHubWebhookReceiver {
     if (typeof delivery !== "string" || !DELIVERY_SHAPE.test(delivery)) { this.reject(res, 400, client, event, "delivery_id", { error: "Bad request." }); return; }
     if (!this.dedupe.claim(delivery)) { this.ignore(res, client, event, "duplicate_delivery"); return; }
     if (event === "ping") { this.record("received", client, "ping"); reply(res, 202, { ok: true }); return; }
-    if (event !== "pull_request") { this.ignore(res, client, event, "event_not_allowed"); return; }
+    if (event !== "pull_request" && !(event && GITHUB_EVENT_ALLOWLIST.has(event))) { this.ignore(res, client, event, "event_not_allowed"); return; }
 
     let payload: unknown;
     try { payload = JSON.parse(raw.toString("utf8")); } catch { this.reject(res, 400, client, event, "malformed_json", { error: "Bad request." }); return; }
+    if (event !== "pull_request") { this.handleEvent(res, client, event!, payload); return; }
     const parsed = parsePullRequestEvent(payload);
     if (!parsed.ok) { this.ignore(res, client, event, parsed.reason); return; }
     const dispatcher = this.dispatcher();
@@ -250,6 +257,20 @@ export class GitHubWebhookReceiver {
     reply(res, 202, { ok: true });
     // Answered already: the checks run on their own, one routine per matching trigger.
     const work = (async () => { for (const target of targets) { try { await dispatcher.check(target.id); } catch { /* The poller retries at its next tick. */ } } })()
+      .finally(() => { this.pending.delete(work); });
+    this.pending.add(work);
+  }
+
+  private handleEvent(res: ServerResponse, client: string, event: string, payload: unknown): void {
+    const parsed = parseGithubWebhook(event, payload);
+    if (!parsed.ok) { this.ignore(res, client, event, parsed.reason); return; }
+    const dispatcher = this.dispatcher();
+    const targets = dispatcher?.eventTargets?.(parsed.event) ?? [];
+    if (!dispatcher?.deliver || targets.length === 0) { this.ignore(res, client, event, "no_matching_trigger"); return; }
+    const deliver = dispatcher.deliver.bind(dispatcher);
+    this.record("received", client, event, `${parsed.event.kind}:${targets.length}`);
+    reply(res, 202, { ok: true });
+    const work = (async () => { for (const target of targets) { try { await deliver(target.id, parsed.event); } catch { /* A later delivery or the poller retries. */ } } })()
       .finally(() => { this.pending.delete(work); });
     this.pending.add(work);
   }
@@ -309,7 +330,7 @@ export function handleWebhookConsoleRequest(path: string, method: string, contex
   const { receiver } = context;
   if (!receiver) return path === "github/webhook" && method === "GET" ? { status: 200, data: { webhook: { serverMode: false } } } : { status: 404, data: { error: "Not found." } };
   const view = () => ({
-    serverMode: true, ...receiver.status(), path: GITHUB_WEBHOOK_PATH, contentType: "application/json", events: ["Pull requests"],
+    serverMode: true, ...receiver.status(), path: GITHUB_WEBHOOK_PATH, contentType: "application/json", events: ["Pull requests", "Releases", "Pushes (tags)", "Check runs", "Check suites"],
     ...(context.payloadUrl ? { payloadUrl: context.payloadUrl } : {}),
   });
   if (path === "github/webhook") return method === "GET" ? { status: 200, data: { webhook: view() } } : { status: 405, data: { error: "Use GET." } };

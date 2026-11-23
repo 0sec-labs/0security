@@ -173,7 +173,7 @@ export interface SentinelActivation {
   id: string;
   sentinelId: string;
   sentinelVersion: number;
-  trigger: { kind: "manual" | "automation" | "schedule" | "github-pr"; automationId?: string; triggerId?: string; /** Event context (for example PR number and head SHA). */ event?: Record<string, string | number> };
+  trigger: { kind: "manual" | "automation" | "schedule" | "github-pr" | "release" | "check-completed"; automationId?: string; triggerId?: string; /** Event context (for example PR number and head SHA). */ event?: Record<string, string | number> };
   status: SentinelActivationStatus;
   /** Mission (chat/session) for this activation; a child of the Sentinel's home mission. */
   missionId?: string;

@@ -373,8 +373,8 @@
         "packages/cli/src/host/github.ts",
         "packages/cli/src/web/sentinel-runner.ts"
       ],
-      "when": "Explicit findings fix, threat-model publish, findings import and sentinel review commands.",
-      "sent": "A branch push or PR comment the operator asked for.",
+      "when": "Explicit findings fix, threat-model publish, findings import and sentinel review commands, and a Sentinel with release, check or pull request reporting turned on (off by default).",
+      "sent": "A branch push, PR comment or commit status the operator asked for. Sentinel polling reads releases, tags and check runs through gh.",
       "disable": "Do not run those commands; use --no-pr."
     },
     {

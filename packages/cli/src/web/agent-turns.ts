@@ -1,7 +1,7 @@
 import { SentinelStore } from "@0/engine/storage";
 import { sentinelNeedsReview, sentinelReviewFingerprint, type AgentTurn, type AgentTurnOriginDetail, type Sentinel, type SecurityWorkflow } from "@0/engine/shared";
 import { audit } from "./audit.js";
-import type { SentinelMissionRuntime, SentinelSessionEvent } from "./sentinel-runner.js";
+import type { SentinelMissionRuntime, SentinelSessionEvent, SummaryTarget } from "./sentinel-runner.js";
 
 const MAX_CHARTER_CHARS = 6_000;
 const MAX_NOTES_CHARS = 8_000;
@@ -17,7 +17,7 @@ export interface TurnRequest {
   origin: "schedule" | "github";
   /** How it arrived: `schedule`, `poll`, `check` or `webhook`. */
   via: string;
-  trigger: { id: string; kind: "schedule" | "github-pr" };
+  trigger: { id: string; kind: "schedule" | "github-pr" | "release" | "check-completed" };
   automation: SecurityWorkflow;
   event?: Record<string, string | number>;
   /** Unique per Sentinel: schedule is trigger and scheduled time; GitHub is trigger, pull request and head commit. */
@@ -28,7 +28,7 @@ export interface TurnRequest {
   /** Extra untrusted context fenced into the message (for example the pull request diff). */
   context?: { label: string; text: string };
   /** Post (or edit in place) one summary comment on this pull request when the turn completes. Only findings the thread gained during this turn are listed. */
-  comment?: { repo: string; pr: number; headSha: string; fork: boolean };
+  comment?: SummaryTarget;
 }
 export type TurnResult =
   | { status: "queued"; turn: AgentTurn }
@@ -230,7 +230,7 @@ export class AgentTurnDelivery {
     this.#seen.set(sentinel.id, { ...(charterFile ? { charter: charterFile.revision } : {}), ...(notesFile ? { notes: notesFile.revision } : {}), fingerprint });
     const steps = automation.nodes.filter(node => node.enabled && node.type !== "trigger").map(node => `- ${node.label} (${node.type})${node.execution?.instructions ? `: ${node.execution.instructions.slice(0, 600)}` : ""}`).join("\n");
     const when = request.scheduledFor ? ` at ${request.scheduledFor.slice(0, 16).replace("T", " ")} UTC` : "";
-    const source = request.origin === "github" ? `GitHub pull request ${event?.["repo"] ?? ""}#${event?.["pr"] ?? ""}` : `schedule "${automation.name}"${when}`;
+    const source = request.origin === "github" ? (request.trigger.kind === "github-pr" ? `GitHub pull request ${event?.["repo"] ?? ""}#${event?.["pr"] ?? ""}` : `GitHub ${request.trigger.kind === "release" ? "release" : "check"} ${event?.["repo"] ?? ""}`) : `schedule "${automation.name}"${when}`;
     const charter = charterFile?.content ?? "";
     return [
       `[Turn from ${source} · turn ${nonce(turn.id)}]`,

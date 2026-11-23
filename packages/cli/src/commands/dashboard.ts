@@ -180,7 +180,7 @@ export function registerDashboardCommand(program: Command): void {
       let webhookSentinels: () => WebSentinelService | undefined = () => undefined;
       const webhook = serverMode ? new GitHubWebhookReceiver({
         secrets: new WebhookSecretStore(homeStateDir()),
-        dispatcher: () => { const service = webhookSentinels(); return service ? { targets: (repo, base) => service.webhookTargets(repo, base), check: id => service.checkTrigger(id) } : undefined; },
+        dispatcher: () => { const service = webhookSentinels(); return service ? { targets: (repo, base) => service.webhookTargets(repo, base), check: id => service.checkTrigger(id), eventTargets: event => service.webhookEventTargets(event), deliver: (id, event) => service.deliverWebhookEvent(id, event) } : undefined; },
       }) : undefined;
       const webhookConsole = webhook ? { receiver: webhook, ...(publicUrl ? { payloadUrl: new URL(GITHUB_WEBHOOK_PATH, publicUrl).toString() } : {}) } : undefined;
       let phase: ServerPhase = "starting";

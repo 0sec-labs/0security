@@ -10,7 +10,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { extname, join } from "node:path";
 import { parseDocument, stringify } from "yaml";
 import { z } from "zod";
-import { SentinelGithubPrConfigSchema, SentinelScheduleSchema, createSecurityWorkflowTemplate, type Sentinel } from "@0/engine/shared";
+import { SentinelCheckConfigSchema, SentinelGithubPrConfigSchema, SentinelReleaseConfigSchema, SentinelScheduleSchema, createSecurityWorkflowTemplate, type Sentinel } from "@0/engine/shared";
 import type { SecurityWorkflowStore, SentinelStore } from "@0/engine/storage";
 
 const MAX_FILES = 50;
@@ -21,6 +21,8 @@ const TriggerSchema = z.discriminatedUnion("kind", [
   z.strictObject({ kind: z.literal("manual") }),
   z.strictObject({ kind: z.literal("schedule"), schedule: SentinelScheduleSchema }),
   z.strictObject({ kind: z.literal("github-pr"), github: SentinelGithubPrConfigSchema }),
+  z.strictObject({ kind: z.literal("release"), release: SentinelReleaseConfigSchema }),
+  z.strictObject({ kind: z.literal("check-completed"), check: SentinelCheckConfigSchema }),
 ]);
 const AutomationSchema = z.strictObject({
   name: z.string().trim().min(1).max(120),
@@ -74,7 +76,7 @@ export interface SyncChange { sentinel: string; action: "create" | "update" | "u
 export interface SyncStores { sentinels: SentinelStore; workflows: SecurityWorkflowStore }
 
 const canonical = (value: unknown): string => JSON.stringify(value, (_key, item) => item && typeof item === "object" && !Array.isArray(item) ? Object.fromEntries(Object.entries(item as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : 1))) : item);
-const triggerShape = (trigger: { kind: string; schedule?: unknown; github?: unknown }) => canonical({ kind: trigger.kind, ...(trigger.schedule ? { schedule: trigger.schedule } : {}), ...(trigger.github ? { github: trigger.github } : {}) });
+const triggerShape = (trigger: { kind: string; schedule?: unknown; github?: unknown; release?: unknown; check?: unknown }) => canonical({ kind: trigger.kind, ...(trigger.schedule ? { schedule: trigger.schedule } : {}), ...(trigger.github ? { github: trigger.github } : {}), ...(trigger.release ? { release: trigger.release } : {}), ...(trigger.check ? { check: trigger.check } : {}) });
 
 function diffSentinel(current: Sentinel, instructions: string | undefined, charter: string | undefined, definition: SentinelDefinition): string[] {
   const changes: string[] = [];
@@ -172,7 +174,7 @@ export function exportDefinition(sentinel: Sentinel, stores: SyncStores): string
       const template = (workflow as { template?: { id?: string } }).template?.id;
       if (!template) return [];
       return [{ name: workflow.name, template, ...(workflow.runIn ? { runIn: workflow.runIn as "new-mission" | "sentinel-home" } : {}), ...((workflow as { target?: string }).target ? { target: (workflow as { target?: string }).target! } : {}),
-        triggers: triggers.filter(trigger => trigger.automationId === workflow.id).map(trigger => TriggerSchema.parse({ kind: trigger.kind, ...(trigger.schedule ? { schedule: trigger.schedule } : {}), ...(trigger.github ? { github: trigger.github } : {}) })) }];
+        triggers: triggers.filter(trigger => trigger.automationId === workflow.id).map(trigger => TriggerSchema.parse({ kind: trigger.kind, ...(trigger.schedule ? { schedule: trigger.schedule } : {}), ...(trigger.github ? { github: trigger.github } : {}), ...(trigger.release ? { release: trigger.release } : {}), ...(trigger.check ? { check: trigger.check } : {}) })) }];
     }),
   };
   return stringify(definition, { lineWidth: 100 });

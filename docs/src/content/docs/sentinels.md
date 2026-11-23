@@ -72,10 +72,12 @@ A Sentinel has shell access, like a thread. An optional sandbox (SmolVM or Docke
 | `schedule` | Every N minutes (5 or more), hourly, daily, weekdays, weekly or cron, in an IANA timezone. |
 | `manual` | Run it now. |
 | `github-pr` | Polls open pull requests through the connected `gh` account, at least every 60 seconds. |
+| `release` | A published GitHub release, or a pushed tag that starts with a prefix such as `v`. |
+| `check-completed` | A check run or check suite that finished, optionally only when it failed. |
 
 In the browser, open a Sentinel and choose **Add trigger** in its pane. A schedule fires only while the app and its computer are running.
 
-There are no push or finding-created triggers.
+There is no trigger for a branch push or a new finding.
 
 ### GitHub pull request trigger
 
@@ -128,7 +130,7 @@ Polling needs nothing. If you run `0 --server-mode` behind a public HTTPS addres
 A delivery only asks the trigger to check GitHub now, exactly as a poll would. Forks, drafts, comments and the one-review-per-commit rule behave the same. If the webhook is off or unreachable, polling keeps working.
 
 1. Open **Sentinels** (or Settings > Git) and choose **Set up webhook**. Copy the secret now, because it is shown once. The card also shows the payload URL, built from `--public-url`.
-2. On GitHub, open the repository or organisation, then **Settings**, **Webhooks**, **Add webhook**. Set Payload URL to the one on the card, Content type to `application/json`, and Secret to the secret. Under Events choose **Let me select individual events**, then only **Pull requests**. Keep **Active** on and add the webhook.
+2. On GitHub, open the repository or organisation, then **Settings**, **Webhooks**, **Add webhook**. Set Payload URL to the one on the card, Content type to `application/json`, and Secret to the secret. Under Events choose **Let me select individual events**, then **Pull requests**. Add the events for release and check triggers if you use them (see below). Keep **Active** on and add the webhook.
 3. GitHub sends a ping. On the card, **Test** lists the last 5 deliveries as received, ignored or rejected, with no content.
 
 The trigger must exist and be on for that repository and base branch. Deliveries for anything else are ignored. 0 checks the signature before it reads anything, limits a delivery to 1 MB, deduplicates by delivery ID and rate limits. The route does not exist outside server mode.
@@ -140,6 +142,62 @@ Rotate the secret from the card or the CLI:
 ```
 
 The old secret works for 5 minutes, so you can update GitHub without losing deliveries.
+
+### Release trigger
+
+A `release` trigger starts a run when a release is published, or when a tag that starts with `tagPrefix` (default `v`) is pushed. Drafts are skipped. Set `on` to `release` (default) or `tag`.
+
+```json
+{ "kind": "release", "release": { "repo": "owner/name", "on": "release", "tagPrefix": "v", "pollMs": 300000, "report": "none" } }
+```
+
+The first poll records the releases that exist and starts nothing. Each new release or tag then starts one run. The poll reads the 100 newest releases, or all tags that match the prefix. If more than 190 tags match, the trigger shows a blocked status. Use the webhook or a longer prefix.
+
+### Check completed trigger
+
+A `check-completed` trigger starts a run when a check run or check suite finishes. Set `conclusion` to `failure` to start only for a failed or timed-out check, and `checkName` to match one check by its exact name.
+
+```json
+{ "kind": "check-completed", "check": { "repo": "owner/name", "branch": "main", "conclusion": "failure", "checkName": "build", "pollMs": 300000, "report": "none" } }
+```
+
+Polling reads the check runs on the tip of `branch`, or on the default branch when you leave it out. Checks on pull request commits reach the Sentinel only through the webhook.
+
+### What the run receives
+
+The run gets a short summary of the event, not the payload: event, repository, tag or check name, conclusion, commit, branch, pull request number and a GitHub link. It looks like this:
+
+```json
+{ "event": "check completed", "repo": "owner/name", "check": "build", "conclusion": "failure", "commit": "0123456789abcdef0123456789abcdef01234567", "branch": "main", "pr": 12 }
+```
+
+Each field is cut to a fixed length. Angle brackets, backticks and control characters are removed, and only `github.com` links are kept. The summary is placed in a delimited block that the run is told is data from an outside system, never instructions.
+
+### Post the result to GitHub
+
+A finished run can post its summary back. Set `report` on a `release` or `check-completed` trigger. It is `none` by default, so nothing is posted unless you turn it on.
+
+| Value | What is posted |
+| --- | --- |
+| `none` | Nothing. The result stays in the Sentinel. |
+| `commit-status` | One commit status on the commit, through `POST repos/{owner}/{repo}/statuses/{sha}`. For a tag, 0 first looks up the commit the tag points to. |
+| `comment` | One comment on the pull request, edited in place on later runs. Without a pull request number, 0 posts a commit status instead. |
+
+A commit status needs only the status permission of your `gh` token. The context is `0/sentinel/<name>`, so each run replaces the line from the last one. The state is `failure` when a critical or high finding exists, and `success` otherwise. The description holds counts only, such as `2 findings (1 high)`.
+
+A comment carries a hidden marker, so 0 finds and edits its own comment and never adds a second one. The text lists severity, title and a repository path for each finding, with links, markup, `@` mentions and issue references removed. Evidence and proof-of-concept steps are never posted. 0 posts at most one comment per pull request per minute and 30 per hour. A failed post shows on the run and does not fail it.
+
+0 does not create check runs. GitHub allows only a GitHub App to write them, and a `gh` login is not one.
+
+#### Webhook for release and check events
+
+The webhook described above also starts `release` and `check-completed` triggers. Add these events to the same webhook in GitHub: **Releases**, **Pushes** (for tags), **Check runs** and **Check suites**. Choose only the events you use.
+
+A delivery starts a trigger only if its repository matches the trigger, and, for a release or check, its tag prefix, branch, conclusion and check name match too. The trigger's own settings decide, never the payload. A check run and a check suite for the same commit are different events. Subscribe to one of them.
+
+If a webhook delivery and a poll see the same release or check, the run starts once.
+
+These triggers, the webhook events and the posted results were tested with signed test deliveries and a fake `gh`. They were not run against live GitHub.
 
 ## Automations
 
@@ -167,7 +225,19 @@ automations:
         github:
           repo: owner/name
           commentOnPr: true
+      - kind: release
+        release:
+          repo: owner/name
+          tagPrefix: v
+          report: commit-status
+      - kind: check-completed
+        check:
+          repo: owner/name
+          branch: main
+          conclusion: failure
 ```
+
+A trigger takes the settings for its kind: `schedule`, `github` (pull requests), `release` or `check`. The fields are the ones in the JSON examples above. Unknown fields and values outside the limits are refused.
 
 Preview the changes, apply them, or start from an existing Sentinel:
 

@@ -4,6 +4,7 @@ import { listSessions } from "../state/session-store.js";
 import { audit } from "./audit.js";
 import { SecurityWorkflowStore, SentinelStore, SentinelStoreError } from "@0/engine/storage";
 import { SENTINEL_FILE_FOLDERS, SENTINEL_PRESETS, SENTINEL_STATUSES, describeSentinelSchedule, getSentinelPreset, sentinelNeedsReview, type Sentinel, type SentinelActivation, type SentinelAttention, type SentinelTrigger } from "@0/engine/shared";
+import type { GithubEvent } from "./sentinel-github-events.js";
 import { SentinelRunError, SentinelRunner, type SentinelActor, type SentinelGhClient, type SentinelMissionRuntime } from "./sentinel-runner.js";
 
 const PREFIX = "/api/console/";
@@ -50,6 +51,9 @@ export class WebSentinelService {
   }
   /** Webhook acceleration: the triggers a delivery for this repository and base branch may check. */
   webhookTargets(repo: string, baseBranch: string): Array<{ id: string }> { return this.#runner.pullRequestTriggers(repo, baseBranch).map(trigger => ({ id: trigger.id })); }
+  /** Signed-webhook source for release and check triggers: the enabled triggers this event belongs to. */
+  webhookEventTargets(event: GithubEvent): Array<{ id: string }> { return this.#runner.eventTriggers(event).map(trigger => ({ id: trigger.id })); }
+  deliverWebhookEvent(triggerId: string, event: GithubEvent): Promise<boolean> { return this.#runner.deliverEvent(triggerId, event); }
   /** Webhook acceleration: runs the poller's own check for one trigger now (same draft, fork, comment and head-SHA rules). */
   checkTrigger(triggerId: string): Promise<boolean> { return this.#runner.checkNow(triggerId, "webhook"); }
   /** Drives one scheduler pass; the background timer calls this. Exposed for tests and for an explicit "check now". */
@@ -178,7 +182,11 @@ export class WebSentinelService {
 
   #triggerView(trigger: SentinelTrigger) {
     const { activeClaim: _claim, ...visible } = trigger;
-    return { ...visible, ...(trigger.schedule ? { summary: describeSentinelSchedule(trigger.schedule) } : {}) };
+    const summary = trigger.schedule ? describeSentinelSchedule(trigger.schedule)
+      : trigger.release ? `${trigger.release.on === "tag" ? "Tags" : "Releases"} on ${trigger.release.repo}${trigger.release.tagPrefix ? `, starting with ${trigger.release.tagPrefix}` : ""}${trigger.release.report !== "none" ? `, reports as ${trigger.release.report}` : ""}`
+      : trigger.check ? `${trigger.check.conclusion === "failure" ? "Failed checks" : "Finished checks"} on ${trigger.check.repo}${trigger.check.branch ? ` (${trigger.check.branch})` : ""}${trigger.check.report !== "none" ? `, reports as ${trigger.check.report}` : ""}`
+      : undefined;
+    return { ...visible, ...(summary ? { summary } : {}) };
   }
 
   /** Triggers start runs of an owned automation. Enabling one needs the same explicit review approval schedules use. */
@@ -204,13 +212,13 @@ export class WebSentinelService {
     this.#requireWriter(actor);
     if (method === "PATCH") {
       const { approval, expectedVersion, ...patch } = bodyOf(input);
-      const body = parse(z.object({ enabled: z.boolean().optional(), schedule: z.unknown().optional(), github: z.unknown().optional() }).strict(), patch);
+      const body = parse(z.object({ enabled: z.boolean().optional(), schedule: z.unknown().optional(), github: z.unknown().optional(), release: z.unknown().optional(), check: z.unknown().optional() }).strict(), patch);
       if (body.enabled === true && approval !== "enable-reviewed-trigger") throw new SentinelRequestError("Review this trigger before enabling it.", 400);
       const version = expectedVersion === undefined ? undefined : parse(z.number().int().positive(), expectedVersion);
       return { status: 200, data: { trigger: this.#triggerView(this.#store.updateTrigger(triggerId, body, version, this.#now())) } };
     }
     if (method === "POST" && checkNow) {
-      if (trigger.kind !== "github-pr") throw new SentinelRequestError("Only pull request triggers can be checked now.", 400);
+      if (trigger.kind === "schedule" || trigger.kind === "manual") throw new SentinelRequestError("Only GitHub triggers can be checked now.", 400);
       if (!await this.#runner.checkNow(triggerId)) throw new SentinelRequestError("Turn the trigger on and wait for any run in progress, then check again.", 409);
       return { status: 202, data: { trigger: this.#triggerView(this.#store.getTrigger(triggerId)!) } };
     }

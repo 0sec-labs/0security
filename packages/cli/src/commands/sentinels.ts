@@ -171,9 +171,9 @@ export function registerSentinelsCommand(program: Command, deps: ConsoleCommandD
   const triggers = group.command("triggers").description("Control what starts a Sentinel's automations");
   consoleFlags(triggers.command("list <id>").description("List triggers"))
     .action((id: string, options: ConsoleFlags) => withConsole(options, deps, async client => ((await client.request("GET", `${ROOT}/${enc((await sentinel(client, id)).id)}/triggers`)) as { triggers: Trigger[] }).triggers, triggerTable));
-  consoleFlags(triggers.command("add <id>").description("Add a schedule, manual or github-pr trigger; it stays disabled unless --enable --yes")
-    .option("--automation <id>", "What the trigger starts (default: the only one this Sentinel owns)").option("--kind <kind>", "schedule | manual | github-pr")
-    .option("--file <path>", "Trigger JSON object with schedule or github settings").option("--enable", "Enable immediately").option("--yes", "Confirm that an enabled trigger was reviewed")
+  consoleFlags(triggers.command("add <id>").description("Add a schedule, github-pr, release or check-completed trigger; it stays disabled unless --enable --yes")
+    .option("--automation <id>", "What the trigger starts (default: the only one this Sentinel owns)").option("--kind <kind>", "schedule | manual | github-pr | release | check-completed")
+    .option("--file <path>", "Trigger JSON object with schedule, github, release or check settings").option("--enable", "Enable immediately").option("--yes", "Confirm that an enabled trigger was reviewed")
     .option("--frequency <frequency>", `schedule: ${SCHEDULE_FREQUENCIES.join(", ")}`).option("--every <minutes>", "schedule, minutes: interval (5 or more)")
     .option("--at <HH:MM>", "schedule, daily, weekdays, weekly: local time").option("--weekday <day>", "schedule, weekly: sun, mon, ... or 0-6").option("--cron <expression>", "schedule, cron: five fields").option("--timezone <zone>", "schedule: IANA timezone (default UTC)")
     .option("--repo <owner/name>", "github-pr: repository to watch").option("--base-branch <branch>", "github-pr: only pull requests into this branch")
@@ -192,7 +192,7 @@ export function registerSentinelsCommand(program: Command, deps: ConsoleCommandD
       const owned = owner.automationIds ?? [];
       const automationId = options.automation ?? (typeof fromFile.automationId === "string" ? fromFile.automationId : owned.length === 1 ? owned[0] : undefined);
       const body = { ...fromFile, ...github, ...schedule, ...(automationId ? { automationId } : {}), ...(kind ? { kind } : {}) };
-      if (!body.kind) throw new UsageError("Say what kind: --kind schedule | manual | github-pr (a schedule also needs --frequency).");
+      if (!body.kind) throw new UsageError("Say what kind: --kind schedule | manual | github-pr | release | check-completed (a schedule also needs --frequency; release and check-completed take their settings with --file).");
       if (!body.automationId) throw new UsageError(owned.length ? `This Sentinel owns ${owned.length} things a trigger can start. Pick one with --automation <id>: ${owned.join(", ")}.` : "A trigger needs something to start, and this Sentinel owns nothing yet. Add it in the console (Sentinels page), then pass --automation <id>.");
       if (options.enable) requireYes(options.yes, "Enabling a trigger lets the Sentinel start runs unattended.");
       return ((await client.request("POST", `${ROOT}/${enc(owner.id)}/triggers`, { ...body, enabled: options.enable === true, ...(options.enable ? { approval: "enable-reviewed-trigger" } : {}) })) as { trigger: Trigger }).trigger;

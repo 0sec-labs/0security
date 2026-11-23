@@ -252,7 +252,7 @@ describe("console surface", () => {
     expect(handleWebhookConsoleRequest("github/webhook/secret", "POST", context)!.status).toBe(409);
     const status = handleWebhookConsoleRequest("github/webhook", "GET", context)!;
     expect(JSON.stringify(status.data)).not.toContain(secret);
-    expect(status.data).toMatchObject({ webhook: { serverMode: true, configured: true, contentType: "application/json", events: ["Pull requests"], payloadUrl: "https://0.example.com/api/webhooks/github" } });
+    expect(status.data).toMatchObject({ webhook: { serverMode: true, configured: true, contentType: "application/json", events: ["Pull requests", "Releases", "Pushes (tags)", "Check runs", "Check suites"], payloadUrl: "https://0.example.com/api/webhooks/github" } });
     const rotated = handleWebhookConsoleRequest("github/webhook/secret/rotate", "POST", context)!;
     expect(rotated).toMatchObject({ status: 200, data: { graceSeconds: 300 } });
     expect((rotated.data as { secret: string }).secret).not.toBe(secret);

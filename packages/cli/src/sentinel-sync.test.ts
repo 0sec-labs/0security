@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -99,6 +99,54 @@ describe("Sentinels as files", () => {
     const sentinel = s.stores.sentinels.list()[0]!;
     s.write("pr.yaml", exportDefinition(sentinel, s.stores));
     expect(planSync(loadDefinitions(s.defs), s.stores)[0]).toMatchObject({ action: "unchanged" });
+    s.close();
+  });
+
+  it("accepts release and check-completed triggers with the reporting setting, creates them disabled, and round trips through export", () => {
+    const s = setup();
+    s.write("rel.yaml", `name: Release gate
+instructions: Check each release.
+automations:
+  - name: On release
+    template: repository-review
+    triggers:
+      - kind: release
+        release:
+          repo: o/r
+          tagPrefix: v
+          report: commit-status
+      - kind: check-completed
+        check:
+          repo: o/r
+          branch: main
+          conclusion: failure
+          report: comment
+`);
+    const plan = planSync(loadDefinitions(s.defs), s.stores);
+    expect(plan[0]).toMatchObject({ action: "create" });
+    applySync(loadDefinitions(s.defs), s.stores);
+    const triggers = s.stores.sentinels.listTriggers();
+    expect(triggers.map(trigger => trigger.kind).sort()).toEqual(["check-completed", "release"]);
+    expect(triggers.every(trigger => !trigger.enabled)).toBe(true);
+    expect(triggers.find(trigger => trigger.kind === "release")!.release).toEqual({ repo: "o/r", on: "release", tagPrefix: "v", pollMs: 300_000, report: "commit-status" });
+    expect(triggers.find(trigger => trigger.kind === "check-completed")!.check).toMatchObject({ branch: "main", conclusion: "failure", report: "comment" });
+    expect(planSync(loadDefinitions(s.defs), s.stores)[0]).toMatchObject({ action: "unchanged" });
+    s.write("rel.yaml", exportDefinition(s.stores.sentinels.list()[0]!, s.stores));
+    expect(planSync(loadDefinitions(s.defs), s.stores)[0]).toMatchObject({ action: "unchanged" });
+    s.write("rel.yaml", readFileSync(join(s.defs, "rel.yaml"), "utf8").replace("report: commit-status", "report: none"));
+    expect(planSync(loadDefinitions(s.defs), s.stores)[0]!.changes).toEqual(["triggers of On release"]);
+    s.close();
+  });
+
+  it("rejects a release trigger with an unknown reporting mode or a stray key", () => {
+    const s = setup();
+    const file = (body: string) => `name: X\nautomations:\n  - name: A\n    template: repository-review\n    triggers:\n      - kind: release\n        release: { repo: o/r${body} }\n`;
+    s.write("x.yaml", file(", report: check-run"));
+    expect(() => loadDefinitions(s.defs)).toThrow("x.yaml");
+    s.write("x.yaml", file(", secret: abc"));
+    expect(() => loadDefinitions(s.defs)).toThrow("x.yaml");
+    s.write("x.yaml", file(""));
+    expect(loadDefinitions(s.defs)).toHaveLength(1);
     s.close();
   });
 
