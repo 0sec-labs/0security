@@ -461,6 +461,20 @@
       "when": "Explicit `0 findings upload --to bitbucket-cloud|bitbucket-dc` with BITBUCKET_TOKEN set; without the token it only prints the payload.",
       "sent": "A Code Insights report and annotations built from the scan's findings, with the token in the Authorization header. A plain http:// URL is refused unless the host is this machine or --allow-insecure-http is passed.",
       "disable": "Do not run the command, or leave BITBUCKET_TOKEN unset (the payload is printed instead)."
+    },
+    {
+      "id": "audit-siem-sink",
+      "class": "operator",
+      "enterprise": "allowed",
+      "destinations": [
+        "the https collector or syslog-over-TLS host you set in ZERO_AUDIT_SINK_URL"
+      ],
+      "files": [
+        "packages/engine/src/storage/audit-sink.ts"
+      ],
+      "when": "Server mode, only when ZERO_AUDIT_SINK_URL is set in the process environment. Off by default. Never read from a repository, a project file or the database.",
+      "sent": "Batches of audit events (action, actor, subject, outcome, whitelisted and redacted detail), with ZERO_AUDIT_SINK_TOKEN as a bearer token when set. Plain http and plain TCP syslog are refused except to this machine; UDP is refused.",
+      "disable": "Leave ZERO_AUDIT_SINK_URL unset."
     }
   ],
   "knownHosts": [

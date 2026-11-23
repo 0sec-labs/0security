@@ -48,9 +48,10 @@ import { resolveCliEntrypoint } from "../web/dashboard-daemon.js";
 import { handleWebConsoleApiRequest, handleApiRequest } from "../web/dashboard-api.js";
 import { frameProtectionHeaders } from "../web/self-edit-preview.js";
 import { isAnonymousApiExemption, isBrowserOnlyRoute, privilegedRouteDenial } from "../web/privileged-routes.js";
-import { audit, auditDenial, configureAudit } from "../web/audit.js";
+import { audit, auditDenial, configureAudit, currentAuditDbPath, setAuditSinkStatus } from "../web/audit.js";
 import { ServerModeGuard, handleHealth, isHealthRequest, isWildcardHost, resolveAccessSecret, splitList, validateAccessToken, type ServerPhase, type ServerRequestContext } from "../web/server-mode.js";
-import { listAudit } from "@0/engine/storage";
+import { hostname } from "node:os";
+import { listAudit, startAuditSinkFromEnv, type AuditSink } from "@0/engine/storage";
 import { GITHUB_WEBHOOK_PATH, GitHubWebhookReceiver, WebhookSecretStore } from "../web/github-webhook.js";
 
 type DashboardOptions = {
@@ -195,6 +196,17 @@ export function registerDashboardCommand(program: Command): void {
       // Never recover another live host's database while opening a second UI.
       assertLocalEngineAvailable(opts.dbPath);
       configureAudit(opts.dbPath);
+      // Optional SIEM push (ZERO_AUDIT_SINK_URL, environment only). A refused setting stops the start: a feed the operator thinks is on must not be silently off.
+      let auditSink: AuditSink | null = null;
+      if (serverMode) {
+        try {
+          auditSink = startAuditSinkFromEnv({ getDbPath: currentAuditDbPath, version: VERSION, host: hostname() });
+        } catch (error) {
+          console.error(`0: ${error instanceof Error ? error.message : "invalid audit sink setting"}`);
+          process.exit(1);
+        }
+        if (auditSink) { setAuditSinkStatus(() => auditSink!.status()); console.log(chalk.gray(`  Audit sink: sending the audit log to ${auditSink.status().label}`)); }
+      }
       const imported = runStartupImport();
       if (imported && !imported.alreadyDone && (imported.migrated.length || imported.notMigrated.length)) process.stderr.write(`Imported ${imported.migrated.length} item(s) from your earlier setup; ${imported.notMigrated.length} could not be migrated. See the Extensions page.\n`);
       const capabilities = ["sessions", "workflows", "schedules", "approvals", "events", "workspaces", "artifacts", "model-connections", "provider-relay", "operator-services", "process-controls", "learning", "workflow-engine"];
@@ -678,7 +690,7 @@ export function registerDashboardCommand(program: Command): void {
           void drained.then(() => {
           stopHostReconnect?.(); hostRepairAbort.abort();
           services.remoteProviderRelays.dispose();
-          void localProviderSessions.dispose().then(() => { modelBackends.dispose(); backends.dispose(); return engine?.dispose(); }).then(() => sentinels.dispose()).then(() => consoleGateway.closeAll()).then(() => workflows.dispose()).finally(() => {
+          void localProviderSessions.dispose().then(() => { modelBackends.dispose(); backends.dispose(); return engine?.dispose(); }).then(() => sentinels.dispose()).then(() => auditSink?.stop()).then(() => consoleGateway.closeAll()).then(() => workflows.dispose()).finally(() => {
             operator.dispose();
             closeSharedDbs();
             github.dispose();

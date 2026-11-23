@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { ServerResponse } from "node:http";
 import { closeAuditLog, listAudit } from "@0/engine/storage";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { audit, auditActor, auditConsoleRequest, auditDenial, configureAudit, describeConsoleAudit, handleAuditLogRequest } from "./audit.js";
+import { setAuditSinkStatus, audit, auditActor, auditConsoleRequest, auditDenial, configureAudit, describeConsoleAudit, handleAuditLogRequest } from "./audit.js";
 
 let dir = ""; let dbPath = "";
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), "zero-audit-web-")); dbPath = join(dir, "audit.db"); configureAudit(dbPath); });
@@ -72,5 +72,13 @@ describe("GET audit-log", () => {
     expect(handleAuditLogRequest("audit-log", "GET", new URLSearchParams(), { teamEnabled: true, role: "owner" })!.status).toBe(200);
     expect(handleAuditLogRequest("audit-log", "POST", new URLSearchParams(), solo)!.status).toBe(405);
     expect(handleAuditLogRequest("other", "GET", new URLSearchParams(), solo)).toBeNull();
+  });
+  it("adds the SIEM sink counters only while a sink runs", () => {
+    audit({ actor: "system", action: "a" });
+    const solo = { teamEnabled: false };
+    expect(handleAuditLogRequest("audit-log", "GET", new URLSearchParams(), solo)!.data).not.toHaveProperty("sink");
+    setAuditSinkStatus(() => ({ label: "https://siem.example.net", sent: 4, dropped: 1 }));
+    try { expect(handleAuditLogRequest("audit-log", "GET", new URLSearchParams(), solo)!.data).toMatchObject({ sink: { sent: 4, dropped: 1 } }); }
+    finally { setAuditSinkStatus(undefined); }
   });
 });

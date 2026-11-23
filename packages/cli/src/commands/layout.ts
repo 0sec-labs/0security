@@ -23,7 +23,7 @@ export function nest(parent: Command, group: string, registrars: readonly Regist
 export const NEW_HOME: Readonly<Record<string, string>> = {
   reports: "findings",
   connections: "models", usage: "models",
-  "audit-log": "config", team: "config", db: "config", github: "config",
+  "audit-log": "config", "audit-export": "config", team: "config", db: "config", github: "config",
   upgrade: "doctor", workbench: "doctor",
 };
 

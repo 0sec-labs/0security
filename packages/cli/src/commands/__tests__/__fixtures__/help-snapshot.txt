@@ -266,6 +266,22 @@ Commands:
   doctor [options] [checks...]  Check this machine and the engine, then suggest the next command
   help [command]                display help for command
 
+### 0 config audit-export (hidden)
+Usage: 0 config audit-export [options]
+
+Write the audit log as NDJSON, CEF or syslog lines for a SIEM
+
+Options:
+  --format <format>    ndjson (default), cef or syslog
+  --since <time>       Only events at or after this time: a duration (24h, 7d) or a date
+  --until <time>       Only events before this time
+  --limit <n>          Keep only the newest n matching events
+  --type <action...>   Only these actions or action prefixes, for example extension (repeatable, or
+                       comma separated)
+  -o, --output <file>  Write to this file with owner-only permissions instead of stdout
+  --follow             Keep running and print new events as they are written (Ctrl+C stops)
+  -h, --help           display help for command
+
 ### 0 config audit-log (hidden)
 Usage: 0 config audit-log [options]
 

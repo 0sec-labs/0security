@@ -11,6 +11,8 @@ import { getSettings } from "../state/settings-store.js";
 let auditDbPath: string | undefined;
 /** `undefined` selects the default control database, `null` turns auditing off. */
 export function configureAudit(dbPath?: string | null): void { auditDbPath = dbPath === null ? undefined : resolveOsecDbPath(dbPath); }
+/** The database the audit log currently writes to; undefined while auditing is off. */
+export function currentAuditDbPath(): string | undefined { return auditDbPath; }
 export function audit(event: AuditInput): void { if (auditDbPath) recordAudit(event, { dbPath: auditDbPath }); }
 
 export interface AuditCaller { engineRequest: boolean; teamEnabled?: boolean; displayName?: string; userId?: string }
@@ -107,13 +109,18 @@ export function auditDenial(req: Pick<IncomingMessage, "method">, pathname: stri
   audit({ actor: callerKind === "engine" ? "engine" : "operator (browser)", action: `access.${code}`, subject: pathname, outcome: "denied", detail: { callerKind, route: pathname, method: req.method ?? "GET", code, status: 403 } });
 }
 
+/** Set by the server while the SIEM sink runs, so the audit log API can show its status line. */
+let sinkStatus: (() => unknown) | undefined;
+export function setAuditSinkStatus(read: (() => unknown) | undefined): void { sinkStatus = read; }
+
 export function handleAuditLogRequest(path: string, method: string, query: URLSearchParams, caller: { teamEnabled: boolean; role?: string }): { status: number; data: unknown } | null {
   if (path !== "audit-log") return null;
   if (method !== "GET") return { status: 405, data: { error: "Use GET." } };
   if (caller.teamEnabled && caller.role !== "owner") return { status: 403, data: { code: "owner_required", error: "Only workspace owners can read the audit log." } };
   if (!auditDbPath) return { status: 200, data: { events: [], nextBefore: null } };
   const limit = Number(query.get("limit")); const before = Number(query.get("before"));
-  return { status: 200, data: listAudit({ ...(Number.isFinite(limit) && limit > 0 ? { limit } : {}), ...(Number.isFinite(before) && before > 0 ? { before } : {}), q: query.get("q") ?? "" }, { dbPath: auditDbPath }) };
+  const page = listAudit({ ...(Number.isFinite(limit) && limit > 0 ? { limit } : {}), ...(Number.isFinite(before) && before > 0 ? { before } : {}), q: query.get("q") ?? "" }, { dbPath: auditDbPath });
+  return { status: 200, data: sinkStatus ? { ...page, sink: sinkStatus() } : page };
 }
 
 /** The reset replaced the database file: drop the stale handle, then log the reset as the first event of the fresh log. */

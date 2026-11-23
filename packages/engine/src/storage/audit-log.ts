@@ -28,6 +28,8 @@ const SECRET_VALUE: readonly RegExp[] = [
 
 export function isSecretName(name: string): boolean { return SECRET_KEY.test(name); }
 
+/** The redaction every audit text field goes through: secret-looking values become [redacted], then the field is truncated. */
+export function scrubAuditText(value: string): string { return scrub(value); }
 function scrub(value: string): string {
   let out = value;
   for (const pattern of SECRET_VALUE) out = out.replace(pattern, "[redacted]");
@@ -116,4 +118,53 @@ export function listAudit(query: AuditQuery = {}, target?: AuditTarget): AuditPa
     });
     return { events: page, nextBefore: rows.length > limit ? page.at(-1)!.id : null };
   } catch { return { events: [], nextBefore: null }; }
+}
+
+export interface AuditRangeQuery {
+  /** Inclusive ISO lower bound on the event time. */
+  since?: string;
+  /** Exclusive ISO upper bound on the event time. */
+  until?: string;
+  /** Exact action names or dotted prefixes: `extension` matches `extension.install`. */
+  types?: readonly string[];
+  /** Only events with a larger id. */
+  afterId?: number;
+  limit?: number;
+}
+
+const rowToEvent = (row: Record<string, unknown>): AuditEvent => {
+  let detail: Record<string, unknown> = {};
+  try { detail = JSON.parse(String(row.detail_json)) as Record<string, unknown>; } catch { /* keep empty */ }
+  return { id: Number(row.id), ts: String(row.ts), actor: String(row.actor), action: String(row.action), subject: String(row.subject), outcome: row.outcome as AuditOutcome, detail };
+};
+
+/**
+ * Oldest first. With `afterId` the limit keeps the oldest matches (resume a stream); otherwise it keeps the newest
+ * matches, still returned oldest first. Throws when the log cannot be read, unlike listAudit.
+ */
+export function queryAuditEvents(query: AuditRangeQuery = {}, target?: AuditTarget): AuditEvent[] {
+  const { db } = open(resolvePath(target));
+  const where: string[] = []; const args: unknown[] = [];
+  if (typeof query.afterId === "number" && Number.isFinite(query.afterId)) { where.push("id > ?"); args.push(query.afterId); }
+  if (query.since) { where.push("ts >= ?"); args.push(query.since); }
+  if (query.until) { where.push("ts < ?"); args.push(query.until); }
+  const types = (query.types ?? []).map(type => type.trim()).filter(Boolean);
+  if (types.length) {
+    where.push(`(${types.map(() => "(action = ? OR action LIKE ? ESCAPE '\\')").join(" OR ")})`);
+    for (const type of types) args.push(type, `${type.replace(/[\\%_]/g, "\\$&")}.%`);
+  }
+  const limit = query.limit !== undefined && Number.isSafeInteger(query.limit) && query.limit > 0 ? query.limit : undefined;
+  const newest = limit !== undefined && query.afterId === undefined;
+  const sql = `SELECT id, ts, actor, action, subject, outcome, detail_json FROM audit_events ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY id ${newest ? "DESC" : "ASC"}${limit !== undefined ? " LIMIT ?" : ""}`;
+  const rows = db.prepare(sql).all(...args, ...(limit !== undefined ? [limit] : [])) as Array<Record<string, unknown>>;
+  const events = rows.map(rowToEvent);
+  return newest ? events.reverse() : events;
+}
+
+/** The newest event id, or 0 when the log is empty or unreadable. */
+export function latestAuditId(target?: AuditTarget): number {
+  try {
+    const row = open(resolvePath(target)).db.prepare("SELECT MAX(id) AS id FROM audit_events").get() as { id?: number | null } | undefined;
+    return Number(row?.id ?? 0) || 0;
+  } catch { return 0; }
 }
