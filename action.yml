@@ -1,5 +1,5 @@
 name: 0 security scan
-description: Scan a pull request with 0 and upload the findings to GitHub code scanning.
+description: Scan a pull request with 0 and upload the findings to GitHub code scanning. Can also generate and check an SBOM.
 author: 0sec-labs
 branding:
   icon: shield
@@ -9,7 +9,7 @@ inputs:
     description: "Release of 0 to install, for example 0.41.0. Pin it: the binary is checked against that release's checksums."
     required: true
   target:
-    description: Folder to scan, relative to the workspace.
+    description: Folder to scan, relative to the workspace. It must stay inside the workspace.
     default: "."
   diff-base:
     description: "Git ref to compare against. On a pull request it defaults to the base branch, so only the change is reviewed. Empty elsewhere scans the whole folder."
@@ -32,13 +32,55 @@ inputs:
   github-token:
     description: Token used to upload to code scanning.
     default: ${{ github.token }}
+  mode:
+    description: "scan (default) reviews the code with a model. sbom generates a CycloneDX SBOM from lockfiles, checks it against known advisories and uploads it as an artifact. In sbom mode only target, upload, fail-on, licenses-preset and github-token apply."
+    default: scan
+  scanner:
+    description: "Pre-pass scanners, comma separated: foxguard, semgrep, opengrep, gitleaks, trivy, osv-scanner, checkov. Empty uses the CLI default (foxguard)."
+    default: ""
+  rules:
+    description: "Semgrep or OpenGrep rule files or folders, comma separated, relative to the workspace. Needs scanner to include semgrep or opengrep. Take them from the base branch or a separate checkout, never from the pull request."
+    default: ""
+  tiers:
+    description: "Tier map file (YAML or JSON), relative to the workspace. Take it from the base branch or a separate checkout, never from the pull request."
+    default: ""
+  known-sarif:
+    description: "SARIF files from other tools (for example CodeQL or Semgrep), comma separated. The scan looks for what they missed and labels each finding new or already-known."
+    default: ""
+  only-new:
+    description: "With known-sarif: leave findings that match a known item out of the report and out of fail-on."
+    default: "false"
+  context:
+    description: "Background files for the scan (a threat model, notes on who may do what), comma separated. Lower priority than the scan's own instructions."
+    default: ""
+  policy:
+    description: "Markdown policy files or folders to check the code against, comma separated."
+    default: ""
+  skill:
+    description: Skill that holds the scan method. Empty uses the default.
+    default: ""
+  allow-partial:
+    description: "Pass the job when the scan stops before it reviews everything (budget, time limit, entry points not reached); the job warns and the report says partial. Default false: a partial scan fails the job."
+    default: "false"
+  licenses-preset:
+    description: "sbom mode: also check licenses against a preset (permissive or no-copyleft). A violation fails the job."
+    default: ""
 outputs:
   sarif:
-    description: Path of the SARIF file the scan wrote.
+    description: Path of the SARIF file the step wrote.
     value: ${{ steps.scan.outputs.sarif }}
   exit-code:
-    description: "Exit code of the scan: 0 done, 1 findings at or above fail-on or the scan failed, 2 usage error, 3 not finished: stopped at the budget or time limit, or entry points not reached (partial). The action does not fail the job on 3."
+    description: "Exit code of the scan: 0 done, 1 findings at or above fail-on or the scan failed, 2 usage error, 3 not finished (partial). With allow-partial the scan exits 0 or 1 on a partial run, and status says partial."
     value: ${{ steps.scan.outputs.code }}
+  status:
+    description: "How the scan ended: complete, partial, skipped, prepass_only or failed."
+    value: ${{ steps.scan.outputs.status }}
+  coverage:
+    description: One neutralised sentence on what the scan reviewed.
+    value: ${{ steps.scan.outputs.coverage }}
+  sbom:
+    description: Path of the CycloneDX SBOM (sbom mode).
+    value: ${{ steps.scan.outputs.sbom }}
 runs:
   using: composite
   steps:
@@ -58,47 +100,58 @@ runs:
       id: scan
       shell: bash
       env:
+        MODE: ${{ inputs.mode }}
         TARGET: ${{ inputs.target }}
         DIFF_BASE: ${{ inputs.diff-base }}
         MODEL: ${{ inputs.model }}
         BUDGET: ${{ inputs.budget }}
         PASSES: ${{ inputs.passes }}
         FAIL_ON: ${{ inputs.fail-on }}
+        UPLOAD: ${{ inputs.upload }}
+        SCANNER: ${{ inputs.scanner }}
+        RULES: ${{ inputs.rules }}
+        TIERS: ${{ inputs.tiers }}
+        KNOWN_SARIF: ${{ inputs.known-sarif }}
+        ONLY_NEW: ${{ inputs.only-new }}
+        CONTEXT: ${{ inputs.context }}
+        POLICY: ${{ inputs.policy }}
+        SKILL: ${{ inputs.skill }}
+        ALLOW_PARTIAL: ${{ inputs.allow-partial }}
+        LICENSES_PRESET: ${{ inputs.licenses-preset }}
+        HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
       run: |
-        set -uo pipefail
-        sarif="$RUNNER_TEMP/0.sarif"
-        args=(scan "$TARGET" --format sarif -o "$sarif" --budget "$BUDGET" --passes "$PASSES")
-        base="$DIFF_BASE"
-        if [ -z "$base" ] && [ -n "${GITHUB_BASE_REF:-}" ]; then
-          git fetch --no-tags --depth=1 origin "+refs/heads/${GITHUB_BASE_REF}:refs/remotes/origin/${GITHUB_BASE_REF}"
-          base="origin/${GITHUB_BASE_REF}"
-        fi
-        if [ -n "$base" ]; then args+=(--diff "$base"); fi
-        if [ -n "$MODEL" ]; then args+=(--model "$MODEL"); fi
-        if [ -n "$FAIL_ON" ]; then args+=(--fail-on "$FAIL_ON"); fi
-        0 "${args[@]}"
-        code=$?
-        echo "sarif=$sarif" >> "$GITHUB_OUTPUT"
-        echo "code=$code" >> "$GITHUB_OUTPUT"
-        # Upload first, then let the last step decide whether the job fails.
-        exit 0
+        case "$MODE" in
+          scan|sbom) bash "$GITHUB_ACTION_PATH/scripts/action-run.sh" "$MODE" ;;
+          *) echo "::error::Input mode must be scan or sbom."; exit 2 ;;
+        esac
 
     - name: Upload to code scanning
-      if: ${{ inputs.upload == 'true' && steps.scan.outputs.code != '2' }}
+      if: ${{ inputs.upload == 'true' && steps.scan.outputs.code != '2' && steps.scan.outputs.sarif != '' }}
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github-token }}
         SARIF: ${{ steps.scan.outputs.sarif }}
-      run: 0 findings upload "$SARIF" --tool "0"
+        MODE: ${{ inputs.mode }}
+      run: |
+        tool="0"
+        if [ "$MODE" = sbom ]; then tool="0 sbom"; fi
+        0 findings upload "$SARIF" --tool "$tool"
+
+    - name: Upload the SBOM
+      if: ${{ inputs.mode == 'sbom' && steps.scan.outputs.sbom != '' && steps.scan.outputs.code != '2' }}
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      with:
+        name: 0-sbom
+        path: ${{ steps.scan.outputs.sbom }}
 
     - name: Result
       shell: bash
       env:
+        MODE: ${{ inputs.mode }}
         CODE: ${{ steps.scan.outputs.code }}
-      run: |
-        case "$CODE" in
-          0) ;;
-          3) echo "::warning::The scan stopped before it reviewed everything, so the findings are partial. The job does not fail on this. Raise budget, or continue with: 0 scan <folder> --resume latest" ;;
-          1) echo "::error::The scan found a finding at or above fail-on, or it failed. See the log above."; exit 1 ;;
-          *) echo "::error::The scan exited with code $CODE."; exit 1 ;;
-        esac
+        STATUS: ${{ steps.scan.outputs.status }}
+        FAIL_ON: ${{ inputs.fail-on }}
+        ADVISORIES_CODE: ${{ steps.scan.outputs.advisories-code }}
+        LICENSES_CODE: ${{ steps.scan.outputs.licenses-code }}
+      run: bash "$GITHUB_ACTION_PATH/scripts/action-run.sh" result

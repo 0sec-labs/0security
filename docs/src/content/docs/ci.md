@@ -5,7 +5,7 @@ description: Scan only what a pull request changes with the 0 Action, and show t
 
 The 0 Action scans the files a pull request changes and uploads the result to GitHub code scanning. Add it to a workflow to see findings in the repository's **Security** tab and as annotations on the pull request.
 
-The action needs no server. It installs a verified release of `0`, runs `0 scan --diff`, and uploads the SARIF file with `0 findings upload`.
+The action needs no server. It installs a verified release of `0`, runs `0 scan --diff`, and uploads the SARIF file with `0 findings upload`. With `mode: sbom` it checks your dependencies instead.
 
 ```yaml
 name: 0 security
@@ -19,7 +19,10 @@ jobs:
   scan:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
       - uses: 0sec-labs/0security@v0.43.0
         with:
           version: 0.43.0 # Pin the CLI
@@ -28,71 +31,301 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 ```
 
-Set the key of the provider for your model (see [Models](/models/)). The default model needs `OPENAI_API_KEY`.
+Set the key of the provider for your model (see [Models](/models/)). The default model needs `OPENAI_API_KEY`. Put the key in a repository secret and pass it as `env` on the action step, as above. The `sbom` mode needs no key.
 
 ## What the action does
 
 1. Installs the release you pin in `version`. The installer refuses a download whose checksum does not match the release's `checksums.txt`.
-2. Compares the pull request with its base branch and scans only the files that differ and the code they connect to. This costs a fraction of a full scan. A FoxGuard pattern scan runs first, and its hits go to the scan as leads.
-3. Uploads the findings to code scanning with `0 findings upload`. Alerts match by fingerprint, so pushing again updates them.
-4. Fails the job when a finding is at or above `fail-on`. The upload happens first, so the findings show either way.
+2. Checks every input. A value with a space, a newline or a leading dash is refused, and so is a path that leaves the workspace. Inputs reach the shell only as environment variables and go to `0` as separate arguments.
+3. Compares the pull request with its base branch and scans only the files that differ and the code they connect to. This costs a fraction of a full scan. A FoxGuard pattern scan runs first, and its hits go to the scan as leads.
+4. Uploads the findings to code scanning with `0 findings upload`. Alerts match by fingerprint, so pushing again updates them.
+5. Writes a job summary and sets the outputs.
+6. Fails the job when a finding is at or above `fail-on`, or when the scan is partial and `allow-partial` is `false`. The upload happens first, so the findings show either way.
 
 ## Inputs
 
 | Input | Default | Meaning |
 | --- | --- | --- |
 | `version` | required | Release of 0 to install, for example `0.41.0`. |
-| `target` | `.` | Folder to scan, relative to the workspace. |
+| `mode` | `scan` | `scan` reviews the code with a model. `sbom` checks dependencies (see [SBOM mode](#sbom-mode)). |
+| `target` | `.` | Folder to scan, relative to the workspace. It must stay inside the workspace. |
 | `diff-base` | the pull request's base branch | Git ref to compare with. Outside a pull request, empty scans the whole folder. |
 | `model` | the default model | Model for the scan thread. |
-| `budget` | `5` | Stop at this many USD. The findings so far are kept and the job warns that they are partial. |
-| `passes` | `1` | Scan this many times and merge the findings; the budget is split between them. |
+| `budget` | `5` | Stop at this many USD. The findings so far are kept. |
+| `passes` | `1` | Scan this many times (1 to 5) and merge the findings; the budget is split between them. |
 | `fail-on` | none | Fail at or above this severity: `critical`, `high`, `medium`, `low` or `info`. |
+| `scanner` | the CLI default (`foxguard`) | Pre-pass scanners, comma separated: `foxguard`, `semgrep`, `opengrep`, `gitleaks`, `trivy`, `osv-scanner`, `checkov`. A scanner other than `foxguard` must be installed on the runner. |
+| `rules` | none | Semgrep or OpenGrep rule files or folders, comma separated. Needs `scanner` to include `semgrep` or `opengrep`. |
+| `tiers` | none | Tier map file. See [Set the effort per repository](#set-the-effort-per-repository). |
+| `known-sarif` | none | SARIF files from other tools, comma separated. See [Get a second opinion](#get-a-second-opinion). |
+| `only-new` | `false` | With `known-sarif`: leave findings that match a known item out of the report and out of `fail-on`. |
+| `context` | none | Background files for the scan, such as a threat model, comma separated. |
+| `policy` | none | Markdown policy files or folders to check the code against, comma separated. |
+| `skill` | the default skill | Skill that holds the scan method. |
+| `allow-partial` | `false` | Pass the job when the scan stops before it reviews everything. |
+| `licenses-preset` | none | `sbom` mode: also check licenses against `permissive` or `no-copyleft`. |
 | `upload` | `true` | Upload to code scanning. Needs `security-events: write`. |
 | `github-token` | the job's token | Token used for the upload. |
 
-Outputs are `sarif` (the file path) and `exit-code`. The exit code is 0 when the scan finishes, 1 when a finding is at or above `fail-on` or the scan fails, 2 for a usage error and 3 when the scan stops before it reviews everything.
+List inputs and path inputs use only letters, digits and `. _ / + @ = -`. A path with a space is refused. Rename the file.
 
-Exit code 3 means the scan is not finished, not that it failed. The action does not fail the job on it. It still uploads the findings so far, and the job log shows a warning that they are partial. A pull request diff is usually small enough to finish within the default budget. For a whole large folder, check the log for the warning, and run `0 scan <folder> --resume latest` with a higher `budget` to finish it. `fail-on` still fails the job on a finding in the part that was reviewed.
+## Outputs
+
+| Output | Meaning |
+| --- | --- |
+| `sarif` | Path of the SARIF file. |
+| `exit-code` | `0` done, `1` a finding at or above `fail-on` or the scan failed, `2` usage error, `3` not finished. |
+| `status` | `complete`, `partial`, `skipped`, `prepass_only` or `failed`. |
+| `coverage` | One sentence on what the scan reviewed, for example `reviewed 41 of 57 entry points; 16 not reached (budget)`. |
+| `sbom` | Path of the CycloneDX file in `sbom` mode. |
+
+`status` is `partial` when the budget or time limit stopped the scan, or when entry points were not reached. It is `skipped` when a tier map skips the repository, and `prepass_only` when the tier runs only the pattern scanners. The text in `coverage` comes from the CLI's own counts, reduced to letters, digits and basic punctuation.
+
+The job summary lists the status, the coverage sentence, the counts by severity, the tier and, with `known-sarif`, how many findings are new and how many were already known. It never shows text the model wrote, so a scanned file cannot put an `@mention` or an issue reference into it.
+
+## Partial scans
+
+A scan is partial when it stops before it reviews everything. The exit code is 3 and `status` is `partial`.
+
+With `allow-partial: false` (the default), the action uploads the findings so far, then fails the job. A partial scan is a scan you cannot rely on, so the failure makes it visible.
+
+With `allow-partial: true`, the action passes `--allow-partial` to `0`. The scan exits by its findings alone, so a partial run exits 0, or 1 when a finding reaches `fail-on`. The job logs a warning, and `status` is `partial`. To finish the review, run `0 scan <folder> --resume latest` with a higher `budget`. A pull request diff is usually small enough to finish within the default budget. `fail-on` still fails the job on a finding in the part that was reviewed.
 
 ## Add your own rules
 
-Pass Semgrep rules you already write with `--rules`. The rules must not come from the pull request, because a change could delete the rule that catches its own bug. Check out the base branch or a separate repository and point to it:
+Pass Semgrep rules you already write with `rules`. Rules, tier maps, context, policies and known-result files steer the scan. Do not take them from the pull request, because a change could delete the rule that catches its own bug. Check out the base branch or a separate repository to a path of its own and point to it:
 
 ```yaml
       - uses: actions/checkout@v4
         with:
           repository: your-org/security-rules
-          path: rules
+          path: security-rules
+      - uses: 0sec-labs/0security@v0.43.0
+        with:
+          version: 0.43.0 # Pin the CLI
+          scanner: semgrep
+          rules: security-rules/semgrep
 ```
 
-```bash
-0 scan . --diff origin/main --scanner semgrep --rules rules/semgrep
-```
+The action enforces this when it can tell. If one of these files sits in the scanned repository and the checkout is the pull request's own code, the action fails the job for a fork pull request and for `pull_request_target`. For a same-repository `pull_request` it logs a warning. A checkout of the base branch is not refused.
 
 See [scan](/commands/#scan) for the rule format and how findings are marked.
 
 ## Set the effort per repository
 
-A tier map decides how much a repository gets scanned, or whether it is skipped. See [scan](/commands/#set-the-effort-per-repository) for the file. In CI the tier file must not come from the pull request, because a change could lower its own tier and skip its own scan. Read it from the base branch or a separate checkout:
+A tier map decides how much a repository gets scanned, or whether it is skipped. See [scan](/commands/#set-the-effort-per-repository) for the file. In CI the tier file must not come from the pull request, because a change could lower its own tier and skip its own scan. Read it from a separate checkout:
 
 ```yaml
       - uses: actions/checkout@v4
         with:
           repository: your-org/security-config
           path: security-config
+      - uses: 0sec-labs/0security@v0.43.0
+        with:
+          version: 0.43.0 # Pin the CLI
+          tiers: security-config/scan-tiers.yaml
 ```
 
-```bash
-0 scan . --diff origin/main --tiers security-config/scan-tiers.yaml --fail-on-skip
+A skipped scan passes with `status: skipped` and a notice in the log. The job summary shows the tier and why it applied.
+
+## Get a second opinion
+
+Give the scan what another tool already found. It looks for other classes of bug and labels each finding `new` or `already-known`. Download the other tool's SARIF into the workspace first, then pass its path:
+
+```yaml
+          known-sarif: results/codeql.sarif
+          only-new: true
 ```
 
-The Action has no tier input, so run the CLI steps yourself as in the examples below. 0 warns when the tier file sits inside the folder it scans. `--fail-on-skip` fails the job when the tier skips the scan, so a missing scan is visible.
+`only-new` leaves matched findings out of the report and out of `fail-on`. Without it, every finding stays and carries its label.
+
+## SBOM mode
+
+`mode: sbom` generates a CycloneDX SBOM from the lockfiles in `target`, checks every component against the public OSV database and uploads the advisories to code scanning as `0 sbom`. It also uploads the SBOM as the `0-sbom` artifact. It needs no model key.
+
+```yaml
+      - uses: 0sec-labs/0security@v0.43.0
+        with:
+          version: 0.43.0 # Pin the CLI
+          mode: sbom
+          licenses-preset: no-copyleft
+          fail-on: high
+```
+
+Advisories only warn unless `fail-on` is set, and then any advisory fails the job. A license the `licenses-preset` does not allow always fails the job. In this mode only `target`, `upload`, `fail-on`, `licenses-preset` and `github-token` apply. The package names in the SBOM go to `api.osv.dev` for the lookup.
+
+## Examples
+
+Each example pins the action by release. For a stricter pin, replace the tag with the release's full commit SHA and keep the tag in a comment. The permissions are the least each job needs. The model key goes in a repository secret, passed as `env` on the action step.
+
+### Scan a pull request and fail on high
+
+The job needs `contents: read` and `security-events: write`. It needs no other permission.
+
+```yaml
+name: 0 security
+on: pull_request
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: 0sec-labs/0security@v0.43.0 # pin to the release's commit SHA for a stricter pin
+        with:
+          version: 0.43.0 # Pin the CLI
+          fail-on: high
+          budget: "3"
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+```
+
+### Scan the whole repository every night
+
+A nightly full scan can run out of budget on a large repository. With `allow-partial` the job stays green and the summary says what was not reached. To finish the review, run `0 scan . --resume latest` on a machine that kept the earlier scan's state in `~/.0`. A hosted runner starts clean, so resume suits a self-hosted runner or a local run. It refuses when the git HEAD changed unless you pass `--force`.
+
+```yaml
+name: 0 nightly scan
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: zero
+        uses: 0sec-labs/0security@v0.43.0 # pin to the release's commit SHA for a stricter pin
+        with:
+          version: 0.43.0 # Pin the CLI
+          budget: "20"
+          fail-on: critical
+          allow-partial: true
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      - if: steps.zero.outputs.status == 'partial'
+        env:
+          COVERAGE: ${{ steps.zero.outputs.coverage }}
+        run: echo "Partial scan. $COVERAGE"
+```
+
+### Check dependencies and licenses
+
+```yaml
+name: 0 dependencies
+on:
+  pull_request:
+  schedule:
+    - cron: "17 5 * * *"
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  sbom:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: 0sec-labs/0security@v0.43.0 # pin to the release's commit SHA for a stricter pin
+        with:
+          version: 0.43.0 # Pin the CLI
+          mode: sbom
+          licenses-preset: no-copyleft
+          fail-on: high
+```
+
+### Add a second opinion to CodeQL or Semgrep
+
+Run the other tool first, keep its SARIF file, and pass it to 0. This example uses a SARIF file the earlier step wrote to `results/`.
+
+```yaml
+name: 0 second opinion
+on: pull_request
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # Your existing Semgrep or CodeQL step runs here and writes results/other-tool.sarif.
+      - uses: 0sec-labs/0security@v0.43.0 # pin to the release's commit SHA for a stricter pin
+        with:
+          version: 0.43.0 # Pin the CLI
+          known-sarif: results/other-tool.sarif
+          only-new: true
+          fail-on: high
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+```
+
+### Scan with a tier map
+
+The tier map comes from a separate repository, so a pull request cannot lower its own tier.
+
+```yaml
+name: 0 tiered scan
+on: pull_request
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: your-org/security-config
+          path: security-config
+          persist-credentials: false
+      - uses: 0sec-labs/0security@v0.43.0 # pin to the release's commit SHA for a stricter pin
+        with:
+          version: 0.43.0 # Pin the CLI
+          tiers: security-config/scan-tiers.yaml
+          fail-on: high
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+```
+
+If the second repository is private, give its checkout a token that can read it.
 
 ## Limits
 
 - Only pull requests from the same repository work. A fork's pull request has no access to your secrets, so it cannot run a model. Do not use `pull_request_target` to get around this: it runs a model on untrusted code with your key.
-- Use the default checkout. On a pull request it checks out the merge commit, so comparing with the base branch gives exactly the change.
+- Use the default checkout ref. On a pull request it checks out the merge commit, so comparing with the base branch gives exactly the change.
+- With `fetch-depth: 0` the checkout already has the base branch, so you can set `persist-credentials: false`. With a shallow checkout the action fetches the base branch itself and needs the persisted credentials.
 - Code scanning needs a supported plan. On private repositories it is part of GitHub Code Security.
 - A clean run means the model found nothing. It does not mean the code is safe. The report says what the scan covered.
 
@@ -284,7 +517,7 @@ The pull request variables depend on the repository host Azure Pipelines builds,
 
 ## Keep an SBOM and check it for advisories
 
-The EU Cyber Resilience Act expects a manufacturer to keep an SBOM and check it for advisories regularly. A scheduled job can regenerate the SBOM from your lockfiles and fail when a component has a known advisory. The lookup uses the public OSV database.
+The EU Cyber Resilience Act expects a manufacturer to keep an SBOM and check it for advisories regularly. A scheduled job can regenerate the SBOM from your lockfiles and fail when a component has a known advisory. The lookup uses the public OSV database. The Action does the same with `mode: sbom` (see [SBOM mode](#sbom-mode)); the steps below do it without the Action.
 
 ```yaml
 name: dependency advisories
