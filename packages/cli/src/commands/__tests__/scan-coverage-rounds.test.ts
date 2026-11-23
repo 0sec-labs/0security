@@ -72,8 +72,8 @@ describe("follow-up rounds for files a thread did not open", () => {
     expect(followUps[0]!.text).not.toContain("- routes/r0.js");
     expect(followUps[0]!.text).toContain("Open and review each one now, then add any findings and update your summary.");
     const json = JSON.parse(h.out.join(""));
-    expect(json.fileCoverage).toMatchObject({ inScope: 4, opened: 4, unopenedCount: 0, rounds: { allowed: 2, used: 1 } });
-    expect(h.err.join("\n")).toMatch(/follow-up round 1 of 2/);
+    expect(json.fileCoverage).toMatchObject({ inScope: 4, opened: 4, unopenedCount: 0, rounds: { allowed: 1, used: 1 } });
+    expect(h.err.join("\n")).toMatch(/follow-up round 1 of 1/);
   });
 
   it("asks nothing when the thread opened every file", async () => {
@@ -135,7 +135,7 @@ describe("batched scan with files that were not opened", () => {
     await runScan(big(), opts({ ...batched }), h.deps);
     const json = JSON.parse(h.out.join(""));
     expect(json.coverage.statement).toBe("reviewed 4 of 6 entry points; 2 not reached (not opened); 2 files never opened");
-    expect(json.coverage).toMatchObject({ complete: false, inScope: 6, opened: 4, unopenedCount: 2, rounds: { allowed: 2, used: 2 } });
+    expect(json.coverage).toMatchObject({ complete: false, inScope: 6, opened: 4, unopenedCount: 2, rounds: { allowed: 1, used: 1 } });
     expect(json.coverage.pendingUnits.map((unit: { path: string; reason: string }) => `${unit.path} ${unit.reason}`)).toEqual(["routes/r4.js not opened", "routes/r5.js not opened"]);
     expect(json.status).toBe("partial");
     expect(process.exitCode).toBe(3);

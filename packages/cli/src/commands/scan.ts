@@ -43,7 +43,7 @@ const DEFAULT_TIMEOUT_SECONDS = 3600;
 export const DEFAULT_BATCH_TIMEOUT_SECONDS = 900;
 const MAX_RETRIES = 5;
 /** Follow-up rounds that ask a thread to open the source files it skipped (`--coverage-rounds`). */
-export const DEFAULT_COVERAGE_ROUNDS = 2;
+export const DEFAULT_COVERAGE_ROUNDS = 1;
 const MAX_COVERAGE_ROUNDS = 5;
 /** A follow-up round starts only with this much of the thread's budget left (a share of it, and never less than the floor). */
 const ROUND_BUDGET_SHARE = 0.15;

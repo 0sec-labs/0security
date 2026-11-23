@@ -186,7 +186,7 @@ One thread cannot review every entry point of a big repository, and it cannot te
 3. It runs one thread per batch of entry points, one after another. Each thread gets its batch, a short summary of the whole folder, and your `--context` and `--policy` text. The budget left is split between the batches not yet run, with a small minimum.
 4. A batch counts as reviewed only when its thread finished normally. A batch that stopped at its budget, hit a time limit or failed stays pending.
 5. A batch that fails because the connection dropped or the provider timed out, was rate limited or returned a server error runs again, up to 2 times (`--retries`). The failed attempt's findings are kept and its cost counts against the budget. A batch that runs past 900 seconds (`--batch-timeout`) is cancelled and stays pending with the reason `timeout`. The next batch still runs.
-6. A batch counts as reviewed for the units whose files its thread opened. If the thread skipped files, 0 asks it in the same thread to open them, up to 2 times (`--coverage-rounds`). A unit whose files stay unopened stays pending with the reason `not opened`, and `--resume` runs it again.
+6. A batch counts as reviewed for the units whose files its thread opened. If the thread skipped files, 0 asks it in the same thread to open them once (`--coverage-rounds`). A unit whose files stay unopened stays pending with the reason `not opened`, and `--resume` runs it again.
 
 The report says plainly how much was reviewed:
 

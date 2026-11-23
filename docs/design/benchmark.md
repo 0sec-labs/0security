@@ -340,6 +340,39 @@ NodeGoat shows no change (p 0.83 strict, 1.00 reviewed), more unmatched findings
 Result: no variant was kept. None improved recall on DVNA beyond the spread between repeats, and ABC did not improve NodeGoat, the second validation app. The shipped skill is unchanged. The synthetic fixtures were not rerun, because nothing changed.
 
 Marking a unit reviewed only when the model opened its files is not reliable. The scan reads files through `bash` (cat, sed, grep) and delegates to helper threads through `spawn_agent`. A saved thread lists those tool calls, but whether a command opened a file can only be guessed from the command text, and helper threads are separate. The earlier DVNA check found the missed files were opened in 18 of 19 scans, so a gate on opening would not have caught those misses.
+### Asking a thread to open the files it skipped
+
+`--coverage-rounds` sends a thread a follow-up that names the source files it never opened. This measurement asks whether that raises the share of files opened, what it costs, and whether recall moves. Both arms ran in the same time window, fresh `HOME` per scan, default model, `--prepass off`, scored with the harness's matcher and my review rules (the same functions as `--report`). The baseline arm used `--coverage-rounds 0`; the enforcement arm used 2 rounds allowed.
+
+One thread (`--batches off`, budget 1). Failed scans (no report) are left out of the means and counted:
+
+| app | arm | scans | files opened | recall strict | recall reviewed | cost per scan | rounds sent | unmatched findings |
+|---|---|---|---|---|---|---|---|---|
+| DVNA (15 files) | baseline | 5 (+1 failed) | 92% (73-100) | 66% (65-71) | 80% (71-88) | $0.087 | 0 | 2.0 |
+| DVNA | enforced | 6 | 100% (100) | 62% (53-71) | 76% (71-82) | $0.117 | 4 of 6 scans, 1 each | 2.7 |
+| NodeGoat (27 files) | baseline | 5 (+1 failed) | 91% (85-96) | 64% (47-76) | 68% (53-82) | $0.132 | 0 | 5.0 |
+| NodeGoat | enforced | 6 | 100% (100) | 61% (47-71) | 66% (53-76) | $0.169 | 5 of 6 scans, 1 each | 7.8 |
+| VAmPI (11 files) | baseline | 4 | 100% | 67% | 67% | $0.010 | 0 | 1.5 |
+| VAmPI | enforced | 4 | 100% | 72% (67-78) | 72% (67-78) | $0.012 | 0 | 1.8 |
+
+What this shows:
+
+- Files opened rose from 91 and 92% to 100% on DVNA and NodeGoat. All 9 follow-ups that were sent got the missing files opened, in one round each. No scan needed a second round, and no thread ignored a follow-up. In the one transcript I read in full, the model opened the four named files and recorded a new finding on one.
+- Cost per scan rose 1.3 times on DVNA and 1.3 times on NodeGoat, under the 2 times limit.
+- Recall did not change beyond the spread between repeats. Strict recall was 4 points lower on DVNA and NodeGoat and 5 points higher on VAmPI; reviewed recall moved the same way. Opening more files did not find more planted bugs here, which fits the finding above that the missed files were usually opened already.
+- Decoy hits stayed at 0 in both arms. Unmatched findings rose on NodeGoat (5.0 to 7.8); I did not read them, so I cannot say whether they are real extra issues or noise.
+
+The detector is the one the scan uses. A second count, which only looks for file names written in tool calls, gave lower shares for the enforced arm (72% on NodeGoat) because the model reads files through globs such as `app/data/*.js` in a loop, which that count cannot see. I checked one such transcript by hand: the glob loop did print the files. Treat the second count as a lower bound.
+
+The threads did not always open files themselves: the model hands entry points to worker threads and names the files in the task. The check counts a file named in such a task as opened.
+
+Default batched scans (`--batches auto`, `--prepass off`, budget 2, 3 scans per arm and app): batched threads are given their files, and every batch opened them, so no round was sent in 12 of 12 scans. Their recall and cost are not a fair comparison: 7 of 12 scans reached the 900 second limit because four scans ran at once alongside other work. Treat the batched rows as showing only that the check did not trigger. I did not run VAmPI batched.
+
+Synthetic fixtures, 2 repeats per arm, one thread: recall 80% (baseline) against 82% (enforced) over six fixtures. False positives on the two clean fixtures were 1.5 and 1.5 for the baseline, 2.0 and 1.0 for the enforced arm. I did not run `medium-app`. The default is 1 round because one round closed every gap measured.
+
+Finding about the earlier guard: the status poll returns only the last 20 messages of a thread, so the earlier shallow-review check saw only a part of the thread. The follow-up check reads the whole transcript once after the thread ends.
+
+Spend for this section: about $6.
 
 ### What this does not prove
 
