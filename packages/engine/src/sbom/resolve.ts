@@ -210,7 +210,7 @@ export async function resolveJvmDependencies(folder: string, options: ResolveOpt
       (projects.length > 1 ? warnings : failures).push(`gradle (${label}): ${message}`);
     }
   }
-  if (!lists.length) throw new ResolveFailedError(failures.join("\n") || "No dependency tree was produced.");
+  if (!lists.length) throw new ResolveFailedError([...failures, ...warnings].join("\n") || "No dependency tree was produced.");
   warnings.push(...failures);
   return { components: mergeComponents(lists), tools, warnings };
 }
