@@ -8,6 +8,18 @@ export const RELEASES_URL = "https://github.com/0sec-labs/0security/releases";
 
 export const RELEASES: readonly Release[] = [
   {
+    version: "0.43.0",
+    date: "2026-11-22",
+    title: "Scan tiers, safer extensions, deeper dependency checks",
+    summary: "Operators can set how deep each repository is scanned and compare a scan with other tools' findings. Extensions run in an OS sandbox, and Maven and Gradle projects resolve their dependency trees.",
+    highlights: [
+      { icon: "Gauge", title: "Scan tiers and second opinions", text: "An operator-owned tier map sets budget, depth or skip per repository. 0 scan --known tells the scan what other tools already found, and --only-new hides the repeats. 0 findings metrics shows what runs cost." },
+      { icon: "Wrench", title: "Fixes you can check", text: "0 findings fix --sandbox docker runs your checks in a container with no network. Pull requests follow your title, branch and label conventions, and 0 findings export-fixes reports what was proposed and merged. Accepted risks now need a reason and an expiry." },
+      { icon: "ShieldCheck", title: "Safer extensions and scanners", text: "Extension scripts and MCP servers can run in a macOS or Linux sandbox with the network off. Extension commands are checked more strictly, and the scanners ignore ignore-files and config inside the repository being scanned. Agent Skills folders load as skills." },
+      { icon: "ListChecks", title: "Dependencies and operations", text: "0 sbom generate --resolve reads Maven and Gradle trees from your own build tool, and 0 sbom licenses checks a license policy. Sentinels start on releases and finished checks, and 0 config audit-export sends the audit log to a SIEM." },
+    ],
+  },
+  {
     version: "0.42.0",
     date: "2026-11-22",
     title: "Fix findings, bring your own scanners, check dependencies",
