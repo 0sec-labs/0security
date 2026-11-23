@@ -177,7 +177,7 @@ export function findApprovalCommand(command: string): string | null {
       }
     }
     const exe = (words[0] ?? "").replace(/^.*\//, "");
-    if (!["0", "zero", "node"].includes(exe) && !/^0(\.js)?$/.test(exe)) continue;
+    if (!["0", "0security", "zero", "node"].includes(exe) && !/^0(security)?(\.js)?$/.test(exe)) continue;
     // `node /path/to/index.js skills ...`: the first plain word is the script, not the command group.
     const rest = words.slice(1).filter(w => !w.startsWith("-")).slice(exe === "node" ? 1 : 0);
     const [group, sub, sub2] = rest;

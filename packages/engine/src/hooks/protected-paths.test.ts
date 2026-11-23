@@ -63,6 +63,7 @@ describe("protected paths: text analysis", () => {
 
   it("flags approval-bearing CLI commands wherever they are in a pipeline", () => {
     for (const command of [
+      "0security skills extensions enable x --yes", "/usr/local/bin/0security plugin enable x", "sudo 0security skills add x --yes",
       "0 skills add github.com/x/y@" + "a".repeat(40) + " --yes --enable",
       "0 skills extensions enable x --yes", "0 skills extensions update x --yes --to abc", "0 skills extensions import --force",
       "FOO=1 0 skills extensions disable scope --yes", "cd /tmp && 0 plugin enable scope", "env 0 skills list foo --yes", "sudo 0 plugin disable scope",
