@@ -30,8 +30,11 @@ export async function mapWithConcurrency<T, R>(
 ): Promise<R[]> {
   const out = new Array<R>(items.length);
   let next = 0;
+  // A NaN limit (e.g. a bad parsed setting) would otherwise survive the clamp
+  // below, spawn zero workers and silently return an all-empty result.
+  const cap = Number.isNaN(limit) ? 1 : limit;
   const workers = Array.from(
-    { length: Math.max(1, Math.min(limit, items.length)) },
+    { length: Math.max(1, Math.min(cap, items.length)) },
     async () => {
       for (;;) {
         if (signal?.aborted) return;
