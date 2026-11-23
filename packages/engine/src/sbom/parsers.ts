@@ -16,6 +16,8 @@ export interface Component {
   dependsOn?: Array<{ name: string; version: string }>;
   /** Licenses exactly as the lockfile states them (an SPDX expression or free text); classified when the SBOM is written. */
   licenses?: string[];
+  /** Resolved by running the project's own build tool (`0 sbom generate --resolve`), not read from a declaration. */
+  resolved?: boolean;
 }
 export interface Hash { alg: "SHA-1" | "SHA-256" | "SHA-384" | "SHA-512"; content: string }
 

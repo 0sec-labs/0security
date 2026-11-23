@@ -27,7 +27,7 @@ export const OUTBOUND_PATTERNS = {
   fetch: /(?<![\w.#])(?:fetch|fetchImpl|doFetch|fetcher|fetchScoped|createPolicyFetch)\((?!\))|\?\? fetch\b|\bglobalThis\.fetch\b|this\.#?(?:fetchImpl|fetch)\(|\.fetchImpl\(/,
   nodeHttp: /import\s+(?!type)[^;]*\b(?:request|get)\b[^;]*from "node:https?"/,
   socket: /\bnet\.connect|createConnection|new WebSocket|new EventSource|XMLHttpRequest/,
-  process: /(?:spawn|execFile|execFileSync|spawnSync|execute|run|exec)\w*\(\s*"(?:gh|curl|wget|ssh|scp)"/,
+  process: /(?:spawn|execFile|execFileSync|spawnSync|execute|run|exec)\w*\(\s*"(?:gh|curl|wget|ssh|scp|mvn|gradle|docker)"/,
   gitNetwork: /"(?:clone|ls-remote|fetch|push|pull)"/,
 };
 

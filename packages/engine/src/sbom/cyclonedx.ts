@@ -23,6 +23,8 @@ export interface Bom {
 }
 /** Metadata property naming one declared dependency, profile, module, parent or BOM that was not analysed, and why. */
 export const UNRESOLVED_PROPERTY = "0:unresolved";
+/** Component property set to `true` when a build tool resolved the component (`0 sbom generate --resolve`). */
+export const RESOLVED_PROPERTY = "0:resolved";
 export type LicenseChoice = { license: { id: string } } | { license: { name: string } } | { expression: string };
 export interface LibraryComponent { type: "library"; "bom-ref": string; name: string; version: string; purl: string; scope?: "excluded"; hashes?: Hash[]; licenses?: LicenseChoice[]; properties?: Array<{ name: string; value: string }> }
 
@@ -114,7 +116,7 @@ function mergeFacts(into: Component, from: Component): void {
 }
 
 /** Build a CycloneDX 1.5 SBOM from the lockfiles under a folder. Sorted and de-duplicated, so the same lockfiles give the same SBOM. */
-export function generateSbom(folder: string, options: { name?: string; toolVersion: string; now?: Date; ai?: boolean }): SbomResult {
+export function generateSbom(folder: string, options: { name?: string; toolVersion: string; now?: Date; ai?: boolean; resolved?: Component[] }): SbomResult {
   const files = listFiles(folder);
   const locks: Found[] = [];
   for (const file of files) { const lock = LOCKFILES.find(candidate => candidate.file === basename(file.path)); if (lock) locks.push({ path: file.path, label: lock.label, parse: lock.parse }); }
@@ -164,8 +166,21 @@ export function generateSbom(folder: string, options: { name?: string; toolVersi
     summary.push({ path: relative(folder, file.path) || file.path, label: file.label, components: file.components.length });
     for (const component of file.components) add(component, (relative(folder, file.path) || file.path).split("\\").join("/"));
   }
+  // Components a build tool resolved replace what the declarations said about the same package: the tool saw the parents, BOMs and profiles.
+  const resolvedNames = new Set((options.resolved ?? []).map(component => component.name));
+  if (options.resolved?.length) {
+    const carried = new Map<string, { component: Component; source: string }>();
+    for (const [purl, entry] of byPurl) if (entry.component.ecosystem === "maven" && resolvedNames.has(entry.component.name)) { carried.set(purl, entry); byPurl.delete(purl); }
+    // A resolved component keeps the file that declared it; a transitive one points at the project's top build file.
+    const top = files.map(file => rel(file.path)).filter(path => /(^|\/)(pom\.xml|build\.gradle(\.kts)?)$/.test(path)).sort((a, b) => a.split("/").length - b.split("/").length || (a < b ? -1 : 1))[0] ?? "pom.xml";
+    for (const component of options.resolved) {
+      const before = carried.get(packageUrl(component));
+      add({ ...component, resolved: true }, before?.source ?? top);
+      if (before) mergeFacts(byPurl.get(packageUrl(component))!.component, { ...before.component, dependsOn: undefined });
+    }
+  }
   const seenUnresolved = new Set<string>();
-  const unresolvedSorted = unresolved.filter(item => { const key = `${item.source}\n${item.name}\n${item.reason}`; if (seenUnresolved.has(key)) return false; seenUnresolved.add(key); return true; })
+  const unresolvedSorted = unresolved.filter(item => !resolvedNames.has(item.name.replace(":", "/"))).filter(item => { const key = `${item.source}\n${item.name}\n${item.reason}`; if (seenUnresolved.has(key)) return false; seenUnresolved.add(key); return true; })
     .sort((a, b) => (a.source !== b.source ? (a.source < b.source ? -1 : 1) : a.name !== b.name ? (a.name < b.name ? -1 : 1) : a.reason < b.reason ? -1 : a.reason > b.reason ? 1 : 0));
   const ai = options.ai ? detectAi(folder) : { components: [], services: [] };
   const sorted = [...byPurl.values()].sort((a, b) => (a.purl < b.purl ? -1 : a.purl > b.purl ? 1 : 0));
@@ -184,7 +199,7 @@ export function generateSbom(folder: string, options: { name?: string; toolVersi
       ...(component.dev ? { scope: "excluded" as const } : {}),
       ...(component.hashes?.length ? { hashes: [...component.hashes].sort((a, b) => (a.alg < b.alg ? -1 : 1)) } : {}),
       ...(component.licenses?.length ? { licenses: licenseChoices(component.licenses) } : {}),
-      properties: [{ name: "0:source", value: source }],
+      properties: [{ name: "0:source", value: source }, ...(component.resolved ? [{ name: RESOLVED_PROPERTY, value: "true" }] : [])],
     })), ...ai.components],
     ...(ai.services.length ? { services: ai.services } : {}),
   };

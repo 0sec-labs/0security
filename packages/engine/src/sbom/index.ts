@@ -1,5 +1,5 @@
 export { LOCKFILES, parseCargoLock, parseComposerLock, parseGemfileLock, parseGoMod, parseGradleLock, parseMixLock, parseNugetLock, parsePubspecLock, parseNpmLock, parsePipfileLock, parsePnpmLock, parsePoetryLock, parseRequirements, parseYarnLock, sriToHashes, type Component, type Hash } from "./parsers.js";
-export { classifyLicense, generateSbom, packageUrl, UNRESOLVED_PROPERTY, type Bom, type LibraryComponent, type LicenseChoice, type SbomResult } from "./cyclonedx.js";
+export { classifyLicense, generateSbom, packageUrl, UNRESOLVED_PROPERTY, RESOLVED_PROPERTY, type Bom, type LibraryComponent, type LicenseChoice, type SbomResult } from "./cyclonedx.js";
 export { checkBomAgainstOsv, type Advisory, type AdvisorySeverity, type OsvOptions } from "./osv.js";
 export { compareVersions, cvss3BaseScore } from "./advisory-facts.js";
 export { toSpdx, type SpdxDocument, type SpdxPackage } from "./spdx.js";
@@ -10,3 +10,4 @@ export { advisoriesToSarif, advisoriesToText, componentLabel, fixAdvice, sortAdv
 export { checkOutdated, outdatedToText, OUTDATED_CAP, type OutdatedNote, type OutdatedResult } from "./outdated.js";
 export { analyzeMaven, parseXml, type Unresolved } from "./maven.js";
 export { parseCatalog, parseGradleBuild, parseVersionCatalog } from "./gradle.js";
+export { buildToolEnv, mergeComponents, parseGradleTree, parseMavenTree, ResolveFailedError, resolveJvmDependencies, RESOLVE_TIMEOUT_MS, type ResolveOptions, type ResolveResult } from "./resolve.js";

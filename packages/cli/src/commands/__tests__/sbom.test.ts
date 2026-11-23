@@ -51,6 +51,51 @@ describe("0 sbom resolved and unresolved summary", () => {
   });
 });
 
+describe("0 sbom generate --resolve", () => {
+  const pom = "<project><modelVersion>4.0.0</modelVersion><groupId>g</groupId><artifactId>app</artifactId><version>1</version><dependencies><dependency><groupId>org.apache.commons</groupId><artifactId>commons-text</artifactId><version>1.9</version></dependency></dependencies></project>";
+  /** A fake mvn that writes a tree to the requested file. Nothing real runs. */
+  const fakeBin = () => {
+    const bin = mkdtempSync(join(tmpdir(), "0-fakemvn-")); dirs.push(bin);
+    writeFileSync(join(bin, "mvn"), "#!/bin/sh\nfor a in \"$@\"; do case \"$a\" in -DoutputFile=*) printf 'g:app:jar:1\\n+- org.apache.commons:commons-text:jar:1.9:compile\\n\\\\- org.example:extra:jar:2.0:compile\\n' > \"${a#-DoutputFile=}\";; esac; done\n", { mode: 0o755 });
+    return bin;
+  };
+  const env = (bin: string) => ({ PATH: `${bin}:/usr/bin:/bin` });
+  it("warns, runs the build tool with --allow-build-tools, and marks resolved components", async () => {
+    const io = deps({ env: env(fakeBin()) });
+    await runGenerateWith(project({ "pom.xml": pom }), { resolve: true, allowBuildTools: true }, io.deps);
+    expect(io.err.join("\n")).toContain("warning: --resolve runs the project's own build tool");
+    const bom = JSON.parse(io.out.join(""));
+    expect(bom.components.map((c: { purl: string }) => c.purl)).toContain("pkg:maven/org.example/extra@2.0");
+    expect(bom.components.find((c: { name: string }) => c.name === "org.example/extra").properties).toContainEqual({ name: "0:resolved", value: "true" });
+  });
+  it("refuses without --allow-build-tools when nobody can be asked, and does not run anything", async () => {
+    const io = deps({ env: env(fakeBin()) });
+    await expect(runGenerateWith(project({ "pom.xml": pom }), { resolve: true }, io.deps)).rejects.toThrow(/--allow-build-tools/);
+    expect(io.out).toEqual([]);
+  });
+  it("runs after a yes at the prompt and not after a no", async () => {
+    const yes = deps({ env: env(fakeBin()), confirm: async () => true });
+    await runGenerateWith(project({ "pom.xml": pom }), { resolve: true }, yes.deps);
+    expect(yes.out.join("")).toContain("org.example/extra");
+    const no = deps({ env: env(fakeBin()), confirm: async () => false });
+    await expect(runGenerateWith(project({ "pom.xml": pom }), { resolve: true }, no.deps)).rejects.toBeInstanceOf(UsageError);
+  });
+  it("is refused under ZERO_ENTERPRISE, even with the consent flag", async () => {
+    const io = deps({ env: { ...env(fakeBin()), ZERO_ENTERPRISE: "1" } });
+    await expect(runGenerateWith(project({ "pom.xml": pom }), { resolve: true, allowBuildTools: true }, io.deps)).rejects.toThrow(/ZERO_ENTERPRISE/);
+  });
+  it("rejects flags that do not fit", async () => {
+    const io = deps();
+    await expect(runGenerateWith(project({ "pom.xml": pom }), { allowBuildTools: true }, io.deps)).rejects.toThrow(/only apply with --resolve/);
+    await expect(runGenerateWith(project({ "pom.xml": pom }), { resolve: true, generator: "syft" }, io.deps)).rejects.toThrow(/builtin generator only/);
+  });
+  it("turns a failing build tool into a usage error with the tool's message", async () => {
+    const bin = mkdtempSync(join(tmpdir(), "0-fakemvn-")); dirs.push(bin);
+    writeFileSync(join(bin, "mvn"), "#!/bin/sh\necho '[ERROR] Could not resolve' >&2\nexit 1\n", { mode: 0o755 });
+    await expect(runGenerateWith(project({ "pom.xml": pom }), { resolve: true, allowBuildTools: true }, deps({ env: env(bin) }).deps)).rejects.toThrow(/mvn failed.*Could not resolve/s);
+  });
+});
+
 describe("0 sbom generate --ai", () => {
   it("adds the AI in the folder, and is not an error when there is no lockfile but there is AI", () => {
     const dir = project({ "app.py": 'm = AutoModel.from_pretrained("org/model")\n', ".mcp.json": JSON.stringify({ mcpServers: { files: { command: "npx", args: ["-y", "srv"] } } }) });

@@ -48,6 +48,7 @@ For a stronger guarantee than a test, also block egress at the network: run 0 in
 | `osv-advisory-lookup` | `api.osv.dev` | `0 sbom check` and evidence bundles with advisories. | Package URLs from the SBOM. | Skip the check. |
 | `sbom-outdated-lookup` | `api.deps.dev` | `0 sbom check --outdated`. | Package names from the SBOM (at most 200). | Do not pass the flag. |
 | `sbom-licenses-resolve` | `api.deps.dev` | `0 sbom licenses --resolve`. | Package names and versions of components with no stated license. | Do not pass the flag. |
+| `sbom-resolve-build-tools` | The repositories the project's build files name (Maven Central by default) | `0 sbom generate --resolve`, after you confirm. | Whatever the project's own `mvn` or `gradle` sends. It also runs the project's build scripts. | Do not pass the flag. |
 | `extension-git-source` | `github.com` or the https git host you give | Installing or updating an extension from a remote source. | A shallow fetch of one pinned commit. | Install from a local folder. |
 | `extension-connector-health` | Hosts an installed connector declares | The console shows connector status. | A GET carrying the connector token. | Do not install connectors. |
 | `smolvm-provision` | `github.com` | Explicit setup of the macOS sandbox runtime. | A GET of a pinned archive, checked against a fixed hash. | Preinstall the runtime. |
@@ -80,6 +81,7 @@ These are not blocked, because you name the destination. Leave them unused to ke
 | `source-control-writes` | The git remote and GitHub host of your repository | `0 findings fix`, threat-model publishing, findings import, sentinel reviews. | The branch push or comment you asked for. |
 | `audit-siem-sink` | The https collector or syslog-over-TLS host you set in `ZERO_AUDIT_SINK_URL` | Server mode, only when you set that variable. Off by default. | Audit events: action, actor, subject, outcome and redacted detail. Plain http and plain TCP syslog are refused except to this machine, and UDP is refused. `ZERO_ENTERPRISE` leaves it on, because the collector is yours. See [Send the audit log to a SIEM](/server-mode/#send-the-audit-log-to-a-siem). |
 | `source-control-writes` | The git remote and GitHub host of your repository | `0 findings fix`, threat-model publishing, findings import, sentinel reviews, and Sentinel release and check triggers with `report` turned on. | The branch push, comment or commit status you asked for. Sentinel triggers also read releases, tags and check runs through `gh`. |
+| `fix-sandbox-docker` | The registry of the image you name, pulled by the Docker daemon. With `--sandbox-network`, whatever the build downloads. | `0 findings fix --sandbox docker`. The container has no network unless you pass `--sandbox-network`, which `ZERO_ENTERPRISE` refuses. | Nothing from 0. |
 | `bitbucket-code-insights` | `api.bitbucket.org`, or the Bitbucket Data Center URL you pass | `0 findings upload --to bitbucket-cloud` or `--to bitbucket-dc` with `BITBUCKET_TOKEN` set. | A Code Insights report and annotations from the scan's findings. A plain `http://` URL is refused unless the host is this machine or you pass `--allow-insecure-http`. |
 
 ## Local only
