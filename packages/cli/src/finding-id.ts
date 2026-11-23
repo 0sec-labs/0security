@@ -11,6 +11,11 @@ export function shortFindingId(id: string): string {
   return (imported ? imported[2]! : id).slice(0, 8);
 }
 
+/** An imported finding's own part of its id (what `findings list` shows), or undefined for an ordinary id. */
+export function importedFindingPart(id: string): string | undefined {
+  return IMPORTED.exec(id)?.[2];
+}
+
 /** Like an id, a fingerprint of an imported finding begins with the file's identity; show what is distinctive. */
 export function shortFingerprint(fingerprint: string): string {
   const imported = /^(?:ci|sarif)-[a-f0-9]{64}:(.+)$/.exec(fingerprint);
@@ -28,7 +33,7 @@ export function resolveFindingId<T extends { id: string }>(rows: readonly T[], i
   if (exact) return exact;
   const strategies: Array<(row: T) => boolean> = [
     row => row.id.startsWith(text),
-    row => (IMPORTED.exec(row.id)?.[2] ?? "").startsWith(text),
+    row => (importedFindingPart(row.id) ?? "").startsWith(text),
     row => text.length >= 6 && row.id.endsWith(text),
   ];
   for (const matches of strategies) {
