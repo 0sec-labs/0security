@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -54,6 +54,7 @@ test("checksum failure does not install a binary or modify shell startup", () =>
     assert.notEqual(installed.status, 0);
     assert.match(installed.stderr, /checksum mismatch/);
     assert.equal(existsSync(join(home, ".0", "bin", "0")), false);
+    assert.equal(existsSync(join(home, ".0", "bin", "0security")), false);
     assert.equal(existsSync(join(home, ".profile")), false);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
@@ -84,6 +85,7 @@ test("a failed attestation blocks the install unless explicitly skipped", () => 
     assert.match(blocked.stderr, /could not verify the checksums.txt attestation/);
     assert.match(blocked.stderr, /HTTP 404: Not Found/, "gh's own error is shown");
     assert.equal(existsSync(join(home, ".0", "bin", "0")), false);
+    assert.equal(existsSync(join(home, ".0", "bin", "0security")), false);
     const skipped = spawnSync("bash", ["install.sh"], { env: { ...failing, INSTALL_ATTESTATION: "0" }, encoding: "utf8" });
     assert.equal(skipped.status, 0, skipped.stderr);
   } finally { rmSync(root, { recursive: true, force: true }); }
@@ -103,5 +105,53 @@ test("a logged-in gh without the attestation subcommand is treated like a missin
     assert.equal(installed.status, 0, installed.stderr);
     assert.match(installed.stderr, /too old for `gh attestation`/);
     assert.equal(existsSync(join(root, "gh.log")), false);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+test("installs 0security and links 0 to it with a relative symlink", () => {
+  const { root, home, env } = fixture();
+  try {
+    const installed = spawnSync("bash", ["install.sh"], { env, encoding: "utf8" });
+    assert.equal(installed.status, 0, installed.stderr);
+    const dir = join(home, ".0", "bin");
+    assert.equal(lstatSync(join(dir, "0security")).isFile(), true);
+    assert.equal(lstatSync(join(dir, "0")).isSymbolicLink(), true);
+    assert.equal(readlinkSync(join(dir, "0")), "0security");
+    assert.equal(realpathSync(join(dir, "0")), realpathSync(join(dir, "0security")));
+    for (const name of ["0", "0security"]) {
+      const run = spawnSync(join(dir, name), [], { encoding: "utf8" });
+      assert.equal(run.stdout.trim(), "installed");
+    }
+    assert.match(installed.stderr, /0security to .*\/0security \(also available as .*\/0\)/);
+    assert.deepEqual(readdirSync(dir).sort(), ["0", "0security"]);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+test("upgrading over an older plain 0 file replaces it with the symlink", () => {
+  const { root, home, env } = fixture();
+  try {
+    const dir = join(home, ".0", "bin");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "0"), '#!/bin/sh\nprintf "old\\n"\n', { mode: 0o755 });
+    assert.equal(spawnSync(join(dir, "0"), [], { encoding: "utf8" }).stdout.trim(), "old");
+    const installed = spawnSync("bash", ["install.sh"], { env, encoding: "utf8" });
+    assert.equal(installed.status, 0, installed.stderr);
+    assert.equal(lstatSync(join(dir, "0")).isSymbolicLink(), true);
+    assert.equal(spawnSync(join(dir, "0"), [], { encoding: "utf8" }).stdout.trim(), "installed");
+    assert.equal(spawnSync(join(dir, "0security"), [], { encoding: "utf8" }).stdout.trim(), "installed");
+    // A second run over the new layout stays correct and leaves no temporary files.
+    assert.equal(spawnSync("bash", ["install.sh"], { env, encoding: "utf8" }).status, 0);
+    assert.deepEqual(readdirSync(dir).sort(), ["0", "0security"]);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+test("a checksum failure leaves an older plain 0 file untouched", () => {
+  const { root, home, env } = fixture(true);
+  try {
+    const dir = join(home, ".0", "bin");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "0"), '#!/bin/sh\nprintf "old\\n"\n', { mode: 0o755 });
+    const installed = spawnSync("bash", ["install.sh"], { env, encoding: "utf8" });
+    assert.notEqual(installed.status, 0);
+    assert.equal(lstatSync(join(dir, "0")).isFile(), true);
+    assert.equal(spawnSync(join(dir, "0"), [], { encoding: "utf8" }).stdout.trim(), "old");
+    assert.deepEqual(readdirSync(dir), ["0"]);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

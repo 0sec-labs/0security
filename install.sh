@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-# Install the latest verified standalone 0 binary for this host.
+# Install the latest verified standalone binary for this host as `0security`, with `0` as a symlink alias.
 set -eu
 
 REPO="0sec-labs/0security"
@@ -43,8 +43,9 @@ mkdir -p "$INSTALL_DIR"
 manifest="$(mktemp "${TMPDIR:-/tmp}/0-checksums.XXXXXX")"
 binary="$(mktemp "${INSTALL_DIR}/.${ASSET}.XXXXXX")"
 fg_binary=""
+alias_link=""
 cleanup() {
-  rm -f "$manifest" "$binary" "$fg_binary"
+  rm -f "$manifest" "$binary" "$fg_binary" "$alias_link"
 }
 trap cleanup EXIT HUP INT TERM
 
@@ -104,11 +105,22 @@ expected="$(awk -v asset="$ASSET" '$2 == asset || $2 == ("*" asset) { print $1; 
 actual="$(sha256_file "$binary")"
 [ "$expected" = "$actual" ] || fail "checksum mismatch for ${ASSET}; refusing to install"
 
-printf '%s\n' "Installing 0…" >&2
+printf '%s\n' "Installing 0security…" >&2
 chmod 755 "$binary"
-mv -f "$binary" "${INSTALL_DIR}/0"
+mv -f "$binary" "${INSTALL_DIR}/0security"
 binary=""
-printf '%s\n' "Installed verified 0 to ${INSTALL_DIR}/0" >&2
+# `0` is a relative symlink to `0security`. The link is built under a temporary
+# name and renamed over `0`, so an older plain `0` file is replaced in one step
+# and the folder always holds a working `0`.
+alias_link="${INSTALL_DIR}/.0.link.$$"
+rm -f "$alias_link"
+if ln -sf 0security "$alias_link" && mv -f "$alias_link" "${INSTALL_DIR}/0"; then
+  alias_link=""
+  printf '%s\n' "Installed verified 0security to ${INSTALL_DIR}/0security (also available as ${INSTALL_DIR}/0)" >&2
+else
+  printf '%s\n' "0 installer: could not link ${INSTALL_DIR}/0 to 0security; the 0 command was left as it was" >&2
+  printf '%s\n' "Installed verified 0security to ${INSTALL_DIR}/0security" >&2
+fi
 
 # Provision the default static analyzer too, so standalone source reviews do
 # not require Node/npm. INSTALL_FOXGUARD=0 opts out for pre-provisioned hosts.
