@@ -220,6 +220,10 @@ export class osecDB {
     return this.repos.findings.getFindingModelVerification(findingId);
   }
 
+  setFindingScope(findingId: string, label: { scope: "in-scope" | "out-of-scope"; reason: string; source: string }): void {
+    return this.repos.findings.setFindingScope(findingId, label);
+  }
+
   setFindingModelVerification(findingId: string, verification: FindingModelVerification): void {
     return this.repos.findings.setFindingModelVerification(findingId, verification);
   }

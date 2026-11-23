@@ -113,6 +113,10 @@ export const findings = sqliteTable(
     triageExpiresAt: text("triageExpiresAt"),
     /** Free-text label of who approved the acceptance. A label the operator typed, not an authenticated identity. */
     triageApprover: text("triageApprover"),
+    /** `in-scope` or `out-of-scope` when a declared scope (`0 scan --scope`) names the vector; NULL otherwise. Additive and nullable. */
+    scope: text("scope"),
+    scopeReason: text("scopeReason"),
+    scopeSource: text("scopeSource"),
     workflowStatus: text("workflowStatus").notNull().default("backlog"),
     workflowAssignee: text("workflowAssignee"),
     workflowUpdatedAt: text("workflowUpdatedAt"),

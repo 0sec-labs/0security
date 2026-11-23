@@ -220,6 +220,18 @@ export function categoryFromText(text: string): AttackCategory | undefined {
   return textMatch(text.toLowerCase());
 }
 
+/**
+ * The category a person's words name: one of our ids, an alias, or free text run through the same keyword rules.
+ * Undefined when nothing matches. Used for the vectors a repository's SECURITY.md declares in or out of scope.
+ */
+export function categoryFromLabel(text: string): AttackCategory | undefined {
+  const label = normalizeLabel(text);
+  if (isAttackCategory(label)) return label;
+  const alias = CATEGORY_ALIASES[label];
+  if (alias) return alias;
+  return textMatch(text.toLowerCase().replace(/[-_]+/g, " "));
+}
+
 export interface FindingClassification {
   category: AttackCategory;
   /** The model's label when it was not one of ours. */

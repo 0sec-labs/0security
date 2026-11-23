@@ -204,6 +204,14 @@ export class FindingRepository extends Repository {
   }
 
 
+  /** Record the declared-scope label of a finding. Touches no other column. A missing finding is ignored. */
+  setFindingScope(findingId: string, label: { scope: "in-scope" | "out-of-scope"; reason: string; source: string }): void {
+    this.db.update(schema.findings)
+      .set({ scope: label.scope, scopeReason: label.reason, scopeSource: label.source })
+      .where(eq(schema.findings.id, findingId)).run();
+  }
+
+
   getFindings(scanId: string) {
     return this.db
       .select()

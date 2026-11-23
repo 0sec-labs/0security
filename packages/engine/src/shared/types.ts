@@ -664,6 +664,12 @@ export interface Finding {
   triageExpiresAt?: string;
   /** Free-text label of the approver, as typed by the operator. Not authenticated. */
   triageApprover?: string;
+  /** Set after a scan when the folder's declared scope names this finding's vector (`0 scan --scope`). Absent otherwise. */
+  scope?: "in-scope" | "out-of-scope";
+  /** The reason the declared scope gives for the vector. */
+  scopeReason?: string;
+  /** Where the scope came from: a file name, never a path outside the scan. */
+  scopeSource?: string;
   /**
    * Append-only list of triage layer verdicts, ordered by execution.
    * Empty until the triage stage runs. See {@link LayerVerdict} for details.
@@ -1456,6 +1462,8 @@ export interface ScanReport extends ScanPlanExecution {
   tier?: ScanTierInfo;
   /** Present when the scan ran with `--known`. */
   known?: ScanKnownSummary;
+  /** Present when a declared scope applied (`0 scan --scope`): where it came from and the vectors it names. Findings it labels out of scope are listed apart and left out of the summary counts. */
+  scopeInfo?: { source: string; inScopeVectors: string[]; outOfScopeVectors: string[]; unmatched?: number; sarifSuppress?: boolean };
   /** How the scan ended (complete, partial, budget_exhausted, timed_out, skipped, prepass_only, failed); written to the SARIF run properties. */
   scanStatus?: string;
   /** Why a failed or stopped scan did not finish: a cause such as provider_connection or timeout, and a plain message without secrets. Written to the SARIF run properties. */

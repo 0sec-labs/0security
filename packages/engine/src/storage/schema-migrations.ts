@@ -55,6 +55,9 @@ CREATE TABLE IF NOT EXISTS findings (
   triagedAt TEXT,
   triageExpiresAt TEXT,
   triageApprover TEXT,
+  scope TEXT,
+  scopeReason TEXT,
+  scopeSource TEXT,
   workflowStatus TEXT NOT NULL DEFAULT 'backlog',
   workflowAssignee TEXT,
   workflowUpdatedAt TEXT,
@@ -418,6 +421,10 @@ export function migrateLegacySchema(sqlite: ShimmedDatabase): void {
   }
   if (!colNames.has("triageApprover")) {
     sqlite.exec("ALTER TABLE findings ADD COLUMN triageApprover TEXT");
+  }
+  // Declared scope label from `0 scan --scope`. Additive and nullable.
+  for (const column of ["scope", "scopeReason", "scopeSource"]) {
+    if (!colNames.has(column)) sqlite.exec(`ALTER TABLE findings ADD COLUMN ${column} TEXT`);
   }
   // Backfill NULL fingerprint / triageStatus / workflowStatus for rows
   // created before those columns existed.
