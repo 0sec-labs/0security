@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dominantEol, globToRegExp, labelWithScope, matchesScope, MAX_SCOPE_ENTRIES, parseScope, renderScopeSection, replaceScopeSection, scopeEntryExpired, splitByScope } from "./scope.js";
+import { dominantEol, globToRegExp, isAlwaysInScope, SCOPE_QUESTION_CATEGORIES, labelWithScope, matchesScope, MAX_SCOPE_ENTRIES, parseScope, renderScopeSection, replaceScopeSection, scopeEntryExpired, splitByScope } from "./scope.js";
 
 const DOC = `# Security policy
 
@@ -282,5 +282,18 @@ describe("renderScopeSection and replaceScopeSection", () => {
     expect(dominantEol("a\r\nb\r\n")).toBe("\r\n");
     expect(dominantEol("a\nb\r\n")).toBe("\n");
     expect(dominantEol("none")).toBe("\n");
+  });
+});
+
+describe("always-in-scope classes", () => {
+  it("warns when an entry declares one of them out of scope, and keeps the entry", () => {
+    const parsed = parseScope("## Scope\n### Out of scope\n- eval: it is a test helper\n- path traversal: internal\n- denial-of-service: gateway\n### In scope\n- sql injection: always\n");
+    expect(parsed.entries.map(entry => [entry.kind, entry.category])).toEqual([["out", "code-injection"], ["out", "path-traversal"], ["out", "denial-of-service"], ["in", "sql-injection"]]);
+    expect(parsed.warnings.filter(w => w.includes("declared out of scope: this class is usually a real vulnerability"))).toHaveLength(2);
+    expect(parsed.warnings.join(" ")).toContain("line 3: 'eval' declared out of scope");
+  });
+  it("lists the classes the interview never asks about", () => {
+    for (const category of ["code-injection", "command-injection", "sql-injection", "hardcoded-secret", "insecure-storage", "path-traversal", "xxe", "unsafe-deserialization"]) expect(isAlwaysInScope(category)).toBe(true);
+    for (const category of SCOPE_QUESTION_CATEGORIES) expect(isAlwaysInScope(category)).toBe(false);
   });
 });

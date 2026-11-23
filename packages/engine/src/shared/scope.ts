@@ -27,6 +27,31 @@ export const MAX_SCOPE_TEXT_BYTES = 256 * 1024;
 
 export type ScopeKind = "in" | "out";
 
+/**
+ * Classes that are real vulnerabilities in nearly every application: nobody needs to make a scope call about them.
+ * `0 threat-model --interview` never asks about them, and the parser warns when a hand-written entry declares one out of scope.
+ */
+export const ALWAYS_IN_SCOPE_CATEGORIES: ReadonlySet<string> = new Set<string>([
+  "code-injection", "command-injection", "sql-injection", "hardcoded-secret", "insecure-storage", "path-traversal", "xxe", "unsafe-deserialization",
+  "xss", "ssrf", "prototype-pollution", "insecure-randomness", "mass-assignment", "format-string", "heap-overflow", "stack-buffer-overflow", "out-of-bounds-read",
+  "out-of-bounds-write", "use-after-free", "double-free", "type-confusion", "uninitialized-memory", "integer-overflow", "integer-truncation",
+  "prompt-injection", "jailbreak", "system-prompt-extraction", "tool-misuse",
+]);
+
+export const isAlwaysInScope = (category: string | undefined): boolean => category !== undefined && ALWAYS_IN_SCOPE_CATEGORIES.has(category);
+
+/**
+ * Classes where "we do not care" is a plausible answer, most plausible first: a missing limit, a route that is public on purpose,
+ * data that goes to a third party, a rule the code conflicts with, a weakness accepted for now.
+ */
+export const SCOPE_QUESTION_CATEGORIES: readonly AttackCategory[] = [
+  "denial-of-service", "regex-dos", "missing-rate-limit", "broken-access-control", "data-exfiltration", "information-disclosure", "cors",
+  "policy-violation", "known-vulnerable-package", "insecure-transport",
+];
+
+/** Classes the model may ask about from reading the code: the ones above, and weaknesses a team may accept knowingly for a while. */
+export const MODEL_QUESTION_CATEGORIES: ReadonlySet<string> = new Set<string>([...SCOPE_QUESTION_CATEGORIES, "csrf", "open-redirect", "security-misconfiguration", "supply-chain", "crypto-misuse"]);
+
 export interface ScopeEntry {
   kind: ScopeKind;
   /** The vector as written (cleaned): a category id, an alias or free text. */
@@ -182,6 +207,7 @@ export function parseScope(markdown: string): ParsedScope {
     const entry: ScopeEntry = { kind, vector, ...(category ? { category } : {}), reason, ...(until ? { until } : {}), paths, line };
     entries.push(entry);
     last = entry;
+    if (kind === "out" && isAlwaysInScope(category)) warnings.push(`line ${line}: '${vector}' declared out of scope: this class is usually a real vulnerability`);
     if (!category) { unmatched.push(entry); warnings.push(`unmatched scope entry (line ${line}): '${vector}' names no vulnerability category I know; it labels nothing. Use a category id such as denial-of-service or broken-access-control`); }
   }
   if (overflow) warnings.push(`more than ${MAX_SCOPE_ENTRIES} entries; the rest were ignored`);

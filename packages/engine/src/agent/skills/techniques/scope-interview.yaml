@@ -3,7 +3,7 @@ name: "Ask a team which security vectors it cares about"
 description: "Experimental. Read a draft threat model and the code, then return up to 8 specific questions whose answers the code cannot decide (is this unauthenticated route public on purpose, may this field go to that third party, do you care about denial of service here), as one JSON block. A second mode words a scope entry from a person's own answer. Records no findings and changes no file. Used by 0 threat-model --interview; the CLI asks the person and writes the files."
 summary: "Experimental: up to 8 specific questions the code cannot decide, as JSON."
 category: "Code review"
-version: 1
+version: 2
 applicable_roles:
   - attack
   - audit
@@ -32,14 +32,17 @@ content: |
   - a rule the code seems to break: which is right, the rule or the code?
   - a weakness the team may have accepted knowingly: is it accepted, and until when?
 
+  Never ask about a class that is a real vulnerability in every application, because no team declares those out of scope: code-injection (eval and similar), command-injection, sql-injection, hardcoded-secret, insecure-storage (plaintext passwords or keys), path-traversal, xxe, unsafe-deserialization, xss, ssrf, prototype-pollution, insecure-randomness and memory-safety bugs. The program drops such questions.
+
   Rules:
 
   1. Every question names a place you opened: evidence as `path:line` in this folder.
-  2. Every question names the vector it concerns as exactly one of these ids: broken-access-control, broken-authentication, mass-assignment, csrf, open-redirect, xxe, hardcoded-secret, insecure-randomness, insecure-storage, insecure-transport, missing-rate-limit, denial-of-service, regex-dos, information-disclosure, data-exfiltration, ssrf, sql-injection, command-injection, code-injection, path-traversal, xss, cors, unsafe-deserialization, security-misconfiguration, crypto-misuse, known-vulnerable-package, supply-chain, missing-validation, other.
+  2. Every question names the vector it concerns as exactly one of these ids: denial-of-service, regex-dos, missing-rate-limit, broken-access-control (a route that may be public on purpose), data-exfiltration (a field going to a third party), information-disclosure, cors, insecure-transport, policy-violation (a rule the code breaks), known-vulnerable-package, csrf, open-redirect, security-misconfiguration, supply-chain, crypto-misuse. A question with any other id is dropped.
   3. Ask nothing about a vector the code does not touch. A question about SQL injection needs a query in the code.
   4. Skip every vector the message says the team already answered, in SECURITY.md or in a section a person marked `<!-- human -->`.
   5. One or two plain sentences per question, no jargon without the plain word beside it, no leading wording that pushes toward an answer. The person answers with a scope decision: in scope (the team wants findings like this) or out of scope (it does not), or not sure. Word the question so that is a natural answer: "Do you want findings about X here, or is it fine?"
-  6. Fewer is better. Ask 3 questions that matter, not 8 that do not. Ask none when nothing is undecided: return an empty list.
+  6. One question per vector. When a vector shows up in several places, ask once and name the places in the question (up to 5, as `path:line`; use `evidence` for the first). Vary the wording from question to question: do not start two questions the same way.
+  7. Fewer is better. Ask 3 questions that matter, not 8 that do not. Ask none when nothing is undecided: return an empty list.
 
   Return one fenced JSON block and nothing the program must read outside it:
 
