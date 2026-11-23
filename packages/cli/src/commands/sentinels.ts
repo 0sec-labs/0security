@@ -175,7 +175,7 @@ export function registerSentinelsCommand(program: Command, deps: ConsoleCommandD
     .option("--automation <id>", "What the trigger starts (default: the only one this Sentinel owns)").option("--kind <kind>", "schedule | manual | github-pr | release | check-completed")
     .option("--file <path>", "Trigger JSON object with schedule, github, release or check settings").option("--enable", "Enable immediately").option("--yes", "Confirm that an enabled trigger was reviewed")
     .option("--frequency <frequency>", `schedule: ${SCHEDULE_FREQUENCIES.join(", ")}`).option("--every <minutes>", "schedule, minutes: interval (5 or more)")
-    .option("--at <HH:MM>", "schedule, daily, weekdays, weekly: local time").option("--weekday <day>", "schedule, weekly: sun, mon, ... or 0-6").option("--cron <expression>", "schedule, cron: five fields").option("--timezone <zone>", "schedule: IANA timezone (default UTC)")
+    .option("--at <HH:MM>", "schedule, daily, weekdays, weekly: time of day in --timezone (default UTC)").option("--weekday <day>", "schedule, weekly: sun, mon, ... or 0-6").option("--cron <expression>", "schedule, cron: five fields").option("--timezone <zone>", "schedule: IANA timezone (default UTC)")
     .option("--repo <owner/name>", "github-pr: repository to watch").option("--base-branch <branch>", "github-pr: only pull requests into this branch")
     .option("--comment", "github-pr: comment on each pull request with one short summary, edited in place on later pushes (default: off)")
     .option("--include-forks", "github-pr: also review pull requests from forks, marked untrusted (default: skipped)"))
@@ -193,7 +193,7 @@ export function registerSentinelsCommand(program: Command, deps: ConsoleCommandD
       const automationId = options.automation ?? (typeof fromFile.automationId === "string" ? fromFile.automationId : owned.length === 1 ? owned[0] : undefined);
       const body = { ...fromFile, ...github, ...schedule, ...(automationId ? { automationId } : {}), ...(kind ? { kind } : {}) };
       if (!body.kind) throw new UsageError("Say what kind: --kind schedule | manual | github-pr | release | check-completed (a schedule also needs --frequency; release and check-completed take their settings with --file).");
-      if (!body.automationId) throw new UsageError(owned.length ? `This Sentinel owns ${owned.length} things a trigger can start. Pick one with --automation <id>: ${owned.join(", ")}.` : "A trigger needs something to start, and this Sentinel owns nothing yet. Add it in the console (Sentinels page), then pass --automation <id>.");
+      if (!body.automationId) throw new UsageError(owned.length ? `This Sentinel owns ${owned.length} things a trigger can start. Pick one with --automation <id>: ${owned.join(", ")}.` : "A trigger needs something to start, and this Sentinel owns nothing yet that the CLI can list. Create it from a YAML file with `0 sentinels sync <folder> --apply`, which can include a schedule, or add the automation in the console and pass its full id with --automation <id>.");
       if (options.enable) requireYes(options.yes, "Enabling a trigger lets the Sentinel start runs unattended.");
       return ((await client.request("POST", `${ROOT}/${enc(owner.id)}/triggers`, { ...body, enabled: options.enable === true, ...(options.enable ? { approval: "enable-reviewed-trigger" } : {}) })) as { trigger: Trigger }).trigger;
     }, value => triggerTable([value])));

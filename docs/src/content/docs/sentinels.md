@@ -20,7 +20,7 @@ Sentinels run on the engine behind the browser app. With no server running, noth
 
 The Sentinel is active, and you land in its thread. Tell it what to do in the composer. The pane on the right holds its status, triggers, instructions and notes.
 
-Creating a Sentinel never turns on a schedule. Add a trigger under **Triggers** in the pane. A trigger starts only after you review and turn it on.
+Creating a Sentinel never turns on a schedule. Add a trigger under **Triggers** in the pane, or from the terminal as in [Create a Sentinel with a schedule from the terminal](#create-a-sentinel-with-a-schedule-from-the-terminal). A trigger starts only after you review and turn it on.
 
 ### Presets
 
@@ -69,7 +69,7 @@ A Sentinel has shell access, like a thread. An optional sandbox (SmolVM or Docke
 
 | Trigger | Behavior |
 | --- | --- |
-| `schedule` | Every N minutes (5 or more), hourly, daily, weekdays, weekly or cron, in an IANA timezone. |
+| `schedule` | Every N minutes (5 or more), hourly, daily, weekdays, weekly or cron, in an IANA timezone. The default is UTC. |
 | `manual` | Run it now. |
 | `github-pr` | Polls open pull requests through the connected `gh` account, at least every 60 seconds. |
 | `release` | A published GitHub release, or a pushed tag that starts with a prefix such as `v`. |
@@ -205,6 +205,45 @@ An automation is a saved prompt plus a trigger: a schedule, a manual run or a Gi
 
 - A completed turn exits `0` even when it found something. Read the findings, not only the exit code.
 - Applying a patch needs your approval. A patch is not evidence that it fixes the finding. See [Findings](/findings/#verified-and-not-verified).
+
+## Create a Sentinel with a schedule from the terminal
+
+`0 sentinels set --create` makes a Sentinel with no automation, so it has nothing a trigger can start. To create one with a schedule from the terminal, write it as a file and sync it. Save this as `.0/sentinels/nightly.yaml`:
+
+```yaml
+name: Nightly dependency check
+mission: Watch lockfiles and advisories
+instructions: |
+  Check the lockfiles for risky package changes. Report what you find.
+automations:
+  - name: Nightly check
+    template: repository-review
+    triggers:
+      - kind: schedule
+        schedule: { frequency: daily, time: "09:00", timezone: Europe/Zurich }
+```
+
+Then apply it:
+
+```bash
+0 sentinels sync .0/sentinels --apply
+```
+
+The Sentinel is paused and the trigger is off. Review both, then turn them on:
+
+```bash
+0 sentinels set SENTINEL_ID --trigger list
+0 sentinels set SENTINEL_ID --trigger enable TRIGGER_ID --yes
+0 sentinels set SENTINEL_ID --state active --acknowledge
+```
+
+A schedule uses UTC unless you set `timezone` (`--timezone` on the command line) to an IANA name such as `Europe/Zurich`. The `time` or `--at` value is a time of day in that timezone. The trigger list shows each schedule with its timezone.
+
+To add another trigger to a Sentinel that already has an automation, pass the automation's full ID from the trigger list:
+
+```bash
+0 sentinels set SENTINEL_ID --trigger add --automation AUTOMATION_ID --kind schedule --frequency weekly --weekday mon --at 08:30 --timezone Europe/Zurich
+```
 
 ## Sentinels as files
 
