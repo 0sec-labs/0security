@@ -1,10 +1,18 @@
-import { accessSync, constants } from "node:fs";
+import { accessSync, constants, realpathSync } from "node:fs";
 import { basename, dirname } from "node:path";
 
 export const NPM_MIGRATION_HINT =
   "This 0 was installed with npm, which is no longer updated (last version 0.21.4). Run `npm uninstall -g 0sec-cli`, then `curl -fsSL https://raw.githubusercontent.com/0sec-labs/0security/main/install.sh | bash`.";
 
 interface Origin { argv1?: string; execPath?: string }
+
+/** The standalone binary is installed as `0security`, with `0` as an alias (or, in older installs, the only name). */
+const BINARY_NAME = /^(0security|0)(\.exe)?$/;
+
+/** The real file behind the running binary, so an update replaces it and not a symlink that points to it. */
+function realBinaryPath(execPath: string): string {
+  try { return realpathSync(execPath); } catch { return execPath; }
+}
 
 /** True for an install that lives under node_modules (npm, pnpm, yarn or npx). Needs no network. */
 export function isNpmStyleInstall(origin: Origin = { argv1: process.argv[1], execPath: process.execPath }): boolean {
@@ -19,9 +27,9 @@ export function defaultInstallDir(
   origin: Origin = { argv1: process.argv[1], execPath: process.execPath },
   writable: (dir: string) => boolean = dir => { try { accessSync(dir, constants.W_OK); return true; } catch { return false; } },
 ): string | undefined {
-  const exec = origin.execPath;
-  if (!exec || isNpmStyleInstall(origin)) return undefined;
-  if (!/^0(\.exe)?$/.test(basename(exec))) return undefined;
+  if (!origin.execPath || isNpmStyleInstall(origin)) return undefined;
+  const exec = realBinaryPath(origin.execPath);
+  if (!BINARY_NAME.test(basename(exec))) return undefined;
   const dir = dirname(exec);
   return writable(dir) ? dir : undefined;
 }
@@ -56,14 +64,14 @@ function runningInContainer(env: NodeJS.ProcessEnv = process.env): boolean {
 }
 
 /**
- * What kind of install is this process? Only a standalone `0` binary in a writable folder is managed:
+ * What kind of install is this process? Only a standalone `0security` or `0` binary in a writable folder is managed:
  * Docker images are replaced, never patched; npm installs are retired; source checkouts update with git.
  */
 export function detectInstallKind(probe: InstallProbe = {}): InstallInfo {
   const origin: Origin = { argv1: probe.argv1 ?? process.argv[1], execPath: probe.execPath ?? process.execPath };
   if ((probe.inContainer ?? runningInContainer)()) return { kind: "docker", managed: false, instruction: DOCKER_UPDATE_COMMAND };
   if (isNpmStyleInstall(origin)) return { kind: "npm", managed: false, instruction: NPM_MIGRATION_HINT };
-  if (!origin.execPath || !/^0(\.exe)?$/.test(basename(origin.execPath))) return { kind: "source", managed: false, instruction: SOURCE_UPDATE_COMMAND };
+  if (!origin.execPath || !BINARY_NAME.test(basename(realBinaryPath(origin.execPath)))) return { kind: "source", managed: false, instruction: SOURCE_UPDATE_COMMAND };
   if ((probe.platform ?? process.platform) === "win32") return { kind: "binary", managed: false, instruction: "Download the latest 0-windows-x64.exe from https://github.com/0sec-labs/0security/releases/latest and replace this one." };
   const dir = defaultInstallDir(origin, probe.writable);
   if (!dir) return { kind: "binary", managed: false, instruction: BINARY_UPDATE_COMMAND };

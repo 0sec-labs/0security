@@ -196,8 +196,9 @@ WORKDIR /app
 # Copy the bundled CLI + its production node_modules from the builder
 COPY --from=builder /app/dist /app/dist
 
-# Make the bundled CLI globally invocable as `0`.
-RUN ln -s /app/dist/0.js /usr/local/bin/0 \
+# Make the bundled CLI globally invocable as `0security` and `0`.
+RUN ln -s /app/dist/0.js /usr/local/bin/0security \
+    && ln -s /app/dist/0.js /usr/local/bin/0 \
     && chmod +x /app/dist/0.js
 
 # tini is PID 1 so SIGTERM reaches `0` (graceful drain) and zombies are reaped.

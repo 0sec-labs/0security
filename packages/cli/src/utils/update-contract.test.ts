@@ -2,9 +2,10 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createServer, type Server } from "node:http";
 import { createHash } from "node:crypto";
 import { execFile, execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { realpathSync } from "node:fs";
 import { fetchLatestTag, performAutoUpdate, resolveUpdatePolicy } from "./update-check.js";
 import { defaultInstallDir, detectInstallKind, isNpmStyleInstall } from "./install-origin.js";
 import { UpdateManager } from "../web/update-manager.js";
@@ -85,6 +86,22 @@ describe("install origin", () => {
     expect(defaultInstallDir({ execPath: "/usr/bin/node", argv1: "/src/index.js" }, yes)).toBeUndefined();
     expect(defaultInstallDir({ execPath: "/x/node_modules/.bin/0" }, yes)).toBeUndefined();
   });
+
+  it("accepts the 0security name and resolves symlinks to the real file's folder", () => {
+    const yes = () => true;
+    expect(defaultInstallDir({ execPath: "/usr/local/bin/0security" }, yes)).toBe("/usr/local/bin");
+    const dir = mkdtempSync(join(tmpdir(), "0-origin-"));
+    try {
+      mkdirSync(join(dir, "real")); mkdirSync(join(dir, "path"));
+      writeFileSync(join(dir, "real", "0security"), "x");
+      symlinkSync(join(dir, "real", "0security"), join(dir, "path", "0"));
+      const real = join(dir, "real");
+      // Started through a symlink in another folder: the update lands next to the real file.
+      expect(defaultInstallDir({ execPath: join(dir, "path", "0") }, yes)).toBe(realpathSync(real));
+      expect(detectInstallKind({ execPath: join(dir, "path", "0"), argv1: "/$bunfs/root/0security", inContainer: () => false, writable: yes, platform: "linux" }))
+        .toMatchObject({ kind: "binary", managed: true, dir: realpathSync(real) });
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
 });
 
 const installer = join(import.meta.dirname, "../../../../install.sh");
@@ -120,6 +137,25 @@ describe.skipIf(!asset || !existsSync(installer))("install.sh swap against a fak
     expect(result.status, result.stderr).toBe(0);
     expect(execFileSync(target, { encoding: "utf8" })).toBe("new\n");
     expect(statSync(target).mode & 0o777).toBe(0o755);
+  });
+
+  it("keeps 0 a symlink to the real 0security through an update, and adds 0security next to an old plain 0", async () => {
+    const bin = join(dir, "bin");
+    execFileSync("mkdir", ["-p", bin]);
+    // Old layout: only a plain 0.
+    writeFileSync(join(bin, "0"), "#!/bin/sh\necho old\n", { mode: 0o755 });
+    publish("#!/bin/sh\necho v1\n");
+    expect((await install()).status).toBe(0);
+    expect(lstatSync(join(bin, "0")).isSymbolicLink()).toBe(true);
+    expect(readlinkSync(join(bin, "0"))).toBe("0security");
+    expect(execFileSync(join(bin, "0"), { encoding: "utf8" })).toBe("v1\n");
+    // New layout: updating replaces the real file; the symlink stays a symlink and follows it.
+    publish("#!/bin/sh\necho v2\n");
+    expect((await install()).status).toBe(0);
+    expect(lstatSync(join(bin, "0")).isSymbolicLink()).toBe(true);
+    expect(lstatSync(join(bin, "0security")).isFile()).toBe(true);
+    expect(execFileSync(join(bin, "0"), { encoding: "utf8" })).toBe("v2\n");
+    expect(execFileSync(join(bin, "0security"), { encoding: "utf8" })).toBe("v2\n");
   });
 
   it("refuses a checksum mismatch and leaves the old binary untouched", async () => {

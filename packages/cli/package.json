@@ -6,6 +6,7 @@
   "private": true,
   "type": "module",
   "bin": {
+    "0security": "dist/index.js",
     "0": "dist/index.js"
   },
   "scripts": {

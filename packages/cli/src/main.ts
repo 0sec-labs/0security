@@ -28,6 +28,7 @@ import { savedConnectionEnvPatch } from "./connection-env.js";
 import { commandPathsOf, setCrashCommandPaths } from "./crash-capture.js";
 import { surfaceFromArgv } from "./surface.js";
 import { createRootProgram } from "./program.js";
+import { invokedProgramName } from "./program-name.js";
 import { registerLazyCommandTree } from "./commands/lazy-tree.js";
 import { applyErrorPolicy } from "./commands/layout.js";
 import { getReleaseChannel } from "./state/runtime.js";
@@ -178,7 +179,7 @@ process.argv = [process.argv[0], process.argv[1], ...userArgs];
 async function runConsole(args: string[]): Promise<void> {
   process.argv = [process.argv[0], process.argv[1], "console", ...args];
   const { registerConsoleCommand } = await import("./commands/console.js");
-  const program = new Command().name("0").enablePositionalOptions();
+  const program = new Command().name(invokedProgramName()).enablePositionalOptions();
   registerConsoleCommand(program);
   program.parseAsync().catch(exitWithCommandError);
 }

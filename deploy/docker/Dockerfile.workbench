@@ -130,6 +130,7 @@ RUN HOME=/root npx --no-install playwright install chromium \
     && chmod -R a+rX /opt/playwright \
     && printf '#!/bin/sh\nexec /usr/local/bin/bun /opt/0/0.js "$@"\n' > /usr/local/bin/0 \
     && chmod 0755 /usr/local/bin/0 \
+    && ln -sf 0 /usr/local/bin/0security \
     && ln -sf /opt/0-agent-clis/node_modules/.bin/claude /usr/local/bin/claude \
     && ln -sf /opt/0-agent-clis/node_modules/.bin/codex /usr/local/bin/codex \
     && ln -sf /opt/0-agent-clis/node_modules/.bin/gemini /usr/local/bin/gemini \

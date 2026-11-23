@@ -2,12 +2,13 @@ import { Command, Option } from "commander";
 import { VERSION } from "@0/engine/shared";
 import { configureGroupedHelp } from "./commands/layout.js";
 import { TOP_LEVEL_COMMANDS } from "./commands/manifest.js";
+import { invokedProgramName } from "./program-name.js";
 
 /** The root command with its name, version and grouped help; no subcommands yet. */
 export function createRootProgram(): Command {
   const program = new Command();
   program
-    .name("0")
+    .name(invokedProgramName())
     .description("Security sentinels for your repositories. Run 0 to open the console.")
     .version(VERSION)
     .enablePositionalOptions();
