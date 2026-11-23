@@ -11,7 +11,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
-import type { Command } from "commander";
+import { Option, type Command } from "commander";
 import { fixPrompt, type FixPolicy, type FixPromptFinding } from "@0/engine/shared";
 import { loadFixPolicyFile, type FixPolicyOptions, type LoadedFixPolicy } from "./fix-policy.js";
 import { osecDB, resolveOsecDbPath } from "@0/engine/storage";
@@ -266,6 +266,7 @@ export function registerFixCommand(program: Command, deps: FixDeps = defaults): 
     .option("--budget <usd>", "Stop when the estimated spend reaches this many USD", String(DEFAULT_BUDGET_USD))
     .option("--model <model>", `Model for the fix thread (default: ${DEFAULT_SCAN_MODEL})`)
     .option("--timeout <seconds>", "Maximum seconds to wait for the fix", String(DEFAULT_TIMEOUT_SECONDS))
+    .addOption(new Option("--format <format>", "Output: text or json").choices(["text", "json"]))
     )
     .addHelpText("after", "\nNothing is pushed to the base branch and nothing is merged: the change goes to a branch named 0/fix-<id>, and running it again updates the same pull request.\nExit codes: 0 a verified change (or committed with --no-pr), 1 no change or a failed check, 2 usage error, 3 stopped at the budget or time limit.")
     .action(async (finding: string, options: FixOptions) => {

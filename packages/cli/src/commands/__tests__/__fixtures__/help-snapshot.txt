@@ -679,6 +679,7 @@ Options:
                                   request
   --dry-run                       List what would be attempted and skipped; change nothing
   --history                       List the metrics row of each earlier run and exit
+  --format <format>               Output: text or json (choices: "text", "json")
   --engine-url <url>              Attach directly to a running trusted engine
   --engine-token-env <name>       Environment variable holding the attached engine token
   --computer <id>                 Use a registered remote computer
@@ -740,6 +741,7 @@ Options:
   --budget <usd>             Stop when the estimated spend reaches this many USD (default: "3")
   --model <model>            Model for the fix thread (default: gpt-6-luna)
   --timeout <seconds>        Maximum seconds to wait for the fix (default: "1800")
+  --format <format>          Output: text or json (choices: "text", "json")
   --engine-url <url>         Attach directly to a running trusted engine
   --engine-token-env <name>  Environment variable holding the attached engine token
   --computer <id>            Use a registered remote computer

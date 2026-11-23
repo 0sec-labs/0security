@@ -1485,6 +1485,7 @@ A policy file inside the repository being fixed is not read unless you pass `--r
 | `--budget <usd>` | `3` | Stop when the estimated spend reaches this many USD |
 | `--model <model>` | — | Model for the fix thread (default: gpt-6-luna) |
 | `--timeout <seconds>` | `1800` | Maximum seconds to wait for the fix |
+| `--format <format>` | — | Output: text or json Choices: text, json. |
 | `--engine-url <url>` | — | Attach directly to a running trusted engine |
 | `--engine-token-env <name>` | — | Environment variable holding the attached engine token |
 | `--computer <id>` | — | Use a registered remote computer |
@@ -1624,6 +1625,7 @@ Exit codes:
 | `--retry` | — | Work again on findings that already have a fix branch or pull request |
 | `--dry-run` | — | List what would be attempted and skipped; change nothing |
 | `--history` | — | List the metrics row of each earlier run and exit |
+| `--format <format>` | — | Output: text or json Choices: text, json. |
 | `--engine-url <url>` | — | Attach directly to a running trusted engine |
 | `--engine-token-env <name>` | — | Environment variable holding the attached engine token |
 | `--computer <id>` | — | Use a registered remote computer |

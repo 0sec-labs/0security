@@ -11,7 +11,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
-import type { Command } from "commander";
+import { Option, type Command } from "commander";
 import { homeStateDir } from "@0/engine/shared";
 import { osecDB, resolveOsecDbPath } from "@0/engine/storage";
 import { consoleTransportOptions, type ConsoleTransportOptions } from "../console-client.js";
@@ -313,7 +313,8 @@ export function registerBurndownCommand(program: Command, fixDeps: FixDeps = def
     .option("--timeout <seconds>", "Maximum seconds to wait for one fix", "1800")
     .option("--retry", "Work again on findings that already have a fix branch or pull request")
     .option("--dry-run", "List what would be attempted and skipped; change nothing")
-    .option("--history", "List the metrics row of each earlier run and exit"))
+    .option("--history", "List the metrics row of each earlier run and exit")
+    .addOption(new Option("--format <format>", "Output: text or json").choices(["text", "json"])))
     .addHelpText("after", "\nNothing is pushed to the base branch and nothing is merged. The outcome per finding is kept in ~/.0/burndown.json: running it again skips findings that already have a pull request and continues with the rest.\nExit codes: 0 every attempted fix is verified (or nothing to do), 1 a fix failed or the run stopped on failures, 2 usage error, 3 the total budget ran out.")
     .action(async (options: BurndownOptions) => {
       const json = options.format === "json";
