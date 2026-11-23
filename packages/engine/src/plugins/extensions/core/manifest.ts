@@ -13,6 +13,7 @@ import { connectorProblem, connectorShape, toConnectorDecl, type ConnectorDecl }
 import { isSafeExtensionEnvName } from "./env.js";
 import { type FolderFile, textOf } from "./files.js";
 import { err, ok, type Result } from "./result.js";
+import { parseSandboxDecl, type SandboxDecl } from "../sandbox/policy.js";
 
 export type ManifestFormat = "extension" | "claude" | "plugin-json" | "skill-folder";
 export interface McpServerDecl { name: string; transport: "stdio" | "http" | "sse"; command?: string; args: string[]; url?: string; env: string[]; headers: string[]; /** One line shown to the model in the tool index. Not part of the approval. */ description?: string }
@@ -23,6 +24,8 @@ export interface ExtensionManifest {
   name: string; version: string; description: string; license: string | null;
   skills: SkillDecl[]; mcpServers: McpServerDecl[]; connector: ConnectorDecl | null;
   verify: string | null;
+  /** OS sandbox declaration for its scripts and MCP servers, or null when the manifest has none. */
+  sandbox: SandboxDecl | null;
   requires: { bins: string[]; env: string[]; zero: string | null };
   /** Files bash can run (scripts/, executables, shell/py/js files). Nothing runs except through bash. */
   scripts: string[];
@@ -44,7 +47,7 @@ const connectorSchema = connectorShape.extend({ surface: relPath.optional() });
 const zeroSchema = z.object({
   /** MCP servers declared in the `0` block (same shape as `.mcp.json`). */
   mcp: z.lazy(() => mcpMap).optional(),
-  connector: connectorSchema.optional(), verify: relPath.optional(),
+  connector: connectorSchema.optional(), verify: relPath.optional(), sandbox: z.unknown().optional(),
   requires: z.object({ bins: list(text, 32), env: list(envName), "0": z.string().max(32).optional() }).default({ bins: [], env: [] }),
 });
 const mcpEntry = z.object({ description: z.string().max(300).optional(), command: z.string().optional(), url: z.string().optional(), type: z.string().optional(), transport: z.string().optional(), args: list(z.string(), 128), env: z.record(z.string(), z.string()).default({}), headers: z.record(z.string(), z.string()).default({}) })
@@ -136,13 +139,15 @@ function fromJson(tree: Tree, raw: unknown, format: ManifestFormat, manifestPath
   }
   for (const [label, path] of [["verify", z0.verify]] as const) if (path && !tree.has(path)) return bad(`${label} points at ${path}, which does not exist.`);
   if (z0.connector?.surface && !tree.has(z0.connector.surface) && !tree.dir(z0.connector.surface)) return bad(`connector.surface points at ${z0.connector.surface}, which does not exist.`);
+  let sandbox: SandboxDecl | null = null;
+  if (z0.sandbox !== undefined) { const sb = parseSandboxDecl(z0.sandbox); if (!sb.ok) return bad(sb.error); sandbox = sb.value; }
   const problem = z0.connector ? connectorProblem(z0.connector) : null;
   if (problem) return bad(problem);
   const connector: ConnectorDecl | null = z0.connector ? toConnectorDecl(z0.connector) : null;
   const ignored = ["hooks", "commands", "agents"].filter(k => record[k] !== undefined || tree.dir(k));
   return ok({
     format, manifestPath, name, version: m.version ?? "0.0.0", description: (m.description ?? "").slice(0, 500), license: m.license?.slice(0, 100) ?? null,
-    skills: folders.flatMap(f => skillsIn(tree, f)), mcpServers: servers, connector, verify: z0.verify ?? null,
+    skills: folders.flatMap(f => skillsIn(tree, f)), mcpServers: servers, connector, verify: z0.verify ?? null, sandbox,
     requires: { bins: z0.requires.bins, env: [...new Set(z0.requires.env)].sort(), zero: z0.requires["0"] ?? null }, scripts: scriptsOf(tree), ignored,
   });
 }
@@ -161,5 +166,5 @@ export function parseManifest(files: readonly FolderFile[], options: { fallbackN
   if (!skills.length) return bad("No manifest found: expected extension.json, .claude-plugin/plugin.json, plugin.json or a SKILL.md.");
   const name = root ? (isExtensionName(root.name) ? root.name : fallback) : (fallback || skills[0]!.name);
   if (!isExtensionName(name)) return bad(`Cannot derive an extension name (${JSON.stringify(name)}).`);
-  return ok({ format: "skill-folder", manifestPath: null, name, version: "0.0.0", description: root?.description ?? skills.map(s => s.name).join(", "), license: null, skills, mcpServers: [], connector: null, verify: null, requires: { bins: [], env: [], zero: null }, scripts: scriptsOf(tree), ignored: [] });
+  return ok({ format: "skill-folder", manifestPath: null, name, version: "0.0.0", description: root?.description ?? skills.map(s => s.name).join(", "), license: null, skills, mcpServers: [], connector: null, verify: null, sandbox: null, requires: { bins: [], env: [], zero: null }, scripts: scriptsOf(tree), ignored: [] });
 }
