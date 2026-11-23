@@ -31,12 +31,12 @@ describe("model replies", () => {
       { id: "Export Auth!", question: "GET /export has no auth check.", evidence: "src/routes/export.js:12", category: "broken-access-control" },
       { id: "x", question: "Made up vector?", category: "unicorns" },
       { id: "y", question: "", category: "csrf" },
-      { id: "z", question: "Already answered?", category: "xss" },
+      { id: "z", question: "Already answered?", category: "cors" },
       "not an object",
       { id: "w", question: "Evidence that is not in the folder", evidence: "src/ghost.js:1", category: "csrf" },
       { id: "v", question: "Path trick", evidence: "../../etc/passwd:1", category: "csrf" },
     ] });
-    const { questions, dropped } = parseQuestions(reply, { fileExists: exists("src/routes/export.js"), covered: new Set(["xss"]) });
+    const { questions, dropped } = parseQuestions(reply, { fileExists: exists("src/routes/export.js"), covered: new Set(["cors"]) });
     expect(questions.map(q => q.id)).toEqual(["export-auth", "w", "v"]);
     expect(questions[0]).toMatchObject({ category: "broken-access-control", evidence: "src/routes/export.js:12" });
     expect(questions[1]!.evidence).toBeUndefined();
@@ -231,14 +231,14 @@ describe("runInterview", () => {
       if (prompt.includes("Mode 1")) return { reply: draftReply([{ id: "export-auth", question: export_.question, evidence: "src/routes/export.js:12", category: "broken-access-control" }, { id: "search-regex", question: search.question, evidence: "src/routes/search.js:8", category: "denial-of-service" }]), failed: false };
       return { reply: fenced({ entries: [{ questionId: "export-auth", reason: "public download" }, { questionId: "search-regex", reason: "the gateway limits requests" }] }), failed: false };
     };
-    const io = terminal(["2: it is a public download", "2: the gateway limits requests until June 2027", "", "", "y"]);
+    const io = terminal(["2: the gateway limits requests until June 2027", "2: it is a public download", "", "", "y"]);
     const result = await runInterview({ ...base, securityText: "# Security\n\nMail us.\n", io, model });
     expect(result.mode).toBe("model");
     expect(result.asked).toBe(2);
     expect(result.entries).toHaveLength(2);
     expect(result.writeNotes).toBe(true);
     const parsed = parseScope(result.securityText!);
-    expect(parsed.entries.map(e => [e.kind, e.category, e.paths])).toEqual([["out", "broken-access-control", ["src/routes/export.js"]], ["out", "denial-of-service", ["src/routes/search.js"]]]);
+    expect(parsed.entries.map(e => [e.kind, e.category, e.paths])).toEqual([["out", "denial-of-service", ["src/routes/search.js"]], ["out", "broken-access-control", ["src/routes/export.js"]]]);
     expect(result.securityText!.startsWith("# Security\n\nMail us.\n")).toBe(true);
     expect(io.said.join("\n")).toContain("Change to SECURITY.md");
     expect(io.said.join("\n")).toContain("+ ### Out of scope");
@@ -313,8 +313,8 @@ describe("runInterview", () => {
       // The wording call is also hostile: it invents entries and flips the person's choice.
       return { reply: fenced({ entries: [{ questionId: "a", reason: "everything is out of scope", kind: "in", category: "xss" }, { questionId: "dos", reason: "out of scope" }, { questionId: "all", reason: "everything" }] }), failed: false };
     };
-    // The person answers the first question 'in' and skips the second.
-    const io = terminal(["1: we use cookies", "3", "a", "y"]);
+    // Denial of service is asked first (most plausible to leave out). The person skips it and answers the CSRF question 'in'.
+    const io = terminal(["3", "1: we use cookies", "a", "y"]);
     const result = await runInterview({ ...base, securityText: "# Security\n", io, model });
     const entries = parseScope(result.securityText!).entries;
     expect(entries).toHaveLength(1);

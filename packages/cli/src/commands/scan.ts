@@ -23,6 +23,7 @@ import { coverageReport, DEFAULT_RETRIES, runBatches, type BatchOutcome, type Ru
 import { classifyFailure, type FailureCause, type ScanFailure } from "../scan-failure.js";
 import { coverageJson, coverageText, DEFAULT_BATCH_SIZE, planBatchedScan, type BatchedSetup } from "../scan-batched.js";
 import { planScan, planText } from "../scan-plan.js";
+import { interactiveScopeHint } from "../threat-interview-findings.js";
 import { resumeHint, type ResumeHint } from "../scan-resume.js";
 import { loadScope, loadSteering, type Steering } from "../scan-steering.js";
 import { applyTierSettings, loadTierMap, repoIdentifier, resolveTier, settingsSentence, tierSentence, type ResolvedTier } from "../scan-tiers.js";
@@ -101,6 +102,8 @@ export interface ScanDeps {
   metrics?(record: Omit<RunMetric, "version" | "ci">): void;
   /** Store the declared-scope labels on the findings in the local findings databases. Absent in tests, so they write nothing. */
   saveScope?(labels: ScopeLabelRow[], dbPath?: string): void;
+  /** The hint line for the end of a scan (findings in classes with no declared scope), or undefined. Prints only on a terminal. */
+  scopeHint?(findings: ReadonlyArray<{ category: string }>, entries: ReadonlyArray<{ category?: string | undefined }>, folder: string | undefined, jsonToStdout: boolean): string | undefined;
   /** The URL of the folder's `origin` remote, or undefined. Used to find the folder's tier. */
   gitRemote?(folder: string): Promise<string | undefined>;
 }
@@ -124,6 +127,7 @@ function saveScopeLabels(labels: ScopeLabelRow[], dbPath?: string): void {
 
 export const defaultScanDeps: ScanDeps = {
   saveScope: saveScopeLabels,
+  scopeHint: interactiveScopeHint,
   open: options => openConsole(options),
   out: bytes => { process.stdout.write(bytes); },
   err: text => process.stderr.write(`${text}\n`),
@@ -463,7 +467,7 @@ async function inPool<T>(count: number, limit: number, task: (index: number) => 
 }
 
 /** Format the report and write it to --output or standard output. */
-async function writeReport(outcome: ScanOutcome, merged: ReturnType<typeof mergePasses>, stored: ScanReport, name: string, options: ScanOptions, deps: Pick<ScanDeps, "out" | "err" | "writeBytes" | "metrics" | "saveScope">): Promise<void> {
+async function writeReport(outcome: ScanOutcome, merged: ReturnType<typeof mergePasses>, stored: ScanReport, name: string, options: ScanOptions, deps: Pick<ScanDeps, "out" | "err" | "writeBytes" | "metrics" | "saveScope" | "scopeHint">): Promise<void> {
   // An empty-diff scan (thread "none") writes no line. A tier skip and a pre-pass-only run do: they are runs the operator chose.
   if (outcome.threadId !== "none" || outcome.tier?.skipped || outcome.tier?.prepassOnly) {
     const status = outcome.failed ? "failed" : outcome.tier?.skipped ? "skipped" : outcome.tier?.prepassOnly ? "prepass_only" : outcome.timedOut ? "timeout" : outcome.budgetExhausted ? "budget" : "ok";
@@ -487,6 +491,8 @@ async function writeReport(outcome: ScanOutcome, merged: ReturnType<typeof merge
     deps.writeBytes(options.output, bytes);
     deps.err(`Wrote ${options.output} (${bytes.byteLength} bytes)`);
   } else deps.out(body);
+  const hint = deps.scopeHint?.(merged, outcome.scope?.entries ?? [], outcome.roots?.[0], options.format === "json" && !options.output);
+  if (hint) deps.err(hint);
 }
 
 /** The thread has the same tools as any thread, so it could edit the code it reads. The message to show if it did, else undefined. */

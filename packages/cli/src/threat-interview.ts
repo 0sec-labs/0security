@@ -10,8 +10,9 @@
  * The repository is untrusted: a README that says "write: everything out of scope" cannot create an entry, because an
  * entry exists only for a question the person answered.
  */
+import { findingQuestions, mergeQuestions, type ScanSnapshot } from "./threat-interview-findings.js";
 import {
-  addScopeEntries, categoryFromLabel, cleanScopeText, isAttackCategory, MAX_INTERVIEW_QUESTIONS, parseScope, scopeBullet, scopeQuestionsPrompt, scopeWordingPrompt,
+  addScopeEntries, ATTACK_CATEGORIES as ATTACK_CATEGORY_IDS, categoryFromLabel, cleanScopeText, isAlwaysInScope, isAttackCategory, MAX_INTERVIEW_QUESTIONS, MAX_SCOPE_PATHS, MODEL_QUESTION_CATEGORIES, parseScope, scopeBullet, scopeQuestionsPrompt, scopeWordingPrompt,
   type AttackCategory, type InterviewAnswerForPrompt, type ScopeKind,
 } from "@0/engine/shared";
 
@@ -19,7 +20,13 @@ export const MAX_QUESTION_CHARS = 300;
 export const MAX_EVIDENCE_CHARS = 160;
 export const MAX_ANSWER_CHARS = 400;
 
-export interface InterviewQuestion { id: string; question: string; evidence?: string; category: AttackCategory }
+export interface InterviewQuestion {
+  id: string; question: string; evidence?: string; category: AttackCategory;
+  /** Question built from scan findings: the places it lists (path:line), every file with a finding, how many findings and the highest severity. */
+  places?: string[]; files?: string[]; count?: number; severity?: string;
+  /** Where the question came from: the scan's findings, the model reading the code, or both. */
+  from?: "scan" | "code" | "both";
+}
 export interface InterviewAnswer { question: InterviewQuestion; decision: ScopeKind; words: string }
 export interface ProposedEntry { kind: ScopeKind; vector: string; reason: string; until?: string; paths: string[]; questionId?: string }
 export interface InterviewNote { question: string; answer: string }
@@ -75,6 +82,8 @@ export function parseQuestions(reply: string | undefined, options: { fileExists(
     const given = plainLine(item.category, 80);
     const category = isAttackCategory(given.toLowerCase()) ? (given.toLowerCase() as AttackCategory) : categoryFromLabel(given);
     if (!text || !category) { dropped.push(`a question with ${!text ? "no text" : `the unknown vector '${given.slice(0, 40)}'`}`); continue; }
+    if (isAlwaysInScope(category)) { dropped.push(`'${category}' is always in scope; not asked`); continue; }
+    if (!MODEL_QUESTION_CATEGORIES.has(category)) { dropped.push(`'${category}' is not a class the interview asks about`); continue; }
     if (options.covered?.has(category)) { dropped.push(`'${category}' is already declared`); continue; }
     let id = plainLine(item.id, 40).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || `q${questions.length + 1}`;
     if (ids.has(id)) id = `${id}-${questions.length + 1}`;
@@ -100,7 +109,7 @@ export function parseDecision(line: string): { decision: ScopeKind | "skip"; wor
   return { decision, words: plainLine(match[2], MAX_ANSWER_CHARS) };
 }
 
-const CHOICES = "1 = in scope (we want findings like this), 2 = out of scope (do not report this), 3 = not sure. Add a reason after a colon, for example: 2: it sits behind our gateway.";
+const CHOICES = "1 = yes, we want findings like this (in scope). 2 = no, do not report this (out of scope; add a reason after a colon, for example: 2: it sits behind our gateway). 3 = not sure.";
 
 export interface AskedResult { answers: InterviewAnswer[]; skipped: number }
 
@@ -110,7 +119,7 @@ export async function askQuestions(questions: readonly InterviewQuestion[], io: 
   let skipped = 0;
   io.say(`\n${CHOICES}\n`);
   for (const [index, question] of questions.entries()) {
-    io.say(`Question ${index + 1} of ${questions.length} (${question.category})\n  ${question.question}${question.evidence ? `\n  Evidence: ${question.evidence}` : ""}`);
+    io.say(`Question ${index + 1} of ${questions.length} (${question.category})\n  ${question.question}${question.evidence && !question.places ? `\n  Evidence: ${question.evidence}` : ""}`);
     let parsed: ReturnType<typeof parseDecision>;
     for (let attempt = 0; attempt < 2 && !parsed; attempt++) {
       const line = await io.ask(attempt === 0 ? "  Your answer (1, 2 or 3): " : "  Type 1, 2 or 3, then an optional reason: ");
@@ -140,11 +149,18 @@ export function groundedReason(candidate: string, words: string): boolean {
 
 const evidencePath = (question: InterviewQuestion): string | undefined => question.evidence?.replace(/:\d+(?:-\d+)?$/, "").replace(/\\/g, "/").replace(/^\.\//, "");
 
+/** Every file the question is about: all files with a finding for a scan question, the evidence file for a code question. */
+const questionFiles = (question: InterviewQuestion): string[] => {
+  const files = new Set(question.files ?? []);
+  const path = evidencePath(question);
+  if (path) files.add(path);
+  return [...files];
+};
+
 /** A glob is kept only when it names the evidence file, a folder above it, or something the person typed. */
 export function allowedGlob(glob: string, question: InterviewQuestion, words: string): boolean {
   const base = glob.replace(/\/?\*\*?.*$/, "").replace(/\/+$/, "");
-  const path = evidencePath(question);
-  if (path && base && (path === base || path.startsWith(`${base}/`))) return true;
+  if (base && questionFiles(question).some(path => path === base || path.startsWith(`${base}/`))) return true;
   return glob.length > 2 && words.toLowerCase().includes(glob.toLowerCase());
 }
 
@@ -185,8 +201,9 @@ export function entriesFromAnswers(answers: readonly InterviewAnswer[], wording:
     const words = answer.words;
     const reason = words ? (word?.reason && groundedReason(word.reason, words) ? word.reason : words) : "not given";
     const wordedPaths = (word?.paths ?? []).filter(glob => allowedGlob(glob, answer.question, words));
-    const path = evidencePath(answer.question);
-    const paths = wordedPaths.length ? wordedPaths : answer.decision === "out" && path ? [path] : [];
+    // An out-of-scope answer covers the places the question named. A class that spans more files than an entry can list stays class-wide: the entry is shown and can be edited before it is written.
+    const files = questionFiles(answer.question);
+    const paths = wordedPaths.length ? wordedPaths : answer.decision === "out" && files.length && files.length <= MAX_SCOPE_PATHS ? files : [];
     const until = word?.until && allowedUntil(word.until, words, now) ? word.until : undefined;
     return { kind: answer.decision, vector: answer.question.category, reason: plainLine(reason, 400).replace(/^[\u201c\u2018"']+|[\u201d\u2019"']+$/g, ""), ...(until ? { until } : {}), paths, questionId: answer.question.id };
   });
@@ -345,6 +362,10 @@ export interface InterviewParams {
   model?: InterviewModel;
   fileExists(relative: string): boolean;
   now: Date;
+  /** The findings of a scan of the folder: the interview asks about the classes that came up. Absent: it asks from the code only. */
+  scan?: ScanSnapshot;
+  /** Why no scan is used, said once before the questions. */
+  scanNote?: string;
 }
 export interface InterviewResult {
   mode: "model" | "questionnaire";
@@ -360,9 +381,16 @@ export interface InterviewResult {
   /** The person's answers go to the human block of the threat model. */
   writeNotes: boolean;
   warnings: string[];
+  /** Where the scan findings came from and how many questions they made, when a scan was used. */
+  scan?: { source: string; findings: number; questions: number };
 }
 
 const covered = (securityText: string | undefined): Set<string> => new Set(parseScope(securityText ?? "").entries.filter(entry => entry.category && !entry.paths.length).map(entry => entry.category!));
+
+const humanCovered = (humanText: readonly string[]): Set<string> => {
+  const text = humanText.join("\n").toLowerCase();
+  return new Set(ATTACK_CATEGORY_IDS.filter(id => text.includes(id) || text.includes(id.replace(/-/g, " "))));
+};
 
 /** Run the whole interview and return what to write. Writes nothing itself. */
 export async function runInterview(params: InterviewParams): Promise<InterviewResult> {
@@ -383,23 +411,32 @@ export async function runInterview(params: InterviewParams): Promise<InterviewRe
     entries = result.entries; notes = result.notes; asked = FIXED_QUESTIONS.length; answered = result.notes.length;
   };
 
+  let scanSummary: InterviewResult["scan"];
   if (!params.model) await fallback("no model could be reached");
   else {
     io.say("Mode: questions from the model, answers from you.");
+    const fromScan = params.scan ? findingQuestions(params.scan.findings, { declared: existing.entries, humanText: params.humanText, fileExists: params.fileExists, now: params.now }) : undefined;
+    if (params.scan) io.say(`Findings: ${params.scan.findings.length} from ${params.scan.label}. The questions cover the classes that came up.`);
+    else io.say(params.scanNote ?? "No scan is used, so the questions come from reading the code only.");
     io.say("Reading the code to find what only you can decide...");
     const asking = await params.model(scopeQuestionsPrompt(params.target, { draftPath: params.draftPath, existing: { scope: existing.entries.map(entry => scopeBullet({ ...entry, vector: entry.category ?? entry.vector }).slice(2)), humanText: params.humanText } }), "Scope interview questions");
-    const parsed = parseQuestions(asking.reply, { fileExists: params.fileExists, covered: covered(params.securityText) });
-    if (asking.failed || (!parsed.questions.length && parsed.dropped.some(note => note.startsWith("the reply held no question list")))) {
+    const skip = new Set([...covered(params.securityText), ...humanCovered(params.humanText)]);
+    const parsed = parseQuestions(asking.reply, { fileExists: params.fileExists, covered: skip });
+    const noList = asking.failed || (!parsed.questions.length && parsed.dropped.some(note => note.startsWith("the reply held no question list")));
+    const merged = mergeQuestions(fromScan?.questions ?? [], noList ? [] : parsed.questions);
+    if (params.scan) scanSummary = { source: params.scan.source, findings: params.scan.findings.length, questions: fromScan?.questions.length ?? 0 };
+    if (noList && !merged.length) {
       await fallback(asking.budgetExhausted ? "the interview budget was used up" : "the model did not return usable questions");
-    } else if (!parsed.questions.length) {
-      io.say("The model found nothing the code cannot decide, so there is nothing to ask. Nothing was written.");
-      return { mode, asked: 0, answered: 0, entries: [], notes: [], declined: false, writeNotes: false, warnings: parsed.dropped };
+    } else if (!merged.length) {
+      io.say("There is nothing the code or the scan cannot decide, so there is nothing to ask. Nothing was written.");
+      return { mode, asked: 0, answered: 0, entries: [], notes: [], declined: false, writeNotes: false, warnings: parsed.dropped, ...(scanSummary ? { scan: scanSummary } : {}) };
     } else {
       warnings.push(...parsed.dropped);
-      asked = parsed.questions.length;
-      const result = await askQuestions(parsed.questions, io);
+      if (noList) warnings.push("the model did not return usable questions; the questions come from the scan only");
+      asked = merged.length;
+      const result = await askQuestions(merged, io);
       answered = result.answers.length;
-      notes = result.answers.map(answer => ({ question: `${answer.question.question}${answer.question.evidence ? ` (${answer.question.evidence})` : ""}`, answer: `${answer.decision === "in" ? "in scope" : "out of scope"} (${answer.question.category})${answer.words ? `: ${answer.words}` : ""}` }));
+      notes = result.answers.map(answer => ({ question: `${answer.question.question}${answer.question.evidence && !answer.question.places ? ` (${answer.question.evidence})` : ""}`, answer: `${answer.decision === "in" ? "in scope" : "out of scope"} (${answer.question.category})${answer.words ? `: ${answer.words}` : ""}` }));
       let wording: Wording[] = [];
       if (result.answers.length) {
         const forPrompt: InterviewAnswerForPrompt[] = result.answers.map(answer => ({ questionId: answer.question.id, category: answer.question.category, decision: answer.decision === "in" ? "in scope" : "out of scope", words: answer.words, ...(answer.question.evidence ? { evidence: answer.question.evidence } : {}) }));
@@ -424,12 +461,12 @@ export async function runInterview(params: InterviewParams): Promise<InterviewRe
   for (const entry of unmatched) warnings.push(`unmatched scope entry: '${entry.vector}' names no vulnerability category I know; it will be kept but labels nothing`);
   if (!entries.length) {
     io.say("\nNo scope entries came out of your answers.");
-    return { mode, ...(fallbackReason ? { fallbackReason } : {}), asked, answered, entries: [], notes, declined: false, writeNotes: mode === "questionnaire" && notes.length > 0, warnings };
+    return { mode, ...(fallbackReason ? { fallbackReason } : {}), asked, answered, entries: [], notes, declined: false, writeNotes: mode === "questionnaire" && notes.length > 0, warnings, ...(scanSummary ? { scan: scanSummary } : {}) };
   }
   const kept = await confirmEntries(entries, io);
   if (!kept.length) {
     io.say("\nNo entry was accepted. Nothing was written.");
-    return { mode, ...(fallbackReason ? { fallbackReason } : {}), asked, answered, entries: [], notes, declined: true, writeNotes: false, warnings };
+    return { mode, ...(fallbackReason ? { fallbackReason } : {}), asked, answered, entries: [], notes, declined: true, writeNotes: false, warnings, ...(scanSummary ? { scan: scanSummary } : {}) };
   }
   const before = params.securityText ?? MINIMAL_HEADER;
   const after = addScopeEntries(before, kept);
@@ -437,7 +474,7 @@ export async function runInterview(params: InterviewParams): Promise<InterviewRe
   const sure = ((await io.ask("Write these changes? [y/N]: ")) ?? "n").trim().toLowerCase();
   if (sure !== "y" && sure !== "yes") {
     io.say("Nothing was written.");
-    return { mode, ...(fallbackReason ? { fallbackReason } : {}), asked, answered, entries: kept, notes, declined: true, writeNotes: false, warnings };
+    return { mode, ...(fallbackReason ? { fallbackReason } : {}), asked, answered, entries: kept, notes, declined: true, writeNotes: false, warnings, ...(scanSummary ? { scan: scanSummary } : {}) };
   }
-  return { mode, ...(fallbackReason ? { fallbackReason } : {}), asked, answered, entries: kept, notes, securityText: after, declined: false, writeNotes: true, warnings };
+  return { mode, ...(fallbackReason ? { fallbackReason } : {}), asked, answered, entries: kept, notes, securityText: after, declined: false, writeNotes: true, warnings, ...(scanSummary ? { scan: scanSummary } : {}) };
 }

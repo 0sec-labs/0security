@@ -2477,6 +2477,13 @@ Options:
                              of the threat model. Needs a terminal
   --interview-budget <usd>   With --interview: the most each interview thread may spend (default:
                              0.5)
+  --scan                     With --interview: run a scan of the folder first and ask about the
+                             classes of vulnerability it finds. Shows the estimated cost and asks
+                             before it runs
+  --from-scan <report>       With --interview: ask about the classes in this saved report (from 0
+                             scan --format json). Without --scan or --from-scan, the latest scan of
+                             the folder from the last 30 days is used when there is one
+  --scan-budget <usd>        With --scan: the most the scan may spend (default: 3)
   --output <path>            Where to write the threat model, relative to the folder, a .md file
                              (default: .0/threat-model.md); for example THREAT_MODEL.md
   --format <format>          json prints the outcome as JSON

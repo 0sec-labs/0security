@@ -18,10 +18,14 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
-import type { Command } from "commander";
+import { Command } from "commander";
+import { buildInventory } from "@0/engine";
 import { parseScope, THREAT_MODEL_PATH, threatModelPrompt } from "@0/engine/shared";
 import { consoleTransportOptions, type ConsoleClient, type ConsoleTransportOptions } from "../console-client.js";
-import { connect, DEFAULT_SCAN_MODEL, defaultScanDeps, waitForThread, type ScanDeps } from "./scan.js";
+import { connect, DEFAULT_SCAN_MODEL, defaultScanDeps, registerScanCommand, waitForThread, type ScanDeps } from "./scan.js";
+import { planScan } from "../scan-plan.js";
+import { DEFAULT_BATCH_SIZE } from "../scan-batched.js";
+import { findingsFromReport, latestScanFindings, loadReportFile, MAX_SCAN_AGE_DAYS, type ScanSnapshot } from "../threat-interview-findings.js";
 import { finishWithError, UsageError } from "./output.js";
 import { asJson, finishedThread, usageLine } from "./thread-output.js";
 import { ensureScopeLink, runInterview, scopeLinkFor, upsertScopeDecisions, type InterviewIO, type InterviewModel, type InterviewResult } from "../threat-interview.js";
@@ -31,6 +35,8 @@ const DEFAULT_BUDGET_USD = 3;
 const DEFAULT_TIMEOUT_SECONDS = 1800;
 /** What the two interview threads (questions, wording) may spend together. */
 export const DEFAULT_INTERVIEW_BUDGET_USD = 0.5;
+/** What the scan that `--scan` runs first may spend. */
+export const DEFAULT_SCAN_BUDGET_USD = 3;
 export const SECURITY_FILE = "SECURITY.md";
 export const THREAT_MODEL_BRANCH = "0/threat-model";
 export const REQUIRED_HEADINGS = ["Summary", "What matters most", "Assets", "Actors", "Trust boundaries", "Entry points", "Authorization and business rules", "Data flows", "Open questions"];
@@ -50,6 +56,12 @@ export interface ThreatModelDeps extends Pick<ScanDeps, "open" | "err" | "sleep"
   /** The terminal the interview reads and writes. Tests give scripted answers. */
   openTerminal?(): InterviewIO & { close(): void };
   now?(): Date;
+  /** The latest scan of the folder in the findings database, newer than 30 days. Tests give their own. */
+  latestScan?(folder: string, now: Date): ScanSnapshot | undefined;
+  /** A rough cost range for a scan of the folder, from its files alone. Calls no model. */
+  estimateScan?(folder: string, budgetUsd: number): { lowUsd: number; highUsd: number };
+  /** Run a scan of the folder as `0 scan --format json` and return its report text. */
+  runScan?(folder: string, options: { budget: number; model?: string; timeout: string; client?: ConsoleClient }): Promise<{ text?: string; costUsd?: number; note?: string }>;
 }
 
 /** Lines typed at the terminal, one per question. Prompts and notes go to standard error so standard output stays for the result. */
@@ -80,15 +92,45 @@ export const defaultThreatModelDeps: ThreatModelDeps = {
   isTTY: () => Boolean(process.stdin.isTTY && process.stderr.isTTY),
   openTerminal: openStdioTerminal,
   now: () => new Date(),
+  latestScan: (folder, now) => latestScanFindings(folder, { now }),
+  estimateScan: (folder, budgetUsd) => {
+    const { estimate } = planScan(buildInventory(folder), { folder, batchSize: DEFAULT_BATCH_SIZE, batchesMode: "auto", budgetUsd });
+    return { lowUsd: estimate.lowUsd, highUsd: estimate.highUsd };
+  },
+  async runScan(folder, options) {
+    const dir = mkdtempSync(join(tmpdir(), "0-interview-scan-"));
+    const out = join(dir, "report.json");
+    const exitBefore = process.exitCode;
+    try {
+      const program = new Command().exitOverride();
+      // The scan runs on the console this command already connected to; stopping a console of its own would leave a stale registration behind.
+      const shared = options.client;
+      const scanClient: ConsoleClient | undefined = shared && { request: (method, path, body) => shared.request(method, path, body), dispose: () => {} };
+      registerScanCommand(program, { ...defaultScanDeps, scopeHint: () => undefined, ...(scanClient ? { open: async () => scanClient } : {}) });
+      await program.parseAsync(["scan", folder, "--budget", String(options.budget), "--format", "json", "--output", out, "--timeout", options.timeout, ...(options.model ? ["--model", options.model] : [])], { from: "user" });
+      const failed = process.exitCode === 2 || process.exitCode === 1 && !existsSync(out);
+      if (!existsSync(out)) return { note: failed ? "the scan failed before it wrote a report" : "the scan wrote no report" };
+      const text = readFileSync(out, "utf8");
+      let costUsd: number | undefined;
+      try { const cost = (JSON.parse(text) as { costUsd?: unknown }).costUsd; if (typeof cost === "number") costUsd = cost; } catch { /* no cost */ }
+      return { text, ...(costUsd !== undefined ? { costUsd } : {}) };
+    } catch (error) {
+      return { note: `the scan failed: ${error instanceof Error ? error.message.split("\n")[0]!.slice(0, 200) : "unknown error"}` };
+    } finally {
+      // The scan reports its own exit code (findings, partial); this command's exit code is about the threat model.
+      process.exitCode = exitBefore;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  },
 };
 
 export interface ThreatModelOptions extends ConsoleTransportOptions {
-  base?: string; budget: string; model?: string; timeout: string; pr?: boolean; format?: string; interview?: boolean; interviewBudget?: string; output?: string;
+  base?: string; budget: string; model?: string; timeout: string; pr?: boolean; format?: string; interview?: boolean; interviewBudget?: string; output?: string; scan?: boolean; fromScan?: string; scanBudget?: string;
 }
 
 export interface ThreatModelOutcome {
   file: string; written: boolean; changed: boolean; problems: string[]; humanSectionsKept?: boolean;
-  interview?: { mode: string; fallbackReason?: string; asked: number; answered: number; entries: number; wroteSecurity: boolean; securityFile?: string };
+  interview?: { mode: string; fallbackReason?: string; asked: number; answered: number; entries: number; wroteSecurity: boolean; securityFile?: string; scan?: { source: string; findings: number; questions: number } };
   notices?: string[];
   branch?: string; pullRequest?: { url: string; created: boolean }; threadId?: string; costUsd?: number; budgetExhausted?: boolean; timedOut?: boolean; summary?: string;
 }
@@ -212,6 +254,11 @@ export async function runThreatModel(folderArg: string | undefined, options: Thr
     if (!Number.isFinite(interviewBudget) || interviewBudget <= 0) throw new UsageError("--interview-budget must be a positive number of USD.");
     if (options.computer || options.engineUrl) throw new UsageError("0 threat-model writes a file on this machine; run it against the local console.");
     if (options.interviewBudget !== undefined && !options.interview) throw new UsageError("--interview-budget applies to --interview.");
+    if ((options.scan || options.fromScan !== undefined || options.scanBudget !== undefined) && !options.interview) throw new UsageError("--scan, --from-scan and --scan-budget apply to --interview.");
+    if (options.scan && options.fromScan !== undefined) throw new UsageError("Use --scan or --from-scan, not both.");
+    if (options.scanBudget !== undefined && !options.scan) throw new UsageError("--scan-budget applies to --scan.");
+    const scanBudget = Number(options.scanBudget ?? DEFAULT_SCAN_BUDGET_USD);
+    if (!Number.isFinite(scanBudget) || scanBudget <= 0) throw new UsageError("--scan-budget must be a positive number of USD.");
     if (options.interview && !(deps.isTTY?.() ?? false)) throw new UsageError("0 threat-model --interview asks questions on the terminal. Run it in a terminal.");
     const folder = resolve(folderArg ?? ".");
     if (!existsSync(folder) || !statSync(folder).isDirectory()) throw new UsageError(`${folderArg ?? "."} is not a folder.`);
@@ -255,13 +302,48 @@ export async function runThreatModel(folderArg: string | undefined, options: Thr
     const dirtyBefore = !options.pr ? await deps.git(workFolder, ["status", "--porcelain", "--untracked-files=all"]).catch(() => undefined) : undefined;
     if (!options.pr) mkdirSync(dirname(target), { recursive: true });
 
+    // The interview's terminal is also where --scan shows its cost and asks before it runs.
+    let terminal: (InterviewIO & { close(): void }) | undefined;
+    const openTerminal = (): InterviewIO & { close(): void } => (terminal ??= (deps.openTerminal ?? defaultThreatModelDeps.openTerminal!)());
     let client: ConsoleClient | undefined;
+    let snapshot: ScanSnapshot | undefined;
+    let scanNote: string | undefined;
+    let scanCost = 0;
+    if (options.interview) {
+      const now = (deps.now ?? (() => new Date()))();
+      if (options.fromScan !== undefined) {
+        try { snapshot = loadReportFile(resolve(options.fromScan), workFolder); }
+        catch (error) { throw new UsageError(`--from-scan: ${error instanceof Error ? error.message : String(error)}`); }
+      } else if (options.scan) {
+        const io = openTerminal();
+        const estimate = deps.estimateScan?.(folder, scanBudget) ?? { lowUsd: 0, highUsd: scanBudget };
+        io.say(`Scan first: about $${estimate.lowUsd.toFixed(2)} to $${estimate.highUsd.toFixed(2)} for the scan (stops at $${Number(scanBudget.toFixed(4))}), plus up to $${Number(budget.toFixed(4))} for the threat model and $${Number(interviewBudget.toFixed(4))} for the interview. This is a rough estimate, not a quote.`);
+        const go = ((await io.ask("Run the scan now? [y/N]: ")) ?? "n").trim().toLowerCase();
+        if (go === "y" || go === "yes") {
+          try { const connected = await connect(options, deps); stopConsole = connected.stop; client = connected.client; }
+          catch (error) { deps.err(`could not reach a console for the scan: ${(error instanceof Error ? error.message : String(error)).split("\n")[0]!.slice(0, 200)}`); }
+          const ran = (await deps.runScan?.(folder, { budget: scanBudget, ...(options.model ? { model: options.model } : {}), timeout: options.timeout, ...(client ? { client } : {}) })) ?? { note: "no scan runner" };
+          scanCost = ran.costUsd ?? 0;
+          if (ran.text) {
+            try { snapshot = { findings: findingsFromReport(ran.text, folder), source: "new", label: "the scan that just ran" }; }
+            catch (error) { scanNote = `The scan report could not be used (${error instanceof Error ? error.message : String(error)}), so the questions come from reading the code only.`; }
+          } else scanNote = `The scan gave no findings to ask about (${ran.note ?? "no report"}), so the questions come from reading the code only.`;
+        } else io.say("The scan was not run.");
+      }
+      if (!snapshot && !scanNote) {
+        snapshot = deps.latestScan?.(folder, now);
+        if (!snapshot) scanNote = `No scan of this folder from the last ${MAX_SCAN_AGE_DAYS} days is stored, so the questions come from reading the code only. Add --scan to scan first, or --from-scan <report.json> to use a saved report.`;
+      }
+    }
+
     let thread: Awaited<ReturnType<typeof runThread>> | undefined;
     let draftError: string | undefined;
     try {
-      const connected = await connect(options, deps);
-      stopConsole = connected.stop;
-      client = connected.client;
+      if (!client) {
+        const connected = await connect(options, deps);
+        stopConsole = connected.stop;
+        client = connected.client;
+      }
       thread = await runThread(client, deps, workFolder, threatModelPrompt(folder, { exists: before !== undefined, ...(options.output ? { path: rel } : {}), ...(scopeFound ? { scopeLink: scopeLinkFor(rel) } : {}) }), options, budget, `Threat model ${folder}`, "drafting the threat model");
     } catch (error) {
       // The interview still works without a model: it falls back to the fixed questionnaire.
@@ -275,7 +357,7 @@ export async function runThreatModel(folderArg: string | undefined, options: Thr
     let interviewCost = 0;
     const notices: string[] = [];
     if (options.interview) {
-      const terminal = (deps.openTerminal ?? defaultThreatModelDeps.openTerminal!)();
+      const io = openTerminal();
       try {
         const live = client;
         const model: InterviewModel | undefined = live && thread && !thread.failed && !thread.timedOut ? async (prompt, title) => {
@@ -288,9 +370,9 @@ export async function runThreatModel(folderArg: string | undefined, options: Thr
         const draftNow = deps.readFile(target);
         interview = await runInterview({
           target: folder, folder: workFolder, draftPath: rel, draftExists: draftNow !== undefined, securityText: securityBefore,
-          humanText: humanBlocks(draftNow ?? before ?? ""), io: terminal, ...(model ? { model } : {}), fileExists: path => insideFile(workFolder, path), now: (deps.now ?? (() => new Date()))(),
+          humanText: humanBlocks(draftNow ?? before ?? ""), io, ...(model ? { model } : {}), ...(snapshot ? { scan: snapshot } : {}), ...(scanNote ? { scanNote } : {}), fileExists: path => insideFile(workFolder, path), now: (deps.now ?? (() => new Date()))(),
         });
-      } finally { terminal.close(); }
+      } finally { terminal?.close(); terminal = undefined; }
       if (interview.securityText !== undefined) { (deps.writePublic ?? deps.writeFile)(securityPath, interview.securityText); wroteSecurity = true; }
       const latest = deps.readFile(target);
       if (interview.writeNotes && interview.notes.length) {
@@ -313,11 +395,11 @@ export async function runThreatModel(folderArg: string | undefined, options: Thr
     const text = deps.readFile(target);
     const problems = checkThreatModel(text);
     const humanKept = before !== undefined ? humanBlocks(before).every(block => text !== undefined && text.includes(block)) : undefined;
-    const costUsd = (thread?.costUsd ?? 0) + interviewCost;
+    const costUsd = (thread?.costUsd ?? 0) + interviewCost + scanCost;
     const common = {
       file: options.pr ? fileRel : target, written: text !== undefined || wroteSecurity, problems, ...(humanKept === undefined ? {} : { humanSectionsKept: humanKept }),
-      ...(thread ? { threadId: thread.id } : {}), ...(thread?.costUsd !== undefined || interviewCost ? { costUsd } : {}), ...(thread?.budgetExhausted ? { budgetExhausted: true } : {}), ...(thread?.timedOut ? { timedOut: true } : {}), ...(thread?.reply ? { summary: thread.reply } : {}),
-      ...(interview ? { interview: { mode: interview.mode, ...(interview.fallbackReason ? { fallbackReason: interview.fallbackReason } : {}), asked: interview.asked, answered: interview.answered, entries: interview.entries.length, wroteSecurity, ...(wroteSecurity ? { securityFile: options.pr ? securityRel : securityPath } : {}) } } : {}),
+      ...(thread ? { threadId: thread.id } : {}), ...(thread?.costUsd !== undefined || interviewCost || scanCost ? { costUsd } : {}), ...(thread?.budgetExhausted ? { budgetExhausted: true } : {}), ...(thread?.timedOut ? { timedOut: true } : {}), ...(thread?.reply ? { summary: thread.reply } : {}),
+      ...(interview ? { interview: { mode: interview.mode, ...(interview.fallbackReason ? { fallbackReason: interview.fallbackReason } : {}), asked: interview.asked, answered: interview.answered, entries: interview.entries.length, wroteSecurity, ...(wroteSecurity ? { securityFile: options.pr ? securityRel : securityPath } : {}), ...(interview.scan ? { scan: interview.scan } : {}) } } : {}),
       ...(notices.length ? { notices } : {}),
     };
     if (humanKept === false) problems.push("a section marked <!-- human --> was changed; compare with the earlier file before keeping this one");
@@ -374,6 +456,9 @@ export function registerThreatModelCommand(program: Command, deps: ThreatModelDe
     .option("--base <branch>", "With --pr: the branch to start from and open the pull request against (default: the remote's default branch)")
     .option("--interview", "After the draft, ask a few specific questions on the terminal and write your answers to the Scope section of SECURITY.md and to a human block of the threat model. Needs a terminal")
     .option("--interview-budget <usd>", `With --interview: the most each interview thread may spend (default: ${DEFAULT_INTERVIEW_BUDGET_USD})`)
+    .option("--scan", "With --interview: run a scan of the folder first and ask about the classes of vulnerability it finds. Shows the estimated cost and asks before it runs")
+    .option("--from-scan <report>", "With --interview: ask about the classes in this saved report (from 0 scan --format json). Without --scan or --from-scan, the latest scan of the folder from the last 30 days is used when there is one")
+    .option("--scan-budget <usd>", `With --scan: the most the scan may spend (default: ${DEFAULT_SCAN_BUDGET_USD})`)
     .option("--output <path>", `Where to write the threat model, relative to the folder, a .md file (default: ${THREAT_MODEL_PATH}); for example THREAT_MODEL.md`)
     .option("--format <format>", "json prints the outcome as JSON")
     .option("--budget <usd>", "Stop when the estimated spend reaches this many USD", String(DEFAULT_BUDGET_USD))
