@@ -15,6 +15,9 @@ on the GitHub Release tag.
 ### Fixed
 
 - A Gradle version catalog (`libs.versions.toml`) with a `__proto__`, `constructor` or `prototype` table header or key can no longer change `Object.prototype` while the SBOM is read. Those keys are skipped and catalog tables are built without a prototype; aliases such as `my.lib = { ... }` still resolve as before. Thanks to Himanshu Patro for reporting this in #535.
+### Added
+
+- `0 config audit-export` writes the audit log as NDJSON (default), CEF or RFC 5424 syslog lines, oldest first, with `--since`, `--until` (a duration such as `24h` or a date), `--type` (an action or prefix), `--limit`, `-o <file>` (mode 0600) and `--follow`. Each event has a stable `eventId` and an ISO timestamp, and text and detail go through the log's redaction again on export. In server mode, setting `ZERO_AUDIT_SINK_URL` to an `https://` collector or a `syslog+tls://host:port` address pushes new events in batches, with retries and backoff. It never blocks the action it records, counts dropped events in a status line, refuses UDP and plain http or TCP except to this machine, and is off by default. `ZERO_ENTERPRISE` leaves it on because you name the destination. See [Send the audit log to a SIEM](/server-mode/#send-the-audit-log-to-a-siem). Checked with a local syslog-over-TCP listener, a local TLS listener with a self-signed certificate, and a server run; not checked against a commercial collector or the compiled binary.
 
 ## [0.42.0] - 2026-11-22
 

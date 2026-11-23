@@ -502,7 +502,7 @@ Inspect, export, and import the two-level console configuration
 0 config
 ```
 
-Subcommands: [get](#config-get) · [set](#config-set) · [doctor](#config-doctor) · [show](#config-show) · [list](#config-list) · [reset](#config-reset) · [export](#config-export) · [import](#config-import) · [audit-log](#config-audit-log) · [team](#config-team) · [db](#config-db) · [github](#config-github).
+Subcommands: [get](#config-get) · [set](#config-set) · [doctor](#config-doctor) · [show](#config-show) · [list](#config-list) · [reset](#config-reset) · [export](#config-export) · [import](#config-import) · [audit-log](#config-audit-log) · [audit-export](#config-audit-export) · [team](#config-team) · [db](#config-db) · [github](#config-github).
 
 #### config show
 
@@ -870,6 +870,28 @@ Show the local log of privileged actions: connection and settings changes, exten
 | `--before <id>` | — | Only events older than this id (pagination) |
 | `--json` | — | Print JSON |
 | `--format <format>` | — | Output: text or json Choices: text, json. |
+
+### config audit-export
+
+Write the audit log as NDJSON, CEF or syslog lines for a SIEM, oldest first. Each event has a stable `eventId`. Secret-looking values are redacted again on the way out. See [Send the audit log to a SIEM](/server-mode/#send-the-audit-log-to-a-siem).
+
+```text
+0 config audit-export [options]
+```
+
+```bash
+0 config audit-export --format cef --since 24h -o audit.cef
+```
+
+| Option | Registered default | Description |
+| --- | --- | --- |
+| `--format <format>` | — | ndjson (default), cef or syslog |
+| `--since <time>` | — | Only events at or after this time: a duration (24h, 7d) or a date |
+| `--until <time>` | — | Only events before this time |
+| `--limit <n>` | — | Keep only the newest n matching events |
+| `--type <action...>` | — | Only these actions or action prefixes, for example extension (repeatable, or comma separated) |
+| `-o, --output <file>` | — | Write to this file with owner-only permissions instead of stdout |
+| `--follow` | — | Keep running and print new events as they are written (Ctrl+C stops) |
 
 ### doctor workbench
 

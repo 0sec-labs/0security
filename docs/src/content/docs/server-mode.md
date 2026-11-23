@@ -211,6 +211,67 @@ If the secret leaks, rotate it. The old secret works for 5 minutes.
 docker compose exec zero 0 sentinels webhook secret rotate --yes
 ```
 
+### Send the audit log to a SIEM
+
+The audit log records privileged actions: settings changes, extension installs, connections and denied attempts. Export it as a file, or push it from a server to your collector.
+
+Export a day of events as NDJSON, CEF or RFC 5424 syslog lines:
+
+```bash
+0 config audit-export --since 24h
+0 config audit-export --format cef --type extension -o audit.cef
+0 config audit-export --format syslog --follow
+```
+
+Events print oldest first. `--since` and `--until` take a duration such as `24h` or `7d`, or a date. `--type` takes an action or a prefix, so `extension` matches `extension.install`. `--limit` keeps the newest events. `-o` writes a file only you can read. `--follow` keeps printing new events until you press Ctrl+C. Flags are in [config audit-export](/commands/#config-audit-export).
+
+To push events from a server, set the destination in the server's environment:
+
+```bash
+ZERO_AUDIT_SINK_URL=https://siem.example.com/ingest
+ZERO_AUDIT_SINK_TOKEN=...
+```
+
+A syslog collector uses `ZERO_AUDIT_SINK_URL=syslog+tls://logs.example.com:6514`. The sink is off unless you set the URL. Only the server's environment sets it. A repository, a project file or the database cannot.
+
+- An `https://` URL receives NDJSON by default. Set `ZERO_AUDIT_SINK_FORMAT` to `cef` or `syslog` for those lines instead. The token, if set, goes in an `Authorization: Bearer` header.
+- A `syslog+tls://` URL receives RFC 5424 lines over TLS, one per line. The server checks the certificate against the system and Node.js trust store.
+- Plain `http://` and `syslog+tcp://` work only for this machine. UDP syslog is refused.
+- The server refuses to start when the setting is refused, so a feed you expect is never silently off.
+- `ZERO_ENTERPRISE` does not block the sink, because you name the destination. See [Data flow](/data-flow/).
+
+The sink sends events in batches every two seconds. It retries a failed batch five times with growing delays, then drops it. It never slows or fails the action it records. The server prints a status line when it drops events and when it stops, and the audit log API shows the same counters:
+
+```text
+audit sink https://siem.example.com: sent 120, dropped 3, last error: collector answered HTTP 503
+```
+
+The sink starts after the newest event when the server starts. Use `0 config audit-export --since` to load earlier history. A restart can lose events written while the server was down. The log keeps the newest 50,000 events.
+
+#### Event fields
+
+Every format carries the same fields.
+
+| Field | Meaning |
+| --- | --- |
+| `schema` | `0.audit.v1`. |
+| `eventId` | A 32-character hash of the event. It stays the same across exports and the sink, so use it to deduplicate. |
+| `seq` | Position in the local log. It grows by one for each event. |
+| `ts` | Time in ISO 8601 UTC with milliseconds. |
+| `actor` | Who acted, for example `operator (browser)`, `engine` or `cli`. |
+| `action` | What happened, for example `extension.install`, `settings.change`, `decision.approved` or `access.browser_only`. |
+| `subject` | What it happened to, for example an extension name, a setting key or a route. |
+| `outcome` | `ok`, `denied` or `error`. |
+| `detail` | A small object. Only these keys are kept: key, keys, old, new, scope, enabled, approved, decision, fingerprint, name, transport, envKeys, headerKeys, callerKind, route, method, status, code, kind, id, sentinelId, triggerId, trigger, reason, role, autonomy, seed, preset, count, source, repo, sessionId, decisionId, path, version, client. |
+
+The log never stores secrets, tokens, evidence bodies or prompts. Text fields are cut at 200 characters, and values that look like keys or tokens become `[redacted]`. The export applies the same redaction again.
+
+In CEF the header is `CEF:0|0security|0|<version>|<action>|<action>|<severity>`, with severity 3 for `ok`, 6 for `denied` and 7 for `error`. The extension carries `externalId` (the event id), `rt` (epoch milliseconds), `suser` (actor), `act`, `outcome`, `cs1` (subject), `cs2` (detail as JSON), `cn1` (seq) and `dvchost`.
+
+In syslog the line is `<PRI>1 <ts> <host> 0 - <action> [audit@32473 eventId seq actor action subject outcome] <event as JSON>`. The facility is authpriv, and the severity is informational, warning or error for `ok`, `denied` and `error`. The structured-data ID uses the documentation enterprise number 32473 because 0 has none registered.
+
+The TLS sink is tested against a local listener with a self-signed certificate. It is not tested against a commercial collector. Collectors that need their own envelope, such as Splunk HEC, are not supported directly.
+
 ### Not supported
 
 - High availability, failover, or more than one replica.
