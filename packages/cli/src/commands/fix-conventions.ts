@@ -105,10 +105,10 @@ export const pullRequestTitle = (finding: ConventionFinding, conventions?: PullR
 export const commitSubject = (finding: ConventionFinding, conventions?: PullRequestConventions): string =>
   conventions?.commitMessageTemplate ? renderTemplate(conventions.commitMessageTemplate, finding) : defaultTitle(finding);
 
-/** Whether the pull request is a draft: `on-failure` (the default) drafts when a check failed. */
-export function isDraft(verified: boolean, conventions?: PullRequestConventions): boolean {
+/** Whether the pull request is a draft: `on-failure` (the default) drafts when a check failed or no check ran (unless `--ready`). */
+export function isDraft(verified: boolean, conventions?: PullRequestConventions, unchecked = false): boolean {
   const rule = conventions?.draft ?? "on-failure";
-  return rule === "always" ? true : rule === "never" ? false : !verified;
+  return rule === "always" ? true : rule === "never" ? false : !verified || unchecked;
 }
 
 /** The operator's footer, neutralised line by line and ready to append to the body. */

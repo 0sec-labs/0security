@@ -133,7 +133,7 @@ export function sandboxVerifiedLine(checks: CheckResult[]): string | undefined {
   return labels.length === 1 ? `Verified in a sandbox: ${cell(labels[0]!)}.` : undefined;
 }
 
-export function pullRequestBody(finding: FindingToFix, summary: string | undefined, checks: CheckResult[], footer?: string): string {
+export function pullRequestBody(finding: FindingToFix, summary: string | undefined, checks: CheckResult[], footer?: string, draftUnchecked = false): string {
   const where = finding.path ? `\`${finding.path.replace(/`/g, "'")}${finding.startLine ? `:${finding.startLine}` : ""}\`` : "not given";
   const rows = checks.length ? checks.map(check => `| \`${escapeHtml(check.command.replace(/`/g, "'").replace(/\s+/g, " ")).replace(/\|/g, "\\|")}\` | ${check.code === 0 ? "passed" : `failed (exit ${check.code})`} |`).join("\n") : "| none were run | |";
   const failed = checks.filter(check => check.code !== 0);
@@ -154,13 +154,14 @@ export function pullRequestBody(finding: FindingToFix, summary: string | undefin
     "",
     inert(modelText || "The change is in the diff."),
     "",
-    failed.length ? "Opened as a draft because a check failed. Review it before it is marked ready." : "A person should review this before merging; 0 does not merge.",
+    ...(!checks.length ? ["No checks were run."] : []),
+    failed.length ? "Opened as a draft because a check failed. Review it before it is marked ready." : draftUnchecked ? "Opened as a draft because no check ran. Review it before it is marked ready." : "A person should review this before merging; 0 does not merge.",
     ...(footer ? ["", footer] : []),
   ].join("\n");
 }
 
 export interface FixOptions extends ConsoleTransportOptions {
-  repo?: string; base?: string; test?: string[]; budget: string; model?: string; timeout: string; pr: boolean; format?: string; policy?: string; repoPolicy?: boolean; sandbox?: string; sandboxImage?: string; sandboxNetwork?: boolean;
+  repo?: string; base?: string; test?: string[]; ready?: boolean; budget: string; model?: string; timeout: string; pr: boolean; format?: string; policy?: string; repoPolicy?: boolean; sandbox?: string; sandboxImage?: string; sandboxNetwork?: boolean;
 }
 
 export interface FixOutcome {
@@ -283,8 +284,8 @@ async function runFixFlow(id: string, options: FixOptions, deps: FixDeps): Promi
     const host = selectHost({ run: (args, input) => deps.gh(tree, args, input), git: args => deps.git(tree, args) });
     await host.pushBranch(branch);
     const bodyFile = join(temp, "body.md");
-    deps.writeFile(bodyFile, pullRequestBody(finding, thread.reply, checks, footerText(conventions)));
-    const draft = isDraft(verified, conventions);
+    const draft = isDraft(verified, conventions, !checks.length && !options.ready);
+    deps.writeFile(bodyFile, pullRequestBody(finding, thread.reply, checks, footerText(conventions), draft && verified && !checks.length));
     const existing = await host.findOpenPullRequest(branch);
     let url: string; let created = false;
     if (existing) {
@@ -351,6 +352,7 @@ export function registerFixCommand(program: Command, deps: FixDeps = defaults): 
     .option("--repo <dir>", "Git repository the finding is in (default: the current directory)")
     .option("--base <branch>", "Branch to start from and open the pull request against (default: the remote's default branch)")
     .option("--test <command>", "Check to run after the change; repeat for several. A failing check makes the pull request a draft", collect)
+    .option("--ready", "Open the pull request ready for review even when no --test ran. Without it, a pull request with no checks is a draft")
     .addOption(new Option("--sandbox <mode>", "Run the --test commands in a container instead of on this machine (docker)").choices(["docker"]))
     .option("--sandbox-image <image>", "Image for --sandbox docker, for example maven:3-eclipse-temurin-21. It must hold the tools and dependencies the tests need")
     .option("--sandbox-network", "Give the sandbox network access (to download dependencies). Off by default")
@@ -362,7 +364,7 @@ export function registerFixCommand(program: Command, deps: FixDeps = defaults): 
     .option("--timeout <seconds>", "Maximum seconds to wait for the fix", String(DEFAULT_TIMEOUT_SECONDS))
     .addOption(new Option("--format <format>", "Output: text or json").choices(["text", "json"]))
     )
-    .addHelpText("after", "\nNothing is pushed to the base branch and nothing is merged: the change goes to a branch named 0/fix-<id>, and running it again updates the same pull request.\nWithout --sandbox, --test commands run on this machine with your privileges. With --sandbox docker they run in a container with no network, limited memory, CPU and processes, a copy of the work tree and none of your environment variables; the pull request says so only when every check passed there.\nExit codes: 0 a verified change (or committed with --no-pr), 1 no change or a failed check, 2 usage error, 3 stopped at the budget or time limit.")
+    .addHelpText("after", "\nNothing is pushed to the base branch and nothing is merged: the change goes to a branch named 0/fix-<id>, and running it again updates the same pull request.\nWithout --sandbox, --test commands run on this machine with your privileges. With --sandbox docker they run in a container with no network, limited memory, CPU and processes, a copy of the work tree and none of your environment variables; the pull request says so only when every check passed there.\nA pull request is a draft when a check failed or when no --test ran; --ready opens it ready in the second case.\nExit codes: 0 a change was made and no check failed (also with --no-pr), 1 no change or a failed check, 2 usage error, 3 stopped at the budget or time limit.")
     .action(async (finding: string, options: FixOptions, command: Command) => {
       try {
         const outcome = await runFix(finding, applyWorkflowDefaults("fix", options, command), deps);

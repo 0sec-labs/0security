@@ -77,6 +77,19 @@ describe("0 findings fix", () => {
     expect(h.bodies[0]).toContain("failed (exit 2)");
   });
 
+  it("opens a draft that says no checks were run when there is no --test, and a ready one with --ready", async () => {
+    const h = harness();
+    const outcome = await runFix("f-1", options(), h.deps);
+    expect(outcome?.pullRequest).toMatchObject({ created: true, draft: true });
+    expect(h.calls.find(call => call.startsWith("gh pr create"))).toContain("--draft");
+    expect(h.bodies[0]).toContain("No checks were run.");
+    const ready = harness();
+    const readyOutcome = await runFix("f-1", options({ ready: true }), ready.deps);
+    expect(readyOutcome?.pullRequest).toMatchObject({ draft: false });
+    expect(ready.calls.find(call => call.startsWith("gh pr create"))).not.toContain("--draft");
+    expect(ready.bodies[0]).toContain("No checks were run.");
+  });
+
   it("updates the pull request that already exists instead of opening another", async () => {
     const h = harness({ pulls: JSON.stringify([{ number: 7, url: "https://github.com/o/r/pull/7", isDraft: true }]) });
     const outcome = await runFix("f-1", options({ test: ["pnpm test"] }), h.deps);

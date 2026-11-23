@@ -62,7 +62,7 @@ export interface BurndownDeps {
 }
 
 export interface BurndownOptions extends ConsoleTransportOptions {
-  repo?: string; base?: string; test?: string[]; pr: boolean; model?: string; timeout: string; format?: string; policy?: string;
+  repo?: string; base?: string; test?: string[]; ready?: boolean; pr: boolean; model?: string; timeout: string; format?: string; policy?: string;
   severity?: string; category?: string; tool?: string; source?: string; scan?: string; limit?: string; fingerprint?: string;
   concurrency: string; budget: string; perFix: string; maxConsecutiveFailures: string; maxFailureRate: string; minAttempts?: string;
   dryRun?: boolean; history?: boolean; retry?: boolean;
@@ -302,6 +302,7 @@ export function registerBurndownCommand(program: Command, fixDeps: FixDeps = def
     .option("--repo <dir>", "Git repository the findings are in (default: the current directory)")
     .option("--base <branch>", "Branch to start from and open pull requests against (default: the remote's default branch)")
     .option("--test <command>", "Check to run after each change; repeat for several. A failing check makes the pull request a draft", collect)
+    .option("--ready", "Open pull requests ready for review even when no --test ran. Without it, a pull request with no checks is a draft")
     .option("--policy <file>", "Policy file (.json or .yaml) with fix rules and pull request conventions; any path you name. Default: ~/.0/fix-policy.json|yaml|yml")
     .option("--no-pr", "Commit on the fix branches but do not push or open pull requests")
     .option("--concurrency <n>", `Fixes at the same time, each in its own work tree (1 to ${MAX_CONCURRENCY})`, "1")
