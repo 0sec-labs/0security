@@ -18,6 +18,8 @@ export interface PrePassIo {
   note?: (text: string) => void;
   /** Overrides every scanner's time limit (tests). */
   timeoutSeconds?: number;
+  /** The folder the scanners run in (default: this process's). Trivy reads `.trivyignore` from there. */
+  cwd?: string;
   /** When true, honors in-repo scanner config and ignore files (.gitleaks.toml, .trivyignore). Off by default. */
   repoIgnores?: boolean;
 }
@@ -58,6 +60,11 @@ export async function runPrePass(folder: string, scanners: string[], rules: stri
         return undefined;
       };
       if (!binary) return missing();
+      const forced = repoIgnores ? undefined : spec.repoConfigFiles?.find(name => existsSync(join(folder, name)));
+      if (forced) {
+        note(`${spec.id} was skipped: it always reads ${forced} from the scanned folder and cannot be told not to. Pass --repo-ignores to run it anyway.`);
+        return undefined;
+      }
       const seconds = io.timeoutSeconds ?? spec.timeoutSeconds ?? DEFAULT_TIMEOUT_SECONDS;
       // A scanner such as Checkov writes its SARIF to a file in a scratch folder, not to standard output.
       const out = spec.outputFile ? mkdtempSync(join(tmpdir(), "0-scanner-")) : "";
@@ -65,7 +72,7 @@ export async function runPrePass(folder: string, scanners: string[], rules: stri
       try {
         let stdout: string;
         const isolationOptions = { repoIgnores, emptyConfig, emptyIgnore, gitleaksConfig };
-        try { stdout = (await exec(binary, scannerArguments(spec, folder, useRules ? rules : undefined, out, isolationOptions), { env, timeout: seconds * 1000, maxBuffer: 128 * 1024 * 1024, windowsHide: true })).stdout; if (spec.outputFile) stdout = report() ?? stdout; }
+        try { stdout = (await exec(binary, scannerArguments(spec, folder, useRules ? rules : undefined, out, isolationOptions), { env, cwd: io.cwd, timeout: seconds * 1000, maxBuffer: 128 * 1024 * 1024, windowsHide: true })).stdout; if (spec.outputFile) stdout = report() ?? stdout; }
         // A scanner that exits non-zero because it found something still wrote its report.
         catch (error) {
           const failure = error as { stdout?: string; killed?: boolean; signal?: string; code?: string };

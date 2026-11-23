@@ -189,7 +189,11 @@ The default stays FoxGuard alone. The other scanners are not installed with 0. S
 | `trivy` | Vulnerable dependencies, misconfigurations such as Terraform and Kubernetes, and secrets | Downloads its databases on first run |
 | `osv-scanner` | Vulnerable dependencies in lockfiles | Sends package names and versions to osv.dev and deps.dev |
 
-Each scanner runs without a shell, on the folder as an absolute path, with a time limit (2 minutes; 5 for trivy, 3 for osv-scanner). One that fails or runs out of time is skipped with a note. Scanners run with in-repo ignore and configuration files disabled by default so a change under review cannot hide findings (.gitleaks.toml, .gitleaksignore, .trivyignore). Pass --repo-ignores to honor them (with a warning).
+Each scanner runs without a shell, on the folder as an absolute path, with a time limit (2 minutes; 5 for trivy, 3 for osv-scanner). One that fails or runs out of time is skipped with a note.
+
+A change under review can edit files in the folder to hide findings. So the scanners do not read the folder's own configuration or ignore files: `.foxguard.yml`, `.semgrepignore`, `.gitleaks.toml`, `.gitleaksignore`, `.trivyignore` and `osv-scanner.toml`. Inline suppressions such as `gitleaks:allow`, `nosemgrep` and `trivy:ignore` still apply, because they sit next to the code. Pass `--repo-ignores` to let the scanners read the folder's files; 0 prints a warning.
+
+Checkov reads `.checkov.yaml` and `.checkov.yml` from the folder and has no option to ignore them. 0 skips Checkov when the folder has one of those files, unless you pass `--repo-ignores`.
 
 Secret values stay out of the prompt and the findings. gitleaks runs with `--redact`, and trivy masks values by default. 0 also drops the snippet and any `Match:` line from a secret lead, so the thread sees the rule, the file and the line. The thread can still read the file itself, as it reads any file in the folder. `0 findings import` is unchanged.
 FoxGuard ships next to `0`; set `ZERO_FOXGUARD_PATH` to use another copy. Pass `--prepass off` to skip it. `--scanner` adds or replaces scanners (`foxguard`, `semgrep`, `opengrep`, `checkov`); repeat the flag for several. A scanner that is not installed is skipped. A Semgrep rule pack such as `p/default` is downloaded when it runs.
@@ -234,7 +238,7 @@ A hit from your rules is a lead like any other. The scan checks it against the c
 | `--policy <file-or-folder>` | — | Check the code against these Markdown policies (a file or a folder of .md files) and report pass or fail for each; repeat for several. Runs the policy-check skill |
 | `--org-policy <folder>` | — | An organisation's policy folder: evaluated first, and wins when a --policy says otherwise or uses the same id; repeat for several |
 | `--repo-context` | — | Also read .0/threat-model.md from the scanned folder as context. Off by default: a change under review can edit that file; in CI pass the base branch's copy with --context instead |
-| `--repo-ignores` | — | Also honor ignore files and scanner configuration from the scanned folder (.gitleaks.toml, .gitleaksignore, .trivyignore). Off by default: a change under review can use them to hide secrets or misconfigurations |
+| `--repo-ignores` | — | Also let the pre-pass scanners read their configuration and ignore files from the scanned folder (.foxguard.yml, .semgrepignore, .gitleaks.toml, .gitleaksignore, .trivyignore, osv-scanner.toml, .checkov.yaml). Off by default: a change under review can use them to hide findings. Inline suppressions such as nosemgrep always apply |
 | `--skill <id>` | `scan` | Skill that holds the scan method |
 | `--model <model>` | — | Model for the scan thread (default: gpt-6-luna) |
 | `--batches <mode>` | `auto` | auto reviews a large folder in batches, one thread per group of entry points, and records what each batch covered; on always does; off keeps one thread |

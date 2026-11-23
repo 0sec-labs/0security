@@ -37,13 +37,13 @@ const argsOf = (log: string) => readFileSync(log, "utf8").split("\n").filter(Boo
 describe("scanner arguments", () => {
   it("passes each rule path as its own --config, and the default pack when there are none", () => {
     const semgrep = scannerById("semgrep")!;
-    expect(scannerArguments(semgrep, "/w", ["/r/a.yml", "/r/dir"])).toEqual(["scan", "--sarif", "--quiet", "--metrics", "off", "--config", "/r/a.yml", "--config", "/r/dir", "/w"]);
+    expect(scannerArguments(semgrep, "/w", ["/r/a.yml", "/r/dir"], "", { repoIgnores: true })).toEqual(["scan", "--sarif", "--quiet", "--metrics", "off", "--config", "/r/a.yml", "--config", "/r/dir", "/w"]);
     expect(scannerArguments(semgrep, "/w", [])).toContain("p/default");
-    expect(scannerArguments(scannerById("opengrep")!, "/w", ["/r/a.yml"])).toEqual(["scan", "--sarif", "--quiet", "--config", "/r/a.yml", "/w"]);
+    expect(scannerArguments(scannerById("opengrep")!, "/w", ["/r/a.yml"], "", { repoIgnores: true })).toEqual(["scan", "--sarif", "--quiet", "--config", "/r/a.yml", "/w"]);
   });
   it("does not give rules to foxguard", () => {
     expect(scannerTakesRules(scannerById("foxguard")!)).toBe(false);
-    expect(scannerArguments(scannerById("foxguard")!, "/w", ["/r/a.yml"])).toEqual(["--format", "sarif", "/w"]);
+    expect(scannerArguments(scannerById("foxguard")!, "/w", ["/r/a.yml"], "", { repoIgnores: true })).toEqual(["--format", "sarif", "/w"]);
   });
 });
 
@@ -69,7 +69,7 @@ describe("the pre-pass with rules", () => {
     const repo = temp();
     const rules = ["/abs/one.yml", "/abs/two dir; touch pwned"];
     const result = await defaultScanDeps.prePass(repo, ["semgrep"], rules);
-    expect(argsOf(log)).toEqual(["scan", "--sarif", "--quiet", "--metrics", "off", "--config", "/abs/one.yml", "--config", "/abs/two dir; touch pwned", repo]);
+    expect(argsOf(log)).toEqual(["scan", "--sarif", "--quiet", "--metrics", "off", "--config", "/abs/one.yml", "--config", "/abs/two dir; touch pwned", "--x-semgrepignore-filename", ".0-no-semgrepignore", repo]);
     expect(result?.leads).toHaveLength(1);
     expect(result?.leads[0]).toMatchObject({ ruleId: "acme.rules.no-backdoor", ruleSource: "custom" });
   });

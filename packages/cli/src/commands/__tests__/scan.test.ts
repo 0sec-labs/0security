@@ -431,7 +431,7 @@ describe("the pattern-scanner pre-pass", () => {
     const dir = folder();
     const withIgnores = fakes(finished, []);
     await runScan(dir, options({ repoIgnores: true }), withIgnores.deps);
-    expect(withIgnores.err.join("\n")).toContain("warning: --repo-ignores honors scanner configuration and ignore files from the scanned folder (.gitleaks.toml, .gitleaksignore, .trivyignore). A change under review can use them to hide findings from the pre-pass.");
+    expect(withIgnores.err.join("\n")).toContain("warning: --repo-ignores makes the pre-pass scanners read configuration and ignore files from the scanned folder");
     expect(withIgnores.deps.prePass).toHaveBeenCalledWith(dir, ["foxguard"], [], { repoIgnores: true });
 
     const withoutIgnores = fakes(finished, []);

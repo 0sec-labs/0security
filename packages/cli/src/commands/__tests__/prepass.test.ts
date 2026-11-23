@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -45,7 +45,7 @@ describe("scanner list", () => {
     expect(scannerArguments(scannerById("gitleaks")!, "/w/app")).toEqual(["dir", "--report-format", "sarif", "--report-path", "-", "--redact", "--no-banner", "--no-color", "--exit-code", "0", "--log-level", "error", "--config", "/dev/null", "--gitleaks-ignore-path", "/dev/null", "/w/app"]);
     expect(scannerArguments(scannerById("trivy")!, "/w/app")).toEqual(["fs", "--scanners", "vuln,misconfig,secret", "--format", "sarif", "--quiet", "--no-progress", "--disable-telemetry", "--ignorefile", "/dev/null", "--config", "/dev/null", "/w/app"]);
     expect(scannerArguments(scannerById("osv-scanner")!, "/w/app")).toEqual(["scan", "source", "--format", "sarif", "--allow-no-lockfiles", "--verbosity", "error", "-r", "--config", "/dev/null", "/w/app"]);
-    expect(scannerArguments(scannerById("checkov")!, "/w/app", undefined, "/tmp/out")).toEqual(["-d", "/w/app", "-o", "sarif", "--output-file-path", "/tmp/out", "--quiet", "--skip-download", "--config-file", "/dev/null"]);
+    expect(scannerArguments(scannerById("checkov")!, "/w/app", undefined, "/tmp/out")).toEqual(["-d", "/w/app", "-o", "sarif", "--output-file-path", "/tmp/out", "--quiet", "--skip-download"]);
     expect(scannerArguments(scannerById("gitleaks")!, "/w/app", undefined, "", { repoIgnores: true })).toEqual(["dir", "--report-format", "sarif", "--report-path", "-", "--redact", "--no-banner", "--no-color", "--exit-code", "0", "--log-level", "error", "/w/app"]);
     expect(scannerArguments(scannerById("trivy")!, "/w/app", undefined, "", { repoIgnores: true })).toEqual(["fs", "--scanners", "vuln,misconfig,secret", "--format", "sarif", "--quiet", "--no-progress", "--disable-telemetry", "/w/app"]);
     expect(scannerArguments(scannerById("osv-scanner")!, "/w/app", undefined, "", { repoIgnores: true })).toEqual(["scan", "source", "--format", "sarif", "--allow-no-lockfiles", "--verbosity", "error", "-r", "/w/app"]);
@@ -61,7 +61,7 @@ describe("runPrePass with fake scanners", () => {
     const output = sarif("gitleaks", [result("aws-access-token", `Match: ${FAKE_SECRET}\nfound in file`, `${folder}/src/a.js`, 3, { snippet: { text: FAKE_SECRET } })]);
     const tool = fakeTool("gitleaks", output, 0);
     const found = await runPrePass(folder, ["gitleaks"], [], { env: { ...process.env, ZERO_GITLEAKS_PATH: tool.bin } });
-    expect(tool.args().slice(0, 11)).toEqual(["dir", "--report-format", "sarif", "--report-path", "-", "--redact", "--no-banner", "--no-color", "--exit-code", "0", "--log-level", "error"]);
+    expect(tool.args().slice(0, 12)).toEqual(["dir", "--report-format", "sarif", "--report-path", "-", "--redact", "--no-banner", "--no-color", "--exit-code", "0", "--log-level", "error"]);
     expect(tool.args()).toContain("--config");
     expect(tool.args()).toContain("--gitleaks-ignore-path");
     expect(tool.args().slice(-1)).toEqual([folder]);
@@ -178,42 +178,123 @@ describe("runPrePass with the real tools", () => {
 });
 
 describe("in-repo ignore files and scanner configuration isolation", () => {
-  it("isolates gitleaks, trivy, osv-scanner, and checkov from in-repo ignore/config files by default", () => {
-    const folder = tmp();
-    // Plant in-repo ignore and config files
-    writeFileSync(join(folder, ".gitleaksignore"), "some-ignore");
-    writeFileSync(join(folder, ".gitleaks.toml"), "[allowlist]\npaths = [\"src/\"]");
-    writeFileSync(join(folder, ".trivyignore"), "AVD-AWS-0092");
-    writeFileSync(join(folder, "trivy.yaml"), "format: json");
-    writeFileSync(join(folder, "osv-scanner.toml"), "IgnoredVulns = [\"CVE-2020-28500\"]");
-    writeFileSync(join(folder, ".checkov.yml"), "framework: [terraform]");
+  const args = (id: string, options: Parameters<typeof scannerArguments>[4] = {}) => scannerArguments(scannerById(id)!, "/w/app", undefined, "/tmp/out", { emptyConfig: "/s/empty", emptyIgnore: "/s/empty", gitleaksConfig: "/s/gitleaks.toml", ...options });
 
-    // gitleaks: default isolation provides empty ignore and explicit default config; repoIgnores drops them
-    const gitleaksDefault = scannerArguments(scannerById("gitleaks")!, folder);
-    expect(gitleaksDefault).toContain("--config");
-    expect(gitleaksDefault).toContain("--gitleaks-ignore-path");
-    const gitleaksHonored = scannerArguments(scannerById("gitleaks")!, folder, undefined, "", { repoIgnores: true });
-    expect(gitleaksHonored).not.toContain("--config");
-    expect(gitleaksHonored).not.toContain("--gitleaks-ignore-path");
-
-    // trivy: default isolation provides empty ignore and empty config; repoIgnores drops them
-    const trivyDefault = scannerArguments(scannerById("trivy")!, folder);
-    expect(trivyDefault).toContain("--ignorefile");
-    expect(trivyDefault).toContain("--config");
-    const trivyHonored = scannerArguments(scannerById("trivy")!, folder, undefined, "", { repoIgnores: true });
-    expect(trivyHonored).not.toContain("--ignorefile");
-    expect(trivyHonored).not.toContain("--config");
-
-    // osv-scanner: default isolation provides empty config; repoIgnores drops it
-    const osvDefault = scannerArguments(scannerById("osv-scanner")!, folder);
-    expect(osvDefault).toContain("--config");
-    const osvHonored = scannerArguments(scannerById("osv-scanner")!, folder, undefined, "", { repoIgnores: true });
-    expect(osvHonored).not.toContain("--config");
-
-    // checkov: default isolation provides empty config; repoIgnores drops it
-    const checkovDefault = scannerArguments(scannerById("checkov")!, folder, undefined, "/tmp/out");
-    expect(checkovDefault).toContain("--config-file");
-    const checkovHonored = scannerArguments(scannerById("checkov")!, folder, undefined, "/tmp/out", { repoIgnores: true });
-    expect(checkovHonored).not.toContain("--config-file");
+  it("points each scanner at an empty config or ignore file, placed before the folder", () => {
+    expect(args("foxguard")).toEqual(["--format", "sarif", "--config", "/s/empty", "/w/app"]);
+    expect(args("semgrep")).toEqual(["scan", "--sarif", "--quiet", "--metrics", "off", "--config", "p/default", "--x-semgrepignore-filename", ".0-no-semgrepignore", "/w/app"]);
+    expect(args("opengrep")).toEqual(["scan", "--sarif", "--quiet", "--config", "p/default", "--semgrepignore-filename", ".0-no-semgrepignore", "/w/app"]);
+    expect(args("gitleaks").slice(-5)).toEqual(["--config", "/s/gitleaks.toml", "--gitleaks-ignore-path", "/s/empty", "/w/app"]);
+    expect(args("trivy").slice(-5)).toEqual(["--ignorefile", "/s/empty", "--config", "/s/empty", "/w/app"]);
+    expect(args("osv-scanner").slice(-3)).toEqual(["--config", "/s/empty", "/w/app"]);
+    // Checkov has no option that turns off the .checkov.yaml in the scanned folder, so it gets none.
+    expect(args("checkov")).toEqual(["-d", "/w/app", "-o", "sarif", "--output-file-path", "/tmp/out", "--quiet", "--skip-download"]);
   });
+
+  it("adds no isolation argument with repoIgnores", () => {
+    for (const spec of SCANNERS) {
+      const honored = args(spec.id, { repoIgnores: true });
+      expect(honored).toEqual(scannerArguments(spec, "/w/app", undefined, "/tmp/out", { repoIgnores: true }));
+      for (const flag of ["--ignorefile", "--gitleaks-ignore-path", "--semgrepignore-filename", "--x-semgrepignore-filename"]) expect(honored).not.toContain(flag);
+      if (spec.id !== "semgrep" && spec.id !== "opengrep" && spec.id !== "checkov") expect(honored).not.toContain("--config");
+    }
+  });
+
+  posix("gives foxguard an empty config file while it runs, removes it after, and omits it with repoIgnores", async () => {
+    const folder = tmp();
+    const dir = tmp(); const bin = join(dir, "foxguard"); const probe = join(dir, "probe");
+    writeFileSync(bin, `#!/bin/sh\nwhile [ "$#" -gt 0 ]; do if [ "$1" = "--config" ]; then echo "$2" > '${probe}'; wc -c < "$2" >> '${probe}'; fi; shift; done\necho '${sarif("foxguard", [])}'\n`);
+    chmodSync(bin, 0o755);
+    const env = { ...process.env, ZERO_FOXGUARD_PATH: bin };
+    await runPrePass(folder, ["foxguard"], [], { env });
+    const [config, size] = readFileSync(probe, "utf8").trim().split("\n");
+    expect(config).not.toBe("/dev/null");
+    expect(size!.trim()).toBe("0");
+    expect(existsSync(config!)).toBe(false);
+    rmSync(probe);
+    await runPrePass(folder, ["foxguard"], [], { env, repoIgnores: true });
+    expect(existsSync(probe)).toBe(false);
+  });
+
+  posix("skips checkov when the folder has a .checkov.yaml, unless repoIgnores", async () => {
+    const folder = tmp();
+    writeFileSync(join(folder, ".checkov.yaml"), "skip-check:\n  - CKV_DOCKER_2\n");
+    const tool = fakeTool("checkov", "{}", 0);
+    const ran = () => existsSync(join(tool.bin, "..", "args.log"));
+    const notes: string[] = [];
+    const env = { ...process.env, ZERO_CHECKOV_PATH: tool.bin };
+    expect(await runPrePass(folder, ["checkov"], [], { env, note: text => notes.push(text) })).toBeUndefined();
+    expect(notes[0]).toContain("always reads .checkov.yaml");
+    expect(notes[0]).toContain("--repo-ignores");
+    expect(ran()).toBe(false);
+    await runPrePass(folder, ["checkov"], [], { env, repoIgnores: true });
+    expect(ran()).toBe(true);
+    const clean = tmp();
+    await runPrePass(clean, ["checkov"], [], { env });
+    expect(tool.args()).toContain(clean);
+  });
+});
+
+// Each real scanner, with a finding in the folder and an in-repo file that would hide it. By default the finding is still reported.
+const RULE = "rules:\n  - id: demo-eval\n    pattern: eval(...)\n    message: eval is dangerous\n    languages: [javascript]\n    severity: ERROR\n";
+const EVAL_APP = "const express = require('express');\nconst app = express();\napp.get('/x', (req, res) => { eval(req.query.c); res.send('ok'); });\n";
+const expat = "/opt/homebrew/opt/expat/lib";
+// Checkov needs the Homebrew expat library on some Macs.
+const realEnv = { ...process.env, ...(process.platform === "darwin" && existsSync(expat) ? { DYLD_LIBRARY_PATH: expat } : {}) };
+
+describe("in-repo files do not hide findings from the real tools", () => {
+  real("foxguard")("foxguard: scan.no_builtins in .foxguard.yml does not turn off the built-in rules", async () => {
+    const folder = tmp();
+    writeFileSync(join(folder, "app.js"), EVAL_APP);
+    writeFileSync(join(folder, ".foxguard.yml"), "scan:\n  no_builtins: true\n");
+    expect((await runPrePass(folder, ["foxguard"], [], { env: realEnv, timeoutSeconds: 60 }))?.total ?? 0).toBeGreaterThan(0);
+    expect((await runPrePass(folder, ["foxguard"], [], { env: realEnv, timeoutSeconds: 60, repoIgnores: true }))?.total ?? 0).toBe(0);
+  }, 90_000);
+
+  for (const id of ["semgrep", "opengrep"]) {
+    real(id)(`${id}: .semgrepignore does not hide a finding`, async () => {
+      const folder = tmp(); const rules = join(tmp(), "rule.yml");
+      writeFileSync(rules, RULE);
+      writeFileSync(join(folder, "app.js"), EVAL_APP);
+      writeFileSync(join(folder, ".semgrepignore"), "*.js\n");
+      const found = await runPrePass(folder, [id], [rules], { env: realEnv, timeoutSeconds: 120 });
+      expect(found?.leads.some(lead => lead.path === "app.js")).toBe(true);
+      const honored = await runPrePass(folder, [id], [rules], { env: realEnv, timeoutSeconds: 120, repoIgnores: true });
+      expect(honored?.total ?? 0).toBe(0);
+    }, 150_000);
+  }
+
+  real("gitleaks")("gitleaks: .gitleaks.toml does not hide a secret", async () => {
+    const folder = tmp();
+    writeFileSync(join(folder, "config.js"), `const awsKey = "${FAKE_SECRET}";\n`);
+    writeFileSync(join(folder, ".gitleaks.toml"), '[allowlist]\npaths = ["config.js"]\n');
+    expect((await runPrePass(folder, ["gitleaks"], [], { env: realEnv, timeoutSeconds: 60 }))?.leads.length ?? 0).toBeGreaterThan(0);
+    expect((await runPrePass(folder, ["gitleaks"], [], { env: realEnv, timeoutSeconds: 60, repoIgnores: true }))?.leads.length ?? 0).toBe(0);
+  }, 90_000);
+
+  real("trivy")("trivy: .trivyignore in the working folder does not hide a misconfiguration", async () => {
+    const folder = tmp();
+    writeFileSync(join(folder, "main.tf"), 'resource "aws_s3_bucket" "b" {\n  bucket = "demo"\n  acl    = "public-read"\n}\n');
+    writeFileSync(join(folder, ".trivyignore"), "AWS-0092\nAVD-AWS-0092\n");
+    expect((await runPrePass(folder, ["trivy"], [], { env: realEnv, cwd: folder, timeoutSeconds: 240 }))?.leads.some(lead => lead.ruleId === "AWS-0092")).toBe(true);
+    expect((await runPrePass(folder, ["trivy"], [], { env: realEnv, cwd: folder, timeoutSeconds: 240, repoIgnores: true }))?.leads.some(lead => lead.ruleId === "AWS-0092") ?? false).toBe(false);
+  }, 600_000);
+
+  real("osv-scanner")("osv-scanner: osv-scanner.toml does not hide a vulnerable package", async () => {
+    const folder = tmp();
+    writeFileSync(join(folder, "package-lock.json"), JSON.stringify({ name: "demo", version: "1.0.0", lockfileVersion: 3, requires: true, packages: { "": { name: "demo", version: "1.0.0", dependencies: { lodash: "4.17.15" } }, "node_modules/lodash": { version: "4.17.15" } } }));
+    writeFileSync(join(folder, "osv-scanner.toml"), '[[IgnoredVulns]]\nid = "CVE-2020-28500"\nreason = "x"\n');
+    expect((await runPrePass(folder, ["osv-scanner"], [], { env: realEnv, timeoutSeconds: 120 }))?.leads.some(lead => lead.ruleId === "CVE-2020-28500")).toBe(true);
+  }, 180_000);
+
+  real("checkov")("checkov: a folder with .checkov.yaml is skipped, one without is scanned", async () => {
+    const folder = tmp();
+    writeFileSync(join(folder, "Dockerfile"), "FROM ubuntu\n");
+    writeFileSync(join(folder, ".checkov.yaml"), "skip-check:\n  - CKV_DOCKER_2\n  - CKV_DOCKER_3\n  - CKV_DOCKER_7\n");
+    const notes: string[] = [];
+    expect(await runPrePass(folder, ["checkov"], [], { env: realEnv, timeoutSeconds: 120, note: text => notes.push(text) })).toBeUndefined();
+    expect(notes[0]).toContain("always reads .checkov.yaml");
+    rmSync(join(folder, ".checkov.yaml"));
+    expect((await runPrePass(folder, ["checkov"], [], { env: realEnv, timeoutSeconds: 120 }))?.total ?? 0).toBeGreaterThan(0);
+  }, 150_000);
 });

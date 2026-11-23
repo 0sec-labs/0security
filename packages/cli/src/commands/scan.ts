@@ -42,7 +42,7 @@ const MAX_PASSES = 5;
 const POLICY_SKILL = "policy-check";
 const BATCH_MODES = ["auto", "on", "off"];
 const MAX_BATCH_SIZE = 50;
-const GIT_TARGET = /^(git@|git:\/\/|ssh:\/\/git@)|\.git$|^https:\/\/(github|gitlab)\.com\//;
+const GIT_TARGET =/^(git@|git:\/\/|ssh:\/\/git@)|\.git$|^https:\/\/(github|gitlab)\.com\//;
 
 /**
  * The arguments that run this same program as a headless console for one scan. `--port 0` takes any free port, so another
@@ -240,7 +240,7 @@ export async function waitForThread(client: ConsoleClient, deps: Pick<ScanDeps, 
   let snapshot: Json = {};
   let timedOut = false;
   let failedPolls = 0;
-  for (; ;) {
+  for (;;) {
     await deps.sleep(1000);
     try {
       snapshot = asJson(asJson(await client.request("GET", path)).snapshot);
@@ -475,7 +475,7 @@ export async function runScan(target: string | undefined, options: ScanOptions, 
     ({ client, stop: stopConsole } = await connect(options, deps));
     // --budget is the total: each pass gets an equal share, so the cost stays predictable however many passes run.
     if (options.repoIgnores) {
-      deps.err("warning: --repo-ignores honors scanner configuration and ignore files from the scanned folder (.gitleaks.toml, .gitleaksignore, .trivyignore). A change under review can use them to hide findings from the pre-pass.");
+      deps.err("warning: --repo-ignores makes the pre-pass scanners read configuration and ignore files from the scanned folder (.foxguard.yml, .semgrepignore, .gitleaks.toml, .gitleaksignore, .trivyignore, osv-scanner.toml, .checkov.yaml). A change under review can use them to hide findings. Inline suppressions such as gitleaks:allow, nosemgrep and trivy:ignore apply with or without this flag.");
     }
     const scanners = parseScannerList(options.scanner);
     const rules = resolveRulePaths(options.rules);
@@ -564,7 +564,7 @@ export function registerScanCommand(program: Command, deps: ScanDeps = defaultSc
     .option("--policy <file-or-folder>", "Check the code against these Markdown policies (a file or a folder of .md files) and report pass or fail for each; repeat for several. Runs the policy-check skill", (value: string, previous: string[] = []) => [...previous, value])
     .option("--org-policy <folder>", "An organisation's policy folder: evaluated first, and wins when a --policy says otherwise or uses the same id; repeat for several", (value: string, previous: string[] = []) => [...previous, value])
     .option("--repo-context", "Also read .0/threat-model.md from the scanned folder as context. Off by default: a change under review can edit that file; in CI pass the base branch's copy with --context instead")
-    .option("--repo-ignores", "Also honor ignore files and scanner configuration from the scanned folder (.gitleaks.toml, .gitleaksignore, .trivyignore). Off by default: a change under review can use them to hide secrets or misconfigurations")
+    .option("--repo-ignores", "Also let the pre-pass scanners read their configuration and ignore files from the scanned folder (.foxguard.yml, .semgrepignore, .gitleaks.toml, .gitleaksignore, .trivyignore, osv-scanner.toml, .checkov.yaml). Off by default: a change under review can use them to hide findings. Inline suppressions such as nosemgrep always apply")
     .option("--skill <id>", "Skill that holds the scan method", "scan")
     .option("--model <model>", `Model for the scan thread (default: ${DEFAULT_SCAN_MODEL})`)
     .option("--batches <mode>", "auto reviews a large folder in batches, one thread per group of entry points, and records what each batch covered; on always does; off keeps one thread", "auto")

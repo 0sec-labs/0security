@@ -28,6 +28,7 @@ on the GitHub Release tag.
 
 - The Sentinel runner's `gh` calls now refuse to run under `ZERO_ENTERPRISE`, like every other GitHub call.
 - Comments to GitHub no longer turn `#123` in finding titles into issue links.
+- The pre-pass scanners no longer read configuration or ignore files from the scanned folder, so a change under review cannot hide findings with them. This covers `.foxguard.yml`, `.semgrepignore`, `.gitleaks.toml`, `.gitleaksignore`, `.trivyignore` and `osv-scanner.toml`. Inline suppressions such as `gitleaks:allow`, `nosemgrep` and `trivy:ignore` still apply. Checkov has no option to ignore its `.checkov.yaml`, so it is skipped when the folder has one. `--repo-ignores` restores the old behavior and prints a warning.
 
 ## [0.42.0] - 2026-11-22
 

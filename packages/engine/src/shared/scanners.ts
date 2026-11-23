@@ -23,16 +23,21 @@ export interface ScannerSpec {
   reportsSecrets?: boolean;
   /** Arguments to disable discovery of in-repo ignore files and configs (the default). */
   isolationArgs?: string[];
+  /** Files in the scanned folder it always reads and has no option to ignore. With one present it is skipped, unless the folder's configuration is allowed. */
+  repoConfigFiles?: string[];
 }
 
+/** A file name no repository has. Semgrep and OpenGrep read this file for ignore patterns instead of `.semgrepignore`, so none is read. */
+const NO_SEMGREPIGNORE = ".0-no-semgrepignore";
+
 export const SCANNERS: readonly ScannerSpec[] = [
-  { id: "foxguard", label: "FoxGuard", command: "foxguard", args: ["--format", "sarif", "{folder}"], pathEnv: "ZERO_FOXGUARD_PATH" },
-  { id: "semgrep", label: "Semgrep", command: "semgrep", args: ["scan", "--sarif", "--quiet", "--metrics", "off", "--config", "{rules}", "{folder}"], pathEnv: "ZERO_SEMGREP_PATH", install: "brew install semgrep, or see https://semgrep.dev/docs/getting-started/", note: "downloads rules for --config when it is a registry pack" },
-  { id: "opengrep", label: "OpenGrep", command: "opengrep", args: ["scan", "--sarif", "--quiet", "--config", "{rules}", "{folder}"], pathEnv: "ZERO_OPENGREP_PATH", install: "brew install opengrep, or see https://github.com/opengrep/opengrep" },
+  { id: "foxguard", label: "FoxGuard", command: "foxguard", args: ["--format", "sarif", "{folder}"], isolationArgs: ["--config", "{emptyConfig}"], pathEnv: "ZERO_FOXGUARD_PATH" },
+  { id: "semgrep", label: "Semgrep", command: "semgrep", args: ["scan", "--sarif", "--quiet", "--metrics", "off", "--config", "{rules}", "{folder}"], isolationArgs: ["--x-semgrepignore-filename", NO_SEMGREPIGNORE], pathEnv: "ZERO_SEMGREP_PATH", install: "brew install semgrep, or see https://semgrep.dev/docs/getting-started/", note: "downloads rules for --config when it is a registry pack" },
+  { id: "opengrep", label: "OpenGrep", command: "opengrep", args: ["scan", "--sarif", "--quiet", "--config", "{rules}", "{folder}"], isolationArgs: ["--semgrepignore-filename", NO_SEMGREPIGNORE], pathEnv: "ZERO_OPENGREP_PATH", install: "brew install opengrep, or see https://github.com/opengrep/opengrep" },
   { id: "gitleaks", label: "Gitleaks", command: "gitleaks", args: ["dir", "--report-format", "sarif", "--report-path", "-", "--redact", "--no-banner", "--no-color", "--exit-code", "0", "--log-level", "error", "{folder}"], isolationArgs: ["--config", "{gitleaksConfig}", "--gitleaks-ignore-path", "{emptyIgnore}"], pathEnv: "ZERO_GITLEAKS_PATH", install: "brew install gitleaks, or see https://github.com/gitleaks/gitleaks#installing", reportsSecrets: true },
   { id: "trivy", label: "Trivy", command: "trivy", args: ["fs", "--scanners", "vuln,misconfig,secret", "--format", "sarif", "--quiet", "--no-progress", "--disable-telemetry", "{folder}"], isolationArgs: ["--ignorefile", "{emptyIgnore}", "--config", "{emptyConfig}"], pathEnv: "ZERO_TRIVY_PATH", install: "brew install trivy, or see https://trivy.dev/latest/getting-started/installation/", timeoutSeconds: 300, reportsSecrets: true, note: "downloads its vulnerability database on first run" },
   { id: "osv-scanner", label: "OSV-Scanner", command: "osv-scanner", args: ["scan", "source", "--format", "sarif", "--allow-no-lockfiles", "--verbosity", "error", "-r", "{folder}"], isolationArgs: ["--config", "{emptyConfig}"], pathEnv: "ZERO_OSV_SCANNER_PATH", install: "brew install osv-scanner, or see https://google.github.io/osv-scanner/installation/", timeoutSeconds: 180, note: "sends package names and versions from lockfiles to osv.dev and deps.dev" },
-  { id: "checkov", label: "Checkov", command: "checkov", args: ["-d", "{folder}", "-o", "sarif", "--output-file-path", "{out}", "--quiet", "--skip-download"], isolationArgs: ["--config-file", "{emptyConfig}"], outputFile: "results_sarif.sarif", pathEnv: "ZERO_CHECKOV_PATH", install: "pip install checkov, or see https://www.checkov.io/", note: "reads Terraform, CloudFormation, Kubernetes, Dockerfiles, GitHub Actions and more" },
+  { id: "checkov", label: "Checkov", command: "checkov", args: ["-d", "{folder}", "-o", "sarif", "--output-file-path", "{out}", "--quiet", "--skip-download"], repoConfigFiles: [".checkov.yaml", ".checkov.yml"], outputFile: "results_sarif.sarif", pathEnv: "ZERO_CHECKOV_PATH", install: "pip install checkov, or see https://www.checkov.io/", note: "reads Terraform, CloudFormation, Kubernetes, Dockerfiles, GitHub Actions and more" },
 ];
 export const DEFAULT_SCANNERS: readonly string[] = ["foxguard"];
 const DEFAULT_RULES = "p/default";
