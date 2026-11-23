@@ -2,7 +2,7 @@
 import { createRequire } from "node:module";
 import { createWriteStream } from "node:fs";
 import type { ScanReport } from "../shared/index.js";
-import { compareFindingsBySeverity } from "../shared/index.js";
+import { compareFindingsBySeverity, orderByScope, isOutOfScope } from "../shared/index.js";
 import type PDFDocumentType from "pdfkit";
 import { findingPresentation, targetLabel, reportDate } from "./presentation.js";
 
@@ -18,7 +18,8 @@ export async function generatePdfReport(report: ScanReport, outputPath: string):
   const stream = createWriteStream(outputPath);
   const done = new Promise<void>((resolve, reject) => { stream.on("finish", resolve); stream.on("error", reject); doc.on("error", reject); });
   doc.pipe(stream);
-  const sorted = [...report.findings].sort(compareFindingsBySeverity);
+  const sorted = orderByScope(report.findings, compareFindingsBySeverity);
+  const outside = sorted.filter(isOutOfScope).length;
   function text(value: string, size = 11, color = "#4d4d57", bold = false): void {
     doc.font(bold ? "Helvetica-Bold" : "Helvetica").fontSize(size).fillColor(color).text(plain(value), M, doc.y, { width: W, lineGap: 3 });
   }
@@ -28,9 +29,10 @@ export async function generatePdfReport(report: ScanReport, outputPath: string):
   doc.y = 42; text("0", 35, "#ffffff", true);
   doc.font("Helvetica").fontSize(9).fillColor("#aaaab4").text("SECURITY REVIEW", 94, 58, { width: 200 });
   doc.y = 150; text(title, 46, "#ffffff", true); doc.moveDown(.3); text(reportDate(report.startedAt), 11, "#aaaab4");
-  doc.y = Math.max(doc.y + 54, 280); text(`${sorted.length} findings`, 27, "#ffffff"); doc.moveDown(.8);
+  doc.y = Math.max(doc.y + 54, 280); text(`${sorted.length - outside} findings`, 27, "#ffffff"); doc.moveDown(.8);
   const active = (["critical", "high", "medium", "low", "info"] as const).filter(s => report.summary[s]);
   text(active.map(s => `${report.summary[s]} ${s}`).join("   /   ") || "No findings reported", 13, "#ffb28b");
+  if (outside) { doc.moveDown(.5); text(`${outside} more outside the scope the repository declared (listed after the others, not counted above)`, 10, "#aaaab4"); }
   doc.moveDown(2); text("Findings and recommended actions", 12, "#eeeeef", true);
   text("Supporting evidence is available in the companion HTML report.", 10, "#aaaab4");
   if (report.executionSuccessful === false) { doc.moveDown(); text(report.scanFailure ? `The scan did not finish: ${report.scanFailure.message.replace(/\.+$/, "")}. Results may be incomplete.` : "The assessment did not complete. Results may be incomplete.", 10, "#e5c777"); }
@@ -43,10 +45,11 @@ export async function generatePdfReport(report: ScanReport, outputPath: string):
     const height = 22 + measure(copy.title, 17, true) + 10 + measure(copy.summary, 11) + (copy.action ? 18 + measure(`Fix: ${copy.action}`, 10) : 0) + 34;
     if (doc.y + height > 710 && doc.y > 80) page();
     const start = doc.y;
-    text(`${String(i + 1).padStart(2, "0")} / ${f.severity.toUpperCase()}`, 8, colors[f.severity], true);
+    text(`${String(i + 1).padStart(2, "0")} / ${f.severity.toUpperCase()}${isOutOfScope(f) ? " / OUTSIDE DECLARED SCOPE" : ""}`, 8, colors[f.severity], true);
     doc.y += 7; text(copy.title, 17, "#202025", true);
     doc.y += 7; text(copy.summary);
     if (copy.action) { doc.y += 10; text(`Fix: ${copy.action}`, 10, "#3d6550"); }
+    if (isOutOfScope(f)) { doc.y += 8; text(`Out of scope: ${f.scopeReason ?? "no reason given"}`, 10, "#73737d"); }
     doc.y += 20; line(doc.y); doc.y += 20;
     // Very long source findings can continue naturally; no text is clipped.
     if (doc.y < start) doc.x = M;

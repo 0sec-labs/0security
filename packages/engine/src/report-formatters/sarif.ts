@@ -151,7 +151,7 @@ function findingLocation(finding: Finding, target: string): SarifResult["locatio
   return { artifactLocation: { uri }, region: { startLine, ...end } };
 }
 
-function findingToResult(finding: Finding, target: string): SarifResult {
+function findingToResult(finding: Finding, target: string, suppressOutOfScope = false): SarifResult {
   const result: SarifResult = {
     ruleId: finding.templateId,
     level: severityToLevel(finding.severity),
@@ -173,6 +173,13 @@ function findingToResult(finding: Finding, target: string): SarifResult {
     }];
   }
 
+  if (finding.scope && finding.scope !== undefined) {
+    // Suppressions are opt-in (`--scope-sarif suppress`): GitHub code scanning dismisses a suppressed result.
+    if (suppressOutOfScope && finding.scope === "out-of-scope" && !result.suppressions) {
+      result.suppressions = [{ kind: "external", status: "accepted", justification: `Outside declared scope: ${finding.scopeReason ?? "no reason given"}`, properties: { scope: finding.scope, ...(finding.scopeSource ? { scopeSource: finding.scopeSource } : {}) } }];
+    }
+  }
+
   result.properties = {
     findingId: finding.id,
     category: finding.category,
@@ -180,6 +187,9 @@ function findingToResult(finding: Finding, target: string): SarifResult {
     status: finding.status,
     evidence: finding.evidence,
   };
+  if (finding.scope) result.properties["scope"] = finding.scope;
+  if (finding.scopeReason) result.properties["scopeReason"] = finding.scopeReason;
+  if (finding.scopeSource) result.properties["scopeSource"] = finding.scopeSource;
   if (finding.ruleSource) result.properties["ruleSource"] = finding.ruleSource;
   if (finding.knownStatus) result.properties["knownStatus"] = finding.knownStatus;
   if (finding.knownBy) result.properties["knownBy"] = finding.knownBy;
@@ -246,7 +256,7 @@ export function formatSarif(report: ScanReport): string {
           },
         },
         results: [
-          ...[...report.findings].sort(compareFindingsBySeverity).map((f) => findingToResult(f, report.target)),
+          ...[...report.findings].sort(compareFindingsBySeverity).map((f) => findingToResult(f, report.target, report.scopeInfo?.sarifSuppress === true)),
           ...(report.reviewChecks ?? []).map(check => ({
             ruleId: `review-check/${check.id}`,
             kind: check.status === "pass" ? "pass" : check.status === "issue" ? "fail" : "open",
@@ -264,7 +274,7 @@ export function formatSarif(report: ScanReport): string {
         ],
         // What a batched scan reviewed; complete is false when entry points were not reached.
         // The tier map's decision and the known set of a second-opinion scan.
-        ...(report.scanStatus || report.scanFailure || report.coverage || report.fileCoverage || report.tier || report.known || report.warnings?.length ? { properties: { ...(report.scanStatus ? { status: report.scanStatus } : {}), ...(report.scanFailure ? { failure: report.scanFailure } : {}), ...(report.coverage ? { coverage: report.coverage } : {}), ...(report.fileCoverage ? { fileCoverage: report.fileCoverage } : {}), ...(report.tier ? { tier: report.tier } : {}), ...(report.known ? { known: report.known } : {}), ...(report.warnings?.length ? { warnings: report.warnings.map(warning => warning.message) } : {}) } } : {}),
+        ...(report.scanStatus || report.scanFailure || report.coverage || report.fileCoverage || report.tier || report.known || report.scopeInfo || report.warnings?.length ? { properties: { ...(report.scanStatus ? { status: report.scanStatus } : {}), ...(report.scanFailure ? { failure: report.scanFailure } : {}), ...(report.coverage ? { coverage: report.coverage } : {}), ...(report.fileCoverage ? { fileCoverage: report.fileCoverage } : {}), ...(report.tier ? { tier: report.tier } : {}), ...(report.known ? { known: report.known } : {}), ...(report.scopeInfo ? { scope: { source: report.scopeInfo.source, outOfScopeFindings: report.findings.filter(f => f.scope === "out-of-scope").length } } : {}), ...(report.warnings?.length ? { warnings: report.warnings.map(warning => warning.message) } : {}) } } : {}),
       },
     ],
   };

@@ -1,4 +1,4 @@
-import { describeAttackerImpact, compareFindingsBySeverity } from "../shared/index.js";
+import { describeAttackerImpact, compareFindingsBySeverity, orderByScope, splitByScope } from "../shared/index.js";
 import type { ScanReport, Finding, FindingRemediation, PocStep } from "../shared/index.js";
 
 /**
@@ -20,8 +20,12 @@ const EVIDENCE_BLOCK_LIMIT = 4000;
 /** Longest single PoC step list rendered before summarising the remainder. */
 const POC_STEP_LIMIT = 20;
 
+/** Text from a scope file in one table cell or line: no pipes, line breaks, HTML or Markdown links. */
+const inline = (text: string): string => text.replace(/[|\r\n]+/g, " ").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/([\\`*_{}\[\]()#+!~])/g, "\\$1");
+
 export function formatMarkdown(report: ScanReport): string {
   const lines: string[] = [];
+  const { inScope, outOfScope } = splitByScope(report.findings);
   const incomplete = report.executionSuccessful === false;
 
   lines.push("# 0 Scan Report");
@@ -32,6 +36,7 @@ export function formatMarkdown(report: ScanReport): string {
   lines.push(`| Started | ${report.startedAt} |`);
   lines.push(`| Duration | ${(report.durationMs / 1000).toFixed(1)}s |`);
   if (report.tier) lines.push(`| Tier | ${report.tier.name}${report.tier.reason ? `: ${report.tier.reason.replace(/[|\r\n]+/g, " ")}` : ""} |`);
+  if (report.scopeInfo) lines.push(`| Declared scope | ${inline(report.scopeInfo.source)}; in scope: ${report.scopeInfo.inScopeVectors.map(inline).join(", ") || "none listed"}; out of scope: ${report.scopeInfo.outOfScopeVectors.map(inline).join(", ") || "none listed"} |`);
   lines.push("");
   if (incomplete) lines.push(report.scanFailure ? `The scan did not finish: ${report.scanFailure.message.replace(/\.+$/, "")}. Results may be incomplete.` : "Assessment did not complete successfully. Results may be incomplete.", "");
 
@@ -40,6 +45,7 @@ export function formatMarkdown(report: ScanReport): string {
   lines.push("");
   if (report.summary.totalAttacks > 0) lines.push(`- **Attacks:** ${report.summary.totalAttacks}`);
   lines.push(`- **Findings:** ${report.summary.totalFindings}`);
+  if (outOfScope.length) lines.push(`- **Outside declared scope:** ${outOfScope.length} (listed apart, not counted above)`);
   lines.push("", "### Technical severity", "");
   if (report.summary.critical > 0)
     lines.push(`- **Critical:** ${report.summary.critical}`);
@@ -100,10 +106,10 @@ export function formatMarkdown(report: ScanReport): string {
   }
 
   // Findings
-  if (report.findings.length > 0) {
+  if (inScope.length > 0) {
     lines.push("## Findings");
     lines.push("");
-    for (const finding of [...report.findings].sort(compareFindingsBySeverity)) {
+    for (const finding of orderByScope(inScope, compareFindingsBySeverity)) {
       lines.push(formatFinding(finding));
     }
   } else {
@@ -121,6 +127,11 @@ export function formatMarkdown(report: ScanReport): string {
           ? "No security vulnerabilities were found in the inspected scope. Advisory review-check results are reported separately above."
           : incomplete ? "The scanner did not confirm vulnerabilities." : "No vulnerabilities were found in the reviewed scope. A scan with no findings is not proof that the code is safe."
     );
+  }
+
+  if (outOfScope.length > 0) {
+    lines.push("", `## Outside declared scope (${outOfScope.length})`, "", "These findings match a vector the repository's scope file declares out of scope. They are listed here, not hidden, and are not counted in the summary or in the exit code.", "");
+    for (const finding of [...outOfScope].sort(compareFindingsBySeverity)) lines.push(formatFinding(finding));
   }
 
   return lines.join("\n");
@@ -242,6 +253,7 @@ function formatFinding(finding: Finding): string {
   lines.push(`- **Technical severity:** ${finding.severity}`);
   lines.push(`- **Category:** ${finding.category}`);
   lines.push(`- **Status:** ${finding.status}`);
+  if (finding.scope === "out-of-scope") lines.push(`- **Scope:** out of scope (${inline(finding.scopeSource ?? "scope file")}): ${inline(finding.scopeReason ?? "no reason given")}`);
   if (finding.knownStatus) {
     const by = finding.knownBy ? ` (${finding.knownBy.tool} ${finding.knownBy.ruleId} at ${finding.knownBy.path}:${finding.knownBy.startLine})` : "";
     lines.push(`- **Known status:** ${finding.knownStatus}${finding.confirmedIndependently ? ", confirmed independently" : ""}${by}`);
