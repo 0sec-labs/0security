@@ -51,7 +51,7 @@ export function registerWorkerCommand(program: Command): void {
     .option("--trust-new-host", "Trust and remember the computer's SSH host key if it is not known yet", false)
     .option("--forward-provider-key", "Forward this computer's OPENAI_API_KEY to the remote engine (user-owned hosts only)", false)
     .action(async (opts: { ssh?: string; lima: string; targetGit?: string; enginePort?: string; forwardProviderKey: boolean; trustNewHost: boolean; sshConfig?: string; enginesConfig?: string }) => {
-      const port = opts.enginePort === undefined ? undefined : Number.parseInt(opts.enginePort, 10);
+      const port = opts.enginePort === undefined ? undefined : /^\d+$/.test(opts.enginePort.trim()) ? Number(opts.enginePort.trim()) : Number.NaN;
       if (port !== undefined && (!Number.isSafeInteger(port) || port < 1 || port > 65535)) throw new Error("--engine-port must be 1-65535");
       validateWorkerOptions({ ...(opts.ssh ? { ssh: opts.ssh, ...(opts.sshConfig ? { sshConfig: opts.sshConfig } : {}) } : { lima: opts.lima }), ...(opts.targetGit ? { targetGit: opts.targetGit } : {}) });
       const result = await deployWorker({
