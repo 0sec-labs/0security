@@ -15,7 +15,7 @@ import { EMBEDDED_SKILL_YAML } from "./skills.generated.js";
 import { diag } from "../../diagnostics/channel.js";
 
 export type { SkillDefinition, SkillSummary } from "./types.js";
-export { discoverAgentSkills, isAgentSkillAllowed, loadAgentSkill, validateAgentSkillContent } from "./agent-skills.js";
+export { discoverAgentSkills, isAgentSkillAllowed, loadAgentSkill, resolveAgentSkillName, validateAgentSkillContent } from "./agent-skills.js";
 export type { AgentSkillDiscoveryOptions, AgentSkillMetadata, AgentSkillDiscovery } from "./agent-skills.js";
 
 /**

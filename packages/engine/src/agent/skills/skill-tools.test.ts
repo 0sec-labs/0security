@@ -120,6 +120,67 @@ describe("Skill Tools (#457)", () => {
       }
     });
 
+    describe("allow-lists and same-named folder skills", () => {
+      const folderSkill = (root: string, name: string, body: string) => {
+        mkdirSync(join(root, name), { recursive: true });
+        writeFileSync(join(root, name, "SKILL.md"), `---\nname: ${name}\ndescription: A folder skill named ${name}.\n---\n${body}`);
+      };
+      const load = async (executor: ToolExecutor, skill_id: string) => executor.execute({ name: "load_skill", arguments: { skill_id } });
+
+      it("does not load an extension skill named scan under an allow-list of scan", async () => {
+        const root = mkdtempSync(join(tmpdir(), "zero-skill-scan-"));
+        try {
+          folderSkill(root, "scan", "EXTENSION SCAN TEXT");
+          const skillDiscoveryOptions = { homeDir: null, extensionRoots: [{ extension: "demo", revision: "r1", folder: root }], allowedSkillIds: ["scan"] };
+          const executor = new ToolExecutor(makeCtx({ role: "audit", skillDiscoveryOptions }));
+          const byId = await load(executor, "extension/demo/scan");
+          expect(byId.success).toBe(false);
+          expect(byId.error).toContain("allow-list");
+          // The bare name is the built-in skill, never the folder's.
+          const byName = await load(executor, "scan");
+          expect(byName.success).toBe(true);
+          expect(JSON.stringify(byName.output)).not.toContain("EXTENSION SCAN TEXT");
+        } finally {
+          rmSync(root, { recursive: true, force: true });
+        }
+      });
+
+      it("does not let an allow-list of a namespaced skill permit the built-in with the same name", async () => {
+        const root = mkdtempSync(join(tmpdir(), "zero-skill-builtin-"));
+        try {
+          folderSkill(root, "secrets-hunting", "EXTENSION TEXT");
+          const skillDiscoveryOptions = { homeDir: null, extensionRoots: [{ extension: "foo", revision: "r1", folder: root }], allowedSkillIds: ["extension/foo/secrets-hunting"] };
+          const executor = new ToolExecutor(makeCtx({ role: "audit", skillDiscoveryOptions }));
+          const builtIn = await load(executor, "secrets-hunting");
+          expect(builtIn.success).toBe(false);
+          expect(builtIn.error).toContain("allow-list");
+          expect((await load(executor, "extension/foo/secrets-hunting")).success).toBe(true);
+        } finally {
+          rmSync(root, { recursive: true, force: true });
+        }
+      });
+
+      it("does not pick between two folder skills with the same name", async () => {
+        const a = mkdtempSync(join(tmpdir(), "zero-skill-a-")), b = mkdtempSync(join(tmpdir(), "zero-skill-b-"));
+        try {
+          folderSkill(a, "lint-rules", "FROM A");
+          folderSkill(b, "lint-rules", "FROM B");
+          const skillDiscoveryOptions = { homeDir: null, mounts: [{ path: a, id: "a" }, { path: b, id: "b" }] };
+          const executor = new ToolExecutor(makeCtx({ role: "audit", skillDiscoveryOptions }));
+          const bare = await load(executor, "lint-rules");
+          expect(bare.success).toBe(false);
+          expect(bare.error).toContain("mount/a/lint-rules");
+          expect(bare.error).toContain("mount/b/lint-rules");
+          const full = await load(executor, "mount/b/lint-rules");
+          expect(full.success).toBe(true);
+          expect(JSON.stringify(full.output)).toContain("FROM B");
+        } finally {
+          rmSync(a, { recursive: true, force: true });
+          rmSync(b, { recursive: true, force: true });
+        }
+      });
+    });
+
     it("tracks loaded skills across consecutive calls", async () => {
       const ctx = makeCtx({ loadedSkills: new Set() });
       const executor = new ToolExecutor(ctx);

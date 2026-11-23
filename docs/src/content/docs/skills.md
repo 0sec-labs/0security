@@ -32,7 +32,19 @@ Every action on the Skills page has a command. With the console running, command
 0 scan . --skill my-skill
 ```
 
-`skills add` accepts an Agent Skills folder (`SKILL.md` with name and description front matter, optional scripts and references) or git repository, showing a review first. `--yes` installs and enables the skill. `0 scan . --skill <id>` loads and runs the skill instructions during a scan. Bundled scripts are resources and never run on skill load; running them through bash requires approved extension matching. `skills import` takes a folder with `SKILL.md` or an exported bundle. `skills link` mounts a folder without copying it.
+`skills add` accepts an Agent Skills folder (a `SKILL.md` with name and description front matter, plus optional scripts and references) or a git repository. It shows what the skill can do before it installs. `--yes` installs and enables it, then prints the skill id, its files and the scripts it bundles. `skills import` takes a folder with `SKILL.md` or an exported bundle. `skills link` mounts a folder without copying it.
+
+## Use an installed skill in a scan
+
+Pass a skill to `0 scan` with `--skill`. A bare name such as `my-skill` is looked up once, when the scan starts, among the skills you installed. A full id such as `extension/my-skill/my-skill` names exactly one skill. If two installed skills share a name, 0 stops and lists their ids.
+
+```sh
+0 scan . --skill my-skill
+```
+
+You choose the skill. The text of its `SKILL.md` goes to the model as instructions, so install only skills you have read. Bundled scripts do not run when a skill is installed or loaded. The model can run one only after you approve it.
+
+A skill allow-list on a Sentinel matches full ids only. `scan` allows the built-in `scan` skill and not an installed skill that is also named `scan`.
 
 ## Folder format
 

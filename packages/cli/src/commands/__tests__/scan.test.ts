@@ -2,7 +2,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_SCAN_MODEL, headlessConsoleArgs, resolveScanTarget, runScan, withoutCredentials, type ScanDeps } from "../scan.js";
+import { DEFAULT_SCAN_MODEL, headlessConsoleArgs, resolveScanTarget, resolveSkillId, runScan, withoutCredentials, type ScanDeps } from "../scan.js";
+import { UsageError } from "../output.js";
 
 const dirs: string[] = [];
 const folder = () => { const dir = mkdtempSync(join(tmpdir(), "scan-test-")); dirs.push(dir); return dir; };
@@ -262,6 +263,37 @@ describe("runScan", () => {
       await runScan(folder(), options({ skill }), deps);
       expect(requests.find(([method, path]) => method === "POST" && path.endsWith("/messages"))![2]).toMatchObject({ text: expect.stringContaining(`\`${skill}\` skill`) });
     }
+  });
+
+  it("resolves a --skill name to its full id once, before the thread starts", async () => {
+    const { deps, requests } = fakes(finishedSnapshot());
+    deps.resolveSkill = vi.fn((skill: string) => skill === "audit-auth" ? "extension/audit-auth/audit-auth" : skill);
+    await runScan(folder(), options({ skill: "audit-auth" }), deps);
+    expect(deps.resolveSkill).toHaveBeenCalledTimes(1);
+    const texts = requests.filter(([method, path]) => method === "POST" && path.endsWith("/messages")).map(([, , body]) => (body as { text: string }).text);
+    expect(texts.length).toBeGreaterThan(0);
+    for (const text of texts) {
+      expect(text).toContain("`extension/audit-auth/audit-auth` skill");
+      expect(text).not.toContain("`audit-auth` skill");
+    }
+  });
+
+  it("stops with a usage error when a --skill name is shared by several skills", async () => {
+    const { deps, requests } = fakes(finishedSnapshot());
+    deps.resolveSkill = () => { throw new UsageError("Several skills are named lint: extension/a/lint, extension/b/lint. Pass one of these ids to --skill."); };
+    const errors: string[] = [];
+    deps.err = text => errors.push(text);
+    await runScan(folder(), options({ skill: "lint" }), deps);
+    expect(process.exitCode).toBe(2);
+    process.exitCode = 0;
+    expect(errors.join("\n")).toContain("extension/b/lint");
+    expect(requests.some(([method]) => method === "POST")).toBe(false);
+  });
+
+  it("keeps built-in skill names and full ids as given", () => {
+    expect(resolveSkillId("scan")).toBe("scan");
+    expect(resolveSkillId("policy-check")).toBe("policy-check");
+    expect(resolveSkillId("extension/pack/review")).toBe("extension/pack/review");
   });
 
   it("removes a cloned folder when it is done", async () => {

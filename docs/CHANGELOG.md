@@ -12,6 +12,10 @@ on the GitHub Release tag.
 
 ## [Unreleased]
 
+### Added
+
+- `0 skills add <folder>` installs an Agent Skills folder (`SKILL.md` with optional scripts and references) as a 0 skill, and `0 scan --skill <name>` runs it. `--yes` prints the skill id, its files and bundled scripts, and says that the `SKILL.md` text is instructions the model follows. Scripts do not run when a skill is installed or loaded. A bare `--skill` name is resolved to a full id once when the scan starts, and two skills with the same name are an error that lists their ids.
+
 ### Fixed
 
 - A Gradle version catalog (`libs.versions.toml`) with a `__proto__`, `constructor` or `prototype` table header or key can no longer change `Object.prototype` while the SBOM is read. Those keys are skipped and catalog tables are built without a prototype; aliases such as `my.lib = { ... }` still resolve as before. Thanks to Himanshu Patro for reporting this in #535.

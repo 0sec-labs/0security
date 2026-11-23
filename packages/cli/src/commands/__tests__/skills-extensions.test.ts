@@ -99,6 +99,10 @@ describe("0 skills add / 0 skills extensions (local fixture repo, temp HOME)", (
     expect(code).toBe(0);
     expect(res).toContain("Installed skill audit-auth");
     expect(res).not.toContain("Not enabled");
+    expect(res).toContain("Id: extension/audit-auth/audit-auth");
+    expect(res).toContain("scripts/check.sh");
+    expect(res).toContain("SKILL.md is instructions the model follows");
+    expect(res).toContain("Bundled scripts do not run when the skill loads");
 
     const list = await run("extensions", "list");
     expect(list).toMatch(/audit-auth\s+local\s+enabled/);

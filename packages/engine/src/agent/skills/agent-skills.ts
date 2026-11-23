@@ -25,12 +25,16 @@ export interface AgentSkillDiscoveryOptions {
   allowedSkillIds?: string[];
 }
 
-/** True when the options carry no allow-list or the allow-list names this skill. */
+/** True when the options carry no allow-list or the allow-list names this skill by its full ID. Names never match: `scan` does not allow `extension/x/scan`. */
 export function isAgentSkillAllowed(options: Pick<AgentSkillDiscoveryOptions, "allowedSkillIds"> | undefined, id: string): boolean {
-  if (!options?.allowedSkillIds) return true;
-  if (options.allowedSkillIds.includes(id)) return true;
-  const shortId = id.includes("/") ? id.split("/").pop()! : id;
-  return options.allowedSkillIds.some((allowed) => allowed === shortId || (allowed.includes("/") && allowed.split("/").pop() === id));
+  return !options?.allowedSkillIds || options.allowedSkillIds.includes(id);
+}
+
+/** The skill a bare name stands for among discovered skills: one full ID, or every full ID that shares the name. Undefined when none has it. */
+export function resolveAgentSkillName(skills: ReadonlyArray<{ id: string; name: string }>, name: string): { id: string } | { ambiguous: string[] } | undefined {
+  const matches = skills.filter((skill) => skill.name === name).map((skill) => skill.id);
+  if (matches.length > 1) return { ambiguous: matches };
+  return matches.length === 1 ? { id: matches[0]! } : undefined;
 }
 
 export interface AgentSkillMetadata {

@@ -121,6 +121,7 @@ export type {
 export {
   discoverAgentSkills,
   isAgentSkillAllowed,
+  resolveAgentSkillName,
   validateAgentSkillContent,
 } from "./agent/skills/index.js";
 export {

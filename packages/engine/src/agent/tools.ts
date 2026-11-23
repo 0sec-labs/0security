@@ -47,7 +47,7 @@ import { resolvePacks } from "./toolset.js";
 import { listSkillSummaries, getSkillById, matchTriggers, loadSkillRegistry } from "./skills/index.js";
 import type { SkillDefinition } from "./skills/index.js";
 import { loadSkillBundleFromManifest } from "./skills/markdown-bundle.js";
-import { discoverAgentSkills, isAgentSkillAllowed, loadAgentSkill } from "./skills/agent-skills.js";
+import { discoverAgentSkills, isAgentSkillAllowed, loadAgentSkill, resolveAgentSkillName } from "./skills/agent-skills.js";
 import { eventBus } from "../events/bus.js";
 import { ToolHealthTracker } from "./tool-health.js";
 import type { ToolHealthSummary } from "./tool-health.js";
@@ -1519,7 +1519,15 @@ export class ToolExecutor {
         projectRoot: this.ctx.workspaceRoot ?? this.ctx.scopePath,
         ...(typeof this.ctx.skillDiscoveryOptions === "function" ? this.ctx.skillDiscoveryOptions() : this.ctx.skillDiscoveryOptions),
       });
-      const metadata = discovered.skills.find((candidate) => candidate.id === skillId || candidate.name === skillId);
+      // A full ID loads that skill. A bare name loads the one skill that has it; several with the same name are an error, not a pick.
+      let metadata = discovered.skills.find((candidate) => candidate.id === skillId);
+      if (!metadata && !skillId.includes("/")) {
+        const byName = resolveAgentSkillName(discovered.skills, skillId);
+        if (byName && "ambiguous" in byName) {
+          return { success: false, output: null, error: `Several skills are named "${skillId}". Call load_skill with one full ID: ${byName.ambiguous.join(", ")}.` };
+        }
+        if (byName) metadata = discovered.skills.find((candidate) => candidate.id === byName.id);
+      }
       if (metadata) {
         skill = loadAgentSkill(metadata);
         isFolderSkill = true;

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { discoverAgentSkills, isAgentSkillAllowed, loadAgentSkill, validateAgentSkillContent } from "./agent-skills.js";
+import { discoverAgentSkills, isAgentSkillAllowed, loadAgentSkill, resolveAgentSkillName, validateAgentSkillContent } from "./agent-skills.js";
 
 const temporary: string[] = [];
 function temp() { const dir = mkdtempSync(join(tmpdir(), "zero-agent-skills-")); temporary.push(dir); return dir; }
@@ -102,11 +102,30 @@ describe("standard Agent Skills", () => {
     expect(loadAgentSkill(found.skills[0]!).content).toContain("Read the reference.");
   });
 
-  it("enforces allow-lists by full ID or short name", () => {
+  it("matches an allow-list by full ID only", () => {
     expect(isAgentSkillAllowed(undefined, "project/my-skill")).toBe(true);
-    expect(isAgentSkillAllowed({ allowedSkillIds: ["my-skill"] }, "project/my-skill")).toBe(true);
-    expect(isAgentSkillAllowed({ allowedSkillIds: ["project/my-skill"] }, "my-skill")).toBe(true);
-    expect(isAgentSkillAllowed({ allowedSkillIds: ["extension/demo/alpha"] }, "alpha")).toBe(true);
-    expect(isAgentSkillAllowed({ allowedSkillIds: ["other-skill"] }, "project/my-skill")).toBe(false);
+    expect(isAgentSkillAllowed({ allowedSkillIds: ["project/my-skill"] }, "project/my-skill")).toBe(true);
+    expect(isAgentSkillAllowed({ allowedSkillIds: ["scan"] }, "scan")).toBe(true);
+    // A name does not stand for a full ID, and a full ID does not stand for its name.
+    expect(isAgentSkillAllowed({ allowedSkillIds: ["my-skill"] }, "project/my-skill")).toBe(false);
+    expect(isAgentSkillAllowed({ allowedSkillIds: ["scan"] }, "extension/demo/scan")).toBe(false);
+    expect(isAgentSkillAllowed({ allowedSkillIds: ["extension/demo/secrets-hunting"] }, "secrets-hunting")).toBe(false);
+    expect(isAgentSkillAllowed({ allowedSkillIds: [] }, "scan")).toBe(false);
+  });
+
+  it("does not discover an extension skill named like a built-in under an allow-list of the built-in", () => {
+    const folder = temp();
+    skill(folder, "scan");
+    const extensionRoots = [{ extension: "demo", revision: "r1", folder }];
+    expect(discoverAgentSkills({ homeDir: null, extensionRoots }).skills.map((entry) => entry.id)).toEqual(["extension/demo/scan"]);
+    expect(discoverAgentSkills({ homeDir: null, extensionRoots, allowedSkillIds: ["scan"] }).skills).toEqual([]);
+    expect(discoverAgentSkills({ homeDir: null, extensionRoots, allowedSkillIds: ["extension/demo/scan"] }).skills.map((entry) => entry.id)).toEqual(["extension/demo/scan"]);
+  });
+
+  it("names every skill that shares a name", () => {
+    const skills = [{ id: "extension/a/lint", name: "lint" }, { id: "extension/b/lint", name: "lint" }, { id: "extension/a/audit", name: "audit" }];
+    expect(resolveAgentSkillName(skills, "audit")).toEqual({ id: "extension/a/audit" });
+    expect(resolveAgentSkillName(skills, "lint")).toEqual({ ambiguous: ["extension/a/lint", "extension/b/lint"] });
+    expect(resolveAgentSkillName(skills, "missing")).toBeUndefined();
   });
 });

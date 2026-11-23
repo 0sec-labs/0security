@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import type { Command } from "commander";
-import { buildInventory, exportReport, isReportExportFormat, type Batch } from "@0/engine";
+import { buildInventory, discoverAgentSkills, exportReport, getSkillById, isReportExportFormat, resolveAgentSkillName, type Batch } from "@0/engine";
 import { CoverageLedger, coverageSentence, summarizeCoverage } from "@0/engine/storage";
 import { consoleTransportOptions, openConsole, type ConsoleClient, type ConsoleTransportOptions } from "../console-client.js";
 import { homeStateDir, parseSarif, parseScannerList, scanPrompt, scannerArguments, scannerById, scannerTakesRules, SCANNERS, type PrePassLeads, type BatchPromptInfo, type ScanReport } from "@0/engine/shared";
@@ -70,6 +70,8 @@ export interface ScanDeps {
   prePass(folder: string, scanners: string[], rules?: string[], options?: { repoIgnores?: boolean }): Promise<PrePassLeads | undefined>;
   /** The files that differ from a git ref (added, copied, modified, renamed), relative to the folder. Throws when the ref is not valid there. */
   diffFiles(folder: string, ref: string): Promise<string[]>;
+  /** The full id a `--skill` name stands for, or the name itself when no installed skill has it. Throws a UsageError when several do. Optional: without it the name is used as given. */
+  resolveSkill?(skill: string): string;
   /** Make a folder out of a git URL. Returns the folder and how to remove it. */
   clone(url: string): Promise<{ dir: string; dispose(): void }>;
   /** The coverage ledger in the findings database (default: the local control database, or --db-path). Used by batched scans. */
@@ -110,6 +112,7 @@ export const defaultScanDeps: ScanDeps = {
     return Object.assign(stop, { failure: () => failure });
   },
   prePass: (folder, scanners, rules = [], options) => runPrePass(folder, scanners, rules, { note: text => process.stderr.write(`${text}\n`), repoIgnores: options?.repoIgnores }),
+  resolveSkill: resolveSkillId,
   async diffFiles(folder, ref) {
     const { stdout } = await exec("git", ["-C", folder, "diff", "--name-only", "--relative", "--diff-filter=ACMR", ref, "--"], { maxBuffer: 16 * 1024 * 1024 });
     return stdout.split("\n").map(line => line.trim()).filter(Boolean);
@@ -171,6 +174,19 @@ export async function resolveScanTarget(raw: string, deps: Pick<ScanDeps, "clone
     throw new UsageError(`${target} is not a folder. Pass a folder or a git URL.`);
   }
   return { folder, label: folder, reportTarget: basename(folder) || folder, roots: [...new Set([folder, realPath(folder)])] };
+}
+
+/**
+ * `--skill review` is a built-in skill and `--skill extension/pack/review` a full id: both pass through. Any other bare
+ * name is looked up once, here, among the skills you installed (extensions, personal folders), never among folders of
+ * the scanned code. The scan thread then loads that full id, so a later name collision cannot change which skill runs.
+ */
+export function resolveSkillId(skill: string): string {
+  if (skill.includes("/") || getSkillById(skill)) return skill;
+  const found = resolveAgentSkillName(discoverAgentSkills({}).skills, skill);
+  if (!found) return skill;
+  if ("ambiguous" in found) throw new UsageError(`Several skills are named ${skill}: ${found.ambiguous.join(", ")}. Pass one of these ids to --skill.`);
+  return found.id;
 }
 
 function validate(target: string | undefined, options: ScanOptions): void {
@@ -449,6 +465,7 @@ export async function runScan(target: string | undefined, options: ScanOptions, 
     if (options.coverage !== undefined) { await printCoverage(resolved, options, deps); return; }
     const steering = loadSteering(resolved.folder, options, deps.err);
     if (steering.policies.length && options.skill === "scan") options = { ...options, skill: POLICY_SKILL };
+    if (deps.resolveSkill) options = { ...options, skill: deps.resolveSkill(options.skill) };
     const budget = Number(options.budget);
     const total = Number(options.passes);
     const startedAt = deps.now().toISOString();

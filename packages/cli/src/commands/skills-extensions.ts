@@ -68,7 +68,20 @@ async function reviewAndCommit(svc: ExtensionService, io: CommandIo, options: Op
   const enableScope = enableOption ? (options.project ? { scope: "project" as const, project: resolve(options.project) } : { scope: "global" as const }) : undefined;
   const done = svc.installer.commit(p, approvalFor(p, enableScope));
   if (!done.ok) return fail(io, options, done.error.message);
-  emit(io, options, { installed: true, name: done.value.name, revision: done.value.revision, enabled: Boolean(enableOption) }, () => isSkill ? `Installed skill ${done.value.name} at ${done.value.revision.slice(0, 12)}.` : `Installed extension ${done.value.name} at ${done.value.revision.slice(0, 12)}.${options.enable ? "" : ` Not enabled: \`0 skills extensions enable ${done.value.name}\`.`}`);
+  const installed = done.value;
+  if (isSkill) {
+    const skillId = `extension/${installed.name}/${installed.name}`;
+    const scripts = p.prompt.files.map(file => file.path).filter(path => /(^|\/)(scripts?|bin)\//.test(path));
+    emit(io, options, { installed: true, name: installed.name, skillId, revision: installed.revision, enabled: Boolean(enableOption), scripts }, () => [
+      `Installed skill ${installed.name} at ${installed.revision.slice(0, 12)}${enableOption ? " and enabled it" : ""}.`,
+      `Id: ${skillId}`,
+      `Files: ${p.prompt.files.length}${scripts.length ? `; scripts: ${scripts.join(", ")}` : ""}`,
+      `The text of its SKILL.md is instructions the model follows when you run \`0 scan . --skill ${installed.name}\`. Read it first.`,
+      "Bundled scripts do not run when the skill loads. The model can run one only after you approve it.",
+    ].join("\n"));
+    return;
+  }
+  emit(io, options, { installed: true, name: installed.name, revision: installed.revision, enabled: Boolean(enableOption) }, () => `Installed extension ${installed.name} at ${installed.revision.slice(0, 12)}.${options.enable ? "" : ` Not enabled: \`0 skills extensions enable ${installed.name}\`.`}`);
 }
 
 /** Returns "not-extension" (and prints nothing) when a bare owner/repo has no extension or skill layout, so the caller can try the catalog flow. */
