@@ -17,6 +17,9 @@ updates:
       # Grammar ABI must match the vendored tree-sitter 0.21.1 runtime.
       - dependency-name: tree-sitter-c
         update-types: [version-update:semver-minor, version-update:semver-major]
+      # TypeScript 7 removes the JS API and the bin/tsc export the build uses; it needs its own migration.
+      - dependency-name: typescript
+        update-types: [version-update:semver-major]
   - package-ecosystem: github-actions
     directories: [/, /.github/actions/setup-ci]
     schedule:
@@ -30,3 +33,9 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 3
+    ignore:
+      # A new Node major is a project decision (corepack is gone in 25+, CI and engines are on 24).
+      - dependency-name: node
+        update-types: [version-update:semver-major]
+      # The workbench image pins its toolchain with RUSTUP_TOOLCHAIN, so a base-image bump changes nothing.
+      - dependency-name: rust
