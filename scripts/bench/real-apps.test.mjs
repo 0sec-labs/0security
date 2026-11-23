@@ -42,7 +42,8 @@ test("scan arguments per configuration", () => {
   assert.match(args("foxguard-semgrep"), /--scanner foxguard,semgrep/);
   assert.match(args("batched"), /--batches on --batch-size 8 --concurrency 3/);
   assert.match(args("single"), /--batches off/);
-  assert.deepEqual(CONFIGS.length, 5);
+  assert.match(args("lean"), /--batches off --prepass off/);
+  assert.deepEqual(CONFIGS.length, 6);
   assert.throws(() => parseArgs([]), /exactly one/);
   assert.throws(() => parseArgs(["--run", "--dry-run"]), /exactly one/);
 });

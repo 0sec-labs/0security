@@ -109,3 +109,22 @@ Real bugs that verify called false-positive: 0 of 13. Real bugs that --apply sup
 
 The sample has one noise finding (clean-python), and verify called it true-positive, so noise removed is 0 of 1. The triage did not drop real bugs here and did not remove noise either.
 
+
+---
+
+# Scan skill variants on real applications
+
+> Real runs of `node scripts/bench/real-apps.mjs --run --configs lean`, 2026-11-23, default model (gpt-6-luna), 6 repeats per arm and app, `--budget 1` per scan, $3.63 spent over 48 scans. Arms changed only the scan skill text. Illustrative; see docs/design/benchmark.md, "Scan skill variants for missing controls".
+
+| app | arm | strict found (min-max) | reviewed found (min-max) | unmatched | cost per scan |
+|---|---|---|---|---|---|
+| DVNA (17) | base | 10.0 (9-12) | 13.8 (13-14) | 2.8 | $0.077 |
+| DVNA (17) | control table | 9.3 (8-11) | 13.0 (12-15) | 3.5 | $0.079 |
+| DVNA (17) | config and regex pass | 9.7 (8-11) | 14.2 (13-15) | 3.5 | $0.085 |
+| DVNA (17) | all | 10.0 (8-11) | 14.3 (12-16) | 5.2 | $0.074 |
+| NodeGoat (17) | base | 6.8 (4-8) | 9.8 (5-14) | 6.0 | $0.102 |
+| NodeGoat (17) | all | 7.2 (6-9) | 10.0 (8-13) | 9.7 | $0.154 |
+| VAmPI (9) | base | 6.2 (5-7) | 6.7 (6-7) | 1.7 | $0.019 |
+| VAmPI (9) | all | 6.5 (6-8) | 7.8 (7-9) | 2.3 | $0.014 |
+
+No variant was kept. Reviewed numbers use the automatic adjudication, not a fresh hand review.

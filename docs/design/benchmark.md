@@ -192,6 +192,7 @@ The clones stay outside the repository. The dry run needs them, so it is not par
 node scripts/bench/real-apps.mjs --clone                  # network; clones each app at its pinned commit into /tmp/realbench
 node scripts/bench/real-apps.mjs --dry-run                # no model: checks every key item against the clones
 node scripts/bench/real-apps.mjs --run --repeat 3 --budget 2 --total-budget 6 --apps dvna
+node scripts/bench/real-apps.mjs --run --configs lean --apps dvna --repeat 6   # --batches off --prepass off, the cheapest config
 node scripts/bench/real-apps.mjs --report --out <dir>     # summarises saved scans again, after a key correction
 ```
 
@@ -301,6 +302,44 @@ VAmPI:
 - Username enumeration. Found in most configs, missed in every repeat of four of five. Where it was found the finding was filed as information disclosure.
 
 The pattern across the three apps: the scan opens the files, and the misses are judgement calls on configuration, absent controls and regexes, not unread code. A pre-pass that hits only well-known sink patterns does not point at them.
+
+### Scan skill variants for missing controls
+
+The misses above are missing controls, configuration, regexes and logging. I tested whether more instructions in the scan skill fix them. Date 2026-11-23, default model (gpt-6-luna), 6 repeats per arm and app, `--batches off --prepass off` (the `lean` config), fresh `HOME` per scan. Arms ran in the same time window, one scan per arm at a time. Total spend $3.63 over 48 scans.
+
+The arms add text to the scan skill, before the "Prove from the code" step:
+- base: the skill as shipped.
+- A: a per-entry-point control table (authentication, ownership, validation, output encoding, rate limit, session and token handling, secrets and config, error and log exposure, crypto and randomness). Each absent or weak control is a finding.
+- BC: a pass over bootstrap, middleware order, debug settings and manifests, and a pass over every regex applied to input, judged for backtracking.
+- ABC: all of the above.
+
+I tuned on DVNA only. Then I ran base and ABC on NodeGoat and VAmPI, which I did not read while tuning. The p value is a two-sided permutation test on the mean of 6 against 6.
+
+DVNA (17 items), tuning app:
+
+| arm | strict found (min-max) | reviewed found (min-max) | unmatched findings | cost per scan | p strict, reviewed |
+|---|---|---|---|---|---|
+| base | 10.0 (9-12) | 13.8 (13-14) | 2.8 | $0.077 | - |
+| A | 9.3 (8-11) | 13.0 (12-15) | 3.5 | $0.079 | 0.48, 0.25 |
+| BC | 9.7 (8-11) | 14.2 (13-15) | 3.5 | $0.085 | 0.80, 0.71 |
+| ABC | 10.0 (8-11) | 14.3 (12-16) | 5.2 | $0.074 | 1.00, 0.59 |
+
+The three classes the arms target did not move. Query logging and the calculator stack trace were found 0 of 6 times in every arm. The unprotected users API was found 0 of 6 (base), 2 of 6 (A), 2 of 6 (BC) and 0 of 6 (ABC). The reset token hash was found 3, 1, 3 and 0 of 6 times. ABC raised unmatched findings from 2.8 to 5.2 (p 0.04).
+
+Validation, base against ABC:
+
+| app | arm | strict found (min-max) | reviewed found (min-max) | unmatched findings | cost per scan |
+|---|---|---|---|---|---|
+| NodeGoat (17) | base | 6.8 (4-8) | 9.8 (5-14) | 6.0 | $0.102 |
+| NodeGoat (17) | ABC | 7.2 (6-9) | 10.0 (8-13) | 9.7 | $0.154 |
+| VAmPI (9) | base | 6.2 (5-7) | 6.7 (6-7) | 1.7 | $0.019 |
+| VAmPI (9) | ABC | 6.5 (6-8) | 7.8 (7-9) | 2.3 | $0.014 |
+
+NodeGoat shows no change (p 0.83 strict, 1.00 reviewed), more unmatched findings, and 51 percent more cost per scan. VAmPI shows no strict change (p 0.73) and one more reviewed item (p 0.03). The reviewed column uses the harness's automatic adjudication with the reject lists of the earlier runs. I did not re-read near misses by hand for these scans, so treat reviewed numbers as approximate.
+
+Result: no variant was kept. None improved recall on DVNA beyond the spread between repeats, and ABC did not improve NodeGoat, the second validation app. The shipped skill is unchanged. The synthetic fixtures were not rerun, because nothing changed.
+
+Marking a unit reviewed only when the model opened its files is not reliable. The scan reads files through `bash` (cat, sed, grep) and delegates to helper threads through `spawn_agent`. A saved thread lists those tool calls, but whether a command opened a file can only be guessed from the command text, and helper threads are separate. The earlier DVNA check found the missed files were opened in 18 of 19 scans, so a gate on opening would not have caught those misses.
 
 ### What this does not prove
 

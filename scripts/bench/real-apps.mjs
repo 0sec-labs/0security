@@ -19,7 +19,7 @@ import { defaultCli, git, isMain, isolatedEnv, pct, range, repoRoot, run as runP
 const here = dirname(fileURLToPath(import.meta.url));
 export const KEYS_DIR = join(here, "real-apps");
 export const DEFAULT_ROOT = "/tmp/realbench";
-export const CONFIGS = ["default", "prepass-off", "foxguard-semgrep", "batched", "single"];
+export const CONFIGS = ["default", "prepass-off", "foxguard-semgrep", "batched", "single", "lean"];
 const SEVERITY = ["critical", "high", "medium", "low", "info"];
 const MAX_FILE_BYTES = 1_000_000;
 
@@ -223,6 +223,7 @@ export function scanArgs(config, folder, outFile, o) {
   else if (config === "foxguard-semgrep") args.push("--prepass", "auto", "--scanner", "foxguard,semgrep");
   else if (config === "batched") args.push("--batches", "on", "--batch-size", String(o.batchSize), "--concurrency", String(o.concurrency));
   else if (config === "single") args.push("--batches", "off");
+  else if (config === "lean") args.push("--batches", "off", "--prepass", "off");
   return args;
 }
 
