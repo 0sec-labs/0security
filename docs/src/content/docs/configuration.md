@@ -133,6 +133,7 @@ Set them inline, for example `env ZERO_LOG_FORMAT=json 0`.
 | --- | --- |
 | `ZERO_LOG_FORMAT=json` | Write operational records as NDJSON on stderr. They hold lifecycle and cost metadata only, and are not uploaded. |
 | `ZERO_DB_PATH` | Database file. |
+| `ZERO_SANDBOX_DIR` | Folder where `0 findings fix --sandbox docker` copies the work tree. It must be shared with the Docker VM. |
 | `ZERO_SUPPRESS_PROVIDER_STARTUP_LOG=1` | Hide the `Provider:` startup line. |
 | `ZERO_RUNTIME_TRACE=1` | Print the runtime, provider and model to stderr. |
 
