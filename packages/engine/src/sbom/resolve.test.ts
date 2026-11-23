@@ -145,6 +145,36 @@ describe("resolveJvmDependencies with fake tools", () => {
   it("says so when the tool is not installed", async () => {
     await expect(resolveJvmDependencies(project({ "pom.xml": "<project/>" }), { env: { PATH: "/nonexistent" } })).rejects.toThrow(/mvn is not installed/);
   });
+  it("fails with gradle error lines when a single-project build fails", async () => {
+    const { bin } = fakeTools({ gradle: "#!/bin/sh\necho '[ERROR] Could not resolve dependencies for project demo' >&2\nexit 1\n" });
+    await expect(resolveJvmDependencies(project({ "build.gradle": "" }), { env: { PATH: `${bin}:/usr/bin:/bin` } })).rejects.toThrow(/gradle failed \(exit 1\):\n.*Could not resolve dependencies/);
+  });
+  it("preserves missing-tool diagnostic when gradle is not installed in a multi-project build", async () => {
+    const dir = project({ "build.gradle": "", "app/build.gradle": "" });
+    await expect(resolveJvmDependencies(dir, { env: { PATH: "/nonexistent" } })).rejects.toThrow(/gradle is not installed \(or not on PATH\)/);
+  });
+  it("preserves actual gradle error lines when all projects fail in a multi-project build", async () => {
+    const { bin } = fakeTools({ gradle: "#!/bin/sh\necho '[ERROR] Could not resolve all dependencies' >&2\nexit 1\n" });
+    const dir = project({ "build.gradle": "", "app/build.gradle": "" });
+    await expect(resolveJvmDependencies(dir, { env: { PATH: `${bin}:/usr/bin:/bin` } })).rejects.toThrow(/gradle failed \(exit 1\):\n.*Could not resolve all dependencies/);
+  });
+  it("returns components and preserves failed project warning when one project fails and another succeeds", async () => {
+    const { bin } = fakeTools({
+      gradle: `#!/bin/sh
+case "$*" in
+  *app*) echo "+--- org.slf4j:slf4j-api:2.0.12";;
+  *) echo "[ERROR] Configuration 'runtimeClasspath' not found in root project" >&2; exit 1;;
+esac
+`,
+    });
+    const dir = project({ "build.gradle": "", "app/build.gradle": "" });
+    const result = await resolveJvmDependencies(dir, { env: { PATH: `${bin}:/usr/bin:/bin` } });
+    expect(result.tools).toEqual(["gradle (app)"]);
+    expect(result.components.map(c => c.name)).toContain("org.slf4j/slf4j-api");
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0]).toContain("gradle (.): gradle failed (exit 1)");
+    expect(result.warnings[0]).toContain("Configuration 'runtimeClasspath' not found");
+  });
   it("stops a tool that runs too long", async () => {
     const { bin } = fakeTools({ mvn: "#!/bin/sh\nexec sleep 30\n" });
     await expect(resolveJvmDependencies(project({ "pom.xml": "<project/>" }), { env: { PATH: `${bin}:/usr/bin:/bin` }, timeoutMs: 300 })).rejects.toThrow(/did not finish within/);
