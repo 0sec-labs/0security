@@ -8,6 +8,18 @@ export const RELEASES_URL = "https://github.com/0sec-labs/0security/releases";
 
 export const RELEASES: readonly Release[] = [
   {
+    version: "0.42.0",
+    date: "2026-11-22",
+    title: "Fix findings, bring your own scanners, check dependencies",
+    summary: "0 can now fix a finding as a pull request, import what other scanners found, review large repositories in batches, and check dependencies, licenses and model files.",
+    highlights: [
+      { icon: "Wrench", title: "Fix as a pull request", text: "0 findings fix makes one branch and one pull request per finding, as a draft when your checks fail. It never pushes to your base branch. 0 findings burndown works through a backlog in batches." },
+      { icon: "Plug", title: "One list of findings", text: "Import SARIF from any scanner or a repository's GitHub alerts, run FoxGuard, Semgrep, Gitleaks, Trivy, OSV-Scanner or Checkov first, add your own Semgrep rules, and send findings to GitHub code scanning or Issues." },
+      { icon: "ListChecks", title: "Large repositories", text: "A large scan runs in batches, can be continued with --resume and says how much was reviewed. It exits 3 when part was not reached; --allow-partial exits by findings only. 0 scan --plan shows the size and a rough cost first." },
+      { icon: "ShieldCheck", title: "Dependencies, evidence and AI apps", text: "SBOMs carry hashes, the dependency graph and licenses. 0 sbom check shows fixed versions and flags malicious packages, 0 sbom licenses checks a license policy, and 0 findings evidence writes an evidence folder for CRA reviews. 0 threat-model, 0 findings verify and new experimental skills cover threat models, false positives, AI apps, cryptography and infrastructure code." },
+    ],
+  },
+  {
     version: "0.41.0",
     date: "2026-11-19",
     title: "Scan in CI, and scan more than once",

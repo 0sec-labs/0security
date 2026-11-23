@@ -20,9 +20,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: 0sec-labs/0security@v0.41.0
+      - uses: 0sec-labs/0security@v0.42.0
         with:
-          version: 0.41.0 # Pin the CLI
+          version: 0.42.0 # Pin the CLI
           fail-on: high
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}

@@ -12,6 +12,8 @@ on the GitHub Release tag.
 
 ## [Unreleased]
 
+## [0.42.0] - 2026-11-22
+
 ### Added
 
 - `0 scan --allow-partial` exits by the findings alone (0, or 1 with `--fail-on`) when a scan stops before it reviews everything; the default stays exit 3, which means "not finished", not "failed". The JSON `status` is `partial` and `coverage` stays in the report. A scan that ends partial now prints what stopped it, how much is left and the exact `Continue with: 0 scan <folder> --resume <id>` command, on stderr, in the Markdown report and as `coverage.resume` and `coverage.stoppedBy` in JSON. `0 scan --plan [folder]` lists the entry points by kind, the batches, whether `--batches auto` would batch the folder and a rough cost range, without calling a model or writing to the findings database; `--format json` is supported. The cost range scales one measurement (about $0.035 per batch on a 40-file fixture); cost for large repositories is not measured and varies 2 to 3 times. The GitHub Action already treats exit 3 as a warning and does not fail the job; the docs now say so.
