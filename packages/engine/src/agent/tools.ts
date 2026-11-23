@@ -470,7 +470,9 @@ export class ToolExecutor {
     const cwd = this.ctx.scopePath ?? this.ctx.workspaceRoot;
     const extensionRun = this.ctx.extensionRuns?.prepare(command, { cwd });
     if (extensionRun && !extensionRun.ok) return { success: false, output: null, error: `bash refused: ${extensionRun.error}` };
-    const env = { ...sanitizedEnv(), TARGET: this.ctx.target, ...this.buildAuthEnvVars(), ...(extensionRun?.env ?? {}) };
+    const env = extensionRun
+      ? extensionRun.env
+      : { ...sanitizedEnv(), TARGET: this.ctx.target, ...this.buildAuthEnvVars() };
 
     // The command the OPERATOR asked for (the value may have been rewritten by
     // auth-header injection above; the card shows the model's original intent).
