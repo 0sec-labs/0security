@@ -254,7 +254,7 @@ Get the same report later, in any format:
 0 scan . --scope SECURITY.md --fail-on high --format json
 ```
 
-A finding that matches a vector the `## Scope` section of SECURITY.md lists as out of scope gets `scope: "out-of-scope"`, `scopeReason` and `scopeSource`. In the JSON report, `counts` covers the findings that are not labelled, `outOfScopeCounts` counts the labelled ones, and `scope` names the file and the vectors. Labelled findings stay in `findings`, after the others. They do not count toward `--fail-on`. See [Declare what is in and out of scope](/threat-model-and-policy/#declare-what-is-in-and-out-of-scope).
+A finding that matches a vector the `## Scope` section of SECURITY.md lists as out of scope gets `scope: "out-of-scope"`, `scopeReason` and `scopeSource`. In the JSON report, `counts` covers the findings that are not labelled, `outOfScopeCounts` counts the labelled ones, and `scope` names the file and the vectors. Labelled findings stay in `findings`, after the others. They do not count toward `--fail-on`. When findings are in classes you have not declared, a scan on a terminal ends with one line that points to `0security threat-model --interview`. See [Declare what is in and out of scope](/threat-model-and-policy/#declare-what-is-in-and-out-of-scope).
 
 ### Plan a cryptography migration
 

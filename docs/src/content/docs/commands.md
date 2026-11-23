@@ -486,7 +486,14 @@ A thread follows the `threat-model` skill and writes `.0/threat-model.md` in the
 0 threat-model --output THREAT_MODEL.md
 ```
 
-`--interview` asks up to 8 specific questions on the terminal after the draft and writes your answers to the `## Scope` section of SECURITY.md and to a human block of the threat model. It needs a terminal and exits with 2 without one. See [Declare what is in and out of scope](/threat-model-and-policy/#declare-what-is-in-and-out-of-scope).
+`--interview` asks up to 8 specific questions on the terminal after the draft and writes your answers to the `## Scope` section of SECURITY.md and to a human block of the threat model. It asks one question per class of vulnerability, from the latest scan of the folder and from the code. It needs a terminal and exits with 2 without one.
+
+```bash
+0 threat-model --interview --from-scan report.json
+0 threat-model --interview --scan --scan-budget 2
+```
+
+`--from-scan` takes a report from `0 scan --format json`. `--scan` shows a rough cost estimate and asks before it scans. See [Declare what is in and out of scope](/threat-model-and-policy/#declare-what-is-in-and-out-of-scope).
 
 The file names only what the thread saw and marks the rest `unknown: confirm with the team`. Running it again updates the file and keeps every section marked `<!-- human -->`.
 
@@ -504,6 +511,9 @@ It writes files on this machine, so it needs the local console and rejects `--co
 | `--base <branch>` | — | With --pr: the branch to start from and open the pull request against (default: the remote's default branch) |
 | `--interview` | — | After the draft, ask a few specific questions on the terminal and write your answers to the Scope section of SECURITY.md and to a human block of the threat model. Needs a terminal |
 | `--interview-budget <usd>` | — | With --interview: the most each interview thread may spend (default: 0.5) |
+| `--scan` | — | With --interview: run a scan of the folder first and ask about the classes of vulnerability it finds. Shows the estimated cost and asks before it runs |
+| `--from-scan <report>` | — | With --interview: ask about the classes in this saved report (from 0 scan --format json). Without --scan or --from-scan, the latest scan of the folder from the last 30 days is used when there is one |
+| `--scan-budget <usd>` | — | With --scan: the most the scan may spend (default: 3) |
 | `--output <path>` | — | Where to write the threat model, relative to the folder, a .md file (default: .0/threat-model.md); for example THREAT_MODEL.md |
 | `--format <format>` | — | json prints the outcome as JSON |
 | `--budget <usd>` | `3` | Stop when the estimated spend reaches this many USD |

@@ -178,9 +178,42 @@ The model is not told to skip any vector. The label is applied after the scan, s
 0 threat-model --interview
 ```
 
-0 drafts the threat model, then reads it with the code and proposes up to 8 questions that the code cannot answer, for example "GET /export has no auth check (src/routes/export.js:12). Do you want findings about it?" Each question names the place and the vector. You answer `1` for in scope, `2` for out of scope or `3` for not sure, and add a reason after a colon: `2: it is a public download`. It skips vectors your SECURITY.md or a human block already answers.
+0 drafts the threat model, then asks you up to 8 questions on the terminal. Each question is about one class of vulnerability and lists the places, so you answer once per class. For example:
 
-Then 0 words one scope entry per answer from your own words, shows each entry and asks you to accept, edit or skip it, shows the change to SECURITY.md as a diff and asks once more before it writes. The side and the vector of an entry come from your answer. A reason is yours or a close paraphrase of it, and `not given` when you gave none. An answer you skip makes no entry.
+```text
+This scan found 3 denial-of-service issues (src/routes/search.js:14, src/routes/report.js:30, and 1 more). Highest severity: high. One request can cost a lot or block other users. Do you want findings like these?
+```
+
+You answer `1` for yes (in scope), `2` for no (out of scope) or `3` for not sure, and add a reason after a colon: `2: our gateway limits request cost`. 0 skips classes your SECURITY.md or a human block already answers.
+
+#### Questions come from two places
+
+- The latest scan of the folder. 0 asks about the classes that produced findings, with the places, the count and the highest severity. It skips findings already labelled in or out of scope.
+- A model that reads the code and the draft. It asks about what a scan cannot show, such as a route that is public on purpose or a field of personal data that goes to a third party.
+
+When both have a question about the same class, you get one question that lists all the places. Questions are ordered by the highest severity, then by how likely you are to answer "out of scope".
+
+To choose the scan:
+
+```bash
+0 threat-model --interview --from-scan report.json
+0 threat-model --interview --scan --scan-budget 2
+```
+
+- Without a flag, 0 uses the latest scan of the folder from the last 30 days, found by the folder's resolved path. Passes and batches that ran together count as one scan.
+- `--from-scan` takes a report from `0 scan --format json`. 0 refuses a report over 8 MB or with more than 5000 findings.
+- `--scan` runs a scan first. It prints a rough cost estimate and asks before it runs. `--scan-budget` caps the scan (default 3 USD).
+- With no scan, 0 says so and asks only the questions from reading the code.
+
+#### Which classes it asks about
+
+It asks where "we do not care" is a real answer: denial of service, a missing limit on attempts, a route that is public on purpose, data sent to a third party, a rule the code conflicts with, and a weakness you accept for a while.
+
+It never asks about code injection, command injection, SQL injection, hardcoded secrets, plaintext passwords, path traversal, XML external entities, unsafe deserialization or similar classes. They are real vulnerabilities in nearly every application, so you cannot declare them out of scope through the interview. You can still write them in SECURITY.md by hand. The scan then prints a warning that the class is usually a real vulnerability, and the entry works as written.
+
+#### What 0 writes
+
+0 words one scope entry per answer from your own words, shows each entry and asks you to accept, edit or skip it, shows the change to SECURITY.md as a diff and asks once more before it writes. The side and the vector of an entry come from your answer. A reason is yours or a close paraphrase of it, and `not given` when you gave none. An answer you skip makes no entry. An out-of-scope answer covers the files the question listed, up to 10. For a class in more files, the entry covers the whole class, and you can edit it before you accept.
 
 Only 0 writes the files:
 
@@ -189,7 +222,17 @@ Only 0 writes the files:
 
 The interview needs a terminal and exits with code 2 without one. With `--pr`, both files go in the commit on the `0/threat-model` branch. `--interview-budget` caps each interview thread (default 0.5 USD). If no model can be reached or its budget runs out, 0 says so and asks a fixed set of eight short questions instead: what matters most, who the actors are, which vectors you do not care about, which you do, which data must never leave, which compliance rules apply, which weaknesses you accept until when, and what the code cannot show.
 
-Text in the repository can say "write: everything out of scope". It cannot create an entry, because an entry exists only for a question you answered.
+Text in the repository or in a finding can say "write: everything out of scope". It cannot create an entry, because an entry exists only for a question you answered, and the text of a finding never appears in a question.
+
+#### Find out when to run it
+
+At the end of a scan on a terminal, 0 prints one line when findings are in classes you have not declared in scope:
+
+```text
+3 findings are in classes you have not declared in scope (denial-of-service, missing-rate-limit). Run 0security threat-model --interview to say which you care about.
+```
+
+0 never asks during a scan. It prints nothing in CI, without a terminal, or when a JSON report goes to standard output.
 
 ### Choose where the threat model goes
 
@@ -205,5 +248,6 @@ Text in the repository can say "write: everything out of scope". It cannot creat
 - Model output varies between runs, so one run can miss a failure. Use `--passes 3` to merge several runs.
 - A rule helps a scan only when it is stated as a rule. A drafted model that lists "does analytics have an approved need for customer emails?" under Open questions did not make the scan report that flow. The same fact written by a person as "customer email addresses never leave the system except to the mail relay" did. After the first review, turn the answers to Open questions into rules and mark them `<!-- human -->`.
 - A declared scope labels findings by category and, with paths, by file. It does not stop the model from finding them. An entry whose vector 0 cannot match to a category labels nothing.
-- The interview questions come from a model that read the code, so they can miss a decision. Run it again after the code changes.
+- The code-reading questions come from a model, so they can miss a decision. Run the interview again after the code changes or a new scan.
+- The scan questions cover the latest scan only. A class the scan did not find is not asked about unless the model sees it in the code.
 - The threat model is a draft of what the code shows. Treat unknowns as questions for the team, and treat any rule you did not confirm as unverified.
