@@ -151,3 +151,17 @@ test("an item may list several categories and any of them credits it", () => {
   assert.deepEqual(validateAnswer(key), []);
   assert.ok(validateAnswer({ ...key, items: [{ ...key.items[0], category: ["authz", "nope"] }] }).some((p) => p.includes("unknown category nope")));
 });
+
+test("the engine's web categories map to families without needing the title", () => {
+  const fam = (category) => familiesOf({ category, title: "x" });
+  assert.ok(fam("broken-access-control").has("authz"));
+  assert.ok(fam("broken-authentication").has("authn"));
+  assert.ok(fam("mass-assignment").has("authz") && fam("mass-assignment").has("mass-assignment"));
+  assert.ok(fam("insecure-randomness").has("weak-crypto"));
+  assert.ok(fam("insecure-storage").has("secret"));
+  assert.ok(fam("insecure-transport").has("transport"));
+  assert.ok(fam("missing-rate-limit").has("rate-limit"));
+  assert.ok(fam("hardcoded-secret").has("secret"));
+  for (const c of ["csrf", "open-redirect", "xxe"]) assert.ok(fam(c).has(c));
+  assert.ok(familiesOf({ category: "code-injection", title: "MongoDB $where JavaScript injection" }).has("sqli"));
+});

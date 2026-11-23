@@ -40,6 +40,36 @@ Each finding has a stable link at `/findings/<fingerprint>`.
 | `--category` | An attack category |
 | `--limit <n>` | Default 50 |
 
+A group is one flaw. Groups that cite the same file, the same category and overlapping lines are shown as one, with a count of how many were merged. Groups with a different triage state stay apart.
+
+## Finding categories
+
+Each finding has one category. It names the kind of flaw, not where it showed up. The category is the SARIF rule id, the value `--category` filters on, and part of the issue label.
+
+The model picks a category when it records a finding. If it picks a catch-all (`missing-validation`, `other`, `security-misconfiguration`, `information-disclosure`) or a label that is not on the list, 0 files the finding under the class its CWE or title names. A broken ownership check filed as `missing-validation` becomes `broken-access-control`. A specific category the model chose is kept. The model's own label stays on the finding.
+
+| Category | What it is | Usual CWE |
+|---|---|---|
+| `broken-access-control` | A missing or wrong authorization check, IDOR, no role check, a destructive route anyone can call | 284, 285, 306, 639, 862, 863 |
+| `broken-authentication` | Session fixation, a weak password policy, user enumeration, authentication bypass | 204, 287, 384, 521, 613 |
+| `mass-assignment` | A request sets fields it should not, such as an admin flag at registration | 915 |
+| `csrf` | A state-changing request with no anti-forgery check | 352 |
+| `open-redirect` | A redirect to an address the caller chooses | 601 |
+| `xxe` | An XML parser that resolves external entities | 611 |
+| `hardcoded-secret` | A key, signing secret or credential in source, or a seeded default account | 259, 321, 798 |
+| `insecure-randomness` | A predictable token, id or seed | 330, 338, 340 |
+| `insecure-storage` | A password or sensitive value stored in plaintext | 256, 312, 522 |
+| `insecure-transport` | Data or a database link sent without TLS | 295, 319, 523 |
+| `missing-rate-limit` | No limit on attempts, so codes or passwords can be guessed | 307, 799 |
+| `sql-injection`, `command-injection`, `code-injection`, `path-traversal`, `xss`, `ssrf`, `unsafe-deserialization`, `prototype-pollution`, `regex-dos`, `cors` | Injection and request classes | 89, 78, 94, 22, 79, 918, 502, 1321, 1333, 942 |
+| `information-disclosure`, `security-misconfiguration`, `crypto-misuse`, `denial-of-service`, `missing-validation` | General classes, used when nothing more specific fits | 200, 16, 327, 400, 20 |
+| `known-vulnerable-package`, `supply-chain`, `policy-violation` | Dependencies, build pipelines and written rules | 1104, 829 |
+| `prompt-injection`, `jailbreak`, `system-prompt-extraction`, `data-exfiltration`, `tool-misuse`, `output-manipulation`, `encoding-bypass`, `multi-turn` | Attacks on AI applications | |
+| `heap-overflow`, `out-of-bounds-read`, `out-of-bounds-write`, `use-after-free`, `stack-buffer-overflow`, `null-pointer-deref`, `null-deref`, `integer-overflow`, `integer-truncation`, `race-condition`, `toctou`, `type-confusion`, `double-free`, `format-string`, `uninitialized-memory` | Memory safety and concurrency | |
+| `other` | Nothing above fits | |
+
+A report merges findings that two passes or batches filed for one flaw. It merges when the file and the category (or a shared CWE) agree and the cited lines overlap. Findings in different files or categories are never merged. The merged finding keeps the highest severity and lists the ids it absorbed.
+
 `0 findings show` prints the title, what an attacker can do (when the scan assessed it), severity, CVSS when present, status, triage state, evidence and related occurrences.
 
 To read another database, add `--db-path`:

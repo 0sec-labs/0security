@@ -5,7 +5,7 @@ export const DECOY_TOLERANCE = 2;
 // Category families: an answer item matches a finding when the finding belongs to the item's family.
 // A finding can belong to several (a hardcoded key is both a secret and, often, filed as weak crypto).
 const FAMILY_PATTERNS = {
-  sqli: /sql[-_ ]?inj|sqli|sql query/i,
+  sqli: /sql[-_ ]?inj|sqli|sql query|nosql|\$where/i,
   "command-injection": /command[-_ ]?inj|code[-_ ]?inj|shell|os command|\bexec\b|\beval\b|remote code|\brce\b/i,
   "path-traversal": /path[-_ ]?trav|directory trav|\blfi\b|arbitrary file (read|access)|file inclusion/i,
   secret: /secret|hard-?coded|credential|api[-_ ]?key|password|token|private key|information[-_ ]?disclosure/i,
@@ -27,7 +27,7 @@ const FAMILY_PATTERNS = {
   "open-redirect": /open[-_ ]?redirect|unvalidated redirect|redirect/i,
   redos: /redos|regex[-_ ]?dos|regular expression denial|catastrophic backtrack|nested quantifier|regex.*denial|denial.*regex/i,
   "vuln-dependency": /vulnerable (dependenc|component|librar|package|version)|outdated|known vulnerab|\bcve-\d|dependenc|supply[-_ ]chain/i,
-  authn: /session (fixation|management|regenerat|hijack)|fixation|httponly|cookie (flag|attribute|secur)|insecure cookie|weak password|password (policy|complexity|strength|requirement)|(user(name)?|account|password) enumeration|user enumeration/i,
+  authn: /session (fixation|management|regenerat|hijack)|fixation|httponly|cookie (flag|attribute|secur)|insecure cookie|session cookies?[^.]*(secure|https|transport|httponly)|cookies? (are |is )?(not )?marked|weak password|password (policy|complexity|strength|requirement)|(user(name)?|account|password) enumeration|user enumeration/i,
   transport: /insecure (http|transport|connection)|cleartext|plain-?text (http|transport)|unencrypted|without (tls|https|ssl)|no (tls|https)|http (instead|rather)|\bhttps\b/i,
   misconfig: /stack ?trace|x-powered-by|verbose error|debug mode|debug=true|misconfig|security header|query logging|logging (of )?(sensitive|queries)/i,
   "rate-limit": /rate[-_ ]?limit|brute[-_ ]?force|resource consumption|throttl|lockout/i,
@@ -35,14 +35,43 @@ const FAMILY_PATTERNS = {
 };
 export const FAMILIES = Object.keys(FAMILY_PATTERNS);
 
+// What each engine category (packages/engine/src/shared/finding-category.ts) means in family terms. A finding whose
+// category is one of these belongs to those families whatever its title says. Keep this in step with the engine list.
+export const CATEGORY_FAMILIES = {
+  "broken-access-control": ["authz"],
+  "broken-authentication": ["authn"],
+  "mass-assignment": ["mass-assignment", "authz"],
+  csrf: ["csrf"],
+  "open-redirect": ["open-redirect"],
+  xxe: ["xxe"],
+  "hardcoded-secret": ["secret"],
+  "insecure-randomness": ["weak-crypto", "authn"],
+  "insecure-storage": ["secret", "weak-crypto"],
+  "insecure-transport": ["transport"],
+  "missing-rate-limit": ["rate-limit"],
+  "sql-injection": ["sqli"],
+  "command-injection": ["command-injection"],
+  "code-injection": ["command-injection"],
+  "path-traversal": ["path-traversal"],
+  ssrf: ["ssrf"],
+  "unsafe-deserialization": ["deserialization"],
+  xss: ["xss"],
+  "regex-dos": ["redos"],
+  "known-vulnerable-package": ["vuln-dependency"],
+  "supply-chain": ["vuln-dependency", "iac-supply"],
+  "information-disclosure": ["secret"],
+  "crypto-misuse": ["weak-crypto"],
+};
+
 /** The set of families a finding belongs to: category and title first, the description only when those say nothing. */
 export function familiesOf(finding) {
   // A saved scan keeps the families it was scored with, so a report can be scored again against a corrected key.
   if (Array.isArray(finding.families)) return new Set(finding.families);
   const head = `${finding.category ?? ""} ${finding.title ?? ""}`;
-  let found = FAMILIES.filter((family) => FAMILY_PATTERNS[family].test(head));
-  if (!found.length) found = FAMILIES.filter((family) => FAMILY_PATTERNS[family].test(finding.description ?? ""));
-  return new Set(found);
+  const found = new Set(CATEGORY_FAMILIES[finding.category] ?? []);
+  for (const family of FAMILIES) if (FAMILY_PATTERNS[family].test(head)) found.add(family);
+  if (!found.size) for (const family of FAMILIES) if (FAMILY_PATTERNS[family].test(finding.description ?? "")) found.add(family);
+  return found;
 }
 
 /** An item names one family or a list of them (a documented class that several scan labels fit). */

@@ -1455,6 +1455,8 @@ List findings from the database
 0 findings list [options]
 ```
 
+The list shows one line per flaw: groups that cite the same file and category at overlapping lines are merged, and the line says how many. See [finding categories](/findings/#finding-categories) for the values `--category` takes.
+
 An accepted risk shows `accepted until <date>`. Once that date passes, the finding shows as open again. `--expiring <days>` lists the accepted risks that end within that many days.
 
 | Option | Registered default | Description |

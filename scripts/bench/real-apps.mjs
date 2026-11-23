@@ -51,6 +51,7 @@ export function parseArgs(argv) {
     else if (a === "--timeout") o.timeout = Number(next());
     else if (a === "--batch-size") o.batchSize = Number(next());
     else if (a === "--concurrency") o.concurrency = Number(next());
+    else if (a === "--stored-families") o.storedFamilies = true;
     else throw new Error(`unknown option ${a}`);
   }
   if (!o.mode) throw new Error("pass exactly one of --clone, --dry-run (free) or --run (spends model money)");
@@ -362,7 +363,14 @@ if (isMain(import.meta.url)) {
       // Re-summarise saved scans (the per-scan JSON files of a --run) without scanning again.
       const runs = readdirSync(o.out).filter((f) => f.endsWith(".json") && !f.includes("summary")).map((f) => JSON.parse(readFileSync(join(o.out, f), "utf8"))).filter((r) => !String(r.status).startsWith("no-report"));
       const keyMap0 = Object.fromEntries(loadKeys().map((k) => [k.fixture, k]));
-      // Score the saved findings again, so a corrected key applies to scans that were already paid for.
+      // Score the saved findings again, so a corrected key applies to scans that were already paid for. The families are worked
+      // out again from each finding's category and title with the current rules (the category first goes through the engine's
+      // category rules, as a new finding does), unless --stored-families asks for the families the scan was scored with.
+      if (!o.storedFamilies) {
+        let classify;
+        try { ({ classifyFinding: classify } = await import(join(repoRoot, "packages/engine/dist/shared/index.js"))); } catch { console.error("note: the engine is not built, so saved categories are not re-filed (pnpm --filter @0/engine build)"); }
+        for (const r of runs) r.findings = r.findings.map((f) => { const category = classify ? classify({ category: f.category, title: f.title }).category : f.category; return { ...f, category, families: [...familiesOf({ ...f, category, families: undefined })] }; });
+      }
       for (const r of runs) r.score = scoreFindings(keyMap0[r.app], r.findings);
       const keyMap = Object.fromEntries(loadKeys().map((k) => [k.fixture, k]));
       console.log(renderMarkdown(summarize(runs, keyMap), { date: "saved", model: "saved", repeat: "saved", budget: "saved" }));
