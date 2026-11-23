@@ -338,4 +338,67 @@ describe("interpreter compatibility and working-directory propagation", () => {
     const failRes = await bash(svc, "sh ./scripts/hash.sh", { cwd: outside });
     expect("output" in failRes && failRes.output).not.toContain(TOKEN);
   });
+
+  it("refuses ANSI-C $'...' single-quote desync that sneaks chained commands past single-quote tracking", async () => {
+    const { loaded, svc } = await install();
+    const extDir = loaded.dir.replace(/\\/g, "/");
+    const cmd = `sh ${extDir}/scripts/hash.sh $'\\''; echo EXFIL=\$DEMO_SERVICE_TOKEN; # '`;
+    expect(svc.scriptRuns().prepare(cmd)).toBeNull();
+  });
+
+  it("refuses shell parameter expansions that leak connector secrets via stderr or short slices", async () => {
+    const { loaded, svc } = await install();
+    const extDir = loaded.dir.replace(/\\/g, "/");
+    const chunkedCmd = `sh ${extDir}/scripts/hash.sh "\${UNSET_VAR:?\${DEMO_SERVICE_TOKEN:0:3}|\${DEMO_SERVICE_TOKEN:3:3}}"`;
+    expect(svc.scriptRuns().prepare(chunkedCmd)).toBeNull();
+    const unquotedCmd = `sh ${extDir}/scripts/hash.sh \$DEMO_SERVICE_TOKEN`;
+    expect(svc.scriptRuns().prepare(unquotedCmd)).toBeNull();
+    if (process.platform !== "win32") {
+      const res = await bash(svc, chunkedCmd);
+      const combined = `${"output" in res ? res.output : ""} ${"error" in res ? (res as { error?: string }).error ?? "" : ""}`;
+      expect(combined).not.toContain(`${TOKEN.slice(0, 3)}|${TOKEN.slice(3, 6)}`);
+    }
+  });
+
+  it("refuses interpreter code-eval/preload flags, clustered short flags, and mismatched interpreter/script extensions", async () => {
+    const { loaded, svc } = await install();
+    const extDir = loaded.dir.replace(/\\/g, "/");
+    expect(
+      svc.scriptRuns().prepare(
+        `node '--import=data:text/javascript,console.log(process.env.DEMO_SERVICE_TOKEN)' ${extDir}/scripts/run.js`,
+      ),
+    ).toBeNull();
+    expect(svc.scriptRuns().prepare(`node --require=/tmp/evil.js ${extDir}/scripts/run.js`)).toBeNull();
+    expect(svc.scriptRuns().prepare(`node -r/tmp/evil.js ${extDir}/scripts/run.js`)).toBeNull();
+    expect(svc.scriptRuns().prepare(`bun --preload=/tmp/evil.js ${extDir}/scripts/run.js`)).toBeNull();
+    expect(
+      svc.scriptRuns().prepare(
+        `python3 -uc'import os;print(os.environ.get("DEMO_SERVICE_TOKEN"))' ${extDir}/scripts/run.py`,
+      ),
+    ).toBeNull();
+    // Interpreter/script language mismatch must not run a shell script through node/python or vice-versa
+    expect(svc.scriptRuns().prepare(`node ${extDir}/scripts/hash.sh`)).toBeNull();
+    expect(svc.scriptRuns().prepare(`python3 ${extDir}/scripts/hash.sh`)).toBeNull();
+    expect(svc.scriptRuns().prepare(`sh ${extDir}/scripts/run.py`)).toBeNull();
+  });
+
+  it("preserves authorization for legitimate direct, interpreter, env, and post-script flag invocations", async () => {
+    const { loaded, svc } = await install();
+    const extDir = loaded.dir.replace(/\\/g, "/");
+    expect(svc.scriptRuns().prepare(`${extDir}/scripts/hash.sh`)).toMatchObject({ ok: true, secrets: [TOKEN] });
+    expect(svc.scriptRuns().prepare(`sh ${extDir}/scripts/hash.sh --flag "val with spaces"`)).toMatchObject({ ok: true, secrets: [TOKEN] });
+    expect(svc.scriptRuns().prepare(`/bin/bash ${extDir}/scripts/hash.sh`)).toMatchObject({ ok: true, secrets: [TOKEN] });
+    expect(svc.scriptRuns().prepare(`/usr/bin/env python3 ${extDir}/scripts/run.py`)).toMatchObject({ ok: true, secrets: [TOKEN] });
+    expect(svc.scriptRuns().prepare(`'${process.execPath}' ${extDir}/scripts/run.js`)).toMatchObject({ ok: true, secrets: [TOKEN] });
+    expect(svc.scriptRuns().prepare(`bun ${extDir}/scripts/run.js`)).toMatchObject({ ok: true, secrets: [TOKEN] });
+  });
+
+  it("refuses untrusted relative or arbitrary-directory interpreter and env binary paths", async () => {
+    const { loaded, svc } = await install();
+    const extDir = loaded.dir.replace(/\\/g, "/");
+    expect(svc.scriptRuns().prepare(`/tmp/sh ${extDir}/scripts/hash.sh`)).toBeNull();
+    expect(svc.scriptRuns().prepare(`./node ${extDir}/scripts/run.js`)).toBeNull();
+    expect(svc.scriptRuns().prepare(`/tmp/env python3 ${extDir}/scripts/run.py`)).toBeNull();
+    expect(svc.scriptRuns().prepare(`env /tmp/bash ${extDir}/scripts/hash.sh`)).toBeNull();
+  });
 });

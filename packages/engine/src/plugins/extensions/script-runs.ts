@@ -12,21 +12,48 @@ import { BASE_ENV } from "./core/env.js";
 import type { ConnectionSecrets, ExtensionStore } from "./ports.js";
 import { loadable, type LoadedExtension } from "./runtime.js";
 
-const KNOWN_INTERPRETERS = new Set([
-  "sh",
-  "bash",
-  "zsh",
-  "python",
-  "python3",
-  "node",
-  "bun",
-]);
+const SHELL_EXTENSIONS = new Set([".sh", ".bash", ".zsh"]);
+const PYTHON_EXTENSIONS = new Set([".py"]);
+const NODE_EXTENSIONS = new Set([".js", ".mjs", ".cjs", ".ts", ".mts", ".cts"]);
+const BUN_EXTENSIONS = new Set([...NODE_EXTENSIONS, ".jsx", ".tsx"]);
 
-const FORBIDDEN_INTERPRETER_FLAGS = ["-c", "-e", "--eval", "-p", "--print", "-m", "-s", "-i"];
+const INTERPRETER_EXTENSIONS: Readonly<Record<string, ReadonlySet<string>>> = {
+  sh: SHELL_EXTENSIONS,
+  bash: SHELL_EXTENSIONS,
+  zsh: SHELL_EXTENSIONS,
+  python: PYTHON_EXTENSIONS,
+  python3: PYTHON_EXTENSIONS,
+  node: NODE_EXTENSIONS,
+  bun: BUN_EXTENSIONS,
+};
+
+const TRUSTED_ENV_PATHS = new Set(["env", "/usr/bin/env", "/bin/env"]);
+const TRUSTED_INTERPRETER_PREFIXES = ["/bin/", "/usr/bin/", "/usr/local/bin/", "/opt/homebrew/bin/"];
+
+/**
+ * Resolve an interpreter token to its canonical interpreter name if and only if
+ * it is a bare known interpreter name, the active Node executable, or lives directly
+ * inside a trusted system binary directory. Fails closed (`null`) otherwise.
+ */
+function resolveTrustedInterpreter(prog: string): string | null {
+  if (prog === process.execPath) return "node";
+  if (!prog.includes("/") && !prog.includes("\\")) {
+    return Object.hasOwn(INTERPRETER_EXTENSIONS, prog) ? prog : null;
+  }
+  for (const prefix of TRUSTED_INTERPRETER_PREFIXES) {
+    if (!prog.startsWith(prefix)) continue;
+    const base = path.posix.basename(prog);
+    if (prog === prefix + base && Object.hasOwn(INTERPRETER_EXTENSIONS, base)) {
+      return base;
+    }
+  }
+  return null;
+}
 
 /**
  * Tokenize a single-command shell invocation. Rejects shell compounding (`;`, `&&`, `||`, `|`, `&`, `\n`, `\r`),
- * command substitution (`$(...)`, backticks), redirection (`<`, `>`), subshell grouping (`(`, `)`), and shell comments (`#`).
+ * parameter/command expansion (`$...`, `$(...)`, `$'...'`, backticks), redirection (`<`, `>`),
+ * subshell grouping (`(`, `)`), and shell comments (`#`).
  * Fails closed (`null`) if any ambiguous, compound, or non-single-command construct is encountered.
  */
 function parseShellCommand(command: string): string[] | null {
@@ -55,6 +82,7 @@ function parseShellCommand(command: string): string[] | null {
         inDouble = false;
       } else if (ch === "\\") {
         const next = command[i + 1];
+        if (next === "\n" || next === "\r") return null;
         if (next === '"' || next === "\\" || next === "$" || next === "`") {
           current += next;
           i++;
@@ -62,7 +90,7 @@ function parseShellCommand(command: string): string[] | null {
           current += ch;
         }
         hasToken = true;
-      } else if (ch === "`" || (ch === "$" && command[i + 1] === "(")) {
+      } else if (ch === "`" || ch === "$") {
         return null;
       } else {
         current += ch;
@@ -73,6 +101,7 @@ function parseShellCommand(command: string): string[] | null {
 
     if (ch === "\\") {
       const next = command[i + 1];
+      if (next === "\n" || next === "\r") return null;
       if (next !== undefined) {
         current += next;
         i++;
@@ -94,7 +123,7 @@ function parseShellCommand(command: string): string[] | null {
       return null;
     } else if (ch === ";" || ch === "&" || ch === "|" || ch === "<" || ch === ">" || ch === "(" || ch === ")" || ch === "`") {
       return null;
-    } else if (ch === "$" && command[i + 1] === "(") {
+    } else if (ch === "$") {
       return null;
     } else if (ch === "#") {
       return null;
@@ -110,39 +139,31 @@ function parseShellCommand(command: string): string[] | null {
 }
 
 /**
- * Extract the script file path candidate from tokenized arguments.
- * Handles standard interpreters (sh, bash, python3, node, etc.), env wrappers (/usr/bin/env),
- * interpreter flags, and direct executable invocations.
+ * Extract the script file path candidate and optional trusted interpreter from tokenized arguments.
+ * Rejects flags passed to interpreters and untrusted interpreter or `env` binary paths.
  */
-function extractScriptCandidate(tokens: string[]): string | null {
+function extractScriptCandidate(tokens: string[]): { candidate: string; interpreter: string | null } | null {
   if (tokens.length === 0) return null;
 
   let idx = 0;
-  const firstBase = path.basename(tokens[0]);
-  if (tokens[0] === "env" || firstBase === "env") {
+  if (TRUSTED_ENV_PATHS.has(tokens[0])) {
     idx++;
     if (idx >= tokens.length) return null;
-  }
-
-  const prog = tokens[idx];
-  const progBase = path.basename(prog);
-
-  if (KNOWN_INTERPRETERS.has(prog) || KNOWN_INTERPRETERS.has(progBase)) {
+    const interpreter = resolveTrustedInterpreter(tokens[idx]);
+    if (!interpreter) return null;
     idx++;
-    while (idx < tokens.length && tokens[idx].startsWith("-")) {
-      const flag = tokens[idx];
-      for (const forbidden of FORBIDDEN_INTERPRETER_FLAGS) {
-        if (flag === forbidden || flag.startsWith(forbidden + "=") || (forbidden.length === 2 && flag.startsWith(forbidden))) {
-          return null;
-        }
-      }
-      idx++;
-    }
-    if (idx >= tokens.length) return null;
-    return tokens[idx];
+    if (idx >= tokens.length || tokens[idx].startsWith("-")) return null;
+    return { candidate: tokens[idx], interpreter };
   }
 
-  return tokens[0];
+  const interpreter = resolveTrustedInterpreter(tokens[idx]);
+  if (interpreter) {
+    idx++;
+    if (idx >= tokens.length || tokens[idx].startsWith("-")) return null;
+    return { candidate: tokens[idx], interpreter };
+  }
+
+  return { candidate: tokens[0], interpreter: null };
 }
 
 /**
@@ -199,15 +220,23 @@ export function createScriptRuns(options: {
       const tokens = parseShellCommand(command);
       if (!tokens || tokens.length === 0) return null;
 
-      const candidate = extractScriptCandidate(tokens);
-      if (!candidate) return null;
+      const extracted = extractScriptCandidate(tokens);
+      if (!extracted) return null;
 
       const { extensions } = loadable(options.store, options.projectKey, options.secrets);
       if (!extensions.length) return null;
 
       const effectiveCwd = context?.cwd ?? (typeof options.cwd === "function" ? options.cwd() : options.cwd) ?? process.cwd();
-      const match = findAuthorizedExtension(candidate, extensions, effectiveCwd);
+      const match = findAuthorizedExtension(extracted.candidate, extensions, effectiveCwd);
       if (!match) return null;
+
+      if (extracted.interpreter) {
+        const scriptExt = path.posix.extname(match.relScript).toLowerCase();
+        const allowedExts = INTERPRETER_EXTENSIONS[extracted.interpreter];
+        if (scriptExt && (!allowedExts || !allowedExts.has(scriptExt))) {
+          return null;
+        }
+      }
 
       const { ext } = match;
       if (ext.unapprovedEnv.length) {
