@@ -24,7 +24,7 @@ import { Tabs, TabItem, Steps, CardGrid, LinkCard } from "@astrojs/starlight/com
 
     The script supports Apple Silicon macOS and x64 or ARM64 Linux. It checks the binary's checksum, installs it to `~/.0/bin` and adds that folder to your `PATH`. The command is `0security`, and `0` is a short alias for it. Set `INSTALL_DIR` to install somewhere else.
 
-    Windows is experimental. Download `0-windows-x64.exe` from [Releases](https://github.com/0sec-labs/0security/releases/latest). It installs one command name, `0`, so rename the file if you want `0security`.
+    Windows is experimental. Download `0security-windows-x64.exe` from [Releases](https://github.com/0sec-labs/0security/releases/latest). The same file is also published as `0-windows-x64.exe`, which is kept so existing installs can update. Rename the file to the command name you want.
   </TabItem>
   <TabItem label="Docker">
     ```bash
@@ -127,7 +127,7 @@ A source build has no global `0`. Run `node packages/cli/dist/index.js` instead.
 
 ### Download or checksum error
 
-The installer refuses a binary that does not match the release `checksums.txt`. Run it again. Release assets are `0-darwin-arm64`, `0-linux-x64` and `0-linux-arm64`. For Windows, download `0-windows-x64.exe` yourself. Intel Macs have no native release, so use Docker or a source build. `0 config doctor upgrade` does not support Windows.
+The installer refuses a binary that does not match the release `checksums.txt`. Run it again. Release assets are `0security-darwin-arm64`, `0security-linux-x64` and `0security-linux-arm64`. The installer falls back to the older `0-<platform>` names, which are published too so existing installs can update. For Windows, download `0security-windows-x64.exe` yourself. Intel Macs have no native release, so use Docker or a source build. `0 config doctor upgrade` does not support Windows.
 
 ### Model provider shows missing or bad
 

@@ -111,7 +111,7 @@ export function buildNotes({ version, changelog, release = null, repo = REPO }) 
     "0 --version",
     "```",
     "",
-    "Windows (experimental): download `0-windows-x64.exe` below. Docker: `docker run --rm ghcr.io/0sec-labs/0security:latest --help`.",
+    "Windows (experimental): download `0security-windows-x64.exe` below (also published as `0-windows-x64.exe`, kept so existing installs can update). Docker: `docker run --rm ghcr.io/0sec-labs/0security:latest --help`.",
     "",
     "Verify downloads against the attached `checksums.txt` (SHA-256), for example `sha256sum -c checksums.txt --ignore-missing`.",
     "",

@@ -18,15 +18,24 @@ export function checkUpdateContract(root) {
 
   const assets = [...release.matchAll(/^\s*asset:\s*(\S+)/gm)].map((m) => m[1]);
   if (assets.length < 4) errors.push(`release.yml lists ${assets.length} binary assets, expected 4`);
-  const checksums = /sha256sum ([^>\n]+)> checksums\.txt/.exec(release)?.[1].trim().split(/\s+/) ?? [];
+  // Every build is also published as 0security-<platform>; the staging script
+  // copies it, lists both names in checksums.txt, and fails on a missing binary.
+  const stage = read("scripts/stage-release-assets.sh");
+  const platforms = /^PLATFORMS="([^"]+)"/m.exec(stage)?.[1].split(/\s+/) ?? [];
+  if (!release.includes("scripts/stage-release-assets.sh")) errors.push("release.yml must stage assets with scripts/stage-release-assets.sh");
+  if (!/sum "\$\{old\[@\]\}" "\$\{new\[@\]\}" > checksums\.txt/.test(stage)) errors.push("stage-release-assets.sh must write checksums.txt for both name sets");
   for (const a of assets) {
-    if (!checksums.includes(a)) errors.push(`release.yml builds ${a} but checksums.txt does not cover it`);
+    if (!platforms.includes(a.replace(/^0-/, ""))) errors.push(`release.yml builds ${a} but stage-release-assets.sh does not stage it`);
+    for (const name of [a, a.replace(/^0-/, "0security-")]) {
+      if (!release.includes(`dist-bin/${name}\n`)) errors.push(`release.yml does not attest and upload ${name}`);
+    }
   }
+  if (!installer.includes('NEW_ASSET="0security-${ASSET#0-}"')) errors.push("install.sh must prefer the 0security-<platform> asset");
   // install.sh handles every non-Windows asset by exact name.
   for (const a of assets.filter((x) => !x.endsWith(".exe"))) {
     if (!installer.includes(`ASSET="${a}"`)) errors.push(`install.sh has no mapping to release asset ${a}`);
   }
-  for (const m of installer.matchAll(/(?<!\w)ASSET="([^"]+)"/g)) {
+  for (const m of installer.matchAll(/(?<!\w)ASSET="([^"$]+)"/g)) {
     if (!assets.includes(m[1])) errors.push(`install.sh downloads ${m[1]}, which release.yml does not publish`);
   }
   if (!installer.includes(`REPO="${CANONICAL}"`)) errors.push(`install.sh REPO must be ${CANONICAL}`);

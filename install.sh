@@ -30,6 +30,11 @@ case "$(uname -s)" in
     ;;
 esac
 
+# Releases publish each binary as `0security-<platform>` and, so installed older
+# copies can still update, as `0-<platform>`. Prefer the new name and fall back to
+# the old one when a release or mirror has only that.
+NEW_ASSET="0security-${ASSET#0-}"
+
 command -v curl >/dev/null 2>&1 || fail "curl is required"
 if command -v sha256sum >/dev/null 2>&1; then
   sha256_file() { sha256sum "$1" | awk '{print $1}'; }
@@ -96,8 +101,13 @@ else
   printf '%s\n' "Note: gh is not installed, not logged in, or too old for \`gh attestation\` (needs 2.49+), so the release attestation was not verified; falling back to the checksums.txt integrity check. See https://docs.0.security/self-hosting/#verify-a-release to verify manually." >&2
 fi
 
-printf '%s\n' "Downloading ${ASSET}…" >&2
-download "${RELEASE_BASE_URL}/${ASSET}" "$binary"
+printf '%s\n' "Downloading ${NEW_ASSET}…" >&2
+if download "${RELEASE_BASE_URL}/${NEW_ASSET}" "$binary" 2>/dev/null; then
+  ASSET="$NEW_ASSET"
+else
+  printf '%s\n' "${NEW_ASSET} is not available in this release; downloading ${ASSET}…" >&2
+  download "${RELEASE_BASE_URL}/${ASSET}" "$binary"
+fi
 
 printf '%s\n' "Verifying ${ASSET}…" >&2
 expected="$(awk -v asset="$ASSET" '$2 == asset || $2 == ("*" asset) { print $1; exit }' "$manifest")"

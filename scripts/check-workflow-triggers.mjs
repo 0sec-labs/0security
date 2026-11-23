@@ -101,7 +101,7 @@ export function checkWorkflows(files) {
       const needs = (releaseJob.match(/^ {4}needs:\s*(.*)$/m) ?? [])[1] ?? "";
       if (!/\bmain-gate\b/.test(needs) || !/\bbuild\b/.test(needs)) errors.push("release.yml: the `release` job must need both `build` and `main-gate`");
     }
-    for (const asset of ["0-darwin-arm64", "0-linux-x64", "0-linux-arm64", "0-windows-x64.exe", "checksums.txt"]) {
+    for (const asset of ["0-darwin-arm64", "0-linux-x64", "0-linux-arm64", "0-windows-x64.exe", "0security-darwin-arm64", "0security-linux-x64", "0security-linux-arm64", "0security-windows-x64.exe", "checksums.txt"]) {
       if (!release.includes(asset)) errors.push(`release.yml: release asset ${asset} is missing`);
     }
     if (/continue-on-error:\s*true/.test(release)) errors.push("release.yml: no job may continue on error");

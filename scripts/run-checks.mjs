@@ -21,7 +21,7 @@ export const GROUPS = {
     "pnpm docs:check",
     "pnpm check:docs-commands",
     "pnpm test:docs-pointers",
-    "node --test scripts/install-script.test.mjs",
+    "node --test scripts/install-script.test.mjs scripts/stage-release-assets.test.mjs",
     "pnpm check:update-contract",
     "node --test scripts/bench/match.test.mjs scripts/bench/verify-score.test.mjs scripts/bench/fix-score.test.mjs scripts/bench/triage-score.test.mjs",
     "node scripts/bench/run.mjs --dry-run",

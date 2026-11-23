@@ -6,7 +6,7 @@ import { dirname, join } from "node:path";
 import { checkUpdateContract } from "./check-update-contract.mjs";
 
 const repo = join(import.meta.dirname, "..");
-const files = [".github/workflows/release.yml", "install.sh", "packages/cli/src/utils/update-check.ts", "docs/public/_redirects"];
+const files = [".github/workflows/release.yml", "install.sh", "scripts/stage-release-assets.sh", "packages/cli/src/utils/update-check.ts", "docs/public/_redirects"];
 
 function copy() {
   const root = mkdtempSync(join(tmpdir(), "update-contract-"));
@@ -23,6 +23,15 @@ test("renaming a release asset is caught", () => {
   const p = join(root, ".github/workflows/release.yml");
   writeFileSync(p, readFileSync(p, "utf8").replaceAll("0-linux-x64", "0-linux-amd64"));
   assert.ok(checkUpdateContract(root).some((e) => e.includes("0-linux")));
+});
+
+test("dropping an old or new asset name from the release is caught", () => {
+  for (const name of ["0-linux-x64", "0security-linux-x64"]) {
+    const root = copy();
+    const p = join(root, ".github/workflows/release.yml");
+    writeFileSync(p, readFileSync(p, "utf8").replaceAll(`dist-bin/${name}\n`, ""));
+    assert.ok(checkUpdateContract(root).some((e) => e.includes(name)), name);
+  }
 });
 
 test("dropping the legacy slug fallback is caught", () => {

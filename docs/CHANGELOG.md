@@ -12,8 +12,8 @@ on the GitHub Release tag.
 
 ## [Unreleased]
 
-- The installer now installs the command as `0security` and keeps `0` as a symlink to it. Help text shows the name you ran. An older install with only `0` gains `0security` on the next install or update. Release asset names are unchanged. Windows keeps a single `0.exe`.
-
+- The installer now installs the command as `0security` and keeps `0` as a symlink to it. Help text shows the name you ran. An older install with only `0` gains `0security` on the next install or update. Windows keeps a single `0.exe`.
+- Each release publishes the binaries as `0security-darwin-arm64`, `0security-linux-x64`, `0security-linux-arm64` and `0security-windows-x64.exe`, with identical copies under the older `0-<platform>` names so existing installs can still update. `checksums.txt` and the build attestations cover both names. The installer downloads the `0security-` name and falls back to the `0-` name when a release or mirror has only that. The release workflow now has a dry-run job that stages the assets and installs from them.
 ## [0.43.0] - 2026-11-22
 
 ### Added

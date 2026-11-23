@@ -308,12 +308,12 @@ You need `sqlite3` on the host (`sudo apt-get install -y sqlite3`). Run these st
 
 ## Verify a release
 
-Each release publishes the standalone binaries, `checksums.txt`, and a CycloneDX SBOM (`0-sbom.cdx.json`). The release workflow also creates a GitHub build-provenance attestation for every one of those assets, so you can prove that a file was built by this repository's release workflow and not just that it matches a hash someone served you.
+Each release publishes the standalone binaries, `checksums.txt`, and a CycloneDX SBOM (`0-sbom.cdx.json`). The binaries are named `0security-<platform>`. The same bytes are also published as `0-<platform>`, which is kept so existing installs can update. `checksums.txt` lists both names. The release workflow also creates a GitHub build-provenance attestation for every one of those assets, so you can prove that a file was built by this repository's release workflow and not just that it matches a hash someone served you.
 
 With the [GitHub CLI](https://cli.github.com/) installed and logged in (`gh auth login`), download an asset from the [release page](https://github.com/0sec-labs/0security/releases) and verify it:
 
 ```bash
-gh attestation verify 0-linux-x64 --repo 0sec-labs/0security
+gh attestation verify 0security-linux-x64 --repo 0sec-labs/0security
 gh attestation verify checksums.txt --repo 0sec-labs/0security
 ```
 
