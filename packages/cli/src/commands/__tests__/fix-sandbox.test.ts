@@ -118,6 +118,11 @@ describe("pull request body", () => {
     expect(pullRequestBody(finding, "s", [check(0), check(0, "maven:3, network off")])).not.toContain("Verified in a sandbox");
     expect(pullRequestBody(finding, "s", [])).not.toContain("Verified in a sandbox");
   });
+  it("keeps the policy footer after the sandbox line", () => {
+    const body = pullRequestBody(finding, "s", [check(0, "maven:3, network off")], "Footer from policy");
+    expect(body).toContain("Verified in a sandbox: maven:3, network off.");
+    expect(body.trimEnd().endsWith("Footer from policy")).toBe(true);
+  });
   it("says plainly when the checks ran on the host", () => {
     expect(pullRequestBody(finding, "s", [check(0)])).toContain("not in a sandbox");
   });
