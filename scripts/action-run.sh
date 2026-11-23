@@ -171,7 +171,7 @@ validate_scan() {
 # summarise_sarif <sarif> <code> <mode-label>: sets STATUS and COVERAGE, writes the job summary.
 read_report() {
   local sarif=$1 code=$2 meta
-  STATUS=failed; COVERAGE=""
+  STATUS=failed; COVERAGE=""; FAILURE=""
   M_TOTAL=0; M_CRIT=0; M_HIGH=0; M_MED=0; M_LOW=0; M_INFO=0
   TIER=""; KNOWN_NEW=""; KNOWN_OLD=""; KNOWN_HIDDEN=""
   if [ "$code" = 2 ] || [ ! -s "$sarif" ]; then return; fi
@@ -182,6 +182,7 @@ read_report() {
     | [($r.results // [])[] | select((.properties.severity // null) != null)] as $f
     | { status: ($r.properties.status // ""),
         coverage: ($r.properties.coverage.statement // ""),
+        failure: ($r.properties.failure.message // ""),
         total: ($f | length),
         critical: ([$f[] | select(.properties.severity == "critical")] | length),
         high: ([$f[] | select(.properties.severity == "high")] | length),
@@ -199,6 +200,7 @@ read_report() {
     budget_exhausted|timed_out) STATUS=partial ;;
   esac
   COVERAGE=$(clean "$(jq -r '.coverage' <<< "$meta")")
+  FAILURE=$(clean "$(jq -r '.failure' <<< "$meta")")
   M_TOTAL=$(num "$(jq -r '.total' <<< "$meta")"); M_CRIT=$(num "$(jq -r '.critical' <<< "$meta")")
   M_HIGH=$(num "$(jq -r '.high' <<< "$meta")"); M_MED=$(num "$(jq -r '.medium' <<< "$meta")")
   M_LOW=$(num "$(jq -r '.low' <<< "$meta")"); M_INFO=$(num "$(jq -r '.info' <<< "$meta")")
@@ -223,6 +225,7 @@ write_summary() {
   summary ""
   summary "- Status: $STATUS"
   summary "- Coverage: ${COVERAGE:-not reported}"
+  [ -z "$FAILURE" ] || summary "- Why it stopped: $FAILURE"
   summary "- Exit code: $1"
   if [ "$STATUS" != failed ]; then
     summary "- Findings: $M_TOTAL (critical $M_CRIT, high $M_HIGH, medium $M_MED, low $M_LOW, info $M_INFO)"

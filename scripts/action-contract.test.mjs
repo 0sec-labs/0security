@@ -243,12 +243,13 @@ test("status, coverage and summary come from the report and are neutralised", { 
   const f = fixture();
   const result = (severity, known) => ({ ruleId: "x", level: "error", message: { text: "RAW MODEL TEXT @alice #12 <img src=x>" }, properties: { severity, ...(known ? { knownStatus: known } : {}) } });
   writeFileSync(f.sarif, JSON.stringify({ runs: [{ results: [result("high", "new"), result("medium", "already-known"), result("medium"), { ruleId: "review-check/a", properties: { advisory: true } }],
-    properties: { status: "budget_exhausted", coverage: { complete: false, statement: "reviewed 3 of 9 entry points; 6 not reached (budget) @bob #7 <script>" }, tier: { name: "standard", source: "glob" }, known: { tools: ["codeql"], total: 4, findings: { new: 1, alreadyKnown: 2, confirmedIndependently: 1 }, hidden: 1 } } }] }));
+    properties: { status: "budget_exhausted", failure: { cause: "provider_connection", message: "The model provider dropped the connection @bob #7 <script>" }, coverage: { complete: false, statement: "reviewed 3 of 9 entry points; 6 not reached (budget) @bob #7 <script>" }, tier: { name: "standard", source: "glob" }, known: { tools: ["codeql"], total: 4, findings: { new: 1, alreadyKnown: 2, confirmedIndependently: 1 }, hidden: 1 } } }] }));
   const r = f.run("scan", { FAIL_ON: "high" });
   assert.equal(r.status, 0);
   assert.equal(r.outputs.status, "partial");
   assert.equal(r.outputs.coverage, "reviewed 3 of 9 entry points; 6 not reached (budget) bob 7 script");
   assert.match(r.summary, /Findings: 3 \(critical 0, high 1, medium 2, low 0, info 0\)/);
+  assert.match(r.summary, /Why it stopped: The model provider dropped the connection bob 7 script/);
   assert.match(r.summary, /Tier: standard \(glob\)/);
   assert.match(r.summary, /Second opinion: 1 new, 2 already known, 1 left out/);
   const body = r.summary.replace(/^## .*$/m, "");

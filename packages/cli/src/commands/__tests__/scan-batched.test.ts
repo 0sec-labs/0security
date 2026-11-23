@@ -23,7 +23,7 @@ const storedReport = (findings: unknown[]) => ({ target: "", scanDepth: "default
 
 interface Harness { deps: ScanDeps; out: string[]; err: string[]; messages: string[]; created: string[]; loaded: string[] }
 /** `behaviour(threadNumber)` says how thread N ends: normally, at its cost ceiling, or failed. */
-function harness(dbPath: string, behaviour: (n: number) => "ok" | "ceiling" | "failed" = () => "ok", head: () => string | undefined = () => "abc1234567", start = 0): Harness {
+function harness(dbPath: string, behaviour: (n: number) => "ok" | "ceiling" | "failed" | `error:${string}` = () => "ok", head: () => string | undefined = () => "abc1234567", start = 0): Harness {
   const out: string[] = [];
   const err: string[] = [];
   const messages: string[] = [];
@@ -37,7 +37,8 @@ function harness(dbPath: string, behaviour: (n: number) => "ok" | "ceiling" | "f
       if (method === "GET") {
         const n = Number(/sessions\/t(\d+)/.exec(path)?.[1]);
         const how = behaviour(n);
-        return { snapshot: { session: { id: `t${n}`, status: how === "failed" ? "failed" : "ready", ...(how === "ceiling" ? { costCeilingExceeded: true, costCeilingUsd: 0.1 } : {}) }, usage: { costUsd: 0.1 }, messages: [{ role: "assistant", content: [{ type: "text", text: `Covered thread ${n}.` }] }] } };
+        const failed = how === "failed" || how.startsWith("error:");
+        return { snapshot: { session: { id: `t${n}`, status: failed ? "failed" : "ready", ...(how === "ceiling" ? { costCeilingExceeded: true, costCeilingUsd: 0.1 } : {}) }, ...(how.startsWith("error:") ? { lastOutcome: { error: how.slice(6) } } : {}), usage: { costUsd: 0.1 }, messages: [{ role: "assistant", content: [{ type: "text", text: `Covered thread ${n}.` }] }] } };
       }
       return {};
     }),
@@ -283,5 +284,104 @@ describe("batched scan", () => {
     const json = harness(db);
     await runScan(dir, opts(db, { coverage: "latest", format: "json" }), json.deps);
     expect(JSON.parse(json.out.join(""))).toMatchObject({ complete: false, entryPoints: { total: 20, pending: 8 } });
+  });
+});
+
+describe("batched scan failures", () => {
+  const dropped = "error:OpenAI API error: OpenAI transport failure [UND_ERR_SOCKET]: The connection closed before a complete response was received. Request outcome may be unknown. Automatic replay is disabled" as const;
+
+  it("runs a batch again after a dropped connection, keeps the findings of the failed attempt and counts its cost", async () => {
+    const dir = app(20);
+    const db = join(temp(), "db.sqlite");
+    // Thread 2 (batch 2, first attempt) fails; thread 3 is its retry.
+    const h = harness(db, n => (n === 2 ? dropped : "ok"));
+    await runScan(dir, opts(db), h.deps);
+    const json = report(h);
+    expect(h.created).toHaveLength(5);
+    expect(json.status).toBe("complete");
+    expect(json.coverage.retries).toMatchObject({ allowed: 2, total: 1, batches: [{ batch: 2, attempts: 2, causes: ["provider_connection"], recovered: true }] });
+    expect(json.threadIds).toEqual(["t1", "t2", "t3", "t4", "t5"]);
+    // The failed attempt's findings are in the report, and so is its cost (0.1 a thread).
+    expect(h.loaded).toContain("t2");
+    expect(json.costUsd).toBeCloseTo(0.5, 5);
+    expect(json.failure).toBeUndefined();
+    expect(h.err.join("\n")).toMatch(/batch 2 of 4: The model provider dropped the connection.*trying again in \d+s \(retry 1 of 2/);
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it("leaves a batch pending with the cause after the retries are used, and names the cause in every format", async () => {
+    const dir = app(20);
+    const db = join(temp(), "db.sqlite");
+    const h = harness(db, n => (n >= 2 && n <= 4 ? dropped : "ok"));
+    await runScan(dir, opts(db), h.deps);
+    const json = report(h);
+    expect(json.status).toBe("partial");
+    expect(json.failure).toMatchObject({ cause: "provider_connection" });
+    expect(json.failure.message).toMatch(/^The model provider dropped the connection/);
+    expect(json.failure.message).not.toContain("Automatic replay");
+    expect(json.coverage.retries.batches[0]).toMatchObject({ batch: 2, attempts: 3, recovered: false });
+    expect(json.coverage.failures).toEqual([{ batch: 2, cause: "provider_connection", message: json.failure.message }]);
+    expect(json.coverage.pendingUnits[0].reason).toBe("thread failed");
+    expect(h.err.join("\n")).toContain("scan stopped early: The model provider dropped the connection");
+    expect(process.exitCode).toBe(3);
+    process.exitCode = undefined;
+    const sarif = harness(db, n => (n >= 2 && n <= 4 ? dropped : "ok"));
+    await runScan(dir, opts(join(temp(), "db.sqlite"), { format: "sarif" }), sarif.deps);
+    expect(JSON.parse(sarif.out.join("")).runs[0].properties.failure.cause).toBe("provider_connection");
+  });
+
+  it("does not retry with --retries 0, for a refused key, or at the budget", async () => {
+    const dir = app(20);
+    const none = harness("x", n => (n === 2 ? dropped : "ok"));
+    await runScan(dir, opts(join(temp(), "db.sqlite"), { retries: "0" }), none.deps);
+    expect(none.created).toHaveLength(4);
+    expect(report(none).coverage.retries.total).toBe(0);
+    process.exitCode = undefined;
+    const auth = harness("x", n => (n === 2 ? "error:OpenAI API error 401: Incorrect API key provided" : "ok"));
+    await runScan(dir, opts(join(temp(), "db.sqlite")), auth.deps);
+    expect(auth.created).toHaveLength(4);
+    expect(report(auth).failure.cause).toBe("provider_auth");
+    process.exitCode = undefined;
+    const ceiling = harness("x", n => (n === 2 ? "ceiling" : "ok"));
+    await runScan(dir, opts(join(temp(), "db.sqlite")), ceiling.deps);
+    expect(report(ceiling).failure.cause).toBe("budget");
+    expect(report(ceiling).coverage.retries.total).toBe(0);
+  });
+
+  it("rejects a bad --retries or --batch-timeout", async () => {
+    for (const extra of [{ retries: "-1" }, { retries: "9" }, { retries: "1.5" }, { batchTimeout: "0" }, { batchTimeout: "soon" }]) {
+      const h = harness("x");
+      await runScan(app(3), opts(join(temp(), "db.sqlite"), extra), h.deps);
+      expect(process.exitCode).toBe(2);
+      process.exitCode = undefined;
+    }
+  });
+});
+
+describe("single thread failures", () => {
+  it("keeps the findings recorded before the thread failed, reports the cause and exits 1", async () => {
+    const dir = app(3);
+    const db = join(temp(), "db.sqlite");
+    const h = harness(db, () => "error:OpenAI API error: OpenAI transport failure [ECONNRESET]: read ECONNRESET. Automatic replay is disabled");
+    await runScan(dir, opts(db, { retries: "0" }), h.deps);
+    const json = report(h);
+    expect(json.status).toBe("failed");
+    expect(json.counts.total).toBe(1);
+    expect(json.failure).toMatchObject({ cause: "provider_connection" });
+    expect(h.err.join("\n")).toMatch(/scan failed: The model provider dropped the connection.*The 1 finding recorded so far is in the report/);
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("asks the thread once to continue after a transient failure", async () => {
+    const dir = app(3);
+    const db = join(temp(), "db.sqlite");
+    let polls = 0;
+    // The thread fails on its first status read and is ready once it has been asked to continue.
+    const h = harness(db, () => (polls++ < 1 ? "error:OpenAI API error 503: overloaded" : "ok"));
+    await runScan(dir, opts(db), h.deps);
+    expect(h.messages).toHaveLength(2);
+    expect(h.messages[1]).toMatch(/Continue the scan from where you stopped/);
+    expect(h.err.join("\n")).toMatch(/The model provider returned a server error.*asking thread t1 to continue/);
+    expect(report(h).status).toBe("complete");
   });
 });

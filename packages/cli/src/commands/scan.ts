@@ -18,7 +18,8 @@ import { homeStateDir, parseSarif, parseScannerList, scanPrompt, scannerArgument
 import { runPrePass } from "../prepass.js";
 import { checkRulesScanners, resolveRulePaths } from "../scan-rules.js";
 import { markKnown, mergePasses, scanExitCode, scanJson, toScanReport, type ScanOutcome } from "../scan-report.js";
-import { coverageReport, runBatches, type BatchOutcome } from "../scan-batches.js";
+import { coverageReport, DEFAULT_RETRIES, runBatches, type BatchOutcome, type RunBatchesResult } from "../scan-batches.js";
+import { classifyFailure, type FailureCause, type ScanFailure } from "../scan-failure.js";
 import { coverageJson, coverageText, DEFAULT_BATCH_SIZE, planBatchedScan, type BatchedSetup } from "../scan-batched.js";
 import { planScan, planText } from "../scan-plan.js";
 import { resumeHint, type ResumeHint } from "../scan-resume.js";
@@ -37,6 +38,11 @@ const DEFAULT_BUDGET_USD = 5;
 /** Chosen by measurement: on the same one-file scan it finished in 26s and $0.0014 and recorded its finding first try; glm-5.3-flash took minutes and rejected a dozen `finding` calls. */
 export const DEFAULT_SCAN_MODEL = "gpt-6-luna";
 const DEFAULT_TIMEOUT_SECONDS = 3600;
+/** The longest one batch may run. A batch that passes it is cancelled and stays pending; the scan goes on with the next one. */
+export const DEFAULT_BATCH_TIMEOUT_SECONDS = 900;
+const MAX_RETRIES = 5;
+/** Messages and events a status poll asks for. A long thread's full snapshot can pass the transport limit; the status needs only the end. */
+const POLL_WINDOW = 20;
 /** Consecutive failed status requests before the scan gives up on the console (about a minute with the backoff). */
 const MAX_FAILED_POLLS = 12;
 /** Passes that run at the same time: more only crowds the model provider and the console. */
@@ -146,6 +152,7 @@ interface ScanOptions extends ConsoleTransportOptions {
   context?: string[]; policy?: string[]; orgPolicy?: string[]; repoContext?: boolean; repoIgnores?: boolean;
   batches?: string; batchSize?: string; concurrency?: string; resume?: string; force?: boolean; coverage?: string | boolean; allowPartial?: boolean; plan?: boolean;
   tiers?: string; failOnSkip?: boolean; known?: string[]; onlyNew?: boolean;
+  retries?: string; batchTimeout?: string;
   /** The option names the person typed (budget, batches, skill). Tier settings never override these. When unset, an option that differs from its default counts as typed. */
   explicit?: string[];
 }
@@ -243,6 +250,10 @@ function validate(target: string | undefined, options: ScanOptions): void {
   if (options.force && options.resume === undefined) throw new UsageError("--force only applies to --resume.");
   const seconds = Number(options.timeout);
   if (!Number.isFinite(seconds) || seconds <= 0) throw new UsageError("--timeout must be a positive number of seconds.");
+  const batchSeconds = Number(options.batchTimeout ?? DEFAULT_BATCH_TIMEOUT_SECONDS);
+  if (!Number.isFinite(batchSeconds) || batchSeconds <= 0) throw new UsageError("--batch-timeout must be a positive number of seconds.");
+  const retries = Number(options.retries ?? DEFAULT_RETRIES);
+  if (!Number.isInteger(retries) || retries < 0 || retries > MAX_RETRIES) throw new UsageError(`--retries must be a whole number from 0 to ${MAX_RETRIES}.`);
   if (options.failOn !== undefined && !(SEVERITIES as readonly string[]).includes(options.failOn)) throw new UsageError(`--fail-on must be one of: ${SEVERITIES.join(", ")}.`);
 }
 
@@ -268,18 +279,22 @@ export async function connect(options: ConsoleTransportOptions, deps: Pick<ScanD
 }
 
 interface PassContext { prePass?: PrePassLeads; scope?: string[]; known?: KnownItem[]; extras: Partial<ScanOutcome>; steering: Steering; client: ConsoleClient; deps: ScanDeps; resolved: ResolvedTarget; options: ScanOptions; total: number; budget: number; deadline: number }
-interface PassResult { threadId: string; done: FinishedThread; stored: ScanReport; budgetExhausted: boolean; timedOut: boolean; costUsd?: number }
+interface PassResult { threadId: string; done: FinishedThread; stored: ScanReport; budgetExhausted: boolean; timedOut: boolean; /** The batch's own time limit passed before the scan's. */ batchTimedOut: boolean; /** Why the thread failed, when it did and it was not the budget or a time limit. */ failure?: ScanFailure; /** The thread was asked to continue once after a transient failure. */ resumed?: boolean; costUsd?: number }
+
+const retryCount = (options: ScanOptions): number => Number(options.retries ?? DEFAULT_RETRIES);
 
 /** Poll a thread until it finishes, the deadline passes (it is then cancelled) or the console is lost for too long. */
-export async function waitForThread(client: ConsoleClient, deps: Pick<ScanDeps, "sleep">, id: string, deadline: number): Promise<{ snapshot: Json; timedOut: boolean }> {
+export async function waitForThread(client: ConsoleClient, deps: Pick<ScanDeps, "sleep">, id: string, deadline: number, windowed = false): Promise<{ snapshot: Json; timedOut: boolean }> {
   const path = `/api/console/sessions/${encodeURIComponent(id)}`;
+  // A scan's thread can be long: ask for the end of it only (windowed), which holds the status, usage and last reply.
+  const poll = windowed ? `${path}?window=${POLL_WINDOW}&workers=summary` : path;
   let snapshot: Json = {};
   let timedOut = false;
   let failedPolls = 0;
   for (;;) {
     await deps.sleep(1000);
     try {
-      snapshot = asJson(asJson(await client.request("GET", path)).snapshot);
+      snapshot = asJson(asJson(await client.request("GET", poll)).snapshot);
       failedPolls = 0;
     } catch (error) {
       // A console busy with several scans, or a provider timing out, can miss a status request while the thread keeps working.
@@ -298,11 +313,20 @@ export async function waitForThread(client: ConsoleClient, deps: Pick<ScanDeps, 
       timedOut = true;
       await client.request("POST", `${path}/cancel`, {}).catch(() => undefined);
       await deps.sleep(2000);
-      snapshot = await client.request("GET", path).then(value => asJson(asJson(value).snapshot), () => snapshot);
+      snapshot = await client.request("GET", poll).then(value => asJson(asJson(value).snapshot), () => snapshot);
       break;
     }
   }
   return { snapshot, timedOut };
+}
+
+const RESUME_TEXT = "The connection to the model failed part way. Continue the scan from where you stopped. Do not record findings again that you already recorded.";
+
+/** Why a finished thread failed, or undefined when it did not (a budget stop and a time limit are not failures here). */
+function threadFailure(done: FinishedThread, budgetExhausted: boolean, timedOut: boolean): ScanFailure | undefined {
+  if (!done.failed || budgetExhausted || timedOut) return undefined;
+  if (done.claimBlocked && !done.error) return { cause: "unknown", transient: false, message: "The scan's answer was not backed by its checks" };
+  return classifyFailure(done.error);
 }
 
 /** One scan thread: start it, wait for it, and read what it stored. Throws when the thread cannot run or the console is lost. */
@@ -329,10 +353,33 @@ async function runPass(ctx: PassContext, index: number, extra: PassExtra = {}): 
   }
   deps.err(`scanning ${resolved.label} in thread ${id} (${part ? `${part}, ` : ""}budget $${Number(budget.toFixed(4))})`);
 
-  const { snapshot, timedOut } = await waitForThread(client, deps, id, deadline);
+  // A batch has its own limit, so one stuck thread cannot use the time of the whole scan.
+  const batchDeadline = extra.batch ? Date.now() + Number(options.batchTimeout ?? DEFAULT_BATCH_TIMEOUT_SECONDS) * 1000 : Infinity;
+  const limit = Math.min(deadline, batchDeadline);
+  let waited = await waitForThread(client, deps, id, limit, true);
+  let resumed = false;
+  // A thread that is not a batch has no retry loop around it. When the connection or the provider fails it once, ask it to
+  // continue: its context and the findings it recorded stay.
+  if (!extra.batch && retryCount(options) > 0 && !waited.timedOut) {
+    const first = finishedThread(waited.snapshot);
+    const firstFailure = threadFailure(first, false, false);
+    if (first.failed && firstFailure?.transient && Date.now() < limit && !asJson(first.session).costCeilingExceeded) {
+      deps.err(`${firstFailure.message}; asking thread ${id} to continue (the findings so far are kept)`);
+      try {
+        await deps.sleep(2000);
+        await client.request("POST", `${path}/messages`, { text: RESUME_TEXT });
+        waited = await waitForThread(client, deps, id, limit, true);
+        resumed = true;
+      } catch (error) { deps.err(`could not continue thread ${id}: ${error instanceof Error ? error.message : String(error)}`); }
+    }
+  }
+  const { snapshot, timedOut } = waited;
   const done = finishedThread(snapshot);
   const costUsd = typeof done.usage.costUsd === "number" ? done.usage.costUsd : undefined;
-  return { threadId: id, done, stored: await deps.loadReport(client, id), budgetExhausted: asJson(done.session).costCeilingExceeded === true, timedOut, ...(costUsd !== undefined ? { costUsd } : {}) };
+  const budgetExhausted = asJson(done.session).costCeilingExceeded === true;
+  const batchTimedOut = timedOut && limit < deadline;
+  const failure = threadFailure(done, budgetExhausted, timedOut);
+  return { threadId: id, done, stored: await deps.loadReport(client, id), budgetExhausted, timedOut: timedOut && !batchTimedOut, batchTimedOut, ...(failure ? { failure } : {}), ...(resumed ? { resumed } : {}), ...(costUsd !== undefined ? { costUsd } : {}) };
 }
 
 /** Run `count` tasks, at most `limit` at a time, in order of index. */
@@ -400,6 +447,19 @@ async function printCoverage(resolved: ResolvedTarget, options: ScanOptions, dep
   } finally { ledger.close(); }
 }
 
+/** The failure a report carries: the cause of a failed scan, of a batch that failed or timed out, of the budget or the time limit. */
+function scanFailure(input: { failed: boolean; changedError?: string | undefined; budgetExhausted: boolean; timedOut: boolean; batchFailures: ReadonlyArray<{ batch?: number; cause: FailureCause; message: string }>; hardError?: string | undefined }): ScanFailure | undefined {
+  if (input.changedError) return classifyFailure(input.changedError, "target_changed");
+  const first = input.batchFailures[0];
+  // A batch failure already has its plain message; it is carried over as it is.
+  const carried = first ? { cause: first.cause, transient: false, message: first.message } : undefined;
+  if (input.failed) return carried ?? classifyFailure(input.hardError);
+  if (carried) return carried;
+  if (input.budgetExhausted) return classifyFailure(undefined, "budget");
+  if (input.timedOut) return classifyFailure(undefined, "timeout");
+  return undefined;
+}
+
 const emptyStoredReport = (startedAt: string): ScanReport => ({ target: "", scanDepth: "default", startedAt, completedAt: startedAt, durationMs: 0, summary: { totalAttacks: 0, totalFindings: 0, critical: 0, high: 0, medium: 0, low: 0, info: 0 }, findings: [], warnings: [] } as unknown as ScanReport);
 
 /**
@@ -414,7 +474,7 @@ async function runBatchedScan(ctx: PassContext, setup: BatchedSetup, before: Set
   deps.err(`${setup.resumed ? `resuming scan ${scan.id}` : `scan ${scan.id}`}: ${setup.summaryText} ${count ? `${count} batch${count === 1 ? "" : "es"} to run` : "nothing is pending"}`);
 
   const run = await runBatches({
-    batches: setup.batches, ledger, scanId: scan.id, budgetUsd: budget, deadline: ctx.deadline, concurrency: Number(options.concurrency ?? 1), log: deps.err,
+    batches: setup.batches, ledger, scanId: scan.id, budgetUsd: budget, deadline: ctx.deadline, concurrency: Number(options.concurrency ?? 1), log: deps.err, retries: retryCount(options), sleep: deps.sleep,
     run: async (batch: Batch, batchBudget: number): Promise<BatchOutcome> => {
       // Hits of the pattern scanners that sit in this batch's files are its leads; the others belong to other batches.
       const files = new Set(batch.units.flatMap(unit => unit.files ?? [unit.path]));
@@ -423,11 +483,15 @@ async function runBatchedScan(ctx: PassContext, setup: BatchedSetup, before: Set
       const info: BatchPromptInfo = { index: batch.index, total: count, units: batch.units, summary: setup.summaryText };
       const pass = await runPass(ctx, batch.index, { batch: info, budget: batchBudget, prePass, ...(ctx.known ? { known: knownIn(ctx.known, files) } : {}) });
       ran.set(pass.threadId, pass);
-      const hardFailure = pass.done.failed && !pass.budgetExhausted && !pass.timedOut;
+      const hardFailure = pass.done.failed && !pass.budgetExhausted && !pass.timedOut && !pass.batchTimedOut;
+      const reviewed = !pass.done.failed && !pass.done.claimBlocked && !pass.budgetExhausted && !pass.timedOut && !pass.batchTimedOut;
+      // A batch that hit its own time limit was cancelled by the scan: that is a timeout, not a provider failure.
+      const failure = pass.batchTimedOut ? classifyFailure(undefined, "batch_timeout") : pass.failure;
       return {
-        threadId: pass.threadId, reviewed: !pass.done.failed && !pass.done.claimBlocked && !pass.budgetExhausted && !pass.timedOut,
+        threadId: pass.threadId, reviewed,
         ...(pass.costUsd !== undefined ? { costUsd: pass.costUsd } : {}), budgetExhausted: pass.budgetExhausted, timedOut: pass.timedOut, failed: hardFailure || pass.done.claimBlocked,
-        ...(pass.done.error ? { error: pass.done.error } : {}),
+        ...(pass.batchTimedOut ? { batchTimedOut: true } : {}),
+        ...(pass.done.error ? { error: pass.done.error } : {}), ...(failure && !reviewed ? { failure } : {}),
       };
     },
   });
@@ -438,9 +502,9 @@ async function runBatchedScan(ctx: PassContext, setup: BatchedSetup, before: Set
   const units = ledger.units(scan.id);
   const summary = summarizeCoverage(scan.id, units);
   const statement = coverageSentence(summary);
-  const failures = run.outcomes.filter(item => !item.outcome.reviewed && item.outcome.failed).map(item => item.outcome.error ?? "no reason given");
+  const failures = run.failures.length ? run.failures.map(item => item.message) : run.outcomes.filter(item => !item.outcome.reviewed && item.outcome.failed).map(item => item.outcome.error ?? "no reason given");
   const hint: ResumeHint | undefined = resumeHint(resolved.label, summary, { budgetHit: run.budgetHit, budgetUsd: budget, timedOut: run.timedOut, timeoutSeconds: Number(options.timeout), failures });
-  const coverage = { ...coverageReport(summary, statement, units), ...(hint ? { resume: hint.command, stoppedBy: hint.stoppedBy } : {}) };
+  const coverage = { ...coverageReport(summary, statement, units, { retried: run.retried, failures: run.failures, retriesAllowed: retryCount(options) }), ...(hint ? { resume: hint.command, stoppedBy: hint.stoppedBy } : {}) };
   // Findings of every thread of this scan, including the threads an earlier run started and partial batches.
   const threadIds = ledger.getScan(scan.id)?.threadIds ?? [...ran.keys()];
   const stored: ScanReport[] = [];
@@ -462,10 +526,12 @@ async function runBatchedScan(ctx: PassContext, setup: BatchedSetup, before: Set
   const failed = (results.length > 0 && results.every(result => (result.done.failed && !result.budgetExhausted && !result.timedOut) || result.done.claimBlocked)) || changedError !== undefined;
   const lead = results.reduce<PassResult | undefined>((best, result) => (!best || result.stored.findings.length > best.stored.findings.length ? result : best), undefined);
   const hardError = results.map(result => (!result.budgetExhausted && !result.timedOut ? result.done.error : undefined)).find(Boolean);
+  const failure = scanFailure({ failed, changedError, budgetExhausted: run.budgetHit, timedOut: run.timedOut, batchFailures: run.failures, hardError });
+  for (const item of run.retried) if (!item.recovered) deps.err(`batch ${item.batch}: still failing after ${item.attempts - 1} ${item.attempts === 2 ? "retry" : "retries"}`);
   const outcome: ScanOutcome = {
     target: resolved.reportTarget, roots: resolved.roots, threadId: threadIds[0] ?? "none", startedAt, completedAt: deps.now().toISOString(), budgetUsd: budget,
     ...(costKnown ? { costUsd: cost } : {}), budgetExhausted: run.budgetHit, ...(run.timedOut ? { timedOut: true } : {}), failed, ...(options.allowPartial ? { allowPartial: true } : {}),
-    ...(changedError ? { error: changedError } : failed && hardError ? { error: hardError } : {}),
+    ...(changedError ? { error: changedError } : failed && hardError ? { error: hardError } : {}), ...(failure ? { failure } : {}),
     // The thread's own summary can say it covered everything; the ledger's account comes first.
     summary: `Coverage: ${statement}.${lead?.done.reply ? `\n\n${lead.done.reply}` : ""}`,
     coverage, ...(threadIds.length > 1 ? { threadIds } : {}),
@@ -475,6 +541,7 @@ async function runBatchedScan(ctx: PassContext, setup: BatchedSetup, before: Set
   const base = stored[0] ?? emptyStoredReport(startedAt);
   await writeReport(outcome, merged, { ...base, findings: merged }, `0-scan-${threadIds[0] ?? scan.id}`, options, deps);
   noteKnown(outcome, merged, deps);
+  if (failure && !failure.cause.startsWith("budget") && failure.cause !== "timeout") deps.err(`scan ${failed ? "failed" : "stopped early"}: ${failure.message}`);
   deps.err(`${merged.length} finding${merged.length === 1 ? "" : "s"}; ${statement}${hint ? `\n${hint.text}` : ""}\nUsage: ${count} batch${count === 1 ? "" : "es"}, cost ${costKnown ? `$${cost.toFixed(4)}` : "unknown"}`);
   const code = scanExitCode(outcome, merged, options.failOn as typeof SEVERITIES[number] | undefined);
   if (code !== 0) process.exitCode = code;
@@ -646,10 +713,12 @@ export async function runScan(target: string | undefined, options: ScanOptions, 
     const lead = results.reduce((best, result) => (result.stored.findings.length > best.stored.findings.length ? result : best), results[0]!);
     const failed = results.every(result => (result.done.failed && !result.budgetExhausted && !result.timedOut) || result.done.claimBlocked) || changedError !== undefined;
     const firstError = results.map(result => (!result.budgetExhausted && !result.timedOut ? result.done.error : undefined)).find(Boolean);
+    const partialFailure = results.map(result => result.failure).find(Boolean);
+    const failure = scanFailure({ failed, changedError, budgetExhausted, timedOut, batchFailures: partialFailure ? [{ batch: 1, cause: partialFailure.cause, message: partialFailure.message }] : [], hardError: firstError });
     const outcome: ScanOutcome = {
       target: resolved.reportTarget, roots: resolved.roots, threadId: results[0]!.threadId, startedAt, completedAt: deps.now().toISOString(), budgetUsd: budget,
       ...(costKnown ? { costUsd: cost } : {}), budgetExhausted, ...(timedOut ? { timedOut } : {}), failed, ...(options.allowPartial ? { allowPartial: true } : {}),
-      ...(changedError ? { error: changedError } : failed && firstError ? { error: firstError } : {}), ...(lead.done.reply ? { summary: lead.done.reply } : {}),
+      ...(changedError ? { error: changedError } : failed && firstError ? { error: firstError } : {}), ...(failure ? { failure } : {}), ...(lead.done.reply ? { summary: lead.done.reply } : {}),
       ...(customLeads?.length ? { customLeads } : {}),
       ...(total > 1 ? { passes: { requested: total, completed: results.length, failed: failedPasses }, threadIds: results.map(result => result.threadId) } : {}),
       ...ctx.extras,
@@ -658,6 +727,7 @@ export async function runScan(target: string | undefined, options: ScanOptions, 
     await writeReport(outcome, merged, { ...results[0]!.stored, findings: merged }, `0-scan-${results[0]!.threadId}`, options, deps);
     noteKnown(outcome, merged, deps);
     const usage = results.length === 1 ? usageLine(results[0]!.done.usage) : `Usage: ${results.length} passes, cost ${costKnown ? `$${cost.toFixed(4)}` : "unknown"}`;
+    if (failure && failure.cause !== "budget" && failure.cause !== "timeout") deps.err(`scan ${failed ? "failed" : "stopped early"}: ${failure.message}${merged.length ? `. The ${merged.length} finding${merged.length === 1 ? "" : "s"} recorded so far ${merged.length === 1 ? "is" : "are"} in the report` : ""}`);
     deps.err(`${merged.length} finding${merged.length === 1 ? "" : "s"}${total > 1 ? ` from ${results.length} of ${total} passes` : ""}${budgetExhausted ? `, stopped at the $${budget} budget (partial)` : timedOut ? `, stopped at the ${options.timeout}s time limit (partial)` : ""}\n${usage}`);
     const code = scanExitCode(outcome, merged, options.failOn as typeof SEVERITIES[number] | undefined);
     if (code !== 0) process.exitCode = code;
@@ -692,6 +762,8 @@ export function registerScanCommand(program: Command, deps: ScanDeps = defaultSc
     .option("--model <model>", `Model for the scan thread (default: ${DEFAULT_SCAN_MODEL})`)
     .option("--batches <mode>", "auto reviews a large folder in batches, one thread per group of entry points, and records what each batch covered; on always does; off keeps one thread", "auto")
     .option("--batch-size <n>", `Entry points one batch reviews (1 to ${MAX_BATCH_SIZE}); a folder with more than this many is split under --batches auto`, String(DEFAULT_BATCH_SIZE))
+    .option("--retries <n>", `Run a batch again when it fails for a reason that may pass: a dropped connection, a provider timeout, rate limit or server error (0 to ${MAX_RETRIES}; 0 turns it off). A thread that is not a batch is asked once to continue. The cost of every attempt counts against --budget`, String(DEFAULT_RETRIES))
+    .option("--batch-timeout <seconds>", `Longest one batch may run before it is cancelled and left pending (the scan goes on with the next batch); --timeout still limits the whole scan`, String(DEFAULT_BATCH_TIMEOUT_SECONDS))
     .option("--concurrency <n>", `Batches that run at the same time (1 to ${MAX_PARALLEL_PASSES})`, "1")
     .option("--resume <scan>", "Continue the units an earlier batched scan of this folder did not reach (a scan id from its report, or latest); refuses when the git HEAD changed unless --force")
     .option("--force", "With --resume: continue even though the folder's git HEAD changed")
@@ -702,7 +774,7 @@ export function registerScanCommand(program: Command, deps: ScanDeps = defaultSc
     .option("--fail-on-skip", "Exit 1 when the tier map skips this scan (default: exit 0, with the skip stated in the report)")
     .option("--known <sarif>", "SARIF from other tools: the scan is told what is already known and looks for what they missed; findings are labelled new or already-known (confirmedIndependently when the scan analysed it itself). Repeat for several", (value: string, previous: string[] = []) => [...previous, value])
     .option("--only-new", "With --known: leave findings that match a known item out of the report")
-    .option("--timeout <seconds>", "Maximum seconds to wait for the scan", String(DEFAULT_TIMEOUT_SECONDS)))
+    .option("--timeout <seconds>", "Maximum seconds for the whole scan; what it reviewed so far is reported as partial", String(DEFAULT_TIMEOUT_SECONDS)))
     .addHelpText("after", "\nExit codes: 0 done, 1 findings at or above --fail-on or the scan failed, 2 usage error, 3 stopped before it reviewed everything (budget, time limit, or entry points not reached): not finished, not failed; --allow-partial exits 0 or 1 instead.\nThe scan is a thread: follow it with `0 threads list`.")
     .action(async (target: string, options: ScanOptions, command: Command) => {
       // Precedence: a flag you typed (or set in the environment) > the tier map > the operator's workflow defaults > the built-in default.

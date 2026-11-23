@@ -46,6 +46,16 @@ describe("scan run metrics", () => {
   });
 });
 
+describe("scan status polling", () => {
+  it("asks for a window of the thread, so a long thread's status stays under the transport limit", async () => {
+    const f = fakes(finishedSnapshot());
+    await runScan(folder(), { budget: "5", format: "json", timeout: "60", skill: "scan", passes: "1", batches: "off" } as never, f.deps);
+    const polls = f.requests.filter(([method, path]) => method === "GET" && path.includes("/api/console/sessions/")).map(([, path]) => path);
+    expect(polls.length).toBeGreaterThan(0);
+    expect(polls.every(path => path.endsWith("?window=20&workers=summary"))).toBe(true);
+  });
+});
+
 describe("headlessConsoleArgs", () => {
   it("runs the script when node runs a .js file, or the compiled binary itself, always on a free port", () => {
     expect(headlessConsoleArgs("/app/dist/index.js")).toEqual(["/app/dist/index.js", "--headless", "--port", "0"]);

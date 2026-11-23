@@ -34,6 +34,8 @@ export interface ScanOutcome {
   /** The thread failed or its answer was not backed by its checks. */
   failed: boolean;
   error?: string;
+  /** Why the scan failed or stopped early, in plain words (cause and a short message without secrets). */
+  failure?: { cause: string; message: string };
   /** The thread's closing summary: coverage and what was not reached. */
   summary?: string;
   /** Set when more than one pass ran: how many were asked for, finished with a report, and could not finish. */
@@ -173,6 +175,7 @@ export function toScanReport(outcome: ScanOutcome, stored: ScanReport): ScanRepo
     findings,
     summary: { totalAttacks: 0, totalFindings: findings.length, critical: count(findings, "critical"), high: count(findings, "high"), medium: count(findings, "medium"), low: count(findings, "low"), info: count(findings, "info") },
     scanStatus: scanStatus(outcome),
+    ...(outcome.failure ? { scanFailure: { cause: outcome.failure.cause, message: outcome.failure.message } } : {}),
     ...(outcome.coverage ? { coverage: outcome.coverage } : {}),
     ...(outcome.tier ? { tier: outcome.tier } : {}),
     ...(known.summary ? { known: known.summary } : {}),
@@ -214,6 +217,7 @@ export function scanJson(outcome: ScanOutcome, stored: readonly Finding[]): Reco
     ...(outcome.threadIds && outcome.threadIds.length > 1 ? { threadIds: outcome.threadIds } : {}),
     ...(outcome.passes && outcome.passes.requested > 1 ? { passes: outcome.passes } : {}),
     status: scanStatus(outcome),
+    ...(outcome.failure ? { failure: { cause: outcome.failure.cause, message: outcome.failure.message } } : {}),
     ...(outcome.coverage ? { coverage: outcome.coverage } : {}),
     ...(outcome.tier ? { tier: outcome.tier } : {}),
     ...(known.summary ? { known: known.summary } : {}),

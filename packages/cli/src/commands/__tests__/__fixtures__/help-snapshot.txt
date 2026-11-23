@@ -1412,6 +1412,13 @@ Options:
                              one thread (default: "auto")
   --batch-size <n>           Entry points one batch reviews (1 to 50); a folder with more than this
                              many is split under --batches auto (default: "8")
+  --retries <n>              Run a batch again when it fails for a reason that may pass: a dropped
+                             connection, a provider timeout, rate limit or server error (0 to 5; 0
+                             turns it off). A thread that is not a batch is asked once to continue.
+                             The cost of every attempt counts against --budget (default: "2")
+  --batch-timeout <seconds>  Longest one batch may run before it is cancelled and left pending (the
+                             scan goes on with the next batch); --timeout still limits the whole
+                             scan (default: "900")
   --concurrency <n>          Batches that run at the same time (1 to 3) (default: "1")
   --resume <scan>            Continue the units an earlier batched scan of this folder did not reach
                              (a scan id from its report, or latest); refuses when the git HEAD
@@ -1434,7 +1441,8 @@ Options:
                              (confirmedIndependently when the scan analysed it itself). Repeat for
                              several
   --only-new                 With --known: leave findings that match a known item out of the report
-  --timeout <seconds>        Maximum seconds to wait for the scan (default: "3600")
+  --timeout <seconds>        Maximum seconds for the whole scan; what it reviewed so far is reported
+                             as partial (default: "3600")
   --engine-url <url>         Attach directly to a running trusted engine
   --engine-token-env <name>  Environment variable holding the attached engine token
   --computer <id>            Use a registered remote computer

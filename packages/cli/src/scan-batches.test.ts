@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { batchBudget, MIN_BATCH_BUDGET_USD, runBatches, type BatchOutcome, type LedgerPort } from "./scan-batches.js";
+import { batchBudget, isRetryable, MIN_BATCH_BUDGET_USD, retryDelayMs, runBatches, type BatchOutcome, type LedgerPort } from "./scan-batches.js";
 
 const batches = (count: number) => Array.from({ length: count }, (_, index) => ({ index, units: [{ id: `u${index}`, kind: "http-route" as const, path: `f${index}.js`, startLine: 1 }] }));
 const ok = (cost = 0.1): BatchOutcome => ({ threadId: "t", reviewed: true, costUsd: cost, budgetExhausted: false, timedOut: false, failed: false });
@@ -83,5 +83,86 @@ describe("runBatches", () => {
     const { port, threads } = ledger();
     await runBatches({ batches: batches(2), ledger: port, scanId: "s", budgetUsd: 1, deadline: Infinity, concurrency: 1, run: async batch => ({ ...ok(), threadId: `thread-${batch.index}` }) });
     expect(threads).toEqual(["thread-0", "thread-1"]);
+  });
+});
+
+describe("retrying a failed batch", () => {
+  const transient = (cost = 0.1): BatchOutcome => ({ threadId: "t", reviewed: false, costUsd: cost, budgetExhausted: false, timedOut: false, failed: true, error: "reset", failure: { cause: "provider_connection", transient: true, message: "The model provider dropped the connection" } });
+  const permanent = (): BatchOutcome => ({ ...transient(), failure: { cause: "provider_auth", transient: false, message: "The model provider refused the credentials" } });
+  const common = { scanId: "s", deadline: Infinity, concurrency: 1, sleep: async () => {}, random: () => 0.5 };
+
+  it("backs off with jitter, doubling up to a limit", () => {
+    expect(retryDelayMs(1, () => 0)).toBe(1000);
+    expect(retryDelayMs(1, () => 1)).toBe(2000);
+    expect(retryDelayMs(2, () => 1)).toBe(4000);
+    expect(retryDelayMs(10, () => 1)).toBe(30_000);
+  });
+
+  it("only retries a failure that is transient", () => {
+    expect(isRetryable(transient())).toBe(true);
+    expect(isRetryable(permanent())).toBe(false);
+    expect(isRetryable({ ...transient(), budgetExhausted: true })).toBe(false);
+    expect(isRetryable({ ...transient(), timedOut: true })).toBe(false);
+    expect(isRetryable({ ...transient(), batchTimedOut: true })).toBe(false);
+    expect(isRetryable({ ...ok(), reviewed: false, failed: true })).toBe(false);
+  });
+
+  it("keeps the unit pending until an attempt finishes normally, then marks it reviewed", async () => {
+    const { port, marks, threads } = ledger();
+    const calls: number[] = [];
+    const result = await runBatches({ ...common, batches: batches(2), ledger: port, budgetUsd: 10, run: async batch => { calls.push(batch.index); return batch.index === 0 && calls.length === 1 ? transient() : ok(); } });
+    expect(calls).toEqual([0, 0, 1]);
+    expect(marks.map(([, status]) => status)).toEqual(["reviewed", "reviewed"]);
+    expect(result.retried).toEqual([{ batch: 1, attempts: 2, causes: ["provider_connection"], recovered: true }]);
+    expect(threads).toEqual(["t", "t", "t"]);
+  });
+
+  it("counts the cost of failed attempts against the total budget", async () => {
+    const { port } = ledger();
+    const result = await runBatches({ ...common, batches: batches(1), ledger: port, budgetUsd: 10, retries: 2, run: async () => transient(0.25) });
+    expect(result.spentUsd).toBeCloseTo(0.75, 5);
+    expect(result.retried[0]).toMatchObject({ attempts: 3, recovered: false });
+    expect(result.failures).toEqual([{ batch: 1, cause: "provider_connection", message: "The model provider dropped the connection" }]);
+  });
+
+  it("stops retrying when the budget cannot pay for another attempt", async () => {
+    const { port } = ledger();
+    let calls = 0;
+    await runBatches({ ...common, batches: batches(1), ledger: port, budgetUsd: 0.12, run: async () => { calls++; return transient(0.1); } });
+    expect(calls).toBe(1);
+  });
+
+  it("stops retrying when the time limit would pass during the wait", async () => {
+    const { port } = ledger();
+    let calls = 0;
+    await runBatches({ ...common, batches: batches(1), ledger: port, budgetUsd: 10, deadline: 500, now: () => 0, run: async () => { calls++; return transient(); } });
+    expect(calls).toBe(1);
+  });
+
+  it("never retries a permanent failure, and not with retries 0", async () => {
+    for (const [outcome, retries] of [[permanent(), 2], [transient(), 0]] as const) {
+      const { port } = ledger();
+      let calls = 0;
+      const result = await runBatches({ ...common, batches: batches(1), ledger: port, budgetUsd: 10, retries, run: async () => { calls++; return outcome; } });
+      expect(calls).toBe(1);
+      expect(result.retried).toEqual([]);
+    }
+  });
+
+  it("logs each retry", async () => {
+    const { port } = ledger();
+    const lines: string[] = [];
+    await runBatches({ ...common, batches: batches(1), ledger: port, budgetUsd: 10, log: line => lines.push(line), run: async () => transient() });
+    expect(lines.filter(line => line.includes("trying again"))).toHaveLength(2);
+    expect(lines.at(-1)).toMatch(/not reviewed \(failed: The model provider dropped the connection; 2 retries used\)/);
+  });
+
+  it("leaves a batch that timed out pending with reason timeout and goes on to the next", async () => {
+    const { port, marks } = ledger();
+    const result = await runBatches({ ...common, batches: batches(3), ledger: port, budgetUsd: 10, run: async batch => (batch.index === 0 ? { ...ok(), reviewed: false, batchTimedOut: true } : ok()) });
+    expect(marks.map(([, status, reason]) => `${status}${reason ? `:${reason}` : ""}`)).toEqual(["pending:timeout", "reviewed", "reviewed"]);
+    expect(result.stopped).toBeUndefined();
+    expect(result.timedOut).toBe(false);
+    expect(result.failures[0]).toMatchObject({ batch: 1, cause: "batch_timeout" });
   });
 });
