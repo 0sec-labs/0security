@@ -171,12 +171,47 @@ export function generateSbom(folder: string, options: { name?: string; toolVersi
   if (options.resolved?.length) {
     const carried = new Map<string, { component: Component; source: string }>();
     for (const [purl, entry] of byPurl) if (entry.component.ecosystem === "maven" && resolvedNames.has(entry.component.name)) { carried.set(purl, entry); byPurl.delete(purl); }
+    const declarationsByName = new Map<string, Array<{ component: Component; source: string; purl: string }>>();
+    for (const file of jvm) {
+      const source = (relative(folder, file.path) || file.path).split("\\").join("/");
+      for (const component of file.components) {
+        if (component.ecosystem === "maven" && resolvedNames.has(component.name)) {
+          const purl = packageUrl(component);
+          const list = declarationsByName.get(component.name);
+          if (list) list.push({ component, source, purl });
+          else declarationsByName.set(component.name, [{ component, source, purl }]);
+        }
+      }
+    }
+    for (const [purl, entry] of carried) {
+      const list = declarationsByName.get(entry.component.name);
+      if (!list?.some(d => d.source === entry.source && d.purl === purl)) {
+        if (list) list.push({ component: entry.component, source: entry.source, purl });
+        else declarationsByName.set(entry.component.name, [{ component: entry.component, source: entry.source, purl }]);
+      }
+    }
     // A resolved component keeps the file that declared it; a transitive one points at the project's top build file.
     const top = files.map(file => rel(file.path)).filter(path => /(^|\/)(pom\.xml|build\.gradle(\.kts)?)$/.test(path)).sort((a, b) => a.split("/").length - b.split("/").length || (a < b ? -1 : 1))[0] ?? "pom.xml";
     for (const component of options.resolved) {
-      const before = carried.get(packageUrl(component));
-      add({ ...component, resolved: true }, before?.source ?? top);
-      if (before) mergeFacts(byPurl.get(packageUrl(component))!.component, { ...before.component, dependsOn: undefined });
+      const purl = packageUrl(component);
+      const decls = declarationsByName.get(component.name) ?? [];
+      const exact = decls.filter(d => d.purl === purl);
+      const exactSources = new Set(exact.map(d => d.source));
+      const allSources = new Set(decls.map(d => d.source));
+
+      let matchedSource: string | undefined;
+      let before: { component: Component; source: string } | undefined;
+
+      if (exactSources.size === 1) {
+        matchedSource = exact[0]!.source;
+        before = carried.get(purl) ?? exact[0];
+      } else if (exact.length === 0 && allSources.size === 1) {
+        matchedSource = decls[0]!.source;
+        before = carried.get(decls[0]!.purl) ?? decls[0];
+      }
+
+      add({ ...component, resolved: true }, matchedSource ?? top);
+      if (before) mergeFacts(byPurl.get(purl)!.component, { ...before.component, dependsOn: undefined });
     }
   }
   const seenUnresolved = new Set<string>();

@@ -2,7 +2,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { buildToolEnv, generateSbom, mergeComponents, parseGradleTree, parseMavenTree, ResolveFailedError, resolveJvmDependencies } from "./index.js";
+import { buildToolEnv, generateSbom, LOCKFILES, mergeComponents, parseGradleTree, parseMavenTree, ResolveFailedError, resolveJvmDependencies } from "./index.js";
 
 const MAVEN_TREE = [
   "com.example:api:jar:1.0.0",
@@ -215,6 +215,170 @@ describe("generateSbom with resolved components", () => {
   it("points a resolved component at the file that declared it", () => {
     const merged = generateSbom(fixture, { toolVersion: "0", now: new Date(0), resolved });
     const guava = merged.bom.components.find(component => component.purl === "pkg:maven/com.google.guava/guava@32.1.3-jre");
-    expect(guava && "properties" in guava ? guava.properties?.find(property => property.name === "0:source")?.value : "").toMatch(/pom\.xml$/);
+    expect(guava && "properties" in guava ? guava.properties?.find(property => property.name === "0:source")?.value : "").toBe("modules/api/pom.xml");
+  });
+  it("attributes resolved dependency with mismatched version to the submodule that declared it (Test A)", () => {
+    const dir = project({
+      "pom.xml": [
+        "<project>",
+        "  <modelVersion>4.0.0</modelVersion>",
+        "  <groupId>com.example</groupId>",
+        "  <artifactId>root</artifactId>",
+        "  <version>1.0.0</version>",
+        "  <packaging>pom</packaging>",
+        "  <modules><module>sub</module></modules>",
+        "</project>",
+      ].join("\n"),
+      "sub/pom.xml": [
+        "<project>",
+        "  <modelVersion>4.0.0</modelVersion>",
+        "  <parent><groupId>com.example</groupId><artifactId>root</artifactId><version>1.0.0</version></parent>",
+        "  <artifactId>sub</artifactId>",
+        "  <dependencies>",
+        "    <dependency><groupId>foo</groupId><artifactId>bar</artifactId><version>1.0.0</version></dependency>",
+        "  </dependencies>",
+        "</project>",
+      ].join("\n"),
+    });
+    const resolved = [{ ecosystem: "maven" as const, name: "foo/bar", version: "1.1.0" }];
+    const result = generateSbom(dir, { toolVersion: "0", now: new Date(0), resolved });
+    const bar = result.bom.components.find(c => c.name === "foo/bar");
+    expect(bar).toBeDefined();
+    expect(bar?.version).toBe("1.1.0");
+    const source = bar && "properties" in bar ? bar.properties?.find(p => p.name === "0:source")?.value : undefined;
+    expect(source).toBe("sub/pom.xml");
+  });
+  it("attributes resolved dependency with exact version match to declaring submodule (Test B)", () => {
+    const dir = project({
+      "pom.xml": [
+        "<project>",
+        "  <modelVersion>4.0.0</modelVersion>",
+        "  <groupId>com.example</groupId>",
+        "  <artifactId>root</artifactId>",
+        "  <version>1.0.0</version>",
+        "  <packaging>pom</packaging>",
+        "  <modules><module>sub</module></modules>",
+        "</project>",
+      ].join("\n"),
+      "sub/pom.xml": [
+        "<project>",
+        "  <modelVersion>4.0.0</modelVersion>",
+        "  <parent><groupId>com.example</groupId><artifactId>root</artifactId><version>1.0.0</version></parent>",
+        "  <artifactId>sub</artifactId>",
+        "  <dependencies>",
+        "    <dependency><groupId>foo</groupId><artifactId>bar</artifactId><version>1.0.0</version></dependency>",
+        "  </dependencies>",
+        "</project>",
+      ].join("\n"),
+    });
+    const resolved = [{ ecosystem: "maven" as const, name: "foo/bar", version: "1.0.0" }];
+    const result = generateSbom(dir, { toolVersion: "0", now: new Date(0), resolved });
+    const bar = result.bom.components.find(c => c.name === "foo/bar");
+    expect(bar).toBeDefined();
+    expect(bar?.version).toBe("1.0.0");
+    const source = bar && "properties" in bar ? bar.properties?.find(p => p.name === "0:source")?.value : undefined;
+    expect(source).toBe("sub/pom.xml");
+  });
+  it("falls back to top-level build file when multiple modules declare the same artifact (Test C)", () => {
+    const dir = project({
+      "pom.xml": [
+        "<project>",
+        "  <modelVersion>4.0.0</modelVersion>",
+        "  <groupId>com.example</groupId>",
+        "  <artifactId>root</artifactId>",
+        "  <version>1.0.0</version>",
+        "  <packaging>pom</packaging>",
+        "  <modules><module>mod-a</module><module>mod-b</module></modules>",
+        "</project>",
+      ].join("\n"),
+      "mod-a/pom.xml": [
+        "<project>",
+        "  <modelVersion>4.0.0</modelVersion>",
+        "  <parent><groupId>com.example</groupId><artifactId>root</artifactId><version>1.0.0</version></parent>",
+        "  <artifactId>mod-a</artifactId>",
+        "  <dependencies>",
+        "    <dependency><groupId>foo</groupId><artifactId>bar</artifactId><version>1.0.0</version></dependency>",
+        "  </dependencies>",
+        "</project>",
+      ].join("\n"),
+      "mod-b/pom.xml": [
+        "<project>",
+        "  <modelVersion>4.0.0</modelVersion>",
+        "  <parent><groupId>com.example</groupId><artifactId>root</artifactId><version>1.0.0</version></parent>",
+        "  <artifactId>mod-b</artifactId>",
+        "  <dependencies>",
+        "    <dependency><groupId>foo</groupId><artifactId>bar</artifactId><version>2.0.0</version></dependency>",
+        "  </dependencies>",
+        "</project>",
+      ].join("\n"),
+    });
+    const resolved = [{ ecosystem: "maven" as const, name: "foo/bar", version: "3.0.0" }];
+    const result = generateSbom(dir, { toolVersion: "0", now: new Date(0), resolved });
+    const bar = result.bom.components.find(c => c.name === "foo/bar");
+    expect(bar).toBeDefined();
+    const source = bar && "properties" in bar ? bar.properties?.find(p => p.name === "0:source")?.value : undefined;
+    expect(source).toBe("pom.xml");
+  });
+  it("preserves eligible declared metadata (licenses, hashes) when resolved version differs (Test D)", () => {
+    const gradleLock = LOCKFILES.find(candidate => candidate.file === "gradle.lockfile");
+    expect(gradleLock).toBeDefined();
+    const originalParse = gradleLock!.parse;
+    try {
+      (gradleLock as any).parse = () => [{
+        ecosystem: "maven" as const,
+        name: "org.example/lib",
+        version: "1.0.0",
+        licenses: ["Apache-2.0"],
+        hashes: [{ alg: "SHA-256" as const, content: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" }],
+      }];
+      const dir = project({
+        "gradle.lockfile": "org.example:lib:1.0.0=runtimeClasspath\n",
+        "build.gradle": "// root",
+      });
+      const resolved = [{ ecosystem: "maven" as const, name: "org.example/lib", version: "2.0.0" }];
+      const result = generateSbom(dir, { toolVersion: "0", now: new Date(0), resolved });
+      const lib = result.bom.components.find(c => c.name === "org.example/lib");
+      expect(lib).toBeDefined();
+      expect(lib?.version).toBe("2.0.0");
+      const source = lib && "properties" in lib ? lib.properties?.find(p => p.name === "0:source")?.value : undefined;
+      expect(source).toBe("gradle.lockfile");
+      expect(lib?.licenses).toEqual([{ license: { id: "Apache-2.0" } }]);
+      expect(lib?.hashes).toEqual([{ alg: "SHA-256", content: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" }]);
+    } finally {
+      (gradleLock as any).parse = originalParse;
+    }
+  });
+  it("attributes transitive dependency not in any build file to top-level build file (Test E)", () => {
+    const dir = project({
+      "pom.xml": [
+        "<project>",
+        "  <modelVersion>4.0.0</modelVersion>",
+        "  <groupId>com.example</groupId>",
+        "  <artifactId>root</artifactId>",
+        "  <version>1.0.0</version>",
+        "  <packaging>pom</packaging>",
+        "  <modules><module>sub</module></modules>",
+        "</project>",
+      ].join("\n"),
+      "sub/pom.xml": [
+        "<project>",
+        "  <modelVersion>4.0.0</modelVersion>",
+        "  <parent><groupId>com.example</groupId><artifactId>root</artifactId><version>1.0.0</version></parent>",
+        "  <artifactId>sub</artifactId>",
+        "  <dependencies>",
+        "    <dependency><groupId>foo</groupId><artifactId>bar</artifactId><version>1.0.0</version></dependency>",
+        "  </dependencies>",
+        "</project>",
+      ].join("\n"),
+    });
+    const resolved = [
+      { ecosystem: "maven" as const, name: "foo/bar", version: "1.0.0" },
+      { ecosystem: "maven" as const, name: "transitive/dep", version: "9.9.9" },
+    ];
+    const result = generateSbom(dir, { toolVersion: "0", now: new Date(0), resolved });
+    const trans = result.bom.components.find(c => c.name === "transitive/dep");
+    expect(trans).toBeDefined();
+    const source = trans && "properties" in trans ? trans.properties?.find(p => p.name === "0:source")?.value : undefined;
+    expect(source).toBe("pom.xml");
   });
 });
