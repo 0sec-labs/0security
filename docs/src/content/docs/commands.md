@@ -61,6 +61,8 @@ These forms run the commands documented in the sections below.
 
 Change a finding's status to `accepted`, `suppressed`, `open` or `false-positive`. A false positive needs `--reason`, which is saved as its note.
 
+Accepting a risk needs `--reason` and `--expires`. `--approver` is optional. The approver is a label you type: 0 does not check who you are. See [findings accept](#findings-accept).
+
 ```text
 0 findings update [options] <id>
 ```
@@ -73,7 +75,9 @@ Change a finding's status to `accepted`, `suppressed`, `open` or `false-positive
 | --- | --- | --- |
 | `--status <status>` | — | accepted \| suppressed \| open \| false-positive |
 | `--note <text>` | — | Why (optional) |
-| `--reason <text>` | — | Why; required with false-positive |
+| `--reason <text>` | — | Why; required with accepted and false-positive |
+| `--expires <date\|90d>` | — | Accepted: when the acceptance ends (required) |
+| `--approver <name>` | — | Accepted: who approved it, a label not a login |
 | `--db-path <path>` | — | Path to SQLite database |
 
 ### models set
@@ -1332,7 +1336,7 @@ Browse and manage persisted findings
 
 Triage (`new`, `accepted`, `suppressed`) and verification are separate states. Accepting a finding records your decision; reproduction and fix verification are separate steps.
 
-Subcommands: [list](#findings-list) · [show](#findings-show) · [update](#findings-update) · [import](#findings-import) · [fix](#findings-fix) · [burndown](#findings-burndown) · [verify](#findings-verify) · [evidence](#findings-evidence) · [report-draft](#findings-report-draft) · [accept](#findings-accept) · [suppress](#findings-suppress) · [reopen](#findings-reopen) · [export](#findings-export) · [keys](#findings-keys) · [upload](#findings-upload) · [issues](#findings-issues) · [reports](#findings-reports).
+Subcommands: [list](#findings-list) · [show](#findings-show) · [update](#findings-update) · [import](#findings-import) · [fix](#findings-fix) · [burndown](#findings-burndown) · [verify](#findings-verify) · [evidence](#findings-evidence) · [export-fixes](#findings-export-fixes) · [report-draft](#findings-report-draft) · [accept](#findings-accept) · [suppress](#findings-suppress) · [reopen](#findings-reopen) · [export](#findings-export) · [keys](#findings-keys) · [upload](#findings-upload) · [issues](#findings-issues) · [reports](#findings-reports).
 
 | Option | Registered default | Description |
 | --- | --- | --- |
@@ -1342,6 +1346,7 @@ Subcommands: [list](#findings-list) · [show](#findings-show) · [update](#findi
 | `--category <category>` | — | Filter by attack category |
 | `--status <status>` | — | Filter by status: discovered, verified, confirmed, scored, reported, fixed, false-positive |
 | `--triage <triage>` | — | Filter by triage: new, accepted, suppressed |
+| `--expiring <days>` | — | Only accepted risks that expire within this many days |
 | `--limit <n>` | `50` | Max findings/groups to show |
 | `--all` | `false` | Show raw finding rows instead of grouped fingerprints |
 
@@ -1353,6 +1358,8 @@ List findings from the database
 0 findings list [options]
 ```
 
+An accepted risk shows `accepted until <date>`. Once that date passes, the finding shows as open again. `--expiring <days>` lists the accepted risks that end within that many days.
+
 | Option | Registered default | Description |
 | --- | --- | --- |
 | `--all` | — | Show raw finding rows instead of grouped fingerprints |
@@ -1362,6 +1369,7 @@ List findings from the database
 | `--category <category>` | — | Filter by attack category |
 | `--status <status>` | — | Filter by status: discovered, verified, confirmed, scored, reported, fixed, false-positive |
 | `--triage <triage>` | — | Filter by triage: new, accepted, suppressed |
+| `--expiring <days>` | — | Only accepted risks that expire within this many days |
 | `--limit <n>` | — | Max findings/groups to show |
 
 #### findings show
@@ -1390,6 +1398,16 @@ Mark a finding family as accepted
 0 findings accept [options] <id>
 ```
 
+```bash
+0 findings accept 3f2a --reason "Fix scheduled for the next release" --expires 90d --approver "security lead"
+```
+
+An accepted risk needs a reason and an expiry. `--expires` takes a date like `2026-12-31` (it ends at the end of that day, UTC) or a number of days like `90d`. The reason is at most 500 characters. `--note` works as `--reason`.
+
+The approver is a name you type. 0 stores it and exports it, but does not check it against any login. Each change writes one entry to the audit log (`0 config get audit`) with your system user name, the reason, the expiry and the approver.
+
+After the expiry the finding is open again in lists, exports and the next scan. Exports show the reason, expiry and approver: JSON fields, a Markdown line, and a SARIF `suppressions` entry with `kind` external and your reason as the justification. `0 findings evidence` includes them too.
+
 | Argument | Required | Description |
 | --- | --- | --- |
 | `id` | Yes | Finding ID (full or prefix) |
@@ -1397,7 +1415,10 @@ Mark a finding family as accepted
 | Option | Registered default | Description |
 | --- | --- | --- |
 | `--db-path <path>` | — | Path to SQLite database |
-| `--note <text>` | — | Optional triage note |
+| `--reason <text>` | — | Why the risk is accepted (required; --note is the same) |
+| `--note <text>` | — | Alias of --reason |
+| `--expires <date\|days>` | — | When the acceptance ends: 2026-12-31 or 90d (required). The finding reopens after it. |
+| `--approver <name>` | — | Who approved it: a label you type, not a login |
 
 #### findings suppress
 
@@ -1415,6 +1436,7 @@ Suppress a finding family across duplicate occurrences
 | --- | --- | --- |
 | `--db-path <path>` | — | Path to SQLite database |
 | `--note <text>` | — | Suppression reason |
+| `--approver <name>` | — | Who approved it: a label you type, not a login |
 
 #### findings reopen
 
@@ -1522,6 +1544,86 @@ A policy file inside the repository being fixed is not read unless you pass `--r
 | `--engines-config <path>` | — |  |
 | `--db-path <path>` | — | Control database of the local engine to attach to |
 
+#### Pull request conventions
+
+Your policy file can set how fix pull requests look. Add a `pullRequest` object to `~/.0/fix-policy.json` (or the file you pass with `--policy`):
+
+```json
+{
+  "pullRequest": {
+    "titleTemplate": "SEC-142 {severity}: {title}",
+    "commitMessageTemplate": "SEC-142 fix {id}: {title}",
+    "branchPrefix": "sec/fix-",
+    "labels": ["security", "needs review"],
+    "draft": "on-failure",
+    "bodyFooter": "Tracked in SEC-142.",
+    "reviewers": ["alice", "acme/appsec"]
+  }
+}
+```
+
+Templates take the placeholders `{id}`, `{title}`, `{severity}`, `{category}` and `{path}`. Nothing else is evaluated, and an unknown placeholder is an error. Each value is flattened to one line, stripped of mentions, issue references and markup, and the result is cut to 200 characters.
+
+`draft` is `always`, `on-failure` (the default) or `never`. With `never`, a pull request is ready for review even when a check fails. `branchPrefix` is followed by a short hash of the finding, so a second run still updates the same pull request. Reviewers are users or `org/team`.
+
+Labels that do not exist are created. If the host refuses, 0 prints a warning and skips that label. A refused reviewer is a warning too, because the pull request is already open. Without a `pullRequest` object nothing changes.
+
+The settings are read only from your own policy file. A policy file inside the repository (`--repo-policy`) cannot set them, because the repository is untrusted. `0 findings evidence` lists fix branches by the default `0/fix-` prefix, so branches with another prefix are not listed there.
+
+| Argument | Required | Description |
+| --- | --- | --- |
+| `finding` | Yes |  |
+
+| Option | Registered default | Description |
+| --- | --- | --- |
+| `--repo <dir>` | — | Git repository the finding is in (default: the current directory) |
+| `--base <branch>` | — | Branch to start from and open the pull request against (default: the remote's default branch) |
+| `--test <command>` | — | Check to run after the change; repeat for several. A failing check makes the pull request a draft |
+| `--policy <file>` | — | Policy file (.json or .yaml) of approved libraries and fix rules; any path you name, relative to the current directory. Default: ~/.0/fix-policy.json\|yaml\|yml |
+| `--repo-policy` | — | Also read fix-policy.* or .zero/fix-policy.* from the repository being fixed (untrusted content; off by default) |
+| `--no-pr` | — | Commit on the fix branch but do not push or open a pull request |
+| `--budget <usd>` | `3` | Stop when the estimated spend reaches this many USD |
+| `--model <model>` | — | Model for the fix thread (default: gpt-6-luna) |
+| `--timeout <seconds>` | `1800` | Maximum seconds to wait for the fix |
+| `--format <format>` | — | Output: text or json Choices: text, json. |
+| `--engine-url <url>` | — | Attach directly to a running trusted engine |
+| `--engine-token-env <name>` | — | Environment variable holding the attached engine token |
+| `--computer <id>` | — | Use a registered remote computer |
+| `--engine <id>` | — |  |
+| `--computers-config <path>` | — | Operator computer connection registry JSON file |
+| `--engines-config <path>` | — |  |
+| `--db-path <path>` | — | Control database of the local engine to attach to |
+
+#### findings export-fixes
+
+Report what happened to the fixes burndown proposed: counts, pull requests, checks, cost and, on request, merged or closed
+
+```text
+0 findings export-fixes [options]
+```
+
+```bash
+0 findings export-fixes --check-merged -o ./fix-report
+```
+
+The report reads `~/.0/burndown.json`, so it covers fixes made with `0 findings burndown`. A single `0 findings fix` run is not recorded there.
+
+It writes `fix-outcomes.md` and `fix-outcomes.json` to the folder you pass with `-o`, or prints one to the terminal. Each fix lists the finding id, title, severity, branch, pull request link, whether the checks passed, cost and when it was recorded. The summary counts fixes attempted, proposed, pull requests opened, drafts, checks passed and failed.
+
+Without `--check-merged` nothing leaves your machine, and merged, closed and edited are shown as not measured. With it, 0 asks GitHub about each pull request, one request each, through `gh`. The summary then counts merged, closed without merging and still open, and gives an acceptance rate: merged divided by merged plus closed. A pull request counts as edited when it has more than one commit. That is an estimate, because a person may also have rebased it.
+
+Evidence and proof-of-concept text are never included. Titles are flattened and stripped of mentions, issue references and markup in the Markdown.
+
+The JSON has the schema `0.fix-outcomes.v1`: `generatedAt`, `since`, `repo`, `checkedMerged`, `summary` and `fixes`. A field the run could not know is `null`.
+
+| Option | Registered default | Description |
+| --- | --- | --- |
+| `--repo <dir>` | — | Only fixes recorded for this git repository (default: all) |
+| `--since <date>` | — | Only fixes recorded on or after this date, like 2026-01-31 |
+| `--check-merged` | — | Ask the code host whether each pull request was merged, closed or edited (one request each) |
+| `-o, --output <dir>` | — | Write fix-outcomes.md and fix-outcomes.json into this folder instead of printing |
+| `--format <format>` | `markdown` | Printed output: markdown or json Choices: markdown, json. |
+
 #### findings report-draft
 
 Write a draft early warning, notification or final report about one finding (Markdown; nothing is sent)
@@ -1574,7 +1676,7 @@ The folder holds:
 
 - `README.md`
 - `manifest.json`: version, date, commit, models and the SHA-256 of each file
-- `findings.json` and `findings.md`: severity, status, triage state and note, timestamps, location
+- `findings.json` and `findings.md`: severity, status, triage state and note, accepted-risk expiry and approver, timestamps, location
 - `findings.sarif`
 - `sbom.cdx.json`, from the lockfiles in `--repo`
 - `fixes.md`: the fix branches that exist in `--repo`
@@ -1620,6 +1722,8 @@ Run the same command again to continue: findings that already have a pull reques
 
 The report lists what was proposed, committed, opened or updated as pull requests (with links), which checks passed, drafts because a check failed, skipped findings with the reason, cost and time. `--format json` prints it as JSON. Each run also adds a row of metrics (findings attempted, fixes proposed, check result, cost, duration) that `--history` lists.
 
+Burndown applies the same [pull request conventions](#pull-request-conventions) as `findings fix`. Pass a policy with `--policy <file>`, or keep one at `~/.0/fix-policy.json`. Use [findings export-fixes](#findings-export-fixes) to report the outcomes.
+
 Burndown edits files on this machine, so it needs the local console and rejects `--computer` and `--engine-url`.
 
 Exit codes:
@@ -1641,6 +1745,7 @@ Exit codes:
 | `--repo <dir>` | — | Git repository the findings are in (default: the current directory) |
 | `--base <branch>` | — | Branch to start from and open pull requests against (default: the remote's default branch) |
 | `--test <command>` | — | Check to run after each change; repeat for several. A failing check makes the pull request a draft |
+| `--policy <file>` | — | Policy file (.json or .yaml) with fix rules and pull request conventions; any path you name. Default: ~/.0/fix-policy.json\|yaml\|yml |
 | `--no-pr` | — | Commit on the fix branches but do not push or open pull requests |
 | `--concurrency <n>` | `1` | Fixes at the same time, each in its own work tree (1 to 4) |
 | `--budget <usd>` | `10` | Total spend for this run in USD; no new fix starts once it is used |

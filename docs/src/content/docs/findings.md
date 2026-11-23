@@ -55,12 +55,29 @@ Status and triage are separate. Status is what the automation established: `disc
 Accepting a finding does not verify it, and suppressing it does not make it false.
 
 ```bash
-0 findings update 3f2a --status accepted --note "Confirmed on staging, ticket SEC-142"
 0 findings update 3f2a --status suppressed --note "Test-only endpoint"
 0 findings update 3f2a --status open
 ```
 
 `--status open` resets the finding.
+
+### Accept a risk
+
+Accepting a risk records that you know about a finding and will live with it for a set time. It needs a reason and an expiry. Name the approver if your process needs one.
+
+```bash
+0 findings update 3f2a --status accepted --reason "Fix scheduled for the next release, ticket SEC-142" --expires 90d --approver "security lead"
+```
+
+`--expires` takes a date such as `2026-12-31` or a number of days such as `90d`. When the date passes, the finding is open again in lists, in exports and in the next scan. See the ones that end soon:
+
+```bash
+0 findings list --expiring 30
+```
+
+`0 findings list` shows `accepted until <date>` next to an accepted risk. The approver is a label you type. 0 does not check it against a login, so treat it as a note for your records, not as proof of who approved. Every change is also written to the audit log (`0 config get audit`).
+
+JSON, Markdown and `0 findings evidence` carry the reason, expiry and approver. SARIF exports add a `suppressions` entry with `kind` external, status accepted and your reason as the justification, so code scanning tools hide the result while the acceptance lasts.
 
 ### Mark a false positive
 
@@ -368,6 +385,20 @@ To work through many findings, batch them. Each gets its own branch and pull req
 ```
 
 Drop `--dry-run` to start. A re-run skips findings that already have a pull request. See [findings fix](/commands/#findings-fix) and [findings burndown](/commands/#findings-burndown) for the policy file, budgets and stop rules.
+
+### Match your pull request conventions
+
+Set a title template, branch prefix, labels, reviewers, a draft rule and a footer in your policy file, so fix pull requests follow your process. See [pull request conventions](/commands/#pull-request-conventions).
+
+### Show how many fixes were accepted
+
+After a burndown, write a report of the outcomes:
+
+```bash
+0 findings export-fixes --check-merged -o ./fix-report
+```
+
+It lists each fix with its pull request and checks, and counts how many were merged. See [findings export-fixes](/commands/#findings-export-fixes).
 
 ## Export and share
 
