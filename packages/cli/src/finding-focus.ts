@@ -7,6 +7,7 @@ import {
   resolveOsecDbPath,
 } from "@0/engine/storage";
 import { findingSchema, formatZodError } from "@0/engine/shared";
+import { importedFindingPart } from "./finding-id.js";
 
 
 type FindingFocus = {
@@ -116,6 +117,7 @@ export function loadFindingFocus(id: string, options: { dbPath?: string } = {}):
       const fingerprintPrefix = requestedId.replace(/^(?:fp:|f-)/i, "").toLowerCase();
       const prefixMatches = (db.listFindings({ limit: 5000 }) as PersistedFindingRow[])
         .filter((row) => typeof row.id === "string" && (row.id.startsWith(requestedId)
+          || (importedFindingPart(row.id) ?? "").startsWith(requestedId)
           || (fingerprintPrefix.length >= 6 && typeof row.fingerprint === "string" && row.fingerprint.toLowerCase().startsWith(fingerprintPrefix))));
       for (const row of prefixMatches) {
         const scan = db.getScan(typeof row.scanId === "string" ? row.scanId : "") as { target?: unknown } | undefined;
