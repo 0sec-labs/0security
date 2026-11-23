@@ -79,6 +79,7 @@ on the GitHub Release tag.
 
 ### Fixed
 
+- `0 sbom generate`, `0 sbom licenses` and `0 findings evidence` read `yarn.lock`, `Gemfile.lock`, `build.gradle`/`build.gradle.kts` and hashed `requirements.txt` files with Windows (CRLF) line endings, as Git for Windows checks them out by default. Before, such a file gave no components and no warning, so `0 sbom check` had nothing to look up for it.
 - Pending crash reports, feedback, scanner binaries and the 0verse runtime config now live under the same state folder as everything else, so they follow `HOME` on Windows too.
 - A Lima worker's private ssh config is now kept in the 0 state folder with owner-only permissions, can no longer be pre-created or swapped by another user, and is removed when the worker's tunnel is stopped or already gone.
 - `0 findings issues`, `0 fix` and `0 findings burndown`, found by an end-to-end run: issue titles are plain text (no backslash escapes), id hints resolve for imported findings, a closed issue's status table says closed, the pull request body shows the real Checks table before the model's labelled summary and escapes table cells and command text, `0 findings update --status false-positive` without `--reason` says that `--reason` is required, and burndown fixes findings reported twice at one place and category once.

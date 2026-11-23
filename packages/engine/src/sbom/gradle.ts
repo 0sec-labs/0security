@@ -54,7 +54,7 @@ function tomlValue(raw: string): TomlValue {
 /** The `[versions]` and `[libraries]` tables of a version catalog. */
 export function parseCatalog(source: string): { versions: Record<string, TomlValue>; libraries: Record<string, TomlValue> } {
   const tables: Record<string, Record<string, TomlValue>> = { versions: {}, libraries: {} };
-  const lines = source.split("\n");
+  const lines = source.split(/\r?\n/);
   let section = ""; let sub = "";
   for (let index = 0; index < lines.length; index += 1) {
     const line = stripTomlComment(lines[index]!).trim();
@@ -100,7 +100,7 @@ export function parseVersionCatalog(source: string, rel: string): { components: 
 }
 
 function stripGradleComments(source: string): string {
-  return source.replace(/\/\*[\s\S]*?\*\//g, " ").split("\n").map(line => line.replace(/(^|\s)\/\/.*$/, "$1")).join("\n");
+  return source.replace(/\/\*[\s\S]*?\*\//g, " ").split(/\r?\n/).map(line => line.replace(/(^|\s)\/\/.*$/, "$1")).join("\n");
 }
 const CONFIGURATION = /(?<![\w.$])((?:[a-z][A-Za-z]*?)?(?:Implementation|Api|CompileOnly|RuntimeOnly|Compile|Runtime|AnnotationProcessor|Kapt|Ksp)|implementation|api|compileOnly|compileOnlyApi|runtimeOnly|compile|runtime|annotationProcessor|kapt|ksp|classpath)\s*\(?\s*(.*)$/;
 const isTestConfiguration = (configuration: string) => /^(test|androidTest)/i.test(configuration) || /Test(?:Implementation|Compile|Runtime|Api)/.test(configuration);
