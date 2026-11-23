@@ -10,6 +10,7 @@
  * `TOOL_DEFINITIONS` registry; the matching runtime handlers live on the
  * `ToolExecutor` class in agent/tools.ts.
  */
+import { ATTACK_CATEGORIES } from "../../shared/finding-category.js";
 import type { ToolDefinition } from "../types.js";
 
 export const findingsToolDefinitions: Record<string, ToolDefinition> = {
@@ -33,54 +34,9 @@ export const findingsToolDefinitions: Record<string, ToolDefinition> = {
       },
       category: {
         type: "string",
-        description: "Attack category",
-        enum: [
-          // AI/LLM attack categories
-          "prompt-injection",
-          "jailbreak",
-          "system-prompt-extraction",
-          "data-exfiltration",
-          "tool-misuse",
-          "output-manipulation",
-          "encoding-bypass",
-          "multi-turn",
-          // Source-code audit categories (0 audit)
-          "prototype-pollution",
-          "path-traversal",
-          "command-injection",
-          "code-injection",
-          "regex-dos",
-          "unsafe-deserialization",
-          "information-disclosure",
-          "ssrf",
-          "sql-injection",
-          "xss",
-          "cors",
-          "security-misconfiguration",
-          "missing-validation",
-          // Memory corruption / binary categories (C/C++ review, kernel review)
-          "heap-overflow",
-          "out-of-bounds-read",
-          "out-of-bounds-write",
-          "use-after-free",
-          "stack-buffer-overflow",
-          "null-pointer-deref",
-          "null-deref",
-          "integer-overflow",
-          "integer-truncation",
-          "race-condition",
-          "toctou",
-          "type-confusion",
-          "double-free",
-          "format-string",
-          "uninitialized-memory",
-          // Supply-chain / package categories
-          "known-vulnerable-package",
-          "supply-chain",
-          // A written organisation policy that the code breaks (policy-check skill)
-          "policy-violation",
-          "other",
-        ],
+        description:
+          "The vulnerability class, chosen from this list (the closest one when none fits exactly; a label outside the list is mapped for you). Name the root cause, not the symptom: a missing ownership or role check is broken-access-control even when the effect is a data leak; a request body that sets an admin flag is mass-assignment; a predictable reset token is insecure-randomness; a signing key in source is hardcoded-secret; missing-validation is only for input that is accepted without a check and fits no other class. Give the CWE in the cwe field when you know it.",
+        enum: [...ATTACK_CATEGORIES],
       },
       template_id: { type: "string", description: "ID of the attack template used" },
       evidence_request: { type: "string", description: "The request/prompt that triggered the vuln" },

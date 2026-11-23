@@ -61,7 +61,7 @@ import { nonEmptyString, buildOperatorQuestionRequest, type ToolExecutorCheckpoi
 import { resolveBashWallclockCeilingMs, runBashWithWallclock, buildStrReplaceMeta } from "./tools/exec-helpers.js";
 import { parseVerificationSpecArg, autoVerificationSpec, evaluateSourceVerification, parsePocStepsArg, parseEvidencePathsArg, buildValidationFailureResult } from "./tools/verification.js";
 import { citedSourceHasKnownMarker } from "./tools/probe-helpers.js";
-import { normalizeAttackCategory } from "../shared/finding-schemas.js";
+import { classifyFinding } from "../shared/finding-category.js";
 import { enterpriseMode } from "../policy/enterprise.js";
 import { mcpHostOf, deferredToolsOf, packToolsOf } from "./tools/context-hosts.js";
 
@@ -655,15 +655,20 @@ export class ToolExecutor {
 
     const evidenceAnalysis = typeof args.evidence_analysis === "string" ? args.evidence_analysis : undefined;
 
-    const { category, unknownLabel } = normalizeAttackCategory(args.category);
     const description = (args.description as string) ?? "";
+    const title = (args.title as string) ?? "Untitled finding";
+    // The model's category is mapped to ours: an alias becomes its category, and a catch-all such as missing-validation
+    // is refined by the CWE or the title. The label the model gave is kept, never rejected (shared/finding-category.ts).
+    const { category, unknownLabel, refinedFrom } = classifyFinding({ category: args.category, title, description, cwe: args.cwe });
+    const categoryLabel = unknownLabel ?? refinedFrom;
     const finding: Finding = {
       id: randomUUID(),
       templateId: (args.template_id as string) ?? "manual",
-      title: (args.title as string) ?? "Untitled finding",
+      title,
       description: unknownLabel ? `${description}${description ? "\n\n" : ""}Category as given: ${unknownLabel}.` : description,
       severity: (args.severity as Finding["severity"]) ?? "medium",
       category,
+      ...(categoryLabel ? { categoryLabel } : {}),
       status: "discovered",
       evidence: {
         request: (args.evidence_request as string) ?? "",

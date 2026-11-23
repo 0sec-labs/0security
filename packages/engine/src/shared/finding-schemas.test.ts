@@ -6,14 +6,17 @@ describe("normalizeAttackCategory", () => {
     expect(normalizeAttackCategory("sql-injection")).toEqual({ category: "sql-injection" });
     expect(normalizeAttackCategory("  SSRF ")).toEqual({ category: "ssrf" });
   });
+  it("maps a label we have an alias for to its category and returns the label", () => {
+    expect(normalizeAttackCategory("idor")).toEqual({ category: "broken-access-control", unknownLabel: "idor" });
+  });
   it("turns a label we do not have into other and returns the label", () => {
-    expect(normalizeAttackCategory("broken-access-control")).toEqual({ category: "other", unknownLabel: "broken-access-control" });
+    expect(normalizeAttackCategory("flux capacitor")).toEqual({ category: "other", unknownLabel: "flux capacitor" });
   });
   it("turns a missing category into other with no label", () => {
     for (const value of [undefined, "", "   ", 7]) expect(normalizeAttackCategory(value)).toEqual({ category: "other" });
   });
   it("always yields a category the finding schema accepts", () => {
-    for (const value of ["idor", "xss", undefined]) {
+    for (const value of ["idor", "xss", "flux capacitor", undefined]) {
       const { category } = normalizeAttackCategory(value);
       expect(findingSchema.shape.category.safeParse(category).success).toBe(true);
     }

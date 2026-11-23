@@ -330,6 +330,18 @@ export type AttackCategory =
   | "supply-chain"
   // A written organisation rule (data handling, logging, retention) that the code breaks
   | "policy-violation"
+  // Web application classes (see finding-category.ts for the CWE and OWASP mapping)
+  | "broken-access-control"
+  | "broken-authentication"
+  | "mass-assignment"
+  | "csrf"
+  | "open-redirect"
+  | "xxe"
+  | "hardcoded-secret"
+  | "insecure-randomness"
+  | "insecure-storage"
+  | "insecure-transport"
+  | "missing-rate-limit"
   | "other";
 
 export interface AttackTemplate {
@@ -633,6 +645,8 @@ export interface Finding {
   description: string;
   severity: Severity;
   category: AttackCategory;
+  /** The label the model gave when the category was refined or mapped from it (`idor` filed as broken-access-control). */
+  categoryLabel?: string;
   status: FindingStatus;
   evidence: Evidence;
   fingerprint?: string;

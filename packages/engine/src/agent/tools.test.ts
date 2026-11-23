@@ -103,6 +103,19 @@ describe("ToolExecutor", () => {
     expect(ctx.findings[0].id).toBeTruthy();
   });
 
+  it("finding files a catch-all or unknown category under the class the title or CWE names, and keeps the label", async () => {
+    const save = (arguments_: Record<string, unknown>) => executor.execute({ name: "finding", arguments: { severity: "high", evidence_request: "GET /x", evidence_response: "200", ...arguments_ } });
+    expect((await save({ title: "Authenticated users can read other users' book secrets", category: "missing-validation" })).success).toBe(true);
+    expect((await save({ title: "Weird behaviour", category: "other", cwe: "CWE-352" })).success).toBe(true);
+    expect((await save({ title: "Reset flow", category: "predictable password-reset token" })).success).toBe(true);
+    expect(ctx.findings.map(f => [f.category, f.categoryLabel])).toEqual([
+      ["broken-access-control", "missing-validation"],
+      ["csrf", "other"],
+      ["insecure-randomness", "predictable password-reset token"],
+    ]);
+    expect(ctx.findings[2]!.description).toContain("Category as given: predictable password-reset token.");
+  });
+
   it("finding evaluates only code predicates in the scoped source workspace", async () => {
     const root = mkdtempSync(join(tmpdir(), "0-source-check-"));
     try {

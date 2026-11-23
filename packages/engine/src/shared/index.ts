@@ -4,6 +4,8 @@ export * from "./constants.js";
 export * from "./pricing.js";
 export * from "./verification.js";
 export * from "./finding-schemas.js";
+export * from "./finding-category.js";
+export * from "./finding-similarity.js";
 export * from "./sarif-import.js";
 export * from "./known-findings.js";
 export * from "./attacker-impact.js";

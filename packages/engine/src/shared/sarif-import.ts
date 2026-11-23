@@ -6,6 +6,7 @@
  * leave the repository, and nothing in the log is executed or fetched.
  */
 import { createHash } from "node:crypto";
+import { CWE_CATEGORY } from "./finding-category.js";
 import { normalizeAttackCategory } from "./finding-schemas.js";
 import type { AttackCategory, Severity } from "./types.js";
 
@@ -69,20 +70,6 @@ export function repoRelativePath(uri: unknown, roots: readonly string[] = []): s
   return parts.join("/");
 }
 
-export const CWE_CATEGORY: Record<number, AttackCategory> = {
-  22: "path-traversal", 23: "path-traversal", 36: "path-traversal", 73: "path-traversal",
-  78: "command-injection", 77: "command-injection", 88: "command-injection",
-  79: "xss", 80: "xss", 83: "xss", 87: "xss",
-  89: "sql-injection", 564: "sql-injection",
-  94: "code-injection", 95: "code-injection", 96: "code-injection", 1336: "code-injection",
-  200: "information-disclosure", 209: "information-disclosure", 532: "information-disclosure", 312: "information-disclosure", 798: "information-disclosure",
-  326: "crypto-misuse", 327: "crypto-misuse", 328: "crypto-misuse", 330: "crypto-misuse", 338: "crypto-misuse",
-  352: "security-misconfiguration", 942: "cors", 16: "security-misconfiguration", 1004: "security-misconfiguration", 614: "security-misconfiguration",
-  502: "unsafe-deserialization", 918: "ssrf", 1333: "regex-dos", 400: "regex-dos", 1321: "prototype-pollution",
-  20: "missing-validation", 129: "missing-validation",
-  416: "use-after-free", 476: "null-pointer-deref", 787: "out-of-bounds-write", 125: "out-of-bounds-read", 119: "out-of-bounds-write",
-  120: "stack-buffer-overflow", 121: "stack-buffer-overflow", 122: "heap-overflow", 190: "integer-overflow", 362: "race-condition",
-};
 
 export function cweNumbers(...sources: unknown[]): number[] {
   const found = new Set<number>();

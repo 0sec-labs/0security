@@ -5,6 +5,7 @@
  */
 
 import { z } from "zod";
+import { ATTACK_CATEGORIES, classifyFinding } from "./finding-category.js";
 import type { AttackCategory, Finding, PocStep, ReportSummary } from "./types.js";
 
 // ── Enum mirrors ────────────────────────────────────────────────────────────
@@ -15,50 +16,7 @@ import type { AttackCategory, Finding, PocStep, ReportSummary } from "./types.js
 
 const severityEnum = z.enum(["critical", "high", "medium", "low", "info"]);
 
-const attackCategoryEnum = z.enum([
-  "prompt-injection",
-  "jailbreak",
-  "system-prompt-extraction",
-  "data-exfiltration",
-  "tool-misuse",
-  "output-manipulation",
-  "encoding-bypass",
-  "multi-turn",
-  "prototype-pollution",
-  "path-traversal",
-  "command-injection",
-  "code-injection",
-  "regex-dos",
-  "unsafe-deserialization",
-  "information-disclosure",
-  "ssrf",
-  "sql-injection",
-  "xss",
-  "cors",
-  "security-misconfiguration",
-  "missing-validation",
-  "crypto-misuse",
-  "heap-overflow",
-  "out-of-bounds-read",
-  "out-of-bounds-write",
-  "use-after-free",
-  "stack-buffer-overflow",
-  "null-pointer-deref",
-  "null-deref",
-  "integer-overflow",
-  "integer-truncation",
-  "race-condition",
-  "toctou",
-  "type-confusion",
-  "double-free",
-  "format-string",
-  "uninitialized-memory",
-  "denial-of-service",
-  "known-vulnerable-package",
-  "supply-chain",
-  "policy-violation",
-  "other",
-]);
+const attackCategoryEnum = z.enum(ATTACK_CATEGORIES);
 
 const findingStatusEnum = z.enum([
   "discovered",
@@ -143,14 +101,13 @@ const evidenceSchema = z.object({
 });
 
 /**
- * A category the model chose, as one of ours. A label we do not have (a model will write
- * "broken-access-control" or "idor") becomes `other` and the caller keeps the model's label, so the
- * finding is stored rather than rejected when it is read back.
+ * A category the model chose, as one of ours. A label we have an alias for ("idor") becomes its category; one we do
+ * not have becomes the closest category by its words, or `other`. The model's label comes back in `unknownLabel`, so
+ * the finding is stored rather than rejected when it is read back. The full rules are in finding-category.ts.
  */
 export function normalizeAttackCategory(value: unknown): { category: z.infer<typeof attackCategoryEnum>; unknownLabel?: string } {
-  const parsed = attackCategoryEnum.safeParse(typeof value === "string" ? value.trim().toLowerCase() : value);
-  if (parsed.success) return { category: parsed.data };
-  return typeof value === "string" && value.trim() ? { category: "other", unknownLabel: value.trim() } : { category: "other" };
+  const { category, unknownLabel } = classifyFinding({ category: value });
+  return unknownLabel ? { category, unknownLabel } : { category };
 }
 
 export const findingSchema = z
