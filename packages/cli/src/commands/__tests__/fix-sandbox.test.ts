@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -90,6 +90,35 @@ describe("runInSandbox with a fake docker", () => {
     const result = await runInSandbox(tree(), "x", spec, { env: fakeDocker("head -c 6000000 /dev/zero | tr '\\0' a").env });
     expect(result.output).toContain("printed more than");
     expect(result.code).toBe(1);
+  });
+  it("never follows or fails on a pre-existing symlink or directory at .0-sandbox-probe", async () => {
+    const dirWithDirProbe = tree();
+    mkdirSync(join(dirWithDirProbe, ".0-sandbox-probe"));
+    const dirProbeRes = await runInSandbox(dirWithDirProbe, "x", spec, { env: { PATH: "/nonexistent" } });
+    expect(dirProbeRes.code).toBe(127);
+
+    const outside = mkdtempSync(join(tmpdir(), "0-sbx-outside-"));
+    const targetFile = join(outside, "host-secret.txt");
+    writeFileSync(targetFile, "host-data");
+    const dirWithLinkProbe = tree();
+    try {
+      let linked = false;
+      try {
+        symlinkSync(targetFile, join(dirWithLinkProbe, ".0-sandbox-probe"));
+        linked = true;
+      } catch (err) {
+        if (process.platform !== "win32" || (err as NodeJS.ErrnoException).code !== "EPERM") throw err;
+      }
+      if (linked) {
+        const linkRes = await runInSandbox(dirWithLinkProbe, "x", spec, { env: { PATH: "/nonexistent" } });
+        expect(linkRes.code).toBe(127);
+        expect(readFileSync(targetFile, "utf8")).toBe("host-data");
+      }
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+      rmSync(dirWithDirProbe, { recursive: true, force: true });
+      rmSync(dirWithLinkProbe, { recursive: true, force: true });
+    }
   });
 });
 

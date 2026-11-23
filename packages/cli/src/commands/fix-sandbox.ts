@@ -8,9 +8,9 @@
  */
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, constants, cpSync, mkdirSync, mkdtempSync, openSync, realpathSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 export interface SandboxSpec { image: string; network: boolean }
 export interface SandboxResult { command: string; code: number; output: string; sandbox: string }
@@ -82,7 +82,18 @@ export async function runInSandbox(cwd: string, command: string, spec: SandboxSp
   for (const key of ["PATH", "HOME", "DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_CONFIG", "XDG_RUNTIME_DIR"]) if (source[key] !== undefined) env[key] = source[key];
   try {
     cpSync(cwd, copy, { recursive: true, verbatimSymlinks: true, filter: path => !/(^|[\\/])\.git$/.test(path) });
-    writeFileSync(join(copy, PROBE), "");
+    const probePath = join(copy, PROBE);
+    // Remove any pre-existing file, directory, or symlink without following it, then create the probe exclusively.
+    rmSync(probePath, { recursive: true, force: true });
+    if (realpathSync(dirname(probePath)) !== realpathSync(copy)) {
+      throw new Error("Sandbox copy directory escaped its expected root.");
+    }
+    const fd = openSync(
+      probePath,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0),
+      0o600,
+    );
+    closeSync(fd);
     const ids = typeof process.getuid === "function" && typeof process.getgid === "function" ? { uid: process.getuid(), gid: process.getgid() } : undefined;
     const timeout = options.timeoutMs ?? SANDBOX_TIMEOUT_MS;
     const result = await run("docker", dockerRunArgs(spec, name, copy, command, ids), env, timeout);
