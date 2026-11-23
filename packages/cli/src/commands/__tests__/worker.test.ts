@@ -29,6 +29,8 @@ describe("worker deploy command", () => {
 
   it("rejects a non-numeric engine port before touching the worker", async () => {
     await expect(runCli(["computers", "deploy", "--engine-port", "abc"])).rejects.toThrow(/--engine-port/);
+    await expect(runCli(["computers", "deploy", "--engine-port", "8080abc"])).rejects.toThrow(/--engine-port/);
+    await expect(runCli(["computers", "deploy", "--engine-port", "80.5"])).rejects.toThrow(/--engine-port/);
     expect(mocks.deployWorker).not.toHaveBeenCalled();
   });
 
