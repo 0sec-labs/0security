@@ -41,6 +41,8 @@ export interface TrackedFinding {
   closedBecause?: "suppressed" | "accepted" | "fixed" | "false-positive";
   /** The suppression was recorded as a false positive (its triage note says so). */
   falsePositive?: boolean;
+  /** The declared scope (`0 scan --scope`) names this finding's vector out of scope. */
+  scope?: "in-scope" | "out-of-scope";
 }
 
 /** The key for the marker: the fingerprint itself when it is plainly safe, otherwise a hash of it. */
@@ -149,6 +151,7 @@ async function loadTrackedFindings(dbPath: string | undefined): Promise<TrackedF
       ...(annotation && typeof annotation.path === "string" ? { path: annotation.path } : {}),
       ...(annotation && typeof annotation.startLine === "number" ? { startLine: annotation.startLine } : {}),
       ...(impact ? { impact } : {}),
+      ...((latest as { scope?: unknown }).scope === "out-of-scope" ? { scope: "out-of-scope" as const } : {}),
       ...(triage === "suppressed" && /^false[ -]positive\b/i.test(String((latest as { triageNote?: unknown }).triageNote ?? "").trim()) ? { falsePositive: true } : {}),
       ...(CLOSING_TRIAGE.has(triage) ? { closedBecause: triage as "accepted" | "suppressed" } : CLOSING_STATUS.has(latest.status) ? { closedBecause: latest.status as "fixed" | "false-positive" } : {}),
     });
@@ -165,7 +168,7 @@ const defaults: IssuesDeps = {
   makeTracker: (repo, gh) => selectHost({ run: gh }).issues(repo),
 };
 
-export interface IssuesOptions { repo?: string; minSeverity: string; max: string; delay: string; dryRun?: boolean; dbPath?: string; format?: string }
+export interface IssuesOptions { includeOutOfScope?: boolean; repo?: string; minSeverity: string; max: string; delay: string; dryRun?: boolean; dbPath?: string; format?: string }
 export interface IssueOutcome { action: IssueAction["kind"]; key: string; title: string; issue?: number; ok: boolean; error?: string }
 export interface IssuesResult { repo: string; dryRun: boolean; planned: number; deferred: number; unchanged: number; belowMinimum: number; outcomes: IssueOutcome[]; warnings: string[] }
 
@@ -181,7 +184,10 @@ export async function runIssues(options: IssuesOptions, deps: IssuesDeps = defau
   if (!host.isValidRepo(repo)) throw new UsageError("Name the repository with --repo owner/name (or run this inside its clone).");
 
   const tracker = deps.makeTracker(repo, deps.gh);
-  const findings = await deps.loadFindings(options.dbPath);
+  const loaded = await deps.loadFindings(options.dbPath);
+  // Findings the team declared out of scope are not what it asked to act on: no issue is opened for them unless asked.
+  const findings = options.includeOutOfScope ? loaded : loaded.filter(finding => finding.scope !== "out-of-scope");
+  if (findings.length < loaded.length) deps.err(`${loaded.length - findings.length} finding(s) outside the declared scope were left out; add --include-out-of-scope to open issues for them.`);
   const { actions, unchanged, belowMinimum } = planIssueSync(findings, await tracker.list(), options.minSeverity);
   const todo = actions.slice(0, max);
   const result: IssuesResult = { repo, dryRun: Boolean(options.dryRun), planned: actions.length, deferred: actions.length - todo.length, unchanged, belowMinimum, outcomes: [], warnings: [] };
@@ -233,6 +239,7 @@ export function registerFindingsIssuesCommand(parent: Command, deps: IssuesDeps 
     .option("--max <n>", "Most issues to create, update, close or reopen in one run", "25")
     .option("--delay <ms>", "Wait this long between changes to respect rate limits", "1000")
     .option("--dry-run", "Print what would change and change nothing")
+    .option("--include-out-of-scope", "Also open issues for findings the declared scope (0 scan --scope) labelled out of scope; they are skipped by default")
     .option("--db-path <path>", "Path to SQLite database (default: the shared database and every scan's)")
     .option("--format <format>", "Output: text or json", "text")
     .action(async (options: IssuesOptions) => {

@@ -53,6 +53,9 @@ inputs:
   context:
     description: "Background files for the scan (a threat model, notes on who may do what), comma separated. Lower priority than the scan's own instructions."
     default: ""
+  scope:
+    description: "A Markdown file whose '## Scope' section declares which vectors are in and out of scope (usually SECURITY.md). Findings in out-of-scope vectors are labelled and listed apart, and do not count toward fail-on. Use the base branch's copy, never the pull request's own: git show origin/main:SECURITY.md > base-security.md."
+    default: ""
   policy:
     description: "Markdown policy files or folders to check the code against, comma separated."
     default: ""
@@ -115,6 +118,7 @@ runs:
         ONLY_NEW: ${{ inputs.only-new }}
         CONTEXT: ${{ inputs.context }}
         POLICY: ${{ inputs.policy }}
+        SCOPE: ${{ inputs.scope }}
         SKILL: ${{ inputs.skill }}
         ALLOW_PARTIAL: ${{ inputs.allow-partial }}
         LICENSES_PRESET: ${{ inputs.licenses-preset }}

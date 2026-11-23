@@ -4,8 +4,8 @@
  * the scanned repository is read on its own: a file there is written by whoever can change the code under review.
  */
 import { lstatSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { join, relative, resolve, sep } from "node:path";
-import { mergePolicies, parsePolicyFile, type PolicyEntry, type PolicySource, type SteeringFile } from "@0/engine/shared";
+import { basename, join, relative, resolve, sep } from "node:path";
+import { mergePolicies, parsePolicyFile, parseScope, type PolicyEntry, type PolicySource, type ScopeEntry, type SteeringFile } from "@0/engine/shared";
 import { UsageError } from "./commands/output.js";
 
 export const REPO_CONTEXT_PATH = join(".0", "threat-model.md");
@@ -81,4 +81,57 @@ export function loadSteering(folder: string, options: SteeringOptions, err: (tex
   const merged = mergePolicies(org.policies, rest.policies);
   for (const warning of [...org.warnings, ...rest.warnings, ...merged.warnings]) err(`policy: ${warning}`);
   return { context, policies: merged.policies };
+}
+
+export const REPO_SCOPE_PATH = "SECURITY.md";
+
+/** A scope the operator declared: the entries, the file name they came from (shown in reports) and the vectors named. */
+export interface ScopeDeclaration { entries: ScopeEntry[]; source: string; inScopeVectors: string[]; outOfScopeVectors: string[]; unmatched: number }
+export interface ScopeOptions { scope?: string; repoScope?: boolean; scopeSarif?: string }
+
+/** `SECURITY.md` of the scanned folder, only when it is a regular file that really lives inside the folder. */
+export function readRepoScopeFile(folder: string): string | undefined {
+  const path = join(folder, REPO_SCOPE_PATH);
+  try {
+    if (!lstatSync(path).isFile()) return undefined;
+    const root = realpathSync(folder);
+    if (!realpathSync(path).startsWith(root + sep)) return undefined;
+    return readText(path, "The repository scope file");
+  } catch (error) { if (error instanceof UsageError) throw error; return undefined; }
+}
+
+const safeSource = (name: string): string => basename(name).replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 80) || "scope";
+
+/**
+ * The declared scope, only from a place the operator chose: `--scope <file>` (any path, usually a copy of SECURITY.md from
+ * the base branch) or `--repo-scope` (SECURITY.md of the scanned folder, with a warning). Nothing is read on its own, so a
+ * change under review cannot declare its own findings out of scope.
+ */
+export function loadScope(folder: string, options: ScopeOptions, err: (text: string) => void): ScopeDeclaration | undefined {
+  if (options.scopeSarif !== undefined && options.scopeSarif !== "suppress" && options.scopeSarif !== "label") throw new UsageError("--scope-sarif must be label or suppress.");
+  if (options.scope !== undefined && options.repoScope) throw new UsageError("Use --scope <file> or --repo-scope, not both.");
+  if (options.scope === undefined && !options.repoScope) {
+    if (options.scopeSarif === "suppress") throw new UsageError("--scope-sarif suppress needs --scope <file> or --repo-scope.");
+    return undefined;
+  }
+  let text: string | undefined;
+  let source: string;
+  if (options.scope !== undefined) {
+    const path = resolve(options.scope);
+    let isFile = false;
+    try { isFile = statSync(path).isFile(); } catch { /* reported below */ }
+    if (!isFile) throw new UsageError(`--scope ${options.scope} is not a file.`);
+    text = readText(path, "The scope file");
+    source = safeSource(path);
+  } else {
+    err(`warning: --repo-scope reads ${REPO_SCOPE_PATH} from the folder being scanned. Whoever can change that folder (a pull request under review) can edit its Scope section to label real findings out of scope and take them out of --fail-on. In CI pass the base branch's copy instead: git show origin/main:${REPO_SCOPE_PATH} > base-security.md, then --scope base-security.md.`);
+    text = readRepoScopeFile(folder);
+    source = REPO_SCOPE_PATH;
+    if (text === undefined) { err(`warning: --repo-scope: ${REPO_SCOPE_PATH} was not found in the scanned folder (or is not a regular file inside it); nothing is labelled`); return undefined; }
+  }
+  const parsed = parseScope(text);
+  if (!parsed.found) { err(`warning: ${source} has no '## Scope' section; nothing is labelled`); return undefined; }
+  for (const warning of parsed.warnings) err(`scope: ${warning}`);
+  const vectors = (kind: "in" | "out") => parsed.entries.filter(entry => entry.kind === kind).map(entry => entry.category ?? entry.vector);
+  return { entries: parsed.entries, source, inScopeVectors: [...new Set(vectors("in"))], outOfScopeVectors: [...new Set(vectors("out"))], unmatched: parsed.unmatched.length };
 }

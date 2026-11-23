@@ -25,6 +25,7 @@ type FindingsListOptions = {
   status?: string;
   triage?: string;
   expiring?: string;
+  scope?: string;
   limit?: string;
   all?: boolean;
 };
@@ -41,6 +42,10 @@ type FindingRow = {
   triageNote?: string | null;
   triageExpiresAt?: string | null;
   triageApprover?: string | null;
+  /** Declared-scope label from `0 scan --scope`; null when no declared vector names the finding. */
+  scope?: string | null;
+  scopeReason?: string | null;
+  scopeSource?: string | null;
   /** JSON of the second-pass verification from `0 findings verify`; null until verified. */
   modelVerification?: string | null;
   timestamp: number;
@@ -122,7 +127,8 @@ function withFindingsListOptions(command: Command, options: { defaultLimit?: str
     .option("--category <category>", "Filter by attack category")
     .option("--status <status>", "Filter by status: discovered, verified, confirmed, scored, reported, fixed, false-positive")
     .option("--triage <triage>", "Filter by triage: new, accepted, suppressed")
-    .option("--expiring <days>", "Only accepted risks that expire within this many days");
+    .option("--expiring <days>", "Only accepted risks that expire within this many days")
+    .option("--scope <scope>", "in: findings not labelled out of scope; out: only those the declared scope (0 scan --scope) labelled out of scope; all (default): both, each labelled");
   return options.defaultLimit
     ? withFilters.option("--limit <n>", "Max findings/groups to show", options.defaultLimit)
     : withFilters.option("--limit <n>", "Max findings/groups to show");
@@ -181,7 +187,8 @@ function renderVerification(row: FindingRow): void {
   if (phrase) console.log(`  ${chalk.gray(phrase)}`);
 }
 function renderPriority(row: FindingRow): void {
-  console.log(`  ${chalk.white.bold(row.title)}`);
+  console.log(`  ${chalk.white.bold(row.title)}${row.scope === "out-of-scope" ? chalk.yellow("  [out of scope]") : ""}`);
+  if (row.scope === "out-of-scope") console.log(`  ${chalk.gray("Outside declared scope:")} ${row.scopeReason ?? "no reason given"}${row.scopeSource ? chalk.gray(` (${row.scopeSource})`) : ""}`);
   const attacker = describeAttackerImpact(priorityFinding(row));
   if (attacker) console.log(`  ${chalk.gray(`${attacker.label ?? "What an attacker can do"}:`)} ${attacker.can}`);
   console.log(`  ${chalk.gray("Technical severity:")} ${severityColor(row.severity)(row.severity)}${row.cvssScore != null ? `  CVSS: ${row.cvssScore}` : ""}${row.cvssVector ? `  CVSS vector: ${row.cvssVector}` : ""}  ${statusColor(row.status)(row.status)}  ${triageColor(effectiveTriageStatus(row))(triageLabel(row))}`);
@@ -203,6 +210,7 @@ async function renderFindingsList(opts: FindingsListOptions): Promise<void> {
   choice("severity", opts.severity, ["critical", "high", "medium", "low", "info"]);
   choice("status", opts.status, ["discovered", "verified", "confirmed", "scored", "reported", "fixed", "false-positive"]);
   choice("triage", opts.triage, ["new", "accepted", "suppressed"]);
+  choice("scope", opts.scope, ["in", "out", "all"]);
   let expiringDays: number | undefined;
   if (opts.expiring !== undefined) {
     expiringDays = Number(opts.expiring);
@@ -210,8 +218,9 @@ async function renderFindingsList(opts: FindingsListOptions): Promise<void> {
     if (opts.triage && opts.triage !== "accepted") throw new UsageError("--expiring lists accepted risks; drop --triage or use --triage accepted.");
   }
   // The stored status of a lapsed acceptance is still "accepted", so "new" and "expiring" are decided here, on the effective status.
-  const wanted = (row: FindingRow): boolean => (!opts.triage || effectiveTriageStatus(row) === opts.triage) && (expiringDays === undefined || acceptanceExpiresWithin(row, expiringDays));
-  const filterLater = opts.triage === "new" || expiringDays !== undefined;
+  const scopeWanted = (row: FindingRow): boolean => opts.scope === undefined || opts.scope === "all" || (opts.scope === "out") === (row.scope === "out-of-scope");
+  const wanted = (row: FindingRow): boolean => scopeWanted(row) && (!opts.triage || effectiveTriageStatus(row) === opts.triage) && (expiringDays === undefined || acceptanceExpiresWithin(row, expiringDays));
+  const filterLater = opts.triage === "new" || expiringDays !== undefined || opts.scope === "in" || opts.scope === "out";
   const filters = { scanId: opts.scan, severity: opts.severity, category: opts.category, status: opts.status, triageStatus: filterLater ? undefined : opts.triage };
   const queryLimit = filterLater ? 5000 : limit;
   const rows: FindingRow[] = [];

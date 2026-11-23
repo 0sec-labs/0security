@@ -27,7 +27,7 @@ test("existing inputs keep their names and defaults", () => {
 });
 
 test("new inputs exist with safe defaults", () => {
-  const defaults = { mode: "scan", scanner: "", rules: "", tiers: "", "known-sarif": "", "only-new": "false", context: "", policy: "", skill: "", "allow-partial": "false", "licenses-preset": "" };
+  const defaults = { mode: "scan", scanner: "", rules: "", tiers: "", "known-sarif": "", "only-new": "false", context: "", scope: "", policy: "", skill: "", "allow-partial": "false", "licenses-preset": "" };
   for (const [name, def] of Object.entries(defaults)) assert.equal(action.inputs[name]?.default, def, `default of ${name}`);
 });
 
@@ -70,6 +70,7 @@ function fixture() {
   writeFileSync(join(ws, "cfg/tiers.yaml"), "default: standard\n");
   writeFileSync(join(ws, "cfg/known.sarif"), "{}\n");
   writeFileSync(join(ws, "cfg/ctx.md"), "# ctx\n");
+  writeFileSync(join(ws, "cfg/scope.md"), "## Scope\\n");
   const log = join(root, "argv.log");
   const sarif = join(root, "fake.sarif");
   writeFileSync(sarif, JSON.stringify({ runs: [{ results: [] }] }));
@@ -103,7 +104,7 @@ const calls = (argv) => argv.split("--\n").filter(Boolean).map(c => c.trim().spl
 
 test("a full set of inputs becomes one argv array", () => {
   const f = fixture();
-  const r = f.run("scan", { SCANNER: "foxguard,semgrep", RULES: "rules", TIERS: "cfg/tiers.yaml", KNOWN_SARIF: "cfg/known.sarif", ONLY_NEW: "true", CONTEXT: "cfg/ctx.md", POLICY: "cfg", SKILL: "scan", ALLOW_PARTIAL: "true", FAIL_ON: "high", MODEL: "gpt-6-luna", BUDGET: "0.5", PASSES: "2", DIFF_BASE: "origin/main" });
+  const r = f.run("scan", { SCANNER: "foxguard,semgrep", RULES: "rules", TIERS: "cfg/tiers.yaml", KNOWN_SARIF: "cfg/known.sarif", ONLY_NEW: "true", CONTEXT: "cfg/ctx.md", SCOPE: "cfg/scope.md", POLICY: "cfg", SKILL: "scan", ALLOW_PARTIAL: "true", FAIL_ON: "high", MODEL: "gpt-6-luna", BUDGET: "0.5", PASSES: "2", DIFF_BASE: "origin/main" });
   assert.equal(r.status, 0, r.stdout + r.stderr);
   const [argv] = calls(r.argv);
   const real = (p) => spawnSync("realpath", [join(f.ws, p)], { encoding: "utf8" }).stdout.trim();
@@ -114,6 +115,7 @@ test("a full set of inputs becomes one argv array", () => {
   assert.deepEqual(at("--tiers"), [real("cfg/tiers.yaml")]);
   assert.deepEqual(at("--known"), [real("cfg/known.sarif")]);
   assert.deepEqual(at("--context"), [real("cfg/ctx.md")]);
+  assert.deepEqual(at("--scope"), [real("cfg/scope.md")]);
   assert.deepEqual(at("--policy"), [real("cfg")]);
   assert.deepEqual(at("--skill"), ["scan"]);
   assert.deepEqual(at("--diff"), ["origin/main"]);
@@ -129,7 +131,7 @@ test("defaults pass no optional flags", () => {
   const r = f.run("scan", {});
   assert.equal(r.status, 0, r.stderr);
   const [argv] = calls(r.argv);
-  for (const flag of ["--scanner", "--rules", "--tiers", "--known", "--only-new", "--context", "--policy", "--skill", "--allow-partial", "--fail-on", "--diff", "--model"]) assert.ok(!argv.includes(flag), flag);
+  for (const flag of ["--scanner", "--rules", "--tiers", "--known", "--only-new", "--context", "--scope", "--policy", "--skill", "--allow-partial", "--fail-on", "--diff", "--model"]) assert.ok(!argv.includes(flag), flag);
 });
 
 const BAD = [
@@ -154,6 +156,11 @@ const BAD = [
   ["only-new", { ONLY_NEW: "true" }],
   ["only-new", { ONLY_NEW: "yes", KNOWN_SARIF: "cfg/known.sarif" }],
   ["context", { CONTEXT: "`id`" }],
+  ["scope", { SCOPE: "cfg/missing.md" }],
+  ["scope", { SCOPE: "../outside.md" }],
+  ["scope", { SCOPE: "/etc/passwd" }],
+  ["scope", { SCOPE: "$(touch pwned)" }],
+  ["scope", { SCOPE: "-x" }],
   ["policy", { POLICY: "cfg/*" }],
   ["allow-partial", { ALLOW_PARTIAL: "yes" }],
   ["allow-partial", { ALLOW_PARTIAL: "true --force" }],
@@ -225,6 +232,34 @@ test("rules from the pull request's own code are refused for forks and pull_requ
   assert.equal(r.status, 0, r.stdout);
 });
 
+test("a scope file from the pull request's own code is refused for forks and pull_request_target, and warned about otherwise", () => {
+  const f = fixture();
+  writeFileSync(join(f.ws, "SECURITY.md"), "## Scope\n### Out of scope\n- denial of service: gateway\n");
+  git(f.ws, "init", "-q", "-b", "main");
+  git(f.ws, "add", "-A");
+  git(f.ws, "commit", "-qm", "init");
+  const head = git(f.ws, "rev-parse", "HEAD");
+  const base = { SCOPE: "SECURITY.md", HEAD_SHA: head, GITHUB_REPOSITORY: "o/r" };
+  let r = f.run("scan", { ...base, GITHUB_EVENT_NAME: "pull_request", HEAD_REPO: "fork/r" });
+  assert.equal(r.status, 2, r.stdout);
+  assert.equal(r.argv, "", "0 must not run");
+  r = f.run("scan", { ...base, GITHUB_EVENT_NAME: "pull_request_target", HEAD_REPO: "o/r" });
+  assert.equal(r.status, 2, r.stdout);
+  r = f.run("scan", { ...base, GITHUB_EVENT_NAME: "pull_request", HEAD_REPO: "o/r" });
+  assert.equal(r.status, 0, r.stdout);
+  assert.match(r.stdout, /::warning::Input scope/);
+  r = f.run("scan", { ...base, GITHUB_EVENT_NAME: "push" });
+  assert.equal(r.status, 0);
+  assert.ok(!r.stdout.includes("::warning::"));
+  // The base branch's copy, checked out apart from the pull request, is trusted.
+  const sep = join(f.ws, "base");
+  mkdirSync(sep, { recursive: true });
+  writeFileSync(join(sep, "SECURITY.md"), "## Scope\n");
+  git(sep, "init", "-q", "-b", "main");
+  r = f.run("scan", { ...base, SCOPE: "base/SECURITY.md", GITHUB_EVENT_NAME: "pull_request_target", HEAD_REPO: "fork/r" });
+  assert.equal(r.status, 0, r.stdout);
+});
+
 test("rules from a separate checkout are accepted for a fork pull request", () => {
   const f = fixture();
   git(f.ws, "init", "-q", "-b", "main");
@@ -254,6 +289,15 @@ test("status, coverage and summary come from the report and are neutralised", { 
   assert.match(r.summary, /Second opinion: 1 new, 2 already known, 1 left out/);
   const body = r.summary.replace(/^## .*$/m, "");
   for (const bad of ["RAW", "@", "#", "<"]) assert.ok(!body.includes(bad) && !r.outputs.coverage.includes(bad), bad);
+});
+
+test("out-of-scope results are counted apart in the summary", { skip: !hasJq }, () => {
+  const f = fixture();
+  const result = (severity, scope) => ({ ruleId: "x", level: "error", message: { text: "t" }, properties: { severity, ...(scope ? { scope } : {}) } });
+  writeFileSync(f.sarif, JSON.stringify({ runs: [{ results: [result("high"), result("medium", "in-scope"), result("high", "out-of-scope"), result("low", "out-of-scope")], properties: { status: "complete" } }] }));
+  const r = f.run("scan", { FAIL_ON: "high" });
+  assert.match(r.summary, /Findings: 2 \(critical 0, high 1, medium 1, low 0, info 0\)/);
+  assert.match(r.summary, /Outside declared scope: 2 \(listed in the report, not counted above/);
 });
 
 test("a missing report is status failed", () => {

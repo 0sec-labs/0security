@@ -6,8 +6,9 @@
  * (the thread itself or a helper agent), so the report reads the store and never the transcript.
  */
 import { createHash } from "node:crypto";
-import { classifyFinding, classifyKnown, linesWithin, sameFlaw, type Finding, type KnownItem, type ScanCoverage, type ScanFileCoverage, type ScanKnownSummary, type ScanReport, type ScanTierInfo } from "@0/engine/shared";
+import { classifyFinding, classifyKnown, labelWithScope, linesWithin, orderByScope, sameFlaw, type Finding, type KnownItem, type ScanCoverage, type ScanFileCoverage, type ScanKnownSummary, type ScanReport, type ScanTierInfo } from "@0/engine/shared";
 import { tagCustomFindings } from "./scan-rules.js";
+import type { ScopeDeclaration } from "./scan-steering.js";
 
 export const SCAN_REPORT_SCHEMA_VERSION = 1;
 
@@ -54,6 +55,10 @@ export interface ScanOutcome {
   failOnSkip?: boolean;
   /** `--known`: what other tools already reported. Findings are labelled against it; `onlyNew` leaves the matched ones out. */
   known?: { items: readonly KnownItem[]; tools: readonly string[]; onlyNew?: boolean };
+  /** `--scope` or `--repo-scope`: the declared scope. Findings it names out of scope are labelled, listed apart and left out of the counts and the exit code. */
+  scope?: ScopeDeclaration;
+  /** `--scope-sarif suppress`: SARIF results labelled out of scope carry a suppression. */
+  scopeSarifSuppress?: boolean;
   /** Pre-pass hits from rules the user supplied with --rules; findings at the same rule or place are tagged. */
   customLeads?: readonly { ruleId: string; path?: string; startLine?: number; endLine?: number }[];
 }
@@ -156,14 +161,29 @@ export function markKnown<T extends Finding>(outcome: ScanOutcome, findings: rea
   return { findings: kept, summary: { tools: [...outcome.known.tools], total: outcome.known.items.length, findings: tally, ...(hidden ? { hidden } : {}) } };
 }
 
+/** The findings with the declared scope's label (in-scope or out-of-scope) where an entry names them. Nothing is removed. */
+export function applyScope<T extends Finding>(outcome: ScanOutcome, findings: readonly T[]): T[] {
+  if (!outcome.scope) return [...findings];
+  const now = Date.parse(outcome.completedAt);
+  const at = Number.isFinite(now) ? now : Date.now();
+  const { entries, source } = outcome.scope;
+  return findings.map(finding => labelWithScope(finding, entries, source, at));
+}
+
+const outOfScopeOf = (findings: readonly Finding[]): Finding[] => findings.filter(finding => finding.scope === "out-of-scope");
+const inScopeOf = (findings: readonly Finding[]): Finding[] => findings.filter(finding => finding.scope !== "out-of-scope");
+const scopeSummary = (outcome: ScanOutcome) => outcome.scope ? { source: outcome.scope.source, inScope: outcome.scope.inScopeVectors, outOfScope: outcome.scope.outOfScopeVectors, ...(outcome.scope.unmatched ? { unmatchedEntries: outcome.scope.unmatched } : {}) } : undefined;
+
 const count = (findings: readonly Finding[], severity: ScanSeverity) => findings.filter(finding => finding.severity === severity).length;
-const byRank = (findings: readonly Finding[]): Finding[] => [...findings].sort((a, b) => rank(a.severity) - rank(b.severity) || a.title.localeCompare(b.title));
+const compareRank = (a: Finding, b: Finding): number => rank(a.severity) - rank(b.severity) || a.title.localeCompare(b.title);
+/** In scope first (declared in-scope vectors before the rest), then findings outside the declared scope; each part by severity. */
+const byRank = (findings: readonly Finding[]): Finding[] => orderByScope(findings, compareRank);
 
 /** The shared report type the exporter understands (md, sarif, html, pdf), with this scan's facts on top of the stored rows. */
 export function toScanReport(outcome: ScanOutcome, stored: ScanReport): ScanReport {
   const total = outcome.passes?.requested ?? 1;
   const tagged = tagCustomFindings(stored.findings.map(finding => reportFinding(finding, outcome.roots ?? [])), outcome.customLeads);
-  const known = markKnown(outcome, tagged);
+  const known = markKnown(outcome, applyScope(outcome, tagged));
   const findings = byRank(known.findings.map(shaped => {
     const found = (shaped as MergedFinding).foundInPasses;
     // The exporters have no field for it, so say it where every format shows it.
@@ -177,7 +197,9 @@ export function toScanReport(outcome: ScanOutcome, stored: ScanReport): ScanRepo
     completedAt: outcome.completedAt,
     durationMs: Math.max(0, Date.parse(outcome.completedAt) - Date.parse(outcome.startedAt)),
     findings,
-    summary: { totalAttacks: 0, totalFindings: findings.length, critical: count(findings, "critical"), high: count(findings, "high"), medium: count(findings, "medium"), low: count(findings, "low"), info: count(findings, "info") },
+    // The headline counts are the findings inside the declared scope; the labelled ones are listed apart.
+    summary: { totalAttacks: 0, totalFindings: inScopeOf(findings).length, critical: count(inScopeOf(findings), "critical"), high: count(inScopeOf(findings), "high"), medium: count(inScopeOf(findings), "medium"), low: count(inScopeOf(findings), "low"), info: count(inScopeOf(findings), "info") },
+    ...(outcome.scope ? { scopeInfo: { source: outcome.scope.source, inScopeVectors: outcome.scope.inScopeVectors, outOfScopeVectors: outcome.scope.outOfScopeVectors, ...(outcome.scope.unmatched ? { unmatched: outcome.scope.unmatched } : {}), ...(outcome.scopeSarifSuppress ? { sarifSuppress: true } : {}) } } : {}),
     scanStatus: scanStatus(outcome),
     ...(outcome.failure ? { scanFailure: { cause: outcome.failure.cause, message: outcome.failure.message } } : {}),
     ...(outcome.coverage ? { coverage: outcome.coverage } : {}),
@@ -209,8 +231,10 @@ export function scanStatus(outcome: ScanOutcome): string {
 
 /** The documented JSON contract of `0 scan --format json`. Field names are stable within a schemaVersion. */
 export function scanJson(outcome: ScanOutcome, stored: readonly Finding[]): Record<string, unknown> {
-  const known = markKnown(outcome, tagCustomFindings(stored.map(finding => reportFinding(finding, outcome.roots ?? [])), outcome.customLeads));
+  const known = markKnown(outcome, applyScope(outcome, tagCustomFindings(stored.map(finding => reportFinding(finding, outcome.roots ?? [])), outcome.customLeads)));
   const findings = byRank(known.findings);
+  const inScope = inScopeOf(findings);
+  const outside = outOfScopeOf(findings);
   return {
     schemaVersion: SCAN_REPORT_SCHEMA_VERSION,
     target: outcome.target,
@@ -230,7 +254,9 @@ export function scanJson(outcome: ScanOutcome, stored: readonly Finding[]): Reco
     ...(outcome.error ? { error: outcome.error } : {}),
     ...(outcome.shallowReview ? { warnings: [outcome.shallowReview] } : {}),
     ...(outcome.summary ? { summary: outcome.summary } : {}),
-    counts: { total: findings.length, critical: count(findings, "critical"), high: count(findings, "high"), medium: count(findings, "medium"), low: count(findings, "low"), info: count(findings, "info") },
+    // Headline counts are the findings inside the declared scope. Out-of-scope findings are counted apart and still listed.
+    counts: { total: inScope.length, critical: count(inScope, "critical"), high: count(inScope, "high"), medium: count(inScope, "medium"), low: count(inScope, "low"), info: count(inScope, "info") },
+    ...(outcome.scope ? { scope: scopeSummary(outcome), outOfScopeCounts: { total: outside.length, critical: count(outside, "critical"), high: count(outside, "high"), medium: count(outside, "medium"), low: count(outside, "low"), info: count(outside, "info") } } : {}),
     findings: findings.map(finding => ({
       id: finding.id,
       // A hash of the file and first cited line, so a flaw in the same place of unchanged code keeps it from scan to scan
@@ -244,6 +270,7 @@ export function scanJson(outcome: ScanOutcome, stored: readonly Finding[]): Reco
       severity: finding.severity,
       category: finding.category,
       status: finding.status,
+      ...(finding.scope ? { scope: finding.scope, ...(finding.scopeReason ? { scopeReason: finding.scopeReason } : {}), ...(finding.scopeSource ? { scopeSource: finding.scopeSource } : {}) } : {}),
       // With several passes: how many of them found this flaw. A flaw only one pass found is real but less certain.
       ...((finding as MergedFinding).foundInPasses !== undefined ? { foundInPasses: (finding as MergedFinding).foundInPasses } : {}),
       description: finding.description || finding.evidence.analysis || "",
@@ -267,6 +294,8 @@ export function scanExitCode(outcome: ScanOutcome, findings: readonly Finding[],
   if (outcome.tier?.skipped) return outcome.failOnSkip ? 1 : 0;
   // With --only-new, a finding that was already known does not fail the run.
   findings = markKnown(outcome, findings.map(finding => reportFinding(finding, outcome.roots ?? []))).findings;
+  // A finding the declared scope names out of scope is listed in the report but does not fail the run.
+  findings = inScopeOf(applyScope(outcome, findings));
   if (failOn && findings.some(finding => rank(finding.severity) <= rank(failOn))) return 1;
   // Units not reviewed mean the review is partial, whatever stopped it.
   return isPartial(outcome) && !outcome.allowPartial ? 3 : 0;

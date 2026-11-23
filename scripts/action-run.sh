@@ -147,7 +147,7 @@ validate_scan() {
     done
   fi
 
-  RULES_LIST=(); KNOWN_LIST=(); CONTEXT_LIST=(); POLICY_LIST=(); TIERS_REAL=""
+  RULES_LIST=(); KNOWN_LIST=(); CONTEXT_LIST=(); POLICY_LIST=(); TIERS_REAL=""; SCOPE_REAL=""
   if [ -n "${RULES:-}" ]; then
     local ok=no s
     for s in ${SCANNERS[@]+"${SCANNERS[@]}"}; do [ "$s" = semgrep ] || [ "$s" = opengrep ] && ok=yes; done
@@ -158,6 +158,7 @@ validate_scan() {
   [ -z "${CONTEXT:-}" ] || resolve_list context "$CONTEXT" CONTEXT_LIST
   [ -z "${POLICY:-}" ] || resolve_list policy "$POLICY" POLICY_LIST
   if [ -n "${TIERS:-}" ]; then resolve_path tiers "$TIERS"; TIERS_REAL=$REPLY; fi
+  if [ -n "${SCOPE:-}" ]; then resolve_path scope "$SCOPE"; SCOPE_REAL=$REPLY; fi
   if [ "$ONLY_NEW_SET" = yes ] && [ ${#KNOWN_LIST[@]} -eq 0 ]; then fail "Input only-new needs known-sarif."; fi
 
   local f
@@ -166,25 +167,31 @@ validate_scan() {
   for f in ${CONTEXT_LIST[@]+"${CONTEXT_LIST[@]}"}; do trust_check context "$f"; done
   for f in ${POLICY_LIST[@]+"${POLICY_LIST[@]}"}; do trust_check policy "$f"; done
   [ -z "$TIERS_REAL" ] || trust_check tiers "$TIERS_REAL"
+  # The declared scope can label real findings out of scope and take them out of fail-on, so a file the pull request
+  # itself controls must not supply it. Use the base branch's SECURITY.md (git show origin/main:SECURITY.md).
+  [ -z "$SCOPE_REAL" ] || trust_check scope "$SCOPE_REAL"
 }
 
 # summarise_sarif <sarif> <code> <mode-label>: sets STATUS and COVERAGE, writes the job summary.
 read_report() {
   local sarif=$1 code=$2 meta
   STATUS=failed; COVERAGE=""; FAILURE=""; FILES=""
-  M_TOTAL=0; M_CRIT=0; M_HIGH=0; M_MED=0; M_LOW=0; M_INFO=0
+  M_OUT=0; M_TOTAL=0; M_CRIT=0; M_HIGH=0; M_MED=0; M_LOW=0; M_INFO=0
   TIER=""; KNOWN_NEW=""; KNOWN_OLD=""; KNOWN_HIDDEN=""
   if [ "$code" = 2 ] || [ ! -s "$sarif" ]; then return; fi
   case $code in 0|1) STATUS=complete ;; 3) STATUS=partial ;; esac
   command -v jq >/dev/null 2>&1 || { COVERAGE="Not read: jq is not installed on this runner."; return; }
   meta=$(jq -c '
     (.runs[0] // {}) as $r
-    | [($r.results // [])[] | select((.properties.severity // null) != null)] as $f
+    | [($r.results // [])[] | select((.properties.severity // null) != null)] as $all
+    | [$all[] | select((.properties.scope // "") != "out-of-scope")] as $f
+    | [$all[] | select((.properties.scope // "") == "out-of-scope")] as $o
     | { status: ($r.properties.status // ""),
         coverage: ($r.properties.coverage.statement // ""),
         failure: ($r.properties.failure.message // ""),
         files: (($r.properties.coverage // $r.properties.fileCoverage // {}) as $c | if ($c.opened // null) != null and ($c.inScope // null) != null then "\($c.opened) of \($c.inScope) source files opened, \($c.rounds.used // 0) follow-up round\(if ($c.rounds.used // 0) == 1 then "" else "s" end)" else "" end),
         total: ($f | length),
+        outOfScope: ($o | length),
         critical: ([$f[] | select(.properties.severity == "critical")] | length),
         high: ([$f[] | select(.properties.severity == "high")] | length),
         medium: ([$f[] | select(.properties.severity == "medium")] | length),
@@ -206,6 +213,7 @@ read_report() {
   M_TOTAL=$(num "$(jq -r '.total' <<< "$meta")"); M_CRIT=$(num "$(jq -r '.critical' <<< "$meta")")
   M_HIGH=$(num "$(jq -r '.high' <<< "$meta")"); M_MED=$(num "$(jq -r '.medium' <<< "$meta")")
   M_LOW=$(num "$(jq -r '.low' <<< "$meta")"); M_INFO=$(num "$(jq -r '.info' <<< "$meta")")
+  M_OUT=$(num "$(jq -r '.outOfScope' <<< "$meta")")
   TIER=$(clean "$(jq -r '.tier' <<< "$meta")")
   KNOWN_NEW=$(jq -r '.knownNew // empty' <<< "$meta"); KNOWN_OLD=$(jq -r '.knownOld // empty' <<< "$meta")
   KNOWN_HIDDEN=$(jq -r '.knownHidden // empty' <<< "$meta")
@@ -232,6 +240,7 @@ write_summary() {
   summary "- Exit code: $1"
   if [ "$STATUS" != failed ]; then
     summary "- Findings: $M_TOTAL (critical $M_CRIT, high $M_HIGH, medium $M_MED, low $M_LOW, info $M_INFO)"
+    [ "$M_OUT" = 0 ] || summary "- Outside declared scope: $M_OUT (listed in the report, not counted above and not part of fail-on)"
     [ -z "$TIER" ] || summary "- Tier: $TIER"
     if [ -n "$KNOWN_NEW" ]; then
       summary "- Second opinion: $KNOWN_NEW new, $KNOWN_OLD already known${KNOWN_HIDDEN:+, $KNOWN_HIDDEN left out}"
@@ -265,6 +274,7 @@ cmd_scan() {
   for f in ${CONTEXT_LIST[@]+"${CONTEXT_LIST[@]}"}; do args+=(--context "$f"); done
   for f in ${POLICY_LIST[@]+"${POLICY_LIST[@]}"}; do args+=(--policy "$f"); done
   [ -z "$TIERS_REAL" ] || args+=(--tiers "$TIERS_REAL")
+  [ -z "$SCOPE_REAL" ] || args+=(--scope "$SCOPE_REAL")
   [ "${ALLOW_PARTIAL:-false}" != true ] || args+=(--allow-partial)
 
   "$ZERO" "${args[@]}"

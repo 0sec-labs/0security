@@ -12,19 +12,19 @@ import { basename, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import type { Command } from "commander";
 import { buildInventory, discoverAgentSkills, exportReport, getSkillById, isReportExportFormat, resolveAgentSkillName, type Batch } from "@0/engine";
-import { CoverageLedger, coverageSentence, summarizeCoverage } from "@0/engine/storage";
+import { CoverageLedger, coverageSentence, listOsecRunDatabasePaths, osecDB, resolveOsecDbPath, summarizeCoverage } from "@0/engine/storage";
 import { consoleTransportOptions, openConsole, type ConsoleClient, type ConsoleTransportOptions } from "../console-client.js";
 import { homeStateDir, parseSarif, parseScannerList, scanPrompt, scannerArguments, scannerById, scannerTakesRules, SCANNERS, type KnownItem, type PrePassLeads, type BatchPromptInfo, type ScanFileCoverage, type ScanReport } from "@0/engine/shared";
 import { runPrePass } from "../prepass.js";
 import { checkRulesScanners, resolveRulePaths } from "../scan-rules.js";
-import { markKnown, mergePasses, scanExitCode, scanJson, toScanReport, type ScanOutcome } from "../scan-report.js";
+import { applyScope, markKnown, mergePasses, scanExitCode, scanJson, toScanReport, type ScanOutcome } from "../scan-report.js";
 import { followUpText, reviewDepth, reviewScopeFiles, shallowReviewWarning, toolCallText, unopenedFiles } from "../scan-review.js";
 import { coverageReport, DEFAULT_RETRIES, runBatches, type BatchOutcome, type RunBatchesResult } from "../scan-batches.js";
 import { classifyFailure, type FailureCause, type ScanFailure } from "../scan-failure.js";
 import { coverageJson, coverageText, DEFAULT_BATCH_SIZE, planBatchedScan, type BatchedSetup } from "../scan-batched.js";
 import { planScan, planText } from "../scan-plan.js";
 import { resumeHint, type ResumeHint } from "../scan-resume.js";
-import { loadSteering, type Steering } from "../scan-steering.js";
+import { loadScope, loadSteering, type Steering } from "../scan-steering.js";
 import { applyTierSettings, loadTierMap, repoIdentifier, resolveTier, settingsSentence, tierSentence, type ResolvedTier } from "../scan-tiers.js";
 import { knownIn, leadsToFindings, loadKnown, type KnownSet } from "../scan-known.js";
 import { finishWithError, UsageError } from "./output.js";
@@ -99,10 +99,31 @@ export interface ScanDeps {
   gitHead?(folder: string): Promise<string | undefined>;
   /** Record one run in the metrics file (counts and ids only). Absent in tests, so they write nothing. */
   metrics?(record: Omit<RunMetric, "version" | "ci">): void;
+  /** Store the declared-scope labels on the findings in the local findings databases. Absent in tests, so they write nothing. */
+  saveScope?(labels: ScopeLabelRow[], dbPath?: string): void;
   /** The URL of the folder's `origin` remote, or undefined. Used to find the folder's tier. */
   gitRemote?(folder: string): Promise<string | undefined>;
 }
+/** One finding's declared-scope label, as stored. */
+export interface ScopeLabelRow { id: string; scope: "in-scope" | "out-of-scope"; reason: string; source: string }
+
+/** Write the labels into the findings databases that hold those findings (the one named, else the shared one and the per-run ones). A database that does not hold a finding is left alone. */
+function saveScopeLabels(labels: ScopeLabelRow[], dbPath?: string): void {
+  if (!labels.length) return;
+  const paths = dbPath ? [dbPath] : [...new Set([resolveOsecDbPath(), ...listOsecRunDatabasePaths()])].slice(0, 200);
+  for (const path of paths) {
+    if (!existsSync(path)) continue;
+    let db: osecDB | undefined;
+    try {
+      db = new osecDB(path);
+      for (const label of labels) if (db.getFinding(label.id)) db.setFindingScope(label.id, { scope: label.scope, reason: label.reason, source: label.source });
+    } catch { /* a database that cannot be opened keeps no label; the report still carries it */ }
+    finally { db?.close(); }
+  }
+}
+
 export const defaultScanDeps: ScanDeps = {
+  saveScope: saveScopeLabels,
   open: options => openConsole(options),
   out: bytes => { process.stdout.write(bytes); },
   err: text => process.stderr.write(`${text}\n`),
@@ -159,6 +180,7 @@ export const defaultScanDeps: ScanDeps = {
 interface ScanOptions extends ConsoleTransportOptions {
   budget: string; diff?: string; prepass?: string; scanner?: string[]; rules?: string[]; format: string; output?: string; timeout: string; failOn?: string; model?: string; skill: string; passes: string;
   context?: string[]; policy?: string[]; orgPolicy?: string[]; repoContext?: boolean; repoIgnores?: boolean;
+  scope?: string; repoScope?: boolean; scopeSarif?: string;
   batches?: string; batchSize?: string; concurrency?: string; resume?: string; force?: boolean; coverage?: string | boolean; allowPartial?: boolean; plan?: boolean;
   tiers?: string; failOnSkip?: boolean; known?: string[]; onlyNew?: boolean;
   retries?: string; batchTimeout?: string; coverageRounds?: string;
@@ -441,11 +463,17 @@ async function inPool<T>(count: number, limit: number, task: (index: number) => 
 }
 
 /** Format the report and write it to --output or standard output. */
-async function writeReport(outcome: ScanOutcome, merged: ReturnType<typeof mergePasses>, stored: ScanReport, name: string, options: ScanOptions, deps: Pick<ScanDeps, "out" | "err" | "writeBytes" | "metrics">): Promise<void> {
+async function writeReport(outcome: ScanOutcome, merged: ReturnType<typeof mergePasses>, stored: ScanReport, name: string, options: ScanOptions, deps: Pick<ScanDeps, "out" | "err" | "writeBytes" | "metrics" | "saveScope">): Promise<void> {
   // An empty-diff scan (thread "none") writes no line. A tier skip and a pre-pass-only run do: they are runs the operator chose.
   if (outcome.threadId !== "none" || outcome.tier?.skipped || outcome.tier?.prepassOnly) {
     const status = outcome.failed ? "failed" : outcome.tier?.skipped ? "skipped" : outcome.tier?.prepassOnly ? "prepass_only" : outcome.timedOut ? "timeout" : outcome.budgetExhausted ? "budget" : "ok";
     deps.metrics?.({ at: outcome.startedAt, command: "scan", model: options.model ?? DEFAULT_SCAN_MODEL, budgetUsd: outcome.budgetUsd, costUsd: outcome.costUsd ?? null, durationSeconds: Math.max(0, Math.round((Date.parse(outcome.completedAt) - Date.parse(outcome.startedAt)) / 1000)), findingsAttempted: null, findingsProposed: merged.length, checksPassed: null, tokens: null, status, findingIds: merged.map(finding => finding.id) });
+  }
+  if (outcome.scope) {
+    const labelled = applyScope(outcome, merged).filter(finding => finding.scope);
+    const out = labelled.filter(finding => finding.scope === "out-of-scope").length;
+    deps.saveScope?.(labelled.flatMap(finding => [finding.id, ...(finding.mergedFindingIds ?? [])].map(id => ({ id, scope: finding.scope!, reason: finding.scopeReason ?? "", source: finding.scopeSource ?? outcome.scope!.source }))), options.dbPath);
+    deps.err(`scope (${outcome.scope.source}): ${out} finding${out === 1 ? "" : "s"} outside the declared scope, listed apart and left out of the counts and --fail-on`);
   }
   let body: Uint8Array | string;
   if (options.format === "json") body = `${JSON.stringify(scanJson(outcome, merged), null, 2)}\n`;
@@ -694,7 +722,9 @@ export async function runScan(target: string | undefined, options: ScanOptions, 
     if (options.coverage !== undefined) { await printCoverage(resolved, options, deps); return; }
     const known: KnownSet | undefined = options.known?.length ? loadKnown(options.known, resolved.roots) : undefined;
     if (known) deps.err(`known: ${known.items.length} item${known.items.length === 1 ? "" : "s"} from ${known.tools.join(", ") || "the given files"}; the scan is told to look for what they missed`);
+    const declaredScope = loadScope(resolved.folder, options, deps.err);
     const extras: Partial<ScanOutcome> = {
+      ...(declaredScope ? { scope: declaredScope, ...(options.scopeSarif === "suppress" ? { scopeSarifSuppress: true } : {}) } : {}),
       ...(tier ? { tier: tierInfo(tier), ...(options.failOnSkip ? { failOnSkip: true } : {}) } : {}),
       ...(known ? { known: { items: known.items, tools: known.tools, ...(options.onlyNew ? { onlyNew: true } : {}) } } : {}),
     };
@@ -829,6 +859,9 @@ export function registerScanCommand(program: Command, deps: ScanDeps = defaultSc
     .option("--context <file>", "Give the scan this file (a threat model, notes on who may do what) as lower-priority background; repeat for several. It can steer what the scan weighs but cannot change how it works", (value: string, previous: string[] = []) => [...previous, value])
     .option("--policy <file-or-folder>", "Check the code against these Markdown policies (a file or a folder of .md files) and report pass or fail for each; repeat for several. Runs the policy-check skill", (value: string, previous: string[] = []) => [...previous, value])
     .option("--org-policy <folder>", "An organisation's policy folder: evaluated first, and wins when a --policy says otherwise or uses the same id; repeat for several", (value: string, previous: string[] = []) => [...previous, value])
+    .option("--scope <file>", "Read the declared scope from the '## Scope' section of this Markdown file (usually SECURITY.md). Findings that match a vector it lists as out of scope are labelled, listed apart and left out of the counts, --fail-on and the exit code; none are removed. In CI pass the base branch's copy")
+    .option("--repo-scope", "Read SECURITY.md from the scanned folder as the declared scope. Off by default: a change under review can edit that file; in CI pass the base branch's copy with --scope instead")
+    .option("--scope-sarif <mode>", "With --scope: label (default) writes the scope as result properties; suppress also marks out-of-scope results suppressed, which GitHub code scanning then dismisses", "label")
     .option("--repo-context", "Also read .0/threat-model.md from the scanned folder as context. Off by default: a change under review can edit that file; in CI pass the base branch's copy with --context instead")
     .option("--repo-ignores", "Also let the pre-pass scanners read their configuration and ignore files from the scanned folder (.foxguard.yml, .semgrepignore, .gitleaks.toml, .gitleaksignore, .trivyignore, osv-scanner.toml, .checkov.yaml). Off by default: a change under review can use them to hide findings. Inline suppressions such as nosemgrep always apply")
     .option("--skill <id>", "Skill that holds the scan method", "scan")

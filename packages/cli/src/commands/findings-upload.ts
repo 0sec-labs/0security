@@ -46,7 +46,33 @@ const defaults: UploadDeps = {
   git: async args => (await exec("git", args)).stdout,
 };
 
-export interface UploadOptions { repo?: string; commit?: string; ref?: string; wait: boolean; tool?: string; format?: string; to?: string; url?: string; reportId?: string; print?: boolean; allowInsecureHttp?: boolean }
+/**
+ * The text of a SARIF file or scan JSON without the findings labelled out of scope (`properties.scope`, `scope`), and how many
+ * were dropped. Text that is neither is returned as it is.
+ */
+export function withoutOutOfScope(text: string): { text: string; dropped: number } {
+  let document: unknown;
+  try { document = JSON.parse(text); } catch { return { text, dropped: 0 }; }
+  if (typeof document !== "object" || document === null) return { text, dropped: 0 };
+  const root = document as { runs?: unknown; findings?: unknown };
+  let dropped = 0;
+  if (Array.isArray(root.runs)) {
+    for (const run of root.runs as Array<{ results?: unknown }>) {
+      if (!run || !Array.isArray(run.results)) continue;
+      const kept = (run.results as Array<{ properties?: { scope?: unknown } }>).filter(result => result?.properties?.scope !== "out-of-scope");
+      dropped += run.results.length - kept.length;
+      run.results = kept;
+    }
+  }
+  if (Array.isArray(root.findings)) {
+    const kept = (root.findings as Array<{ scope?: unknown }>).filter(finding => finding?.scope !== "out-of-scope");
+    dropped += root.findings.length - kept.length;
+    root.findings = kept;
+  }
+  return dropped ? { text: JSON.stringify(document), dropped } : { text, dropped: 0 };
+}
+
+export interface UploadOptions { includeOutOfScope?: boolean; repo?: string; commit?: string; ref?: string; wait: boolean; tool?: string; format?: string; to?: string; url?: string; reportId?: string; print?: boolean; allowInsecureHttp?: boolean }
 
 const BITBUCKET_TARGETS: Record<string, CodeInsightsPlatform> = { "bitbucket-cloud": "bitbucket-cloud", "bitbucket-dc": "bitbucket-dc" };
 const SLUG = /^[A-Za-z0-9._~-]{1,200}$/;
@@ -61,7 +87,11 @@ export async function runBitbucketUpload(file: string, options: UploadOptions, d
   if (!platform) throw new UsageError("--to must be github, bitbucket-cloud or bitbucket-dc.");
   const env = deps.env ?? process.env;
   let findings;
-  try { findings = readInsightFindings(deps.readText(file)); } catch (error) { if (error instanceof UsageError) throw error; throw new UsageError(`${error instanceof Error ? error.message : String(error)} Make one with \`0 scan --format json -o scan.json\`.`); }
+  try {
+    const filtered = options.includeOutOfScope ? { text: deps.readText(file), dropped: 0 } : withoutOutOfScope(deps.readText(file));
+    if (filtered.dropped) deps.err(`${filtered.dropped} finding(s) outside the declared scope were left out; add --include-out-of-scope to send them.`);
+    findings = readInsightFindings(filtered.text);
+  } catch (error) { if (error instanceof UsageError) throw error; throw new UsageError(`${error instanceof Error ? error.message : String(error)} Make one with \`0 scan --format json -o scan.json\`.`); }
   const reportId = options.reportId ?? "0-security";
   if (!REPORT_ID.test(reportId)) throw new UsageError("--report-id may hold letters, digits, dots, dashes and underscores (at most 100).");
   const payload = buildCodeInsights(findings, platform, { reportId });
@@ -103,7 +133,11 @@ export function packSarif(text: string): string {
 }
 
 export async function runUpload(file: string, options: UploadOptions, deps: UploadDeps = defaults): Promise<{ id: string; status: string } | undefined> {
-  const text = deps.readText(file);
+  const raw = deps.readText(file);
+  if (!looksLikeSarif(raw)) throw new UsageError("This is not a SARIF 2.1.0 file. Make one with `0 scan --format sarif -o scan.sarif`.");
+  const filtered = options.includeOutOfScope ? { text: raw, dropped: 0 } : withoutOutOfScope(raw);
+  if (filtered.dropped) deps.err(`${filtered.dropped} finding(s) outside the declared scope were left out; add --include-out-of-scope to upload them.`);
+  const text = filtered.text;
   if (!looksLikeSarif(text)) throw new UsageError("This is not a SARIF 2.1.0 file. Make one with `0 scan --format sarif -o scan.sarif`.");
 
   const host = selectHost({ run: deps.gh });
@@ -142,6 +176,7 @@ export function registerFindingsUploadCommand(parent: Command, deps: UploadDeps 
     .option("--commit <sha>", "Commit the results are for (default: HEAD, or GITHUB_SHA in Actions)")
     .option("--ref <ref>", "refs/heads/<branch> or refs/pull/<n>/merge (default: the current branch, or GITHUB_REF in Actions)")
     .option("--tool <name>", "Name the tool shown in GitHub")
+    .option("--include-out-of-scope", "Also send findings the declared scope (0 scan --scope) labelled out of scope; they are skipped by default")
     .option("--no-wait", "Return when GitHub has accepted the upload instead of waiting for it to be processed")
     .option("--format <format>", "Output: text or json", "text")
     .action(async (file: string, options: UploadOptions) => {
