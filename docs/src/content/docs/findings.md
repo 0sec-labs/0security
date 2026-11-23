@@ -333,7 +333,19 @@ To bump a package, fix the finding:
 
 The fix raises the package to the lowest fixed version in the manifest, and refreshes the lockfile with your project's own package manager when it is installed. It changes nothing else.
 
-To estimate whether your code calls the vulnerable part, run the experimental `dependency-reachability` skill. Give it the advisories as context:
+For a Maven or Gradle project, add `--resolve` to get the transitive packages and the versions your build picks. This runs your `mvn` or `gradle`, so it asks first. See [sbom generate](/commands/#resolve-maven-and-gradle-dependencies).
+
+```bash
+0 sbom generate . --resolve --allow-build-tools -o sbom.cdx.json
+```
+
+For a Maven fix, 0 changes the version where it is set: the pom, a property, or a `dependencyManagement` entry. For Gradle it changes the version catalog or build script, or adds a constraint for a transitive package. It uses the lowest fixed version from the finding and never invents one. Check the result with your own build:
+
+```bash
+0 findings fix 3f2a --test "mvn -q test"
+```
+
+To estimate whether your code calls the vulnerable part, run the experimental `dependency-reachability` skill. Give it the advisories as context. This is two commands, because the scan needs a model and `0 sbom check` does not:
 
 ```bash
 0 sbom check sbom.cdx.json --format json -o advisories.json
@@ -386,6 +398,7 @@ To work through many findings, batch them. Each gets its own branch and pull req
 
 Drop `--dry-run` to start. A re-run skips findings that already have a pull request. See [findings fix](/commands/#findings-fix) and [findings burndown](/commands/#findings-burndown) for the policy file, budgets and stop rules.
 
+
 ### Match your pull request conventions
 
 Set a title template, branch prefix, labels, reviewers, a draft rule and a footer in your policy file, so fix pull requests follow your process. See [pull request conventions](/commands/#pull-request-conventions).
@@ -399,6 +412,39 @@ After a burndown, write a report of the outcomes:
 ```
 
 It lists each fix with its pull request and checks, and counts how many were merged. See [findings export-fixes](/commands/#findings-export-fixes).
+
+## Verified fixes
+
+A verified fix is a fix whose checks ran in a container with no network. The pull request says so only when every check passed there.
+
+```bash
+0 findings fix 3f2a --test "mvn -q test" --sandbox docker --sandbox-image maven:3-eclipse-temurin-21
+```
+
+Without `--sandbox`, your `--test` commands run on your machine with your privileges. They can read your files and use your network. With `--sandbox docker`, 0 copies the fix work tree into a folder without its git data and runs each command in a container from the image you name. The container has:
+
+- no network
+- 4 GB of memory, 2 CPUs and 1024 processes
+- no Linux capabilities, and no new privileges
+- none of your environment variables
+- a 10 minute limit and 4 MB of output
+
+When a check passes, the pull request body reads "Verified in a sandbox: maven:3-eclipse-temurin-21, network off." A failed check makes the pull request a draft, as without a sandbox. A Docker error is a failed check, never a pass. The work tree on your machine does not change while the checks run.
+
+The model is told not to run builds or tests itself in this mode. It edits files, and the sandbox runs the checks.
+
+The image must hold the tools and the dependencies the tests need, because the container has no network. Build an image with your dependencies cached in a folder any user can read. Or pass `--sandbox-network` to let the container download dependencies. The network is then on, and the pull request says "network on". `ZERO_ENTERPRISE` refuses `--sandbox-network`.
+
+Docker pulls the image when it is not on your machine. Use a local image if nothing may be pulled. On macOS and Windows, Docker runs in a VM, so 0 copies the work tree under `~/.0/sandbox`. Set `ZERO_SANDBOX_DIR` to another folder your VM shares.
+
+Limits:
+
+- The sandbox is Docker's isolation. A flaw in Docker is outside what this gives you.
+- Disk use inside the container is not limited.
+- The checks run in a copy, so files they write (such as build output) are not in the commit.
+- Only the `docker` mode exists. Private-repository credentials are not passed into the container.
+- `0 findings burndown` does not take `--sandbox`.
+- The mechanism was tested with a real container (an Alpine Node image, no network). The Maven image was not run for real in this build, only through a fake `docker`.
 
 ## Export and share
 

@@ -1095,14 +1095,48 @@ The default `builtin` generator reads these lockfiles as text, anywhere under th
 
 Components are identified by package URL, sorted and de-duplicated, so the same lockfiles give the same SBOM. A component is marked `excluded` only when every lockfile that lists it says it is development-only. A folder with no supported lockfile and nothing unresolved is an error (exit 2).
 
-It also reads Maven and Gradle declarations as text, with the same rules: nothing is run (no `mvn`, no `gradle`), nothing is downloaded, and output is sorted. Components are looked up in OSV as `pkg:maven/<groupId>/<artifactId>@<version>`.
+It also reads Maven and Gradle declarations as text, with the same rules: nothing is run (no `mvn`, no `gradle`) unless you pass `--resolve`, nothing is downloaded, and output is sorted. Components are looked up in OSV as `pkg:maven/<groupId>/<artifactId>@<version>`.
 
 - `pom.xml`: direct dependencies, with versions taken from the literal version, `<properties>`, `<dependencyManagement>`, and a parent POM or imported BOM, but only when that parent or BOM is in the repository (the `relativePath`, or any POM in the folder with the same coordinates and version). Every `pom.xml` under the folder is read, so a multi-module project is aggregated; a child's own properties override its parent's. Modules of the repository are not listed as third-party components, and `test` scope is marked `excluded`.
 - `gradle.lockfile`, `gradle/libs.versions.toml` and the dependency lines of `build.gradle` and `build.gradle.kts`: a version is read only when it is a literal. When `gradle.lockfile` pins an artifact, the lockfile's version is used and a declared version of the same artifact is dropped. A version catalog is read as declared, so an entry the build never uses is still listed.
 
 What is not analysed is listed as unresolved, never guessed: profiles (their dependencies and properties), a parent POM or imported BOM that is not in the repository, a version from a property that no POM in the repository defines (including `env.` and system properties), version ranges and `LATEST`/`RELEASE`, a dependency with no managed version, a declared module with no POM, and in Gradle a variable, a dynamic version (`1.+`, a range, `latest.release`), a missing version, a `platform(...)` BOM and an unknown `version.ref`. The final line of `generate` reads `resolved N, unresolved M` (components with a known version, and items skipped), followed by the first 20 skipped items. The SBOM records each as a `0:unresolved` metadata property, and `0 sbom check` prints the same line from them.
 
-This is a declaration reader, not a build. It does not resolve transitive dependencies, private registries or mirrors, or `settings.xml`, and it makes no claim about whether vulnerable code is reachable.
+Without `--resolve` this is a declaration reader, not a build. It does not resolve transitive dependencies, private registries or mirrors, or `settings.xml`, and it makes no claim about whether vulnerable code is reachable.
+
+| Argument | Required | Description |
+| --- | --- | --- |
+| `folder` | No | Folder to read lockfiles from (default: .) |
+
+| Option | Registered default | Description |
+| --- | --- | --- |
+| `-o, --output <file>` | — | Write the SBOM to a file instead of stdout |
+| `--name <name>` | — | Name of the application the SBOM describes (default: the folder's name) |
+| `--generator <tool>` | `builtin` | Who writes the SBOM: builtin (reads lockfiles; default), syft, cdxgen, trivy (run the installed tool; exit 2 if it is missing) |
+| `--format <format>` | `cyclonedx` | Output format: cyclonedx (1.5, default) or spdx (2.3 JSON; builtin generator only) |
+| `--image <reference-or-archive>` | — | Describe a container image instead of a folder: a reference such as nginx:1.25, or the path of a docker save archive or OCI layout. Needs --generator syft or trivy, which pulls the image |
+| `--resolve` | — | Maven and Gradle: run the project's own mvn or gradle to resolve the full dependency tree (runs build scripts, downloads from the network; needs --allow-build-tools or a yes at the prompt) |
+| `--allow-build-tools` | — | Confirm --resolve without the prompt: you trust this project to run its build |
+| `--resolve-offline` | — | With --resolve, run the tool offline (mvn -o, gradle --offline): only cached artifacts resolve |
+| `--ai` | — | Also list the AI in the folder: models, datasets, hosted model ids and MCP servers, found by reading files as text |
+
+##### Resolve Maven and Gradle dependencies
+
+Add `--resolve` to run your own build tool and get the full dependency tree, including transitive packages, BOMs, parent POMs and profiles.
+
+```bash
+0 sbom generate . --resolve --allow-build-tools -o sbom.cdx.json
+```
+
+With a `pom.xml`, 0 runs `mvn dependency:tree`. With `build.gradle` or `build.gradle.kts` files, 0 runs `gradle dependencies --configuration runtimeClasspath` once for each project folder, up to 25. It reads the trees, adds the transitive graph to the SBOM, and marks each component the tool resolved with the property `0:resolved` set to `true`. A resolved version replaces a declared version of the same package. Declared packages the tool did not report stay in the SBOM without the mark.
+
+This runs the project's build, so it is off by default. The build tool evaluates the project's build files, which can run arbitrary code, and it downloads from the repositories the project names. 0 prints a warning, then asks for a yes at a terminal. Without a terminal, or in CI, pass `--allow-build-tools` to confirm. Run it only on a project you trust.
+
+0 starts `mvn` or `gradle` from your `PATH`, without a shell, with a 10 minute limit and a 16 MB output limit. It never runs `mvnw` or `gradlew` from the project. The tool gets your `PATH`, `HOME`, `JAVA_HOME`, `MAVEN_*`, `GRADLE_*` and proxy variables, and no other variable, so your API keys stay out of the build. `--resolve-offline` adds `-o` to Maven and `--offline` to Gradle, so only cached artifacts resolve. `ZERO_ENTERPRISE` refuses `--resolve`.
+
+If a tool is missing or the build fails, 0 exits with 2 and prints the tool's error lines. Gradle test dependencies are not listed, because only the runtime classpath is read. Maven test and provided scopes are marked `excluded`.
+
+The resolve step is tested with fake `mvn` and `gradle` programs for the output shapes, and by hand with real Maven 3.9 and Gradle 9 on small projects with network access. Parent POMs and BOMs outside the repository resolve only as far as your Maven or Gradle settings let them. Private-registry mirrors work through your own `settings.xml` and Gradle configuration, which 0 does not read.
 
 Beyond name and version, the SBOM carries the following, only where the lockfile states it. Nothing is looked up or guessed.
 
@@ -1509,6 +1543,8 @@ A thread follows the `fix-finding` skill in a separate git work tree, so your ch
 
 Nothing is pushed to the base branch and nothing is merged. A person reviews and merges. Use `--test` for the project's tests and, to re-run the scanner that raised the finding, its own command (for example `foxguard .`). The command edits files on this machine, so it needs the local console and rejects `--computer` and `--engine-url`.
 
+Without `--sandbox`, each `--test` command runs on this machine, in the work tree, with your privileges and your environment. A test command can do anything you can. To run the checks in a container instead, see [verified fixes](/findings/#verified-fixes).
+
 Exit codes:
 
 - 0: a verified change, or committed with `--no-pr`
@@ -1529,6 +1565,9 @@ A policy file inside the repository being fixed is not read unless you pass `--r
 | `--repo <dir>` | — | Git repository the finding is in (default: the current directory) |
 | `--base <branch>` | — | Branch to start from and open the pull request against (default: the remote's default branch) |
 | `--test <command>` | — | Check to run after the change; repeat for several. A failing check makes the pull request a draft |
+| `--sandbox <mode>` | — | Run the --test commands in a container instead of on this machine (docker) Choices: docker. |
+| `--sandbox-image <image>` | — | Image for --sandbox docker, for example maven:3-eclipse-temurin-21. It must hold the tools and dependencies the tests need |
+| `--sandbox-network` | — | Give the sandbox network access (to download dependencies). Off by default |
 | `--policy <file>` | — | Policy file (.json or .yaml) of approved libraries and fix rules; any path you name, relative to the current directory. Default: ~/.0/fix-policy.json\|yaml\|yml |
 | `--repo-policy` | — | Also read fix-policy.* or .zero/fix-policy.* from the repository being fixed (untrusted content; off by default) |
 | `--no-pr` | — | Commit on the fix branch but do not push or open a pull request |

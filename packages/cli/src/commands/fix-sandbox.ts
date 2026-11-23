@@ -8,15 +8,19 @@
  */
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { cpSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 export interface SandboxSpec { image: string; network: boolean }
 export interface SandboxResult { command: string; code: number; output: string; sandbox: string }
 
 export const SANDBOX_TIMEOUT_MS = 10 * 60 * 1000;
 export const SANDBOX_MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
+const PROBE = ".0-sandbox-probe";
+/** Fails with a clear message when the container cannot see the copied work tree (a Docker VM that does not share the folder), instead of running the command in an empty folder. */
+const guarded = (command: string): string => `[ -e /work/${PROBE} ] || { echo "The work tree is not visible inside the container: the Docker VM must share the folder it was started from." >&2; exit 125; }\n${command}`;
+
 export const SANDBOX_LIMITS = { memory: "4g", cpus: "2", pids: "1024" } as const;
 
 /** A registry reference such as `maven:3-eclipse-temurin-21` or `ghcr.io/org/app@sha256:...`: one word, never an option. */
@@ -39,7 +43,7 @@ export function dockerRunArgs(spec: SandboxSpec, name: string, dir: string, comm
     ...(ids ? ["--user", `${ids.uid}:${ids.gid}`] : []),
     "-e", "HOME=/tmp", "-e", "CI=true",
     "-v", `${dir}:/work`, "-w", "/work",
-    "--entrypoint", "/bin/sh", spec.image, "-c", command,
+    "--entrypoint", "/bin/sh", spec.image, "-c", guarded(command),
   ];
 }
 
@@ -65,8 +69,9 @@ function run(tool: "docker", args: string[], env: NodeJS.ProcessEnv, timeout: nu
 export async function runInSandbox(cwd: string, command: string, spec: SandboxSpec, options: { env?: NodeJS.ProcessEnv; timeoutMs?: number } = {}): Promise<SandboxResult> {
   const sandbox = sandboxLabel(spec);
   const fail = (code: number, output: string): SandboxResult => ({ command, code, output, sandbox });
-  // Docker on macOS and Windows runs in a VM that shares the home folder, not the system temp folder.
-  const parent = process.platform === "linux" ? tmpdir() : join(homedir(), ".0", "sandbox");
+  // Docker on macOS and Windows runs in a VM that shares the home folder, not the system temp folder. ZERO_SANDBOX_DIR names another shared folder.
+  const chosen = process.env["ZERO_SANDBOX_DIR"]?.trim();
+  const parent = chosen ? resolve(chosen) : process.platform === "linux" ? tmpdir() : join(homedir(), ".0", "sandbox");
   mkdirSync(parent, { recursive: true, mode: 0o700 });
   const scratch = mkdtempSync(join(parent, "run-"));
   const copy = join(scratch, "work");
@@ -77,6 +82,7 @@ export async function runInSandbox(cwd: string, command: string, spec: SandboxSp
   for (const key of ["PATH", "HOME", "DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_CONFIG", "XDG_RUNTIME_DIR"]) if (source[key] !== undefined) env[key] = source[key];
   try {
     cpSync(cwd, copy, { recursive: true, verbatimSymlinks: true, filter: path => !/(^|[\\/])\.git$/.test(path) });
+    writeFileSync(join(copy, PROBE), "");
     const ids = typeof process.getuid === "function" && typeof process.getgid === "function" ? { uid: process.getuid(), gid: process.getgid() } : undefined;
     const timeout = options.timeoutMs ?? SANDBOX_TIMEOUT_MS;
     const result = await run("docker", dockerRunArgs(spec, name, copy, command, ids), env, timeout);

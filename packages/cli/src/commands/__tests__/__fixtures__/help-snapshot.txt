@@ -775,6 +775,12 @@ Options:
                              remote's default branch)
   --test <command>           Check to run after the change; repeat for several. A failing check
                              makes the pull request a draft
+  --sandbox <mode>           Run the --test commands in a container instead of on this machine
+                             (docker) (choices: "docker")
+  --sandbox-image <image>    Image for --sandbox docker, for example maven:3-eclipse-temurin-21. It
+                             must hold the tools and dependencies the tests need
+  --sandbox-network          Give the sandbox network access (to download dependencies). Off by
+                             default
   --policy <file>            Policy file (.json or .yaml) of approved libraries and fix rules; any
                              path you name, relative to the current directory. Default:
                              ~/.0/fix-policy.json|yaml|yml
@@ -1291,6 +1297,13 @@ Options:
   --image <reference-or-archive>  Describe a container image instead of a folder: a reference such
                                   as nginx:1.25, or the path of a docker save archive or OCI layout.
                                   Needs --generator syft or trivy, which pulls the image
+  --resolve                       Maven and Gradle: run the project's own mvn or gradle to resolve
+                                  the full dependency tree (runs build scripts, downloads from the
+                                  network; needs --allow-build-tools or a yes at the prompt)
+  --allow-build-tools             Confirm --resolve without the prompt: you trust this project to
+                                  run its build
+  --resolve-offline               With --resolve, run the tool offline (mvn -o, gradle --offline):
+                                  only cached artifacts resolve
   --ai                            Also list the AI in the folder: models, datasets, hosted model ids
                                   and MCP servers, found by reading files as text
   -h, --help                      display help for command

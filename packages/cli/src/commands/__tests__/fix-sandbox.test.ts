@@ -26,7 +26,8 @@ describe("docker run arguments", () => {
     expect(args).toContain("--network"); expect(args[args.indexOf("--network") + 1]).toBe("none");
     expect(args).toEqual(expect.arrayContaining(["--memory", "--cpus", "--pids-limit", "--cap-drop", "ALL", "no-new-privileges"]));
     expect(args).toEqual(expect.arrayContaining(["-v", "/copy:/work", "--user", "501:20"]));
-    expect(args.slice(-5)).toEqual(["--entrypoint", "/bin/sh", "maven:3-eclipse-temurin-21", "-c", "mvn -q test"]);
+    expect(args.slice(-5, -1)).toEqual(["--entrypoint", "/bin/sh", "maven:3-eclipse-temurin-21", "-c"]);
+    expect(args.at(-1)).toMatch(/not visible inside the container[\s\S]*\nmvn -q test$/);
     expect(args.filter(arg => arg === "-e")).toHaveLength(2); // HOME and CI only
   });
   it("leaves the network on only when asked", () => {
@@ -50,7 +51,7 @@ describe("runInSandbox with a fake docker", () => {
     expect(result).toMatchObject({ code: 0, sandbox: "maven:3-eclipse-temurin-21, network off" });
     expect(result.output).toContain("built");
     const args = readFileSync(fake.log, "utf8").split("\n");
-    expect(args).toContain("mvn -q test");
+    expect(args.join("\n")).toContain("\nmvn -q test");
     const mount = args[args.indexOf("-v") + 1]!.split(":/work")[0]!;
     expect(mount).not.toBe(dir); // the mounted folder is a copy, and it is gone afterwards
     expect(existsSync(mount)).toBe(false);
