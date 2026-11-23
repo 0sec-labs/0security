@@ -1,0 +1,38 @@
+{
+  "fixture": "dvna",
+  "name": "Damn Vulnerable NodeJS Application",
+  "repo": "https://github.com/appsecco/dvna",
+  "sha": "9ba473add536f66ac9007966acb2a775dd31277a",
+  "language": "Node.js / Express / Sequelize",
+  "exclude": ["docs", "views/vulnerabilities", "config/vulns.js", "README.md", "public"],
+  "excludeWhy": "docs/ is the answer source; views/vulnerabilities and config/vulns.js are the in-app lessons that describe each bug; public/ is vendored front-end code.",
+  "docSource": "docs/solution/*.md in the repository (one page per OWASP Top 10 2017 category, with the vulnerable snippet and its file name)",
+  "items": [
+    { "id": "a1-sqli-usersearch", "path": "core/appHandler.js", "startLine": 9, "endLine": 35, "anchor": "SELECT name,id FROM Users", "category": "sqli", "description": "SQL injection in the user search handler", "docRef": "docs/solution/a1-injection.md (SQL Injection)", "source": "doc-file-function" },
+    { "id": "a1-cmdi-ping", "path": "core/appHandler.js", "startLine": 38, "endLine": 45, "anchor": "exec('ping", "category": "command-injection", "description": "Command injection in the ping handler", "docRef": "docs/solution/a1-injection.md (Command Injection)", "source": "doc-file-function" },
+    { "id": "a2-reset-token-md5", "path": "core/authHandler.js", "startLine": 41, "endLine": 104, "anchor": "md5(req.query.login)", "category": ["authz", "weak-crypto", "authn"], "description": "Password reset token is the MD5 of the login name, so anyone can reset any account", "docRef": "docs/solution/a2-broken-auth.md (Insecure Reset Password)", "source": "doc-file-function" },
+    { "id": "a2-session-secret", "path": "server.js", "startLine": 22, "endLine": 28, "anchor": "keyboard cat", "category": ["secret", "authn"], "description": "Hardcoded, well-known session secret", "docRef": "docs/solution/a2-broken-auth.md (Insecure Session Secret)", "source": "doc-file-function" },
+    { "id": "a3-user-hash-disclosure", "path": "core/appHandler.js", "startLine": 206, "endLine": 213, "anchor": "findAll({})", "category": "secret", "description": "Admin users API returns whole user objects including password hashes", "docRef": "docs/solution/a3-sensitive-data-exposure.md (Hashed Passwords Disclosed)", "source": "doc-file-function" },
+    { "id": "a3-sequelize-logging", "path": "models/index.js", "startLine": 10, "endLine": 17, "anchor": "new Sequelize(config.database", "category": ["secret", "misconfig"], "description": "Sequelize logs every query (sensitive data) because logging is not disabled", "docRef": "docs/solution/a3-sensitive-data-exposure.md (Logging of sensitive information)", "source": "doc-file-function" },
+    { "id": "a4-xxe-bulkproducts", "path": "core/appHandler.js", "startLine": 233, "endLine": 248, "anchor": "noent:true", "category": "xxe", "description": "XML bulk import parses external entities (noent true)", "docRef": "docs/solution/a4-xxe.md", "source": "doc-file-function" },
+    { "id": "a5-users-api-no-admin-check", "path": "routes/app.js", "startLine": 42, "endLine": 42, "anchor": "usersapi", "category": "authz", "description": "List-users API route has no admin check (only login)", "docRef": "docs/solution/a5-broken-access-control.md (Unauthorized Access to Users API)", "source": "doc-file-function", "alsoAt": [{ "path": "core/appHandler.js", "startLine": 206, "endLine": 213 }] },
+    { "id": "a5-useredit-idor", "path": "core/appHandler.js", "startLine": 144, "endLine": 185, "anchor": "'id': req.body.id", "category": "authz", "description": "User edit trusts the id in the body: any user can change any user", "docRef": "docs/solution/a5-broken-access-control.md (Missing Authorization check in Edit User)", "source": "doc-file-function" },
+    { "id": "a6-calc-stack-trace", "path": "core/appHandler.js", "startLine": 194, "endLine": 204, "anchor": "mathjs.eval", "category": ["misconfig", "secret"], "description": "Calculator has no error handling and sends the stack trace to the client", "docRef": "docs/solution/a6-securty-misconfig.md (Application sends Stack Trace)", "source": "doc-file-function" },
+    { "id": "a7-xss-search", "path": "views/app/products.ejs", "startLine": 20, "endLine": 20, "anchor": "output.searchTerm", "category": "xss", "description": "Reflected XSS: search term printed with the unescaped EJS tag", "docRef": "docs/solution/a7-xss.md (Reflected XSS in Search Query)", "source": "doc-file-function" },
+    { "id": "a7-xss-products", "path": "views/app/products.ejs", "startLine": 49, "endLine": 53, "anchor": "output.products[i].name", "category": "xss", "description": "Stored XSS: product fields printed with the unescaped EJS tag", "docRef": "docs/solution/a7-xss.md (Stored XSS in Product Listing)", "source": "doc-file-function" },
+    { "id": "a7-dom-xss-users", "path": "views/app/adminusers.ejs", "startLine": 40, "endLine": 42, "anchor": "innerHTML = users[i].name", "category": "xss", "description": "DOM XSS: user fields written with innerHTML", "docRef": "docs/solution/a7-xss.md (DOM XSS in user listing)", "source": "doc-file-function" },
+    { "id": "a8-unserialize-legacy", "path": "core/appHandler.js", "startLine": 215, "endLine": 231, "anchor": "serialize.unserialize", "category": "deserialization", "description": "Legacy bulk import deserializes uploaded data with node-serialize (code execution)", "docRef": "docs/solution/a8-insecure-deserialization.md", "source": "doc-file-function" },
+    { "id": "a9-mathjs-rce", "path": "core/appHandler.js", "startLine": 194, "endLine": 204, "anchor": "mathjs.eval", "category": ["command-injection", "vuln-dependency"], "description": "User input evaluated by an old mathjs version with a code-execution flaw", "docRef": "docs/solution/a9-using-components-with-known-vulnerability.md", "source": "doc-file-function", "alsoAt": [{ "path": "package.json", "startLine": 25, "endLine": 25 }] },
+    { "id": "ax-csrf-forms", "path": "routes/app.js", "startLine": 56, "endLine": 58, "anchor": "modifyproduct", "category": "csrf", "description": "Product edit and user edit forms have no anti-CSRF token", "docRef": "docs/solution/ax-csrf.md", "source": "doc-file-function", "alsoAt": [{ "path": "core/appHandler.js", "startLine": 103, "endLine": 134 }, { "path": "core/appHandler.js", "startLine": 144, "endLine": 185 }] },
+    { "id": "ax-open-redirect", "path": "core/appHandler.js", "startLine": 186, "endLine": 192, "anchor": "res.redirect(req.query.url)", "category": "open-redirect", "description": "Redirect to any URL taken from the query string", "docRef": "docs/solution/ax-unvalidated-redirects-and-forwards.md", "source": "doc-file-function" }
+  ],
+  "nearMissIgnore": ["ax-csrf-forms", "a2-session-secret"],
+  "nearMissReject": [{"item": "a3-sequelize-logging", "hint": "tls"}, {"item": "a2-reset-token-md5", "hint": "enumerates"}],
+  "decoys": [],
+  "notCovered": [
+    "A10 insufficient logging and monitoring: an absence, no line to match (docs/solution/a10-insufficient-logging.md)",
+    "X-Powered-By header: an absence in server.js (docs/solution/a6-securty-misconfig.md)",
+    "Anything the docs do not discuss: the session cookie flags, the plaintext database credentials, the register and login handlers, the product modify handler. A finding there is 'unmatched'; the 10 highest severity unmatched findings per app were classified by hand"
+  ],
+  "mismatches": []
+}

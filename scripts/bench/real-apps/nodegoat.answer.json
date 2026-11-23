@@ -1,0 +1,332 @@
+{
+  "fixture": "nodegoat",
+  "name": "OWASP NodeGoat",
+  "repo": "https://github.com/OWASP/NodeGoat",
+  "sha": "c5cb68a7084e4ae7dcc60e6a98768720a81841e8",
+  "language": "Node.js / Express / MongoDB / Swig",
+  "exclude": [
+    "app/views/tutorial",
+    "test",
+    "README.md",
+    "CONTRIBUTING.md",
+    "CODE_OF_CONDUCT.md",
+    "app/assets/vendor",
+    "app/assets/images",
+    "package-lock.json"
+  ],
+  "excludeWhy": "app/views/tutorial is the answer source (the in-app tutorial, one page per OWASP Top 10 2013 category plus ReDoS and SSRF pages); test/ holds the project's own security test; app/assets/vendor and images are vendored or binary; package-lock.json is noise.",
+  "docSource": "app/views/tutorial/*.html in the repository (the 'Source Code Example' section of each page names a file and function)",
+  "items": [
+    {
+      "id": "a1-ssjs-eval",
+      "path": "app/routes/contributions.js",
+      "startLine": 31,
+      "endLine": 35,
+      "anchor": "eval(req.body.preTax)",
+      "category": "command-injection",
+      "description": "Server-side JS injection: eval of the contribution fields",
+      "docRef": "app/views/tutorial/a1.html (A1-1 Server Side JS Injection; routes/contributions.js handleContributionsUpdate)",
+      "source": "doc-file-function"
+    },
+    {
+      "id": "a1-nosql-where",
+      "path": "app/data/allocations-dao.js",
+      "startLine": 57,
+      "endLine": 82,
+      "anchor": "this.stocks > '${threshold}'",
+      "category": "sqli",
+      "description": "NoSQL injection: the threshold goes into a $where JavaScript string",
+      "docRef": "app/views/tutorial/a1.html (A1-2 SQL and NoSQL Injection; allocations-dao getByUserIdAndThreshold)",
+      "source": "doc-file-function"
+    },
+    {
+      "id": "a2-plaintext-passwords",
+      "path": "app/data/user-dao.js",
+      "startLine": 15,
+      "endLine": 45,
+      "anchor": "this.addUser",
+      "category": [
+        "secret",
+        "weak-crypto"
+      ],
+      "description": "Passwords are stored and compared in plaintext (the bcrypt fix is only in a comment)",
+      "docRef": "app/views/tutorial/a2.html (A2-1 Protecting user credentials; data/user-dao.js addUser)",
+      "source": "doc-file-function",
+      "alsoAt": [
+        {
+          "path": "app/data/user-dao.js",
+          "startLine": 59,
+          "endLine": 70
+        }
+      ]
+    },
+    {
+      "id": "a6-plaintext-ssn-dob",
+      "path": "app/data/profile-dao.js",
+      "startLine": 42,
+      "endLine": 66,
+      "anchor": "user.ssn = ssn",
+      "category": [
+        "secret",
+        "weak-crypto"
+      ],
+      "description": "SSN and date of birth are stored unencrypted (the encryption fix is only in a comment)",
+      "docRef": "app/views/tutorial/a6.html (data/profile-dao.js: encrypt ssn and dob)",
+      "source": "doc-file-function"
+    },
+    {
+      "id": "a2-session-fixation",
+      "path": "app/routes/session.js",
+      "startLine": 53,
+      "endLine": 120,
+      "anchor": "req.session.userId = user._id",
+      "category": "authn",
+      "description": "Session id not regenerated on login (session fixation)",
+      "docRef": "app/views/tutorial/a2.html (A2-1 Session hijacking; routes/session.js handleLoginRequest)",
+      "source": "doc-file-function"
+    },
+    {
+      "id": "a2-weak-password-policy",
+      "path": "app/routes/session.js",
+      "startLine": 138,
+      "endLine": 180,
+      "anchor": "PASS_RE = /^.{1,20}$/",
+      "category": "authn",
+      "description": "Password policy accepts any 1 to 20 characters",
+      "docRef": "app/views/tutorial/a2.html (A2-2 Password Guessing Attacks; validateSignup)",
+      "source": "doc-file-function"
+    },
+    {
+      "id": "a2-user-enumeration",
+      "path": "app/routes/session.js",
+      "startLine": 59,
+      "endLine": 98,
+      "anchor": "invalidUserNameErrorMessage",
+      "category": "authn",
+      "description": "Login tells whether the user name or the password was wrong (enumeration)",
+      "docRef": "app/views/tutorial/a2.html (A2-2 Password Guessing Attacks; handleLoginRequest)",
+      "source": "doc-file-function"
+    },
+    {
+      "id": "a2-session-cookie-flags",
+      "path": "server.js",
+      "startLine": 78,
+      "endLine": 86,
+      "anchor": "session({",
+      "category": "authn",
+      "description": "Session cookie has no HttpOnly or Secure flag and no timeout",
+      "docRef": "app/views/tutorial/a2.html and a3.html (Session timeout and protecting cookies; server.js)",
+      "source": "doc-file-function"
+    },
+    {
+      "id": "a3-xss-autoescape-off",
+      "path": "server.js",
+      "startLine": 134,
+      "endLine": 138,
+      "anchor": "autoescape: false",
+      "category": "xss",
+      "description": "Template autoescape is disabled, so profile fields render as raw HTML (stored XSS)",
+      "docRef": "app/views/tutorial/a3.html (server.js swig autoescape)",
+      "source": "doc-file-function"
+    },
+    {
+      "id": "a4-allocations-idor",
+      "path": "app/routes/allocations.js",
+      "startLine": 12,
+      "endLine": 31,
+      "anchor": "} = req.params",
+      "category": "authz",
+      "description": "Allocations are fetched by the user id in the URL, not the session",
+      "docRef": "app/views/tutorial/a4.html (routes/allocations.js)",
+      "source": "doc-file-function"
+    },
+    {
+      "id": "a6-http-not-https",
+      "path": "server.js",
+      "startLine": 143,
+      "endLine": 146,
+      "anchor": "http.createServer",
+      "category": "transport",
+      "description": "Server runs over plain HTTP",
+      "docRef": "app/views/tutorial/a6.html (server.js: start a secure HTTPS server)",
+      "source": "doc-file-function"
+    },
+    {
+      "id": "a7-benefits-no-admin",
+      "path": "app/routes/index.js",
+      "startLine": 54,
+      "endLine": 56,
+      "anchor": "/benefits",
+      "category": "authz",
+      "description": "Benefits routes check login but not the admin role (missing function-level access control)",
+      "docRef": "app/views/tutorial/a7.html (routes/index.js)",
+      "source": "doc-file-function",
+      "alsoAt": [
+        {
+          "path": "app/routes/benefits.js",
+          "startLine": 1,
+          "endLine": 57
+        }
+      ]
+    },
+    {
+      "id": "a8-csrf-missing",
+      "path": "server.js",
+      "startLine": 99,
+      "endLine": 112,
+      "anchor": "csrf",
+      "category": "csrf",
+      "description": "No CSRF middleware or tokens: the csurf setup is only in a comment",
+      "docRef": "app/views/tutorial/a8.html (server.js csrf middleware)",
+      "source": "located-by-us",
+      "alsoAt": [
+        {
+          "path": "app/routes/index.js",
+          "startLine": 47,
+          "endLine": 56
+        }
+      ]
+    },
+    {
+      "id": "a9-marked-old-version",
+      "path": "package.json",
+      "startLine": 17,
+      "endLine": 17,
+      "anchor": "\"marked\": \"0.3.5\"",
+      "category": "vuln-dependency",
+      "description": "Old marked version with known XSS issues, used for memos",
+      "docRef": "app/views/tutorial/a9.html (Insecure Dependencies Example: Marked)",
+      "source": "doc-file-function",
+      "alsoAt": [
+        {
+          "path": "app/routes/memos.js",
+          "startLine": 1,
+          "endLine": 37
+        }
+      ]
+    },
+    {
+      "id": "a10-open-redirect-learn",
+      "path": "app/routes/index.js",
+      "startLine": 69,
+      "endLine": 73,
+      "anchor": "res.redirect(req.query.url)",
+      "category": "open-redirect",
+      "description": "Redirect to any URL from the query string",
+      "docRef": "app/views/tutorial/a10.html (routes/index.js /learn)",
+      "source": "doc-file-function"
+    },
+    {
+      "id": "redos-bank-routing",
+      "path": "app/routes/profile.js",
+      "startLine": 52,
+      "endLine": 61,
+      "anchor": "([0-9]+)+",
+      "category": "redos",
+      "description": "Regex with nested quantifier validates the bank routing number (ReDoS)",
+      "docRef": "app/views/tutorial/redos.html (routes/profile.js)",
+      "source": "doc-file-function"
+    },
+    {
+      "id": "ssrf-research",
+      "path": "app/routes/research.js",
+      "startLine": 13,
+      "endLine": 17,
+      "anchor": "req.query.url + req.query.symbol",
+      "category": "ssrf",
+      "description": "Server fetches a URL built from query parameters",
+      "docRef": "app/views/tutorial/ssrf.html (routes/research.js)",
+      "source": "doc-file-function"
+    }
+  ],
+  "nearMissIgnore": [
+    "redos-bank-routing",
+    "a9-marked-old-version",
+    "a8-csrf-missing"
+  ],
+  "nearMissReject": [
+    {
+      "item": "a2-user-enumeration",
+      "hint": "xss"
+    },
+    {
+      "item": "a2-user-enumeration",
+      "hint": "reflect"
+    },
+    {
+      "item": "a2-user-enumeration",
+      "hint": "csrf"
+    },
+    {
+      "item": "a2-session-fixation",
+      "hint": "username"
+    },
+    {
+      "item": "a2-session-fixation",
+      "hint": "xss"
+    },
+    {
+      "item": "a2-session-fixation",
+      "hint": "reflect"
+    },
+    {
+      "item": "a2-session-fixation",
+      "hint": "csrf"
+    },
+    {
+      "item": "a2-session-fixation",
+      "hint": "logout"
+    },
+    {
+      "item": "a2-session-cookie-flags",
+      "hint": "unbounded"
+    },
+    {
+      "item": "a2-session-cookie-flags",
+      "hint": "uninitialized"
+    },
+    {
+      "item": "a2-session-cookie-flags",
+      "hint": "accumulate"
+    },
+    {
+      "item": "a2-session-cookie-flags",
+      "hint": "allocate"
+    },
+    {
+      "item": "a2-session-cookie-flags",
+      "hint": "csrf"
+    },
+    {
+      "item": "a2-session-cookie-flags",
+      "hint": "xss"
+    },
+    {
+      "item": "a2-session-cookie-flags",
+      "hint": "reflected"
+    },
+    {
+      "item": "a2-session-cookie-flags",
+      "hint": "anonymous"
+    },
+    {
+      "item": "a1-nosql-where",
+      "hint": "caller-selected"
+    },
+    {
+      "item": "a1-nosql-where",
+      "hint": "cross-user allocation lookup"
+    },
+    {
+      "item": "a4-allocations-idor",
+      "hint": "$where injection"
+    }
+  ],
+  "decoys": [],
+  "notCovered": [
+    "A5 security misconfiguration headers (x-powered-by, helmet): absences inside a commented block, nothing to match (app/views/tutorial/a5.html)",
+    "Hardcoded cookie secret and crypto key in config/env/all.js: real, but the tutorial offers those literals as the fix example, so they are not in the key",
+    "Anything else the tutorial does not discuss. A finding there is 'unmatched'; the 10 highest severity unmatched findings per app were classified by hand"
+  ],
+  "mismatches": []
+}

@@ -14,23 +14,39 @@ const FAMILY_PATTERNS = {
   "weak-crypto": /crypto|\bmd5\b|sha-?1\b|\becb\b|\brsa\b|\bkdf\b|weak (hash|cipher|key)|key size|quantum|pkcs|\bdes\b|unsalted/i,
   xss: /\bxss\b|cross[-_ ]site scripting|html injection|template\.html|unescaped|unsanitized html/i,
   "prompt-injection": /prompt[-_ ]?inj|indirect injection|excessive[-_ ]agency|tool[-_ ]misuse|jailbreak|untrusted (content|text|input|ticket).*(model|prompt|tool|command|shell)|model-controlled|shell tool|agent.*(shell|command)/i,
-  authz: /authz|authori[sz]ation|access[-_ ]control|\bidor\b|insecure direct|missing (auth|ownership|permission|admin)|broken (access|object)|privilege|forced browsing|unauthori[sz]ed/i,
+  authz: /authz|(other|another|any|different) users?(['’]s?)?\b|self-assign|without (an? )?(auth|admin|ownership)|no (admin|ownership) (check|guard)|authori[sz]ation|access[-_ ]control|\bidor\b|insecure direct|missing (auth|ownership|permission|admin)|broken (access|object)|privilege|forced browsing|unauthori[sz]ed/i,
   "output-handling":/output[-_ ]?(handling|manipulation)|insecure output|model output|llm output|improper output|(agent|model|llm|assistant)[a-z ]*(reply|response|output).*(html|escap|markup)|unescaped (agent|model|llm|assistant)/i,
   "iac-network": /security[-_ ]group|subnet|route[-_ ]?table|\broute\b|ingress|0\.0\.0\.0|internet gateway|network (exposure|exposed)|publicly (accessible|exposed|reachable)|public (subnet|route|access)|open to the (internet|world)|exposed to the internet/i,
   "iac-iam": /\biam\b|pass-?role|privilege escalation|wildcard (action|resource|permission)|over-?(permissive|broad) (role|polic|permission)|assume-?role/i,
   "iac-privilege": /privileged|host-?path|docker\.sock|docker socket|host-?(network|pid|ipc)|container escape|node (takeover|compromise)|service-?account|security-?context|run(s|ning)? as root/i,
   "iac-supply": /unpinned|not pinned|pipe[sd]? (into|to) (sh|bash|a shell)|curl[^|]*\|\s*(sh|bash)|install script|:latest|latest tag|remote script|download(s|ed)? and (run|execut)/i,
   "ci-injection": /(script|shell)[-_ ]?inj|workflow[-_ ]?inj|expression[-_ ]?inj|pull_request_target|pwn[-_ ]?request|untrusted (checkout|code|pull)|github\.event|(workflow|github actions?|pull[-_ ]request|pr title).*(inject|untrusted)|inject.*(workflow|github actions?|pull[-_ ]request|pr title)/i,
+  // Families for the real-application answer keys (web apps documented by their projects).
+  xxe: /\bxxe\b|xml external|external entit/i,
+  csrf: /\bcsrf\b|cross[-_ ]site request|anti-?csrf/i,
+  "open-redirect": /open[-_ ]?redirect|unvalidated redirect|redirect/i,
+  redos: /redos|regex[-_ ]?dos|regular expression denial|catastrophic backtrack|nested quantifier|regex.*denial|denial.*regex/i,
+  "vuln-dependency": /vulnerable (dependenc|component|librar|package|version)|outdated|known vulnerab|\bcve-\d|dependenc|supply[-_ ]chain/i,
+  authn: /session (fixation|management|regenerat|hijack)|fixation|httponly|cookie (flag|attribute|secur)|insecure cookie|weak password|password (policy|complexity|strength|requirement)|(user(name)?|account|password) enumeration|user enumeration/i,
+  transport: /insecure (http|transport|connection)|cleartext|plain-?text (http|transport)|unencrypted|without (tls|https|ssl)|no (tls|https)|http (instead|rather)|\bhttps\b/i,
+  misconfig: /stack ?trace|x-powered-by|verbose error|debug mode|debug=true|misconfig|security header|query logging|logging (of )?(sensitive|queries)/i,
+  "rate-limit": /rate[-_ ]?limit|brute[-_ ]?force|resource consumption|throttl|lockout/i,
+  "mass-assignment": /mass[-_ ]assign|over-?posting|admin (flag|field|role).*(register|request|body)/i,
 };
 export const FAMILIES = Object.keys(FAMILY_PATTERNS);
 
 /** The set of families a finding belongs to: category and title first, the description only when those say nothing. */
 export function familiesOf(finding) {
+  // A saved scan keeps the families it was scored with, so a report can be scored again against a corrected key.
+  if (Array.isArray(finding.families)) return new Set(finding.families);
   const head = `${finding.category ?? ""} ${finding.title ?? ""}`;
   let found = FAMILIES.filter((family) => FAMILY_PATTERNS[family].test(head));
   if (!found.length) found = FAMILIES.filter((family) => FAMILY_PATTERNS[family].test(finding.description ?? ""));
   return new Set(found);
 }
+
+/** An item names one family or a list of them (a documented class that several scan labels fit). */
+export const itemCategories = (item) => (Array.isArray(item.category) ? item.category : [item.category]);
 
 const normPath = (p) => String(p ?? "").replace(/\\/g, "/").replace(/^\.?\//, "");
 
@@ -78,7 +94,7 @@ export function scoreFindings(answer, findings, { tolerance = LINE_TOLERANCE } =
     // An item may name other places the same flaw shows (`alsoAt`): the sink in a helper file, the route that reaches it.
     const spots = (item) => [item, ...(item.alsoAt ?? [])];
     return items
-      .map((item, index) => ({ index, distance: families[i].has(item.category) ? Math.min(...spots(item).map((s) => (samePath(w.path, s.path) ? lineDistance(w.start, w.end, s.startLine, s.endLine) : Infinity))) : Infinity }))
+      .map((item, index) => ({ index, distance: itemCategories(item).some((c) => families[i].has(c)) ? Math.min(...spots(item).map((s) => (samePath(w.path, s.path) ? lineDistance(w.start, w.end, s.startLine, s.endLine) : Infinity))) : Infinity }))
       .filter((c) => c.distance <= tolerance)
       .sort((a, b) => a.distance - b.distance)
       .map((c) => c.index);
@@ -108,6 +124,18 @@ export function scoreFindings(answer, findings, { tolerance = LINE_TOLERANCE } =
     if (answer.clean || decoy) falsePositives.push(label(f));
   });
   if (answer.clean) for (let f = 0; f < findings.length; f++) if (credited.has(f) || candidates[f].length) falsePositives.push(label(f));
+  // Findings that sit on an item (path and lines agree) but whose label names no family of it. They are not credited;
+  // a person reads them, so the report can say how much of the recall gap is wording.
+  const nearMisses = [];
+  findings.forEach((finding, f) => {
+    const w = where[f];
+    if (!w || credited.has(f) || candidates[f].length) return;
+    items.forEach((item, i) => {
+      if (owner[i] !== -1) return;
+      const d = Math.min(...[item, ...(item.alsoAt ?? [])].map((s) => (samePath(w.path, s.path) ? lineDistance(w.start, w.end, s.startLine, s.endLine) : Infinity)));
+      if (d <= tolerance) nearMisses.push({ finding: label(f), item: item.id, distance: d });
+    });
+  });
   const foundIds = items.filter((_, i) => owner[i] !== -1).map((i) => i.id);
   return {
     planted: items.length,
@@ -119,6 +147,7 @@ export function scoreFindings(answer, findings, { tolerance = LINE_TOLERANCE } =
     falsePositives: falsePositives.length,
     decoyHits,
     unmatched,
+    nearMisses,
   };
 }
 
@@ -157,7 +186,7 @@ export function validateAnswer(answer, { fileLines } = {}) {
     }
   }
   for (const item of answer.items ?? []) {
-    if (!FAMILIES.includes(item.category)) problems.push(`${item.id}: unknown category ${item.category} (known: ${FAMILIES.join(", ")})`);
+    for (const c of itemCategories(item)) if (!FAMILIES.includes(c)) problems.push(`${item.id}: unknown category ${c} (known: ${FAMILIES.join(", ")})`);
     if (!item.description) problems.push(`${item.id}: missing description`);
   }
   return problems;

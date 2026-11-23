@@ -1,0 +1,39 @@
+{
+  "fixture": "vampi",
+  "name": "VAmPI, the vulnerable REST API",
+  "repo": "https://github.com/erev0s/VAmPI",
+  "sha": "f16052dce83f05847133ec98f01c5193a41de7d8",
+  "language": "Python / Flask / Connexion / SQLAlchemy",
+  "exclude": ["README.md", "openapi_specs/VAmPI.postman_collection.json", "docker-compose.yaml", "LICENSE"],
+  "excludeWhy": "README.md is the answer source (it lists the nine vulnerability classes); the Postman collection is an exploit walkthrough. The OpenAPI spec stays: it is the app's routing table.",
+  "docSource": "README.md section 'List of Vulnerabilities' (nine classes, no locations) and its 'vulnerable' switch: each class is guarded by a vuln flag and the other branch is the project's own safe version",
+  "items": [
+    { "id": "sqli-get-user", "path": "models/user_model.py", "startLine": 69, "endLine": 80, "anchor": "SELECT * FROM users WHERE username", "category": "sqli", "description": "SQL injection: username concatenated into a query", "docRef": "README.md: SQLi Injection", "source": "located-by-us" },
+    { "id": "unauthorized-password-change", "path": "api_views/users.py", "startLine": 179, "endLine": 203, "anchor": "filter_by(username=username).first()", "category": "authz", "description": "Any logged-in user can change another user's password", "docRef": "README.md: Unauthorized Password Change", "source": "located-by-us" },
+    { "id": "bola-book-secret", "path": "api_views/books.py", "startLine": 45, "endLine": 60, "anchor": "filter_by(book_title=str(book_title))", "category": "authz", "description": "Any user can read any book's secret by title (broken object level authorization)", "docRef": "README.md: Broken Object Level Authorization", "source": "located-by-us" },
+    { "id": "mass-assignment-admin", "path": "api_views/users.py", "startLine": 52, "endLine": 71, "anchor": "'admin' in request_data", "category": ["mass-assignment", "authz"], "description": "Registration accepts an admin flag from the request body", "docRef": "README.md: Mass Assignment", "source": "located-by-us" },
+    { "id": "debug-endpoint-exposure", "path": "api_views/users.py", "startLine": 24, "endLine": 26, "anchor": "get_all_users_debug", "category": ["secret", "authz"], "description": "Unauthenticated debug endpoint returns every user including passwords", "docRef": "README.md: Excessive Data Exposure through debug endpoint", "source": "located-by-us", "alsoAt": [{ "path": "models/user_model.py", "startLine": 58, "endLine": 67 }] },
+    { "id": "user-password-enumeration", "path": "api_views/users.py", "startLine": 101, "endLine": 106, "anchor": "Username does not exist", "category": "authn", "description": "Login errors tell whether the username exists and whether the password was wrong", "docRef": "README.md: User and Password Enumeration", "source": "located-by-us" },
+    { "id": "regex-dos-email", "path": "api_views/users.py", "startLine": 143, "endLine": 146, "anchor": "re.search(", "category": "redos", "description": "Email validation regex with nested quantifiers (catastrophic backtracking)", "docRef": "README.md: RegexDOS (Denial of Service)", "source": "located-by-us" },
+    { "id": "no-rate-limit", "path": "api_views/users.py", "startLine": 85, "endLine": 114, "anchor": "def login_user", "category": "rate-limit", "description": "Login and other endpoints have no rate limiting or resource limits", "docRef": "README.md: Lack of Resources & Rate Limiting", "source": "located-by-us", "alsoAt": [{ "path": "app.py", "startLine": 1, "endLine": 17 }] },
+    { "id": "jwt-weak-secret", "path": "config.py", "startLine": 13, "endLine": 13, "anchor": "'random'", "category": "secret", "description": "JWTs are signed with the constant secret 'random'", "docRef": "README.md: JWT authentication bypass via weak signing key", "source": "located-by-us", "alsoAt": [{ "path": "models/user_model.py", "startLine": 30, "endLine": 53 }] }
+  ],
+  "nearMissIgnore": ["no-rate-limit"],
+  "nearMissReject": [{"item": "jwt-weak-secret", "hint": "plaintext"}, {"item": "debug-endpoint-exposure", "hint": "email"}, {"item": "debug-endpoint-exposure", "hint": "directory"}],
+  "decoys": [
+    { "id": "safe-book-lookup", "path": "api_views/books.py", "startLine": 61, "endLine": 71, "anchor": "filter_by(user=user", "description": "vuln=0 branch: book lookup restricted to the owner" },
+    { "id": "safe-register", "path": "api_views/users.py", "startLine": 67, "endLine": 69, "anchor": "email=request_data['email'])", "description": "vuln=0 branch: registration ignores the admin flag" },
+    { "id": "safe-login-error", "path": "api_views/users.py", "startLine": 107, "endLine": 110, "anchor": "Username or Password Incorrect", "description": "vuln=0 branch: one generic login error" },
+    { "id": "safe-email-regex", "path": "api_views/users.py", "startLine": 161, "endLine": 163, "anchor": "regex =", "description": "vuln=0 branch: non-backtracking email regex" },
+    { "id": "safe-password-update", "path": "api_views/users.py", "startLine": 193, "endLine": 196, "anchor": "resp['sub']", "description": "vuln=0 branch: password update only for the token's own user" },
+    { "id": "safe-get-user", "path": "models/user_model.py", "startLine": 79, "endLine": 80, "anchor": "filter_by(username=username)", "description": "vuln=0 branch: parameterised ORM lookup" }
+  ],
+  "notCovered": [
+    "Plaintext password storage and comparison (models/user_model.py, api_views/users.py): real, not in the README list, and not switched by the vulnerable flag",
+    "debug=True and host 0.0.0.0 in app.py, and Flask debugger exposure",
+    "No authentication on /users/v1/{username} and the user list: by design in the README flow",
+    "The README says some things stay vulnerable with the flag off (the debug endpoint), so a finding in a decoy branch about plaintext passwords is partly right; decoy hits are reported and read by hand",
+    "Anything else. A finding there is 'unmatched'; the 10 highest severity unmatched findings per app were classified by hand"
+  ],
+  "mismatches": []
+}

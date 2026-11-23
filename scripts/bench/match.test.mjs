@@ -111,3 +111,43 @@ test("an item can name other places the same flaw shows, and the authz family re
   assert.ok(validateAnswer(key, { fileLines: { "routes/hook.js": 30, "lib/http.js": 10, "routes/orders.js": 40 } }).some((p) => p.includes("past the end of lib/http.js")));
   assert.ok(validateAnswer(key, { fileLines: { "routes/hook.js": 30, "routes/orders.js": 40 } }).some((p) => p.includes("alsoAt file lib/http.js not found")));
 });
+
+test("web-application families come from the title", () => {
+  const fam = (title, category = "other") => familiesOf({ category, title });
+  assert.ok(fam("XML external entity processing in bulk import").has("xxe"));
+  assert.ok(fam("Missing CSRF protection on state-changing forms").has("csrf"));
+  assert.ok(fam("Open redirect through the url parameter").has("open-redirect"));
+  assert.ok(fam("Regular expression denial of service in email check").has("redos"));
+  assert.ok(fam("Outdated mathjs dependency with known vulnerabilities").has("vuln-dependency"));
+  assert.ok(fam("Session fixation: id not regenerated on login").has("authn"));
+  assert.ok(fam("Username enumeration through distinct login errors").has("authn"));
+  assert.ok(fam("Server listens over plain HTTP instead of HTTPS").has("transport"));
+  assert.ok(fam("Stack trace returned to the client").has("misconfig"));
+  assert.ok(fam("No rate limiting on login").has("rate-limit"));
+  assert.ok(fam("Mass assignment of the admin flag on registration").has("mass-assignment"));
+  assert.equal(fam("SQL injection in search").has("xxe"), false);
+});
+
+test("a finding on an item with a label that fits no family is a near miss, not a hit", () => {
+  const key = { fixture: "x", items: [{ id: "p", path: "u.py", startLine: 10, endLine: 12, category: "sqli", description: "d" }], decoys: [] };
+  const r = scoreFindings(key, [{ id: "n", title: "Input is validated late", category: "missing-validation", location: { path: "u.py", startLine: 11 } }]);
+  assert.equal(r.found, 0);
+  assert.deepEqual(r.nearMisses, [{ finding: "n", item: "p", distance: 0 }]);
+  assert.deepEqual(scoreFindings(key, [{ id: "n", title: "x", category: "other", location: { path: "u.py", startLine: 40 } }]).nearMisses, []);
+});
+
+test("access-control wording about other users reads as authz", () => {
+  assert.ok(familiesOf({ category: "missing-validation", title: "Authenticated users can reset another user's password" }).has("authz"));
+  assert.ok(familiesOf({ category: "other", title: "Registration permits administrator self-assignment" }).has("authz"));
+  assert.equal(familiesOf({ category: "style", title: "Users page is slow" }).has("authz"), false);
+});
+
+test("an item may list several categories and any of them credits it", () => {
+  const key = { fixture: "x", items: [{ id: "m", path: "a.js", startLine: 10, endLine: 12, category: ["authz", "weak-crypto"], description: "d" }], decoys: [] };
+  const found = (finding) => scoreFindings(key, [{ location: { path: "a.js", startLine: 11 }, ...finding }]).found;
+  assert.equal(found({ title: "Weak MD5 reset token", category: "weak-crypto" }), 1);
+  assert.equal(found({ title: "Missing authorization on reset", category: "authz" }), 1);
+  assert.equal(found({ title: "SQL injection", category: "sql-injection" }), 0);
+  assert.deepEqual(validateAnswer(key), []);
+  assert.ok(validateAnswer({ ...key, items: [{ ...key.items[0], category: ["authz", "nope"] }] }).some((p) => p.includes("unknown category nope")));
+});
