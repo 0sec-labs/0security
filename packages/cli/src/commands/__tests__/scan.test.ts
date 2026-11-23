@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -213,6 +213,28 @@ describe("runScan", () => {
     await runScan(folder(), options({ failOn: "low" }), deps);
     expect(JSON.parse(String(out[0]))).toMatchObject({ status: "complete", counts: { total: 0 } });
     expect(process.exitCode).toBeUndefined();
+  });
+
+  it("warns when a scan with no findings never opened the source files", async () => {
+    const dir = folder();
+    writeFileSync(join(dir, "app.js"), "app.get('/x', (req, res) => res.send(eval(req.query.x)));\n");
+    writeFileSync(join(dir, "lib.js"), "module.exports = {};\n");
+    const snapshot = { ...finishedSnapshot(), messages: [{ role: "assistant", content: [{ type: "tool_use", name: "bash", input: { command: "cat app.js" } }, { type: "text", text: "Done." }] }] };
+    const { deps, out } = fakes(snapshot, []);
+    await runScan(dir, options(), deps);
+    const report = JSON.parse(String(out[0]));
+    expect(report.status).toBe("complete");
+    expect(report.warnings[0]).toContain("opened 1 of 2 source files");
+    expect(report.warnings[0]).toContain("lib.js");
+  });
+
+  it("does not warn when a scan with no findings named every source file", async () => {
+    const dir = folder();
+    writeFileSync(join(dir, "app.js"), "console.log(1);\n");
+    const snapshot = { ...finishedSnapshot(), messages: [{ role: "assistant", content: [{ type: "tool_use", name: "bash", input: { command: "cat app.js" } }, { type: "text", text: "Done." }] }] };
+    const { deps, out } = fakes(snapshot, []);
+    await runScan(dir, options(), deps);
+    expect(JSON.parse(String(out[0])).warnings).toBeUndefined();
   });
 
   it("exits 1 when a finding reaches --fail-on", async () => {

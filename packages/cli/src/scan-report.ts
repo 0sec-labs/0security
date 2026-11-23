@@ -42,6 +42,8 @@ export interface ScanOutcome {
   passes?: { requested: number; completed: number; failed: number };
   /** Set when the scan ran in batches: what was and was not reviewed. */
   coverage?: ScanCoverage;
+  /** Set when a scan recorded nothing and did not open every source file: what it did not open. The report shows it as a warning. */
+  shallowReview?: string;
   /** Every pass's thread, first to last. */
   threadIds?: readonly string[];
   /** The tier map's decision for this scan, when a tier map applied. */
@@ -180,7 +182,7 @@ export function toScanReport(outcome: ScanOutcome, stored: ScanReport): ScanRepo
     ...(outcome.tier ? { tier: outcome.tier } : {}),
     ...(known.summary ? { known: known.summary } : {}),
     // The stored rows carry a note that the export was rebuilt from a legacy record; a scan is not one.
-    warnings: [...(outcome.tier?.skipped ? [{ stage: "report" as const, message: `Skipped by tier ${outcome.tier.name}${outcome.tier.reason ? `: ${outcome.tier.reason}` : ""}. Nothing was scanned.` }] : []), ...(outcome.tier?.prepassOnly ? [{ stage: "report" as const, message: `Tier ${outcome.tier.name} is pre-pass only: the findings are scanner hits, not reviewed by a model.` }] : []), ...(outcome.coverage && !outcome.coverage.complete ? [{ stage: "report" as const, message: `Partial review: ${outcome.coverage.statement}.${outcome.coverage.resume ? ` ${outcome.coverage.stoppedBy ? `Stopped by ${outcome.coverage.stoppedBy}. ` : ""}Continue with: ${outcome.coverage.resume}` : ""}` }] : []),...(outcome.passes && outcome.passes.failed > 0 ? [{ stage: "report" as const, message: `${outcome.passes.failed} of ${outcome.passes.requested} scan passes could not finish; the findings may be incomplete.` }] : [])].concat(outcome.budgetExhausted ? [{ stage: "report" as const, message: `Stopped at the $${outcome.budgetUsd} budget; findings are partial.` }] : outcome.timedOut ? [{ stage: "report" as const, message: "Stopped at the time limit; findings are partial." }] : []),
+    warnings: [...(outcome.tier?.skipped ? [{ stage: "report" as const, message: `Skipped by tier ${outcome.tier.name}${outcome.tier.reason ? `: ${outcome.tier.reason}` : ""}. Nothing was scanned.` }] : []), ...(outcome.tier?.prepassOnly ? [{ stage: "report" as const, message: `Tier ${outcome.tier.name} is pre-pass only: the findings are scanner hits, not reviewed by a model.` }] : []), ...(outcome.coverage && !outcome.coverage.complete ? [{ stage: "report" as const, message: `Partial review: ${outcome.coverage.statement}.${outcome.coverage.resume ? ` ${outcome.coverage.stoppedBy ? `Stopped by ${outcome.coverage.stoppedBy}. ` : ""}Continue with: ${outcome.coverage.resume}` : ""}` }] : []),...(outcome.shallowReview ? [{ stage: "report" as const, message: outcome.shallowReview }] : []),...(outcome.passes && outcome.passes.failed > 0 ? [{ stage: "report" as const, message: `${outcome.passes.failed} of ${outcome.passes.requested} scan passes could not finish; the findings may be incomplete.` }] : [])].concat(outcome.budgetExhausted ? [{ stage: "report" as const, message: `Stopped at the $${outcome.budgetUsd} budget; findings are partial.` }] : outcome.timedOut ? [{ stage: "report" as const, message: "Stopped at the time limit; findings are partial." }] : []),
     executionSuccessful: !outcome.failed,
     ...(outcome.costUsd !== undefined ? { estimatedCostUsd: outcome.costUsd } : {}),
     ...(outcome.budgetExhausted ? { costCeilingExceeded: true, exitReason: "cost_ceiling_exceeded" as const } : {}),
@@ -222,6 +224,7 @@ export function scanJson(outcome: ScanOutcome, stored: readonly Finding[]): Reco
     ...(outcome.tier ? { tier: outcome.tier } : {}),
     ...(known.summary ? { known: known.summary } : {}),
     ...(outcome.error ? { error: outcome.error } : {}),
+    ...(outcome.shallowReview ? { warnings: [outcome.shallowReview] } : {}),
     ...(outcome.summary ? { summary: outcome.summary } : {}),
     counts: { total: findings.length, critical: count(findings, "critical"), high: count(findings, "high"), medium: count(findings, "medium"), low: count(findings, "low"), info: count(findings, "info") },
     findings: findings.map(finding => ({

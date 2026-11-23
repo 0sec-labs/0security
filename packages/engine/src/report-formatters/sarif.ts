@@ -264,7 +264,7 @@ export function formatSarif(report: ScanReport): string {
         ],
         // What a batched scan reviewed; complete is false when entry points were not reached.
         // The tier map's decision and the known set of a second-opinion scan.
-        ...(report.scanStatus || report.scanFailure || report.coverage || report.tier || report.known ? { properties: { ...(report.scanStatus ? { status: report.scanStatus } : {}), ...(report.scanFailure ? { failure: report.scanFailure } : {}), ...(report.coverage ? { coverage: report.coverage } : {}), ...(report.tier ? { tier: report.tier } : {}), ...(report.known ? { known: report.known } : {}) } } : {}),
+        ...(report.scanStatus || report.scanFailure || report.coverage || report.tier || report.known || report.warnings?.length ? { properties: { ...(report.scanStatus ? { status: report.scanStatus } : {}), ...(report.scanFailure ? { failure: report.scanFailure } : {}), ...(report.coverage ? { coverage: report.coverage } : {}), ...(report.tier ? { tier: report.tier } : {}), ...(report.known ? { known: report.known } : {}), ...(report.warnings?.length ? { warnings: report.warnings.map(warning => warning.message) } : {}) } } : {}),
       },
     ],
   };

@@ -233,6 +233,7 @@ The JSON report has `schemaVersion: 1` and these fields:
 - With batches: `coverage` (`complete`, `statement`, `entryPoints` and `otherGroups` with `total`, `reviewed`, `pending` and `skipped`, `byKind`, `notReached`, `pendingUnits`) and every batch's `threadIds`.
 - When the scan failed or stopped early: `failure` with a `cause` and a plain `message`, and `error` with the thread's own text. With batches, `coverage.retries` (retries allowed and used, and the cause of each) and `coverage.failures` (the batches that stayed pending, with the cause).
 - `counts` by severity, and the model's closing `summary`.
+- `warnings`: present when a scan found nothing and its tool calls never named some source files. It lists the files that were not opened. The status stays `complete`: the check reads the commands the model ran, so it can miss a file read by a method it does not recognise. Run the scan again, or use `--passes 2`.
 - `target`: the folder's name, or the git URL without credentials. It is the same on every machine.
 - With `--passes`: `passes` (asked for, finished, failed) and every pass's `threadIds`.
 - For each finding: `severity`, `category`, `location` (path relative to the scanned folder, with start and end line), `evidence`, and `foundInPasses` with `--passes`. `cvssScore` and `suggestedFix` appear when the scan gave them.

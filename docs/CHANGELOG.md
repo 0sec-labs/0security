@@ -12,6 +12,8 @@ on the GitHub Release tag.
 
 ## [Unreleased]
 
+- Changed: the Markdown report of a scan with no findings is headed "No Findings" instead of "No Vulnerabilities Found". When no pattern scanner can run, the scan prints one line saying it runs without leads and how to install one; FoxGuard now has an install hint.
+- Added: a one-thread scan that records no finding now checks which source files its tool calls named. When some were not opened, the report says "Shallow review" with the files, in the warnings of the Markdown, HTML and PDF reports, in the SARIF run properties and in a `warnings` field of the JSON report. The status stays `complete`. The check reads command text, so a file read in a way it does not recognise is listed as not opened. The Markdown line for a no-findings scan with warnings no longer mentions probe execution.
 - A Sentinel's pull request poll keeps its cursor for long-lived open pull requests: it forgets closed pull requests first, so an open one is no longer reviewed again after the cursor fills up. A repository with more than 190 open pull requests is now refused with "Use a base-branch filter." instead of being polled with churn.
 - `0 findings fix --sandbox docker` no longer follows or truncates a symlinked `.0-sandbox-probe` in the work tree copy. The probe is removed without following it and created exclusively.
 - `0 sbom generate --resolve` keeps Gradle's own error text when every project in a multi-project build fails, instead of only "No dependency tree was produced."

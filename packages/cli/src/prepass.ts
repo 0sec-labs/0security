@@ -48,6 +48,8 @@ export async function runPrePass(folder: string, scanners: string[], rules: stri
     writeFileSync(gitleaksConfig, 'title = "0 default gitleaks config"\n\n[extend]\nuseDefault = true\n');
   }
 
+  // Scanners that were not found. They are reported after the run: one line when none ran, else one line each.
+  const absent: Array<NonNullable<ReturnType<typeof scannerById>>> = [];
   try {
     const lists = await Promise.all(scanners.map(async id => {
       const spec = scannerById(id);
@@ -56,7 +58,7 @@ export async function runPrePass(folder: string, scanners: string[], rules: stri
       const useRules = rules.length > 0 && scannerTakesRules(spec);
       const missing = () => {
         if (useRules) throw new Error(`--rules needs ${spec.id}, which is not installed.`);
-        if (spec.install) note(`${spec.id} is not installed, so it was skipped. Install it: ${spec.install}`);
+        absent.push(spec);
         return undefined;
       };
       if (!binary) return missing();
@@ -101,6 +103,10 @@ export async function runPrePass(folder: string, scanners: string[], rules: stri
       }
     }));
     const ran = lists.filter((entry): entry is NonNullable<typeof entry> => entry !== undefined);
+    if (!ran.length && absent.length === scanners.length && absent.length > 0) {
+      const hints = absent.filter(spec => spec.install).map(spec => `${spec.label}: ${spec.install}`);
+      note(`No pattern scanner is installed, so the scan runs without leads.${hints.length ? ` Install one: ${hints.join("; ")}` : ""}`);
+    } else for (const spec of absent) if (spec.install) note(`${spec.id} is not installed, so it was skipped. Install it: ${spec.install}`);
     if (!ran.length) return undefined;
     const leads = ran.flatMap(entry => entry.leads);
     return { tools: ran.map(entry => entry.tool), leads, total: leads.length };

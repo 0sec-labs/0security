@@ -111,8 +111,16 @@ describe("runPrePass with fake scanners", () => {
     const notes: string[] = [];
     const found = await runPrePass(tmp(), ["gitleaks"], [], { env: { PATH: tmp() }, note: text => notes.push(text) });
     expect(found).toBeUndefined();
-    expect(notes).toEqual([expect.stringContaining("gitleaks is not installed")]);
+    expect(notes).toEqual([expect.stringContaining("No pattern scanner is installed, so the scan runs without leads.")]);
     expect(notes[0]).toContain("brew install gitleaks");
+  });
+
+  posix("names a missing scanner on its own line when another one ran", async () => {
+    const tool = fakeTool("trivy", sarif("trivy", [result("CVE-1", "x", "a.js", 1)]));
+    const notes: string[] = [];
+    const found = await runPrePass(tmp(), ["trivy", "gitleaks"], [], { env: { ...process.env, ZERO_TRIVY_PATH: tool.bin, PATH: "/bin:/usr/bin" }, note: text => notes.push(text) });
+    expect(found?.tools).toEqual(["trivy"]);
+    expect(notes).toEqual([expect.stringContaining("gitleaks is not installed, so it was skipped")]);
   });
 
   posix("finds a scanner on PATH", async () => {

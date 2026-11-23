@@ -134,7 +134,7 @@ describe("batched scan", () => {
         expect(text).toContain("## Coverage");
         expect(text).toContain("reviewed 12 of 20 entry points; 8 not reached (budget)");
         expect(text).not.toContain("The target passed all tests");
-        expect(text).not.toContain("No Vulnerabilities Found");
+        expect(text).not.toContain("No Findings");
       } else expect(JSON.parse(text).runs[0].properties.coverage).toMatchObject({ complete: false, entryPoints: { pending: 8 } });
       process.exitCode = undefined;
     }

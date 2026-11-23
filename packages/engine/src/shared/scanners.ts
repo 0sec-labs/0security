@@ -31,7 +31,7 @@ export interface ScannerSpec {
 const NO_SEMGREPIGNORE = ".0-no-semgrepignore";
 
 export const SCANNERS: readonly ScannerSpec[] = [
-  { id: "foxguard", label: "FoxGuard", command: "foxguard", args: ["--format", "sarif", "{folder}"], isolationArgs: ["--config", "{emptyConfig}"], pathEnv: "ZERO_FOXGUARD_PATH" },
+  { id: "foxguard", label: "FoxGuard", command: "foxguard", args: ["--format", "sarif", "{folder}"], isolationArgs: ["--config", "{emptyConfig}"], pathEnv: "ZERO_FOXGUARD_PATH", install: "run the install script again (it installs FoxGuard next to 0), or set ZERO_FOXGUARD_PATH to a FoxGuard binary" },
   { id: "semgrep", label: "Semgrep", command: "semgrep", args: ["scan", "--sarif", "--quiet", "--metrics", "off", "--config", "{rules}", "{folder}"], isolationArgs: ["--x-semgrepignore-filename", NO_SEMGREPIGNORE], pathEnv: "ZERO_SEMGREP_PATH", install: "brew install semgrep, or see https://semgrep.dev/docs/getting-started/", note: "downloads rules for --config when it is a registry pack" },
   { id: "opengrep", label: "OpenGrep", command: "opengrep", args: ["scan", "--sarif", "--quiet", "--config", "{rules}", "{folder}"], isolationArgs: ["--semgrepignore-filename", NO_SEMGREPIGNORE], pathEnv: "ZERO_OPENGREP_PATH", install: "brew install opengrep, or see https://github.com/opengrep/opengrep" },
   { id: "gitleaks", label: "Gitleaks", command: "gitleaks", args: ["dir", "--report-format", "sarif", "--report-path", "-", "--redact", "--no-banner", "--no-color", "--exit-code", "0", "--log-level", "error", "{folder}"], isolationArgs: ["--config", "{gitleaksConfig}", "--gitleaks-ignore-path", "{emptyIgnore}"], pathEnv: "ZERO_GITLEAKS_PATH", install: "brew install gitleaks, or see https://github.com/gitleaks/gitleaks#installing", reportsSecrets: true },

@@ -105,7 +105,7 @@ export function formatMarkdown(report: ScanReport): string {
     }
   } else {
     if (report.tier?.skipped) return lines.join("\n");
-    lines.push(incomplete || partial || report.warnings.length > 0 ? "## No Confirmed Vulnerabilities" : "## No Vulnerabilities Found");
+    lines.push(incomplete || partial || report.warnings.length > 0 ? "## No Confirmed Vulnerabilities" : "## No Findings");
     lines.push("");
     lines.push(
       report.tier?.prepassOnly
@@ -113,7 +113,7 @@ export function formatMarkdown(report: ScanReport): string {
         : partial
         ? `No vulnerabilities were confirmed in the code that was reviewed (${report.coverage!.statement}).`
         : report.warnings.length > 0
-        ? "The scanner did not confirm vulnerabilities, but target validation or probe execution produced warnings."
+        ? "The scanner did not confirm vulnerabilities, but the scan produced warnings (see Warnings). Read them before relying on this result."
         : report.reviewChecks?.length
           ? "No security vulnerabilities were found in the inspected scope. Advisory review-check results are reported separately above."
           : incomplete ? "The scanner did not confirm vulnerabilities." : "No vulnerabilities were found in the reviewed scope. A scan with no findings is not proof that the code is safe."

@@ -81,7 +81,7 @@ describe("scan tiers", () => {
       const { deps, out } = fakes([], { gitRemote: vi.fn(async () => "git@github.com:acme/archive.git") });
       await runScan(temp(), options({ tiers: tierFile(TIERS), format }), deps);
       const text = out.join("");
-      expect(text).not.toMatch(/No Vulnerabilities Found|passed all tests/);
+      expect(text).not.toMatch(/No Findings|passed all tests/);
       if (format === "md") expect(text).toContain("Skipped by tier skip: archived");
       else expect(JSON.parse(text).runs[0].properties.tier).toMatchObject({ name: "skip", skipped: true });
     }

@@ -18,6 +18,7 @@ import { homeStateDir, parseSarif, parseScannerList, scanPrompt, scannerArgument
 import { runPrePass } from "../prepass.js";
 import { checkRulesScanners, resolveRulePaths } from "../scan-rules.js";
 import { markKnown, mergePasses, scanExitCode, scanJson, toScanReport, type ScanOutcome } from "../scan-report.js";
+import { reviewDepth, shallowReviewWarning, toolCallText } from "../scan-review.js";
 import { coverageReport, DEFAULT_RETRIES, runBatches, type BatchOutcome, type RunBatchesResult } from "../scan-batches.js";
 import { classifyFailure, type FailureCause, type ScanFailure } from "../scan-failure.js";
 import { coverageJson, coverageText, DEFAULT_BATCH_SIZE, planBatchedScan, type BatchedSetup } from "../scan-batched.js";
@@ -279,7 +280,7 @@ export async function connect(options: ConsoleTransportOptions, deps: Pick<ScanD
 }
 
 interface PassContext { prePass?: PrePassLeads; scope?: string[]; known?: KnownItem[]; extras: Partial<ScanOutcome>; steering: Steering; client: ConsoleClient; deps: ScanDeps; resolved: ResolvedTarget; options: ScanOptions; total: number; budget: number; deadline: number }
-interface PassResult { threadId: string; done: FinishedThread; stored: ScanReport; budgetExhausted: boolean; timedOut: boolean; /** The batch's own time limit passed before the scan's. */ batchTimedOut: boolean; /** Why the thread failed, when it did and it was not the budget or a time limit. */ failure?: ScanFailure; /** The thread was asked to continue once after a transient failure. */ resumed?: boolean; costUsd?: number }
+interface PassResult { threadId: string; done: FinishedThread; stored: ScanReport; budgetExhausted: boolean; timedOut: boolean; /** The batch's own time limit passed before the scan's. */ batchTimedOut: boolean; /** Why the thread failed, when it did and it was not the budget or a time limit. */ failure?: ScanFailure; /** What the thread's tool calls named, across every attempt (a continued thread keeps one transcript). */ toolCalls: string; /** The thread was asked to continue once after a transient failure. */ resumed?: boolean; costUsd?: number }
 
 const retryCount = (options: ScanOptions): number => Number(options.retries ?? DEFAULT_RETRIES);
 
@@ -379,7 +380,7 @@ async function runPass(ctx: PassContext, index: number, extra: PassExtra = {}): 
   const budgetExhausted = asJson(done.session).costCeilingExceeded === true;
   const batchTimedOut = timedOut && limit < deadline;
   const failure = threadFailure(done, budgetExhausted, timedOut);
-  return { threadId: id, done, stored: await deps.loadReport(client, id), budgetExhausted, timedOut: timedOut && !batchTimedOut, batchTimedOut, ...(failure ? { failure } : {}), ...(resumed ? { resumed } : {}), ...(costUsd !== undefined ? { costUsd } : {}) };
+  return { threadId: id, done, stored: await deps.loadReport(client, id), budgetExhausted, timedOut: timedOut && !batchTimedOut, batchTimedOut, toolCalls: toolCallText(snapshot), ...(failure ? { failure } : {}), ...(resumed ? { resumed } : {}), ...(costUsd !== undefined ? { costUsd } : {}) };
 }
 
 /** Run `count` tasks, at most `limit` at a time, in order of index. */
@@ -715,11 +716,16 @@ export async function runScan(target: string | undefined, options: ScanOptions, 
     const firstError = results.map(result => (!result.budgetExhausted && !result.timedOut ? result.done.error : undefined)).find(Boolean);
     const partialFailure = results.map(result => result.failure).find(Boolean);
     const failure = scanFailure({ failed, changedError, budgetExhausted, timedOut, batchFailures: partialFailure ? [{ batch: 1, cause: partialFailure.cause, message: partialFailure.message }] : [], hardError: firstError });
+    // A scan that found nothing and never named most of the source files has not shown the code is clean: say which files it did not open.
+    const shallow = merged.length === 0 && !failure && !failed && !budgetExhausted && !timedOut && !results.some(result => result.batchTimedOut) && options.skill === "scan"
+      ? shallowReviewWarning(reviewDepth(resolved.folder, results.map(result => result.toolCalls).join("\n"), scope))
+      : undefined;
     const outcome: ScanOutcome = {
       target: resolved.reportTarget, roots: resolved.roots, threadId: results[0]!.threadId, startedAt, completedAt: deps.now().toISOString(), budgetUsd: budget,
       ...(costKnown ? { costUsd: cost } : {}), budgetExhausted, ...(timedOut ? { timedOut } : {}), failed, ...(options.allowPartial ? { allowPartial: true } : {}),
       ...(changedError ? { error: changedError } : failed && firstError ? { error: firstError } : {}), ...(failure ? { failure } : {}), ...(lead.done.reply ? { summary: lead.done.reply } : {}),
       ...(customLeads?.length ? { customLeads } : {}),
+      ...(shallow ? { shallowReview: shallow } : {}),
       ...(total > 1 ? { passes: { requested: total, completed: results.length, failed: failedPasses }, threadIds: results.map(result => result.threadId) } : {}),
       ...ctx.extras,
     };
