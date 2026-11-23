@@ -1421,6 +1421,8 @@ export interface ScanReport extends ScanPlanExecution {
   tier?: ScanTierInfo;
   /** Present when the scan ran with `--known`. */
   known?: ScanKnownSummary;
+  /** How the scan ended (complete, partial, budget_exhausted, timed_out, skipped, prepass_only, failed); written to the SARIF run properties. */
+  scanStatus?: string;
   target: string;
   scanDepth: ScanDepth;
   startedAt: string;

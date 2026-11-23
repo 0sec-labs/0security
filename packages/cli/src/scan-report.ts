@@ -157,6 +157,7 @@ export function toScanReport(outcome: ScanOutcome, stored: ScanReport): ScanRepo
     durationMs: Math.max(0, Date.parse(outcome.completedAt) - Date.parse(outcome.startedAt)),
     findings,
     summary: { totalAttacks: 0, totalFindings: findings.length, critical: count(findings, "critical"), high: count(findings, "high"), medium: count(findings, "medium"), low: count(findings, "low"), info: count(findings, "info") },
+    scanStatus: scanStatus(outcome),
     ...(outcome.coverage ? { coverage: outcome.coverage } : {}),
     ...(outcome.tier ? { tier: outcome.tier } : {}),
     ...(known.summary ? { known: known.summary } : {}),
