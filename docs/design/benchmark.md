@@ -178,6 +178,136 @@ Share of the reported findings that are new (not matching a known item by file, 
 - Which items count as missed comes from the benchmark matcher applied to the tool's SARIF, so a tool finding that the matcher does not credit counts as a miss. A generic run failed on `crypto-app` and one on `llm-app` (the thread's answer was not backed by its checks), and the `medium-app` run with the flag stopped partial; they are included.
 - The same limits as above apply: tiny synthetic fixtures with textbook bugs, an answer key we wrote, and a model that varies between runs.
 
+## Real applications
+
+The synthetic fixtures are small and textbook-shaped. This section measures `0 scan` on three public, intentionally vulnerable applications whose bugs their own projects document. Code: `scripts/bench/real-apps.mjs`, keys in `scripts/bench/real-apps/`.
+
+The apps are untrusted. The harness clones them as text at a pinned commit, never installs or runs them, and scans a scratch copy.
+
+### Run it
+
+The clones stay outside the repository. The dry run needs them, so it is not part of `node scripts/run-checks.mjs static`.
+
+```bash
+node scripts/bench/real-apps.mjs --clone                  # network; clones each app at its pinned commit into /tmp/realbench
+node scripts/bench/real-apps.mjs --dry-run                # no model: checks every key item against the clones
+node scripts/bench/real-apps.mjs --run --repeat 3 --budget 2 --total-budget 6 --apps dvna
+node scripts/bench/real-apps.mjs --report --out <dir>     # summarises saved scans again, after a key correction
+```
+
+`--run` writes one JSON file per scan (findings, status, coverage, cost) so findings can be read by hand afterwards. `--total-budget` stops new scans once that much is spent.
+
+### Apps, commits and answer keys
+
+| app | commit | items | key source |
+|---|---|---|---|
+| DVNA (Node, Express, Sequelize) | `9ba473add536f66ac9007966acb2a775dd31277a` | 17 | `docs/solution/*.md`: one page per OWASP category with the vulnerable snippet and its file name |
+| NodeGoat (Node, Express, MongoDB) | `c5cb68a7084e4ae7dcc60e6a98768720a81841e8` | 17 | `app/views/tutorial/*.html`: the "Source Code Example" of each page names a file and function |
+| VAmPI (Flask API) | `f16052dce83f05847133ec98f01c5193a41de7d8` | 9 and 6 decoys | `README.md`, "List of Vulnerabilities": nine classes, no locations |
+
+Each item records its file, line range, family, the doc page it comes from and whether the docs or we located it. DVNA: all 17 located by the docs (file and function). NodeGoat: 16 by the docs, 1 by us (the missing CSRF middleware, an absence). VAmPI: all 9 located by us, because the README names classes only.
+
+VAmPI switches each bug with a `vuln` flag, and the other branch is the project's own safe version. Those six safe branches are the decoys, so VAmPI is the only app with documented-safe code.
+
+The scanned copy leaves out the answer source: DVNA `docs/`, `views/vulnerabilities/` and `config/vulns.js`; NodeGoat `app/views/tutorial/` and `test/`; the VAmPI README and Postman collection. It also blanks comments that name the flaw, keeping every line number. NodeGoat's code carries comments such as "Fix for A1" and commented-out fixed code; without the blanking the scan would read the answer (391 lines blanked there, 16 in DVNA, 16 in VAmPI). The app names, the `vuln` flag and the VAmPI docstring in `app.py` stay, so the model knows these are intentionally vulnerable apps.
+
+Not in the keys:
+- Absences with no line to match: DVNA insufficient logging and the `X-Powered-By` header, NodeGoat missing security headers.
+- Anything the docs do not discuss. A real bug found there is "unmatched", not a false positive. It has no credit.
+- One NodeGoat correction: I first read the tutorial's plaintext password and plaintext SSN bugs as already fixed, because the bcrypt and encryption code was there. That code is inside comments. Both are bugs and are in the key now.
+
+### How scans were scored
+
+The automatic matcher is the one from the fixtures: same file, lines within 5, and the finding's label in the item's category family. Matching is one-to-one. I added families for XXE, CSRF, open redirect, ReDoS, vulnerable dependency, authentication weaknesses, plain HTTP, misconfiguration, rate limiting and mass assignment, and let an item list several categories. I widened the authorization family after the first VAmPI scan showed the model writing "Authenticated user can reset another user's password" under the label "missing-validation". That change followed seeing scan output.
+
+The automatic recall is too low for another reason: the model often words a correct finding in a way no family recognises (for example "predictable password-reset token"). So the matcher also reports near misses (a finding on an item's lines whose label fits no family), and I read every near miss and every credited title by hand. The "after review" column counts an item when a finding sits on it and I did not reject the wording. The reject lists are in the keys (`nearMissIgnore`, `nearMissReject`). The strict number is a lower bound and the reviewed number is an upper bound. I rejected, for example, a finding about TLS that the matcher had credited to DVNA's query-logging item.
+
+### Results
+
+Default model (gpt-6-luna), fresh `HOME` per scan, `--budget 2`. Strict is the automatic matcher, reviewed is after my review, each as mean with min-max over the repeats. Scans ran up to six at a time on one machine, so times are inflated and not comparable with other sections.
+
+DVNA (17 items):
+
+| config | scans | strict | reviewed | unmatched findings | cost per scan | time (s) | status and coverage |
+|---|---|---|---|---|---|---|---|
+| default (foxguard pre-pass on) | 3 | 73% (71-76) | 86% (82-88) | 6.7 | $0.229 | 971 (607-1228) | 1 partial: 27 of 43 entry points, 16 not reached after a thread failure; others complete |
+| `--prepass off` | 4 | 69% (65-71) | 85% (82-88) | 5.3 | $0.227 | 789 (648-917) | complete, 43 of 43 |
+| `--scanner foxguard,semgrep` | 4 | 69% (59-82) | 84% (70-88) | 8.3 | $0.230 | 848 (729-941) | complete, 43 of 43 |
+| `--batches on --batch-size 8` | 3 | 61% (53-76) | 82% (76-88) | 7.0 | $0.175 | 340 (329-354) | 1 partial, others 43 of 43 |
+| `--batches off` | 3 | 65% (59-76) | 86% (82-88) | 3.7 | $0.076 | 182 (129-208) | 1 failed, others complete |
+
+NodeGoat (17 items):
+
+| config | scans | strict | reviewed | unmatched findings | cost per scan | time (s) | status and coverage |
+|---|---|---|---|---|---|---|---|
+| default | 3 | 45% (35-53) | 59% (47-70) | 12.3 | $0.306 | 1120 (728-1505) | 1 timed out at 1500 s with 0 of 7 other-file groups reviewed; 27 of 27 entry points |
+| `--prepass off` | 4 | 44% (41-53) | 62% (52-70) | 14.5 | $0.297 | 1113 (751-1394) | 1 partial, others complete |
+| `--scanner foxguard,semgrep` | 3 | 53% (41-65) | 63% (58-64) | 13.0 | $0.300 | 970 (653-1509) | 1 timed out |
+| `--batches on --batch-size 8` | 2 | 44% (41-47) | 68% (64-70) | 18.0 | $0.341 | 408 (299-517) | complete |
+| `--batches off` | 2 | 53% (53) | 65% (58-70) | 7.5 | $0.128 | 299 (275-323) | complete |
+
+VAmPI (9 items, 6 decoys):
+
+| config | scans | strict | reviewed | unmatched findings | decoy hits | cost per scan | time (s) |
+|---|---|---|---|---|---|---|---|
+| default | 5 | 58% (33-67) | 67% (66) | 2.4 | 0.2 raw, 0 real | $0.012 | 116 (95-139) |
+| `--prepass off` | 6 | 67% (56-78) | 74% (66-77) | 1.5 | 0.3 raw, 0 real | $0.010 | 98 (89-131) |
+| `--scanner foxguard,semgrep` | 6 | 54% (44-67) | 67% (66) | 3.7 | 0.7 raw, 0 real | $0.013 | 126 (98-158) |
+| `--batches on --batch-size 8` | 6 | 57% (56-67) | 69% (66-77) | 2.5 | 0.2 raw, 0 real | $0.018 | 109 (91-131) |
+| `--batches off` | 6 | 59% (44-67) | 67% (66) | 1.7 | 0.2 raw, 0 real | $0.010 | 86 (68-100) |
+
+What the tables say:
+
+- No configuration is better than another on any app. Every difference between configs is smaller than the spread between repeats of one config. The foxguard pre-pass, the foxguard and Semgrep pre-pass and batching did not change recall measurably, as on the synthetic fixtures.
+- Reviewed recall is about 85% on DVNA, 60 to 68% on NodeGoat and 67 to 74% on VAmPI. Strict recall is 10 to 25 points lower. The gap is wording, not misses.
+- The default scan already splits a folder with more than 8 entry points into batches (`--batches auto`). On DVNA (43 entry points) and NodeGoat (27) the default and the explicit batched config therefore differ only in concurrency (1 against 3 batches at a time), which is why the batched config is 2 to 3 times faster. The only single-thread config is `--batches off`. It was the cheapest on both (about a third of the cost) and its recall is inside the range of the others. On VAmPI the inventory finds one entry point (Connexion takes its routes from the OpenAPI file), so there was nothing to split and all five configs are single-thread in effect.
+- Decoy hits on VAmPI are 9 over 29 scans. I read all nine. Each is a correct finding on the vulnerable branch whose line range reaches the safe branch (for example a finding on lines 60 to 66 against a safe branch starting at 67). None is a false positive on safe code. The count that matters is therefore 0 of 29 scans, but the matcher's raw number is not 0.
+- The foxguard pre-pass gave the scan 4 to 10 leads per app. Its leads covered the SQL injection, command injection, `eval`, deserialization, hardcoded secrets and one ReDoS (NodeGoat), and none of the authorization, CSRF, XSS or logic bugs.
+- Cost per scan is $0.01 to $0.34. The whole run is $7.58 over 60 scans that wrote a report, plus up to about $1 for scans I killed after a launch mistake and whose cost was not recorded. The cap was $18.
+
+### Unmatched findings, read by hand
+
+For the 10 highest severity distinct unmatched clusters per app (deduplicated across scans), by reading the code:
+
+| app | real and exploitable | real, low value | not a useful finding |
+|---|---|---|---|
+| DVNA | 4: the open redirect and SQL injection reported at their route, CSRF on session routes, stored XSS in the product list, logout CSRF (these are variants of key items or a documented class at another place) | 1: unbounded session store | 5: unquoted environment variable in the entrypoint (operator-set, not attacker-reachable), plain-HTTP port, MySQL without TLS, two cookie hygiene duplicates, synchronous bcrypt |
+| NodeGoat | 8: hardcoded session secret, stored XSS in the benefits table, seeded admin password in the reset script (two reports), reflected XSS in login, profile and signup, benefits changes by any user (a variant of a key item), HTML relayed by the research route | 0 | 2: shell injection in a Grunt task whose argument comes from the developer's command line (one issue reported twice) |
+| VAmPI | 6: public database reset, seeded admin with a known password, plaintext passwords (two reports), debugger on, mutable CI action tags, container runs as root | 1: public book list | 1: example token in the API spec |
+
+Most of what the scan reports beyond the key is real. NodeGoat's key lists one XSS item but the same root cause (template autoescape off) shows in many views, and the scan reports each. The weak findings are infrastructure hygiene and operator-controlled input.
+
+### What the scan missed and why
+
+Misses that happened in every or almost every repeat. "Pointed at" means foxguard reported that file on the scanned copy (run by hand with the same copy). "Opened" means a tool call in the scan's saved transcript names the file. That is evidence of looking, not of reading the right lines.
+
+DVNA:
+- Query logging (`models/index.js`, no `logging: false`). A configuration omission, not a code pattern. The pre-pass did not point at it. The file was named in tool calls in 18 of 19 scans on this app, so the model saw it and did not report it. A scan that credited it was a TLS finding on the same lines, which I rejected.
+- Stack trace in the calculator (`core/appHandler.js`). The route was reviewed and reported as code execution through the old mathjs. The missing error handling was never reported as its own issue. The pre-pass had no hit there.
+- CSRF on the forms. No line holds an absence. Scans reported missing CSRF protection in a few runs at other lines, and reported the authorization problems on the same forms.
+
+NodeGoat:
+- Password policy, username enumeration and cookie flags (`session.js`, `server.js`). All three are weak-rule or absent-flag issues. The pre-pass hit only the session store flags (`saveUninitialized`, `resave`). Scans found "one-character passwords" and "unknown user versus wrong password" in some runs under other wording, which the review counts. The files were opened in 16 of 16 scans.
+- The old `marked` version (`package.json`). Never reported as a vulnerable dependency, and the pre-pass did not hit it. The scan reported the memo CSRF and XSS instead.
+- Plaintext SSN and date of birth (`profile-dao.js`). The file was named in tool calls in only 12 of 16 scans, the one clear case of a file that was often not opened. The comment blanking leaves the plain assignments looking like ordinary code.
+
+VAmPI:
+- ReDoS in the email check. Missed in every scan of every config. The pre-pass has no regex rule for Python. The file was opened every time, so the model read the regex and did not judge it exploitable.
+- Rate limiting. An absence, never reported as such.
+- Username enumeration. Found in most configs, missed in every repeat of four of five. Where it was found the finding was filed as information disclosure.
+
+The pattern across the three apps: the scan opens the files, and the misses are judgement calls on configuration, absent controls and regexes, not unread code. A pre-pass that hits only well-known sink patterns does not point at them.
+
+### What this does not prove
+
+- Three apps, 9 to 17 items each, 2 to 6 scans per cell. A cell's range is two or three runs, so differences of one or two items are noise.
+- These apps are famous. Models may have seen the code, its tutorial or its solutions, so recall may be higher than on a private codebase. The comment blanking removes the in-code answers but not memory of the project.
+- The answer keys follow the projects' documents, but the line ranges are mine, and VAmPI's are all mine. Ranges are whole functions, so a wrong finding in the same function can be credited. The "reviewed" number is an upper bound that depends on my reading, and I wrote the reject lists after seeing the findings.
+- The matcher families were extended after the first scans. The strict numbers are not comparable with the earlier sections.
+- Precision is barely measured. Only VAmPI has documented-safe code, and its six safe branches produced no real false positive. The hand-read unmatched sample is 10 clusters per app by severity, not a random sample, and I judged them from the code without running anything.
+- Scans ran in parallel, one run killed by a launch mistake, and the model, provider and load vary. Time and some failures (one timeout, one failed thread, one failed scan) belong to that run.
+- Nothing here measures fixes, severity or the quality of the reports.
+
 ## Adding a fixture
 
 1. Create `scripts/bench/fixtures/<name>/` with a small app (under 150 lines) in its own language. Keep each bug on a few lines and add at least one decoy: safe code shaped like a bug.
