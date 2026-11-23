@@ -6,6 +6,9 @@ describe("pageTitleFor", () => {
     expect(pageTitleFor("/findings/abc")).toBe("Findings · 0security");
     expect(pageTitleFor("/skills")).toBe("Skills · 0security");
     expect(pageTitleFor("/extensions")).toBe("Extensions · 0security");
+    expect(pageTitleFor("/")).toBe("Command Center · 0security");
+    expect(pageTitleFor("/workers/abc")).toBe("Command Center · 0security");
+    expect(pageTitleFor("/automations")).toBe("Command Center · 0security");
     expect(pageTitleFor("/nope")).toBe("Page not found · 0security");
   });
 });
