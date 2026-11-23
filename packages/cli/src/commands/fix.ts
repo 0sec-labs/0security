@@ -22,6 +22,7 @@ import { resolveFindingId, shortFindingId } from "../finding-id.js";
 import { selectHost, type Host } from "../host/index.js";
 import { commitSubject, footerText, isDraft, pullRequestTitle, type PullRequestConventions } from "./fix-conventions.js";
 import { finishWithError, UsageError } from "./output.js";
+import { runInSandbox, sandboxLabel, validateSandboxImage, type SandboxSpec } from "./fix-sandbox.js";
 
 export { DEFAULT_FIX_POLICY_FILES, parseFixPolicy, loadFixPolicyFile } from "./fix-policy.js";
 import { asJson, finishedThread, usageLine } from "./thread-output.js";
@@ -32,15 +33,15 @@ const DEFAULT_TIMEOUT_SECONDS = 1800;
 const CHECK_TIMEOUT_MS = 10 * 60 * 1000;
 export const BRANCH_PREFIX = "0/fix-";
 
-export interface CheckResult { command: string; code: number; output: string }
+export interface CheckResult { command: string; code: number; output: string; /** Set when the command ran in a container: "<image>, network off". */ sandbox?: string }
 export interface FindingToFix extends FixPromptFinding { fingerprint: string }
 
 export interface FixDeps extends Pick<ScanDeps, "open" | "err" | "sleep" | "startConsole"> {
   out(text: string): void;
   git(cwd: string, args: string[]): Promise<string>;
   gh(cwd: string, args: string[], input?: string): Promise<string>;
-  /** Run one check command in the work tree through the shell. Never throws on a failing command. */
-  check(cwd: string, command: string): Promise<CheckResult>;
+  /** Run one check command in the work tree through the shell, or in a container with `sandbox`. Never throws on a failing command. */
+  check(cwd: string, command: string, sandbox?: SandboxSpec): Promise<CheckResult>;
   loadFinding(id: string, dbPath: string | undefined): FindingToFix;
   loadPolicy(repoRoot: string, options: FixPolicyOptions): LoadedFixPolicy | undefined;
   makeTemp(): string;
@@ -66,7 +67,8 @@ const defaults: FixDeps = {
     running.child.stdin?.end(input ?? "");
     return (await running).stdout;
   },
-  async check(cwd, command) {
+  async check(cwd, command, sandbox) {
+    if (sandbox) return runInSandbox(cwd, command, sandbox);
     try {
       const { stdout, stderr } = await exec("/bin/sh", ["-c", command], { cwd, timeout: CHECK_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 });
       return { command, code: 0, output: `${stdout}${stderr}` };
@@ -119,6 +121,13 @@ const withoutCheckHeadings = (text: string): string => {
   }).join("\n").trim();
 };
 
+/** The sandbox line is written only when every check ran in a container and passed. */
+export function sandboxVerifiedLine(checks: CheckResult[]): string | undefined {
+  if (!checks.length || checks.some(check => check.code !== 0 || !check.sandbox)) return undefined;
+  const labels = [...new Set(checks.map(check => check.sandbox!))];
+  return labels.length === 1 ? `Verified in a sandbox: ${cell(labels[0]!)}.` : undefined;
+}
+
 export function pullRequestBody(finding: FindingToFix, summary: string | undefined, checks: CheckResult[], footer?: string): string {
   const where = finding.path ? `\`${finding.path.replace(/`/g, "'")}${finding.startLine ? `:${finding.startLine}` : ""}\`` : "not given";
   const rows = checks.length ? checks.map(check => `| \`${escapeHtml(check.command.replace(/`/g, "'").replace(/\s+/g, " ")).replace(/\|/g, "\\|")}\` | ${check.code === 0 ? "passed" : `failed (exit ${check.code})`} |`).join("\n") : "| none were run | |";
@@ -132,6 +141,7 @@ export function pullRequestBody(finding: FindingToFix, summary: string | undefin
     "",
     "### Checks",
     `| Command | Result |\n| --- | --- |\n${rows}`,
+    ...(sandboxVerifiedLine(checks) ? ["", sandboxVerifiedLine(checks)!] : checks.some(check => check.sandbox) ? ["", "Not verified in a sandbox: a sandboxed check failed."] : checks.length ? ["", "These checks ran on the machine that ran 0, not in a sandbox."] : []),
     ...(tails ? ["", tails] : []),
     "",
     "### What changed",
@@ -145,7 +155,7 @@ export function pullRequestBody(finding: FindingToFix, summary: string | undefin
 }
 
 export interface FixOptions extends ConsoleTransportOptions {
-  repo?: string; base?: string; test?: string[]; budget: string; model?: string; timeout: string; pr: boolean; format?: string; policy?: string; repoPolicy?: boolean;
+  repo?: string; base?: string; test?: string[]; budget: string; model?: string; timeout: string; pr: boolean; format?: string; policy?: string; repoPolicy?: boolean; sandbox?: string; sandboxImage?: string; sandboxNetwork?: boolean;
 }
 
 export interface FixOutcome {
@@ -163,6 +173,21 @@ async function defaultBase(deps: FixDeps, repo: string, requested?: string): Pro
   return { ref: "HEAD", name: current === "HEAD" ? "main" : current };
 }
 
+/** Check the sandbox flags together. Without --sandbox the checks run on this machine with your privileges. */
+export function sandboxSpec(options: FixOptions, env: NodeJS.ProcessEnv = process.env): SandboxSpec | undefined {
+  if (!options.sandbox) {
+    if (options.sandboxImage || options.sandboxNetwork) throw new UsageError("--sandbox-image and --sandbox-network need --sandbox docker.");
+    return undefined;
+  }
+  if (options.sandbox !== "docker") throw new UsageError("--sandbox must be docker.");
+  if (!options.sandboxImage) throw new UsageError("--sandbox docker needs --sandbox-image, for example maven:3-eclipse-temurin-21.");
+  if (!options.test?.length) throw new UsageError("--sandbox runs your --test commands in the container; give at least one --test.");
+  let image: string;
+  try { image = validateSandboxImage(options.sandboxImage); } catch (error) { throw new UsageError(error instanceof Error ? error.message : String(error)); }
+  if (options.sandboxNetwork) assertEgressAllowed("the network from the fix sandbox (--sandbox-network)", env);
+  return { image, network: Boolean(options.sandboxNetwork) };
+}
+
 export async function runFix(id: string, options: FixOptions, deps: FixDeps): Promise<FixOutcome | undefined> {
   let stopConsole: (() => void) | undefined;
   let temp: string | undefined;
@@ -174,6 +199,7 @@ export async function runFix(id: string, options: FixOptions, deps: FixDeps): Pr
     const budget = Number(options.budget);
     if (!Number.isFinite(budget) || budget <= 0) throw new UsageError("--budget must be a positive number of USD.");
     if (!Number.isFinite(Number(options.timeout)) || Number(options.timeout) <= 0) throw new UsageError("--timeout must be a positive number of seconds.");
+    const sandbox = sandboxSpec(options);
     if (options.computer || options.engineUrl) throw new UsageError("0 fix edits files on this machine; run it against the local console.");
     const finding = deps.loadFinding(id, options.dbPath);
     try { repo = (await deps.git(resolve(options.repo ?? process.cwd()), ["rev-parse", "--show-toplevel"])).trim(); }
@@ -204,7 +230,7 @@ export async function runFix(id: string, options: FixOptions, deps: FixDeps): Pr
       if (conventions) deps.err("applying pull request conventions from the policy");
     }
     const outcomeBase = { finding: finding.id, branch };
-    const thread = await runThread(client, deps, tree, finding, options, budget, policy);
+    const thread = await runThread(client, deps, tree, finding, options, budget, policy, Boolean(sandbox));
     const status = (await deps.git(tree, ["status", "--porcelain", "--untracked-files=all"])).trim();
     const common = { ...outcomeBase, threadId: thread.id, ...(thread.costUsd !== undefined ? { costUsd: thread.costUsd } : {}), ...(thread.budgetExhausted ? { budgetExhausted: true } : {}), ...(thread.timedOut ? { timedOut: true } : {}), ...(thread.reply ? { summary: thread.reply } : {}) };
     if (!status) {
@@ -213,7 +239,7 @@ export async function runFix(id: string, options: FixOptions, deps: FixDeps): Pr
     }
 
     const checks: CheckResult[] = [];
-    for (const command of options.test ?? []) { deps.err(`running: ${command}`); checks.push(await deps.check(tree, command)); }
+    for (const command of options.test ?? []) { deps.err(`running${sandbox ? ` in a sandbox (${sandboxLabel(sandbox)})` : ""}: ${command}`); checks.push(await deps.check(tree, command, sandbox)); }
     const verified = checks.every(check => check.code === 0) && !thread.failed;
 
     await deps.git(tree, ["add", "-A"]);
@@ -276,12 +302,12 @@ async function decoratePullRequest(host: Host, url: string, conventions: PullReq
   }
 }
 
-async function runThread(client: ConsoleClient, deps: FixDeps, folder: string, finding: FindingToFix, options: FixOptions, budget: number, policy?: FixPolicy) {
+async function runThread(client: ConsoleClient, deps: FixDeps, folder: string, finding: FindingToFix, options: FixOptions, budget: number, policy?: FixPolicy, sandboxed = false) {
   const created = asJson(asJson(await client.request("POST", "/api/console/sessions", { runtime: { model: options.model ?? DEFAULT_SCAN_MODEL }, title: `Fix: ${finding.title}`.slice(0, 120), costCeilingUsd: budget })).session);
   const id = String(created.id);
   const path = `/api/console/sessions/${encodeURIComponent(id)}`;
   await client.request("PATCH", `${path}/configuration`, { workspacePath: folder });
-  await client.request("POST", `${path}/messages`, { text: fixPrompt(finding, { tests: options.test ?? [], policy }) });
+  await client.request("POST", `${path}/messages`, { text: fixPrompt(finding, { tests: options.test ?? [], policy, sandboxed }) });
   deps.err(`working in thread ${id} (budget $${Number(budget.toFixed(4))})`);
   const { snapshot, timedOut } = await waitForThread(client, deps, id, Date.now() + Number(options.timeout) * 1000);
   const done = finishedThread(snapshot);
@@ -296,6 +322,9 @@ export function registerFixCommand(program: Command, deps: FixDeps = defaults): 
     .option("--repo <dir>", "Git repository the finding is in (default: the current directory)")
     .option("--base <branch>", "Branch to start from and open the pull request against (default: the remote's default branch)")
     .option("--test <command>", "Check to run after the change; repeat for several. A failing check makes the pull request a draft", collect)
+    .addOption(new Option("--sandbox <mode>", "Run the --test commands in a container instead of on this machine (docker)").choices(["docker"]))
+    .option("--sandbox-image <image>", "Image for --sandbox docker, for example maven:3-eclipse-temurin-21. It must hold the tools and dependencies the tests need")
+    .option("--sandbox-network", "Give the sandbox network access (to download dependencies). Off by default")
     .option("--policy <file>", "Policy file (.json or .yaml) of approved libraries and fix rules; any path you name, relative to the current directory. Default: ~/.0/fix-policy.json|yaml|yml")
     .option("--repo-policy", "Also read fix-policy.* or .zero/fix-policy.* from the repository being fixed (untrusted content; off by default)")
     .option("--no-pr", "Commit on the fix branch but do not push or open a pull request")
@@ -304,7 +333,7 @@ export function registerFixCommand(program: Command, deps: FixDeps = defaults): 
     .option("--timeout <seconds>", "Maximum seconds to wait for the fix", String(DEFAULT_TIMEOUT_SECONDS))
     .addOption(new Option("--format <format>", "Output: text or json").choices(["text", "json"]))
     )
-    .addHelpText("after", "\nNothing is pushed to the base branch and nothing is merged: the change goes to a branch named 0/fix-<id>, and running it again updates the same pull request.\nExit codes: 0 a verified change (or committed with --no-pr), 1 no change or a failed check, 2 usage error, 3 stopped at the budget or time limit.")
+    .addHelpText("after", "\nNothing is pushed to the base branch and nothing is merged: the change goes to a branch named 0/fix-<id>, and running it again updates the same pull request.\nWithout --sandbox, --test commands run on this machine with your privileges. With --sandbox docker they run in a container with no network, limited memory, CPU and processes, a copy of the work tree and none of your environment variables; the pull request says so only when every check passed there.\nExit codes: 0 a verified change (or committed with --no-pr), 1 no change or a failed check, 2 usage error, 3 stopped at the budget or time limit.")
     .action(async (finding: string, options: FixOptions) => {
       try {
         const outcome = await runFix(finding, options, deps);

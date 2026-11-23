@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { FIX_SAFETY_RULES, fixPolicyBlock, fixPrompt, type FixPolicy, type FixPromptFinding } from "./fix-prompt.js";
 
+describe("fixPrompt in a sandbox run", () => {
+  it("tells the model not to run builds or tests when the caller runs them in a sandbox", () => {
+    const finding = { id: "f", title: "t", severity: "high", category: "c", description: "d" };
+    const prompt = fixPrompt(finding, { tests: ["mvn -q test"], sandboxed: true });
+    expect(prompt).toContain("Do not run builds or tests yourself");
+    expect(prompt).not.toContain("run these and report each result");
+    expect(fixPrompt(finding, { tests: ["mvn -q test"] })).toContain("run these and report each result");
+  });
+});
+
 const sampleFinding: FixPromptFinding = {
   id: "find-sql-1",
   title: "SQL injection vulnerability in user lookup",

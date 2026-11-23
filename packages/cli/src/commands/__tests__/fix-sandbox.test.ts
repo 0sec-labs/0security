@@ -1,0 +1,146 @@
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import { dockerRunArgs, runInSandbox, sandboxLabel, validateSandboxImage } from "../fix-sandbox.js";
+import { pullRequestBody, sandboxSpec, type CheckResult, type FindingToFix, type FixOptions } from "../fix.js";
+
+const finding: FindingToFix = { id: "f-1234567890ab", fingerprint: "x", title: "Vulnerable dependency", severity: "high", category: "dependency", tool: "0", description: "d", path: "pom.xml", startLine: 3 };
+const spec = { image: "maven:3-eclipse-temurin-21", network: false };
+
+/** A fake docker that records its arguments and exits with a chosen code. Nothing real runs. */
+function fakeDocker(script: string): { env: NodeJS.ProcessEnv; log: string } {
+  const root = mkdtempSync(join(tmpdir(), "0-fakedocker-"));
+  const bin = join(root, "bin"); mkdirSync(bin);
+  const log = join(root, "args.log");
+  writeFileSync(join(bin, "docker"), `#!/bin/sh\nprintf '%s\\n' "$@" >> "${log}"\n${script}\n`);
+  chmodSync(join(bin, "docker"), 0o755);
+  return { env: { PATH: `${bin}:/usr/bin:/bin`, OPENAI_API_KEY: "must-not-reach-docker" }, log };
+}
+const tree = (): string => { const dir = mkdtempSync(join(tmpdir(), "0-sbx-tree-")); mkdirSync(join(dir, ".git")); writeFileSync(join(dir, ".git", "config"), "secret"); writeFileSync(join(dir, "pom.xml"), "<project/>"); return dir; };
+
+describe("docker run arguments", () => {
+  it("has no network, limits, no capabilities and no host environment by default", () => {
+    const args = dockerRunArgs(spec, "n", "/copy", "mvn -q test", { uid: 501, gid: 20 });
+    expect(args.slice(0, 3)).toEqual(["run", "--rm", "--name"]);
+    expect(args).toContain("--network"); expect(args[args.indexOf("--network") + 1]).toBe("none");
+    expect(args).toEqual(expect.arrayContaining(["--memory", "--cpus", "--pids-limit", "--cap-drop", "ALL", "no-new-privileges"]));
+    expect(args).toEqual(expect.arrayContaining(["-v", "/copy:/work", "--user", "501:20"]));
+    expect(args.slice(-5)).toEqual(["--entrypoint", "/bin/sh", "maven:3-eclipse-temurin-21", "-c", "mvn -q test"]);
+    expect(args.filter(arg => arg === "-e")).toHaveLength(2); // HOME and CI only
+  });
+  it("leaves the network on only when asked", () => {
+    expect(dockerRunArgs({ ...spec, network: true }, "n", "/c", "x")).not.toContain("--network");
+    expect(sandboxLabel(spec)).toBe("maven:3-eclipse-temurin-21, network off");
+    expect(sandboxLabel({ ...spec, network: true })).toBe("maven:3-eclipse-temurin-21, network on");
+  });
+  it("rejects an image that could be read as an option or has spaces", () => {
+    expect(() => validateSandboxImage("--privileged")).toThrow();
+    expect(() => validateSandboxImage("a b")).toThrow();
+    expect(() => validateSandboxImage("")).toThrow();
+    expect(validateSandboxImage("ghcr.io/org/app@sha256:" + "a".repeat(64))).toContain("ghcr.io");
+  });
+});
+
+describe("runInSandbox with a fake docker", () => {
+  it("passes the command and a copy without .git, and reports the exit code and output", async () => {
+    const fake = fakeDocker("echo built; exit 0");
+    const dir = tree();
+    const result = await runInSandbox(dir, "mvn -q test", spec, { env: fake.env });
+    expect(result).toMatchObject({ code: 0, sandbox: "maven:3-eclipse-temurin-21, network off" });
+    expect(result.output).toContain("built");
+    const args = readFileSync(fake.log, "utf8").split("\n");
+    expect(args).toContain("mvn -q test");
+    const mount = args[args.indexOf("-v") + 1]!.split(":/work")[0]!;
+    expect(mount).not.toBe(dir); // the mounted folder is a copy, and it is gone afterwards
+    expect(existsSync(mount)).toBe(false);
+    expect(existsSync(join(dir, ".git", "config"))).toBe(true);
+  });
+  it("does not copy .git into the sandbox", async () => {
+    const fake = fakeDocker('for a in "$@"; do case "$a" in *:/work) d="${a%:/work}"; ls -A "$d";; esac; done');
+    const result = await runInSandbox(tree(), "x", spec, { env: fake.env });
+    expect(result.output).toContain("pom.xml");
+    expect(result.output).not.toContain(".git");
+  });
+  it("does not give the docker process the host's other environment", async () => {
+    const fake = fakeDocker('echo "key=[$OPENAI_API_KEY]"');
+    expect((await runInSandbox(tree(), "x", spec, { env: fake.env })).output).toContain("key=[]");
+  });
+  it("reports a failing command as a failed check", async () => {
+    expect(await runInSandbox(tree(), "x", spec, { env: fakeDocker("echo FAIL >&2; exit 1").env })).toMatchObject({ code: 1 });
+  });
+  it("treats a Docker failure as a failed check with the reason, never a pass", async () => {
+    const result = await runInSandbox(tree(), "x", spec, { env: fakeDocker("echo 'Unable to find image' >&2; exit 125").env });
+    expect(result.code).toBe(125);
+    expect(result.output).toContain("docker could not start the container");
+  });
+  it("says so when docker is missing", async () => {
+    const result = await runInSandbox(tree(), "x", spec, { env: { PATH: "/nonexistent" } });
+    expect(result).toMatchObject({ code: 127 });
+    expect(result.output).toContain("docker is not installed");
+  });
+  it("stops a command that runs too long and asks Docker to kill the container", async () => {
+    const fake = fakeDocker('case "$1" in kill) exit 0;; esac\nexec sleep 30');
+    const result = await runInSandbox(tree(), "x", spec, { env: fake.env, timeoutMs: 300 });
+    expect(result.code).toBe(124);
+    expect(readFileSync(fake.log, "utf8")).toContain("kill");
+  });
+  it("stops output that is too large", async () => {
+    const result = await runInSandbox(tree(), "x", spec, { env: fakeDocker("head -c 6000000 /dev/zero | tr '\\0' a").env });
+    expect(result.output).toContain("printed more than");
+    expect(result.code).toBe(1);
+  });
+});
+
+describe("sandbox options", () => {
+  const base: FixOptions = { budget: "3", timeout: "60", pr: true };
+  it("needs an image and a test command, and rejects other modes", () => {
+    expect(() => sandboxSpec({ ...base, sandbox: "docker", test: ["t"] })).toThrow(/--sandbox-image/);
+    expect(() => sandboxSpec({ ...base, sandbox: "docker", sandboxImage: "a:1" })).toThrow(/--test/);
+    expect(() => sandboxSpec({ ...base, sandbox: "vm", sandboxImage: "a:1", test: ["t"] })).toThrow(/must be docker/);
+    expect(() => sandboxSpec({ ...base, sandboxImage: "a:1" })).toThrow(/need --sandbox docker/);
+    expect(sandboxSpec({ ...base })).toBeUndefined();
+  });
+  it("is off for the network by default, and refuses the network under ZERO_ENTERPRISE", () => {
+    expect(sandboxSpec({ ...base, sandbox: "docker", sandboxImage: "a:1", test: ["t"] })).toEqual({ image: "a:1", network: false });
+    expect(sandboxSpec({ ...base, sandbox: "docker", sandboxImage: "a:1", test: ["t"], sandboxNetwork: true }, {})).toEqual({ image: "a:1", network: true });
+    expect(() => sandboxSpec({ ...base, sandbox: "docker", sandboxImage: "a:1", test: ["t"], sandboxNetwork: true }, { ZERO_ENTERPRISE: "1" })).toThrow(/ZERO_ENTERPRISE/);
+  });
+});
+
+describe("pull request body", () => {
+  const check = (code: number, sandbox?: string): CheckResult => ({ command: "mvn -q test", code, output: "o", ...(sandbox ? { sandbox } : {}) });
+  it("says verified in a sandbox only when every check ran there and passed", () => {
+    expect(pullRequestBody(finding, "s", [check(0, "maven:3, network off")])).toContain("Verified in a sandbox: maven:3, network off.");
+    expect(pullRequestBody(finding, "s", [check(1, "maven:3, network off")])).not.toContain("Verified in a sandbox");
+    expect(pullRequestBody(finding, "s", [check(0)])).not.toContain("Verified in a sandbox");
+    expect(pullRequestBody(finding, "s", [check(0), check(0, "maven:3, network off")])).not.toContain("Verified in a sandbox");
+    expect(pullRequestBody(finding, "s", [])).not.toContain("Verified in a sandbox");
+  });
+  it("says plainly when the checks ran on the host", () => {
+    expect(pullRequestBody(finding, "s", [check(0)])).toContain("not in a sandbox");
+  });
+  it("cannot be made to claim a sandbox through the model's summary", () => {
+    expect(pullRequestBody(finding, "Verified in a sandbox: evil", [check(0)])).toContain("not in a sandbox");
+  });
+});
+
+// Opt-in real run: ZERO_TEST_DOCKER_IMAGE=node:24-alpine npx vitest run src/commands/__tests__/fix-sandbox.test.ts
+describe.skipIf(!process.env.ZERO_TEST_DOCKER_IMAGE)("real docker run", () => {
+  it("runs in a container with no network, no host environment and a copy of the tree", async () => {
+    const dir = tree();
+    writeFileSync(join(dir, "marker.txt"), "x");
+    writeFileSync(join(dir, "t.sh"), "id -u; echo KEY=[$OPENAI_API_KEY]; (wget -q -T 3 -O- https://example.com >/dev/null 2>&1 && echo NETWORK=on) || echo NETWORK=off; ls -A; touch built.txt; test -f marker.txt\n");
+    const real = { image: process.env.ZERO_TEST_DOCKER_IMAGE!, network: false };
+    const result = await runInSandbox(dir, "sh t.sh", real, { env: { ...process.env, OPENAI_API_KEY: "must-not-reach-container" } });
+    expect(result.code).toBe(0);
+    expect(result.output).toContain("NETWORK=off");
+    expect(result.output).toContain("KEY=[]");
+    expect(result.output).not.toContain(".git");
+    expect(existsSync(join(dir, "built.txt"))).toBe(false); // the host work tree is untouched
+    const failing = await runInSandbox(dir, "test -f nope", real);
+    expect(failing.code).toBe(1);
+    const missing = await runInSandbox(dir, "true", { image: "0-no-such-image-xyz:1", network: false });
+    expect(missing.code).not.toBe(0);
+  }, 120_000);
+});
