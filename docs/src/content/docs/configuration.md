@@ -136,6 +136,14 @@ Set them inline, for example `env ZERO_LOG_FORMAT=json 0`.
 | `ZERO_SUPPRESS_PROVIDER_STARTUP_LOG=1` | Hide the `Provider:` startup line. |
 | `ZERO_RUNTIME_TRACE=1` | Print the runtime, provider and model to stderr. |
 
+### Sandbox
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `ZERO_SANDBOX` | `auto` | OS sandbox for extension scripts and MCP servers: `auto` (extensions that declare a `sandbox` block), `require` (every extension, refuse when none is available) or `off`. See [Sandboxing](/extensions/#sandboxing). |
+| `ZERO_SANDBOX_CPU_SECONDS` | unset | CPU time limit for a sandboxed run. |
+| `ZERO_SANDBOX_MEMORY_MB` | unset | Memory limit for a sandboxed run. Linux only. |
+
 ### Retries and timeouts
 
 | Variable | Default | Purpose |
@@ -342,19 +350,20 @@ The estimator prices input, output, cached-input and cache-write tokens from a b
 
 ### Extensions and MCP
 
-An extension or MCP server you add runs other people's code as your user. 0 puts an explicit review in front of it but does not sandbox it. Setup is in [Extensions](/extensions/).
+An extension or MCP server you add runs other people's code as your user. 0 puts an explicit review in front of it. An extension can also declare an OS sandbox, which you approve with it and which `ZERO_SANDBOX` controls. Setup is in [Extensions](/extensions/).
 
 - Commit pins. 0 fetches a git extension without running anything and pins it to a full 40-character commit. It refuses branches, tags and short SHAs. It hashes the installed folder and blocks the extension until you review it again if the folder changes. It pins local folders by content hash.
 - The install prompt. It shows `repo @ commit`, the licence, the file list, hidden-Unicode flags and what the extension can do: scripts it ships, MCP servers (command or URL, variable names), and services it calls (hosts, read or write). Your click echoes the commit, and the server checks that the revision it installs is the one you saw. Only you can approve. 0 refuses an install requested by a thread or without a terminal. The audit log records `extension.install` with the commit and capabilities.
 - Updates prompt again. Any change, even one new script, shows the folder diff and a capability delta and asks again. Third-party extensions never update silently. Built-ins update with the binary.
 - Per-tool MCP pins. The first time an MCP server connects, you approve its tools. 0 stores a sha256 of each tool's name, description, input schema and annotations. If any tool is changed, new or removed, 0 blocks the whole server until you approve again. MCP servers start only when the model first loads them, and run through `beforeCommand` (your approvals). 0 labels their output untrusted and caps it. See [MCP servers in extensions](/extensions/#servers-bundled-in-an-extension).
 - Environment allowlist. A process gets a scrubbed environment plus only the variable names the extension declared and you approved. 0 never passes provider keys unless the extension declares them and the prompt shows them. 0 always rejects loader variables (`LD_PRELOAD`, `DYLD_*`, `NODE_OPTIONS`). A connection token reaches only a declared variable.
+- Sandbox. An extension that declares a `sandbox` block runs its scripts and MCP servers with no network, no access to your home folder and writes only to a scratch folder, unless it declared more and you approved it. `ZERO_SANDBOX=require` applies this to every extension. See [Sandboxing](/extensions/#sandboxing) for the limits.
 - Repo config is a suggestion. A repository's `.0/` or `.claude/` files cannot install or enable anything.
 - Network. Remote MCP servers need https (plain http only to loopback). 0 refuses hosts that resolve to private, loopback, link-local or metadata addresses, and does not follow redirects.
 
 #### Residual risk
 
-- An approved extension or MCP server can read your files, use your network and run programs as your user. Approval is informed consent, not isolation. Use a Computer or SmolVM when you need isolation.
+- An approved extension or MCP server without a sandbox can read your files, use your network and run programs as your user. Approval is informed consent, not isolation. The OS sandbox narrows this but is not a container. Use a Computer or SmolVM when you need isolation.
 - A commit pin shows you got the code you reviewed, not that it is safe. Review the repository, not only the manifest.
 - Extensions have no signatures or publisher identity. A catalog entry marked verified means 0 curated it and pinned its commit.
 - An MCP server sees what the agent sends it. Its tool names, descriptions and results can contain prompt injection.

@@ -118,7 +118,7 @@ Add a provider connection, or list, test or remove one with `--list`, `--test` a
 
 ### config doctor
 
-Check this machine and the engine. `--fix` repairs the local database. The subcommands of `doctor` also work here: `config doctor upgrade`, `config doctor workbench` and `config doctor checks`.
+Check this machine and the engine, including which OS sandbox backends are available (`sandbox-exec`, `bwrap`, Docker). `--fix` repairs the local database. The subcommands of `doctor` also work here: `config doctor upgrade`, `config doctor workbench` and `config doctor checks`.
 
 ```text
 0 config doctor [options] [checks...]

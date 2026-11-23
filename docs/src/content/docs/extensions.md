@@ -57,7 +57,7 @@ From the command line:
 
 Do not type secrets on the command line. An extension declares the variable names it needs, and the review lists them. Add `--format json` for JSON output.
 
-The browser app and headless Threads also read a JSON array in `ZERO_MCP`. Local entries take `id`, `command` and optional `args`, `env` and `cwd`. Remote entries take `id`, `url` and optional `headers`. 0 skips malformed entries and failed connections.
+The browser app and headless Threads also read a JSON array in `ZERO_MCP`. Local entries take `id`, `command` and optional `args`, `env` and `cwd`. Remote entries take `id`, `url` and optional `headers`. Local entries can also take `sandbox` (see [Sandbox your own MCP servers](#sandbox-your-own-mcp-servers)). 0 skips malformed entries and failed connections.
 
 Tools appear as `mcp__<server-id>__<tool-name>`, and results are untrusted. Starting a stdio server runs its code as you, so give it only the credentials and files it needs.
 
@@ -80,6 +80,73 @@ Pinned packages: a server started with `npx`, `bunx`, `pnpm dlx`, `npm exec`, `u
 Remote servers: HTTPS only. Plain `http` works only for `localhost`, `127.0.0.1` or `[::1]`. 0 resolves the host name before connecting and before each request, and refuses a name that points to a private, loopback, link-local or cloud-metadata address. It refuses redirects. 0 declares no sampling, elicitation or roots capability, so a server cannot ask the model or you for anything.
 
 Secrets: a server receives a connector's stored token only for a variable name that its extension declared and you approved (the connector's `env`). The value comes from the connection store, never the model's environment, and 0 masks it if the server echoes it back. Commands that change approvals or connections refuse to run from inside a server or from any Thread.
+
+## Sandboxing
+
+A sandbox limits what an extension's scripts and MCP servers can touch at the operating system level. It is off for an extension until the extension declares a `sandbox` block, and you approve it in the install prompt.
+
+Declare the block in `extension.json`, next to `connector` (or under `"0"` when you use that object):
+
+```json
+{
+  "name": "docs-search",
+  "version": "1.0.0",
+  "sandbox": { "network": false, "process": false, "readPaths": ["data"], "writePaths": [] }
+}
+```
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `network` | `false` | Allow network connections. |
+| `process` | `false` | Allow starting programs from the system folders. By default only interpreters (`sh`, `bash`, `zsh`, `python`, `python3`, `node`, `bun`) and the extension's own files can start. |
+| `readPaths` | `[]` | Extra read-only paths, relative to the extension folder. `$WORKSPACE` adds the folder you run the extension in. |
+| `writePaths` | `[]` | Extra writable paths, in the same form. |
+
+An unknown key, an absolute path, `~` or `..` makes the manifest invalid. A path must exist inside the extension folder. A symlink that leaves the folder is refused.
+
+Inside the sandbox a process can read the system, its own folder and the extension's declared paths. It can write only to a scratch folder (its `TMPDIR`) and to declared `writePaths`. It cannot read your home folder, `~/.0`, `~/.ssh`, `~/.aws`, other repositories or the scanned folder, and it has no network. The scratch folder is deleted when the run ends. Its working folder is the extension folder, or the workspace when `$WORKSPACE` is declared.
+
+The block is part of what you approve. Adding network access, widening a path list or turning on `process` in a new revision asks again.
+
+### Choose when it applies
+
+Set `ZERO_SANDBOX` to `auto`, `require` or `off`:
+
+```sh
+env ZERO_SANDBOX=require 0
+```
+
+- `auto` is the default. A script or server of an extension with a `sandbox` block runs in the sandbox when this computer has one. Otherwise it runs as before and 0 says so. An extension without a block runs as before.
+- `require` sandboxes every extension script and server. An extension without a block gets the defaults above, with no network. If no sandbox works on this computer, 0 refuses to run it.
+- `off` never uses the sandbox.
+
+Every script run starts its output with a line such as `[sandbox: applied (seatbelt, network off, ...)]` or `[sandbox: not applied (...)]`. A server's load result carries the same line. Run `0 doctor` to see what this computer offers.
+
+When a sandboxed run fails because it needs something it did not declare, the error is the operating system's, for example `Operation not permitted`. Add the missing permission to the `sandbox` block, or set `ZERO_SANDBOX=off` to run without it.
+
+Optional limits apply to sandboxed runs: `ZERO_SANDBOX_CPU_SECONDS` (macOS and Linux) and `ZERO_SANDBOX_MEMORY_MB` (Linux only; macOS does not enforce it). The timeout of the bash tool still applies.
+
+### Sandbox your own MCP servers
+
+Servers you configure in `ZERO_MCP` run as before. Add `"sandbox": true` to one to run it in the sandbox with the defaults, or a declaration with the fields above:
+
+```json
+[{ "id": "notes", "command": "node", "args": ["server.js"], "cwd": "/path/to/notes-server", "sandbox": true }]
+```
+
+A sandboxed entry needs `cwd`, which becomes its read-only folder. Paths in a declaration are relative to `cwd`. This setting applies whatever `ZERO_SANDBOX` says, and the server does not start if no sandbox works. A server that downloads packages at start, such as one run with `npx`, needs `network` and cannot write its package cache, so it does not fit.
+
+### What the sandbox does not do
+
+- It is not a container or a virtual machine. It does not hide the system, other users' public files or the kernel.
+- On macOS it uses `sandbox-exec` (Seatbelt). Apple marks it deprecated. It works today, and a future macOS can remove it. Reads under your home folder are denied, including whether a file exists. Outside it, a process can see that a file exists but cannot read it.
+- On Linux it uses `bwrap` (bubblewrap) and needs user namespaces. Without `process`, only the allowed program files are mounted, so nothing else can start. With `process`, the system program folders are mounted read-only, so any program there can start.
+- On macOS, `process` allows programs from `/bin`, `/usr/bin`, `/usr/local` and `/opt/homebrew`. The macOS profile always lets a process read `/opt/homebrew` and `/usr/local`, because interpreters from Homebrew load libraries from there.
+- Windows has no sandbox backend. `ZERO_SANDBOX=require` refuses to run extensions there.
+- Network is all or nothing. 0 does not filter by host.
+- The sandbox does not stop a script from misusing what you declared: a script with network access can send out anything it can read.
+- The sandbox covers the scripts an extension ships and the MCP servers it declares. It does not cover commands the model writes itself.
+- Tested: macOS Seatbelt (reads, writes, program starts and loopback network, with `curl` and `node`) and Linux bubblewrap inside a privileged Linux container. Not tested: other Linux distributions, kernels with user namespaces disabled, and Windows.
 
 ## Connect a service
 
