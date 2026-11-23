@@ -23,8 +23,10 @@ export const GROUPS = {
     "pnpm test:docs-pointers",
     "node --test scripts/install-script.test.mjs",
     "pnpm check:update-contract",
-    "node --test scripts/bench/match.test.mjs",
+    "node --test scripts/bench/match.test.mjs scripts/bench/verify-score.test.mjs scripts/bench/fix-score.test.mjs scripts/bench/triage-score.test.mjs",
     "node scripts/bench/run.mjs --dry-run",
+    "node scripts/bench/fix-score.mjs --dry-run",
+    "node scripts/bench/triage-score.mjs --dry-run",
   ],
   // Main `browser` job (needs the shared build and Playwright's Chromium).
   browser: [

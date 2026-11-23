@@ -1,0 +1,11 @@
+{
+  "id": "weak-password-hash",
+  "title": "Passwords hashed with unsalted MD5",
+  "category": "weak-crypto",
+  "severity": "high",
+  "language": "javascript",
+  "expectedFiles": [
+    "src/auth.js"
+  ],
+  "note": "Store passwords with a salted, slow password hash (scrypt, pbkdf2 with a high iteration count, or argon2 if available) with a random salt per password. verifyPassword keeps working with the new format and compares in constant time."
+}

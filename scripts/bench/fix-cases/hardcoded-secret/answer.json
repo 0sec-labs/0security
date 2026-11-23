@@ -1,0 +1,11 @@
+{
+  "id": "hardcoded-secret",
+  "title": "Hardcoded session signing key",
+  "category": "hardcoded-secret",
+  "severity": "high",
+  "language": "javascript",
+  "expectedFiles": [
+    "src/session.js"
+  ],
+  "note": "Read the signing key from the SESSION_SECRET environment variable and remove the literal from source. With the variable unset, signing must fail instead of using a default."
+}

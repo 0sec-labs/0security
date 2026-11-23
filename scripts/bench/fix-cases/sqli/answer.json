@@ -1,0 +1,11 @@
+{
+  "id": "sqli",
+  "title": "SQL injection in findUsersByName",
+  "category": "sql-injection",
+  "severity": "high",
+  "language": "javascript",
+  "expectedFiles": [
+    "src/users.js"
+  ],
+  "note": "The user-supplied name must reach the database only as a bound parameter. Use a prepared statement placeholder, not string building or hand-made quoting. Lookups by exact name keep working."
+}

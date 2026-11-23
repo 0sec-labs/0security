@@ -1,0 +1,11 @@
+{
+  "id": "command-injection",
+  "title": "Command injection in countLines",
+  "category": "command-injection",
+  "severity": "critical",
+  "language": "javascript",
+  "expectedFiles": [
+    "src/lines.js"
+  ],
+  "note": "The file name must never be interpreted by a shell. Read the file in Node, or run wc with an argument array and no shell. A name with a space or shell metacharacters is data."
+}

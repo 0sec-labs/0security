@@ -1,0 +1,11 @@
+{
+  "id": "unsafe-eval",
+  "title": "Unsafe eval of a pasted settings document",
+  "category": "unsafe-deserialization",
+  "severity": "critical",
+  "language": "javascript",
+  "expectedFiles": [
+    "src/settings.js"
+  ],
+  "note": "Parse the pasted text as data with JSON.parse. Nothing the user pastes may be executed. Valid JSON settings keep parsing and invalid JSON still throws."
+}

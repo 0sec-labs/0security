@@ -8,15 +8,12 @@
 // classify every finding with the benchmark matcher: a true positive matches a planted bug, a false positive is on a
 // decoy or anywhere in a clean fixture, "other" is neither. The numbers that matter are printed first: real bugs
 // that verification called false-positive, and real bugs that `--apply` would have suppressed.
-import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { join, resolve } from "node:path";
 import { scoreFindings } from "./match.mjs";
+import { defaultCli, isMain, isolatedEnv, repoRoot, run } from "./lib.mjs";
 
-const here = dirname(fileURLToPath(import.meta.url));
-const repoRoot = resolve(here, "../..");
 const DEFAULT_FIXTURES = ["clean-app", "clean-python", "python-flask", "go-http", "node-express", "llm-app"];
 
 /** One finding's class against the answer key: "tp" (matches a planted bug), "fp" (decoy, or any finding in a clean fixture) or "other". */
@@ -42,8 +39,8 @@ export function tally(rows) {
   return t;
 }
 
-function parseArgs(argv) {
-  const o = { run: false, repeat: 1, scanBudget: 0.5, verifyBudget: 1, fixtures: DEFAULT_FIXTURES, cli: join(repoRoot, "packages/cli/dist/index.js"), out: join(tmpdir(), "verify-score"), model: undefined, timeout: 900, scoreFile: undefined };
+export function parseArgs(argv) {
+  const o = { run: false, scans: undefined, repeat: 1, scanBudget: 0.5, verifyBudget: 1, fixtures: DEFAULT_FIXTURES, cli: defaultCli, out: join(tmpdir(), "verify-score"), model: undefined, timeout: 900, scoreFile: undefined };
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i]; const next = () => argv[++i];
     if (a === "--run") o.run = true;
@@ -55,27 +52,52 @@ function parseArgs(argv) {
     else if (a === "--out") o.out = resolve(next());
     else if (a === "--model") o.model = next();
     else if (a === "--score-file") o.scoreFile = resolve(next());
+    else if (a === "--scans") o.scans = resolve(next());
     else throw new Error(`unknown option ${a}`);
   }
   return o;
 }
 
-function runOnce(o, name, repeat) {
+/** A finding as the benchmark matcher reads it, from the JSON that `0 findings export` writes. */
+export function toMatchShape(f) {
+  const where = f.reviewAnnotation ?? {};
+  return { id: f.id, title: f.title, category: f.category, description: f.description, severity: f.severity, ...(where.path ? { location: { path: where.path, startLine: where.startLine, endLine: where.endLine } } : {}) };
+}
+
+/**
+ * Get the fixture's findings into the HOME database and return them. With a scan report for the fixture in
+ * `o.scans` (<fixture>.json from `0 scan --format json -o`) the report is imported and no model is called;
+ * otherwise the fixture is scanned. Either way the report is kept under `o.out` so it can be reused as `--scans`.
+ */
+function obtainFindings(o, name, folder, env, root, model) {
+  const given = o.scans ? join(o.scans, `${name}.json`) : undefined;
+  const cli = (args, timeoutSeconds) => run(process.execPath, [o.cli, ...args], { cwd: repoRoot, env, timeoutSeconds });
+  if (given && existsSync(given)) {
+    const imported = cli(["findings", "reports", "import", given], 120);
+    if (imported.status !== 0) return { findings: [], scanStatus: imported.status, scanCostUsd: undefined };
+    const exported = cli(["findings", "export", "--format", "json"], 60);
+    let findings = []; try { findings = JSON.parse(exported.stdout).findings.map(toMatchShape); } catch { /* nothing exported */ }
+    let cost; try { const r = JSON.parse(readFileSync(given, "utf8")); cost = r.usage?.costUsd ?? r.costUsd; } catch { /* no cost recorded */ }
+    return { findings, scanStatus: 0, scanCostUsd: cost };
+  }
+  const scanFile = join(root, "scan.json");
+  const scan = cli(["scan", folder, "--budget", String(o.scanBudget), "--format", "json", "-o", scanFile, "--timeout", String(o.timeout), ...model], o.timeout + 120);
+  let report; try { report = JSON.parse(readFileSync(scanFile, "utf8")); } catch { /* no report */ }
+  if (report) { mkdirSync(o.out, { recursive: true }); writeFileSync(join(o.out, `${name}.json`), readFileSync(scanFile)); }
+  return { findings: report?.findings ?? [], scanStatus: scan.status, scanCostUsd: report?.usage?.costUsd ?? report?.costUsd };
+}
+
+export function runOnce(o, name, repeat) {
   const answer = JSON.parse(readFileSync(join(repoRoot, "scripts/bench/fixtures", name, "answer.json"), "utf8"));
   const root = mkdtempSync(join(tmpdir(), `verify-${name}-`));
   const folder = join(root, "app");
-  const home = join(root, "home");
-  mkdirSync(home, { recursive: true });
+  const env = isolatedEnv(join(root, "home"));
   cpSync(join(repoRoot, "scripts/bench/fixtures", name), folder, { recursive: true, filter: src => !src.endsWith("answer.json") });
-  const env = { ...process.env, HOME: home, USERPROFILE: home, XDG_CONFIG_HOME: join(home, "config"), XDG_DATA_HOME: join(home, "data"), XDG_CACHE_HOME: join(home, "cache") };
   const model = o.model ? ["--model", o.model] : [];
-  const scanFile = join(root, "scan.json");
-  const scan = spawnSync(process.execPath, [o.cli, "scan", folder, "--budget", String(o.scanBudget), "--format", "json", "-o", scanFile, "--timeout", String(o.timeout), ...model], { env, encoding: "utf8", timeout: (o.timeout + 120) * 1000, cwd: repoRoot });
-  let report; try { report = JSON.parse(readFileSync(scanFile, "utf8")); } catch { /* no report */ }
-  const findings = report?.findings ?? [];
-  const row = { fixture: name, repeat, root, scanStatus: scan.status, findings: findings.length, rows: [], scanCostUsd: report?.usage?.costUsd ?? report?.costUsd };
+  const { findings, scanStatus, scanCostUsd } = obtainFindings(o, name, folder, env, root, model);
+  const row = { fixture: name, repeat, root, scanStatus, findings: findings.length, rows: [], scanCostUsd };
   if (!findings.length) return row;
-  const verify = spawnSync(process.execPath, [o.cli, "findings", "verify", "--folder", folder, "--apply", "--budget", String(o.verifyBudget), "--format", "json", "--timeout", "600", ...model], { env, encoding: "utf8", timeout: 1800 * 1000, cwd: repoRoot });
+  const verify = run(process.execPath, [o.cli, "findings", "verify", "--folder", folder, "--apply", "--budget", String(o.verifyBudget), "--format", "json", "--timeout", "600", ...model], { cwd: repoRoot, env, timeoutSeconds: 1800 });
   let verified; try { verified = JSON.parse(verify.stdout); } catch { row.verifyError = (verify.stderr || verify.stdout).slice(-400); return row; }
   row.verifyCostUsd = verified.costUsd;
   row.stoppedReason = verified.stoppedReason;
@@ -86,6 +108,32 @@ function runOnce(o, name, repeat) {
     row.rows.push({ id: item.finding, title: finding.title, severity: item.severity, cls: classify(answer, finding), verdict: item.verdict ?? item.result, advisorySeverity: item.advisorySeverity, applied: Boolean(item.applied), applyRefused: item.applyRefused, reasoning: item.reasoning });
   }
   return row;
+}
+
+/**
+ * Triage quality against the answer keys. Ground truth: "tp" findings are real planted bugs, "fp" findings are decoys
+ * or anything in a clean fixture, "other" is unknown and left out of the rates. A false-positive verdict is the
+ * triage claiming a finding is noise, so a real bug with that verdict is the loss to watch.
+ */
+export function triageMetrics(rows) {
+  const t = tally(rows);
+  const v = (b, key) => b.byVerdict[key] ?? 0;
+  const ratio = (n, d) => (d ? n / d : null);
+  const tpTotal = t.tp.total, fpTotal = t.fp.total;
+  const tpCalledTp = v(t.tp, "true-positive"), fpCalledTp = v(t.fp, "true-positive");
+  const tpCalledFp = v(t.tp, "false-positive"), fpCalledFp = v(t.fp, "false-positive");
+  const tpKept = tpTotal - tpCalledFp, fpKept = fpTotal - fpCalledFp;
+  return {
+    real: tpTotal, noise: fpTotal, unknown: t.other.total,
+    realCalledFalsePositive: tpCalledFp, realCalledFalsePositiveRate: ratio(tpCalledFp, tpTotal),
+    realSuppressedByApply: t.wronglySuppressed, realSuppressedHighOrCritical: t.wronglySuppressedHighOrCritical,
+    truePositive: { precision: ratio(tpCalledTp, tpCalledTp + fpCalledTp), recall: ratio(tpCalledTp, tpTotal) },
+    falsePositive: { precision: ratio(fpCalledFp, fpCalledFp + tpCalledFp), recall: ratio(fpCalledFp, fpTotal) },
+    uncertainReal: v(t.tp, "uncertain"), uncertainNoise: v(t.fp, "uncertain"),
+    precisionBefore: ratio(tpTotal, tpTotal + fpTotal), precisionAfter: ratio(tpKept, tpKept + fpKept),
+    noiseRemoved: ratio(fpCalledFp, fpTotal), recallLoss: ratio(tpCalledFp, tpTotal),
+    tally: t,
+  };
 }
 
 const pct = (n, d) => (d ? `${n}/${d}` : "0/0");
@@ -113,10 +161,10 @@ export function render(runs) {
   return lines.join("\n");
 }
 
-const direct = process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href;
+const direct = isMain(import.meta.url);
 const o = direct ? parseArgs(process.argv) : { scoreFile: undefined, run: false };
 if (!direct) {
-  // Imported for its helpers (classify, tally, render): nothing to run.
+  // Imported for its helpers (classify, tally, render, runOnce, triageMetrics): nothing to run.
 } else if (o.scoreFile) {
   console.log(render(JSON.parse(readFileSync(o.scoreFile, "utf8")).runs));
 } else if (o.run) {
@@ -132,5 +180,5 @@ if (!direct) {
   }
   console.log(`\n${render(runs)}`);
 } else {
-  console.log("Pass --run to spend model money, or --score-file <runs.json> to re-score saved runs.");
+  console.log("Pass --run to spend model money, or --score-file <runs.json> to re-score saved runs. triage-score.mjs writes the full report.");
 }

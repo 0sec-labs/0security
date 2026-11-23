@@ -1,0 +1,11 @@
+{
+  "id": "open-redirect",
+  "title": "Open redirect after login",
+  "category": "open-redirect",
+  "severity": "medium",
+  "language": "javascript",
+  "expectedFiles": [
+    "src/login.js"
+  ],
+  "note": "Only a local path may be used as the redirect target: one leading slash and no second slash or backslash. Anything else (absolute URLs, protocol-relative URLs, backslash tricks) falls back to the home page."
+}

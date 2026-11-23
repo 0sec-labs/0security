@@ -1,0 +1,11 @@
+{
+  "id": "path-traversal",
+  "title": "Path traversal in readUpload",
+  "category": "path-traversal",
+  "severity": "high",
+  "language": "javascript",
+  "expectedFiles": [
+    "src/uploads.js"
+  ],
+  "note": "A name that resolves outside the uploads folder (dot-dot segments, an absolute path) must be refused. Resolve the path and check it stays inside the root. Files and sub-folders inside the root still read normally."
+}

@@ -1,0 +1,11 @@
+{
+  "id": "missing-authz",
+  "title": "Missing authorization check on note read and delete",
+  "category": "missing-authorization",
+  "severity": "high",
+  "language": "javascript",
+  "expectedFiles": [
+    "src/notes.js"
+  ],
+  "note": "get and remove must check the caller owns the note (an admin may also access it) and refuse otherwise. Owners and admins keep their access. Prefer not-found over a distinct forbidden error."
+}
