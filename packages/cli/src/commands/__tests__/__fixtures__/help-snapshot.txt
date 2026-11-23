@@ -621,6 +621,7 @@ Options:
   --status <status>                 Filter by status: discovered, verified, confirmed, scored,
                                     reported, fixed, false-positive
   --triage <triage>                 Filter by triage: new, accepted, suppressed
+  --expiring <days>                 Only accepted risks that expire within this many days
   --limit <n>                       Max findings/groups to show (default: "50")
   --all                             Show raw finding rows instead of grouped fingerprints (default:
                                     false)
@@ -641,6 +642,8 @@ Commands:
                                     record a verdict next to them
   evidence [options] <folder>       Write one folder of findings, SARIF, SBOM and fix branches, with
                                     a README that says what it does and does not show
+  export-fixes [options]            Report what happened to the fixes burndown proposed: counts,
+                                    pull requests, checks, cost and, on request, merged or closed
   report-draft [options] <finding>  Write a draft early warning, notification or final report about
                                     one finding (Markdown; nothing is sent)
   help [command]                    display help for command
@@ -651,12 +654,16 @@ Usage: 0 findings accept [options] <id>
 Mark a finding family as accepted
 
 Arguments:
-  id                Finding ID (full or prefix)
+  id                     Finding ID (full or prefix)
 
 Options:
-  --db-path <path>  Path to SQLite database
-  --note <text>     Optional triage note
-  -h, --help        display help for command
+  --db-path <path>       Path to SQLite database
+  --reason <text>        Why the risk is accepted (required; --note is the same)
+  --note <text>          Alias of --reason
+  --expires <date|days>  When the acceptance ends: 2026-12-31 or 90d (required). The finding reopens
+                         after it.
+  --approver <name>      Who approved it: a label you type, not a login
+  -h, --help             display help for command
 
 ### 0 findings burndown
 Usage: 0 findings burndown [options]
@@ -678,6 +685,9 @@ Options:
                                   remote's default branch)
   --test <command>                Check to run after each change; repeat for several. A failing
                                   check makes the pull request a draft
+  --policy <file>                 Policy file (.json or .yaml) with fix rules and pull request
+                                  conventions; any path you name. Default:
+                                  ~/.0/fix-policy.json|yaml|yml
   --no-pr                         Commit on the fix branches but do not push or open pull requests
   --concurrency <n>               Fixes at the same time, each in its own work tree (1 to 4)
                                   (default: "1")
@@ -736,6 +746,23 @@ Options:
   --db-path <path>       Path to SQLite database
   --json                 Print the result of writing a file as JSON
   -h, --help             display help for command
+
+### 0 findings export-fixes
+Usage: 0 findings export-fixes [options]
+
+Report what happened to the fixes burndown proposed: counts, pull requests, checks, cost and, on
+request, merged or closed
+
+Options:
+  --repo <dir>        Only fixes recorded for this git repository (default: all)
+  --since <date>      Only fixes recorded on or after this date, like 2026-01-31
+  --check-merged      Ask the code host whether each pull request was merged, closed or edited (one
+                      request each)
+  -o, --output <dir>  Write fix-outcomes.md and fix-outcomes.json into this folder instead of
+                      printing
+  --format <format>   Printed output: markdown or json (choices: "markdown", "json", default:
+                      "markdown")
+  -h, --help          display help for command
 
 ### 0 findings fix
 Usage: 0 findings fix [options] <finding>
@@ -862,6 +889,7 @@ Options:
   --status <status>      Filter by status: discovered, verified, confirmed, scored, reported, fixed,
                          false-positive
   --triage <triage>      Filter by triage: new, accepted, suppressed
+  --expiring <days>      Only accepted risks that expire within this many days
   --limit <n>            Max findings/groups to show
   -h, --help             display help for command
 
@@ -961,12 +989,13 @@ Usage: 0 findings suppress [options] <id>
 Suppress a finding family across duplicate occurrences
 
 Arguments:
-  id                Finding ID (full or prefix)
+  id                 Finding ID (full or prefix)
 
 Options:
-  --db-path <path>  Path to SQLite database
-  --note <text>     Suppression reason
-  -h, --help        display help for command
+  --db-path <path>   Path to SQLite database
+  --note <text>      Suppression reason
+  --approver <name>  Who approved it: a label you type, not a login
+  -h, --help         display help for command
 
 ### 0 findings update
 Usage: 0 findings update [options] <id>
@@ -974,11 +1003,13 @@ Usage: 0 findings update [options] <id>
 Change a finding's status
 
 Options:
-  --status <status>  accepted | suppressed | open | false-positive
-  --note <text>      Why (optional)
-  --reason <text>    Why; required with false-positive
-  --db-path <path>   Path to SQLite database
-  -h, --help         display help for command
+  --status <status>     accepted | suppressed | open | false-positive
+  --note <text>         Why (optional)
+  --reason <text>       Why; required with accepted and false-positive
+  --expires <date|90d>  Accepted: when the acceptance ends (required)
+  --approver <name>     Accepted: who approved it, a label not a login
+  --db-path <path>      Path to SQLite database
+  -h, --help            display help for command
 
 ### 0 findings upload (hidden)
 Usage: 0 findings upload [options] <file>
