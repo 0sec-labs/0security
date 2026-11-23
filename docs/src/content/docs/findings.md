@@ -184,7 +184,8 @@ One thread cannot review every entry point of a big repository, and it cannot te
 1. It lists the entry points without calling a model: routes and handlers (Express, Fastify, Koa, Next, Flask, FastAPI, Django, Go, Spring, Rails, PHP), webhooks, queue and cron consumers, program mains, and the places that deserialize data, accept uploads or run commands. It skips what `.gitignore` ignores and vendored or build folders, and runs nothing from the folder.
 2. Source files no pattern matches are grouped by folder, so every source file belongs to a group. Entry points are reviewed first.
 3. It runs one thread per batch of entry points, one after another. Each thread gets its batch, a short summary of the whole folder, and your `--context` and `--policy` text. The budget left is split between the batches not yet run, with a small minimum.
-4. A batch counts as reviewed only when its thread finished normally. A batch that stopped at its budget, hit the time limit or failed stays pending.
+4. A batch counts as reviewed only when its thread finished normally. A batch that stopped at its budget, hit a time limit or failed stays pending.
+5. A batch that fails because the connection dropped or the provider timed out, was rate limited or returned a server error runs again, up to 2 times (`--retries`). The failed attempt's findings are kept and its cost counts against the budget. A batch that runs past 900 seconds (`--batch-timeout`) is cancelled and stays pending with the reason `timeout`. The next batch still runs.
 
 The report says plainly how much was reviewed:
 
@@ -230,6 +231,7 @@ The JSON report has `schemaVersion: 1` and these fields:
 
 - `status`: `complete`, `partial`, `budget_exhausted`, `timed_out` or `failed`. `partial` means entry points were not reached for a reason other than the budget or time limit. With `--allow-partial`, every early stop is `partial`; `coverage.stoppedBy` says why.
 - With batches: `coverage` (`complete`, `statement`, `entryPoints` and `otherGroups` with `total`, `reviewed`, `pending` and `skipped`, `byKind`, `notReached`, `pendingUnits`) and every batch's `threadIds`.
+- When the scan failed or stopped early: `failure` with a `cause` and a plain `message`, and `error` with the thread's own text. With batches, `coverage.retries` (retries allowed and used, and the cause of each) and `coverage.failures` (the batches that stayed pending, with the cause).
 - `counts` by severity, and the model's closing `summary`.
 - `target`: the folder's name, or the git URL without credentials. It is the same on every machine.
 - With `--passes`: `passes` (asked for, finished, failed) and every pass's `threadIds`.

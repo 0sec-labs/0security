@@ -163,6 +163,61 @@ Exit codes:
 
 Add `--allow-partial` when a partial scan should not fail the job. The exit code then follows the findings alone: 0, or 1 with `--fail-on`. The report still says it is partial.
 
+| Argument | Required | Description |
+| --- | --- | --- |
+| `target` | No |  |
+
+| Option | Registered default | Description |
+| --- | --- | --- |
+| `--budget <usd>` | `5` | Stop when the estimated spend reaches this many USD; partial findings are kept |
+| `--format <format>` | `md` | Report format: json, md, sarif, html, pdf |
+| `-o, --output <file>` | — | Write the report to a file instead of stdout |
+| `--fail-on <severity>` | — | Exit 1 when a finding is at or above this severity (critical, high, medium, low, info) |
+| `--passes <n>` | `1` | Scan this many times and merge the findings (a scan misses some issues that another run finds); the budget is split between them, up to 5 |
+| `--diff <ref>` | — | Review only the files that differ from this git ref (for example origin/main), and what they connect to; an empty diff scans nothing |
+| `--prepass <mode>` | `auto` | auto runs the pattern scanners first when they are installed and gives their hits to the scan as leads; off skips them |
+| `--scanner <id>` | — | Scanner for the pre-pass (foxguard, semgrep, opengrep, gitleaks, trivy, osv-scanner, checkov); repeat or separate with commas to use several (default: foxguard). gitleaks, trivy and osv-scanner must be installed; secret values are redacted |
+| `--rules <file-or-folder>` | — | Semgrep or OpenGrep rules for the pre-pass (a file or a folder); repeat for several. Replaces the default rules and needs --scanner semgrep or opengrep. Rules are never read from the scanned folder unless you name them |
+| `--context <file>` | — | Give the scan this file (a threat model, notes on who may do what) as lower-priority background; repeat for several. It can steer what the scan weighs but cannot change how it works |
+| `--policy <file-or-folder>` | — | Check the code against these Markdown policies (a file or a folder of .md files) and report pass or fail for each; repeat for several. Runs the policy-check skill |
+| `--org-policy <folder>` | — | An organisation's policy folder: evaluated first, and wins when a --policy says otherwise or uses the same id; repeat for several |
+| `--repo-context` | — | Also read .0/threat-model.md from the scanned folder as context. Off by default: a change under review can edit that file; in CI pass the base branch's copy with --context instead |
+| `--repo-ignores` | — | Also let the pre-pass scanners read their configuration and ignore files from the scanned folder (.foxguard.yml, .semgrepignore, .gitleaks.toml, .gitleaksignore, .trivyignore, osv-scanner.toml, .checkov.yaml). Off by default: a change under review can use them to hide findings. Inline suppressions such as nosemgrep always apply |
+| `--skill <id>` | `scan` | Skill that holds the scan method |
+| `--model <model>` | — | Model for the scan thread (default: gpt-6-luna) |
+| `--batches <mode>` | `auto` | auto reviews a large folder in batches, one thread per group of entry points, and records what each batch covered; on always does; off keeps one thread |
+| `--batch-size <n>` | `8` | Entry points one batch reviews (1 to 50); a folder with more than this many is split under --batches auto |
+| `--retries <n>` | `2` | Run a batch again when it fails for a reason that may pass: a dropped connection, a provider timeout, rate limit or server error (0 to 5; 0 turns it off). A thread that is not a batch is asked once to continue. The cost of every attempt counts against --budget |
+| `--batch-timeout <seconds>` | `900` | Longest one batch may run before it is cancelled and left pending (the scan goes on with the next batch); --timeout still limits the whole scan |
+| `--concurrency <n>` | `1` | Batches that run at the same time (1 to 3) |
+| `--resume <scan>` | — | Continue the units an earlier batched scan of this folder did not reach (a scan id from its report, or latest); refuses when the git HEAD changed unless --force |
+| `--force` | — | With --resume: continue even though the folder's git HEAD changed |
+| `--coverage [scan]` | — | Print the coverage ledger of a batched scan of this folder (the latest, or the id given) and exit; --format json for JSON |
+| `--allow-partial` | — | Exit by the findings alone (0, or 1 with --fail-on) when the scan stops before it reviews everything; the report still says it is partial |
+| `--plan` | — | List the entry points, the batches and a rough cost range for the folder, then exit; calls no model and writes nothing |
+| `--tiers <file>` | — | An operator's tier map (YAML or JSON) that sets the budget, batches and skill for this repository, or skips it. Default: scan-tiers.yaml\|yml\|json in the 0 state folder. Never read from the scanned folder on its own; in CI read it from the base branch |
+| `--fail-on-skip` | — | Exit 1 when the tier map skips this scan (default: exit 0, with the skip stated in the report) |
+| `--known <sarif>` | — | SARIF from other tools: the scan is told what is already known and looks for what they missed; findings are labelled new or already-known (confirmedIndependently when the scan analysed it itself). Repeat for several |
+| `--only-new` | — | With --known: leave findings that match a known item out of the report |
+| `--timeout <seconds>` | `3600` | Maximum seconds for the whole scan; what it reviewed so far is reported as partial |
+| `--engine-url <url>` | — | Attach directly to a running trusted engine |
+| `--engine-token-env <name>` | — | Environment variable holding the attached engine token |
+| `--computer <id>` | — | Use a registered remote computer |
+| `--engine <id>` | — |  |
+| `--computers-config <path>` | — | Operator computer connection registry JSON file |
+| `--engines-config <path>` | — |  |
+| `--db-path <path>` | — | Control database of the local engine to attach to |
+
+#### When the model provider fails
+
+A dropped connection, a provider timeout, a rate limit or a server error stops one thread, not the code you scan. A batch that fails for one of these reasons runs again, up to 2 times, after a short wait. Set `--retries <n>` to change that, or `--retries 0` to turn it off. Budget stops, refused keys, invalid requests and cancelled threads are never retried. The cost of every attempt counts against `--budget`.
+
+A scan without batches has no batch to run again. When its thread fails for one of these reasons, 0 asks the same thread once to continue. The findings it recorded stay in the report.
+
+`--timeout` limits the whole scan. `--batch-timeout <seconds>` (default 900) limits one batch. A batch that passes it is cancelled and stays pending with the reason `timeout`, and the scan goes on with the next batch. A scan that passes `--timeout` stops and reports what it reviewed as partial.
+
+When a scan fails or stops early, the error says why, in plain words. The JSON report has the same text in `failure`, with a `cause` such as `provider_connection`, `provider_timeout`, `provider_rate_limit`, `provider_server`, `provider_auth`, `provider_invalid_request`, `no_model`, `budget`, `timeout`, `batch_timeout` or `console_lost`. SARIF has it in the run properties. Keys and tokens are removed from the text.
+
 To see what a scan involves before you run it, use `--plan`. It lists the entry points, the batches and a rough cost, and calls no model:
 
 ```bash
@@ -247,6 +302,8 @@ A hit from your rules is a lead like any other. The scan checks it against the c
 | `--model <model>` | — | Model for the scan thread (default: gpt-6-luna) |
 | `--batches <mode>` | `auto` | auto reviews a large folder in batches, one thread per group of entry points, and records what each batch covered; on always does; off keeps one thread |
 | `--batch-size <n>` | `8` | Entry points one batch reviews (1 to 50); a folder with more than this many is split under --batches auto |
+| `--retries <n>` | `2` | Run a batch again when it fails for a reason that may pass: a dropped connection, a provider timeout, rate limit or server error (0 to 5; 0 turns it off). A thread that is not a batch is asked once to continue. The cost of every attempt counts against --budget |
+| `--batch-timeout <seconds>` | `900` | Longest one batch may run before it is cancelled and left pending (the scan goes on with the next batch); --timeout still limits the whole scan |
 | `--concurrency <n>` | `1` | Batches that run at the same time (1 to 3) |
 | `--resume <scan>` | — | Continue the units an earlier batched scan of this folder did not reach (a scan id from its report, or latest); refuses when the git HEAD changed unless --force |
 | `--force` | — | With --resume: continue even though the folder's git HEAD changed |
@@ -257,7 +314,7 @@ A hit from your rules is a lead like any other. The scan checks it against the c
 | `--fail-on-skip` | — | Exit 1 when the tier map skips this scan (default: exit 0, with the skip stated in the report) |
 | `--known <sarif>` | — | SARIF from other tools: the scan is told what is already known and looks for what they missed; findings are labelled new or already-known (confirmedIndependently when the scan analysed it itself). Repeat for several |
 | `--only-new` | — | With --known: leave findings that match a known item out of the report |
-| `--timeout <seconds>` | `3600` | Maximum seconds to wait for the scan |
+| `--timeout <seconds>` | `3600` | Maximum seconds for the whole scan; what it reviewed so far is reported as partial |
 | `--engine-url <url>` | — | Attach directly to a running trusted engine |
 | `--engine-token-env <name>` | — | Environment variable holding the attached engine token |
 | `--computer <id>` | — | Use a registered remote computer |

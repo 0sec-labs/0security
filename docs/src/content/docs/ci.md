@@ -81,7 +81,7 @@ List inputs and path inputs use only letters, digits and `. _ / + @ = -`. A path
 
 `status` is `partial` when the budget or time limit stopped the scan, or when entry points were not reached. It is `skipped` when a tier map skips the repository, and `prepass_only` when the tier runs only the pattern scanners. The text in `coverage` comes from the CLI's own counts, reduced to letters, digits and basic punctuation.
 
-The job summary lists the status, the coverage sentence, the counts by severity, the tier and, with `known-sarif`, how many findings are new and how many were already known. It never shows text the model wrote, so a scanned file cannot put an `@mention` or an issue reference into it.
+The job summary lists the status, the coverage sentence, why the scan stopped when it did not finish (for example a dropped provider connection), the counts by severity, the tier and, with `known-sarif`, how many findings are new and how many were already known. It never shows text the model wrote, so a scanned file cannot put an `@mention` or an issue reference into it.
 
 ## Partial scans
 
