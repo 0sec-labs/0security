@@ -26,7 +26,7 @@ done
 cp "$FIXTURE/$asset" "$dest"
 `, { mode: 0o755 });
   // Default gh stub: not logged in, so the attestation step falls back deterministically.
-  writeFileSync(join(tools, "gh"), '#!/bin/sh\nif [ "$1" = auth ]; then exit "${GH_AUTH_EXIT:-1}"; fi\nif [ "$1" = attestation ]; then echo "$*" >> "$FIXTURE/gh.log"; exit "${GH_VERIFY_EXIT:-0}"; fi\nexit 1\n', { mode: 0o755 });
+  writeFileSync(join(tools, "gh"), '#!/bin/sh\nif [ "$1" = auth ]; then exit "${GH_AUTH_EXIT:-1}"; fi\nif [ "$1" = attestation ] && [ "$2" = --help ]; then exit "${GH_ATTESTATION_HELP_EXIT:-0}"; fi\nif [ "$1" = attestation ]; then echo "$*" >> "$FIXTURE/gh.log"; [ "${GH_VERIFY_EXIT:-0}" = 0 ] || echo "gh: HTTP 404: Not Found" >&2; exit "${GH_VERIFY_EXIT:-0}"; fi\nexit 1\n', { mode: 0o755 });
   const env = { ...process.env, HOME: home, SHELL: "/bin/bash", PATH: `${tools}:${process.env.PATH}`, FIXTURE: root, INSTALL_FOXGUARD: "0" };
   delete env.INSTALL_DIR;
   return { root, home, env };
@@ -82,6 +82,7 @@ test("a failed attestation blocks the install unless explicitly skipped", () => 
     const blocked = spawnSync("bash", ["install.sh"], { env: failing, encoding: "utf8" });
     assert.notEqual(blocked.status, 0);
     assert.match(blocked.stderr, /could not verify the checksums.txt attestation/);
+    assert.match(blocked.stderr, /HTTP 404: Not Found/, "gh's own error is shown");
     assert.equal(existsSync(join(home, ".0", "bin", "0")), false);
     const skipped = spawnSync("bash", ["install.sh"], { env: { ...failing, INSTALL_ATTESTATION: "0" }, encoding: "utf8" });
     assert.equal(skipped.status, 0, skipped.stderr);
@@ -93,5 +94,14 @@ test("INSTALL_ATTESTATION=require fails when gh cannot verify", () => {
     const installed = spawnSync("bash", ["install.sh"], { env: { ...env, INSTALL_ATTESTATION: "require" }, encoding: "utf8" });
     assert.notEqual(installed.status, 0);
     assert.match(installed.stderr, /requires?|needs an authenticated/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+test("a logged-in gh without the attestation subcommand is treated like a missing gh", () => {
+  const { root, env } = fixture();
+  try {
+    const installed = spawnSync("bash", ["install.sh"], { env: { ...env, GH_AUTH_EXIT: "0", GH_ATTESTATION_HELP_EXIT: "1" }, encoding: "utf8" });
+    assert.equal(installed.status, 0, installed.stderr);
+    assert.match(installed.stderr, /too old for `gh attestation`/);
+    assert.equal(existsSync(join(root, "gh.log")), false);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

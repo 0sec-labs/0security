@@ -74,22 +74,25 @@ case "$INSTALL_ATTESTATION" in auto|require|0) ;; *) fail "INSTALL_ATTESTATION m
 attestation_verify() {
   gh attestation verify "$1" --repo "$2" >/dev/null 2>&1
 }
+# gh older than 2.49 has no `attestation` subcommand; treat it like a missing gh.
 attestation_usable() {
-  command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1
+  command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1 \
+    && gh attestation --help >/dev/null 2>&1
 }
 if [ "$INSTALL_ATTESTATION" = "0" ]; then
   printf '%s\n' "Skipping attestation check (INSTALL_ATTESTATION=0); relying on checksums.txt only." >&2
 elif attestation_usable; then
   printf '%s\n' "Verifying checksums.txt attestation with gh…" >&2
-  if attestation_verify "$manifest" "$REPO"; then
+  if attestation_output="$(gh attestation verify "$manifest" --repo "$REPO" 2>&1)"; then
     printf '%s\n' "checksums.txt attestation verified for ${REPO}." >&2
   else
+    printf '%s\n' "$attestation_output" >&2
     fail "could not verify the checksums.txt attestation for ${REPO}; refusing to install (set INSTALL_ATTESTATION=0 to skip when offline or using a mirror)"
   fi
 elif [ "$INSTALL_ATTESTATION" = "require" ]; then
   fail "INSTALL_ATTESTATION=require needs an authenticated GitHub CLI (gh auth login)"
 else
-  printf '%s\n' "Note: gh is not installed or not logged in, so the release attestation was not verified; falling back to the checksums.txt integrity check. See https://docs.0.security/self-hosting/#verify-a-release to verify manually." >&2
+  printf '%s\n' "Note: gh is not installed, not logged in, or too old for \`gh attestation\` (needs 2.49+), so the release attestation was not verified; falling back to the checksums.txt integrity check. See https://docs.0.security/self-hosting/#verify-a-release to verify manually." >&2
 fi
 
 printf '%s\n' "Downloading ${ASSET}…" >&2
