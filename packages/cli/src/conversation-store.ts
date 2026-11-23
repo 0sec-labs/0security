@@ -39,11 +39,13 @@ async function readConversationCatalog(options: { homeDir?: string; cwd?: string
   try { entries = await readdir(dir, { withFileTypes: true }); } catch { return { documents, truncated }; }
   const candidates = entries.filter(entry => entry.isFile() && entry.name.endsWith(".json") && isValidSessionId(entry.name.slice(0, -5)) && !options.excludedIds?.has(entry.name.slice(0, -5)))
     .sort((a, b) => a.name.localeCompare(b.name));
-  if (candidates.length > MAX_FILES) truncated = true;
-  const files = await Promise.all(candidates.slice(0, MAX_FILES).map(async entry => {
+  const files = await Promise.all(candidates.map(async entry => {
     try { const info = await stat(join(dir, entry.name)); return { name: entry.name, modified: info.mtimeMs }; } catch { return null; }
   }));
-  const ordered = files.filter(file => file !== null).sort((a, b) => b.modified - a.modified || a.name.localeCompare(b.name));
+  // Cap after ordering by recency so the newest transcripts survive the limit.
+  const recent = files.filter(file => file !== null).sort((a, b) => b.modified - a.modified || a.name.localeCompare(b.name));
+  if (recent.length > MAX_FILES) truncated = true;
+  const ordered = recent.slice(0, MAX_FILES);
   let bytes = 0;
   for (const file of ordered) {
     let handle;
