@@ -40,6 +40,7 @@ import type {
   TrustGraphEdgeRow,
 } from "./types.js";
 import type { FindingModelVerification, PersistedFindingReviewFields, WorkflowStatus } from "./finding-helpers.js";
+import type { TriageDetails } from "./repositories/finding-repository.js";
 import { createRepositories, type Repositories } from "./repositories/index.js";
 import type { ScanRepository } from "./repositories/scan-repository.js";
 
@@ -299,8 +300,9 @@ export class osecDB {
     fingerprint: string,
     triageStatus: FindingTriageStatus,
     triageNote?: string,
+    details?: TriageDetails,
   ): void {
-    return this.repos.findings.updateFindingTriageByFingerprint(fingerprint, triageStatus, triageNote);
+    return this.repos.findings.updateFindingTriageByFingerprint(fingerprint, triageStatus, triageNote, details);
   }
 
   updateFindingWorkflowByFingerprint(
@@ -311,8 +313,8 @@ export class osecDB {
     return this.repos.findings.updateFindingWorkflowByFingerprint(fingerprint, workflowStatus, workflowAssignee);
   }
 
-  updateFindingTriage(findingId: string, triageStatus: FindingTriageStatus, triageNote?: string): void {
-    return this.repos.findings.updateFindingTriage(findingId, triageStatus, triageNote);
+  updateFindingTriage(findingId: string, triageStatus: FindingTriageStatus, triageNote?: string, details?: TriageDetails): void {
+    return this.repos.findings.updateFindingTriage(findingId, triageStatus, triageNote, details);
   }
 
   getLatestFindingByFingerprint(fingerprint: string) {

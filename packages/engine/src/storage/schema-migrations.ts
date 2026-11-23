@@ -53,6 +53,8 @@ CREATE TABLE IF NOT EXISTS findings (
   triageStatus TEXT NOT NULL DEFAULT 'new',
   triageNote TEXT,
   triagedAt TEXT,
+  triageExpiresAt TEXT,
+  triageApprover TEXT,
   workflowStatus TEXT NOT NULL DEFAULT 'backlog',
   workflowAssignee TEXT,
   workflowUpdatedAt TEXT,
@@ -409,6 +411,13 @@ export function migrateLegacySchema(sqlite: ShimmedDatabase): void {
   // Second-pass model verification (`0 findings verify`). Additive and nullable.
   if (!colNames.has("modelVerification")) {
     sqlite.exec("ALTER TABLE findings ADD COLUMN modelVerification TEXT");
+  }
+  // Accepted-risk expiry and approver. Additive and nullable.
+  if (!colNames.has("triageExpiresAt")) {
+    sqlite.exec("ALTER TABLE findings ADD COLUMN triageExpiresAt TEXT");
+  }
+  if (!colNames.has("triageApprover")) {
+    sqlite.exec("ALTER TABLE findings ADD COLUMN triageApprover TEXT");
   }
   // Backfill NULL fingerprint / triageStatus / workflowStatus for rows
   // created before those columns existed.

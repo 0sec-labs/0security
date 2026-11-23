@@ -1,6 +1,6 @@
 import type { Command } from "commander";
 import chalk from "chalk";
-import { describeAttackerImpact, compareFindingsBySeverity } from "@0/engine/shared";
+import { acceptanceExpiresWithin, describeAttackerImpact, compareFindingsBySeverity, effectiveTriageStatus } from "@0/engine/shared";
 import type { Finding, FindingTriageStatus, LayerVerdict } from "@0/engine/shared";
 import { writePresentationLine, writePresentationErrorLine } from "../presentation/process-output.js";
 import {
@@ -13,6 +13,8 @@ import {
 import { buildFindingConsoleCommand } from "../finding-handoff.js";
 import { resolveFindingId, shortFindingId, shortFingerprint } from "../finding-id.js";
 import { rowVerification, verificationPhrase } from "../finding-verification.js";
+import { auditTriage, buildTriageRequest, triageLabel, type TriageFlags } from "./findings-triage.js";
+import { UsageError } from "./output.js";
 
 type FindingsListOptions = {
   dbPath?: string;
@@ -21,6 +23,7 @@ type FindingsListOptions = {
   category?: string;
   status?: string;
   triage?: string;
+  expiring?: string;
   limit?: string;
   all?: boolean;
 };
@@ -35,6 +38,8 @@ type FindingRow = {
   fingerprint?: string | null;
   triageStatus?: string | null;
   triageNote?: string | null;
+  triageExpiresAt?: string | null;
+  triageApprover?: string | null;
   /** JSON of the second-pass verification from `0 findings verify`; null until verified. */
   modelVerification?: string | null;
   timestamp: number;
@@ -115,7 +120,8 @@ function withFindingsListOptions(command: Command, options: { defaultLimit?: str
     .option("--severity <severity>", "Filter by severity: critical, high, medium, low, info")
     .option("--category <category>", "Filter by attack category")
     .option("--status <status>", "Filter by status: discovered, verified, confirmed, scored, reported, fixed, false-positive")
-    .option("--triage <triage>", "Filter by triage: new, accepted, suppressed");
+    .option("--triage <triage>", "Filter by triage: new, accepted, suppressed")
+    .option("--expiring <days>", "Only accepted risks that expire within this many days");
   return options.defaultLimit
     ? withFilters.option("--limit <n>", "Max findings/groups to show", options.defaultLimit)
     : withFilters.option("--limit <n>", "Max findings/groups to show");
@@ -134,7 +140,7 @@ async function openDatabaseHolding(id: string, selectedDbPath?: string): Promise
 }
 
 function triageColor(status?: string | null) {
-  switch (status) {
+  switch (status?.split(" ")[0]) {
     case "accepted":
       return chalk.green;
     case "suppressed":
@@ -177,7 +183,7 @@ function renderPriority(row: FindingRow): void {
   console.log(`  ${chalk.white.bold(row.title)}`);
   const attacker = describeAttackerImpact(priorityFinding(row));
   if (attacker) console.log(`  ${chalk.gray(`${attacker.label ?? "What an attacker can do"}:`)} ${attacker.can}`);
-  console.log(`  ${chalk.gray("Technical severity:")} ${severityColor(row.severity)(row.severity)}${row.cvssScore != null ? `  CVSS: ${row.cvssScore}` : ""}${row.cvssVector ? `  CVSS vector: ${row.cvssVector}` : ""}  ${statusColor(row.status)(row.status)}  ${triageColor(row.triageStatus)(String(row.triageStatus ?? "new"))}`);
+  console.log(`  ${chalk.gray("Technical severity:")} ${severityColor(row.severity)(row.severity)}${row.cvssScore != null ? `  CVSS: ${row.cvssScore}` : ""}${row.cvssVector ? `  CVSS vector: ${row.cvssVector}` : ""}  ${statusColor(row.status)(row.status)}  ${triageColor(effectiveTriageStatus(row))(triageLabel(row))}`);
 }
 
 async function renderFindingsList(opts: FindingsListOptions): Promise<void> {
@@ -196,7 +202,17 @@ async function renderFindingsList(opts: FindingsListOptions): Promise<void> {
   choice("severity", opts.severity, ["critical", "high", "medium", "low", "info"]);
   choice("status", opts.status, ["discovered", "verified", "confirmed", "scored", "reported", "fixed", "false-positive"]);
   choice("triage", opts.triage, ["new", "accepted", "suppressed"]);
-  const filters = { scanId: opts.scan, severity: opts.severity, category: opts.category, status: opts.status, triageStatus: opts.triage };
+  let expiringDays: number | undefined;
+  if (opts.expiring !== undefined) {
+    expiringDays = Number(opts.expiring);
+    if (!Number.isSafeInteger(expiringDays) || expiringDays < 1 || expiringDays > 3650) throw new UsageError("--expiring must be a whole number of days from 1 to 3650.");
+    if (opts.triage && opts.triage !== "accepted") throw new UsageError("--expiring lists accepted risks; drop --triage or use --triage accepted.");
+  }
+  // The stored status of a lapsed acceptance is still "accepted", so "new" and "expiring" are decided here, on the effective status.
+  const wanted = (row: FindingRow): boolean => (!opts.triage || effectiveTriageStatus(row) === opts.triage) && (expiringDays === undefined || acceptanceExpiresWithin(row, expiringDays));
+  const filterLater = opts.triage === "new" || expiringDays !== undefined;
+  const filters = { scanId: opts.scan, severity: opts.severity, category: opts.category, status: opts.status, triageStatus: filterLater ? undefined : opts.triage };
+  const queryLimit = filterLater ? 5000 : limit;
   const rows: FindingRow[] = [];
   const groups: Array<{ fingerprint: string; latest: FindingRow; count: number; scans: number }> = [];
   if (!opts.all && !opts.scan && !selectedDbPath && dbPaths.length > 1) {
@@ -204,14 +220,14 @@ async function renderFindingsList(opts: FindingsListOptions): Promise<void> {
     const merged = await new FindingsService({ sharedDbPath: resolveOsecDbPath(), listPaths: listOsecRunDatabasePaths }).list();
     const selected = merged.families.filter(({ latest }) =>
       (!opts.severity || latest.severity === opts.severity) && (!opts.category || latest.category === opts.category)
-      && (!opts.status || latest.status === opts.status) && (!opts.triage || latest.triageStatus === opts.triage)).slice(0, limit);
+      && (!opts.status || latest.status === opts.status) && wanted(latest as FindingRow)).slice(0, limit);
     for (const family of selected) groups.push({ fingerprint: family.key, latest: family.latest as FindingRow, count: family.count, scans: family.scanCount });
   } else {
     for (const dbPath of dbPaths) {
       const db = new osecDB(dbPath);
       try {
-        if (opts.all) rows.push(...db.listFindingsBySeverity({ ...filters, limit }) as FindingRow[]);
-        else for (const family of db.listFindingFamiliesBySeverity({ ...filters, limit })) groups.push({ fingerprint: family.key, latest: family.latest as FindingRow, count: family.count, scans: family.scanCount });
+        if (opts.all) rows.push(...(db.listFindingsBySeverity({ ...filters, limit: queryLimit }) as FindingRow[]).filter(wanted));
+        else for (const family of db.listFindingFamiliesBySeverity({ ...filters, limit: queryLimit }).filter(entry => wanted(entry.latest as FindingRow))) groups.push({ fingerprint: family.key, latest: family.latest as FindingRow, count: family.count, scans: family.scanCount });
       } finally { db.close(); }
     }
   }
@@ -238,7 +254,7 @@ async function renderFindingsList(opts: FindingsListOptions): Promise<void> {
     renderPriority(f);
     renderVerification(f);
     console.log(`  ${chalk.gray(`fp:${shortFingerprint(group.fingerprint)}`)}  ${chalk.gray(f.category)}  ${chalk.gray(`${group.count} hits / ${group.scans} scans`)}  ${chalk.gray(`latest:${f.scanId.slice(0, 8)}`)}`);
-    if (f.triageNote) console.log(`  ${chalk.gray("note:")} ${chalk.dim(f.triageNote)}`);
+    if (f.triageNote) console.log(`  ${chalk.gray("note:")} ${chalk.dim(f.triageNote)}${f.triageApprover && effectiveTriageStatus(f) === "accepted" ? chalk.gray(` (approver: ${f.triageApprover})`) : ""}`);
     console.log("");
   }
 }
@@ -246,9 +262,11 @@ async function renderFindingsList(opts: FindingsListOptions): Promise<void> {
 async function mutateTriage(
   id: string,
   triageStatus: FindingTriageStatus,
-  triageNote: string | undefined,
+  flags: TriageFlags,
   dbPath?: string,
 ): Promise<void> {
+  // Validate before opening a database: a bad flag changes nothing.
+  const request = buildTriageRequest(triageStatus, flags);
   const { db } = await openDatabaseHolding(id, dbPath);
   try {
     const rows = db.listFindings({ limit: 5000 }) as FindingRow[];
@@ -256,10 +274,11 @@ async function mutateTriage(
     if (!finding) {
       throw new Error(`Finding '${id}' not found.`);
     }
-    db.updateFindingTriage(finding.id, triageStatus, triageNote);
+    db.updateFindingTriage(finding.id, request.status, request.note, request.details);
+    auditTriage({ findingId: finding.id, fingerprint: finding.fingerprint ?? finding.id, from: String(finding.triageStatus ?? "new"), request });
     const related = finding.fingerprint ? db.getRelatedFindings(finding.fingerprint) as FindingRow[] : [finding];
     console.log(
-      `${chalk.green("Updated")} ${chalk.white(related.length.toString())} ${chalk.gray("findings in family")} ${chalk.gray(`fp:${shortFingerprint(finding.fingerprint ?? finding.id)}`)} ${chalk.gray(`→ ${triageStatus}`)}`
+      `${chalk.green("Updated")} ${chalk.white(related.length.toString())} ${chalk.gray("findings in family")} ${chalk.gray(`fp:${shortFingerprint(finding.fingerprint ?? finding.id)}`)} ${chalk.gray(`→ ${triageStatus}${request.details.expiresAt ? ` until ${request.details.expiresAt.slice(0, 10)}` : ""}`)}`
     );
   } finally {
     db.close();
@@ -338,6 +357,9 @@ export function registerFindingsCommand(program: Command): void {
         if (finding.triageNote) {
           console.log(`  ${chalk.gray("Triage:")}     ${finding.triageNote}`);
         }
+        if (finding.triageExpiresAt || finding.triageApprover) {
+          console.log(`  ${chalk.gray("Acceptance:")} ${triageLabel(finding)}${finding.triageApprover ? `, approver (label): ${finding.triageApprover}` : ""}`);
+        }
         const verification = rowVerification(finding);
         if (verification) {
           console.log(`  ${chalk.gray("Verification:")} ${verification.verdict}${verification.advisorySeverity ? `, advisory severity ${verification.advisorySeverity}` : ""} (${verification.model ?? "model"}, ${verification.verifiedAt.slice(0, 10)}; advice only, severity and status are unchanged)`);
@@ -381,9 +403,12 @@ export function registerFindingsCommand(program: Command): void {
     .description("Mark a finding family as accepted")
     .argument("<id>", "Finding ID (full or prefix)")
     .option("--db-path <path>", "Path to SQLite database")
-    .option("--note <text>", "Optional triage note")
-    .action(async (id: string, opts: { dbPath?: string; note?: string }, command: Command) => {
-      await mutateTriage(id, "accepted", opts.note, resolveDbPath(opts, command));
+    .option("--reason <text>", "Why the risk is accepted (required; --note is the same)")
+    .option("--note <text>", "Alias of --reason")
+    .option("--expires <date|days>", "When the acceptance ends: 2026-12-31 or 90d (required). The finding reopens after it.")
+    .option("--approver <name>", "Who approved it: a label you type, not a login")
+    .action(async (id: string, opts: TriageFlags & { dbPath?: string }, command: Command) => {
+      await mutateTriage(id, "accepted", opts, resolveDbPath(opts, command));
     });
 
   findingsCmd
@@ -392,8 +417,9 @@ export function registerFindingsCommand(program: Command): void {
     .argument("<id>", "Finding ID (full or prefix)")
     .option("--db-path <path>", "Path to SQLite database")
     .option("--note <text>", "Suppression reason")
-    .action(async (id: string, opts: { dbPath?: string; note?: string }, command: Command) => {
-      await mutateTriage(id, "suppressed", opts.note, resolveDbPath(opts, command));
+    .option("--approver <name>", "Who approved it: a label you type, not a login")
+    .action(async (id: string, opts: TriageFlags & { dbPath?: string }, command: Command) => {
+      await mutateTriage(id, "suppressed", opts, resolveDbPath(opts, command));
     });
 
   findingsCmd
@@ -402,7 +428,7 @@ export function registerFindingsCommand(program: Command): void {
     .argument("<id>", "Finding ID (full or prefix)")
     .option("--db-path <path>", "Path to SQLite database")
     .option("--note <text>", "Optional triage note")
-    .action(async (id: string, opts: { dbPath?: string; note?: string }, command: Command) => {
-      await mutateTriage(id, "new", opts.note, resolveDbPath(opts, command));
+    .action(async (id: string, opts: TriageFlags & { dbPath?: string }, command: Command) => {
+      await mutateTriage(id, "new", opts, resolveDbPath(opts, command));
     });
 }

@@ -166,6 +166,8 @@ export const findingSchema = z
     fingerprint: z.string().optional(),
     triageStatus: z.enum(["new", "accepted", "suppressed"]).optional(),
     triageNote: z.string().optional(),
+    triageExpiresAt: z.string().optional(),
+    triageApprover: z.string().optional(),
     layerVerdicts: z.array(z.unknown()).optional(),
     workflowStatus: z.string().optional(),
     workflowAssignee: z.string().nullable().optional(),

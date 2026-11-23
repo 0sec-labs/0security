@@ -92,13 +92,14 @@ const EXAMPLES: Readonly<Record<string, readonly string[]>> = {
   "sbom generate": ["0 sbom generate . -o sbom.cdx.json", "0 sbom generate ~/code/app --name app"],
   "sbom licenses": ["0 sbom licenses . --preset permissive", "0 sbom licenses sbom.cdx.json --deny 'GPL-*,AGPL-*'", "0 sbom licenses . --policy license-policy.yaml --resolve --format sarif > licenses.sarif"],
   "sbom check": ["0 sbom check sbom.cdx.json", "0 sbom check sbom.cdx.json --format json"],
-  findings: ["0 findings list --severity high", "0 findings show 3f2a", '0 findings update 3f2a --status accepted --note "known"'],
-  "findings list": ["0 findings list --severity high --status verified", "0 findings list --format json", "0 findings list --format sarif -o findings.sarif"],
+  findings: ["0 findings list --severity high", "0 findings show 3f2a", '0 findings update 3f2a --status accepted --reason "fix scheduled" --expires 90d --approver "security lead"'],
+  "findings list": ["0 findings list --expiring 30", "0 findings list --severity high --status verified", "0 findings list --format json", "0 findings list --format sarif -o findings.sarif"],
   "findings show": ["0 findings show 3f2a"],
   "findings evidence": ["0 findings evidence ./evidence --repo .", "0 findings evidence ./evidence --repo . --check-advisories"],
+  "findings export-fixes": ["0 findings export-fixes", "0 findings export-fixes --check-merged -o ./fix-report", "0 findings export-fixes --repo . --since 2026-01-01 --format json"],
   "findings report-draft": ["0 findings report-draft 3f2a --stage early-warning --product app --contact \"Jo, security@example.com\"", "0 findings report-draft 3f2a --stage notification --facts facts.json -o notification.md"],
   "findings issues": ["0 findings issues --repo acme/app --dry-run", "0 findings issues --repo acme/app --min-severity high --max 10"],
-  "findings update": ['0 findings update 3f2a --status false-positive --reason "test fixture"'],
+  "findings update": ['0 findings update 3f2a --status accepted --reason "fix scheduled" --expires 90d --approver "security lead"', '0 findings update 3f2a --status false-positive --reason "test fixture"'],
   "findings verify": ["0 findings verify --severity high,medium --folder ~/code/app", "0 findings verify 3f2a --folder ~/code/app", "0 findings verify --apply --budget 1 --folder ~/code/app"],
   "findings burndown": ["0 findings burndown --severity high --limit 10 --test \"pnpm test\"", "0 findings burndown --dry-run", "0 findings burndown --history --format json"],
   threads: ['0 threads start "Map the login flow" --folder ~/code/app --wait', "0 threads list", "0 threads show <id>", '0 threads send <id> "Now the logout path" --wait', "0 threads stop <id>"],
@@ -173,7 +174,7 @@ interface NewFormStub { readonly name: string; readonly args: string; readonly d
 
 /** Visible subcommands that have no implementation command of their own: `command-grammar.ts` rewrites them before parsing, so the action only runs on incomplete input. */
 const NEW_FORM_STUBS: Readonly<Record<string, readonly NewFormStub[]>> = {
-  findings: [{ name: "update", args: "<id>", description: "Change a finding's status", usage: "0 findings update <id> --status accepted|suppressed|open|false-positive [--note <text>]", options: [["--status <status>", "accepted | suppressed | open | false-positive"], ["--note <text>", "Why (optional)"], ["--reason <text>", "Why; required with false-positive"], ["--db-path <path>", "Path to SQLite database"]] }],
+  findings: [{ name: "update", args: "<id>", description: "Change a finding's status", usage: "0 findings update <id> --status accepted|suppressed|open|false-positive [--note <text>] [--reason <text> --expires <date|90d> --approver <name>]", options: [["--status <status>", "accepted | suppressed | open | false-positive"], ["--note <text>", "Why (optional)"], ["--reason <text>", "Why; required with accepted and false-positive"], ["--expires <date|90d>", "Accepted: when the acceptance ends (required)"], ["--approver <name>", "Accepted: who approved it, a label not a login"], ["--db-path <path>", "Path to SQLite database"]] }],
   models: [
     { name: "set", args: "[model]", description: "Show or choose the default model", usage: "0 models set <model> --provider <id>", options: [["--provider <provider>", "Provider of the model"]] },
     { name: "connect", args: "[provider]", description: "Add, list, test or remove a provider connection", options: [["--key-env <VAR>", "Add: read the API key from this environment variable"], ["--stdin", "Add: read the API key from stdin"], ["--list", "List connections (the default with no provider)"], ["--test", "Test a connection"], ["--remove", "Remove a connection (with --yes)"]] },

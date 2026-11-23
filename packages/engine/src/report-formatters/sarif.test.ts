@@ -92,4 +92,16 @@ describe("formatSarif custom rules", () => {
     expect(results[0].properties.ruleSource).toBe("custom");
     expect(results[1].properties.ruleSource).toBeUndefined();
   });
+
+  it("records an accepted risk as an external suppression with its reason, expiry and approver", () => {
+    const base = { target: "/repo", scanDepth: "quick" as const, startedAt: "", completedAt: "", durationMs: 0, warnings: [], summary: { totalAttacks: 0, totalFindings: 2, critical: 0, high: 2, medium: 0, low: 0, info: 0 } };
+    const finding = (id: string, extra: Partial<Finding>): Finding => ({ id, templateId: "t", title: id, description: "d", severity: "high", category: "path-traversal", status: "confirmed", evidence: { request: "", response: "" }, timestamp: 1, ...extra });
+    const sarif = JSON.parse(formatSarif({ ...base, findings: [
+      finding("accepted", { triageStatus: "accepted", triageNote: "vendor patch due", triageExpiresAt: "2026-12-31T23:59:59.999Z", triageApprover: "security lead" }),
+      finding("open", {}),
+    ] }));
+    const byId = Object.fromEntries(sarif.runs[0].results.map((r: { properties: { findingId: string } }) => [r.properties.findingId, r]));
+    expect(byId["accepted"].suppressions).toEqual([{ kind: "external", status: "accepted", justification: "vendor patch due", properties: { triage: "accepted", expiresAt: "2026-12-31T23:59:59.999Z", approver: "security lead" } }]);
+    expect(byId["open"].suppressions).toBeUndefined();
+  });
 });

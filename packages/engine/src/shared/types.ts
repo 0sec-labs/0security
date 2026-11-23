@@ -640,6 +640,10 @@ export interface Finding {
   ruleSource?: "custom";
   triageStatus?: FindingTriageStatus;
   triageNote?: string;
+  /** ISO time an accepted risk lapses. See `effectiveTriageStatus`. */
+  triageExpiresAt?: string;
+  /** Free-text label of the approver, as typed by the operator. Not authenticated. */
+  triageApprover?: string;
   /**
    * Append-only list of triage layer verdicts, ordered by execution.
    * Empty until the triage stage runs. See {@link LayerVerdict} for details.

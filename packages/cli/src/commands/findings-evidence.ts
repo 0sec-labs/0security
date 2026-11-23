@@ -26,7 +26,7 @@ export const EVIDENCE_FILES = ["README.md", "manifest.json", "findings.json", "f
 
 export interface EvidenceFindingRecord {
   id: string; fingerprint: string | null; title: string; severity: string; category: string; status: string;
-  triageStatus: string | null; triageNote: string | null; workflowStatus: string | null; workflowAssignee: string | null;
+  triageStatus: string | null; triageNote: string | null; triageExpiresAt: string | null; triageApprover: string | null; workflowStatus: string | null; workflowAssignee: string | null;
   workflowUpdatedAt: string | null; detectedAt: string | null; location: string | null; reportedBy: string | null;
   cvssScore: number | null; cvssVector: string | null; attackerImpact: string | null;
   scanId: string | null; scanTarget: string | null; scanStartedAt: string | null; scanModel: string | null;
@@ -61,7 +61,7 @@ function recordOf(entry: EvidenceInput["findings"][number], includeEvidence: boo
   const at = finding.reviewAnnotation;
   return {
     id: finding.id, fingerprint: finding.fingerprint ?? null, title: finding.title, severity: finding.severity, category: finding.category,
-    status: finding.status, triageStatus: finding.triageStatus ?? null, triageNote: finding.triageNote ?? null,
+    status: finding.status, triageStatus: finding.triageStatus ?? null, triageNote: finding.triageNote ?? null, triageExpiresAt: finding.triageExpiresAt ?? null, triageApprover: finding.triageApprover ?? null,
     workflowStatus: finding.workflowStatus ?? null, workflowAssignee: finding.workflowAssignee ?? null, workflowUpdatedAt: finding.workflowUpdatedAt ?? null,
     detectedAt: iso(finding.timestamp), location: at?.path ? `${at.path}${at.startLine ? `:${at.startLine}` : ""}` : null, reportedBy: entry.tool ?? finding.tool ?? null,
     cvssScore: finding.cvssScore ?? null, cvssVector: finding.cvssVector ?? null, attackerImpact: attackerImpactSentence(finding) ?? null,
@@ -79,12 +79,14 @@ export function findingsMarkdown(records: EvidenceFindingRecord[], includeEviden
     "| Id | Severity | Title | Category | Status | Triage | Workflow | Where | Detected | Last workflow change | Reported by |", "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ...records.map(r => `| \`${r.id}\` | ${cell(r.severity)} | ${cell(r.title)} | ${cell(r.category)} | ${cell(r.status)} | ${cell(r.triageStatus)} | ${cell(r.workflowStatus)} | ${cell(r.location)} | ${cell(r.detectedAt)} | ${cell(r.workflowUpdatedAt)} | ${cell(r.reportedBy)} |`),
   ];
-  const noted = records.filter(r => r.triageNote || r.attackerImpact);
+  const noted = records.filter(r => r.triageNote || r.attackerImpact || r.triageExpiresAt || r.triageApprover);
   if (noted.length) {
     lines.push("", "## Notes", "");
     for (const r of noted) {
       lines.push(`### \`${r.id}\` ${cell(r.title)}`, "");
-      if (r.triageNote) lines.push(`- Triage note: ${cell(r.triageNote)}`);
+      if (r.triageNote) lines.push(`- ${r.triageStatus === "accepted" ? "Reason for accepting the risk" : "Triage note"}: ${cell(r.triageNote)}`);
+      if (r.triageExpiresAt) lines.push(`- ${r.triageStatus === "accepted" ? "Accepted until" : "Earlier acceptance expired"}: ${cell(r.triageExpiresAt.slice(0, 10))}`);
+      if (r.triageApprover) lines.push(`- Approver (a label typed by the operator, not verified): ${cell(r.triageApprover)}`);
       if (r.attackerImpact) lines.push(`- Attacker impact (assessed): ${cell(r.attackerImpact)}`);
       lines.push("");
     }

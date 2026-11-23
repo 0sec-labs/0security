@@ -6,7 +6,11 @@ import * as schema from "../schema.js";
 import { findingStatuses, type FindingStatusDB } from "../schema.js";
 import { iterateLatestFindingMetadata, getFindingFamilyMetadata, selectFindingFamiliesBySeverity, selectFindingsBySeverity, type RankedFindingOptions } from "../finding-priority.js";
 import { buildFindingFingerprint, type PersistedFindingReviewFields, type FindingModelVerification, parseFindingModelVerification, serializeFindingModelVerification, serializeFindingSourceVerification, serializeFindingVerificationResult, serializeFindingReviewAnnotation, restoreFindingReviewFields, deriveEvidenceFromPocSteps, normalizeWorkflowStatus, type WorkflowStatus } from "../finding-helpers.js";
+import { effectiveTriageStatus } from "../../shared/triage-expiry.js";
 import { Repository } from "./base.js";
+
+/** What goes with a triage decision beyond the status and note. */
+export interface TriageDetails { expiresAt?: string; approver?: string }
 
 export class FindingRepository extends Repository {
 
@@ -19,7 +23,10 @@ export class FindingRepository extends Repository {
     };
     const scan = this.owner.getScan(scanId);
     const fingerprint = finding.fingerprint ?? buildFindingFingerprint(scan?.target ?? scanId, finding);
-    const inheritedTriage = this.owner.getLatestFindingByFingerprint(fingerprint);
+    const latestTriage = this.owner.getLatestFindingByFingerprint(fingerprint);
+    // An acceptance that has lapsed is not carried onto a new scan's row: the finding is open again.
+    const lapsed = latestTriage ? effectiveTriageStatus(latestTriage) !== (latestTriage.triageStatus ?? "new") : false;
+    const inheritedTriage = lapsed ? undefined : latestTriage;
     const inheritedWorkflowStatus = normalizeWorkflowStatus(
       workflowFinding.workflowStatus ?? inheritedTriage?.workflowStatus,
       {
@@ -96,6 +103,8 @@ export class FindingRepository extends Repository {
         fingerprint,
         triageStatus: finding.triageStatus ?? inheritedTriage?.triageStatus ?? "new",
         triageNote: finding.triageNote ?? inheritedTriage?.triageNote ?? null,
+        triageExpiresAt: finding.triageExpiresAt ?? inheritedTriage?.triageExpiresAt ?? null,
+        triageApprover: finding.triageApprover ?? inheritedTriage?.triageApprover ?? null,
         triagedAt: finding.triageStatus || inheritedTriage?.triageStatus ? new Date().toISOString() : null,
         workflowStatus: inheritedWorkflowStatus,
         workflowAssignee: inheritedWorkflowAssignee,
@@ -130,6 +139,8 @@ export class FindingRepository extends Repository {
           fingerprint,
           triageStatus: finding.triageStatus ?? inheritedTriage?.triageStatus ?? "new",
           triageNote: finding.triageNote ?? inheritedTriage?.triageNote ?? null,
+          triageExpiresAt: finding.triageExpiresAt ?? inheritedTriage?.triageExpiresAt ?? null,
+          triageApprover: finding.triageApprover ?? inheritedTriage?.triageApprover ?? null,
           triagedAt: finding.triageStatus || inheritedTriage?.triageStatus ? new Date().toISOString() : null,
           workflowStatus: inheritedWorkflowStatus,
           workflowAssignee: inheritedWorkflowAssignee,
@@ -330,6 +341,7 @@ export class FindingRepository extends Repository {
     fingerprint: string,
     triageStatus: FindingTriageStatus,
     triageNote?: string,
+    details: TriageDetails = {},
   ): void {
     const latestFinding = this.owner.getLatestFindingByFingerprint(fingerprint);
     // Accept is accepted risk: it never closes the finding. Only a dismissal (false positive) cancels it.
@@ -342,6 +354,8 @@ export class FindingRepository extends Repository {
       .set({
         triageStatus,
         triageNote: triageNote ?? null,
+        triageExpiresAt: triageStatus === "new" ? null : details.expiresAt ?? null,
+        triageApprover: triageStatus === "new" ? null : details.approver ?? null,
         triagedAt: new Date().toISOString(),
         ...(workflowStatus
           ? {
@@ -364,6 +378,8 @@ export class FindingRepository extends Repository {
           triageStatus,
           workflowStatus: workflowStatus ?? refreshedFinding.workflowStatus ?? "backlog",
           triageNote: triageNote ?? null,
+          ...(triageStatus !== "new" && details.expiresAt ? { triageExpiresAt: details.expiresAt } : {}),
+          ...(triageStatus !== "new" && details.approver ? { triageApprover: details.approver } : {}),
         },
         timestamp: Date.now(),
       });
@@ -396,6 +412,8 @@ export class FindingRepository extends Repository {
         workflowUpdatedAt: new Date().toISOString(),
         triageStatus,
         triagedAt: triageStatus === "new" ? null : new Date().toISOString(),
+        triageExpiresAt: null,
+        triageApprover: null,
       })
       .where(eq(schema.findings.fingerprint, fingerprint))
       .run();
@@ -421,19 +439,19 @@ export class FindingRepository extends Repository {
   }
 
 
-  updateFindingTriage(findingId: string, triageStatus: FindingTriageStatus, triageNote?: string): void {
+  updateFindingTriage(findingId: string, triageStatus: FindingTriageStatus, triageNote?: string, details: TriageDetails = {}): void {
     const finding = this.owner.getFinding(findingId);
     if (!finding) throw new Error(`Finding ${findingId} not found`);
     if (!finding.fingerprint) {
       // Legacy rows can predate fingerprints: triage just that row by id.
       this.db
         .update(schema.findings)
-        .set({ triageStatus, triageNote: triageNote ?? null, triagedAt: new Date().toISOString() })
+        .set({ triageStatus, triageNote: triageNote ?? null, triageExpiresAt: triageStatus === "new" ? null : details.expiresAt ?? null, triageApprover: triageStatus === "new" ? null : details.approver ?? null, triagedAt: new Date().toISOString() })
         .where(eq(schema.findings.id, findingId))
         .run();
       return;
     }
-    this.owner.updateFindingTriageByFingerprint(finding.fingerprint, triageStatus, triageNote);
+    this.owner.updateFindingTriageByFingerprint(finding.fingerprint, triageStatus, triageNote, details);
   }
 
 

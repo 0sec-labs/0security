@@ -109,6 +109,10 @@ export const findings = sqliteTable(
     triageStatus: text("triageStatus").notNull().default("new"),
     triageNote: text("triageNote"),
     triagedAt: text("triagedAt"),
+    /** ISO time an accepted risk lapses; NULL means it does not. Additive and nullable. */
+    triageExpiresAt: text("triageExpiresAt"),
+    /** Free-text label of who approved the acceptance. A label the operator typed, not an authenticated identity. */
+    triageApprover: text("triageApprover"),
     workflowStatus: text("workflowStatus").notNull().default("backlog"),
     workflowAssignee: text("workflowAssignee"),
     workflowUpdatedAt: text("workflowUpdatedAt"),

@@ -12,7 +12,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { Option, type Command } from "commander";
-import { homeStateDir } from "@0/engine/shared";
+import { effectiveTriageStatus, homeStateDir } from "@0/engine/shared";
 import { osecDB, resolveOsecDbPath } from "@0/engine/storage";
 import { consoleTransportOptions, type ConsoleTransportOptions } from "../console-client.js";
 import { connect, DEFAULT_SCAN_MODEL } from "./scan.js";
@@ -62,7 +62,7 @@ export interface BurndownDeps {
 }
 
 export interface BurndownOptions extends ConsoleTransportOptions {
-  repo?: string; base?: string; test?: string[]; pr: boolean; model?: string; timeout: string; format?: string;
+  repo?: string; base?: string; test?: string[]; pr: boolean; model?: string; timeout: string; format?: string; policy?: string;
   severity?: string; category?: string; tool?: string; source?: string; scan?: string; limit?: string; fingerprint?: string;
   concurrency: string; budget: string; perFix: string; maxConsecutiveFailures: string; maxFailureRate: string; minAttempts?: string;
   dryRun?: boolean; history?: boolean; retry?: boolean;
@@ -111,7 +111,7 @@ export function listOpenCandidates(dbPath: string | undefined): Candidate[] {
       const id = String(row.id);
       const candidate: Candidate = {
         id, fingerprint: String(row.fingerprint ?? id), title: String(row.title), severity: String(row.severity), category: String(row.category),
-        tool: typeof row.tool === "string" ? row.tool : null, scanId: String(row.scanId), status: String(row.status), triage: String(row.triageStatus ?? "new"), timestamp: Number(row.timestamp ?? 0),
+        tool: typeof row.tool === "string" ? row.tool : null, scanId: String(row.scanId), status: String(row.status), triage: effectiveTriageStatus({ triageStatus: String(row.triageStatus ?? "new"), triageExpiresAt: typeof row.triageExpiresAt === "string" ? row.triageExpiresAt : undefined }), timestamp: Number(row.timestamp ?? 0),
       };
       const annotation = db.getFindingReviewFields(id).reviewAnnotation;
       if (annotation && typeof annotation.path === "string" && annotation.path) { candidate.path = annotation.path; if (typeof annotation.startLine === "number") candidate.startLine = annotation.startLine; }
@@ -302,6 +302,7 @@ export function registerBurndownCommand(program: Command, fixDeps: FixDeps = def
     .option("--repo <dir>", "Git repository the findings are in (default: the current directory)")
     .option("--base <branch>", "Branch to start from and open pull requests against (default: the remote's default branch)")
     .option("--test <command>", "Check to run after each change; repeat for several. A failing check makes the pull request a draft", collect)
+    .option("--policy <file>", "Policy file (.json or .yaml) with fix rules and pull request conventions; any path you name. Default: ~/.0/fix-policy.json|yaml|yml")
     .option("--no-pr", "Commit on the fix branches but do not push or open pull requests")
     .option("--concurrency <n>", `Fixes at the same time, each in its own work tree (1 to ${MAX_CONCURRENCY})`, "1")
     .option("--budget <usd>", "Total spend for this run in USD; no new fix starts once it is used", "10")

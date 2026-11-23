@@ -89,6 +89,8 @@ interface FakeFindingRow {
   fingerprint?: string | null;
   triageStatus?: string | null;
   triageNote?: string | null;
+  triageExpiresAt?: string | null;
+  triageApprover?: string | null;
   timestamp: number;
   score?: number | null;
   templateId: string;
@@ -153,8 +155,8 @@ vi.mock("@0/engine/storage", () => {
       for (const row of this.listFindings(opts)) { const key = row.fingerprint ?? row.id; groups.set(key, [...groups.get(key) ?? [], row]); }
       return [...groups.entries()].map(([key, rows]) => ({ key, latest: [...rows].sort((a, b) => b.timestamp - a.timestamp)[0]!, count: rows.length, scanCount: new Set(rows.map(row => row.scanId)).size })).slice(0, opts?.limit ?? 100);
     }
-    updateFindingTriage(findingId: string, status: FindingTriageStatus, note?: string): void {
-      dbState.calls.push({ method: "updateFindingTriage", args: [findingId, status, note] });
+    updateFindingTriage(findingId: string, status: FindingTriageStatus, note?: string, details?: unknown): void {
+      dbState.calls.push({ method: "updateFindingTriage", args: details && Object.keys(details as object).length ? [findingId, status, note, details] : [findingId, status, note] });
     }
     getRelatedFindings(fingerprint: string): FakeFindingRow[] {
       dbState.calls.push({ method: "getRelatedFindings", args: [fingerprint] });
@@ -169,6 +171,7 @@ vi.mock("@0/engine/storage", () => {
   }
   return {
     osecDB: FakeOsecDB,
+    recordAudit: () => undefined,
     listOsecRunDatabasePaths: () => [],
     resolveOsecDbPath: () => undefined,
     resolveOsecRunStorage: () => ({ dbPath: undefined }),
@@ -221,6 +224,8 @@ function makeRow(overrides: Partial<FakeFindingRow> & { id: string }): FakeFindi
     fingerprint: overrides.fingerprint ?? null,
     triageStatus: overrides.triageStatus ?? null,
     triageNote: overrides.triageNote ?? null,
+    triageExpiresAt: overrides.triageExpiresAt ?? null,
+    triageApprover: overrides.triageApprover ?? null,
     timestamp: overrides.timestamp ?? 1_714_521_600_000,
     score: overrides.score ?? null,
     templateId: overrides.templateId ?? "tpl-xss-reflected",
@@ -540,12 +545,57 @@ describe("findings accept/suppress/reopen — triage transitions", () => {
       "1111aaaa", // prefix
       "--note",
       "looked legit",
+      "--expires",
+      "90d",
     ]);
     expect(err).toBeUndefined();
 
     const calls = callsByMethod("updateFindingTriage");
     expect(calls).toHaveLength(1);
-    expect(calls[0]!.args).toEqual([id, "accepted", "looked legit"]);
+    expect(calls[0]!.args.slice(0, 3)).toEqual([id, "accepted", "looked legit"]);
+    expect(calls[0]!.args[3]).toEqual({ expiresAt: expect.stringMatching(/^\d{4}-\d\d-\d\dT/) });
+  });
+
+  it("accept without a reason or an expiry is a usage error and changes nothing", async () => {
+    const id = "1111aaaa2222bbbb";
+    dbState.rows.push(makeRow({ id, fingerprint: "fp-strict" }));
+    expect((await runCli(["findings", "accept", id, "--expires", "90d"]) as Error).message).toMatch(/needs a reason/);
+    expect((await runCli(["findings", "accept", id, "--reason", "ok"]) as Error).message).toMatch(/needs an expiry/);
+    expect((await runCli(["findings", "accept", id, "--reason", "ok", "--expires", "yesterday"]) as Error).message).toMatch(/--expires/);
+    expect(callsByMethod("updateFindingTriage")).toHaveLength(0);
+  });
+
+  it("accept forwards the approver and an explicit date", async () => {
+    const id = "1111aaaa2222bbbb";
+    dbState.rows.push(makeRow({ id, fingerprint: "fp-approver" }));
+    const err = await runCli(["findings", "accept", id, "--reason", "vendor patch due", "--expires", "2999-01-31", "--approver", "security lead"]);
+    expect(err).toBeUndefined();
+    expect(callsByMethod("updateFindingTriage")[0]!.args[3]).toEqual({ expiresAt: "2999-01-31T23:59:59.999Z", approver: "security lead" });
+  });
+
+  it("list shows 'accepted until' and reopens an expired acceptance", async () => {
+    dbState.rows.push(
+      makeRow({ id: "aaaa000000000001", fingerprint: "fp-live", triageStatus: "accepted", triageExpiresAt: "2999-01-31T23:59:59.999Z" } as never),
+      makeRow({ id: "aaaa000000000002", fingerprint: "fp-lapsed", triageStatus: "accepted", triageExpiresAt: "2001-01-31T23:59:59.999Z" } as never),
+    );
+    expect(await runCli(["findings", "list"])).toBeUndefined();
+    const out = logSpy.mock.calls.map((c: unknown[]) => String(c[0])).join("\n");
+    expect(out).toContain("accepted until 2999-01-31");
+    expect(out).toContain("open (acceptance expired 2001-01-31)");
+  });
+
+  it("list --expiring selects only live acceptances that lapse soon", async () => {
+    const soon = new Date(Date.now() + 5 * 86_400_000).toISOString();
+    dbState.rows.push(
+      makeRow({ id: "bbbb000000000001", fingerprint: "fp-soon", triageStatus: "accepted", triageExpiresAt: soon } as never),
+      makeRow({ id: "bbbb000000000002", fingerprint: "fp-far", triageStatus: "accepted", triageExpiresAt: "2999-01-31T23:59:59.999Z" } as never),
+      makeRow({ id: "bbbb000000000003", fingerprint: "fp-new" }),
+    );
+    expect(await runCli(["findings", "list", "--expiring", "30"])).toBeUndefined();
+    const out = logSpy.mock.calls.map((c: unknown[]) => String(c[0])).join("\n");
+    expect(out).toContain("finding groups (1)");
+    expect(out).toContain("fp:fp-soon");
+    expect((await runCli(["findings", "list", "--expiring", "0"]) as Error).message).toMatch(/--expiring/);
   });
 
   it("suppress calls updateFindingTriage with 'suppressed'", async () => {
@@ -575,7 +625,7 @@ describe("findings accept/suppress/reopen — triage transitions", () => {
   it("triage resolves the prefix before calling updateFindingTriage (DB never sees the truncated id)", async () => {
     const id = "abcd1234efgh5678";
     dbState.rows.push(makeRow({ id, fingerprint: "fp-prefix" }));
-    const err = await runCli(["findings", "accept", "abcd1234"]);
+    const err = await runCli(["findings", "accept", "abcd1234", "--reason", "ok", "--expires", "90d"]);
     expect(err).toBeUndefined();
 
     const calls = callsByMethod("updateFindingTriage");
@@ -587,7 +637,7 @@ describe("findings accept/suppress/reopen — triage transitions", () => {
 
   it("triage on an unknown id throws 'not found' and still closes the DB", async () => {
     dbState.rows.push(makeRow({ id: "1234567890abcdef" }));
-    const err = await runCli(["findings", "accept", "no-such-id"]);
+    const err = await runCli(["findings", "accept", "no-such-id", "--reason", "ok", "--expires", "90d"]);
     expect(err).toBeInstanceOf(Error);
     expect((err as Error).message).toMatch(/not found/i);
     // No update fired …
@@ -616,7 +666,7 @@ describe("findings accept/suppress/reopen — triage transitions", () => {
       makeRow({ id: "11112222aaaa0002", fingerprint: fp }),
       makeRow({ id: "11112222aaaa0003", fingerprint: fp }),
     );
-    const err = await runCli(["findings", "accept", id]);
+    const err = await runCli(["findings", "accept", id, "--reason", "ok", "--expires", "90d"]);
     expect(err).toBeUndefined();
 
     // The CLI prints "Updated <N> findings in family ..." — N = related rows.
@@ -655,7 +705,7 @@ describe("findings accept/suppress/reopen — triage transitions", () => {
     const id = "1111aaaa2222bbbb";
     dbState.rows.push(makeRow({ id, fingerprint: "fp-accept-dbpath" }));
 
-    const err = await runCli(["findings", "accept", id, "--db-path", "/tmp/accept.db"]);
+    const err = await runCli(["findings", "accept", id, "--db-path", "/tmp/accept.db", "--reason", "ok", "--expires", "90d"]);
     expect(err).toBeUndefined();
 
     // Both reads (listFindings lookup + updateFindingTriage) use the same DB
@@ -693,7 +743,7 @@ describe("findings accept/suppress/reopen — triage transitions", () => {
     // `0 findings --db-path /tmp/parent.db accept <id>` — the
     // parent-position form Commander binds to the parent opts. The
     // subcommand action must still resolve it.
-    const err = await runCli(["findings", "--db-path", "/tmp/parent.db", "accept", id]);
+    const err = await runCli(["findings", "--db-path", "/tmp/parent.db", "accept", id, "--reason", "ok", "--expires", "90d"]);
     expect(err).toBeUndefined();
 
     expect(dbState.ctorArgs).toEqual(["/tmp/parent.db"]);
@@ -712,12 +762,14 @@ describe("findings accept/suppress/reopen — triage transitions", () => {
       "/tmp/note-and-db.db",
       "--note",
       "verified manually",
+      "--expires",
+      "90d",
     ]);
     expect(err).toBeUndefined();
 
     expect(dbState.ctorArgs).toEqual(["/tmp/note-and-db.db"]);
     const updates = callsByMethod("updateFindingTriage");
     expect(updates).toHaveLength(1);
-    expect(updates[0]!.args).toEqual([id, "accepted", "verified manually"]);
+    expect(updates[0]!.args.slice(0, 3)).toEqual([id, "accepted", "verified manually"]);
   });
 });

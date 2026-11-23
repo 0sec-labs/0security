@@ -6,7 +6,7 @@ import {
   osecDB,
   resolveOsecDbPath,
 } from "@0/engine/storage";
-import { findingSchema, formatZodError } from "@0/engine/shared";
+import { effectiveTriageStatus, findingSchema, formatZodError } from "@0/engine/shared";
 import { importedFindingPart } from "./finding-id.js";
 
 
@@ -57,8 +57,11 @@ export function findingFromRow(
     category: typeof row.category === "string" ? row.category : "",
     status: typeof row.status === "string" ? row.status : "",
     fingerprint: typeof row.fingerprint === "string" ? row.fingerprint || undefined : undefined,
-    triageStatus: typeof row.triageStatus === "string" ? row.triageStatus || undefined : undefined,
+    // An acceptance past its expiry reads as open, so exports and the web view never present a lapsed risk as accepted.
+    triageStatus: typeof row.triageStatus === "string" && row.triageStatus ? effectiveTriageStatus({ triageStatus: row.triageStatus, triageExpiresAt: typeof row.triageExpiresAt === "string" ? row.triageExpiresAt : undefined }) : undefined,
     triageNote: typeof row.triageNote === "string" ? row.triageNote || undefined : undefined,
+    triageExpiresAt: typeof row.triageExpiresAt === "string" ? row.triageExpiresAt || undefined : undefined,
+    triageApprover: typeof row.triageApprover === "string" ? row.triageApprover || undefined : undefined,
     workflowStatus: typeof row.workflowStatus === "string" ? row.workflowStatus || undefined : undefined,
     workflowAssignee: typeof row.workflowAssignee === "string" ? row.workflowAssignee : null,
     confidence: typeof row.confidence === "number" ? row.confidence : undefined,

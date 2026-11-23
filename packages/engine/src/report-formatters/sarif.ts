@@ -27,6 +27,8 @@ interface SarifResult {
       }>;
     }>;
   }>;
+  /** SARIF 2.1.0 section 3.27.23: an accepted risk or a dismissal recorded outside the code. */
+  suppressions?: Array<{ kind: "external"; status: "accepted"; justification?: string; properties?: Record<string, unknown> }>;
   properties?: Record<string, unknown>;
 }
 
@@ -162,6 +164,14 @@ function findingToResult(finding: Finding, target: string): SarifResult {
 
   const codeFlows = pocStepsToCodeFlows(finding.pocSteps, target);
   if (codeFlows) result.codeFlows = codeFlows;
+
+  if (finding.triageStatus === "accepted" || finding.triageStatus === "suppressed") {
+    result.suppressions = [{
+      kind: "external", status: "accepted",
+      ...(finding.triageNote ? { justification: finding.triageNote } : {}),
+      properties: { triage: finding.triageStatus, ...(finding.triageExpiresAt ? { expiresAt: finding.triageExpiresAt } : {}), ...(finding.triageApprover ? { approver: finding.triageApprover } : {}) },
+    }];
+  }
 
   result.properties = {
     findingId: finding.id,

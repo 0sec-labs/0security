@@ -9,7 +9,7 @@
  */
 import { createHash } from "node:crypto";
 import type { Command } from "commander";
-import { attackerImpactSentence } from "@0/engine/shared";
+import { attackerImpactSentence, effectiveTriageStatus } from "@0/engine/shared";
 import { FindingsService, listOsecRunDatabasePaths, resolveOsecDbPath } from "@0/engine/storage";
 import { shortFindingId } from "../finding-id.js";
 import { finishWithError, UsageError } from "./output.js";
@@ -142,7 +142,7 @@ async function loadTrackedFindings(dbPath: string | undefined): Promise<TrackedF
   for (const family of merged.families) {
     const latest = family.latest;
     const annotation = (await service.readFamily(family.key, db => db.getFindingReviewFields(latest.id).reviewAnnotation)).find(Boolean);
-    const triage = latest.triageStatus ?? "new";
+    const triage = effectiveTriageStatus(latest);
     const impact = attackerImpactSentence(latest);
     out.push({
       key: findingKey(family.key), id: latest.id, title: latest.title, severity: latest.severity, category: latest.category,

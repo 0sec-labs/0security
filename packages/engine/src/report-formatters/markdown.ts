@@ -236,8 +236,11 @@ function formatFinding(finding: Finding): string {
   if (finding.confidence !== undefined) {
     lines.push(`- **Confidence:** ${(finding.confidence * 100).toFixed(0)}%`);
   }
-  if (finding.triageNote) {
+  if (finding.triageNote && finding.triageStatus !== "accepted") {
     lines.push(`- **Triage:** ${finding.triageNote}`);
+  }
+  if (finding.triageStatus === "accepted") {
+    lines.push(`- **Accepted risk:** ${finding.triageNote ?? "no reason recorded"}${finding.triageExpiresAt ? `; accepted until ${finding.triageExpiresAt.slice(0, 10)}` : ""}${finding.triageApprover ? `; approver (label): ${finding.triageApprover}` : ""}`);
   }
   lines.push(`- **Description:** ${finding.description}`);
   lines.push("");
