@@ -132,11 +132,40 @@ describe("remote endpoints", () => {
       await expect(checkRemoteEndpoint("https://rebind.example/mcp", resolver(addrs)), addrs.join()).rejects.toThrow(/private, loopback, link-local or metadata/);
     await expect(checkRemoteEndpoint("https://rebind.example/mcp", resolver([]))).rejects.toThrow(/did not resolve/);
   });
+  it("refuses IPv4-compatible, IPv4-translated, uncompressed IPv4-mapped, 6to4, Teredo, and local NAT64 IPv6 SSRF forms", async () => {
+    for (const addr of [
+      "::169.254.169.254",
+      "::127.0.0.1",
+      "::a9fe:a9fe",
+      "::ffff:0:169.254.169.254",
+      "::ffff:0:a9fe:a9fe",
+      "0:0:0:0:0:ffff:a9fe:a9fe",
+      "0000:0000:0000:0000:0000:ffff:7f00:0001",
+      "2002:a9fe:a9fe::",
+      "2001:0:a9fe:a9fe::1",
+      "64:ff9b:1::a9fe:a9fe",
+      "100::1",
+    ]) {
+      expect(isBlockedAddress(addr), addr).toBe(true);
+      await expect(checkRemoteEndpoint("https://rebind.example/mcp", resolver([addr])), addr).rejects.toThrow(/private, loopback, link-local or metadata/);
+    }
+    for (const badUrl of [
+      "https://[::169.254.169.254]/mcp",
+      "https://[::ffff:0:169.254.169.254]/mcp",
+      "https://[2002:a9fe:a9fe::]/mcp",
+      "https://[64:ff9b:1::a9fe:a9fe]/mcp",
+    ]) {
+      await expect(checkRemoteEndpoint(badUrl, resolver(["93.184.216.34"])), badUrl).rejects.toThrow(/private, loopback, link-local or metadata/);
+    }
+  });
   it("allows a public address, plain http only to a literal loopback name, and nothing with credentials", async () => {
     await expect(checkRemoteEndpoint("https://ok.example/mcp", resolver(["93.184.216.34", "2606:2800:220:1:248:1893:25c8:1946"]))).resolves.toBeInstanceOf(URL);
     await expect(checkRemoteEndpoint("http://127.0.0.1:1/mcp", resolver([]))).resolves.toBeInstanceOf(URL);
     for (const bad of ["http://ok.example/mcp", "https://u:p@ok.example/mcp", "https://ok.example/mcp#x", "https://10.1.2.3/mcp", "https://[::1]/mcp", "https://foo.localhost/mcp", "ftp://ok.example/"]) await expect(checkRemoteEndpoint(bad, resolver(["93.184.216.34"])), bad).rejects.toThrow();
     expect(isBlockedAddress("8.8.8.8")).toBe(false);
+    expect(isBlockedAddress("2001:4860:4860::8888")).toBe(false);
+    expect(isBlockedAddress("::ffff:93.184.216.34")).toBe(false);
+    expect(isBlockedAddress("0:0:0:0:0:ffff:5db8:d822")).toBe(false);
   });
 });
 

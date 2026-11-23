@@ -9,18 +9,61 @@ import { BlockList, isIP } from "node:net";
 export type Resolver = (hostname: string) => Promise<readonly string[]>;
 export const systemResolver: Resolver = async host => (await lookup(host, { all: true, verbatim: true })).map(a => a.address);
 
-const blocked = new BlockList();
-for (const [a, p] of [["0.0.0.0", 8], ["10.0.0.0", 8], ["100.64.0.0", 10], ["127.0.0.0", 8], ["169.254.0.0", 16], ["172.16.0.0", 12], ["192.0.0.0", 24], ["192.168.0.0", 16], ["198.18.0.0", 15], ["224.0.0.0", 4], ["240.0.0.0", 4]] as const) blocked.addSubnet(a, p, "ipv4");
-for (const [a, p] of [["::", 128], ["::1", 128], ["fc00::", 7], ["fe80::", 10], ["ff00::", 8], ["64:ff9b::", 96], ["2001:db8::", 32]] as const) blocked.addSubnet(a, p, "ipv6");
+const blockedIpv4 = new BlockList();
+for (const [a, p] of [
+  ["0.0.0.0", 8], ["10.0.0.0", 8], ["100.64.0.0", 10], ["127.0.0.0", 8],
+  ["169.254.0.0", 16], ["172.16.0.0", 12], ["192.0.0.0", 24], ["192.0.2.0", 24],
+  ["192.88.99.0", 24], ["192.168.0.0", 16], ["198.18.0.0", 15],
+  ["198.51.100.0", 24], ["203.0.113.0", 24], ["224.0.0.0", 4], ["240.0.0.0", 4],
+] as const) blockedIpv4.addSubnet(a, p, "ipv4");
 
-/** True for an address an MCP endpoint must never reach, including an IPv4 address written as IPv4-mapped IPv6. */
+const globalIpv6 = new BlockList();
+globalIpv6.addSubnet("2000::", 3, "ipv6");
+
+const blockedIpv6 = new BlockList();
+for (const [a, p] of [["2001::", 23], ["2001:db8::", 32], ["2002::", 16]] as const) {
+  blockedIpv6.addSubnet(a, p, "ipv6");
+}
+
+function parseIpv6Hextets(address: string): number[] | null {
+  let body = address;
+  const lastColon = body.lastIndexOf(":");
+  let trailing: number[] = [];
+  if (lastColon !== -1 && body.slice(lastColon + 1).includes(".")) {
+    const octets = body.slice(lastColon + 1).split(".").map(n => Number(n));
+    if (octets.length !== 4 || octets.some(n => !Number.isInteger(n) || n < 0 || n > 255)) return null;
+    trailing = [(octets[0]! << 8) | octets[1]!, (octets[2]! << 8) | octets[3]!];
+    body = body.slice(0, body[lastColon - 1] === ":" ? lastColon + 1 : lastColon);
+  }
+  const halves = body.split("::");
+  if (halves.length > 2) return null;
+  const parsePart = (part: string) => part === "" ? [] : part.split(":").map(h => parseInt(h, 16));
+  const head = parsePart(halves[0]!);
+  const tail = halves.length === 2 ? [...parsePart(halves[1]!), ...trailing] : trailing;
+  if (halves.length === 1) {
+    const all = [...head, ...trailing];
+    return all.length === 8 ? all : null;
+  }
+  const missing = 8 - head.length - tail.length;
+  if (missing < 0) return null;
+  return [...head, ...Array<number>(missing).fill(0), ...tail];
+}
+
+/** True for an address an MCP endpoint must never reach, including all IPv4-embedded and non-global IPv6 forms. */
 export function isBlockedAddress(raw: string): boolean {
   const address = raw.startsWith("[") && raw.endsWith("]") ? raw.slice(1, -1) : raw;
-  const mapped = address.toLowerCase().match(/^(?:::ffff:|0:0:0:0:0:ffff:)(\d+\.\d+\.\d+\.\d+)$/);
-  const hex = address.toLowerCase().match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
-  const v4 = mapped?.[1] ?? (hex ? `${parseInt(hex[1]!, 16) >> 8}.${parseInt(hex[1]!, 16) & 255}.${parseInt(hex[2]!, 16) >> 8}.${parseInt(hex[2]!, 16) & 255}` : null);
-  const target = v4 ?? address; const family = isIP(target);
-  return family === 0 ? true : blocked.check(target, family === 4 ? "ipv4" : "ipv6");
+  const family = isIP(address);
+  if (family === 0) return true;
+  if (family === 4) return blockedIpv4.check(address, "ipv4");
+
+  const groups = parseIpv6Hextets(address);
+  if (!groups) return true;
+  // IPv4-mapped IPv6 (::ffff:a.b.c.d in any compressed or expanded hex/dotted spelling).
+  if (groups[0] === 0 && groups[1] === 0 && groups[2] === 0 && groups[3] === 0 && groups[4] === 0 && groups[5] === 0xffff) {
+    const v4 = `${groups[6]! >> 8}.${groups[6]! & 255}.${groups[7]! >> 8}.${groups[7]! & 255}`;
+    return blockedIpv4.check(v4, "ipv4");
+  }
+  return !globalIpv6.check(address, "ipv6") || blockedIpv6.check(address, "ipv6");
 }
 
 const LOOPBACK_NAMES = new Set(["localhost", "127.0.0.1", "[::1]"]);
