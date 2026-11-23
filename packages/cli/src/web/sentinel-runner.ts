@@ -331,13 +331,19 @@ export class SentinelRunner {
       if (!Array.isArray(parsed)) throw new Error("Unexpected gh output.");
       prs = parsed.filter((pr): pr is (typeof prs)[number] => !!pr && typeof pr.number === "number" && typeof pr.headRefOid === "string")
         .filter(pr => pr.state === undefined || String(pr.state).toUpperCase() === "OPEN");
+      if (prs.length > MAX_POLLED_EVENTS) throw new Error(`More than ${MAX_POLLED_EVENTS} matching open pull requests. Use a base-branch filter.`);
     } catch (error) {
       // Typically gh missing or unauthenticated: surfaced on the trigger, retried at the next poll.
       release({ lastStatus: "blocked", lastError: `GitHub could not be read with the connected gh account: ${message(error)}`.slice(0, 1000) });
       return;
     }
     if (!isEnabled()) { release({}); return; }
-    const seen = { ...(trigger.cursor ?? {}) };
+    // Prune closed pull requests so historical PR numbers cannot push open PRs past the 200-entry cursor limit.
+    const openKeys = new Set(prs.map(pr => String(pr.number)));
+    const seen: Record<string, string> = {};
+    for (const [k, v] of Object.entries(trigger.cursor ?? {})) {
+      if (openKeys.has(k)) seen[k] = v;
+    }
     if (!trigger.cursor) {
       // First poll only records what is already open; it never launches a review for old PRs. A draft is recorded as a
       // draft so that marking it ready for review later still starts one review.
@@ -355,13 +361,19 @@ export class SentinelRunner {
       const skip = draft ? { reason: "draft pull request", tag: "draft" } : fork && !github.includeForks ? { reason: "fork pull request", tag: "fork" } : undefined;
       const marker = skip ? `${pr.headRefOid}:${skip.tag}` : pr.headRefOid;
       if (seen[key] === marker || seen[key] === pr.headRefOid) continue;
+      const prIdempotencyKey = `github:${trigger.id}:${pr.number}:${pr.headRefOid}`;
+      const skipKey = skip ? `${prIdempotencyKey}:${skip.tag}` : undefined;
+      if (this.#store.getTurnByKey(sentinel.id, skipKey ?? prIdempotencyKey)) {
+        seen[key] = marker;
+        continue;
+      }
       const event = { repo: github.repo, pr: pr.number, headSha: pr.headRefOid, base: pr.baseRefName, head: pr.headRefName, fork: fork ? "yes" : "no", title: pr.title.slice(0, 300), url: pr.url };
       if (skip) {
         this.#store.createActivation({
           sentinelId: sentinel.id, sentinelVersion: sentinel.version, status: "skipped", skills: [...sentinel.skills], automationId: automation.id,
           trigger: { kind: "github-pr", automationId: automation.id, triggerId: trigger.id, event: { ...event, skipped: skip.reason } },
           error: `Skipped: ${skip.reason}.`, finishedAt: isoAt(this.#now()),
-        }, { via, idempotencyKey: `github:${trigger.id}:${pr.number}:${pr.headRefOid}:${skip.tag}` });
+        }, { via, idempotencyKey: skipKey });
         seen[key] = marker;
         continue;
       }
@@ -370,7 +382,7 @@ export class SentinelRunner {
       if (!isEnabled()) break;
       if (this.#persistent()) {
         const outcome = await this.#deliverSafely({
-          sentinel, origin: "github", via, trigger: { id: trigger.id, kind: "github-pr" }, automation, event, idempotencyKey: `github:${trigger.id}:${pr.number}:${pr.headRefOid}`,
+          sentinel, origin: "github", via, trigger: { id: trigger.id, kind: "github-pr" }, automation, event, idempotencyKey: prIdempotencyKey,
           ...(fork ? { untrusted: true } : {}), ...(diff ? { context: { label: "pull-request-diff", text: diff } } : {}),
           ...(github.commentOnPr === true ? { comment: { repo: github.repo, pr: pr.number, headSha: pr.headRefOid, fork } } : {}),
         });
@@ -387,7 +399,7 @@ export class SentinelRunner {
       }
       const result = await this.#launchSafely(sentinel.id, {
         trigger: { kind: "github-pr", automationId: automation.id, triggerId: trigger.id, event },
-        automation, autonomous: true, via, idempotencyKey: `github:${trigger.id}:${pr.number}:${pr.headRefOid}`, ...(fork ? { untrusted: true } : {}),
+        automation, autonomous: true, via, idempotencyKey: prIdempotencyKey, ...(fork ? { untrusted: true } : {}),
         ...(diff ? { context: { label: "pull-request-diff", text: diff } } : {}),
         ...(github.commentOnPr === true ? { comment: { repo: github.repo, pr: pr.number, headSha: pr.headRefOid, fork } } : {}),
       });
