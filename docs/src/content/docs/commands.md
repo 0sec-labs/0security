@@ -181,6 +181,9 @@ Add `--allow-partial` when a partial scan should not fail the job. The exit code
 | `--context <file>` | — | Give the scan this file (a threat model, notes on who may do what) as lower-priority background; repeat for several. It can steer what the scan weighs but cannot change how it works |
 | `--policy <file-or-folder>` | — | Check the code against these Markdown policies (a file or a folder of .md files) and report pass or fail for each; repeat for several. Runs the policy-check skill |
 | `--org-policy <folder>` | — | An organisation's policy folder: evaluated first, and wins when a --policy says otherwise or uses the same id; repeat for several |
+| `--scope <file>` | — | Read the declared scope from the '## Scope' section of this Markdown file (usually SECURITY.md). Findings that match a vector it lists as out of scope are labelled, listed apart and left out of the counts, --fail-on and the exit code; none are removed. In CI pass the base branch's copy |
+| `--repo-scope` | — | Read SECURITY.md from the scanned folder as the declared scope. Off by default: a change under review can edit that file; in CI pass the base branch's copy with --scope instead |
+| `--scope-sarif <mode>` | `label` | With --scope: label (default) writes the scope as result properties; suppress also marks out-of-scope results suppressed, which GitHub code scanning then dismisses |
 | `--repo-context` | — | Also read .0/threat-model.md from the scanned folder as context. Off by default: a change under review can edit that file; in CI pass the base branch's copy with --context instead |
 | `--repo-ignores` | — | Also let the pre-pass scanners read their configuration and ignore files from the scanned folder (.foxguard.yml, .semgrepignore, .gitleaks.toml, .gitleaksignore, .trivyignore, osv-scanner.toml, .checkov.yaml). Off by default: a change under review can use them to hide findings. Inline suppressions such as nosemgrep always apply |
 | `--skill <id>` | `scan` | Skill that holds the scan method |
@@ -350,6 +353,8 @@ Install Checkov with `brew install checkov` or `pipx install checkov`, or set `Z
 
 0 never reads that file from the scanned folder on its own, because a pull request could edit it to blind the scan. In CI, pass a copy from the base branch. `--repo-context` reads `.0/threat-model.md` from the folder anyway and prints a warning.
 
+`--scope <file>` reads the `## Scope` section of a Markdown file, usually SECURITY.md, and labels findings in vectors it lists as out of scope. They are listed apart and left out of the counts, `--fail-on` and the exit code. 0 does not read SECURITY.md on its own, because a pull request could edit it. `--repo-scope` reads it from the scanned folder and prints a warning. In CI, pass the base branch's copy with `--scope`. `--scope-sarif suppress` also marks the labelled SARIF results suppressed, which GitHub code scanning dismisses. See [Declare what is in and out of scope](/threat-model-and-policy/#declare-what-is-in-and-out-of-scope).
+
 `--policy <file-or-folder>` checks the code against Markdown policies with the `policy-check` skill and answers pass, fail or not-applicable for each. `--org-policy <folder>` is an organisation's policy folder. It is evaluated first and wins over `--policy` on the same id or a conflicting rule.
 
 A folder with more than 8 entry points, or more than 150 source files, is reviewed in batches: one thread per group of entry points, each recorded in a coverage ledger. The report states what was reviewed, for example `reviewed 41 of 57 entry points; 16 not reached (budget)`, and the exit code is 3 while anything is not reached. When a scan stops early, it prints what stopped it, how much is left and the command that continues it:
@@ -472,12 +477,16 @@ Draft the repository's threat model as a file for people to review.
 0 threat-model [options] [folder]
 ```
 
-A thread follows the `threat-model` skill and writes `.0/threat-model.md` in the folder. The file has a summary, what matters most, assets, actors, trust boundaries, entry points, authorization and business rules, data flows and open questions. Front matter holds the date and the commit.
+A thread follows the `threat-model` skill and writes `.0/threat-model.md` in the folder, or the path in `--output`. The file has a summary, what matters most, assets, actors, trust boundaries, entry points, authorization and business rules, data flows and open questions. Front matter holds the date and the commit.
 
 ```bash
 0 threat-model
 0 threat-model ~/code/app --pr
+0 threat-model --interview
+0 threat-model --output THREAT_MODEL.md
 ```
+
+`--interview` asks up to 8 specific questions on the terminal after the draft and writes your answers to the `## Scope` section of SECURITY.md and to a human block of the threat model. It needs a terminal and exits with 2 without one. See [Declare what is in and out of scope](/threat-model-and-policy/#declare-what-is-in-and-out-of-scope).
 
 The file names only what the thread saw and marks the rest `unknown: confirm with the team`. Running it again updates the file and keeps every section marked `<!-- human -->`.
 
@@ -493,6 +502,9 @@ It writes files on this machine, so it needs the local console and rejects `--co
 | --- | --- | --- |
 | `--pr` | — | Commit the file on the branch 0/threat-model in a separate git work tree and open or update a pull request |
 | `--base <branch>` | — | With --pr: the branch to start from and open the pull request against (default: the remote's default branch) |
+| `--interview` | — | After the draft, ask a few specific questions on the terminal and write your answers to the Scope section of SECURITY.md and to a human block of the threat model. Needs a terminal |
+| `--interview-budget <usd>` | — | With --interview: the most each interview thread may spend (default: 0.5) |
+| `--output <path>` | — | Where to write the threat model, relative to the folder, a .md file (default: .0/threat-model.md); for example THREAT_MODEL.md |
 | `--format <format>` | — | json prints the outcome as JSON |
 | `--budget <usd>` | `3` | Stop when the estimated spend reaches this many USD |
 | `--model <model>` | — | Model for the thread (default: gpt-6-luna) |
@@ -1512,6 +1524,7 @@ Subcommands: [list](#findings-list) · [show](#findings-show) · [update](#findi
 | `--status <status>` | — | Filter by status: discovered, verified, confirmed, scored, reported, fixed, false-positive |
 | `--triage <triage>` | — | Filter by triage: new, accepted, suppressed |
 | `--expiring <days>` | — | Only accepted risks that expire within this many days |
+| `--scope <scope>` | — | in: findings not labelled out of scope; out: only those the declared scope (0 scan --scope) labelled out of scope; all (default): both, each labelled |
 | `--limit <n>` | `50` | Max findings/groups to show |
 | `--all` | `false` | Show raw finding rows instead of grouped fingerprints |
 
@@ -1522,6 +1535,8 @@ List findings from the database
 ```text
 0 findings list [options]
 ```
+
+`--scope in|out|all` filters by the label a declared scope gave. A finding labelled out of scope shows `[out of scope]` and its reason.
 
 The list shows one line per flaw: groups that cite the same file and category at overlapping lines are merged, and the line says how many. See [finding categories](/findings/#finding-categories) for the values `--category` takes.
 
@@ -1537,6 +1552,7 @@ An accepted risk shows `accepted until <date>`. Once that date passes, the findi
 | `--status <status>` | — | Filter by status: discovered, verified, confirmed, scored, reported, fixed, false-positive |
 | `--triage <triage>` | — | Filter by triage: new, accepted, suppressed |
 | `--expiring <days>` | — | Only accepted risks that expire within this many days |
+| `--scope <scope>` | — | in: findings not labelled out of scope; out: only those the declared scope (0 scan --scope) labelled out of scope; all (default): both, each labelled |
 | `--limit <n>` | — | Max findings/groups to show |
 
 #### findings show
@@ -2053,6 +2069,7 @@ With `--to bitbucket-cloud` or `--to bitbucket-dc` the findings go to Bitbucket 
 | `--commit <sha>` | — | Commit the results are for (default: HEAD, or GITHUB_SHA in Actions) |
 | `--ref <ref>` | — | refs/heads/&lt;branch&gt; or refs/pull/&lt;n&gt;/merge (default: the current branch, or GITHUB_REF in Actions) |
 | `--tool <name>` | — | Name the tool shown in GitHub |
+| `--include-out-of-scope` | — | Also send findings the declared scope (0 scan --scope) labelled out of scope; they are skipped by default |
 | `--no-wait` | — | Return when GitHub has accepted the upload instead of waiting for it to be processed |
 | `--format <format>` | `text` | Output: text or json |
 
@@ -2088,6 +2105,7 @@ The issue text holds only the title, severity, category, location (`path:line`),
 | `--max <n>` | `25` | Most issues to create, update, close or reopen in one run |
 | `--delay <ms>` | `1000` | Wait this long between changes to respect rate limits |
 | `--dry-run` | — | Print what would change and change nothing |
+| `--include-out-of-scope` | — | Also open issues for findings the declared scope (0 scan --scope) labelled out of scope; they are skipped by default |
 | `--db-path <path>` | — | Path to SQLite database (default: the shared database and every scan's) |
 | `--format <format>` | `text` | Output: text or json |
 

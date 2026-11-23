@@ -60,6 +60,7 @@ Set the key of the provider for your model (see [Models](/models/)). The default
 | `known-sarif` | none | SARIF files from other tools, comma separated. See [Get a second opinion](#get-a-second-opinion). |
 | `only-new` | `false` | With `known-sarif`: leave findings that match a known item out of the report and out of `fail-on`. |
 | `context` | none | Background files for the scan, such as a threat model, comma separated. |
+| `scope` | none | A Markdown file whose `## Scope` section declares what is in and out of scope, usually `SECURITY.md`. See [Declare scope](#declare-scope). |
 | `policy` | none | Markdown policy files or folders to check the code against, comma separated. |
 | `skill` | the default skill | Skill that holds the scan method. |
 | `allow-partial` | `false` | Pass the job when the scan stops before it reviews everything. |
@@ -110,6 +111,27 @@ Pass Semgrep rules you already write with `rules`. Rules, tier maps, context, po
 The action enforces this when it can tell. If one of these files sits in the scanned repository and the checkout is the pull request's own code, the action fails the job for a fork pull request and for `pull_request_target`. For a same-repository `pull_request` it logs a warning. A checkout of the base branch is not refused.
 
 See [scan](/commands/#scan) for the rule format and how findings are marked.
+
+## Declare scope
+
+Pass the `## Scope` section of your `SECURITY.md` with `scope`. Findings in vectors it lists as out of scope are labelled and listed apart. They do not count toward `fail-on`, and the job summary counts them on a separate line. See [Declare what is in and out of scope](/threat-model-and-policy/#declare-what-is-in-and-out-of-scope).
+
+Use the base branch's copy, never the pull request's. A change could otherwise edit the Scope section to label its own bug out of scope:
+
+```yaml
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.base_ref }}
+          path: base
+      - uses: actions/checkout@v4
+      - uses: 0sec-labs/0security@v0.43.0
+        with:
+          version: 0.43.0 # Pin the CLI
+          scope: base/SECURITY.md
+          fail-on: high
+```
+
+The action fails the job when `scope` points into the pull request's own code and the pull request comes from a fork or runs as `pull_request_target`. For a same-repository `pull_request` it logs a warning.
 
 ## Set the effort per repository
 

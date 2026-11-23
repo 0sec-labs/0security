@@ -622,6 +622,9 @@ Options:
                                     reported, fixed, false-positive
   --triage <triage>                 Filter by triage: new, accepted, suppressed
   --expiring <days>                 Only accepted risks that expire within this many days
+  --scope <scope>                   in: findings not labelled out of scope; out: only those the
+                                    declared scope (0 scan --scope) labelled out of scope; all
+                                    (default): both, each labelled
   --limit <n>                       Max findings/groups to show (default: "50")
   --all                             Show raw finding rows instead of grouped fingerprints (default:
                                     false)
@@ -841,6 +844,8 @@ Options:
                              "25")
   --delay <ms>               Wait this long between changes to respect rate limits (default: "1000")
   --dry-run                  Print what would change and change nothing
+  --include-out-of-scope     Also open issues for findings the declared scope (0 scan --scope)
+                             labelled out of scope; they are skipped by default
   --db-path <path>           Path to SQLite database (default: the shared database and every scan's)
   --format <format>          Output: text or json (default: "text")
   -h, --help                 display help for command
@@ -902,6 +907,8 @@ Options:
                          false-positive
   --triage <triage>      Filter by triage: new, accepted, suppressed
   --expiring <days>      Only accepted risks that expire within this many days
+  --scope <scope>        in: findings not labelled out of scope; out: only those the declared scope
+                         (0 scan --scope) labelled out of scope; all (default): both, each labelled
   --limit <n>            Max findings/groups to show
   -h, --help             display help for command
 
@@ -1041,27 +1048,29 @@ Usage: 0 findings upload [options] <file>
 Upload findings to GitHub code scanning (SARIF) or to Bitbucket Code Insights (scan JSON or SARIF)
 
 Arguments:
-  file                   SARIF 2.1.0 file from `0 scan --format sarif -o scan.sarif`; for Bitbucket
-                         also `0 scan --format json -o scan.json`
+  file                    SARIF 2.1.0 file from `0 scan --format sarif -o scan.sarif`; for Bitbucket
+                          also `0 scan --format json -o scan.json`
 
 Options:
-  --to <target>          github (default), bitbucket-cloud or bitbucket-dc (default: "github")
-  --url <url>            Bitbucket Data Center base URL (default: BITBUCKET_URL)
-  --report-id <id>       Bitbucket report id or key (default: "0-security")
-  --print                Bitbucket: print the report and annotation payload instead of posting it
-                         (also the behaviour without BITBUCKET_TOKEN)
-  --allow-insecure-http  Bitbucket: allow sending the token to an http:// URL that is not on this
-                         machine (default: refuse)
-  --repo <owner/name>    Repository (default: the current clone's); Bitbucket: workspace/repo or
-                         PROJECT/repo
-  --commit <sha>         Commit the results are for (default: HEAD, or GITHUB_SHA in Actions)
-  --ref <ref>            refs/heads/<branch> or refs/pull/<n>/merge (default: the current branch, or
-                         GITHUB_REF in Actions)
-  --tool <name>          Name the tool shown in GitHub
-  --no-wait              Return when GitHub has accepted the upload instead of waiting for it to be
-                         processed
-  --format <format>      Output: text or json (default: "text")
-  -h, --help             display help for command
+  --to <target>           github (default), bitbucket-cloud or bitbucket-dc (default: "github")
+  --url <url>             Bitbucket Data Center base URL (default: BITBUCKET_URL)
+  --report-id <id>        Bitbucket report id or key (default: "0-security")
+  --print                 Bitbucket: print the report and annotation payload instead of posting it
+                          (also the behaviour without BITBUCKET_TOKEN)
+  --allow-insecure-http   Bitbucket: allow sending the token to an http:// URL that is not on this
+                          machine (default: refuse)
+  --repo <owner/name>     Repository (default: the current clone's); Bitbucket: workspace/repo or
+                          PROJECT/repo
+  --commit <sha>          Commit the results are for (default: HEAD, or GITHUB_SHA in Actions)
+  --ref <ref>             refs/heads/<branch> or refs/pull/<n>/merge (default: the current branch,
+                          or GITHUB_REF in Actions)
+  --tool <name>           Name the tool shown in GitHub
+  --include-out-of-scope  Also send findings the declared scope (0 scan --scope) labelled out of
+                          scope; they are skipped by default
+  --no-wait               Return when GitHub has accepted the upload instead of waiting for it to be
+                          processed
+  --format <format>       Output: text or json (default: "text")
+  -h, --help              display help for command
 
 ### 0 findings verify
 Usage: 0 findings verify [options] [finding...]
@@ -1397,6 +1406,17 @@ Options:
                              the policy-check skill
   --org-policy <folder>      An organisation's policy folder: evaluated first, and wins when a
                              --policy says otherwise or uses the same id; repeat for several
+  --scope <file>             Read the declared scope from the '## Scope' section of this Markdown
+                             file (usually SECURITY.md). Findings that match a vector it lists as
+                             out of scope are labelled, listed apart and left out of the counts,
+                             --fail-on and the exit code; none are removed. In CI pass the base
+                             branch's copy
+  --repo-scope               Read SECURITY.md from the scanned folder as the declared scope. Off by
+                             default: a change under review can edit that file; in CI pass the base
+                             branch's copy with --scope instead
+  --scope-sarif <mode>       With --scope: label (default) writes the scope as result properties;
+                             suppress also marks out-of-scope results suppressed, which GitHub code
+                             scanning then dismisses (default: "label")
   --repo-context             Also read .0/threat-model.md from the scanned folder as context. Off by
                              default: a change under review can edit that file; in CI pass the base
                              branch's copy with --context instead
@@ -2452,6 +2472,13 @@ Options:
                              tree and open or update a pull request
   --base <branch>            With --pr: the branch to start from and open the pull request against
                              (default: the remote's default branch)
+  --interview                After the draft, ask a few specific questions on the terminal and write
+                             your answers to the Scope section of SECURITY.md and to a human block
+                             of the threat model. Needs a terminal
+  --interview-budget <usd>   With --interview: the most each interview thread may spend (default:
+                             0.5)
+  --output <path>            Where to write the threat model, relative to the folder, a .md file
+                             (default: .0/threat-model.md); for example THREAT_MODEL.md
   --format <format>          json prints the outcome as JSON
   --budget <usd>             Stop when the estimated spend reaches this many USD (default: "3")
   --model <model>            Model for the thread (default: gpt-6-luna)

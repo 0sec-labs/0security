@@ -38,6 +38,7 @@ Each finding has a stable link at `/findings/<fingerprint>`.
 | `--status` | `discovered`, `verified`, `confirmed`, `scored`, `reported`, `fixed`, `false-positive` |
 | `--triage` | `new`, `accepted`, `suppressed` |
 | `--category` | An attack category |
+| `--scope` | `in` (not labelled out of scope), `out` (only those), `all` (default) |
 | `--limit <n>` | Default 50 |
 
 A group is one flaw. Groups that cite the same file, the same category and overlapping lines are shown as one, with a count of how many were merged. Groups with a different triage state stay apart.
@@ -246,6 +247,14 @@ Get the same report later, in any format:
 ```bash
 0 findings export --scan <thread id>
 ```
+
+### Label findings by declared scope
+
+```bash
+0 scan . --scope SECURITY.md --fail-on high --format json
+```
+
+A finding that matches a vector the `## Scope` section of SECURITY.md lists as out of scope gets `scope: "out-of-scope"`, `scopeReason` and `scopeSource`. In the JSON report, `counts` covers the findings that are not labelled, `outOfScopeCounts` counts the labelled ones, and `scope` names the file and the vectors. Labelled findings stay in `findings`, after the others. They do not count toward `--fail-on`. See [Declare what is in and out of scope](/threat-model-and-policy/#declare-what-is-in-and-out-of-scope).
 
 ### Plan a cryptography migration
 
@@ -518,7 +527,7 @@ Mirror findings into a repository's issues, so the team triages them next to the
 
 Each finding gets one issue, matched on later runs by a hidden marker in its body, so a re-run updates and never duplicates. Accepted, suppressed and fixed findings close their issue with a comment. A finding that comes back reopens it.
 
-`--min-severity` (default `medium`), `--max` (default 25 changes per run) and `--delay` keep it inside rate limits.
+`--min-severity` (default `medium`), `--max` (default 25 changes per run) and `--delay` keep it inside rate limits. Findings labelled out of scope by a declared scope get no issue; `--include-out-of-scope` opens issues for them too.
 
 An issue holds only the title, severity, category, location, the attacker-impact sentence and the status. Evidence, requests, responses and proof-of-concept steps are never copied, because they can quote code or secrets. Read them locally with `0 findings show <id>`. Report text is neutralised, so a finding cannot mention a person or reference another issue.
 
@@ -527,6 +536,8 @@ To show findings in the Security tab instead, upload a SARIF file:
 ```bash
 0 findings upload scan.sarif --repo acme/app
 ```
+
+Results labelled out of scope are left out of the upload. Add `--include-out-of-scope` to send them.
 
 ## Collect evidence and report an exploited vulnerability
 
