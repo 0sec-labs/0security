@@ -10,8 +10,6 @@ const referencePath = resolve(root, "docs/src/content/docs/commands.md");
 const optionDescriptions = new Map([
   ["0 scan web|--dry-run", "For --emit pr only: print proposed git/gh emission commands. The scan itself still executes."],
   ["0 scan source|--dry-run", "For --emit pr only: print proposed git/gh emission commands. The source review itself still executes."],
-  ["0 scan repair|--cost-ceiling", "Requested model-cost limit. Current accounting checks the repair ledger separately from investigation usage; this is not a guaranteed whole-workflow spend cap."],
-  ["0 scan repair|--max-findings", "Maximum findings selected for repair. Inspect blockedFindingIds separately from the overall run status."],
   ["0 scan web|--cost-ceiling", "Soft estimated-model-cost ceiling; partial findings are retained when enforcement trips. In-flight work may overshoot. Overrides ZERO_COST_CEILING_USD."],
   ["0 scan package|--cost-ceiling", "Soft estimated-model-cost ceiling; partial findings are retained when enforcement trips. In-flight work may overshoot. Overrides ZERO_COST_CEILING_USD."],
   ["0 scan source|--cost-ceiling", "Soft estimated-model-cost ceiling; partial findings are retained when enforcement trips. In-flight work may overshoot. Overrides ZERO_COST_CEILING_USD."],

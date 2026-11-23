@@ -36,6 +36,7 @@ describe("0 sbom licenses", () => {
     expect(text).toContain("SEE LICENSE IN LICENSE");
     expect(text).toContain("5 components: 0 denied, 1 not allowed, 2 unknown, 2 allowed.");
     expect(text).toContain("not legal advice");
+    expect(text.match(/not legal advice/g)).toHaveLength(1);
   });
   it("exits 0 when nothing violates, and unknown=fail turns unknown into a violation", async () => {
     const dir = project({ "package-lock.json": lock });

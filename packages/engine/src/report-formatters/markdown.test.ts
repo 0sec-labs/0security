@@ -31,6 +31,6 @@ describe("markdown report", () => {
   it("keeps the clean result for a successful scan without findings", () => {
     const markdown = formatMarkdown({ ...report, executionSuccessful: true });
     expect(markdown).toContain("## No Vulnerabilities Found");
-    expect(markdown).toContain("The target passed all tests.");
+    expect(markdown).toContain("is not proof that the code is safe.");
   });
 });

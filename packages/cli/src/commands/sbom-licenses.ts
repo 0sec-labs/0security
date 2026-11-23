@@ -216,7 +216,7 @@ export async function runLicenses(input: string | undefined, options: LicensesOp
     const { stats } = lookup;
     deps.err(`Looked up ${stats.asked} components on deps.dev: ${stats.found} with license data, ${stats.notFound} not found or without one, ${stats.failed} failed.${stats.unsupported ? ` ${stats.unsupported} are in ecosystems deps.dev does not cover.` : ""}${stats.overLimit ? ` ${stats.overLimit} were not looked up because of --resolve-limit ${limit}.` : ""}`);
   }
-  if (options.format) {
+  if (options.format && options.format !== "text") {
     if (report.summary.unknown) deps.err(`${report.summary.unknown} of ${report.summary.total} components have no usable license data${options.resolve ? "" : " (lockfiles other than npm and Composer state none; --resolve looks them up)"}.`);
     deps.err("Information from lockfiles and registries, not legal advice.");
   }

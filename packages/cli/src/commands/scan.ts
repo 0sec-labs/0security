@@ -324,7 +324,7 @@ async function runPass(ctx: PassContext, index: number, extra: PassExtra = {}): 
     // A thread that never started is no use to anyone; do not leave it in the list.
     const removed = await client.request("POST", `${path}/delete`, {}).then(() => true, () => false);
     const reason = error instanceof Error ? error.message : String(error);
-    const hint = /model/i.test(reason) ? ` Pick another with --model (default ${DEFAULT_SCAN_MODEL}).` : "";
+    const hint = /model/i.test(reason) && !/No provider credential found/i.test(reason) ? ` Pick another with --model (default ${DEFAULT_SCAN_MODEL}).` : "";
     throw new Error(`${reason}${hint}${removed ? "" : ` (thread ${id} was created; remove it with \`0 threads delete ${id} --yes\`)`}`);
   }
   deps.err(`scanning ${resolved.label} in thread ${id} (${part ? `${part}, ` : ""}budget $${Number(budget.toFixed(4))})`);

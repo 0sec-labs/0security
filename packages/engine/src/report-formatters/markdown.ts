@@ -116,7 +116,7 @@ export function formatMarkdown(report: ScanReport): string {
         ? "The scanner did not confirm vulnerabilities, but target validation or probe execution produced warnings."
         : report.reviewChecks?.length
           ? "No security vulnerabilities were found in the inspected scope. Advisory review-check results are reported separately above."
-          : incomplete ? "The scanner did not confirm vulnerabilities." : "The target passed all tests."
+          : incomplete ? "The scanner did not confirm vulnerabilities." : "No vulnerabilities were found in the reviewed scope. A scan with no findings is not proof that the code is safe."
     );
   }
 

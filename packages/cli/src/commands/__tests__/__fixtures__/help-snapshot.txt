@@ -687,6 +687,8 @@ Options:
                                   remote's default branch)
   --test <command>                Check to run after each change; repeat for several. A failing
                                   check makes the pull request a draft
+  --ready                         Open pull requests ready for review even when no --test ran.
+                                  Without it, a pull request with no checks is a draft
   --policy <file>                 Policy file (.json or .yaml) with fix rules and pull request
                                   conventions; any path you name. Default:
                                   ~/.0/fix-policy.json|yaml|yml
@@ -777,6 +779,8 @@ Options:
                              remote's default branch)
   --test <command>           Check to run after the change; repeat for several. A failing check
                              makes the pull request a draft
+  --ready                    Open the pull request ready for review even when no --test ran. Without
+                             it, a pull request with no checks is a draft
   --sandbox <mode>           Run the --test commands in a container instead of on this machine
                              (docker) (choices: "docker")
   --sandbox-image <image>    Image for --sandbox docker, for example maven:3-eclipse-temurin-21. It
@@ -1697,7 +1701,8 @@ Options:
   --yes                    Confirm that an enabled trigger was reviewed
   --frequency <frequency>  schedule: minutes, hourly, daily, weekdays, weekly, cron
   --every <minutes>        schedule, minutes: interval (5 or more)
-  --at <HH:MM>             schedule, daily, weekdays, weekly: local time
+  --at <HH:MM>             schedule, daily, weekdays, weekly: time of day in --timezone (default
+                           UTC)
   --weekday <day>          schedule, weekly: sun, mon, ... or 0-6
   --cron <expression>      schedule, cron: five fields
   --timezone <zone>        schedule: IANA timezone (default UTC)

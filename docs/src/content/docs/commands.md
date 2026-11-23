@@ -1602,7 +1602,7 @@ Fix one finding in an isolated git work tree and open a pull request for review
 0 findings fix 3f2a --test "pnpm test"
 ```
 
-A thread follows the `fix-finding` skill in a separate git work tree, so your checkout is never touched. It makes the smallest change it can. Then the command runs each `--test` check, commits on a branch named `0/fix-<id>` and opens a pull request, as a draft when a check fails. Running it again for the same finding updates the same pull request.
+A thread follows the `fix-finding` skill in a separate git work tree, so your checkout is never touched. It makes the smallest change it can. Then the command runs each `--test` check, commits on a branch named `0/fix-<id>` and opens a pull request, as a draft when a check fails or when you gave no `--test`; the body then says "No checks were run." Pass `--ready` to open it ready for review without checks. Running it again for the same finding updates the same pull request.
 
 Nothing is pushed to the base branch and nothing is merged. A person reviews and merges. Use `--test` for the project's tests and, to re-run the scanner that raised the finding, its own command (for example `foxguard .`). The command edits files on this machine, so it needs the local console and rejects `--computer` and `--engine-url`.
 
@@ -1628,6 +1628,7 @@ A policy file inside the repository being fixed is not read unless you pass `--r
 | `--repo <dir>` | — | Git repository the finding is in (default: the current directory) |
 | `--base <branch>` | — | Branch to start from and open the pull request against (default: the remote's default branch) |
 | `--test <command>` | — | Check to run after the change; repeat for several. A failing check makes the pull request a draft |
+| `--ready` | — | Open the pull request ready for review even when no --test ran. Without it, a pull request with no checks is a draft |
 | `--sandbox <mode>` | — | Run the --test commands in a container instead of on this machine (docker) Choices: docker. |
 | `--sandbox-image <image>` | — | Image for --sandbox docker, for example maven:3-eclipse-temurin-21. It must hold the tools and dependencies the tests need |
 | `--sandbox-network` | — | Give the sandbox network access (to download dependencies). Off by default |
@@ -1666,7 +1667,7 @@ Your policy file can set how fix pull requests look. Add a `pullRequest` object 
 
 Templates take the placeholders `{id}`, `{title}`, `{severity}`, `{category}` and `{path}`. Nothing else is evaluated, and an unknown placeholder is an error. Each value is flattened to one line, stripped of mentions, issue references and markup, and the result is cut to 200 characters.
 
-`draft` is `always`, `on-failure` (the default) or `never`. With `never`, a pull request is ready for review even when a check fails. `branchPrefix` is followed by a short hash of the finding, so a second run still updates the same pull request. Reviewers are users or `org/team`.
+`draft` is `always`, `on-failure` (the default) or `never`. With `never`, a pull request is ready for review even when a check fails or none ran. `branchPrefix` is followed by a short hash of the finding, so a second run still updates the same pull request. Reviewers are users or `org/team`.
 
 Labels that do not exist are created. If the host refuses, 0 prints a warning and skips that label. A refused reviewer is a warning too, because the pull request is already open. Without a `pullRequest` object nothing changes.
 
@@ -1847,6 +1848,7 @@ Exit codes:
 | `--repo <dir>` | — | Git repository the findings are in (default: the current directory) |
 | `--base <branch>` | — | Branch to start from and open pull requests against (default: the remote's default branch) |
 | `--test <command>` | — | Check to run after each change; repeat for several. A failing check makes the pull request a draft |
+| `--ready` | — | Open pull requests ready for review even when no --test ran. Without it, a pull request with no checks is a draft |
 | `--policy <file>` | — | Policy file (.json or .yaml) with fix rules and pull request conventions; any path you name. Default: ~/.0/fix-policy.json\|yaml\|yml |
 | `--no-pr` | — | Commit on the fix branches but do not push or open pull requests |
 | `--concurrency <n>` | `1` | Fixes at the same time, each in its own work tree (1 to 4) |
@@ -3892,7 +3894,7 @@ Add a trigger for an automation the Sentinel owns; disabled unless --enable --ye
 | `--yes` | — | Confirm that an enabled trigger was reviewed |
 | `--frequency <frequency>` | — | schedule: minutes, hourly, daily, weekdays, weekly, cron |
 | `--every <minutes>` | — | schedule, minutes: interval (5 or more) |
-| `--at <HH:MM>` | — | schedule, daily, weekdays, weekly: local time |
+| `--at <HH:MM>` | — | schedule, daily, weekdays, weekly: time of day in --timezone (default UTC) |
 | `--weekday <day>` | — | schedule, weekly: sun, mon, ... or 0-6 |
 | `--cron <expression>` | — | schedule, cron: five fields |
 | `--timezone <zone>` | — | schedule: IANA timezone (default UTC) |
