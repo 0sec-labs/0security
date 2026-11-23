@@ -50,7 +50,7 @@ const CLI_CONFIG_KEYS = [
   "executionProfile", "approvals", "analyticsLevel", "diagnosticReporting", "updatePolicy",
 ] as const satisfies readonly (keyof TuiSettings)[];
 const PUBLIC_CONFIG_KEYS = new Set<keyof TuiSettings>(CLI_CONFIG_KEYS);
-const INTERNAL_CONFIG_KEYS = new Set<keyof TuiSettings>(["onboardingCompleted", "diagnosticReportingPrompted", "modelPreference"]);
+const INTERNAL_CONFIG_KEYS = new Set<keyof TuiSettings>(["onboardingCompleted", "diagnosticReportingPrompted", "modelPreference", "workflows"]);
 function publicConfig(settings: TuiSettings): Partial<TuiSettings> {
   return Object.fromEntries(CLI_CONFIG_KEYS.map(key => [key, settings[key]]));
 }

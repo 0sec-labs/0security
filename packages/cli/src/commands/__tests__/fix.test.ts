@@ -4,6 +4,7 @@ import {
   BRANCH_PREFIX,
   fixBranchName,
   parseFixPolicy,
+  fixMetric,
   pullRequestBody,
   runFix,
   type FixDeps,
@@ -127,6 +128,29 @@ describe("0 findings fix", () => {
   it("hints an id that resolves, not a shared prefix", () => {
     const scan = `sarif-${"b".repeat(64)}`;
     expect(pullRequestBody({ ...finding, id: `${scan}-12345678abcdef` }, "s", [])).toContain("Fixes finding 12345678:");
+  });
+});
+
+describe("run metrics", () => {
+  it("records one row per run with counts and the finding id, and none for a usage error", async () => {
+    const h = harness();
+    const rows: unknown[] = [];
+    const deps: FixDeps = { ...h.deps, metrics: row => { rows.push(row); } };
+    await runFix("f-1", options({ test: ["pnpm test"], model: "m1" }), deps);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ command: "fix", model: "m1", budgetUsd: 3, costUsd: 0.12, findingsAttempted: 1, findingsProposed: 1, checksPassed: 1, status: "ok", findingIds: ["f-1234567890ab"] });
+    expect(JSON.stringify(rows[0])).not.toContain("SQL injection");
+    expect(JSON.stringify(rows[0])).not.toContain("src/db.ts");
+    await expect(runFix("f-1", options({ budget: "0" }), deps)).rejects.toThrow();
+    expect(rows).toHaveLength(1);
+  });
+
+  it("scores a failed check as proposed but not verified, and a run with no change as failed", () => {
+    const base = { finding: "f-1", branch: "b", changed: true, checks: [] };
+    expect(fixMetric({ ...base, committed: true, verified: false } as never, { budget: "1" }, 0, 5000)).toMatchObject({ findingsProposed: 1, checksPassed: 0, status: "ok", durationSeconds: 5 });
+    expect(fixMetric({ ...base, committed: false, verified: false } as never, { budget: "1" }, 0, 0)).toMatchObject({ findingsProposed: 0, status: "failed" });
+    expect(fixMetric(undefined, { budget: "1" }, 0, 0)).toMatchObject({ status: "failed", findingIds: [], costUsd: null });
+    expect(fixMetric({ ...base, committed: true, verified: true, budgetExhausted: true } as never, { budget: "1" }, 0, 0).status).toBe("budget");
   });
 });
 

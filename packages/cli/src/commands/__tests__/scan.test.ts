@@ -34,6 +34,18 @@ function fakes(snapshot: unknown, findings: unknown[] = [storedFinding]) {
 // These tests run on arbitrary folders such as /tmp; batching has its own tests in scan-batched.test.ts.
 const options = (extra: Record<string, unknown> = {}) => ({ budget: "5", format: "json", timeout: "60", skill: "scan", passes: "1", batches: "off", ...extra }) as never;
 
+describe("scan run metrics", () => {
+  it("records one row with counts and finding ids, and no finding text", async () => {
+    const { deps } = fakes(finishedSnapshot());
+    const rows: unknown[] = [];
+    deps.metrics = row => { rows.push(row); };
+    await runScan(folder(), options({ model: "m1" }), deps);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ command: "scan", model: "m1", budgetUsd: 5, findingsAttempted: null, findingsProposed: 1, status: "ok" });
+    expect(JSON.stringify(rows[0])).not.toContain(storedFinding.title);
+  });
+});
+
 describe("headlessConsoleArgs", () => {
   it("runs the script when node runs a .js file, or the compiled binary itself, always on a free port", () => {
     expect(headlessConsoleArgs("/app/dist/index.js")).toEqual(["/app/dist/index.js", "--headless", "--port", "0"]);

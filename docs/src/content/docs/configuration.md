@@ -72,6 +72,7 @@ Change the setup later:
 | `console-sessions/` | One transcript JSON per thread. |
 | `engines.json` | Registered remote computers. See [Computers](/computers/). |
 | `workbench.json` | Workbench choices. |
+| `metrics.ndjson` | One line per scan, fix and verify run: cost, duration and counts. See [findings metrics](/commands/#findings-metrics). |
 | `last-update-check` | Cache for update checks. |
 | `feedback.md` | Locally staged feedback. |
 | `diagnostics/pending/` | Crash reports waiting for your review, mode `0600`. Used only when `diagnosticReporting` is `ask`. Holds at most 10, oldest removed first. |
@@ -86,6 +87,24 @@ Set the database file with `--db-path` or `ZERO_DB_PATH`. `--db-path` wins. Movi
 A running console is tied to one folder and owns its database. If you run `0 skills list` or `0 threads list` from another folder, it stops with `This console is for <folder>. Run the command there, or add --db-path <path>.`
 
 Thread transcripts hold target hostnames, findings and raw request and response bodies, including any cookies or tokens a tool echoed. 0 does not scrub or encrypt them. File permissions (`0600` files, `0700` directory) are the only protection.
+
+## Set a budget and model per workflow
+
+Scan, fix and verify can each have a default budget in USD and a default model. Add a `workflows` key to `~/.0/tui-settings.json`:
+
+```json
+{
+  "workflows": {
+    "scan": { "budget": 2 },
+    "fix": { "budget": 0.5, "model": "gpt-6-luna" },
+    "verify": { "budget": 1 }
+  }
+}
+```
+
+The budget becomes the default for `--budget` and the model the default for `--model` of `0 scan`, `0 findings fix` and `0 findings verify`. A flag you pass always wins. For verify, the budget is the total for the run.
+
+Only this file sets the defaults. A project settings file cannot, so a repository you open cannot pick your model or your spend. An invalid entry is ignored. `0 findings burndown` does not read these defaults: use its own `--budget`, `--per-fix` and `--model`.
 
 ## The `0 config` command
 

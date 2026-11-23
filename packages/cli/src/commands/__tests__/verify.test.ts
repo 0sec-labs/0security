@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyRefusal, firstSentence, groupFindings, runVerify, type VerifyCandidate, type VerifyDeps, type VerifyOptions } from "../verify.js";
+import { applyRefusal, firstSentence, groupFindings, runVerify, verifyMetric, type VerifyCandidate, type VerifyDeps, type VerifyOptions } from "../verify.js";
 import type { FindingModelVerification } from "@0/engine/storage";
 
 const cand = (id: string, extra: Partial<VerifyCandidate> = {}): VerifyCandidate => ({
@@ -190,5 +190,24 @@ describe("helpers", () => {
     const record = { verdict: "false-positive" as const, reasoning: "see x.ts:1", control: "x.ts:1" };
     expect(applyRefusal({ severity: "low" }, record, "/w", () => false)).toMatch(/not in the folder/);
     expect(applyRefusal({ severity: "low" }, record, "/w", () => true)).toBeUndefined();
+  });
+});
+
+describe("verify run metrics", () => {
+  it("records counts and finding ids once per run, and nothing for a dry run", async () => {
+    const h = harness([cand("a"), cand("b", { path: "src/b.ts" })], m => block({ finding: idIn(m), verdict: "true-positive", reasoning: "Attack built through a.ts:3." }));
+    const rows: unknown[] = [];
+    const deps = { ...h.deps, metrics: (row: unknown) => { rows.push(row); } };
+    await runVerify([], options({ model: "m1" }), deps);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ command: "verify", model: "m1", budgetUsd: 2, findingsAttempted: 2, findingsProposed: 2, checksPassed: null, status: "ok", findingIds: ["a", "b"] });
+    expect(JSON.stringify(rows[0])).not.toContain("Title a");
+    await runVerify([], options({ dryRun: true, force: true }), deps);
+    expect(rows).toHaveLength(1);
+  });
+
+  it("is absent when no thread ran", () => {
+    const report = { folder: "/w", dryRun: false, selected: 0, verified: 0, failed: 0, skipped: 0, counts: {}, applied: 0, costUsd: 0, items: [] } as never;
+    expect(verifyMetric(report, { budget: "2" }, 0, 0)).toBeUndefined();
   });
 });

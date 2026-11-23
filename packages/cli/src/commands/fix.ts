@@ -23,6 +23,8 @@ import { selectHost, type Host } from "../host/index.js";
 import { commitSubject, footerText, isDraft, pullRequestTitle, type PullRequestConventions } from "./fix-conventions.js";
 import { finishWithError, UsageError } from "./output.js";
 import { runInSandbox, sandboxLabel, validateSandboxImage, type SandboxSpec } from "./fix-sandbox.js";
+import { appendRunMetric, type RunMetric } from "../run-metrics.js";
+import { applyWorkflowDefaults } from "../workflow-defaults.js";
 
 export { DEFAULT_FIX_POLICY_FILES, parseFixPolicy, loadFixPolicyFile } from "./fix-policy.js";
 import { asJson, finishedThread, usageLine } from "./thread-output.js";
@@ -47,6 +49,8 @@ export interface FixDeps extends Pick<ScanDeps, "open" | "err" | "sleep" | "star
   makeTemp(): string;
   removeTemp(path: string): void;
   writeFile(path: string, text: string): void;
+  /** Record one run in the metrics file (counts and ids only). Absent in tests, so they write nothing. */
+  metrics?(record: Omit<RunMetric, "version" | "ci">): void;
 }
 
 function resolveRow(rows: Array<Record<string, unknown>>, id: string): Record<string, unknown> {
@@ -95,6 +99,7 @@ const defaults: FixDeps = {
   makeTemp: () => mkdtempSync(join(tmpdir(), "0-fix-")),
   removeTemp: path => rmSync(path, { recursive: true, force: true }),
   writeFile: (path, text) => writeFileSync(path, text, { mode: 0o600 }),
+  metrics: record => appendRunMetric(record),
 };
 
 export const defaultFixDeps: FixDeps = defaults;
@@ -160,7 +165,17 @@ export interface FixOptions extends ConsoleTransportOptions {
 
 export interface FixOutcome {
   finding: string; branch: string; changed: boolean; committed: boolean; checks: CheckResult[]; verified: boolean;
-  pullRequest?: { url: string; created: boolean; draft: boolean }; threadId?: string; costUsd?: number; budgetExhausted?: boolean; timedOut?: boolean; summary?: string;
+  pullRequest?: { url: string; created: boolean; draft: boolean }; threadId?: string; costUsd?: number; tokens?: number; budgetExhausted?: boolean; timedOut?: boolean; summary?: string;
+}
+
+/** The metrics record of one fix run; `outcome` is undefined when the run failed before it had one. */
+export function fixMetric(outcome: FixOutcome | undefined, options: Pick<FixOptions, "model" | "budget">, startedAt: number, endedAt: number): Omit<RunMetric, "version" | "ci"> {
+  const status = !outcome ? "failed" : outcome.timedOut ? "timeout" : outcome.budgetExhausted ? "budget" : outcome.committed ? "ok" : "failed";
+  return {
+    at: new Date(startedAt).toISOString(), command: "fix", model: options.model ?? DEFAULT_SCAN_MODEL, budgetUsd: Number(options.budget), costUsd: outcome?.costUsd ?? null,
+    durationSeconds: Math.max(0, Math.round((endedAt - startedAt) / 1000)), findingsAttempted: 1, findingsProposed: outcome?.committed ? 1 : 0, checksPassed: outcome?.committed && outcome.verified ? 1 : 0,
+    tokens: outcome?.tokens ?? null, status, findingIds: outcome ? [outcome.finding] : [],
+  };
 }
 
 async function defaultBase(deps: FixDeps, repo: string, requested?: string): Promise<{ ref: string; name: string }> {
@@ -189,6 +204,19 @@ export function sandboxSpec(options: FixOptions, env: NodeJS.ProcessEnv = proces
 }
 
 export async function runFix(id: string, options: FixOptions, deps: FixDeps): Promise<FixOutcome | undefined> {
+  const started = Date.now();
+  try {
+    const outcome = await runFixFlow(id, options, deps);
+    deps.metrics?.(fixMetric(outcome, options, started, Date.now()));
+    return outcome;
+  } catch (error) {
+    // A usage error is a mistyped command, not a run.
+    if (!(error instanceof UsageError)) deps.metrics?.(fixMetric(undefined, options, started, Date.now()));
+    throw error;
+  }
+}
+
+async function runFixFlow(id: string, options: FixOptions, deps: FixDeps): Promise<FixOutcome | undefined> {
   let stopConsole: (() => void) | undefined;
   let temp: string | undefined;
   let repo = "";
@@ -232,7 +260,7 @@ export async function runFix(id: string, options: FixOptions, deps: FixDeps): Pr
     const outcomeBase = { finding: finding.id, branch };
     const thread = await runThread(client, deps, tree, finding, options, budget, policy, Boolean(sandbox));
     const status = (await deps.git(tree, ["status", "--porcelain", "--untracked-files=all"])).trim();
-    const common = { ...outcomeBase, threadId: thread.id, ...(thread.costUsd !== undefined ? { costUsd: thread.costUsd } : {}), ...(thread.budgetExhausted ? { budgetExhausted: true } : {}), ...(thread.timedOut ? { timedOut: true } : {}), ...(thread.reply ? { summary: thread.reply } : {}) };
+    const common = { ...outcomeBase, threadId: thread.id, ...(thread.costUsd !== undefined ? { costUsd: thread.costUsd } : {}), ...(thread.tokens !== undefined ? { tokens: thread.tokens } : {}), ...(thread.budgetExhausted ? { budgetExhausted: true } : {}), ...(thread.timedOut ? { timedOut: true } : {}), ...(thread.reply ? { summary: thread.reply } : {}) };
     if (!status) {
       deps.err(thread.error ?? "The thread made no change; no pull request was opened.");
       return { ...common, changed: false, committed: false, checks: [], verified: false };
@@ -312,7 +340,8 @@ async function runThread(client: ConsoleClient, deps: FixDeps, folder: string, f
   const { snapshot, timedOut } = await waitForThread(client, deps, id, Date.now() + Number(options.timeout) * 1000);
   const done = finishedThread(snapshot);
   const costUsd = typeof done.usage.costUsd === "number" ? done.usage.costUsd : undefined;
-  return { id, reply: done.reply, error: done.error, failed: done.failed && !timedOut, timedOut, budgetExhausted: asJson(done.session).costCeilingExceeded === true, usage: usageLine(done.usage), ...(costUsd !== undefined ? { costUsd } : {}) };
+  const tokens = typeof done.usage.inputTokens === "number" && typeof done.usage.outputTokens === "number" ? done.usage.inputTokens + done.usage.outputTokens : undefined;
+  return { id, reply: done.reply, error: done.error, failed: done.failed && !timedOut, ...(tokens !== undefined ? { tokens } : {}), timedOut, budgetExhausted: asJson(done.session).costCeilingExceeded === true, usage: usageLine(done.usage), ...(costUsd !== undefined ? { costUsd } : {}) };
 }
 
 export function registerFixCommand(program: Command, deps: FixDeps = defaults): void {
@@ -334,9 +363,9 @@ export function registerFixCommand(program: Command, deps: FixDeps = defaults): 
     .addOption(new Option("--format <format>", "Output: text or json").choices(["text", "json"]))
     )
     .addHelpText("after", "\nNothing is pushed to the base branch and nothing is merged: the change goes to a branch named 0/fix-<id>, and running it again updates the same pull request.\nWithout --sandbox, --test commands run on this machine with your privileges. With --sandbox docker they run in a container with no network, limited memory, CPU and processes, a copy of the work tree and none of your environment variables; the pull request says so only when every check passed there.\nExit codes: 0 a verified change (or committed with --no-pr), 1 no change or a failed check, 2 usage error, 3 stopped at the budget or time limit.")
-    .action(async (finding: string, options: FixOptions) => {
+    .action(async (finding: string, options: FixOptions, command: Command) => {
       try {
-        const outcome = await runFix(finding, options, deps);
+        const outcome = await runFix(finding, applyWorkflowDefaults("fix", options, command), deps);
         if (!outcome) return;
         if (options.format === "json") deps.out(JSON.stringify(outcome, null, 2));
         else if (outcome.pullRequest) deps.out(`${outcome.pullRequest.created ? "Opened" : "Updated"} ${outcome.pullRequest.draft ? "draft " : ""}pull request: ${outcome.pullRequest.url}`);

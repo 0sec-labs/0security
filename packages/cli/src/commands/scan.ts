@@ -24,6 +24,8 @@ import { planScan, planText } from "../scan-plan.js";
 import { resumeHint, type ResumeHint } from "../scan-resume.js";
 import { loadSteering, type Steering } from "../scan-steering.js";
 import { finishWithError, UsageError } from "./output.js";
+import { appendRunMetric, type RunMetric } from "../run-metrics.js";
+import { applyWorkflowDefaults } from "../workflow-defaults.js";
 import { asJson, finishedThread, lastAssistantText, usageLine, type FinishedThread, type Json } from "./thread-output.js";
 
 const exec = promisify(execFile);
@@ -78,6 +80,8 @@ export interface ScanDeps {
   openLedger?(dbPath?: string): CoverageLedger;
   /** The commit a folder is on, or undefined when it is not a git work tree. A resumed scan refuses a different one. */
   gitHead?(folder: string): Promise<string | undefined>;
+  /** Record one run in the metrics file (counts and ids only). Absent in tests, so they write nothing. */
+  metrics?(record: Omit<RunMetric, "version" | "ci">): void;
 }
 export const defaultScanDeps: ScanDeps = {
   open: options => openConsole(options),
@@ -86,6 +90,7 @@ export const defaultScanDeps: ScanDeps = {
   sleep: ms => new Promise(resolve => setTimeout(resolve, ms)),
   now: () => new Date(),
   writeBytes: (path, bytes) => writeFileSync(path, bytes, { mode: 0o600 }),
+  metrics: record => appendRunMetric(record),
   async loadReport(client, threadId) {
     const report = asJson(await client.request("GET", `/api/scans/${encodeURIComponent(threadId)}/export?format=json`));
     if (!Array.isArray(report.findings)) throw new Error("The engine returned no report for this scan.");
@@ -326,7 +331,11 @@ async function inPool<T>(count: number, limit: number, task: (index: number) => 
 }
 
 /** Format the report and write it to --output or standard output. */
-async function writeReport(outcome: ScanOutcome, merged: ReturnType<typeof mergePasses>, stored: ScanReport, name: string, options: ScanOptions, deps: Pick<ScanDeps, "out" | "err" | "writeBytes">): Promise<void> {
+async function writeReport(outcome: ScanOutcome, merged: ReturnType<typeof mergePasses>, stored: ScanReport, name: string, options: ScanOptions, deps: Pick<ScanDeps, "out" | "err" | "writeBytes" | "metrics">): Promise<void> {
+  if (outcome.threadId !== "none") {
+    const status = outcome.failed ? "failed" : outcome.timedOut ? "timeout" : outcome.budgetExhausted ? "budget" : "ok";
+    deps.metrics?.({ at: outcome.startedAt, command: "scan", model: options.model ?? DEFAULT_SCAN_MODEL, budgetUsd: outcome.budgetUsd, costUsd: outcome.costUsd ?? null, durationSeconds: Math.max(0, Math.round((Date.parse(outcome.completedAt) - Date.parse(outcome.startedAt)) / 1000)), findingsAttempted: null, findingsProposed: merged.length, checksPassed: null, tokens: null, status, findingIds: merged.map(finding => finding.id) });
+  }
   let body: Uint8Array | string;
   if (options.format === "json") body = `${JSON.stringify(scanJson(outcome, merged), null, 2)}\n`;
   else {
@@ -594,5 +603,5 @@ export function registerScanCommand(program: Command, deps: ScanDeps = defaultSc
     .option("--plan", "List the entry points, the batches and a rough cost range for the folder, then exit; calls no model and writes nothing")
     .option("--timeout <seconds>", "Maximum seconds to wait for the scan", String(DEFAULT_TIMEOUT_SECONDS)))
     .addHelpText("after", "\nExit codes: 0 done, 1 findings at or above --fail-on or the scan failed, 2 usage error, 3 stopped before it reviewed everything (budget, time limit, or entry points not reached): not finished, not failed; --allow-partial exits 0 or 1 instead.\nThe scan is a thread: follow it with `0 threads list`.")
-    .action(async (target: string, options: ScanOptions) => { await runScan(target, options, deps); });
+    .action(async (target: string, options: ScanOptions, command: Command) => { await runScan(target, applyWorkflowDefaults("scan", options, command), deps); });
 }

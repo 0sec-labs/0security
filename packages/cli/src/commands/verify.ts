@@ -15,6 +15,8 @@ import { consoleTransportOptions, type ConsoleClient, type ConsoleTransportOptio
 import { resolveFindingId, shortFindingId } from "../finding-id.js";
 import { connect, DEFAULT_SCAN_MODEL, defaultScanDeps, waitForThread, type ScanDeps } from "./scan.js";
 import { finishWithError, UsageError } from "./output.js";
+import { appendRunMetric, type RunMetric } from "../run-metrics.js";
+import { applyWorkflowDefaults } from "../workflow-defaults.js";
 import { asJson, finishedThread } from "./thread-output.js";
 
 const SEVERITIES = ["critical", "high", "medium", "low", "info"] as const;
@@ -42,6 +44,8 @@ export interface VerifyDeps extends Pick<ScanDeps, "open" | "err" | "sleep" | "s
   /** Is there a file or folder at this path inside the folder? Never follows the path out of it. */
   exists(folder: string, relative: string): boolean;
   now(): Date;
+  /** Record one run in the metrics file (counts and ids only). Absent in tests, so they write nothing. */
+  metrics?(record: Omit<RunMetric, "version" | "ci">): void;
 }
 
 export interface VerifyOptions extends ConsoleTransportOptions {
@@ -57,7 +61,19 @@ export interface VerifyItem {
 
 export interface VerifyReport {
   folder: string; dryRun: boolean; selected: number; verified: number; failed: number; skipped: number;
-  counts: Record<ModelVerdict, number>; applied: number; costUsd: number; stoppedReason?: string; items: VerifyItem[];
+  counts: Record<ModelVerdict, number>; applied: number; costUsd: number; tokens?: number; stoppedReason?: string; items: VerifyItem[];
+}
+
+/** The metrics record of one verify run, or undefined when no thread ran (a dry run, or nothing selected). */
+export function verifyMetric(report: VerifyReport, options: Pick<VerifyOptions, "model" | "budget">, startedAt: number, endedAt: number): Omit<RunMetric, "version" | "ci"> | undefined {
+  const verified = report.items.filter(item => item.result === "verified");
+  const attempted = verified.length + report.failed;
+  if (report.dryRun || attempted === 0) return undefined;
+  return {
+    at: new Date(startedAt).toISOString(), command: "verify", model: options.model ?? DEFAULT_SCAN_MODEL, budgetUsd: Number(options.budget), costUsd: report.costUsd,
+    durationSeconds: Math.max(0, Math.round((endedAt - startedAt) / 1000)), findingsAttempted: attempted, findingsProposed: verified.length, checksPassed: null,
+    tokens: report.tokens ?? null, status: report.stoppedReason === BUDGET_SPENT ? "budget" : report.failed > 0 || report.stoppedReason ? "failed" : "ok", findingIds: verified.map(item => item.finding),
+  };
 }
 
 const parseNumber = (name: string, text: string, rule: (n: number) => boolean, expected: string): number => {
@@ -117,6 +133,7 @@ export const defaultVerifyDeps: VerifyDeps = {
     try { return statSync(join(root, relative)) !== undefined; } catch { return false; }
   },
   now: () => new Date(),
+  metrics: record => appendRunMetric(record),
 };
 
 const emptyCounts = (): Record<ModelVerdict, number> => ({ "true-positive": 0, "false-positive": 0, fixed: 0, uncertain: 0, duplicate: 0 });
@@ -189,7 +206,7 @@ export function groupFindings(findings: VerifyCandidate[], size: number): Verify
   return groups;
 }
 
-interface ThreadOutcome { id?: string; reply?: string; error?: string; costUsd?: number; budgetExhausted?: boolean; timedOut?: boolean }
+interface ThreadOutcome { id?: string; reply?: string; error?: string; costUsd?: number; tokens?: number; budgetExhausted?: boolean; timedOut?: boolean }
 
 async function runThread(client: ConsoleClient, deps: VerifyDeps, folder: string, group: VerifyCandidate[], options: VerifyOptions, budget: number): Promise<ThreadOutcome> {
   const title = group.length === 1 ? `Verify: ${group[0]!.title}` : `Verify ${group.length} findings in ${group[0]!.path}`;
@@ -202,10 +219,19 @@ async function runThread(client: ConsoleClient, deps: VerifyDeps, folder: string
   const { snapshot, timedOut } = await waitForThread(client, deps, id, Date.now() + Number(options.timeout) * 1000);
   const done = finishedThread(snapshot);
   const costUsd = typeof done.usage.costUsd === "number" ? done.usage.costUsd : undefined;
-  return { id, ...(done.reply ? { reply: done.reply } : {}), ...(done.error ? { error: done.error } : {}), ...(costUsd !== undefined ? { costUsd } : {}), budgetExhausted: asJson(done.session).costCeilingExceeded === true, timedOut };
+  const tokens = typeof done.usage.inputTokens === "number" && typeof done.usage.outputTokens === "number" ? done.usage.inputTokens + done.usage.outputTokens : undefined;
+  return { id, ...(done.reply ? { reply: done.reply } : {}), ...(done.error ? { error: done.error } : {}), ...(costUsd !== undefined ? { costUsd } : {}), ...(tokens !== undefined ? { tokens } : {}), budgetExhausted: asJson(done.session).costCeilingExceeded === true, timedOut };
 }
 
 export async function runVerify(ids: string[], options: VerifyOptions, deps: VerifyDeps, preset?: { client: ConsoleClient }): Promise<VerifyReport> {
+  const started = Date.now();
+  const report = await runVerifyFlow(ids, options, deps, preset);
+  const record = verifyMetric(report, options, started, Date.now());
+  if (record) deps.metrics?.(record);
+  return report;
+}
+
+async function runVerifyFlow(ids: string[], options: VerifyOptions, deps: VerifyDeps, preset?: { client: ConsoleClient }): Promise<VerifyReport> {
   const concurrency = parseNumber("--concurrency", options.concurrency, n => Number.isInteger(n) && n >= 1 && n <= MAX_VERIFY_CONCURRENCY, `a whole number from 1 to ${MAX_VERIFY_CONCURRENCY}`);
   const total = parseNumber("--budget", options.budget, n => n > 0, "a positive number of USD");
   const perFinding = parseNumber("--per-finding", options.perFinding, n => n > 0, "a positive number of USD");
@@ -233,7 +259,7 @@ export async function runVerify(ids: string[], options: VerifyOptions, deps: Ver
   if (!options.dryRun && groups.length && !client) { const connection = await connect(options, deps); client = connection.client; stop = connection.stop; }
 
   let stoppedReason: string | undefined;
-  let spent = 0, reserved = 0, next = 0, consecutive = 0, finished = 0;
+  let spent = 0, reserved = 0, next = 0, consecutive = 0, finished = 0, tokens = 0;
   const waiting: Array<() => void> = [];
 
   const record = (c: VerifyCandidate, group: VerifyCandidate[], thread: ThreadOutcome, parsed: ReturnType<typeof parseVerdicts>): { item: VerifyItem; failed: boolean } => {
@@ -283,7 +309,7 @@ export async function runVerify(ids: string[], options: VerifyOptions, deps: Ver
       let failure: string | undefined;
       try { thread = await runThread(client, deps, folder, group, options, Number(allowance.toFixed(4))); }
       catch (error) { failure = error instanceof Error ? error.message.split("\n")[0]! : String(error); }
-      reserved -= allowance; spent += thread.costUsd ?? 0;
+      reserved -= allowance; spent += thread.costUsd ?? 0; tokens += thread.tokens ?? 0;
       let failed = false;
       if (failure || !thread.reply) {
         // The thread itself did not run to an answer: nothing is stored, so the next run tries again.
@@ -317,7 +343,7 @@ export async function runVerify(ids: string[], options: VerifyOptions, deps: Ver
     folder, dryRun: Boolean(options.dryRun), selected: selectedAll.length,
     verified: ordered.filter(i => i.result === "verified").length, failed: ordered.filter(i => i.result === "failed").length,
     skipped: ordered.filter(i => i.result === "skipped").length, counts, applied: ordered.filter(i => i.applied).length,
-    costUsd: Number(spent.toFixed(6)), ...(stoppedReason ? { stoppedReason } : {}), items: ordered,
+    costUsd: Number(spent.toFixed(6)), ...(tokens ? { tokens } : {}), ...(stoppedReason ? { stoppedReason } : {}), items: ordered,
   };
 }
 
@@ -359,11 +385,11 @@ export function registerVerifyCommand(program: Command, deps: VerifyDeps = defau
     .option("--dry-run", "List what would be checked and skipped; change nothing")
     .addOption(new Option("--format <format>", "Output: text or json").choices(["text", "json"])))
     .addHelpText("after", "\nA verdict is advice stored next to the finding: severity and status stay as they were. With --apply only a false-positive verdict that cites a control at path:line suppresses a finding, with a note you can read in `0 findings show`. Running it again skips findings that already have a verdict.\nExit codes: 0 done, 1 a check returned no verdict or the run stopped on failures, 2 usage error, 3 the total budget ran out.")
-    .action(async (findings: string[], options: VerifyOptions) => {
+    .action(async (findings: string[], options: VerifyOptions, command: Command) => {
       const json = options.format === "json";
       const err = (text: string) => process.stderr.write(`${text}\n`);
       try {
-        const report = await runVerify(findings ?? [], options, { ...deps, err: json ? err : deps.err });
+        const report = await runVerify(findings ?? [], applyWorkflowDefaults("verify", options, command), { ...deps, err: json ? err : deps.err });
         deps.out(json ? JSON.stringify(report, null, 2) : renderVerifyReport(report));
         process.exitCode = report.stoppedReason === BUDGET_SPENT ? 3 : report.failed > 0 || report.stoppedReason || report.items.some(i => i.result === "verified" && i.reasoning?.startsWith("no verdict returned")) ? 1 : 0;
       } catch (error) { finishWithError(error, { err }, json); }

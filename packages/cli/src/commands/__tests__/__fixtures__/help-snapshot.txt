@@ -640,6 +640,8 @@ Commands:
                                     request each, then a report
   verify [options] [finding...]     Experimental: re-check findings with a fresh thread each and
                                     record a verdict next to them
+  metrics [options]                 Show what scan, fix and verify runs cost and produced: cost per
+                                    proposed fix and the share that passed their checks
   evidence [options] <folder>       Write one folder of findings, SARIF, SBOM and fix branches, with
                                     a README that says what it does and does not show
   export-fixes [options]            Report what happened to the fixes burndown proposed: counts,
@@ -898,6 +900,18 @@ Options:
   --expiring <days>      Only accepted risks that expire within this many days
   --limit <n>            Max findings/groups to show
   -h, --help             display help for command
+
+### 0 findings metrics
+Usage: 0 findings metrics [options]
+
+Show what scan, fix and verify runs cost and produced: cost per proposed fix and the share that
+passed their checks
+
+Options:
+  --since <when>     Only runs since then: 36h, 7d, 2w or a date such as 2026-11-01
+  --command <name>   Only this command: scan, fix, verify
+  --format <format>  Output: text or json (choices: "text", "json")
+  -h, --help         display help for command
 
 ### 0 findings reopen (hidden)
 Usage: 0 findings reopen [options] <id>

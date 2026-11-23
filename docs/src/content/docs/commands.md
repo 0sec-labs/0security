@@ -1370,7 +1370,7 @@ Browse and manage persisted findings
 
 Triage (`new`, `accepted`, `suppressed`) and verification are separate states. Accepting a finding records your decision; reproduction and fix verification are separate steps.
 
-Subcommands: [list](#findings-list) · [show](#findings-show) · [update](#findings-update) · [import](#findings-import) · [fix](#findings-fix) · [burndown](#findings-burndown) · [verify](#findings-verify) · [evidence](#findings-evidence) · [export-fixes](#findings-export-fixes) · [report-draft](#findings-report-draft) · [accept](#findings-accept) · [suppress](#findings-suppress) · [reopen](#findings-reopen) · [export](#findings-export) · [keys](#findings-keys) · [upload](#findings-upload) · [issues](#findings-issues) · [reports](#findings-reports).
+Subcommands: [list](#findings-list) · [show](#findings-show) · [update](#findings-update) · [import](#findings-import) · [fix](#findings-fix) · [burndown](#findings-burndown) · [verify](#findings-verify) · [metrics](#findings-metrics) · [evidence](#findings-evidence) · [export-fixes](#findings-export-fixes) · [report-draft](#findings-report-draft) · [accept](#findings-accept) · [suppress](#findings-suppress) · [reopen](#findings-reopen) · [export](#findings-export) · [keys](#findings-keys) · [upload](#findings-upload) · [issues](#findings-issues) · [reports](#findings-reports).
 
 | Option | Registered default | Description |
 | --- | --- | --- |
@@ -1805,6 +1805,26 @@ Exit codes:
 | `--computers-config <path>` | — | Operator computer connection registry JSON file |
 | `--engines-config <path>` | — |  |
 | `--db-path <path>` | — | Control database of the local engine to attach to |
+
+#### findings metrics
+
+Show what scan, fix and verify runs cost and produced: cost per proposed fix and the share that passed their checks
+
+```text
+0 findings metrics [options]
+```
+
+Every `0 scan`, `0 findings fix` and `0 findings verify` run adds one line to `~/.0/metrics.ndjson`. The line holds the command, model, budget, cost, duration, counts, tokens when the thread reports them, and finding ids. It holds no finding text, file paths or credentials. Only you can read the file. It moves to `metrics.ndjson.1` at 1 MB, so about two files of history remain. `0 findings burndown` runs one fix per finding, so each of its fixes adds a line.
+
+The summary lists runs, cost, average time and counts per command. A proposed fix is a committed change. The share verified is the proposed fixes whose checks all passed. Cost per proposed fix is the cost of all fix runs divided by the fixes they proposed. The run does not see the CI result of the pull request it opens, so CI is recorded as unknown.
+
+`--since` takes hours, days or weeks (`36h`, `7d`, `2w`) or a date. `--format json` prints the summary as JSON.
+
+| Option | Registered default | Description |
+| --- | --- | --- |
+| `--since <when>` | — | Only runs since then: 36h, 7d, 2w or a date such as 2026-11-01 |
+| `--command <name>` | — | Only this command: scan, fix, verify |
+| `--format <format>` | — | Output: text or json Choices: text, json. |
 
 #### findings verify
 

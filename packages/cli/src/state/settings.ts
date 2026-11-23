@@ -56,6 +56,13 @@ export interface ModelPreference {
   cyberAccessProgram?: "standard" | "daybreak_blue" | "daybreak_red";
 }
 
+/** The commands that take a default budget and model from the settings file. */
+export const WORKFLOW_NAMES = ["scan", "fix", "verify"] as const;
+export type WorkflowName = (typeof WORKFLOW_NAMES)[number];
+/** Default spend cap in USD and model for one workflow. An explicit flag on the command wins over both. */
+export interface WorkflowDefault { budget?: number; model?: string }
+export type WorkflowDefaults = Partial<Record<WorkflowName, WorkflowDefault>>;
+
 export interface TuiSettings {
   /** Show the active subagent list while workers run. */
   showSubagents: boolean;
@@ -141,6 +148,8 @@ export interface TuiSettings {
   updatePolicy: "off" | "notify" | "automatic";
   /** Operator-only: provider, model and connection are replaced as one value. */
   modelPreference: ModelPreference | null;
+  /** Operator-only: per-workflow default budget (USD) and model for scan, fix and verify. */
+  workflows: WorkflowDefaults;
   /** Subagents running at once. Env ZERO_SUBAGENT_CONCURRENCY wins; a project may only lower it. */
   subagentConcurrency: number;
   /** Nested subagent depth. Env ZERO_SUBAGENT_MAX_DEPTH wins; a project may only lower it. */
@@ -170,7 +179,7 @@ type BooleanKey = {
  *  `keybindings` is neither boolean nor a fixed-choice enum — it is a bespoke
  *  chord-override map validated by its own path (see its field doc) — so it is
  *  excluded here rather than forced into the enum contract. */
-type EnumKey = Exclude<keyof TuiSettings, BooleanKey | NumberKey | TextKey | "modelPreference">;
+type EnumKey = Exclude<keyof TuiSettings, BooleanKey | NumberKey | TextKey | "modelPreference" | "workflows">;
 
 interface BooleanSettingDef extends SettingDef<boolean> {
   key: BooleanKey;
@@ -480,6 +489,7 @@ export const DEFAULT_SETTINGS: TuiSettings = {
   diagnosticReportingPrompted: false,
   updatePolicy: "automatic",
   modelPreference: null,
+  workflows: {},
   subagentConcurrency: 32,
   subagentMaxDepth: 8,
   subagentFanOut: 1024,
@@ -564,6 +574,9 @@ function strictValueAt<K extends keyof TuiSettings>(raw: unknown, key: K): TuiSe
   if (key === "modelPreference") {
     return normalizeModelPreference(value) as TuiSettings[K] | undefined;
   }
+  if (key === "workflows") {
+    return normalizeWorkflows(value) as TuiSettings[K] | undefined;
+  }
   const def = DEF_BY_KEY.get(key);
   if (def?.kind === "boolean") {
     return typeof value === "boolean" ? (value as TuiSettings[K]) : undefined;
@@ -622,7 +635,8 @@ export function isOperatorSetting(key: keyof TuiSettings): boolean {
     || key === "executionProfile"
     || key === "approvals"
     || key === "archiveIdleDays"
-    || key === "modelPreference";
+    || key === "modelPreference"
+    || key === "workflows";
 }
 
 /**
@@ -723,6 +737,22 @@ function enumAt<K extends EnumKey>(raw: unknown, key: K): TuiSettings[K] {
     : DEFAULT_SETTINGS[key];
 }
 
+/** Keep a workflow default only when its budget is a positive number up to 1000 and its model is a plain model id. Undefined when the value is not an object. */
+export function normalizeWorkflows(raw: unknown): WorkflowDefaults | undefined {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return undefined;
+  const out: WorkflowDefaults = {};
+  for (const name of WORKFLOW_NAMES) {
+    const entry = (raw as Record<string, unknown>)[name];
+    if (typeof entry !== "object" || entry === null || Array.isArray(entry)) continue;
+    const { budget, model } = entry as Record<string, unknown>;
+    const clean: WorkflowDefault = {};
+    if (typeof budget === "number" && Number.isFinite(budget) && budget > 0 && budget <= 1000) clean.budget = budget;
+    if (typeof model === "string" && /^[\w.:/@+-]{1,100}$/.test(model.trim())) clean.model = model.trim();
+    if (clean.budget !== undefined || clean.model !== undefined) out[name] = clean;
+  }
+  return out;
+}
+
 function normalizeModelPreference(raw: unknown): ModelPreference | null | undefined {
   if (raw === null) return null;
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return undefined;
@@ -768,6 +798,7 @@ export function normalizeSettings(raw: unknown): TuiSettings {
     diagnosticReportingPrompted: booleanAt(raw, "diagnosticReportingPrompted"),
     updatePolicy: strictValueAt(raw, "updatePolicy") ?? DEFAULT_SETTINGS.updatePolicy,
     modelPreference: normalizeModelPreference(rawValue(raw, "modelPreference")) ?? null,
+    workflows: normalizeWorkflows(rawValue(raw, "workflows")) ?? {},
     subagentConcurrency: numberAt(raw, "subagentConcurrency"),
     subagentMaxDepth: numberAt(raw, "subagentMaxDepth"),
     subagentFanOut: numberAt(raw, "subagentFanOut"),

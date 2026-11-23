@@ -446,6 +446,18 @@ Limits:
 - `0 findings burndown` does not take `--sandbox`.
 - The mechanism was tested with a real container (an Alpine Node image, no network). The Maven image was not run for real in this build, only through a fake `docker`.
 
+## See what runs cost
+
+Each scan, fix and verify run records its cost, duration and counts on your machine. Read the summary with:
+
+```bash
+0 findings metrics --since 7d
+```
+
+It shows cost per proposed fix and the share of proposed fixes whose checks passed. Add `--command fix` to look at one command, or `--format json` to export. See [findings metrics](/commands/#findings-metrics).
+
+To give a command a default budget and model, set them per workflow in your [settings file](/configuration/#set-a-budget-and-model-per-workflow). A flag on the command line wins.
+
 ## Export and share
 
 Export saved findings as JSON, Markdown or SARIF:
