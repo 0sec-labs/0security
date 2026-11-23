@@ -5,6 +5,10 @@ description: Every outbound network destination of 0, when it is used, what is s
 
 This page lists every place 0 can send data off the computer it runs on. It exists so a security team can check the claim "nothing leaves the network except the model endpoint we configured" instead of taking it on trust.
 
+## What leaves your machine
+
+Your code stays on your machine. 0 sends what you choose to your model provider. By default it also sends anonymous usage counts, and it checks GitHub for updates. `ZERO_OFFLINE=1` turns both off, along with crash reports and the public model and price lookups. `ZERO_NO_TELEMETRY=1` (or `DO_NOT_TRACK=1`) stops the counts and crash reports, and `ZERO_NO_UPDATE_CHECK=1` stops the update check. `ZERO_ENTERPRISE=1` is the strict mode below.
+
 ## No-egress mode
 
 Set one environment variable on every computer or container that runs 0:

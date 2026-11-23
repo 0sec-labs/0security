@@ -21,9 +21,9 @@ export const TELEMETRY_NOTICE_FILENAME = "telemetry-notice";
 export const TELEMETRY_DOCS_URL = "https://docs.0.security/configuration/#telemetry";
 
 export const TELEMETRY_NOTICE_TEXT = [
-  "0security sends anonymous usage counts and crash reports (no targets, findings or code).",
+  "0security sends anonymous usage counts and crash reports (no targets, findings or code) and checks GitHub for updates.",
   `Learn more and opt out: ${TELEMETRY_DOCS_URL}`,
-  "Disable both with ZERO_NO_TELEMETRY=1, or run `0 config set analyticsLevel off` and `0 config set diagnosticReporting off`.",
+  "ZERO_OFFLINE=1 turns all three off. Or use ZERO_NO_TELEMETRY=1 (counts and reports) and ZERO_NO_UPDATE_CHECK=1 (updates), or run `0 config set analyticsLevel off` and `0 config set diagnosticReporting off`.",
 ].join("\n");
 
 const MACHINE_FLAGS = new Set(["--json", "--ndjson", "--jsonl", "--ready-json", "--sarif"]);
