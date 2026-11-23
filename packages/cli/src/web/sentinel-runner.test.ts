@@ -899,8 +899,8 @@ describe("circuit-breaker state preservation across async GitHub PR triggers and
   }
   const pr = (number: number, sha: string) => ({ number, headRefOid: sha, title: `PR ${number}`, url: `https://github.com/o/r/pull/${number}`, baseRefName: "main", headRefName: `b${number}`, isCrossRepository: false, isDraft: false, state: "OPEN" });
 
-  async function armedPrPersistent(ghRun: (args: string[]) => Promise<{ stdout: string }>) {
-    const f = fixture({ gh: { run: ghRun }, persistent: true });
+  async function armedPrPersistent(ghRun: (args: string[]) => Promise<{ stdout: string }>, persistent = true) {
+    const f = fixture({ gh: { run: ghRun }, persistent });
     const created = (await f.call("POST", P, { name: "Reviewer", skills: ["pr-diff-review"] })).data as { sentinel: { id: string } };
     const id = created.sentinel.id;
     await f.call("POST", `${P}/${id}/resume`, { acknowledge: true });
@@ -1317,5 +1317,51 @@ describe("circuit-breaker state preservation across async GitHub PR triggers and
     expect(trigger.lastError).not.toContain("gh auth failed");
     expect(trigger.activeClaim).toBeUndefined();
     expect((await f.view(id)).attention).toMatchObject({ needsYou: true, reason: expect.stringMatching(/three failed turns/) });
+  });
+
+  it("refuses >190 open pull requests on a poll instead of truncating the 200-entry cursor and re-triggering old PRs", async () => {
+    const diffs: string[] = [];
+    const open205 = Array.from({ length: 205 }, (_, i) => pr(i + 1, `sha-${i + 1}`));
+    const { f, triggerId } = await armedPrPersistent(async args => {
+      if (args[0] === "pr" && args[1] === "list") return { stdout: JSON.stringify(open205) };
+      if (args[0] === "pr" && args[1] === "diff") { diffs.push(String(args[2])); return { stdout: "diff --git a/a b/a" }; }
+      return { stdout: "" };
+    }, false);
+
+    expect(f.store.getTrigger(triggerId)?.lastStatus).toBe("blocked");
+    expect(f.store.getTrigger(triggerId)?.lastError).toMatch(/190/);
+    expect(diffs).toHaveLength(0);
+    expect(f.missions.send).not.toHaveBeenCalled();
+
+    await f.service.checkTrigger(triggerId);
+    expect(diffs).toHaveLength(0);
+    expect(f.missions.send).not.toHaveBeenCalled();
+  });
+
+  it("prunes closed pull requests from the cursor so low-numbered open PRs are never evicted past 200 historical PRs", async () => {
+    let listing = Array.from({ length: 185 }, (_, i) => pr(i + 1, `s-${i + 1}`));
+    const diffs: string[] = [];
+    const { f, triggerId } = await armedPrPersistent(async args => {
+      if (args[0] === "pr" && args[1] === "list") return { stdout: JSON.stringify(listing) };
+      if (args[0] === "pr" && args[1] === "diff") { diffs.push(String(args[2])); return { stdout: "diff --git a/a b/a" }; }
+      return { stdout: "" };
+    }, false);
+
+    // PRs 1..5 remain open while 6..185 close and 186..203 open (23 open PRs, 203 cumulative PR IDs > 200 cursor cap).
+    listing = [
+      ...Array.from({ length: 5 }, (_, i) => pr(i + 1, `s-${i + 1}`)),
+      ...Array.from({ length: 18 }, (_, i) => pr(186 + i, `s-${186 + i}`)),
+    ];
+    for (let i = 0; i < 6; i++) {
+      await f.service.checkTrigger(triggerId);
+    }
+
+    const sendsBeforeStable = f.missions.send.mock.calls.length;
+    const diffsBeforeStable = diffs.length;
+    await f.service.checkTrigger(triggerId);
+    expect(f.missions.send).toHaveBeenCalledTimes(sendsBeforeStable);
+    expect(diffs).toHaveLength(diffsBeforeStable);
+    expect(f.store.getTrigger(triggerId)?.cursor?.["1"]).toBe("s-1");
+    expect(f.store.getTrigger(triggerId)?.cursor?.["5"]).toBe("s-5");
   });
 });
