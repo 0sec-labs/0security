@@ -9,6 +9,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { ExtensionRunPort } from "../../agent/types.js";
 import { BASE_ENV } from "./core/env.js";
+import { planSandbox, TRUSTED_INTERPRETER_NAMES, type TrustedInterpreter } from "./sandbox/index.js";
 import type { ConnectionSecrets, ExtensionStore } from "./ports.js";
 import { loadable, type LoadedExtension } from "./runtime.js";
 
@@ -17,7 +18,7 @@ const PYTHON_EXTENSIONS = new Set([".py"]);
 const NODE_EXTENSIONS = new Set([".js", ".mjs", ".cjs", ".ts", ".mts", ".cts"]);
 const BUN_EXTENSIONS = new Set([...NODE_EXTENSIONS, ".jsx", ".tsx"]);
 
-const INTERPRETER_EXTENSIONS: Readonly<Record<string, ReadonlySet<string>>> = {
+const INTERPRETER_EXTENSIONS: Readonly<Record<string, ReadonlySet<string>>> & Record<TrustedInterpreter, ReadonlySet<string>> = {
   sh: SHELL_EXTENSIONS,
   bash: SHELL_EXTENSIONS,
   zsh: SHELL_EXTENSIONS,
@@ -142,7 +143,7 @@ function parseShellCommand(command: string): string[] | null {
  * Extract the script file path candidate and optional trusted interpreter from tokenized arguments.
  * Rejects flags passed to interpreters and untrusted interpreter or `env` binary paths.
  */
-function extractScriptCandidate(tokens: string[]): { candidate: string; interpreter: string | null } | null {
+function extractScriptCandidate(tokens: string[]): { candidate: string; index: number; interpreter: string | null } | null {
   if (tokens.length === 0) return null;
 
   let idx = 0;
@@ -153,17 +154,17 @@ function extractScriptCandidate(tokens: string[]): { candidate: string; interpre
     if (!interpreter) return null;
     idx++;
     if (idx >= tokens.length || tokens[idx].startsWith("-")) return null;
-    return { candidate: tokens[idx], interpreter };
+    return { candidate: tokens[idx], index: idx, interpreter };
   }
 
   const interpreter = resolveTrustedInterpreter(tokens[idx]);
   if (interpreter) {
     idx++;
     if (idx >= tokens.length || tokens[idx].startsWith("-")) return null;
-    return { candidate: tokens[idx], interpreter };
+    return { candidate: tokens[idx], index: idx, interpreter };
   }
 
-  return { candidate: tokens[0], interpreter: null };
+  return { candidate: tokens[0], index: 0, interpreter: null };
 }
 
 /**
@@ -254,7 +255,19 @@ export function createScriptRuns(options: {
         if (!name.startsWith("ZERO_EXTENSION_")) secrets.push(value);
       }
 
-      return { ok: true, env, secrets };
+      // OS sandbox (ZERO_SANDBOX): the script's program is started directly, with the canonical path of the script.
+      const parent = (options.parentEnv ?? (() => process.env))();
+      const argv = [...tokens];
+      let canonicalDir: string;
+      try { canonicalDir = fs.realpathSync(ext.dir); } catch { return { ok: false, error: `extension ${ext.name}: its folder cannot be resolved` }; }
+      argv[extracted.index] = path.join(canonicalDir, match.relScript);
+      const plan = planSandbox({
+        decl: ext.manifest.sandbox, extensionDir: ext.dir, workspace: effectiveCwd, argv, interpreters: TRUSTED_INTERPRETER_NAMES,
+        env: { PATH: parent.PATH ?? process.env.PATH ?? "" }, cwd: effectiveCwd, label: `script ${match.relScript} of extension ${ext.name}`,
+      }, { env: parent });
+      if (plan.kind === "refused") return { ok: false, error: plan.error };
+      if (plan.kind === "unsandboxed") return { ok: true, env, secrets, status: plan.status };
+      return { ok: true, env: { ...env, TMPDIR: plan.env.TMPDIR ?? "", ZERO_SANDBOX_ACTIVE: "1" }, secrets, spawn: { file: plan.file, args: plan.args, cwd: plan.cwd }, status: plan.status, cleanup: plan.cleanup };
     },
   };
 }

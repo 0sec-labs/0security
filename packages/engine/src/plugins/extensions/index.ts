@@ -51,6 +51,7 @@ export { GitSource } from "./adapters/git-source.js";
 export { LocalSource } from "./adapters/local-source.js";
 export { McpDraftSource, type McpDraft } from "./adapters/mcp-draft-source.js";
 export { LegacyImporter } from "./import/index.js";
+export { detectSandbox, sandboxMode, type SandboxStatus, type SandboxMode } from "./sandbox/index.js";
 export { loadable, listRows, type LoadResult, type LoadedExtension, type ListRow } from "./runtime.js";
 export { FsConnectionSecrets } from "./adapters/fs-connection-secrets.js";
 export { TokenConnector } from "./adapters/token-connector.js";

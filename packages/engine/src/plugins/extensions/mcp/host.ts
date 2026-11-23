@@ -17,6 +17,7 @@ import type { ToolDefinition, ToolResult } from "../../../agent/types.js";
 import type { McpLazyView, McpOperatorChannel, McpToolGateFlags, McpToolHost } from "../../../agent/mcp-host.js";
 import { parseMcpToolName } from "../../../agent/mcp-adapt.js";
 import type { LoadedExtension } from "../runtime.js";
+import { planSandbox, TRUSTED_INTERPRETER_NAMES } from "../sandbox/index.js";
 import { buildDefinitions, indexDefinition, indexEntry, indexName, serverId } from "./core/definitions.js";
 import { launchFor, launchHookInput } from "./core/launch.js";
 import { findDuplicateToolNames, mcpToolHash, hashTools, type McpToolInfo } from "./core/tool-hash.js";
@@ -95,8 +96,12 @@ export class ExtensionMcpHost implements McpToolHost {
     return parsed && server && !this.#collides(server) ? { server, tool: parsed.tool } : null;
   }
 
+  /** Per server: the one-line sandbox status of its last start (shown with the load result). */
+  readonly #sandboxStatus = new Map<string, string>();
+
   #readyMessage(server: Server): LoadResult {
-    return { ok: true, message: `MCP server "${server.id}" loaded: ${server.defs.length} tool(s), callable on your next turn: ${server.defs.map(d => d.name).join(", ")}.` };
+    const status = this.#sandboxStatus.get(server.id);
+    return { ok: true, message: `MCP server "${server.id}" loaded: ${server.defs.length} tool(s), callable on your next turn: ${server.defs.map(d => d.name).join(", ")}.${status ? ` [${status}]` : ""}` };
   }
 
   #reviewingMessage(server: Server): LoadResult {
@@ -159,12 +164,23 @@ export class ExtensionMcpHost implements McpToolHost {
         if (server.sessionToken !== token) return cancelled();
         if (!ok) { const r = "you did not approve starting it"; this.#block(server, token, r); return fail(r); }
       }
+      // OS sandbox (ZERO_SANDBOX). The approval and the gate above saw the real command; only the process start is wrapped.
+      let started = launch; let cleanup: (() => void) | undefined; this.#sandboxStatus.delete(server.id);
+      if (launch.kind === "stdio") {
+        const sb = planSandbox({ decl: ext.manifest.sandbox, extensionDir: ext.dir, workspace: operator?.cwd ?? null, argv: [launch.command, ...launch.args], interpreters: TRUSTED_INTERPRETER_NAMES, env: launch.env, cwd: launch.cwd, label: `MCP server ${decl.name} of extension ${ext.name}` }, { env: this.#o.parentEnv ?? process.env });
+        if (sb.kind === "refused") { this.#block(server, token, sb.error); return fail(sb.error); }
+        this.#sandboxStatus.set(server.id, sb.status);
+        if (sb.kind === "sandboxed") { started = { ...launch, command: sb.file, args: sb.args, cwd: sb.cwd, env: sb.env }; cleanup = sb.cleanup; }
+      }
       let session: McpSession;
-      try { session = await this.#o.connector.connect(launch); } catch (e) {
+      try { session = await this.#o.connector.connect(started); } catch (e) {
+        cleanup?.();
         if (server.sessionToken !== token) return cancelled();
-        const r = redactWith(server, `could not start: ${message(e)}`);
+        const hint = cleanup ? " (it ran in an OS sandbox: if it needs the network, another program or a folder, declare that in the extension's sandbox block, or set ZERO_SANDBOX=off)" : "";
+        const r = redactWith(server, `could not start: ${message(e)}${hint}`);
         this.#block(server, token, r); return fail(r);
       }
+      if (cleanup) session.onClosed(() => cleanup?.());
       if (server.sessionToken !== token) { await session.close().catch(() => undefined); return cancelled(); }
 
       server.session = session; server.stale = false; server.revalidating = undefined;

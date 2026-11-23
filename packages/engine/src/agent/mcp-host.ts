@@ -21,6 +21,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 
+import { DEFAULT_DECL, parseSandboxDecl, planSandbox, TRUSTED_INTERPRETER_NAMES, type SandboxDecl } from "../plugins/extensions/sandbox/index.js";
 import type { ToolDefinition, ToolResult } from "./types.js";
 import {
   isSafeMcpServerId,
@@ -40,6 +41,11 @@ export interface McpStdioServerConfig {
   readonly args?: readonly string[];
   readonly env?: Record<string, string>;
   readonly cwd?: string;
+  /**
+   * The operator opted this server into the OS sandbox: `true` for the strict defaults, or a declaration (paths relative
+   * to `cwd`). Needs `cwd`. It applies whatever `ZERO_SANDBOX` says, and the server is not started when no sandbox works.
+   */
+  readonly sandbox?: true | SandboxDecl;
 }
 
 /** A remote MCP server using Streamable HTTP (for example Elastic Agent Builder). */
@@ -118,6 +124,8 @@ export class McpHost implements McpToolHost {
     return this.ownsTool(name) ? this.trustedFlags.get(name) ?? { networkCapable: true, readOnly: false } : undefined;
   }
   private readonly servers = new Map<string, ConnectedServer>();
+  /** Scratch folders of sandboxed servers, removed when the host closes. */
+  private readonly cleanups: Array<() => void> = [];
 
   /** All discovered tools across every connected server, namespaced. */
   registeredTools(): ToolDefinition[] {
@@ -174,11 +182,21 @@ export class McpHost implements McpToolHost {
 
   /** Spawn + connect to a stdio MCP server. */
   async connectStdio(config: McpStdioServerConfig): Promise<ToolDefinition[]> {
+    let command = config.command; let args = [...(config.args ?? [])]; let env = config.env; let cwd = config.cwd;
+    if (config.sandbox) {
+      if (!config.cwd) throw new Error(`MCP server ${config.id}: sandbox needs a cwd (its read-only folder)`);
+      const plan = planSandbox({
+        decl: config.sandbox === true ? DEFAULT_DECL : config.sandbox, extensionDir: config.cwd, workspace: null, argv: [command, ...args],
+        interpreters: TRUSTED_INTERPRETER_NAMES, env: { PATH: config.env?.PATH ?? process.env.PATH ?? "" }, cwd: config.cwd, label: `MCP server ${config.id}`,
+      }, { env: { ...process.env, ZERO_SANDBOX: "require" } });
+      if (plan.kind === "refused") throw new Error(plan.error);
+      if (plan.kind === "sandboxed") { command = plan.file; args = plan.args; cwd = plan.cwd; env = { ...(config.env ?? {}), TMPDIR: plan.env.TMPDIR ?? "" }; this.cleanups.push(plan.cleanup); }
+    }
     const transport = new StdioClientTransport({
-      command: config.command,
-      args: [...(config.args ?? [])],
-      ...(config.env ? { env: config.env } : {}),
-      ...(config.cwd ? { cwd: config.cwd } : {}),
+      command,
+      args,
+      ...(env ? { env } : {}),
+      ...(cwd ? { cwd } : {}),
     });
     const creation = beginExecutionResource();
     const start = transport.start.bind(transport);
@@ -259,6 +277,7 @@ export class McpHost implements McpToolHost {
     this.servers.clear();
     this.trustedFlags.clear();
     await Promise.allSettled(clients.map((s) => s.client.close()));
+    for (const cleanup of this.cleanups.splice(0)) cleanup();
   }
 }
 
@@ -298,12 +317,21 @@ export function parseMcpConfig(raw: string | undefined): McpServerConfig[] {
           ) as Record<string, string>)
         : undefined;
     const cwd = typeof o.cwd === "string" ? o.cwd : undefined;
+    let sandbox: true | SandboxDecl | undefined;
+    if (o.sandbox === true) sandbox = true;
+    else if (o.sandbox !== undefined && o.sandbox !== false) {
+      // A malformed sandbox value must never turn into "no sandbox": skip the whole entry instead.
+      const parsed = parseSandboxDecl(o.sandbox);
+      if (!parsed.ok) continue;
+      sandbox = parsed.value;
+    }
     out.push({
       id: o.id,
       command: o.command,
       ...(args && args.length > 0 ? { args } : {}),
       ...(env && Object.keys(env).length > 0 ? { env } : {}),
       ...(cwd ? { cwd } : {}),
+      ...(sandbox ? { sandbox } : {}),
     });
   }
   return out;
@@ -321,8 +349,9 @@ export async function connectMcpServers(configs: readonly McpServerConfig[]): Pr
     try {
       if ("url" in cfg) await host.connectHttp(cfg);
       else await host.connectStdio(cfg);
-    } catch {
-      // Skip a server that won't connect; the rest still load.
+    } catch (error) {
+      // Skip a server that won't connect; the rest still load. A refused sandbox is said out loud.
+      if ("command" in cfg && cfg.sandbox) process.stderr.write(`0: MCP server ${cfg.id} was not started: ${error instanceof Error ? error.message : String(error)}\n`);
     }
   }
   return host.serverIds().length > 0 ? host : undefined;

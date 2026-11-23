@@ -36,6 +36,8 @@ export interface BashRunOptions {
   signal?: AbortSignal;
   /** Secret values that were put in `env` for this run. They are masked in everything that comes back. */
   redact?: readonly string[];
+  /** Start this program directly (no shell) instead of `/bin/bash -c command`. Set for a sandboxed extension script. */
+  spawn?: { file: string; args: readonly string[] };
 }
 
 /** Replace every occurrence of each secret value (4+ characters) with a marker. */
@@ -67,7 +69,7 @@ export async function runBashWithWallclock(
   return new Promise((resolvePromise) => {
     let child;
     try {
-      child = trackExecutionResourceSpawn(() => spawn("/bin/bash", ["-c", command], {
+      child = trackExecutionResourceSpawn(() => spawn(opts.spawn?.file ?? "/bin/bash", opts.spawn ? [...opts.spawn.args] : ["-c", command], {
         env: opts.env,
         cwd: opts.cwd,
         stdio: ["ignore", "pipe", "pipe"],

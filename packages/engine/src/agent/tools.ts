@@ -476,11 +476,16 @@ export class ToolExecutor {
     // auth-header injection above; the card shows the model's original intent).
     const displayCommand = (args.command as string).trim();
     const startedAt = Date.now();
-    const outcome = await runBashWithWallclock(command, {
-      timeoutMs, ceilingMs, env, cwd, signal: this._executionContext.getStore()?.signal,
-      ...(extensionRun?.secrets.length ? { redact: extensionRun.secrets } : {}),
-    });
+    let outcome;
+    try {
+      outcome = await runBashWithWallclock(command, {
+        timeoutMs, ceilingMs, env, cwd: extensionRun?.spawn?.cwd ?? cwd, signal: this._executionContext.getStore()?.signal,
+        ...(extensionRun?.secrets.length ? { redact: extensionRun.secrets } : {}),
+        ...(extensionRun?.spawn ? { spawn: extensionRun.spawn } : {}),
+      });
+    } finally { extensionRun?.cleanup?.(); }
     const durationMs = Date.now() - startedAt;
+    const sandboxStatus = extensionRun?.status;
 
     if (outcome.kind === "timeout") {
       this.persistToolArtifact("bash", {
@@ -493,7 +498,7 @@ export class ToolExecutor {
       return {
         success: false,
         output: null,
-        error: `bash tool timed out after ${Math.round(timeoutMs / 1000)}s (ZERO_BASH_TIMEOUT_MS=${ceilingMs})`,
+        error: `bash tool timed out after ${Math.round(timeoutMs / 1000)}s (ZERO_BASH_TIMEOUT_MS=${ceilingMs})${sandboxStatus ? ` [${sandboxStatus}]` : ""}`,
         // Display-only card sidecar (never seen by the model): the partial
         // output plus the wall clock, so a timed-out run still renders a card.
         meta: {
@@ -528,7 +533,8 @@ export class ToolExecutor {
     // Middle-out under the shared tool-output policy. The old head-only
     // 10,000-CHAR slice dropped the tail of every long run — and for a scanner
     // the tail is the verdict (exit status, sanitizer summary, final error).
-    const combined = formatTruncated(outcome.combined);
+    const rawCombined = formatTruncated(outcome.combined);
+    const combined = sandboxStatus ? `[${sandboxStatus}]\n${rawCombined}` : rawCombined;
 
     // Many pentesting tools exit non-zero on findings — if we got output,
     // surface it as success regardless of exit code (preserves prior behaviour).
@@ -541,7 +547,7 @@ export class ToolExecutor {
       timedOut: false,
       stdout: combined,
     };
-    if (outcome.exitCode === 0 || combined.length > 0) {
+    if (outcome.exitCode === 0 || rawCombined.length > 0) {
       this.persistToolArtifact("bash", {
         command: command.slice(0, 500),
         output: combined.slice(0, 2_000),
@@ -553,7 +559,7 @@ export class ToolExecutor {
     return {
       success: false,
       output: null,
-      error: `bash exited with code ${outcome.exitCode}`,
+      error: `bash exited with code ${outcome.exitCode}${sandboxStatus ? ` [${sandboxStatus}]` : ""}`,
       meta: commandMeta,
     };
   }

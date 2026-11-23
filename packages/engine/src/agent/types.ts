@@ -378,7 +378,15 @@ export type DelegatedFindingUpdateResult =
  * variables does it get? `null` means the command is not an extension's. Implemented by the extension runtime.
  */
 export interface ExtensionRunPort {
-  prepare(command: string, options?: { cwd?: string }): { ok: true; env: Record<string, string>; secrets: readonly string[] } | { ok: false; error: string } | null;
+  prepare(command: string, options?: { cwd?: string }): {
+    ok: true; env: Record<string, string>; secrets: readonly string[];
+    /** Set when the script runs inside an OS sandbox: start this program (no shell) instead of `bash -c command`. */
+    spawn?: { file: string; args: readonly string[]; cwd: string };
+    /** One line for the tool result: whether a sandbox was applied. */
+    status?: string;
+    /** Called once the run ends (removes the scratch folder). */
+    cleanup?: () => void;
+  } | { ok: false; error: string } | null;
 }
 
 export interface ToolContext {
