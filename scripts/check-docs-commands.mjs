@@ -309,6 +309,9 @@ export function checkEnvVars(files, rootDir = root, has = (n) => sourceHas(n, ro
 /** File names the docs deliberately mention as retired. */
 const RETIRED_CONFIG_NAMES = new Set(["dogfood-review.yml"]);
 
+/** Configuration files of other scanners that the docs say 0 does not read from a scanned folder. */
+const SCANNED_FOLDER_CONFIG_NAMES = new Set([".foxguard.yml", ".checkov.yaml", ".checkov.yml"]);
+
 function trackedBasename(name, rootDir) {
   try {
     const out = execFileSync("git", ["ls-files", "--", `:(glob)**/${name}`], { cwd: rootDir, encoding: "utf8" });
@@ -326,7 +329,7 @@ export function checkConfigNames(files, rootDir = root, has = (n) => sourceHas(n
       for (const m of line.matchAll(/`([~/A-Za-z0-9_.-]+(?:\/[A-Za-z0-9_.*-]+)*\.(?:ya?ml|toml|jsonc?))`/g)) {
         const name = m[1];
         const at = `${relative(rootDir, file)}:${i + 1}`;
-        if (RETIRED_CONFIG_NAMES.has(name) || name.includes("*") || name.includes("...") || name.startsWith("/tmp/") || name.startsWith("~/.codex/")) continue;
+        if (RETIRED_CONFIG_NAMES.has(name) || SCANNED_FOLDER_CONFIG_NAMES.has(name) || name.includes("*") || name.includes("...") || name.startsWith("/tmp/") || name.startsWith("~/.codex/")) continue;
         if (/^(packages|scripts|\.github|docs)\//.test(name)) {
           if (!existsSync(join(rootDir, name))) problems.push(`${at}: ${name} does not exist in the repository`);
         } else if (name.startsWith("~/.0/")) {

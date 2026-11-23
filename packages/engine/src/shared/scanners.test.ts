@@ -9,7 +9,8 @@ describe("scanners", () => {
     expect(() => parseScannerList(["nope"])).toThrow("Unknown scanner 'nope'");
   });
   it("puts the folder in the arguments and never lets it become a flag", () => {
-    expect(scannerArguments(scannerById("foxguard")!, "/work/app")).toEqual(["--format", "sarif", "/work/app"]);
+    expect(scannerArguments(scannerById("foxguard")!, "/work/app", undefined, "", { repoIgnores: true })).toEqual(["--format", "sarif", "/work/app"]);
+    expect(scannerArguments(scannerById("foxguard")!, "/work/app", undefined, "", { emptyConfig: "/s/empty" })).toEqual(["--format", "sarif", "--config", "/s/empty", "/work/app"]);
     expect(scannerArguments(scannerById("semgrep")!, "/w", "p/default")).toContain("p/default");
   });
   it("gives checkov a scratch folder for its report", () => {
