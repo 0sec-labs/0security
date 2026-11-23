@@ -6,7 +6,7 @@
  * (the thread itself or a helper agent), so the report reads the store and never the transcript.
  */
 import { createHash } from "node:crypto";
-import { classifyKnown, type Finding, type KnownItem, type ScanCoverage, type ScanKnownSummary, type ScanReport, type ScanTierInfo } from "@0/engine/shared";
+import { classifyFinding, classifyKnown, linesWithin, sameFlaw, type Finding, type KnownItem, type ScanCoverage, type ScanKnownSummary, type ScanReport, type ScanTierInfo } from "@0/engine/shared";
 import { tagCustomFindings } from "./scan-rules.js";
 
 export const SCAN_REPORT_SCHEMA_VERSION = 1;
@@ -78,28 +78,36 @@ function reportFinding(finding: Finding, roots: readonly string[]): Finding {
   const annotation = finding.reviewAnnotation;
   const path = annotation ? repoRelativePath(annotation.path, roots) : undefined;
   const located = annotation && path ? { ...annotation, path } : undefined;
+  // A finding stored before the category rules, or imported, is filed under the same rules as a new one.
+  const cwe = [...(finding.evidence.analysis ?? "").slice(0, 400).matchAll(/cwe[-_/ :]*0*(\d{1,5})\b/gi)].map(m => `CWE-${m[1]}`);
+  const classified = classifyFinding({ category: finding.category, title: finding.title, description: finding.description, cwe });
+  const category = classified.category;
+  const label = finding.categoryLabel ?? classified.unknownLabel ?? classified.refinedFrom;
   return {
     ...finding,
-    templateId: finding.templateId === "manual" ? finding.category : finding.templateId,
+    category,
+    ...(label && label !== category ? { categoryLabel: label } : {}),
+    templateId: finding.templateId === "manual" ? category : finding.templateId,
     ...(located ? { reviewAnnotation: located, fingerprint: `loc:${locationKey(located.path, located.startLine)}` } : { reviewAnnotation: undefined }),
   };
 }
 
-/** A finding that more than one pass found, merged: how many of the passes did. */
-export type MergedFinding = Finding & { foundInPasses?: number };
+/** A finding that more than one pass found, merged: how many of the passes did, and which other findings it absorbed. */
+export type MergedFinding = Finding & { foundInPasses?: number; mergedFindingIds?: string[] };
 
-/** Cited lines of one file that overlap or lie within this many lines of each other are one flaw. */
-const MERGE_LINE_GAP = 3;
-
-interface Cluster { path: string | undefined; title: string; start: number; end: number; passes: Set<number>; best: Finding }
+interface Cluster { path: string | undefined; title: string; start: number; end: number; passes: Set<number>; best: Finding; members: { finding: Finding; pass: number }[] }
 
 const weight = (finding: Finding): number => (SEVERITIES.length - rank(finding.severity)) * 1_000_000 + finding.description.length + finding.evidence.request.length + finding.evidence.response.length + (finding.evidence.analysis?.length ?? 0);
 
+const asInput = (finding: Finding) => ({ title: finding.title, category: finding.category, description: finding.description, evidenceAnalysis: finding.evidence.analysis, ...(finding.reviewAnnotation ? { location: finding.reviewAnnotation } : {}) });
+
 /**
- * The findings of several passes over the same code as one list. Two findings are one flaw when they cite the same file at
- * overlapping or nearby lines (or, with no location, have the same title), and a pass never merges with itself, so two
- * different flaws close together in one pass stay two. The merged finding is the most severe, most detailed version and
- * records how many passes found it. A flaw only some passes find is a useful signal, and the union is the point.
+ * The findings of several passes over the same code as one list. Two findings are one flaw when they cite the same file
+ * and the same category (or CWE) at overlapping lines, or, across passes, at lines up to a few apart
+ * (a finding with no location merges only on the same title). Findings in different files or categories never merge.
+ * Inside one pass, findings merge only on overlapping lines, so two different flaws close together in one pass stay two.
+ * The merged finding is the most severe, most detailed version; it records how many passes found it and the ids of the
+ * findings it absorbed. A flaw only some passes find is a useful signal, and the union is the point.
  */
 export function mergePasses(passes: readonly (readonly Finding[])[], roots: readonly string[] = []): MergedFinding[] {
   const clusters: Cluster[] = [];
@@ -110,18 +118,25 @@ export function mergePasses(passes: readonly (readonly Finding[])[], roots: read
       const start = location?.startLine ?? 0;
       const end = location?.endLine ?? start;
       const title = finding.title.trim().toLowerCase();
-      const match = clusters.find(cluster => !cluster.passes.has(pass) && (location && cluster.path
-        ? cluster.path === location.path && start <= cluster.end + MERGE_LINE_GAP && cluster.start <= end + MERGE_LINE_GAP
-        : !location && !cluster.path && cluster.title === title));
+      const match = clusters.find(cluster => {
+        if (!location || !cluster.path) return !location && !cluster.path && !cluster.passes.has(pass) && cluster.title === title;
+        return cluster.members.some(member => member.pass === pass
+          ? member.finding.reviewAnnotation !== undefined && linesWithin(member.finding.reviewAnnotation, location, 0) && sameFlaw(asInput(member.finding), asInput(finding))
+          : sameFlaw(asInput(member.finding), asInput(finding), { nearWithoutTitle: true }));
+      });
       if (match) {
         match.passes.add(pass);
+        match.members.push({ finding, pass });
         match.start = Math.min(match.start, start);
         match.end = Math.max(match.end, end);
         if (weight(finding) > weight(match.best)) match.best = finding;
-      } else clusters.push({ path: location?.path, title, start, end, passes: new Set([pass]), best: finding });
+      } else clusters.push({ path: location?.path, title, start, end, passes: new Set([pass]), best: finding, members: [{ finding, pass }] });
     }
   });
-  return clusters.map(cluster => (passes.length > 1 ? { ...cluster.best, foundInPasses: cluster.passes.size } : cluster.best));
+  return clusters.map(cluster => {
+    const absorbed = cluster.members.map(member => member.finding.id).filter(id => id !== cluster.best.id);
+    return { ...cluster.best, ...(passes.length > 1 ? { foundInPasses: cluster.passes.size } : {}), ...(absorbed.length ? { mergedFindingIds: absorbed } : {}) };
+  });
 }
 
 /** The findings with their status against the known set, those already known left out with --only-new, and the counts of all of them. */

@@ -15,6 +15,7 @@ import { resolveFindingId, shortFindingId, shortFingerprint } from "../finding-i
 import { rowVerification, verificationPhrase } from "../finding-verification.js";
 import { auditTriage, buildTriageRequest, triageLabel, type TriageFlags } from "./findings-triage.js";
 import { UsageError } from "./output.js";
+import { foldSimilarGroups } from "./findings-dedupe.js";
 
 type FindingsListOptions = {
   dbPath?: string;
@@ -214,7 +215,7 @@ async function renderFindingsList(opts: FindingsListOptions): Promise<void> {
   const filters = { scanId: opts.scan, severity: opts.severity, category: opts.category, status: opts.status, triageStatus: filterLater ? undefined : opts.triage };
   const queryLimit = filterLater ? 5000 : limit;
   const rows: FindingRow[] = [];
-  const groups: Array<{ fingerprint: string; latest: FindingRow; count: number; scans: number }> = [];
+  const groups: Array<{ fingerprint: string; latest: FindingRow; count: number; scans: number; similar?: number }> = [];
   if (!opts.all && !opts.scan && !selectedDbPath && dbPaths.length > 1) {
     // The same merged view the web Findings page uses: one family per fingerprint across every database.
     const merged = await new FindingsService({ sharedDbPath: resolveOsecDbPath(), listPaths: listOsecRunDatabasePaths }).list();
@@ -233,6 +234,8 @@ async function renderFindingsList(opts: FindingsListOptions): Promise<void> {
   }
   rows.sort(compareRows);
   groups.sort((a, b) => compareRows(a.latest, b.latest));
+  // One line per flaw: groups that cite the same place under the same category are one (see findings-dedupe.ts).
+  groups.splice(0, groups.length, ...foldSimilarGroups(groups));
   if (!(opts.all ? rows.length : groups.length)) {
     console.log(chalk.gray("No findings found."));
     return;
@@ -253,7 +256,7 @@ async function renderFindingsList(opts: FindingsListOptions): Promise<void> {
     const f = group.latest;
     renderPriority(f);
     renderVerification(f);
-    console.log(`  ${chalk.gray(`fp:${shortFingerprint(group.fingerprint)}`)}  ${chalk.gray(f.category)}  ${chalk.gray(`${group.count} hits / ${group.scans} scans`)}  ${chalk.gray(`latest:${f.scanId.slice(0, 8)}`)}`);
+    console.log(`  ${chalk.gray(`fp:${shortFingerprint(group.fingerprint)}`)}  ${chalk.gray(f.category)}  ${chalk.gray(`${group.count} hits / ${group.scans} scans${group.similar ? `, ${group.similar} similar merged` : ""}`)}  ${chalk.gray(`latest:${f.scanId.slice(0, 8)}`)}`);
     if (f.triageNote) console.log(`  ${chalk.gray("note:")} ${chalk.dim(f.triageNote)}${f.triageApprover && effectiveTriageStatus(f) === "accepted" ? chalk.gray(` (approver: ${f.triageApprover})`) : ""}`);
     console.log("");
   }

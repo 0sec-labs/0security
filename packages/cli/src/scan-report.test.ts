@@ -158,6 +158,24 @@ describe("mergePasses", () => {
     expect(mergePasses([[bare("a", "Weak crypto")], [bare("b", "weak crypto")]])).toHaveLength(1);
     expect(mergePasses([[bare("a", "Weak crypto")], [bare("b", "Other")]])).toHaveLength(2);
   });
+  it("merges one flaw that two batches of a pass filed under different labels, keeping the highest severity", () => {
+    // From a real batched scan of a vulnerable API: one missing ownership check, three titles and two labels.
+    const one = f("a", "api_views/books.py", 50, { title: "Book lookup omits ownership authorization", category: "information-disclosure", severity: "medium", reviewAnnotation: { path: "api_views/books.py", startLine: 50, endLine: 51 } });
+    const two = f("b", "api_views/books.py", 50, { title: "Authenticated users can read other users' book secrets", category: "missing-validation", severity: "high", reviewAnnotation: { path: "api_views/books.py", startLine: 50, endLine: 56 } });
+    const merged = mergePasses([[one, two]]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toMatchObject({ id: "b", severity: "high", category: "broken-access-control", mergedFindingIds: ["a"] });
+  });
+  it("keeps two different flaws on nearby lines of one file apart, and never merges two categories", () => {
+    const sql = f("a", "models/user_model.py", 72, { title: "SQL injection in username lookup", reviewAnnotation: { path: "models/user_model.py", startLine: 72, endLine: 73 } });
+    const plain = f("b", "models/user_model.py", 72, { title: "User passwords are stored and compared in plaintext", category: "other", reviewAnnotation: { path: "models/user_model.py", startLine: 72, endLine: 73 } });
+    expect(mergePasses([[sql, plain]])).toHaveLength(2);
+    expect(mergePasses([[sql], [plain]])).toHaveLength(2);
+  });
+  it("files an old finding under the same category rules as a new one", () => {
+    const [only] = mergePasses([[f("a", "api_views/users.py", 60, { title: "Public registration accepts an admin flag and grants administrator privileges", category: "missing-validation" })]]);
+    expect(only).toMatchObject({ category: "mass-assignment", categoryLabel: "missing-validation", templateId: "mass-assignment" });
+  });
   it("says nothing about passes for a single pass", () => {
     const [only] = mergePasses([[f("a", "src/x.ts", 10)]]) as MergedFinding[];
     expect(only!.foundInPasses).toBeUndefined();
