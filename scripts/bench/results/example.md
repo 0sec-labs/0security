@@ -53,3 +53,59 @@ Before and after the scan.yaml edit (same model, 3 repeats, budget $0.5; before 
 Every clean-app and clean-python false positive in both runs was one finding class: "unauthenticated reads with a client-chosen owner lack an ownership check". The apps really have no authentication on those routes, so this is a defensible note, not a hallucination; the edit asks the model to say why the data is meant to be private. The foxguard drops on crypto-app and llm-app are within or at the edge of the repeat spread.
 
 What this does not show: see docs/design/benchmark.md. Few tiny fixtures and few repeats; differences smaller than the spread are noise.
+
+---
+
+# Fix-quality scorecard
+
+> Real run of `node scripts/bench/fix-score.mjs --run --repeat 2`, 2026-11-23, default model (gpt-6-luna), `--budget 0.5` per fix. Illustrative; see docs/design/benchmark.md.
+- Date: 2026-11-23
+- Model: default (gpt-6-luna)
+- Repeats: 2
+- Per-fix budget: $0.5
+- Total cost: $0.0467
+- Cases: 10
+
+Fix rate: 90% of 20 attempts (range over repeats 90%). A fix counts when 0 committed a change, the project's own tests still pass and the hidden exploit check no longer succeeds.
+
+Committed 100%, tests pass 100%, exploit blocked 90%, only the expected files touched 100% of committed changes. Cost per fixed case $0.0026.
+
+Cells for fixed, committed, tests, exploit and expected files count attempts over the repeats. Lines are added plus removed; cost and time show the mean with min-max over the repeats.
+
+| case | fixed | committed | tests pass | exploit blocked | expected files only | files | lines | cost | time (s) | not complete |
+|---|---|---|---|---|---|---|---|---|---|---|
+| command-injection | 2/2 | 2/2 | 2/2 | 2/2 | 2/2 | 2 | 16 (15-16) | $0.0029 ($0.0022-$0.0035) | 33 (25-40) | - |
+| hardcoded-secret | 0/2 | 2/2 | 2/2 | 0/2 | 2/2 | 2 | 13 (13) | $0.0024 ($0.0022-$0.0025) | 30 (27-32) | - |
+| missing-authz | 2/2 | 2/2 | 2/2 | 2/2 | 2/2 | 2 | 15 (15) | $0.0022 ($0.0022-$0.0022) | 24 (22-25) | - |
+| open-redirect | 2/2 | 2/2 | 2/2 | 2/2 | 2/2 | 2 | 16 (15-16) | $0.0027 ($0.0025-$0.0030) | 35 (34-36) | - |
+| path-traversal | 2/2 | 2/2 | 2/2 | 2/2 | 2/2 | 2 | 32 (20-43) | $0.0027 ($0.0025-$0.0029) | 31 (27-34) | - |
+| prototype-pollution | 2/2 | 2/2 | 2/2 | 2/2 | 2/2 | 2 | 11 (11) | $0.0022 ($0.0021-$0.0023) | 27 (27-28) | - |
+| sqli | 2/2 | 2/2 | 2/2 | 2/2 | 2/2 | 2 | 8 (7-8) | $0.0018 ($0.0018-$0.0018) | 22 (21-22) | - |
+| ssrf-allowlist | 2/2 | 2/2 | 2/2 | 2/2 | 2/2 | 2 | 11 (9-13) | $0.0020 ($0.0019-$0.0022) | 22 (22-22) | - |
+| unsafe-eval | 2/2 | 2/2 | 2/2 | 2/2 | 2/2 | 2 | 12 (11-12) | $0.0020 ($0.0017-$0.0022) | 23 (21-25) | - |
+| weak-password-hash | 2/2 | 2/2 | 2/2 | 2/2 | 2/2 | 2 | 36 (30-41) | $0.0025 ($0.0024-$0.0026) | 28 (27-29) | - |
+
+Test files were added or edited in: command-injection, hardcoded-secret, missing-authz, open-redirect, path-traversal, prototype-pollution, sqli, ssrf-allowlist, unsafe-eval, weak-password-hash. They are not counted as unexpected files, and scoring runs the original test files.
+
+What this does not show: see docs/design/benchmark.md. Small single-bug repositories and few repeats; differences smaller than the range are noise.
+
+---
+
+# Agent-triage measurement
+
+> Real runs of `node scripts/bench/triage-score.mjs --run`, 2026-11-23, default model (gpt-6-luna), 1 repeat. Two runs of three fixtures each, added together below. Illustrative; see docs/design/benchmark.md.
+
+- Fixtures: clean-app, python-flask, node-express (first run); clean-python, llm-app, go-http (second run)
+- Findings checked: 18 (13 real, 1 noise, 4 neither)
+- Spend: $0.0598 (verify $0.0286)
+
+Real bugs that verify called false-positive: 0 of 13. Real bugs that --apply suppressed: 0.
+
+| verdict | on real bugs | on noise | on neither | precision | recall |
+|---|---|---|---|---|---|
+| true-positive | 12 | 1 | 3 | 92% | 92% |
+| false-positive | 0 | 0 | 0 | n/a | 0% |
+| uncertain | 1 | 0 | 1 | - | - |
+
+The sample has one noise finding (clean-python), and verify called it true-positive, so noise removed is 0 of 1. The triage did not drop real bugs here and did not remove noise either.
+

@@ -20,6 +20,16 @@ node scripts/bench/run.mjs --dry-run                       # validates fixtures 
 node scripts/bench/run.mjs --run --repeat 2 --budget 0.2   # really scans; prints the worst-case cost first
 ```
 
+The fix and triage scorecards run the same way, each with `--dry-run` and `--run`:
+
+```bash
+node scripts/bench/fix-score.mjs --dry-run                 # every exploit check fails before a fix and passes with the reference fix
+node scripts/bench/fix-score.mjs --run --repeat 2 --budget 0.5 --total-budget 4
+node scripts/bench/triage-score.mjs --run --fixtures clean-app,python-flask,node-express
+```
+
+`--total-budget` stops the fix scorecard from starting new fixes once that much is spent.
+
 `--run` is required to spend money; each scan stops at `--budget`, and the estimate printed is runs times budget. Other options: `--configs generic,skill,foxguard`, `--fixtures a,b`, `--model <id>`, `--out <dir>`, `--timeout <s>`, `--batch-size <n>` and `--concurrency <n>` (both for the `batched` configuration). The dry run is part of `node scripts/run-checks.mjs static`.
 
 ## Batched scans on `medium-app`
@@ -70,6 +80,41 @@ The skill was then tightened: the absence of a caller, a write or a route in the
 - Uncertain was used for 4 planted bugs, 3 other findings and 0 false positives: a hardcoded signing key that no code in the folder uses (go-http), and llm-app findings whose entry point is not in the folder. It answers uncertain rather than guessing, which costs recall in a triage workflow but suppresses nothing.
 - Cost: about $0.001 to $0.002 per finding at the default model, in a thread of its own.
 - This is 25 real-bug findings, 4 false positives and 6 others over 12 scans. It shows the verifier did not dismiss real bugs here and was cautious. It does not show that it removes false positives, because the sample has almost none it could remove. `--apply` has no severity guard: it was not needed in the second round, and it would be added if a real high or critical finding is ever suppressed.
+
+## Fix quality (`0 findings fix`)
+
+Measured with `node scripts/bench/fix-score.mjs --run --repeat 2`. It uses ten small projects under `scripts/bench/fix-cases/`, each with one planted vulnerability: SQL injection, path traversal, command injection, unsafe `eval` of pasted settings, MD5 password hashing, an open redirect, a missing authorization check, a hardcoded signing key, an allowlist bypass in a URL check and prototype pollution. All ten are plain Node with `node --test` and no installs.
+
+A case has the project and its tests, a SARIF file with the finding, a note on what a correct fix must do, a hidden exploit script and a reference fix. The reference fix is used only by `--dry-run`, which proves each exploit check fails on the vulnerable code and passes on a correct fix, with the tests green both times. A run copies the project to a fresh git repository and a fresh home, imports the finding, runs `0 findings fix <id> --no-pr --budget 0.5` with the project's tests as the check, then scores the committed branch in the copy. The tests are the original files, restored before they run. A fix counts when it committed, the original tests pass and the exploit check exits 0.
+
+2026-11-23, default model (gpt-6-luna), 2 repeats, `--budget 0.5` per fix, total cost $0.05:
+
+- Fix rate 90% (18 of 20 attempts; 90% in both repeats). All 20 attempts committed and kept the tests green. 18 blocked the exploit.
+- Both failures were the hardcoded-secret case. The model moved the key to `SESSION_SECRET` but kept a fallback to a default key. The case requires failing closed, so the exploit check counts that as not fixed. It is a strict reading, and the answer note for the case says so.
+- Every fix touched the expected source file and added or edited a test; 7 to 43 lines changed in total. Cost per fix $0.0017 to $0.0035, 21 to 40 seconds.
+- A first pass of the same run scored the open-redirect case 0 of 2 because the exploit check treated `/%2f/` paths as unsafe. Browsers do not decode that sequence in a redirect, so the check was wrong, not the fixes. It was removed and the run repeated; the table above is the second run.
+
+What it shows: on single-bug textbook cases the fix flow commits a working change that keeps the tests passing. What it does not show: how it behaves in a repository with many files, a build, or a vulnerability that spans modules. The exploit scripts are ours and test the cases we thought of. A fix that blocks our payloads and misses another one would pass. The cases are also small enough that the model may have seen close variants of them.
+
+## Agent triage (`0 findings verify`)
+
+Measured with `node scripts/bench/triage-score.mjs --run`. It scans each fixture with a fresh home, runs `0 findings verify --apply` on every finding and scores the verdicts against the answer keys. It shares the scan, verify and classification steps with `verify-score.mjs` and adds precision and recall per verdict. Pass `--scans <dir>` to verify saved scan reports (`<fixture>.json` from `0 scan --format json -o`) instead of scanning again; the run keeps its own scan reports under its output folder for that.
+
+The number to watch is real bugs that verify called false-positive. Real means the finding matches a planted bug. Noise means it is on a decoy or anywhere in a clean fixture. Findings that are neither are left out of the rates.
+
+2026-11-23, default model, 1 repeat, two runs of three fixtures (clean-app, python-flask, node-express and clean-python, llm-app, go-http), total cost $0.06:
+
+| Verdict | on real bugs | on noise | on neither | Precision | Recall |
+| --- | --- | --- | --- | --- | --- |
+| true-positive | 12 | 1 | 3 | 92% | 92% |
+| false-positive | 0 | 0 | 0 | n/a | 0% |
+| uncertain | 1 | 0 | 1 | - | - |
+
+- Real bugs called false-positive: 0 of 13. Real bugs suppressed by `--apply`: 0.
+- Noise removed: 0 of 1. The one noise finding (clean-python) was called true-positive.
+- Precision of the list before triage 93%, and the same after dropping false-positive verdicts, because verify dropped nothing.
+
+This run had a single noise finding, so it says almost nothing about how much noise verify removes. It only repeats the earlier result: verify did not drop real bugs. A harder test needs fixtures that produce more false positives, and the OWASP Benchmark ground truth and the hand-labelled Java findings that the original issue asks for are not done.
 
 ## What it does not prove
 
