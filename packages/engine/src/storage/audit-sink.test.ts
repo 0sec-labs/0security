@@ -150,10 +150,11 @@ describe("audit sink over HTTP", () => {
     const sink = start(url("http://127.0.0.1:9/never"), target, { maxAttempts: 2 });
     const started = Date.now();
     for (let i = 0; i < 50; i++) recordAudit({ actor: "system", action: `a.${i}` }, target);
-    expect(Date.now() - started).toBeLessThan(2000);
+    // The writes are synchronous and never wait for the sink; the ceiling only catches a hang, so it is generous for loaded CI machines.
+    expect(Date.now() - started).toBeLessThan(10_000);
     await sink.poll();
     expect(sink.status()).toMatchObject({ sent: 0, dropped: 50 });
-  });
+  }, 30_000);
 
   it("follows a switch to another database without replaying its history", async () => {
     const first = fresh(); const second = fresh();
