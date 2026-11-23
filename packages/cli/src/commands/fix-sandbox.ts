@@ -8,9 +8,9 @@
  */
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { closeSync, constants, cpSync, mkdirSync, mkdtempSync, openSync, realpathSync, rmSync } from "node:fs";
+import { closeSync, constants, cpSync, mkdirSync, mkdtempSync, openSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 
 export interface SandboxSpec { image: string; network: boolean }
 export interface SandboxResult { command: string; code: number; output: string; sandbox: string }
@@ -85,9 +85,6 @@ export async function runInSandbox(cwd: string, command: string, spec: SandboxSp
     const probePath = join(copy, PROBE);
     // Remove any pre-existing file, directory, or symlink without following it, then create the probe exclusively.
     rmSync(probePath, { recursive: true, force: true });
-    if (realpathSync(dirname(probePath)) !== realpathSync(copy)) {
-      throw new Error("Sandbox copy directory escaped its expected root.");
-    }
     const fd = openSync(
       probePath,
       constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0),

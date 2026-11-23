@@ -12,6 +12,9 @@ on the GitHub Release tag.
 
 ## [Unreleased]
 
+- A Sentinel's pull request poll keeps its cursor for long-lived open pull requests: it forgets closed pull requests first, so an open one is no longer reviewed again after the cursor fills up. A repository with more than 190 open pull requests is now refused with "Use a base-branch filter." instead of being polled with churn.
+- `0 findings fix --sandbox docker` no longer follows or truncates a symlinked `.0-sandbox-probe` in the work tree copy. The probe is removed without following it and created exclusively.
+- `0 sbom generate --resolve` keeps Gradle's own error text when every project in a multi-project build fails, instead of only "No dependency tree was produced."
 - Extension scripts run with an environment built from scratch: basics plus the variables the extension declared and you approved. They no longer inherit the bash tool's environment, `TARGET` or the target-auth variables (`AUTH_HEADER`, `AUTH_VALUE`, `AUTH_CURL_FLAG`), or loader variables such as `NODE_OPTIONS`. A script that relied on one of them must now declare it.
 - The MCP address check blocks more IPv6 forms that reach internal hosts: IPv4-compatible (`::127.0.0.1`), IPv4-translated, 6to4, Teredo, discard and local-use NAT64 addresses. Only global unicast addresses and mapped public IPv4 are allowed.
 - Changed: a fix pull request opened without any `--test` check is now a draft and says "No checks were run." Pass `--ready` to `0 findings fix` or `0 findings burndown` to open it ready for review. A pull request whose checks passed is ready, and one whose check failed is a draft, as before.
