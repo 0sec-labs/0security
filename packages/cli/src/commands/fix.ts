@@ -12,13 +12,15 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { Option, type Command } from "commander";
+import { assertEgressAllowed } from "@0/engine";
 import { fixPrompt, type FixPolicy, type FixPromptFinding } from "@0/engine/shared";
 import { loadFixPolicyFile, type FixPolicyOptions, type LoadedFixPolicy } from "./fix-policy.js";
 import { osecDB, resolveOsecDbPath } from "@0/engine/storage";
 import { consoleTransportOptions, type ConsoleClient, type ConsoleTransportOptions } from "../console-client.js";
 import { connect, DEFAULT_SCAN_MODEL, defaultScanDeps, waitForThread, type ScanDeps } from "./scan.js";
 import { resolveFindingId, shortFindingId } from "../finding-id.js";
-import { selectHost } from "../host/index.js";
+import { selectHost, type Host } from "../host/index.js";
+import { commitSubject, footerText, isDraft, pullRequestTitle, type PullRequestConventions } from "./fix-conventions.js";
 import { finishWithError, UsageError } from "./output.js";
 
 export { DEFAULT_FIX_POLICY_FILES, parseFixPolicy, loadFixPolicyFile } from "./fix-policy.js";
@@ -36,7 +38,7 @@ export interface FindingToFix extends FixPromptFinding { fingerprint: string }
 export interface FixDeps extends Pick<ScanDeps, "open" | "err" | "sleep" | "startConsole"> {
   out(text: string): void;
   git(cwd: string, args: string[]): Promise<string>;
-  gh(cwd: string, args: string[]): Promise<string>;
+  gh(cwd: string, args: string[], input?: string): Promise<string>;
   /** Run one check command in the work tree through the shell. Never throws on a failing command. */
   check(cwd: string, command: string): Promise<CheckResult>;
   loadFinding(id: string, dbPath: string | undefined): FindingToFix;
@@ -58,7 +60,12 @@ const defaults: FixDeps = {
   open: defaultScanDeps.open, err: defaultScanDeps.err, sleep: defaultScanDeps.sleep, startConsole: defaultScanDeps.startConsole,
   out: text => process.stdout.write(`${text}\n`),
   async git(cwd, args) { return (await exec("git", ["-C", cwd, ...args], { maxBuffer: 32 * 1024 * 1024 })).stdout; },
-  async gh(cwd, args) { return (await exec("gh", args, { cwd, maxBuffer: 32 * 1024 * 1024 })).stdout; },
+  async gh(cwd, args, input) {
+    assertEgressAllowed("GitHub (gh)");
+    const running = exec("gh", args, { cwd, maxBuffer: 32 * 1024 * 1024 });
+    running.child.stdin?.end(input ?? "");
+    return (await running).stdout;
+  },
   async check(cwd, command) {
     try {
       const { stdout, stderr } = await exec("/bin/sh", ["-c", command], { cwd, timeout: CHECK_TIMEOUT_MS, maxBuffer: 8 * 1024 * 1024 });
@@ -91,8 +98,8 @@ const defaults: FixDeps = {
 export const defaultFixDeps: FixDeps = defaults;
 
 /** The same finding always gets the same branch, so a second run updates the same pull request. */
-export function fixBranchName(fingerprint: string): string {
-  return `${BRANCH_PREFIX}${createHash("sha256").update(fingerprint).digest("hex").slice(0, 12)}`;
+export function fixBranchName(fingerprint: string, prefix: string = BRANCH_PREFIX): string {
+  return `${prefix}${createHash("sha256").update(fingerprint).digest("hex").slice(0, 12)}`;
 }
 
 /** Report text goes into a pull request body: stop it from notifying people or referencing other issues. */
@@ -112,7 +119,7 @@ const withoutCheckHeadings = (text: string): string => {
   }).join("\n").trim();
 };
 
-export function pullRequestBody(finding: FindingToFix, summary: string | undefined, checks: CheckResult[]): string {
+export function pullRequestBody(finding: FindingToFix, summary: string | undefined, checks: CheckResult[], footer?: string): string {
   const where = finding.path ? `\`${finding.path.replace(/`/g, "'")}${finding.startLine ? `:${finding.startLine}` : ""}\`` : "not given";
   const rows = checks.length ? checks.map(check => `| \`${escapeHtml(check.command.replace(/`/g, "'").replace(/\s+/g, " ")).replace(/\|/g, "\\|")}\` | ${check.code === 0 ? "passed" : `failed (exit ${check.code})`} |`).join("\n") : "| none were run | |";
   const failed = checks.filter(check => check.code !== 0);
@@ -133,6 +140,7 @@ export function pullRequestBody(finding: FindingToFix, summary: string | undefin
     inert(modelText || "The change is in the diff."),
     "",
     failed.length ? "Opened as a draft because a check failed. Review it before it is marked ready." : "A person should review this before merging; 0 does not merge.",
+    ...(footer ? ["", footer] : []),
   ].join("\n");
 }
 
@@ -171,8 +179,12 @@ export async function runFix(id: string, options: FixOptions, deps: FixDeps): Pr
     try { repo = (await deps.git(resolve(options.repo ?? process.cwd()), ["rev-parse", "--show-toplevel"])).trim(); }
     catch { throw new UsageError("Run this inside the git repository the finding is in, or pass --repo."); }
     const base = await defaultBase(deps, repo, options.base);
-    const branch = fixBranchName(finding.fingerprint);
-    if (branch === base.name || !branch.startsWith(BRANCH_PREFIX)) throw new Error("Refusing to work on the base branch.");
+    // The policy is read before anything is created: a bad pull request setting stops the run first.
+    const loaded = deps.loadPolicy(repo, options);
+    const conventions: PullRequestConventions | undefined = loaded && !loaded.fromRepo ? loaded.conventions : undefined;
+    const prefix = conventions?.branchPrefix ?? BRANCH_PREFIX;
+    const branch = fixBranchName(finding.fingerprint, prefix);
+    if (branch === base.name || !branch.startsWith(prefix)) throw new Error("Refusing to work on the base branch.");
 
     temp = deps.makeTemp();
     tree = join(temp, "tree");
@@ -183,13 +195,13 @@ export async function runFix(id: string, options: FixOptions, deps: FixDeps): Pr
 
     const { client, stop } = await connect(options, deps);
     stopConsole = stop;
-    const loaded = deps.loadPolicy(repo, options);
     const policy = loaded?.policy;
     if (loaded) {
       const libs = loaded.policy.approvedLibraries?.length ?? 0;
       const rules = loaded.policy.rules?.length ?? 0;
       deps.err(`applying fix policy from ${loaded.source} (${libs} approved ${libs === 1 ? "library" : "libraries"}, ${rules} ${rules === 1 ? "rule" : "rules"})`);
-      if (loaded.fromRepo) deps.err("warning: this policy comes from the repository being fixed, which is untrusted; it is guidance for the model, not a safety control");
+      if (loaded.fromRepo) deps.err("warning: this policy comes from the repository being fixed, which is untrusted; it is guidance for the model, not a safety control, and its pull request settings are ignored");
+      if (conventions) deps.err("applying pull request conventions from the policy");
     }
     const outcomeBase = { finding: finding.id, branch };
     const thread = await runThread(client, deps, tree, finding, options, budget, policy);
@@ -208,17 +220,17 @@ export async function runFix(id: string, options: FixOptions, deps: FixDeps): Pr
     // A clean machine or an Actions runner has no git identity; use a neutral one rather than fail the commit.
     const configured = (await deps.git(tree, ["config", "user.email"]).catch(() => "")).trim();
     const identity = configured ? [] : ["-c", "user.name=0", "-c", "user.email=noreply@0.security"];
-    await deps.git(tree, [...identity, "commit", "--quiet", "-m", `fix: ${finding.title.slice(0, 120)}\n\nFinding ${finding.id}`]);
+    await deps.git(tree, [...identity, "commit", "--quiet", "-m", `${commitSubject(finding, conventions)}\n\nFinding ${finding.id}`]);
     committedBranch = true;
     const outcome: FixOutcome = { ...common, changed: true, committed: true, checks, verified };
     if (!options.pr) { deps.err(`committed on ${branch}; not pushed (--no-pr).`); return outcome; }
 
     // The branch is ours and only ours: never the base, always with a lease so a person's later push is not overwritten.
-    const host = selectHost({ run: args => deps.gh(tree, args), git: args => deps.git(tree, args) });
+    const host = selectHost({ run: (args, input) => deps.gh(tree, args, input), git: args => deps.git(tree, args) });
     await host.pushBranch(branch);
     const bodyFile = join(temp, "body.md");
-    deps.writeFile(bodyFile, pullRequestBody(finding, thread.reply, checks));
-    const draft = !verified;
+    deps.writeFile(bodyFile, pullRequestBody(finding, thread.reply, checks, footerText(conventions)));
+    const draft = isDraft(verified, conventions);
     const existing = await host.findOpenPullRequest(branch);
     let url: string; let created = false;
     if (existing) {
@@ -228,8 +240,9 @@ export async function runFix(id: string, options: FixOptions, deps: FixDeps): Pr
       if (!existing.isDraft && draft) await host.setPullRequestReady(existing.number, false);
     } else {
       created = true;
-      url = await host.createPullRequest({ base: base.name, head: branch, title: `fix: ${finding.title.slice(0, 120)}`, bodyFile, draft });
+      url = await host.createPullRequest({ base: base.name, head: branch, title: pullRequestTitle(finding, conventions), bodyFile, draft });
     }
+    if (conventions?.labels?.length || conventions?.reviewers?.length) await decoratePullRequest(host, url, conventions, deps.err);
     return { ...outcome, pullRequest: { url, created, draft } };
   } finally {
     stopConsole?.();
@@ -237,6 +250,29 @@ export async function runFix(id: string, options: FixOptions, deps: FixDeps): Pr
     // A branch this run made and never committed to is only clutter.
     if (madeBranch && !madeBranch.existed && !committedBranch) await deps.git(madeBranch.repo, ["branch", "-D", madeBranch.branch]).catch(() => undefined);
     if (temp) deps.removeTemp(temp);
+  }
+}
+
+/** Labels that exist (or can be made) and reviewers go on the pull request. A refusal is a warning: the pull request is already open. */
+async function decoratePullRequest(host: Host, url: string, conventions: PullRequestConventions, warn: (text: string) => void): Promise<void> {
+  const number = Number(/\/pull\/(\d+)/.exec(url)?.[1]);
+  if (!Number.isInteger(number) || number < 1) { warn(`could not tell the pull request number from ${url}; labels and reviewers were not added`); return; }
+  try {
+    let labels: string[] = [];
+    if (conventions.labels?.length) {
+      const repo = await host.currentRepo();
+      if (!repo) warn("could not tell the repository, so the labels were skipped");
+      else {
+        const checked = await host.issues(repo).ensureLabels(conventions.labels);
+        for (const warning of checked.warnings) warn(`warning: ${warning}`);
+        labels = checked.usable;
+      }
+    }
+    if (labels.length) await host.editPullRequest(number, { addLabels: labels });
+  } catch (error) { warn(`warning: labels were not added (${error instanceof Error ? error.message.split("\n")[0]!.slice(0, 160) : "unknown error"})`); }
+  if (conventions.reviewers?.length) {
+    try { await host.editPullRequest(number, { addReviewers: conventions.reviewers }); }
+    catch (error) { warn(`warning: reviewers were not requested (${error instanceof Error ? error.message.split("\n")[0]!.slice(0, 160) : "unknown error"})`); }
   }
 }
 

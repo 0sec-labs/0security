@@ -11,6 +11,7 @@ import { join, relative, resolve, isAbsolute } from "node:path";
 import { parseDocument } from "yaml";
 import { homeStateDir, type FixPolicy } from "@0/engine/shared";
 import { UsageError } from "./output.js";
+import { parsePullRequestConventions, type PullRequestConventions } from "./fix-conventions.js";
 
 const POLICY_BASENAMES = ["fix-policy.json", "fix-policy.yaml", "fix-policy.yml"];
 /** Directories searched inside a repository, in order. */
@@ -22,6 +23,8 @@ export const MAX_POLICY_FILE_BYTES = 64 * 1024;
 export interface FixPolicyOptions { policy?: string; repoPolicy?: boolean }
 export interface LoadedFixPolicy {
   policy: FixPolicy;
+  /** Pull request settings (`pullRequest` key). Only ever set for the operator's own policy, never for a repository's. */
+  conventions?: PullRequestConventions;
   /** The file it came from, for the operator's log. */
   source: string;
   /** True when it came from the repository under fix, which is untrusted. */
@@ -29,6 +32,11 @@ export interface LoadedFixPolicy {
 }
 
 export function parseFixPolicy(content: string, filename?: string): FixPolicy {
+  return parseFixPolicyDocument(content, filename).policy;
+}
+
+/** The policy for the model plus the pull request conventions, which the model never sees. */
+export function parseFixPolicyDocument(content: string, filename?: string): { policy: FixPolicy; conventions?: PullRequestConventions } {
   let raw: unknown;
   try {
     raw = JSON.parse(content);
@@ -50,18 +58,22 @@ export function parseFixPolicy(content: string, filename?: string): FixPolicy {
   const rules = Array.isArray(obj.rules) ? obj.rules.map(String) : undefined;
   const notes = typeof obj.notes === "string" ? obj.notes : undefined;
   const version = typeof obj.version === "number" ? obj.version : undefined;
+  const conventions = obj.pullRequest === undefined ? undefined : parsePullRequestConventions(obj.pullRequest);
   return {
-    ...(version !== undefined ? { version } : {}),
-    ...(approvedLibraries ? { approvedLibraries: approvedLibraries as FixPolicy["approvedLibraries"] } : {}),
-    ...(forbiddenPatterns ? { forbiddenPatterns: forbiddenPatterns as FixPolicy["forbiddenPatterns"] } : {}),
-    ...(rules ? { rules } : {}),
-    ...(notes ? { notes } : {}),
+    policy: {
+      ...(version !== undefined ? { version } : {}),
+      ...(approvedLibraries ? { approvedLibraries: approvedLibraries as FixPolicy["approvedLibraries"] } : {}),
+      ...(forbiddenPatterns ? { forbiddenPatterns: forbiddenPatterns as FixPolicy["forbiddenPatterns"] } : {}),
+      ...(rules ? { rules } : {}),
+      ...(notes ? { notes } : {}),
+    },
+    ...(conventions ? { conventions } : {}),
   };
 }
 
-function readPolicy(path: string, label: string): FixPolicy {
+function readPolicy(path: string, label: string): { policy: FixPolicy; conventions?: PullRequestConventions } {
   if (statSync(path).size > MAX_POLICY_FILE_BYTES) throw new UsageError(`Fix policy ${label} is larger than ${MAX_POLICY_FILE_BYTES / 1024} KiB.`);
-  return parseFixPolicy(readFileSync(path, "utf8"), label);
+  return parseFixPolicyDocument(readFileSync(path, "utf8"), label);
 }
 
 function firstExisting(dir: string, names: string[]): string | undefined {
@@ -73,17 +85,18 @@ export function loadFixPolicyFile(repoRoot: string, options: FixPolicyOptions = 
   if (options.policy) {
     const path = resolve(options.policy);
     if (!existsSync(path)) throw new UsageError(`Fix policy file not found: ${options.policy}`);
-    return { policy: readPolicy(path, options.policy), source: path, fromRepo: false };
+    return { ...readPolicy(path, options.policy), source: path, fromRepo: false };
   }
   const own = firstExisting(homeStateDir(home), POLICY_BASENAMES);
-  if (own) return { policy: readPolicy(own, own), source: own, fromRepo: false };
+  if (own) return { ...readPolicy(own, own), source: own, fromRepo: false };
   if (options.repoPolicy) {
     const path = firstExisting(repoRoot, DEFAULT_FIX_POLICY_FILES);
     if (path) {
       // A symlink in the repository must not pull in a file from outside it (for example a credential).
       const inside = relative(realpathSync(repoRoot), realpathSync(path));
       if (inside.startsWith("..") || isAbsolute(inside)) throw new UsageError(`Fix policy ${path} points outside the repository.`);
-      return { policy: readPolicy(path, path), source: path, fromRepo: true };
+      // A repository is untrusted: its pull request settings (labels, reviewers, branch names) are not applied.
+      return { policy: readPolicy(path, path).policy, source: path, fromRepo: true };
     }
   }
   return undefined;

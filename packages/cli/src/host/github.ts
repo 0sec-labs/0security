@@ -1,7 +1,9 @@
 /** GitHub through the `gh` CLI: arguments are arrays, never a shell string. */
-import type { Host, HostRun, IssueDraft, IssueTracker, PullRequest, SarifUpload, TrackerIssue } from "./index.js";
+import type { Host, HostRun, IssueDraft, IssueTracker, PullRequest, PullRequestState, SarifUpload, TrackerIssue } from "./index.js";
 
 export const REPO = /^(?!\.{1,2}\/)[A-Za-z0-9_.-]{1,100}\/(?!\.{1,2}$)[A-Za-z0-9_.-]{1,100}$/;
+/** The pull request URLs `0 findings fix` records. */
+export const PULL_URL = /^https:\/\/github\.com\/[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}\/pull\/[0-9]{1,9}$/;
 const MARKER = /<!-- 0-finding:([A-Za-z0-9:_.-]{1,80}) -->/;
 const COLOURS: Record<string, string> = { security: "d73a4a", critical: "b60205", high: "d93f0b", medium: "fbca04", low: "0e8a16", info: "c5def5" };
 
@@ -102,6 +104,18 @@ export class GitHubHost implements Host {
 
   async setPullRequestReady(number: number, ready: boolean): Promise<void> {
     await this.gh(ready ? ["pr", "ready", String(number)] : ["pr", "ready", "--undo", String(number)]);
+  }
+
+  async pullRequestState(url: string): Promise<PullRequestState> {
+    if (!PULL_URL.test(url)) throw new Error("Not a GitHub pull request URL.");
+    const raw = JSON.parse(await this.gh(["pr", "view", url, "--json", "state,isDraft,commits", "--jq", "{state, isDraft, commits: (.commits | length)}"])) as { state?: string; isDraft?: boolean; commits?: number };
+    const state = raw.state === "MERGED" ? "merged" : raw.state === "CLOSED" ? "closed" : "open";
+    return { state, draft: raw.isDraft === true, commits: typeof raw.commits === "number" ? raw.commits : 0 };
+  }
+
+  async editPullRequest(number: number, change: { addLabels?: string[]; addReviewers?: string[] }): Promise<void> {
+    const args = [...(change.addLabels ?? []).flatMap(label => [`--add-label=${label}`]), ...(change.addReviewers ?? []).flatMap(name => [`--add-reviewer=${name}`])];
+    if (args.length) await this.gh(["pr", "edit", String(number), ...args]);
   }
 
   async pushBranch(branch: string): Promise<void> {

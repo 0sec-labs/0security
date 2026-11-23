@@ -24,6 +24,9 @@ export interface IssueTracker {
 
 export interface PullRequest { number: number; url: string; isDraft: boolean }
 
+/** Where a pull request stands now: open, merged, or closed without merging. */
+export interface PullRequestState { state: "open" | "merged" | "closed"; draft: boolean; commits: number }
+
 export interface SarifUpload { commit: string; ref: string; /** gzip + base64 */ sarif: string; tool?: string }
 
 /** Run the host's CLI with these arguments and an optional request body on standard input. */
@@ -41,6 +44,10 @@ export interface Host {
   updatePullRequestBody(number: number, bodyFile: string): Promise<void>;
   /** Mark ready for review, or back to draft. */
   setPullRequestReady(number: number, ready: boolean): Promise<void>;
+  /** Add labels (which must already exist) and request reviewers (users or `org/team`). */
+  editPullRequest(number: number, change: { addLabels?: string[]; addReviewers?: string[] }): Promise<void>;
+  /** Read one pull request by its URL. */
+  pullRequestState(url: string): Promise<PullRequestState>;
   pushBranch(branch: string): Promise<void>;
   issues(repo: string): IssueTracker;
   uploadSarif(repo: string, upload: SarifUpload): Promise<{ id?: string }>;

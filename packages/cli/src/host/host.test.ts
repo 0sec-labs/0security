@@ -73,3 +73,22 @@ describe("GitHub host over a fake gh", () => {
     expect(calls[0]!.args).toEqual(["api", "--method", "POST", "repos/o/r/issues", "--input", "-"]);
   });
 });
+
+describe("GitHub host: pull request labels, reviewers and state", () => {
+  it("adds labels and reviewers as separate flag=value arguments, never a shell string", async () => {
+    const { host, calls } = fake();
+    await host.editPullRequest(7, { addLabels: ["security", "needs review"], addReviewers: ["alice", "acme/appsec"] });
+    await host.editPullRequest(7, {});
+    expect(calls).toEqual([{ args: ["pr", "edit", "7", "--add-label=security", "--add-label=needs review", "--add-reviewer=alice", "--add-reviewer=acme/appsec"] }]);
+  });
+
+  it("reads merged, closed and open pull requests, and refuses anything but a GitHub pull request URL", async () => {
+    const url = "https://github.com/o/r/pull/7";
+    expect(await fake({ "pr view": '{"state":"MERGED","isDraft":false,"commits":2}' }).host.pullRequestState(url)).toEqual({ state: "merged", draft: false, commits: 2 });
+    expect((await fake({ "pr view": '{"state":"CLOSED","isDraft":true,"commits":1}' }).host.pullRequestState(url)).state).toBe("closed");
+    expect((await fake({ "pr view": '{"state":"OPEN","isDraft":false,"commits":1}' }).host.pullRequestState(url)).state).toBe("open");
+    const { host, calls } = fake();
+    for (const bad of ["--help", "https://evil.example/o/r/pull/7", "https://github.com/o/r/issues/7", "https://github.com/o/r/pull/7 --web"]) await expect(host.pullRequestState(bad)).rejects.toThrow("pull request URL");
+    expect(calls).toEqual([]);
+  });
+});
