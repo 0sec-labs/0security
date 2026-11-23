@@ -99,6 +99,11 @@ describe("formatSarif custom rules", () => {
     expect(JSON.parse(formatSarif({ ...report, scanStatus: undefined } as ScanReport)).runs[0].properties).toBeUndefined();
   });
 
+  it("records why the scan did not finish in the run properties", () => {
+    const report = { target: "t", scanDepth: "quick", startedAt: "", completedAt: "", durationMs: 0, warnings: [], summary: { totalAttacks: 0, totalFindings: 0, critical: 0, high: 0, medium: 0, low: 0, info: 0 }, findings: [], scanStatus: "partial", scanFailure: { cause: "provider_connection", message: "The model provider dropped the connection" } } as unknown as ScanReport;
+    expect(JSON.parse(formatSarif(report)).runs[0].properties).toEqual({ status: "partial", failure: { cause: "provider_connection", message: "The model provider dropped the connection" } });
+  });
+
   it("records an accepted risk as an external suppression with its reason, expiry and approver", () => {
     const base = { target: "/repo", scanDepth: "quick" as const, startedAt: "", completedAt: "", durationMs: 0, warnings: [], summary: { totalAttacks: 0, totalFindings: 2, critical: 0, high: 2, medium: 0, low: 0, info: 0 } };
     const finding = (id: string, extra: Partial<Finding>): Finding => ({ id, templateId: "t", title: id, description: "d", severity: "high", category: "path-traversal", status: "confirmed", evidence: { request: "", response: "" }, timestamp: 1, ...extra });

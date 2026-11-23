@@ -33,7 +33,7 @@ export async function generatePdfReport(report: ScanReport, outputPath: string):
   text(active.map(s => `${report.summary[s]} ${s}`).join("   /   ") || "No findings reported", 13, "#ffb28b");
   doc.moveDown(2); text("Findings and recommended actions", 12, "#eeeeef", true);
   text("Supporting evidence is available in the companion HTML report.", 10, "#aaaab4");
-  if (report.executionSuccessful === false) { doc.moveDown(); text("The assessment did not complete. Results may be incomplete.", 10, "#e5c777"); }
+  if (report.executionSuccessful === false) { doc.moveDown(); text(report.scanFailure ? `The scan did not finish: ${report.scanFailure.message.replace(/\.+$/, "")}. Results may be incomplete.` : "The assessment did not complete. Results may be incomplete.", 10, "#e5c777"); }
   if (report.warnings.length) { doc.moveDown(); text("Scope and limitations are listed at the end of this brief.", 10, "#aaaab4"); }
   doc.fontSize(8).fillColor("#aaaab4").text("CONFIDENTIAL", M, 710, { width: W });
   if (sorted.length) page();

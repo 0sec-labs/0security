@@ -33,7 +33,7 @@ export function formatMarkdown(report: ScanReport): string {
   lines.push(`| Duration | ${(report.durationMs / 1000).toFixed(1)}s |`);
   if (report.tier) lines.push(`| Tier | ${report.tier.name}${report.tier.reason ? `: ${report.tier.reason.replace(/[|\r\n]+/g, " ")}` : ""} |`);
   lines.push("");
-  if (incomplete) lines.push("Assessment did not complete successfully. Results may be incomplete.", "");
+  if (incomplete) lines.push(report.scanFailure ? `The scan did not finish: ${report.scanFailure.message.replace(/\.+$/, "")}. Results may be incomplete.` : "Assessment did not complete successfully. Results may be incomplete.", "");
 
   // Summary
   lines.push("## Summary");

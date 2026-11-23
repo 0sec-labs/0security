@@ -52,6 +52,16 @@ describe("report export", () => {
     expect(html).not.toContain("Assessment did not complete successfully.");
     expect(JSON.parse(decode((await exportReport(reviewed, "sarif")).body)).runs[0].invocations[0].executionSuccessful).toBe(true);
   });
+  it("names the cause in Markdown and HTML when a scan did not finish", async () => {
+    const failed: ScanReport = { ...report, executionSuccessful: false, scanFailure: { cause: "provider_timeout", message: "The model provider did not answer in time: <b>x</b>." } };
+    const markdown = decode((await exportReport(failed, "markdown")).body);
+    expect(markdown).toContain("The scan did not finish: The model provider did not answer in time");
+    expect(markdown).not.toContain("Assessment did not complete successfully.");
+    const html = decode((await exportReport(failed, "html")).body);
+    expect(html).toContain("The scan did not finish: The model provider did not answer in time: &lt;b&gt;x&lt;/b&gt;.");
+    const bare = decode((await exportReport({ ...failed, scanFailure: undefined }, "markdown")).body);
+    expect(bare).toContain("Assessment did not complete successfully.");
+  });
   it("rejects unsupported formats before invoking a renderer", async () => {
     expect(isReportExportFormat("terminal")).toBe(false);
     await expect(exportReport(report, "exe" as never)).rejects.toThrow("Unsupported");

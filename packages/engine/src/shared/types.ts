@@ -1398,6 +1398,10 @@ export interface ScanCoverage {
   pendingUnits: Array<{ kind: string; path: string; startLine?: number; name?: string; reason?: string }>;
   /** What stopped the scan, when it ended with units pending: the budget, the time limit or failed batches. */
   stoppedBy?: string;
+  /** Batches that were run again after a transient failure: how many retries were allowed and used, and for which causes. */
+  retries?: { allowed: number; total: number; batches: Array<{ batch: number; attempts: number; causes: string[]; recovered: boolean }> };
+  /** Batches that were not reviewed because they failed or timed out, with the cause. */
+  failures?: Array<{ batch: number; cause: string; message: string }>;
   /** The command that continues a scan that ended with units pending. */
   resume?: string;
 }
@@ -1437,6 +1441,8 @@ export interface ScanReport extends ScanPlanExecution {
   known?: ScanKnownSummary;
   /** How the scan ended (complete, partial, budget_exhausted, timed_out, skipped, prepass_only, failed); written to the SARIF run properties. */
   scanStatus?: string;
+  /** Why a failed or stopped scan did not finish: a cause such as provider_connection or timeout, and a plain message without secrets. Written to the SARIF run properties. */
+  scanFailure?: { cause: string; message: string };
   target: string;
   scanDepth: ScanDepth;
   startedAt: string;
