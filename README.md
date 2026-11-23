@@ -57,12 +57,6 @@ That scans the folder, prints a report and stops at a $5 budget. Any model provi
 
 Windows, Docker and source installs are in the [docs](https://docs.0.security/). Only scan code you own or are authorized to test.
 
-## Privacy
-
-Your code stays on your machine. 0 sends what you choose to your model provider. By default it also sends anonymous usage counts and checks GitHub for updates.
-
-Set `ZERO_OFFLINE=1` to turn both off, or `ZERO_ENTERPRISE=1` for no egress except your model endpoint. See [What leaves your machine](https://docs.0.security/data-flow/).
-
 ## What it does
 
 - **Reviews code.** A fast scanner pass, then a model reads the code. Large repositories are reviewed in batches you can resume.
