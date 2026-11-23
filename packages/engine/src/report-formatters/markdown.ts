@@ -62,6 +62,7 @@ export function formatMarkdown(report: ScanReport): string {
   if (report.coverage) {
     lines.push("## Coverage", "");
     lines.push(`This scan ran in batches: ${report.coverage.statement}.`);
+    if (report.coverage.opened !== undefined && report.coverage.inScope !== undefined) lines.push("", `The threads opened ${report.coverage.opened} of ${report.coverage.inScope} source files${report.coverage.rounds?.used ? ` after ${report.coverage.rounds.used} follow-up round${report.coverage.rounds.used === 1 ? "" : "s"}` : ""}.`);
     if (partial) {
       lines.push("", "The scan did not review everything, so the findings below are partial. A missing finding in code that was not reached means nothing.");
       const shown = report.coverage.pendingUnits.slice(0, 20);
@@ -74,6 +75,8 @@ export function formatMarkdown(report: ScanReport): string {
     }
     lines.push("");
   }
+
+  if (!report.coverage && report.fileCoverage) lines.push("## Files opened", "", `The scan opened ${report.fileCoverage.opened} of ${report.fileCoverage.inScope} source files${report.fileCoverage.rounds.used ? ` after ${report.fileCoverage.rounds.used} follow-up round${report.fileCoverage.rounds.used === 1 ? "" : "s"}` : ""}.${report.fileCoverage.unopenedCount ? ` Not opened: ${report.fileCoverage.unopened.slice(0, 20).join(", ")}${report.fileCoverage.unopenedCount > 20 ? `, and ${report.fileCoverage.unopenedCount - 20} more` : ""}.` : ""}`, "");
 
   if (report.warnings.length > 0) {
     lines.push("## Warnings");

@@ -33,7 +33,7 @@ function fixture(name: string): string {
 interface Run { code: number | null; stdout: string; stderr: string; json: Record<string, any> }
 function scan(dir: string, server: FaultServer, args: string[], timeoutMs = 120_000): Promise<Run> {
   const home = mkdtempSync(join(root, "home-"));
-  const child = spawn(process.execPath, [dist, "scan", dir, "--format", "json", "--prepass", "off", "--budget", "1", ...args], {
+  const child = spawn(process.execPath, [dist, "scan", dir, "--format", "json", "--prepass", "off", "--budget", "1", "--coverage-rounds", "0", ...args], {
     cwd: dir,
     env: {
       PATH: process.env.PATH ?? "", HOME: home, TMPDIR: home, NO_COLOR: "1",

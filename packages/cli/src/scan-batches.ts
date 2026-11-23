@@ -3,11 +3,12 @@
  *
  * The orchestration is separate from the console so it can be tested without one: `run` starts one thread and says how it
  * ended. A batch counts as reviewed only when its thread finished normally. A batch that stopped at its budget, hit the time
- * limit or failed stays pending, with the reason, and so does every batch that was never started.
+ * limit or failed stays pending, with the reason, and so does every batch that was never started. Inside a batch that did
+ * finish, a unit whose files the thread never opened stays pending with the reason "not opened".
  */
 import type { Batch, InventoryUnit } from "@0/engine";
 import type { CoverageStatus, CoverageSummary, LedgerUnit } from "@0/engine/storage";
-import type { ScanCoverage } from "@0/engine/shared";
+import type { ScanCoverage, ScanFileCoverage } from "@0/engine/shared";
 import type { FailureCause, ScanFailure } from "./scan-failure.js";
 
 /** The least a batch gets. Below this the scan stops and leaves the rest pending instead of starting threads that cannot finish. */
@@ -36,6 +37,8 @@ export interface BatchOutcome {
   batchTimedOut?: boolean;
   /** Why the thread failed, when it did. Decides whether the batch is tried again. */
   failure?: ScanFailure;
+  /** Units of a batch that finished normally whose files the thread never opened, even after the follow-up rounds: they stay pending. */
+  notOpenedUnitIds?: readonly string[];
 }
 
 /** One batch that was tried more than once. */
@@ -156,7 +159,11 @@ export async function runBatches(input: RunBatchesInput): Promise<RunBatchesResu
       const ids = batch.units.map(unit => unit.id);
       const threadId = outcome.threadId;
       if (outcome.reviewed) {
-        input.ledger.mark(input.scanId, ids, { status: "reviewed", ...(threadId ? { threadId } : {}) });
+        // A thread that ended normally has reviewed the units whose files it opened; the others wait for a resume.
+        const skipped = new Set(outcome.notOpenedUnitIds ?? []);
+        const opened = ids.filter(id => !skipped.has(id));
+        if (opened.length) input.ledger.mark(input.scanId, opened, { status: "reviewed", ...(threadId ? { threadId } : {}) });
+        if (skipped.size) input.ledger.mark(input.scanId, ids.filter(id => skipped.has(id)), { status: "pending", reason: "not opened", ...(threadId ? { threadId } : {}) });
         consecutiveFailures = 0;
       } else {
         const reason: StopReason = outcome.budgetExhausted ? "budget" : outcome.timedOut ? "time limit" : outcome.batchTimedOut ? "timeout" : "thread failed";
@@ -184,7 +191,7 @@ export function unitFromLedger(row: LedgerUnit): InventoryUnit {
 }
 
 /** The `coverage` object of a report: counts, the sentence, and the first units not reached. */
-export function coverageReport(summary: CoverageSummary, statement: string, units: readonly LedgerUnit[], run?: { retried: readonly BatchRetry[]; failures: readonly BatchFailure[]; retriesAllowed: number }): ScanCoverage {
+export function coverageReport(summary: CoverageSummary, statement: string, units: readonly LedgerUnit[], run?: { retried: readonly BatchRetry[]; failures: readonly BatchFailure[]; retriesAllowed: number; files?: ScanFileCoverage }): ScanCoverage {
   const pending = units.filter(unit => unit.status === "pending");
   const batchIds = new Set(units.map(unit => unit.batch));
   const open = new Set(pending.map(unit => unit.batch));
@@ -199,6 +206,7 @@ export function coverageReport(summary: CoverageSummary, statement: string, unit
     notReached: summary.notReached,
     batches: { total: batches.total, reviewed: batches.reviewed, pending: batches.total - batches.reviewed },
     ...(run ? { retries: { allowed: run.retriesAllowed, total: run.retried.reduce((sum, item) => sum + item.attempts - 1, 0), batches: run.retried.map(item => ({ batch: item.batch, attempts: item.attempts, causes: [...item.causes], recovered: item.recovered })) } } : {}),
+    ...(run?.files ? run.files : {}),
     ...(run?.failures.length ? { failures: run.failures.map(item => ({ batch: item.batch, cause: item.cause, message: item.message })) } : {}),
     pendingUnits: pending.slice(0, 100).map(unit => ({ kind: unit.kind, path: unit.path, ...(unit.startLine !== undefined ? { startLine: unit.startLine } : {}), ...(unit.name ? { name: unit.name } : {}), ...(unit.reason ? { reason: unit.reason } : {}) })),
   };

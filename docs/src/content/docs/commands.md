@@ -188,6 +188,7 @@ Add `--allow-partial` when a partial scan should not fail the job. The exit code
 | `--batches <mode>` | `auto` | auto reviews a large folder in batches, one thread per group of entry points, and records what each batch covered; on always does; off keeps one thread |
 | `--batch-size <n>` | `8` | Entry points one batch reviews (1 to 50); a folder with more than this many is split under --batches auto |
 | `--retries <n>` | `2` | Run a batch again when it fails for a reason that may pass: a dropped connection, a provider timeout, rate limit or server error (0 to 5; 0 turns it off). A thread that is not a batch is asked once to continue. The cost of every attempt counts against --budget |
+| `--coverage-rounds <n>` | `2` | After a thread ends, send it a follow-up that names the source files it never opened, up to this many times (0 to 5; 0 turns it off). Each round counts against --budget |
 | `--batch-timeout <seconds>` | `900` | Longest one batch may run before it is cancelled and left pending (the scan goes on with the next batch); --timeout still limits the whole scan |
 | `--concurrency <n>` | `1` | Batches that run at the same time (1 to 3) |
 | `--resume <scan>` | — | Continue the units an earlier batched scan of this folder did not reach (a scan id from its report, or latest); refuses when the git HEAD changed unless --force |
@@ -217,6 +218,16 @@ A scan without batches has no batch to run again. When its thread fails for one 
 `--timeout` limits the whole scan. `--batch-timeout <seconds>` (default 900) limits one batch. A batch that passes it is cancelled and stays pending with the reason `timeout`, and the scan goes on with the next batch. A scan that passes `--timeout` stops and reports what it reviewed as partial.
 
 When a scan fails or stops early, the error says why, in plain words. The JSON report has the same text in `failure`, with a `cause` such as `provider_connection`, `provider_timeout`, `provider_rate_limit`, `provider_server`, `provider_auth`, `provider_invalid_request`, `no_model`, `budget`, `timeout`, `batch_timeout` or `console_lost`. SARIF has it in the run properties. Keys and tokens are removed from the text.
+
+#### Files the model did not open
+
+A model does not always open every source file. After a thread ends, 0 checks which files it read, from the tool calls in the thread. If some source files were never opened, 0 sends the same thread a follow-up that names them and asks it to open and review each one. It does this up to 2 times. Set `--coverage-rounds <n>` (0 to 5) to change that, or `--coverage-rounds 0` to turn it off.
+
+Each round counts against `--budget` and is logged on stderr. A round does not start when little of the budget or time is left, after a failure, a time limit or a budget stop, or after two rounds in a row that opened none of the named files. Files over 200 KB, binary files, and vendored or generated files are not part of the check.
+
+In a batched scan, a unit counts as reviewed only when its files were opened. A unit whose files stayed unopened stays pending with the reason `not opened`, and `--resume` runs it again. The report says so, for example `reviewed 41 of 57 entry points; 16 not reached (not opened); 3 files never opened`, and the exit code is 3. The JSON `coverage` has `opened`, `unopened` (the first 100 paths) and `rounds`. A scan with one thread has the same fields in `fileCoverage`.
+
+The check reads shell commands such as `cat`, `sed`, `head` and `grep` on a file, a read tool, globs, and `find ... | xargs cat`. It can miss a file that was read some other way, so a follow-up may name a file the model did read.
 
 To see what a scan involves before you run it, use `--plan`. It lists the entry points, the batches and a rough cost, and calls no model:
 

@@ -1416,6 +1416,9 @@ Options:
                              connection, a provider timeout, rate limit or server error (0 to 5; 0
                              turns it off). A thread that is not a batch is asked once to continue.
                              The cost of every attempt counts against --budget (default: "2")
+  --coverage-rounds <n>      After a thread ends, send it a follow-up that names the source files it
+                             never opened, up to this many times (0 to 5; 0 turns it off). Each
+                             round counts against --budget (default: "2")
   --batch-timeout <seconds>  Longest one batch may run before it is cancelled and left pending (the
                              scan goes on with the next batch); --timeout still limits the whole
                              scan (default: "900")

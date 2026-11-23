@@ -171,7 +171,7 @@ validate_scan() {
 # summarise_sarif <sarif> <code> <mode-label>: sets STATUS and COVERAGE, writes the job summary.
 read_report() {
   local sarif=$1 code=$2 meta
-  STATUS=failed; COVERAGE=""; FAILURE=""
+  STATUS=failed; COVERAGE=""; FAILURE=""; FILES=""
   M_TOTAL=0; M_CRIT=0; M_HIGH=0; M_MED=0; M_LOW=0; M_INFO=0
   TIER=""; KNOWN_NEW=""; KNOWN_OLD=""; KNOWN_HIDDEN=""
   if [ "$code" = 2 ] || [ ! -s "$sarif" ]; then return; fi
@@ -183,6 +183,7 @@ read_report() {
     | { status: ($r.properties.status // ""),
         coverage: ($r.properties.coverage.statement // ""),
         failure: ($r.properties.failure.message // ""),
+        files: (($r.properties.coverage // $r.properties.fileCoverage // {}) as $c | if ($c.opened // null) != null and ($c.inScope // null) != null then "\($c.opened) of \($c.inScope) source files opened, \($c.rounds.used // 0) follow-up round\(if ($c.rounds.used // 0) == 1 then "" else "s" end)" else "" end),
         total: ($f | length),
         critical: ([$f[] | select(.properties.severity == "critical")] | length),
         high: ([$f[] | select(.properties.severity == "high")] | length),
@@ -201,6 +202,7 @@ read_report() {
   esac
   COVERAGE=$(clean "$(jq -r '.coverage' <<< "$meta")")
   FAILURE=$(clean "$(jq -r '.failure' <<< "$meta")")
+  FILES=$(clean "$(jq -r '.files' <<< "$meta")")
   M_TOTAL=$(num "$(jq -r '.total' <<< "$meta")"); M_CRIT=$(num "$(jq -r '.critical' <<< "$meta")")
   M_HIGH=$(num "$(jq -r '.high' <<< "$meta")"); M_MED=$(num "$(jq -r '.medium' <<< "$meta")")
   M_LOW=$(num "$(jq -r '.low' <<< "$meta")"); M_INFO=$(num "$(jq -r '.info' <<< "$meta")")
@@ -225,6 +227,7 @@ write_summary() {
   summary ""
   summary "- Status: $STATUS"
   summary "- Coverage: ${COVERAGE:-not reported}"
+  [ -z "$FILES" ] || summary "- Files opened: $FILES"
   [ -z "$FAILURE" ] || summary "- Why it stopped: $FAILURE"
   summary "- Exit code: $1"
   if [ "$STATUS" != failed ]; then

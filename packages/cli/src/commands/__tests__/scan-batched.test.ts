@@ -53,7 +53,7 @@ function harness(dbPath: string, behaviour: (n: number) => "ok" | "ceiling" | "f
   void dbPath;
   return { deps, out, err, messages, created, loaded };
 }
-const opts = (dbPath: string, extra: Record<string, unknown> = {}) => ({ budget: "5", format: "json", timeout: "60", skill: "scan", passes: "1", dbPath, ...extra }) as never;
+const opts = (dbPath: string, extra: Record<string, unknown> = {}) => ({ budget: "5", format: "json", timeout: "60", skill: "scan", passes: "1", dbPath, coverageRounds: "0", ...extra }) as never;
 const report = (h: Harness) => JSON.parse(h.out.join(""));
 
 describe("batched scan", () => {

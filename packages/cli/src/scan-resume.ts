@@ -43,6 +43,7 @@ function stoppedBy(stop: StopFacts, summary: CoverageSummary): string {
     return `${stop.failures.length === 1 ? "a failed batch" : `${stop.failures.length} failed batches`}${reason}`;
   }
   const reasons = Object.keys(summary.notReached);
+  if (reasons.length === 1 && reasons[0] === "not opened") return "files the model did not open";
   return reasons.length ? reasons.join(", ") : "an earlier run";
 }
 

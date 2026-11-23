@@ -1383,7 +1383,22 @@ export interface ScanCoverageTally { total: number; reviewed: number; pending: n
  * What a batched scan reviewed. `complete` is true only when no unit is pending; a report with `complete: false`
  * says which entry points were not reached and why.
  */
-export interface ScanCoverage {
+/**
+ * Which source files the scan's threads opened. A file is in scope when the inventory lists it as source and it is not
+ * binary or over 200 KB. `rounds` counts the follow-up messages that asked a thread to open the files it had skipped.
+ */
+export interface ScanFileCoverage {
+  inScope: number;
+  opened: number;
+  /** The files no tool call opened (at most 100). */
+  unopened: string[];
+  /** How many files were not opened, including those not listed. */
+  unopenedCount: number;
+  /** Follow-up rounds: how many were allowed (`--coverage-rounds`) and how many were sent. */
+  rounds: { allowed: number; used: number };
+}
+
+export interface ScanCoverage extends Partial<ScanFileCoverage> {
   scanId: string;
   complete: boolean;
   /** For example "reviewed 41 of 57 entry points; 16 not reached (budget)". */
@@ -1435,6 +1450,8 @@ export interface ScanKnownSummary {
 export interface ScanReport extends ScanPlanExecution {
   /** Present when the scan ran in batches: what was and was not reviewed. */
   coverage?: ScanCoverage;
+  /** Present when the scan ran as one thread: which source files it opened. */
+  fileCoverage?: ScanFileCoverage;
   /** Present when a tier map applied to the scan. */
   tier?: ScanTierInfo;
   /** Present when the scan ran with `--known`. */

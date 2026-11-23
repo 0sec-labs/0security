@@ -14,11 +14,11 @@ import type { Command } from "commander";
 import { buildInventory, discoverAgentSkills, exportReport, getSkillById, isReportExportFormat, resolveAgentSkillName, type Batch } from "@0/engine";
 import { CoverageLedger, coverageSentence, summarizeCoverage } from "@0/engine/storage";
 import { consoleTransportOptions, openConsole, type ConsoleClient, type ConsoleTransportOptions } from "../console-client.js";
-import { homeStateDir, parseSarif, parseScannerList, scanPrompt, scannerArguments, scannerById, scannerTakesRules, SCANNERS, type KnownItem, type PrePassLeads, type BatchPromptInfo, type ScanReport } from "@0/engine/shared";
+import { homeStateDir, parseSarif, parseScannerList, scanPrompt, scannerArguments, scannerById, scannerTakesRules, SCANNERS, type KnownItem, type PrePassLeads, type BatchPromptInfo, type ScanFileCoverage, type ScanReport } from "@0/engine/shared";
 import { runPrePass } from "../prepass.js";
 import { checkRulesScanners, resolveRulePaths } from "../scan-rules.js";
 import { markKnown, mergePasses, scanExitCode, scanJson, toScanReport, type ScanOutcome } from "../scan-report.js";
-import { reviewDepth, shallowReviewWarning, toolCallText } from "../scan-review.js";
+import { followUpText, reviewDepth, reviewScopeFiles, shallowReviewWarning, toolCallText, unopenedFiles } from "../scan-review.js";
 import { coverageReport, DEFAULT_RETRIES, runBatches, type BatchOutcome, type RunBatchesResult } from "../scan-batches.js";
 import { classifyFailure, type FailureCause, type ScanFailure } from "../scan-failure.js";
 import { coverageJson, coverageText, DEFAULT_BATCH_SIZE, planBatchedScan, type BatchedSetup } from "../scan-batched.js";
@@ -42,6 +42,14 @@ const DEFAULT_TIMEOUT_SECONDS = 3600;
 /** The longest one batch may run. A batch that passes it is cancelled and stays pending; the scan goes on with the next one. */
 export const DEFAULT_BATCH_TIMEOUT_SECONDS = 900;
 const MAX_RETRIES = 5;
+/** Follow-up rounds that ask a thread to open the source files it skipped (`--coverage-rounds`). */
+export const DEFAULT_COVERAGE_ROUNDS = 2;
+const MAX_COVERAGE_ROUNDS = 5;
+/** A follow-up round starts only with this much of the thread's budget left (a share of it, and never less than the floor). */
+const ROUND_BUDGET_SHARE = 0.15;
+const ROUND_BUDGET_FLOOR_USD = 0.03;
+/** ...and with this much time left before the thread's limit. */
+const ROUND_MIN_SECONDS = 20;
 /** Messages and events a status poll asks for. A long thread's full snapshot can pass the transport limit; the status needs only the end. */
 const POLL_WINDOW = 20;
 /** Consecutive failed status requests before the scan gives up on the console (about a minute with the backoff). */
@@ -153,7 +161,7 @@ interface ScanOptions extends ConsoleTransportOptions {
   context?: string[]; policy?: string[]; orgPolicy?: string[]; repoContext?: boolean; repoIgnores?: boolean;
   batches?: string; batchSize?: string; concurrency?: string; resume?: string; force?: boolean; coverage?: string | boolean; allowPartial?: boolean; plan?: boolean;
   tiers?: string; failOnSkip?: boolean; known?: string[]; onlyNew?: boolean;
-  retries?: string; batchTimeout?: string;
+  retries?: string; batchTimeout?: string; coverageRounds?: string;
   /** The option names the person typed (budget, batches, skill). Tier settings never override these. When unset, an option that differs from its default counts as typed. */
   explicit?: string[];
 }
@@ -255,6 +263,8 @@ function validate(target: string | undefined, options: ScanOptions): void {
   if (!Number.isFinite(batchSeconds) || batchSeconds <= 0) throw new UsageError("--batch-timeout must be a positive number of seconds.");
   const retries = Number(options.retries ?? DEFAULT_RETRIES);
   if (!Number.isInteger(retries) || retries < 0 || retries > MAX_RETRIES) throw new UsageError(`--retries must be a whole number from 0 to ${MAX_RETRIES}.`);
+  const rounds = Number(options.coverageRounds ?? DEFAULT_COVERAGE_ROUNDS);
+  if (!Number.isInteger(rounds) || rounds < 0 || rounds > MAX_COVERAGE_ROUNDS) throw new UsageError(`--coverage-rounds must be a whole number from 0 to ${MAX_COVERAGE_ROUNDS}.`);
   if (options.failOn !== undefined && !(SEVERITIES as readonly string[]).includes(options.failOn)) throw new UsageError(`--fail-on must be one of: ${SEVERITIES.join(", ")}.`);
 }
 
@@ -279,10 +289,11 @@ export async function connect(options: ConsoleTransportOptions, deps: Pick<ScanD
   throw new Error("Could not start a console within 30s. Start one with `0 --headless` and run the scan again.");
 }
 
-interface PassContext { prePass?: PrePassLeads; scope?: string[]; known?: KnownItem[]; extras: Partial<ScanOutcome>; steering: Steering; client: ConsoleClient; deps: ScanDeps; resolved: ResolvedTarget; options: ScanOptions; total: number; budget: number; deadline: number }
-interface PassResult { threadId: string; done: FinishedThread; stored: ScanReport; budgetExhausted: boolean; timedOut: boolean; /** The batch's own time limit passed before the scan's. */ batchTimedOut: boolean; /** Why the thread failed, when it did and it was not the budget or a time limit. */ failure?: ScanFailure; /** What the thread's tool calls named, across every attempt (a continued thread keeps one transcript). */ toolCalls: string; /** The thread was asked to continue once after a transient failure. */ resumed?: boolean; costUsd?: number }
+interface PassContext { /** The source files a thread is expected to open (empty: no check). */ scopeFiles: readonly string[]; prePass?: PrePassLeads; scope?: string[]; known?: KnownItem[]; extras: Partial<ScanOutcome>; steering: Steering; client: ConsoleClient; deps: ScanDeps; resolved: ResolvedTarget; options: ScanOptions; total: number; budget: number; deadline: number }
+interface PassResult { threadId: string; done: FinishedThread; stored: ScanReport; budgetExhausted: boolean; timedOut: boolean; /** The batch's own time limit passed before the scan's. */ batchTimedOut: boolean; /** Why the thread failed, when it did and it was not the budget or a time limit. */ failure?: ScanFailure; /** What the thread's tool calls named, across every attempt (a continued thread keeps one transcript). */ toolCalls: string; /** The in-scope files this thread was to open, the ones it did not open, and the follow-up rounds sent. */ files: { expected: readonly string[]; unopened: readonly string[]; rounds: number }; /** The thread was asked to continue once after a transient failure. */ resumed?: boolean; costUsd?: number }
 
 const retryCount = (options: ScanOptions): number => Number(options.retries ?? DEFAULT_RETRIES);
+export const coverageRounds = (options: Pick<ScanOptions, "coverageRounds">): number => Number(options.coverageRounds ?? DEFAULT_COVERAGE_ROUNDS);
 
 /** Poll a thread until it finishes, the deadline passes (it is then cancelled) or the console is lost for too long. */
 export async function waitForThread(client: ConsoleClient, deps: Pick<ScanDeps, "sleep">, id: string, deadline: number, windowed = false): Promise<{ snapshot: Json; timedOut: boolean }> {
@@ -331,7 +342,7 @@ function threadFailure(done: FinishedThread, budgetExhausted: boolean, timedOut:
 }
 
 /** One scan thread: start it, wait for it, and read what it stored. Throws when the thread cannot run or the console is lost. */
-interface PassExtra { batch?: BatchPromptInfo; budget?: number; prePass?: PrePassLeads | undefined; known?: KnownItem[] }
+interface PassExtra { /** The files this thread is expected to open (a batch's files); default: every in-scope file. */ files?: readonly string[]; batch?: BatchPromptInfo; budget?: number; prePass?: PrePassLeads | undefined; known?: KnownItem[] }
 async function runPass(ctx: PassContext, index: number, extra: PassExtra = {}): Promise<PassResult> {
   const { client, deps, resolved, options, total, deadline } = ctx;
   const budget = extra.budget ?? ctx.budget;
@@ -374,13 +385,49 @@ async function runPass(ctx: PassContext, index: number, extra: PassExtra = {}): 
       } catch (error) { deps.err(`could not continue thread ${id}: ${error instanceof Error ? error.message : String(error)}`); }
     }
   }
+
+  // Which source files the thread opened. The status polls see the end of the thread only, so read the whole transcript once.
+  const transcript = async (windowed: Json): Promise<string> => {
+    try { return toolCallText(asJson(asJson(await client.request("GET", path)).snapshot)); } catch { return toolCallText(windowed); }
+  };
+  const expected = extra.files ?? ctx.scopeFiles;
+  const allowed = coverageRounds(options);
+  let calls = expected.length ? await transcript(waited.snapshot) : "";
+  let unopened = expected.length ? unopenedFiles(expected, calls, resolved.folder) : [];
+  let rounds = 0;
+  let stalled = 0;
+  let lastRoundCost = 0;
+  // Enforcement is not a retry: it runs only after a thread that ended normally, and never after a failure, a time limit or a budget stop.
+  while (unopened.length && rounds < allowed && !waited.timedOut) {
+    const before = finishedThread(waited.snapshot);
+    if (before.failed || before.claimBlocked) break;
+    const spent = typeof before.usage.costUsd === "number" ? before.usage.costUsd : undefined;
+    const left = spent === undefined ? budget : budget - spent;
+    if (left < Math.max(ROUND_BUDGET_FLOOR_USD, budget * ROUND_BUDGET_SHARE, lastRoundCost * 1.5)) { deps.err(`thread ${id}: ${unopened.length} source file${unopened.length === 1 ? "" : "s"} not opened; no follow-up round, too little of the $${Number(budget.toFixed(4))} budget is left`); break; }
+    if (Date.now() + ROUND_MIN_SECONDS * 1000 > limit) { deps.err(`thread ${id}: ${unopened.length} source file${unopened.length === 1 ? "" : "s"} not opened; no follow-up round, too little time is left`); break; }
+    deps.err(`thread ${id}: opened ${expected.length - unopened.length} of ${expected.length} source files; asking it to open the other ${unopened.length} (follow-up round ${rounds + 1} of ${allowed})`);
+    try { await client.request("POST", `${path}/messages`, { text: followUpText(unopened) }); }
+    catch (error) { deps.err(`could not send the follow-up to thread ${id}: ${error instanceof Error ? error.message : String(error)}`); break; }
+    waited = await waitForThread(client, deps, id, limit, true);
+    rounds++;
+    const after = finishedThread(waited.snapshot);
+    if (typeof after.usage.costUsd === "number" && spent !== undefined) lastRoundCost = Math.max(0, after.usage.costUsd - spent);
+    calls = await transcript(waited.snapshot);
+    const still = unopenedFiles(expected, calls, resolved.folder);
+    const opened = unopened.length - still.length;
+    deps.err(`thread ${id}: follow-up round ${rounds} opened ${opened} of ${unopened.length} file${unopened.length === 1 ? "" : "s"}`);
+    stalled = opened > 0 ? 0 : stalled + 1;
+    unopened = still;
+    // A model that opens nothing twice in a row is not going to; stop asking.
+    if (stalled >= 2) break;
+  }
   const { snapshot, timedOut } = waited;
   const done = finishedThread(snapshot);
   const costUsd = typeof done.usage.costUsd === "number" ? done.usage.costUsd : undefined;
   const budgetExhausted = asJson(done.session).costCeilingExceeded === true;
   const batchTimedOut = timedOut && limit < deadline;
   const failure = threadFailure(done, budgetExhausted, timedOut);
-  return { threadId: id, done, stored: await deps.loadReport(client, id), budgetExhausted, timedOut: timedOut && !batchTimedOut, batchTimedOut, toolCalls: toolCallText(snapshot), ...(failure ? { failure } : {}), ...(resumed ? { resumed } : {}), ...(costUsd !== undefined ? { costUsd } : {}) };
+  return { threadId: id, done, stored: await deps.loadReport(client, id), budgetExhausted, timedOut: timedOut && !batchTimedOut, batchTimedOut, toolCalls: calls || toolCallText(snapshot), files: { expected, unopened, rounds }, ...(failure ? { failure } : {}), ...(resumed ? { resumed } : {}), ...(costUsd !== undefined ? { costUsd } : {}) };
 }
 
 /** Run `count` tasks, at most `limit` at a time, in order of index. */
@@ -463,6 +510,15 @@ function scanFailure(input: { failed: boolean; changedError?: string | undefined
 
 const emptyStoredReport = (startedAt: string): ScanReport => ({ target: "", scanDepth: "default", startedAt, completedAt: startedAt, durationMs: 0, summary: { totalAttacks: 0, totalFindings: 0, critical: 0, high: 0, medium: 0, low: 0, info: 0 }, findings: [], warnings: [] } as unknown as ScanReport);
 
+/** Which of the files the threads were to open they opened, over all of them; undefined when no file was expected. */
+function fileCoverageOf(passes: readonly PassResult[], allowed: number): ScanFileCoverage | undefined {
+  // A file belongs to one batch, but two passes (several --passes) may both be asked about it: it counts as opened when any pass opened it.
+  const expected = new Set(passes.flatMap(pass => pass.files.expected));
+  if (!expected.size) return undefined;
+  const missed = [...expected].filter(file => passes.filter(pass => pass.files.expected.includes(file)).every(pass => pass.files.unopened.includes(file))).sort();
+  return { inScope: expected.size, opened: expected.size - missed.length, unopened: missed.slice(0, 100), unopenedCount: missed.length, rounds: { allowed, used: passes.reduce((sum, pass) => sum + pass.files.rounds, 0) } };
+}
+
 /**
  * The batched flow: one thread per batch of units, a ledger row per unit, and a report that says how much was reviewed.
  * A unit is reviewed only when its batch's thread finished normally; everything else stays pending with the reason.
@@ -482,7 +538,8 @@ async function runBatchedScan(ctx: PassContext, setup: BatchedSetup, before: Set
       const leads = ctx.prePass?.leads.filter(lead => lead.path !== undefined && files.has(lead.path)) ?? [];
       const prePass = ctx.prePass && leads.length ? { ...ctx.prePass, leads, total: leads.length } : undefined;
       const info: BatchPromptInfo = { index: batch.index, total: count, units: batch.units, summary: setup.summaryText };
-      const pass = await runPass(ctx, batch.index, { batch: info, budget: batchBudget, prePass, ...(ctx.known ? { known: knownIn(ctx.known, files) } : {}) });
+      const inScope = new Set(ctx.scopeFiles);
+      const pass = await runPass(ctx, batch.index, { batch: info, budget: batchBudget, prePass, files: [...files].filter(file => inScope.has(file)).sort(), ...(ctx.known ? { known: knownIn(ctx.known, files) } : {}) });
       ran.set(pass.threadId, pass);
       const hardFailure = pass.done.failed && !pass.budgetExhausted && !pass.timedOut && !pass.batchTimedOut;
       const reviewed = !pass.done.failed && !pass.done.claimBlocked && !pass.budgetExhausted && !pass.timedOut && !pass.batchTimedOut;
@@ -493,6 +550,8 @@ async function runBatchedScan(ctx: PassContext, setup: BatchedSetup, before: Set
         ...(pass.costUsd !== undefined ? { costUsd: pass.costUsd } : {}), budgetExhausted: pass.budgetExhausted, timedOut: pass.timedOut, failed: hardFailure || pass.done.claimBlocked,
         ...(pass.batchTimedOut ? { batchTimedOut: true } : {}),
         ...(pass.done.error ? { error: pass.done.error } : {}), ...(failure && !reviewed ? { failure } : {}),
+        // A unit counts as reviewed only when the thread opened its files (with --coverage-rounds 0 the check is off).
+        ...(reviewed && coverageRounds(options) > 0 && pass.files.unopened.length ? { notOpenedUnitIds: batch.units.filter(unit => (unit.files ?? [unit.path]).some(file => pass.files.unopened.includes(file))).map(unit => unit.id) } : {}),
       };
     },
   });
@@ -502,10 +561,13 @@ async function runBatchedScan(ctx: PassContext, setup: BatchedSetup, before: Set
 
   const units = ledger.units(scan.id);
   const summary = summarizeCoverage(scan.id, units);
-  const statement = coverageSentence(summary);
+  const fileCoverage = fileCoverageOf([...ran.values()], coverageRounds(options));
+  // Files of a thread that finished and were never opened: their units are pending ("not opened"), and the sentence says so.
+  const neverOpened = coverageRounds(options) > 0 ? new Set([...ran.values()].filter(pass => !pass.done.failed && !pass.budgetExhausted && !pass.timedOut && !pass.batchTimedOut).flatMap(pass => pass.files.unopened)).size : 0;
+  const statement = `${coverageSentence(summary)}${neverOpened ? `; ${neverOpened} file${neverOpened === 1 ? "" : "s"} never opened` : ""}`;
   const failures = run.failures.length ? run.failures.map(item => item.message) : run.outcomes.filter(item => !item.outcome.reviewed && item.outcome.failed).map(item => item.outcome.error ?? "no reason given");
   const hint: ResumeHint | undefined = resumeHint(resolved.label, summary, { budgetHit: run.budgetHit, budgetUsd: budget, timedOut: run.timedOut, timeoutSeconds: Number(options.timeout), failures });
-  const coverage = { ...coverageReport(summary, statement, units, { retried: run.retried, failures: run.failures, retriesAllowed: retryCount(options) }), ...(hint ? { resume: hint.command, stoppedBy: hint.stoppedBy } : {}) };
+  const coverage = { ...coverageReport(summary, statement, units, { retried: run.retried, failures: run.failures, retriesAllowed: retryCount(options), ...(fileCoverage ? { files: fileCoverage } : {}) }), ...(hint ? { resume: hint.command, stoppedBy: hint.stoppedBy } : {}) };
   // Findings of every thread of this scan, including the threads an earlier run started and partial batches.
   const threadIds = ledger.getScan(scan.id)?.threadIds ?? [...ran.keys()];
   const stored: ScanReport[] = [];
@@ -543,6 +605,7 @@ async function runBatchedScan(ctx: PassContext, setup: BatchedSetup, before: Set
   await writeReport(outcome, merged, { ...base, findings: merged }, `0-scan-${threadIds[0] ?? scan.id}`, options, deps);
   noteKnown(outcome, merged, deps);
   if (failure && !failure.cause.startsWith("budget") && failure.cause !== "timeout") deps.err(`scan ${failed ? "failed" : "stopped early"}: ${failure.message}`);
+  if (fileCoverage) deps.err(`opened ${fileCoverage.opened} of ${fileCoverage.inScope} source files${fileCoverage.rounds.used ? ` after ${fileCoverage.rounds.used} follow-up round${fileCoverage.rounds.used === 1 ? "" : "s"}` : ""}`);
   deps.err(`${merged.length} finding${merged.length === 1 ? "" : "s"}; ${statement}${hint ? `\n${hint.text}` : ""}\nUsage: ${count} batch${count === 1 ? "" : "es"}, cost ${costKnown ? `$${cost.toFixed(4)}` : "unknown"}`);
   const code = scanExitCode(outcome, merged, options.failOn as typeof SEVERITIES[number] | undefined);
   if (code !== 0) process.exitCode = code;
@@ -682,7 +745,8 @@ export async function runScan(target: string | undefined, options: ScanOptions, 
       prePass = leads.length ? { ...prePass, leads, total: leads.length } : undefined;
     }
     if (prePass) deps.err(`${prePass.tools.join(", ")} pre-pass: ${prePass.total} lead${prePass.total === 1 ? "" : "s"} for the scan to check`);
-    const ctx: PassContext = { extras, ...(known ? { known: known.items } : {}), steering, ...(prePass ? { prePass } : {}), ...(scope ? { scope } : {}), client, deps, resolved, options, total, budget: budget / total, deadline: Date.now() + Number(options.timeout) * 1000 };
+    const scopeFiles = options.skill === "scan" ? reviewScopeFiles(resolved.folder, scope) : [];
+    const ctx: PassContext = { scopeFiles, extras, ...(known ? { known: known.items } : {}), steering, ...(prePass ? { prePass } : {}), ...(scope ? { scope } : {}), client, deps, resolved, options, total, budget: budget / total, deadline: Date.now() + Number(options.timeout) * 1000 };
     if (batched) { await runBatchedScan(ctx, batched, before, startedAt, budget); return; }
 
     const passErrors: string[] = [];
@@ -720,12 +784,14 @@ export async function runScan(target: string | undefined, options: ScanOptions, 
     const shallow = merged.length === 0 && !failure && !failed && !budgetExhausted && !timedOut && !results.some(result => result.batchTimedOut) && options.skill === "scan"
       ? shallowReviewWarning(reviewDepth(resolved.folder, results.map(result => result.toolCalls).join("\n"), scope))
       : undefined;
+    const fileCoverage = fileCoverageOf(results, coverageRounds(options));
     const outcome: ScanOutcome = {
       target: resolved.reportTarget, roots: resolved.roots, threadId: results[0]!.threadId, startedAt, completedAt: deps.now().toISOString(), budgetUsd: budget,
       ...(costKnown ? { costUsd: cost } : {}), budgetExhausted, ...(timedOut ? { timedOut } : {}), failed, ...(options.allowPartial ? { allowPartial: true } : {}),
       ...(changedError ? { error: changedError } : failed && firstError ? { error: firstError } : {}), ...(failure ? { failure } : {}), ...(lead.done.reply ? { summary: lead.done.reply } : {}),
       ...(customLeads?.length ? { customLeads } : {}),
       ...(shallow ? { shallowReview: shallow } : {}),
+      ...(fileCoverage ? { fileCoverage } : {}),
       ...(total > 1 ? { passes: { requested: total, completed: results.length, failed: failedPasses }, threadIds: results.map(result => result.threadId) } : {}),
       ...ctx.extras,
     };
@@ -734,6 +800,7 @@ export async function runScan(target: string | undefined, options: ScanOptions, 
     noteKnown(outcome, merged, deps);
     const usage = results.length === 1 ? usageLine(results[0]!.done.usage) : `Usage: ${results.length} passes, cost ${costKnown ? `$${cost.toFixed(4)}` : "unknown"}`;
     if (failure && failure.cause !== "budget" && failure.cause !== "timeout") deps.err(`scan ${failed ? "failed" : "stopped early"}: ${failure.message}${merged.length ? `. The ${merged.length} finding${merged.length === 1 ? "" : "s"} recorded so far ${merged.length === 1 ? "is" : "are"} in the report` : ""}`);
+    if (fileCoverage) deps.err(`opened ${fileCoverage.opened} of ${fileCoverage.inScope} source files${fileCoverage.rounds.used ? ` after ${fileCoverage.rounds.used} follow-up round${fileCoverage.rounds.used === 1 ? "" : "s"}` : ""}`);
     deps.err(`${merged.length} finding${merged.length === 1 ? "" : "s"}${total > 1 ? ` from ${results.length} of ${total} passes` : ""}${budgetExhausted ? `, stopped at the $${budget} budget (partial)` : timedOut ? `, stopped at the ${options.timeout}s time limit (partial)` : ""}\n${usage}`);
     const code = scanExitCode(outcome, merged, options.failOn as typeof SEVERITIES[number] | undefined);
     if (code !== 0) process.exitCode = code;
@@ -769,6 +836,7 @@ export function registerScanCommand(program: Command, deps: ScanDeps = defaultSc
     .option("--batches <mode>", "auto reviews a large folder in batches, one thread per group of entry points, and records what each batch covered; on always does; off keeps one thread", "auto")
     .option("--batch-size <n>", `Entry points one batch reviews (1 to ${MAX_BATCH_SIZE}); a folder with more than this many is split under --batches auto`, String(DEFAULT_BATCH_SIZE))
     .option("--retries <n>", `Run a batch again when it fails for a reason that may pass: a dropped connection, a provider timeout, rate limit or server error (0 to ${MAX_RETRIES}; 0 turns it off). A thread that is not a batch is asked once to continue. The cost of every attempt counts against --budget`, String(DEFAULT_RETRIES))
+    .option("--coverage-rounds <n>", `After a thread ends, send it a follow-up that names the source files it never opened, up to this many times (0 to ${MAX_COVERAGE_ROUNDS}; 0 turns it off). Each round counts against --budget`, String(DEFAULT_COVERAGE_ROUNDS))
     .option("--batch-timeout <seconds>", `Longest one batch may run before it is cancelled and left pending (the scan goes on with the next batch); --timeout still limits the whole scan`, String(DEFAULT_BATCH_TIMEOUT_SECONDS))
     .option("--concurrency <n>", `Batches that run at the same time (1 to ${MAX_PARALLEL_PASSES})`, "1")
     .option("--resume <scan>", "Continue the units an earlier batched scan of this folder did not reach (a scan id from its report, or latest); refuses when the git HEAD changed unless --force")

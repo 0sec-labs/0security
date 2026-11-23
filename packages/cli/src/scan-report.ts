@@ -6,7 +6,7 @@
  * (the thread itself or a helper agent), so the report reads the store and never the transcript.
  */
 import { createHash } from "node:crypto";
-import { classifyFinding, classifyKnown, linesWithin, sameFlaw, type Finding, type KnownItem, type ScanCoverage, type ScanKnownSummary, type ScanReport, type ScanTierInfo } from "@0/engine/shared";
+import { classifyFinding, classifyKnown, linesWithin, sameFlaw, type Finding, type KnownItem, type ScanCoverage, type ScanFileCoverage, type ScanKnownSummary, type ScanReport, type ScanTierInfo } from "@0/engine/shared";
 import { tagCustomFindings } from "./scan-rules.js";
 
 export const SCAN_REPORT_SCHEMA_VERSION = 1;
@@ -42,6 +42,8 @@ export interface ScanOutcome {
   passes?: { requested: number; completed: number; failed: number };
   /** Set when the scan ran in batches: what was and was not reviewed. */
   coverage?: ScanCoverage;
+  /** Set when the scan ran as one thread: which source files it opened. */
+  fileCoverage?: ScanFileCoverage;
   /** Set when a scan recorded nothing and did not open every source file: what it did not open. The report shows it as a warning. */
   shallowReview?: string;
   /** Every pass's thread, first to last. */
@@ -179,6 +181,7 @@ export function toScanReport(outcome: ScanOutcome, stored: ScanReport): ScanRepo
     scanStatus: scanStatus(outcome),
     ...(outcome.failure ? { scanFailure: { cause: outcome.failure.cause, message: outcome.failure.message } } : {}),
     ...(outcome.coverage ? { coverage: outcome.coverage } : {}),
+    ...(outcome.fileCoverage ? { fileCoverage: outcome.fileCoverage } : {}),
     ...(outcome.tier ? { tier: outcome.tier } : {}),
     ...(known.summary ? { known: known.summary } : {}),
     // The stored rows carry a note that the export was rebuilt from a legacy record; a scan is not one.
@@ -221,6 +224,7 @@ export function scanJson(outcome: ScanOutcome, stored: readonly Finding[]): Reco
     status: scanStatus(outcome),
     ...(outcome.failure ? { failure: { cause: outcome.failure.cause, message: outcome.failure.message } } : {}),
     ...(outcome.coverage ? { coverage: outcome.coverage } : {}),
+    ...(outcome.fileCoverage ? { fileCoverage: outcome.fileCoverage } : {}),
     ...(outcome.tier ? { tier: outcome.tier } : {}),
     ...(known.summary ? { known: known.summary } : {}),
     ...(outcome.error ? { error: outcome.error } : {}),
