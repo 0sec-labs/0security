@@ -250,9 +250,8 @@ export function createScriptRuns(options: {
       const env: Record<string, string> = {};
       const secrets: string[] = [];
       for (const [name, value] of Object.entries(ext.env((options.parentEnv ?? (() => process.env))()))) {
-        if (BASE_ENV.includes(name)) continue;
         env[name] = value;
-        if (!name.startsWith("ZERO_EXTENSION_")) secrets.push(value);
+        if (!BASE_ENV.includes(name) && !name.startsWith("ZERO_EXTENSION_")) secrets.push(value);
       }
 
       // OS sandbox (ZERO_SANDBOX): the script's program is started directly, with the canonical path of the script.

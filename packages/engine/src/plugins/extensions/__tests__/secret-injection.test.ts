@@ -401,4 +401,32 @@ describe("interpreter compatibility and working-directory propagation", () => {
     expect(svc.scriptRuns().prepare(`/tmp/env python3 ${extDir}/scripts/run.py`)).toBeNull();
     expect(svc.scriptRuns().prepare(`env /tmp/bash ${extDir}/scripts/hash.sh`)).toBeNull();
   });
+
+  it("includes BASE_ENV without adding BASE_ENV values to secrets and strips LOADER_ENV/provider keys", async () => {
+    const { loaded, svc } = await install();
+    const { createScriptRuns } = await import("../script-runs.js");
+    const extDir = loaded.dir.replace(/\\/g, "/");
+    const prepared = createScriptRuns({
+      store: svc.store,
+      secrets: svc.secrets,
+      projectKey: null,
+      parentEnv: () => ({
+        PATH: "/usr/bin:/bin",
+        HOME: "/home/tester",
+        NODE_OPTIONS: "--require=/tmp/evil.js",
+        OPENAI_API_KEY: "sk-parent-secret",
+      }),
+    }).prepare(`node ${extDir}/scripts/run.js`);
+    expect(prepared).toMatchObject({
+      ok: true,
+      secrets: [TOKEN],
+    });
+    if (prepared && prepared.ok) {
+      expect(prepared.env["PATH"]).toBe("/usr/bin:/bin");
+      expect(prepared.env["HOME"]).toBe("/home/tester");
+      expect(prepared.env["DEMO_SERVICE_TOKEN"]).toBe(TOKEN);
+      expect(prepared.env["NODE_OPTIONS"]).toBeUndefined();
+      expect(prepared.env["OPENAI_API_KEY"]).toBeUndefined();
+    }
+  });
 });
