@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -33,6 +33,22 @@ describe("shared conversation catalog", () => {
     expect(result.conversations).toHaveLength(1);
     expect(result.conversations[0]?.preview).toContain("[redacted]");
     expect(result.conversations[0]?.preview).not.toContain("UNIQUE_PASSWORD");
+  });
+
+  it("keeps the newest transcripts when the file cap truncates the catalog", async () => {
+    const directory = home();
+    const dir = sessionsDir(directory);
+    mkdirSync(dir, { recursive: true });
+    const old = new Date(Date.now() - 60_000);
+    for (let i = 0; i < 1_000; i++) {
+      const file = join(dir, `a-${String(i).padStart(4, "0")}.json`);
+      writeFileSync(file, JSON.stringify({ messages: [{ role: "user", content: "older" }] }));
+      utimesSync(file, old, old);
+    }
+    writeFileSync(join(dir, "zz-newest.json"), JSON.stringify({ messages: [{ role: "user", content: "newest" }] }));
+    const result = await searchConversations({ homeDir: directory, query: "newest" });
+    expect(result.truncated).toBe(true);
+    expect(result.conversations.map(match => match.session.id)).toEqual(["zz-newest"]);
   });
 
   it("ignores symlinks, directories and corrupt transcripts and reports size limits", async () => {
