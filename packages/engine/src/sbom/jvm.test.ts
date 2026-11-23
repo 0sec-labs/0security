@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { analyzeMaven, checkBomAgainstOsv, generateSbom, parseCatalog, parseGradleBuild, parseXml } from "./index.js";
+import { analyzeMaven, checkBomAgainstOsv, generateSbom, parseCatalog, parseGradleBuild, parseVersionCatalog, parseXml } from "./index.js";
 
 const fixtures = join(import.meta.dirname, "fixtures", "jvm");
 const sbom = (name: string) => generateSbom(join(fixtures, name), { toolVersion: "0", now: new Date(0) });
@@ -90,6 +90,34 @@ describe("Gradle", () => {
     const catalog = parseCatalog('[versions]\nv = { require = "1.0", prefer = "1.1" }\n[libraries.lib]\nmodule = "g:a"\nversion.ref = "v"\n');
     expect(catalog.versions.v).toEqual({ require: "1.0", prefer: "1.1" });
     expect(catalog.libraries.lib).toEqual({ module: "g:a", version: { ref: "v" } });
+  });
+});
+
+describe("Gradle catalog prototype pollution", () => {
+  const polluted = () => ({} as Record<string, unknown>).polluted;
+  const hostile = [
+    '[versions.__proto__]\npolluted = "yes"\n',
+    '[constructor.prototype]\npolluted = "yes"\n',
+    '[versions]\n__proto__.polluted = "yes"\nconstructor.prototype.polluted = "yes"\n"a.__proto__.polluted" = "yes"\n',
+    '[libraries]\nlib = { module = "g:a", version.ref = "__proto__", version.__proto__.polluted = "yes", version.constructor.prototype.polluted = "yes" }\n',
+    '[bundles]\n__proto__ = ["a"]\nconstructor = ["a"]\n[__proto__]\npolluted = "yes"\n[libraries.__proto__]\npolluted = "yes"\n[libraries.constructor.prototype]\npolluted = "yes"\n',
+  ];
+  it("never changes Object.prototype for hostile headers and keys", () => {
+    for (const source of hostile) {
+      parseCatalog(source); parseCatalog(source.replace(/\n/g, "\r\n")); parseVersionCatalog(source, "libs.versions.toml");
+      expect(polluted()).toBeUndefined();
+      expect(Object.keys(Object.prototype)).toEqual([]);
+    }
+  });
+  it("reports a hostile version.ref as unresolved", () => {
+    const result = parseVersionCatalog(hostile[3]!, "libs.versions.toml");
+    expect(result.components).toEqual([]);
+    expect(result.unresolved).toHaveLength(1);
+  });
+  it("keeps a top-level dotted alias flat and reads CRLF input", () => {
+    const source = '[versions]\r\nv = "2.0"\r\n[libraries]\r\nmy.lib = { module = "g:a", version = "1.2" }\r\nother = { module = "g:b", version.ref = "v" }\r\n[libraries.sub]\r\nmodule = "g:c"\r\nversion = "3"\r\n__proto__ = "x"\r\n';
+    expect(parseVersionCatalog(source, "libs.versions.toml").components.map(c => `${c.name}@${c.version}`)).toEqual(["g/a@1.2", "g/b@2.0", "g/c@3"]);
+    expect(Object.keys(parseCatalog(source).libraries)).toContain("my.lib");
   });
 });
 

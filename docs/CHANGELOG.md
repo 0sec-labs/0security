@@ -12,6 +12,10 @@ on the GitHub Release tag.
 
 ## [Unreleased]
 
+### Fixed
+
+- A Gradle version catalog (`libs.versions.toml`) with a `__proto__`, `constructor` or `prototype` table header or key can no longer change `Object.prototype` while the SBOM is read. Those keys are skipped and catalog tables are built without a prototype; aliases such as `my.lib = { ... }` still resolve as before. Thanks to Himanshu Patro for reporting this in #535.
+
 ## [0.42.0] - 2026-11-22
 
 ### Added

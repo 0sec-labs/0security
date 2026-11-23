@@ -31,17 +31,23 @@ function splitTop(value: string): string[] {
   return parts.map(part => part.trim()).filter(Boolean);
 }
 const braceDepth = (value: string): number => { let depth = 0; let quote = ""; for (const ch of value) { if (quote) { if (ch === quote) quote = ""; } else if (ch === "\"" || ch === "'") quote = ch; else if (ch === "{") depth += 1; else if (ch === "}") depth -= 1; } return depth; };
+/** Keys that would reach `Object.prototype` if used as a property name. Catalog keys are untrusted, so they are dropped at every path segment. */
+const UNSAFE_KEY = new Set(["__proto__", "constructor", "prototype"]);
+const hasUnsafeKey = (dotted: string): boolean => dotted.split(".").some(segment => UNSAFE_KEY.has(segment.trim()));
+/** Tables are prototype-less so a lookup of any name only ever finds what the catalog declared. */
+const newTable = (): { [key: string]: TomlValue } => Object.create(null) as { [key: string]: TomlValue };
 /** `a.b = v` sets `{ a: { b: v } }`. */
 function setPath(table: { [key: string]: TomlValue }, dotted: string, value: TomlValue): void {
+  if (hasUnsafeKey(dotted)) return;
   const path = dotted.replace(/^"|"$/g, "").split(".");
   let target = table;
-  for (const segment of path.slice(0, -1)) { const next = target[segment]; target = typeof next === "object" ? next : (target[segment] = {}); }
+  for (const segment of path.slice(0, -1)) { const next = target[segment]; target = typeof next === "object" ? next : (target[segment] = newTable()); }
   target[path[path.length - 1]!] = value;
 }
 function tomlValue(raw: string): TomlValue {
   const value = raw.trim();
   if (value.startsWith("{")) {
-    const table: { [key: string]: TomlValue } = {};
+    const table = newTable();
     for (const part of splitTop(value.slice(1, value.lastIndexOf("}") >= 0 ? value.lastIndexOf("}") : undefined))) {
       const pair = /^("[^"]+"|[A-Za-z0-9_.-]+)\s*=\s*(.*)$/.exec(part);
       if (!pair) continue;
@@ -53,20 +59,21 @@ function tomlValue(raw: string): TomlValue {
 }
 /** The `[versions]` and `[libraries]` tables of a version catalog. */
 export function parseCatalog(source: string): { versions: Record<string, TomlValue>; libraries: Record<string, TomlValue> } {
-  const tables: Record<string, Record<string, TomlValue>> = { versions: {}, libraries: {} };
+  const tables: Record<string, Record<string, TomlValue>> = Object.assign(Object.create(null) as Record<string, Record<string, TomlValue>>, { versions: newTable(), libraries: newTable() });
   const lines = source.split(/\r?\n/);
   let section = ""; let sub = "";
   for (let index = 0; index < lines.length; index += 1) {
     const line = stripTomlComment(lines[index]!).trim();
     if (!line) continue;
     const head = /^\[([^\]]+)\]$/.exec(line);
-    if (head) { const [name, ...rest] = head[1]!.split("."); section = name!.trim(); sub = rest.join(".").trim(); continue; }
+    if (head) { if (hasUnsafeKey(head[1]!)) { section = ""; sub = ""; continue; } const [name, ...rest] = head[1]!.split("."); section = name!.trim(); sub = rest.join(".").trim(); continue; }
     const pair = /^("[^"]+"|[A-Za-z0-9_.-]+)\s*=\s*(.*)$/.exec(line);
     if (!pair || !tables[section]) continue;
     let value = pair[2]!;
     while (braceDepth(value) > 0 && index + 1 < lines.length) value += ` ${stripTomlComment(lines[++index]!).trim()}`;
     const key = pair[1]!.replace(/^"|"$/g, "");
-    if (sub) { const holder = tables[section]![sub]; const table = typeof holder === "object" ? holder : (tables[section]![sub] = {}); setPath(table, key, tomlValue(value)); } else tables[section]![key] = tomlValue(value);
+    if (hasUnsafeKey(key)) continue;
+    if (sub) { const holder = tables[section]![sub]; const table = typeof holder === "object" ? holder : (tables[section]![sub] = newTable()); setPath(table, key, tomlValue(value)); } else tables[section]![key] = tomlValue(value);
   }
   return { versions: tables.versions!, libraries: tables.libraries! };
 }
