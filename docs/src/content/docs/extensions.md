@@ -169,7 +169,7 @@ Install the connector extension with `0 skills add <source>` or **Add** in the b
 
 Paste the token. If the connector declares a health URL, 0 checks the token against it. 0 stores the token on this computer in `~/.0/extensions/connections.json`, readable only by you. **Disconnect** deletes it.
 
-A script in the extension receives the token only if the extension declared that variable name and you approved the prompt. When the bash tool runs a command that names a file inside an enabled extension's folder, 0 adds the declared and approved variables, the stored token included, to the command's environment and masks the value in the output. An extension whose approval does not cover a variable it declares does not run. Its MCP servers get the token the same way. Model provider keys and every other secret stay out.
+A script in the extension receives the token only if the extension declared that variable name and you approved the prompt. When the bash tool runs a command that names a file inside an enabled extension's folder, 0 adds the declared and approved variables, the stored token included, to the command's environment and masks the value in the output. An extension whose approval does not cover a variable it declares does not run. Its MCP servers get the token the same way. Model provider keys and every other secret stay out. The script's environment is built from scratch: a short list of basics (`PATH`, `HOME`, `USER`, `SHELL`, locale and `TERM`, `TMPDIR`, `TZ`) plus the approved variables. It does not get the bash tool's environment, the scan target, or target-auth variables such as `TARGET` and `AUTH_HEADER`, so a script that needs one must declare it and be approved.
 
 ### Connector reference
 
