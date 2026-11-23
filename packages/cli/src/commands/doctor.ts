@@ -24,13 +24,17 @@ export function registerDoctorCommand(program: Command): void {
       const hasSupportedNode = nodeMajor >= 24;
 
       const waiting = pending.listPendingReports().length;
+      const { detectSandbox, sandboxMode } = await import("@0/engine");
+      const sandbox = detectSandbox();
+      const sandboxSetting = sandboxMode();
       if (options.json) {
         const problem = !hasSupportedNode ? "Upgrade to Node 24+." : apiRuntime.configured && !apiRuntime.valid ? (apiRuntime.error ?? "The configured provider is unusable.") : !hasApiKey ? "No model is connected. Run `0 models connect`." : undefined;
         console.log(JSON.stringify({
           version: runtime.cliVersion, channel: runtime.releaseChannel, runtime: `${runtime.engine} ${runtime.engineVersion}`, platform: runtime.platform, arch: runtime.arch,
           node: { ok: hasSupportedNode, version: process.version },
           model: { connected: hasApiKey, provider: hasApiKey ? apiRuntime.providerLabel : null },
-          cliProviders: availableRuntimes, crashReportsWaiting: waiting, ok: problem === undefined, ...(problem ? { next: problem } : {}),
+          cliProviders: availableRuntimes, crashReportsWaiting: waiting,
+          sandbox: { mode: sandboxSetting.ok ? sandboxSetting.mode : null, ...(sandboxSetting.ok ? {} : { error: sandboxSetting.error }), backend: sandbox.backend, macosSandboxExec: sandbox.seatbelt, bwrap: sandbox.bwrap, docker: sandbox.docker, ...(sandbox.backend ? {} : { reason: sandbox.reason }) }, ok: problem === undefined, ...(problem ? { next: problem } : {}),
         }, null, 2));
         return;
       }
@@ -48,6 +52,12 @@ export function registerDoctorCommand(program: Command): void {
           : `${chalk.yellow("missing")}  not configured`;
       console.log(`  API provider  ${apiStatus}`);
       console.log(`  CLI providers  ${availableRuntimes.length > 0 ? chalk.yellow("found") : chalk.yellow("missing")}  ${availableRuntimes.join(", ") || "none"}`);
+      const sandboxLine = (name: string, tool: { present: boolean; usable?: boolean; detail: string }): string =>
+        `  ${name.padEnd(14)}${tool.present ? (tool.usable === false ? chalk.red("blocked") : chalk.green("found")) : chalk.gray("missing")}  ${tool.detail}`;
+      console.log(`  Sandbox       ${sandbox.backend ? chalk.green("available") : chalk.yellow("unavailable")}  ZERO_SANDBOX=${sandboxSetting.ok ? sandboxSetting.mode : chalk.red("invalid")}${sandbox.backend ? ` (${sandbox.backend})` : ` (${sandbox.reason})`}`);
+      console.log(sandboxLine("sandbox-exec", sandbox.seatbelt));
+      console.log(sandboxLine("bwrap", sandbox.bwrap));
+      console.log(sandboxLine("docker", sandbox.docker));
       console.log("");
       if (isNpmStyleInstall()) {
         console.log(chalk.yellow(`  ${NPM_MIGRATION_HINT}`));
