@@ -318,7 +318,7 @@ At startup, 0 checks GitHub for a newer release, at most once every 24 hours. Wh
 
 Only an explicit global choice moves the setting off `automatic`.
 
-The check runs only in an interactive terminal. It is skipped when `CI`, `ZERO_NO_UPDATE_CHECK` or `ZERO_OFFLINE` is set to a non-empty value other than `0` or `false`. Project settings cannot change the policy. Windows has no automatic installation, so download a release instead.
+The check runs only in an interactive terminal. It is skipped when `CI`, `ZERO_NO_UPDATE_CHECK` or `ZERO_OFFLINE` is set to a non-empty value other than `0` or `false`. Project settings cannot change the policy. Windows has no automatic installation, so download a release instead. A Windows install has a single `0.exe`, with no `0security` alias.
 
 ```bash
 0 config doctor upgrade                    # install the latest release now

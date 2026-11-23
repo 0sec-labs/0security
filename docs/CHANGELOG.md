@@ -12,6 +12,8 @@ on the GitHub Release tag.
 
 ## [Unreleased]
 
+- The installer now installs the command as `0security` and keeps `0` as a symlink to it. Help text shows the name you ran. An older install with only `0` gains `0security` on the next install or update. Release asset names are unchanged. Windows keeps a single `0.exe`.
+
 ## [0.43.0] - 2026-11-22
 
 ### Added

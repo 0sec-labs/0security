@@ -51,6 +51,8 @@ export OPENAI_API_KEY="your-api-key"
 0 scan ./your-repo
 ```
 
+The installer adds the command as `0security` and as the short alias `0`. Both run the same program.
+
 That scans the folder, prints a report and stops at a $5 budget. Any model provider works: set its key instead (see [Models](https://docs.0.security/models/)).
 
 Windows, Docker and source installs are in the [docs](https://docs.0.security/). Only scan code you own or are authorized to test.
