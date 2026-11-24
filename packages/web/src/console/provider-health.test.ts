@@ -17,7 +17,7 @@ describe("health badge", () => {
     expect(healthBadge(openai, false).label).toBe("Needs connection");
   });
   it("gives an environment hint or a saved-key hint", () => {
-    expect(healthHint(deepseek)).toBe("Set DEEPSEEK_API_KEY in your environment");
+    expect(healthHint(deepseek)).toBe("The key in DEEPSEEK_API_KEY was refused. Set a working one in your environment");
     expect(healthHint({ ...openai, health: { state: "rejected" } })).toBe("Update the key");
     expect(healthHint(openai)).toBeNull();
   });

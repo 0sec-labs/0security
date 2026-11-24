@@ -65,7 +65,7 @@ export function healthBadge(provider: HealthProvider, rowHealthy: boolean, inact
 /** Plain one-line hint under a bad badge. */
 export function healthHint(provider: HealthProvider): string | null {
   const state = provider.health?.state;
-  if (state === "rejected") return provider.health?.hint ?? (provider.source === "environment" ? `Set ${provider.environmentVariable ?? "the API key variable"} in your environment` : "Update the key");
+  if (state === "rejected") return provider.health?.hint ?? (provider.source === "environment" ? `The key in ${provider.environmentVariable ?? "the API key variable"} was refused. Set a working one in your environment` : "Update the key");
   if (state === "unreachable") return provider.health?.hint ?? "Check your network or the API endpoint";
   return null;
 }
