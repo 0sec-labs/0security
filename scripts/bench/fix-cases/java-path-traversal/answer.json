@@ -1,0 +1,11 @@
+{
+  "id": "java-path-traversal",
+  "title": "Path traversal in DocumentStore.read",
+  "category": "path-traversal",
+  "severity": "high",
+  "language": "java",
+  "expectedFiles": [
+    "src/app/DocumentStore.java"
+  ],
+  "note": "A name must not reach a file outside the document folder, whether it uses dot-dot segments or is an absolute path. Reads inside the folder, including subfolders, keep working."
+}

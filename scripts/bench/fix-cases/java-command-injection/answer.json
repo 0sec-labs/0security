@@ -1,0 +1,11 @@
+{
+  "id": "java-command-injection",
+  "title": "Command injection in Archive.list",
+  "category": "command-injection",
+  "severity": "critical",
+  "language": "java",
+  "expectedFiles": [
+    "src/app/Archive.java"
+  ],
+  "note": "The folder and archive name must never be interpreted by a shell. Pass them as separate arguments or reject unsafe names. Listing a normal archive keeps working."
+}

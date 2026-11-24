@@ -10,9 +10,9 @@
 // scores the committed branch with the original tests and the exploit check. The model never sees the exploit,
 // the answer or the solution: they stay outside the copy.
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { aggregate, parseNumstat, renderFixMarkdown, scoreCase, summarizeCases } from "./fix-score-lib.mjs";
+import { aggregate, parseNumstat, renderFixMarkdown, rescanVerdict, scoreCase, summarizeCases } from "./fix-score-lib.mjs";
 import { benchDir, defaultCli, git, isMain, isolatedEnv, run, usd } from "./lib.mjs";
 
 const CASES = join(benchDir, "fix-cases");
@@ -50,8 +50,11 @@ export function loadCases(only) {
   });
 }
 
-/** The project's own test files, relative to the repo. */
-function testFiles(repo) {
+const isJava = (c) => c.answer.language === "java";
+
+/** The project's own test files and folders, relative to the repo: restored from the base commit before scoring. */
+function testFiles(repo, c) {
+  if (isJava(c)) return ["run-tests.sh", "test"];
   const dir = join(repo, "test");
   return existsSync(dir) ? readdirSync(dir).filter((f) => /\.test\.[cm]?js$/.test(f)).sort().map((f) => `test/${f}`) : [];
 }
@@ -66,13 +69,49 @@ function makeRepo(c, root) {
   return repo;
 }
 
-const runTests = (repo, files) => run(process.execPath, ["--test", ...files], { cwd: repo, timeoutSeconds: 300 });
-const runExploit = (c, repo) => run(process.execPath, [join(c.dir, "exploit.mjs"), repo], { cwd: tmpdir(), timeoutSeconds: 120 });
+/** The shell-free command the project's checks run: Node cases use node --test, Java cases use their run-tests.sh. */
+const testCommand = (repo, c) => (isJava(c) ? { command: "sh", args: ["run-tests.sh"] } : { command: process.execPath, args: ["--test", ...testFiles(repo, c)] });
+/** The same check as one string, for the --test option of the fix command. */
+const testCommandLine = (repo, c) => (isJava(c) ? "sh run-tests.sh" : `node --test ${testFiles(repo, c).join(" ")}`);
+const runTests = (repo, c) => { const t = testCommand(repo, c); return run(t.command, t.args, { cwd: repo, timeoutSeconds: 300 }); };
+
+/** Java sources under a folder, as paths. */
+function javaSources(dir) {
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? javaSources(join(dir, e.name)) : e.name.endsWith(".java") ? [join(dir, e.name)] : []));
+}
+
+/** Compile the project's production sources. Node projects have no build step: null. */
+function compile(repo, c) {
+  if (!isJava(c)) return null;
+  const out = mkdtempSync(join(tmpdir(), "0-fixcase-out-"));
+  const sources = javaSources(join(repo, "src"));
+  return sources.length > 0 && run("javac", ["-d", out, ...sources], { cwd: repo, timeoutSeconds: 120 }).status === 0;
+}
+
+/** The hidden check. Node cases ship exploit.mjs; Java cases ship pov/*.java, compiled against the project's sources and run as Pov. */
+function runExploit(c, repo) {
+  if (!isJava(c)) return run(process.execPath, [join(c.dir, "exploit.mjs"), repo], { cwd: tmpdir(), timeoutSeconds: 120 });
+  const out = mkdtempSync(join(tmpdir(), "0-fixcase-pov-"));
+  const built = run("javac", ["-d", out, ...javaSources(join(repo, "src")), ...javaSources(join(c.dir, "pov"))], { cwd: tmpdir(), timeoutSeconds: 120 });
+  if (built.status !== 0) return { ...built, status: 2 }; // the project no longer compiles: the function does not work
+  return run("java", ["-cp", out, "Pov"], { cwd: tmpdir(), timeoutSeconds: 120 });
+}
+
+function findFoxguard() {
+  return [process.env.ZERO_FOXGUARD_PATH, join(homedir(), ".0", "bin", "foxguard")].filter(Boolean).find((x) => existsSync(x)) ?? "foxguard";
+}
+
+/** The free scanner's findings for a repo as { rule, file } with repo-relative paths, or null when it cannot run. */
+function scanRules(repo) {
+  const p = run(findFoxguard(), ["--format", "json", "."], { cwd: repo, timeoutSeconds: 120 });
+  try { return JSON.parse(p.stdout).findings.map((f) => ({ rule: f.rule_id, file: String(f.file).replace(/^\.\//, "") })); } catch { return null; }
+}
 
 /** Static check of one case: the finding points at real lines, the tests pass, the exploit works before and is blocked by the reference fix. */
 export function validateCase(c) {
   const problems = [];
-  for (const f of ["answer.json", "finding.sarif", "exploit.mjs", "repo/package.json"]) if (!existsSync(join(c.dir, f))) problems.push(`missing ${f}`);
+  for (const f of ["answer.json", "finding.sarif", ...(isJava(c) ? ["pov/Pov.java", "repo/run-tests.sh"] : ["exploit.mjs", "repo/package.json"])]) if (!existsSync(join(c.dir, f))) problems.push(`missing ${f}`);
   if (problems.length) return problems;
   if (c.answer.id !== c.name) problems.push(`answer.id ${c.answer.id} does not match the folder`);
   if (!Array.isArray(c.answer.expectedFiles) || !c.answer.expectedFiles.length || !c.answer.note) problems.push("answer needs expectedFiles and note");
@@ -85,9 +124,10 @@ export function validateCase(c) {
   }
   const root = mkdtempSync(join(tmpdir(), "0-fixcase-"));
   const repo = makeRepo(c, root);
-  const files = testFiles(repo);
-  if (!files.length) problems.push("the project has no test files");
-  const before = runTests(repo, files);
+  if (!testFiles(repo, c).length) problems.push("the project has no test files");
+  if (compile(repo, c) === false) problems.push("the vulnerable project does not compile");
+  const rulesBefore = scanRules(repo);
+  const before = runTests(repo, c);
   if (before.status !== 0) problems.push(`the tests fail on the vulnerable code:\n${(before.stdout + before.stderr).slice(-400)}`);
   const exploit = runExploit(c, repo);
   if (exploit.status !== 1) problems.push(`the exploit check should exit 1 on the vulnerable code, got ${exploit.status}: ${(exploit.stderr || exploit.stdout).trim().slice(-200)}`);
@@ -95,7 +135,10 @@ export function validateCase(c) {
   const solution = join(c.dir, "solution");
   if (!existsSync(solution)) { problems.push("missing solution/"); return problems; }
   cpSync(solution, repo, { recursive: true });
-  const after = runTests(repo, files);
+  const after = runTests(repo, c);
+  if (compile(repo, c) === false) problems.push("the project does not compile with the reference fix");
+  const rulesAfter = scanRules(repo);
+  if (rulesBefore && rulesAfter && rescanVerdict(rulesBefore, rulesAfter, c.answer.expectedFiles).rescan === "still-flagged") problems.push("the rescan still flags the finding with the reference fix");
   if (after.status !== 0) problems.push(`the tests fail with the reference fix:\n${(after.stdout + after.stderr).slice(-400)}`);
   const blocked = runExploit(c, repo);
   if (blocked.status !== 0) problems.push(`the exploit check should exit 0 with the reference fix, got ${blocked.status}: ${(blocked.stderr || blocked.stdout).trim().slice(-200)}`);
@@ -110,7 +153,7 @@ function dryRun(o) {
   let bad = 0;
   for (const c of cases) {
     const problems = validateCase(c);
-    console.log(`${problems.length ? "FAIL" : "ok  "} ${c.name}: ${c.answer.category}, expects ${c.answer.expectedFiles.join(", ")}`);
+    console.log(`${problems.length ? "FAIL" : "ok  "} ${c.name} (${c.answer.language}): ${c.answer.category}, expects ${c.answer.expectedFiles.join(", ")}`);
     for (const p of problems) console.log(`     ${p}`);
     bad += problems.length;
   }
@@ -132,8 +175,9 @@ function fixOne(c, repeatIndex, o) {
   let id;
   try { id = JSON.parse(cli(["findings", "list", "--format", "json"], 60).stdout).findings[0].id; } catch { return fail("no-finding-id"); }
 
-  const tests = testFiles(repo);
-  const args = ["findings", "fix", id, "--repo", repo, "--test", `node --test ${tests.join(" ")}`, "--no-pr", "--budget", String(o.budget), "--timeout", String(o.timeout), "--format", "json"];
+  const tests = testFiles(repo, c);
+  const rulesBefore = scanRules(repo);
+  const args = ["findings", "fix", id, "--repo", repo, "--test", testCommandLine(repo, c), "--no-pr", "--budget", String(o.budget), "--timeout", String(o.timeout), "--format", "json"];
   if (o.model) args.push("--model", o.model);
   const started = Date.now();
   const proc = cli(args, o.timeout + 180);
@@ -148,9 +192,12 @@ function fixOne(c, repeatIndex, o) {
   git(repo, ["checkout", "-q", outcome.branch]);
   const numstat = parseNumstat(git(repo, ["diff", "--numstat", "main", outcome.branch]).stdout);
   git(repo, ["checkout", "-q", "main", "--", ...tests]); // the original tests, whatever the model did to them
-  const testsPass = runTests(repo, tests).status === 0;
+  const compiles = compile(repo, c);
+  const testsPass = runTests(repo, c).status === 0;
   const exploit = runExploit(c, repo);
-  return { ...base, ...scoreCase({ answer: c.answer, committed: true, testsPass, exploitCode: exploit.status, numstat, costUsd, seconds, status }), branch: outcome.branch, exploitOutput: (exploit.stderr || exploit.stdout).trim().slice(-200) };
+  const rulesAfter = scanRules(repo);
+  const { rescan, rescanNew } = rulesBefore && rulesAfter ? rescanVerdict(rulesBefore, rulesAfter, c.answer.expectedFiles) : { rescan: "not-applicable", rescanNew: 0 };
+  return { ...base, ...scoreCase({ answer: c.answer, committed: true, compiles, testsPass, exploitCode: exploit.status, rescan, rescanNew, numstat, costUsd, seconds, status }), branch: outcome.branch, exploitOutput: (exploit.stderr || exploit.stdout).trim().slice(-200) };
 }
 
 function realRun(o) {
@@ -166,7 +213,7 @@ function realRun(o) {
     const r = fixOne(c, rep, o);
     spent += r.costUsd ?? 0;
     runs.push(r);
-    console.log(`${r.fixed ? "FIXED" : "not fixed"} (${r.status}; committed ${r.committed}, tests ${r.testsPass}, exploit ${r.exploitBlocked}${r.exploitExit ? ` exit ${r.exploitExit}` : ""}), ${r.files} files, ${r.linesAdded + r.linesRemoved} lines, ${usd(r.costUsd)}, ${r.seconds.toFixed(0)}s`);
+    console.log(`${r.fixed ? "FIXED" : "not fixed"} (${r.status}; committed ${r.committed}, compiles ${r.compiles}, tests ${r.testsPass}, rescan ${r.rescan}, exploit ${r.exploitBlocked}${r.exploitExit ? ` exit ${r.exploitExit}` : ""}), ${r.files} files, ${r.linesAdded + r.linesRemoved} lines, ${usd(r.costUsd)}, ${r.seconds.toFixed(0)}s`);
   }
   return runs;
 }

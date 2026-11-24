@@ -73,7 +73,7 @@ function runTool(tool, folder) {
 }
 
 /** Make SARIF paths relative to the folder so the scan's findings and the known items name files the same way. */
-function relativize(sarifText, folder) {
+export function relativize(sarifText, folder) {
   const log = JSON.parse(sarifText);
   const base = folder.replace(/\/+$/, "");
   for (const run of log.runs ?? []) for (const res of run.results ?? []) for (const loc of res.locations ?? []) {

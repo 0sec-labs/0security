@@ -13,12 +13,29 @@ export function parseNumstat(text) {
 const isTestFile = (file) => /(^|\/)(test|tests|__tests__)\//.test(file) || /\.(test|spec)\.[cm]?[jt]s$/.test(file);
 
 /**
+ * What a rescan says about one finding. before and after are lists of { rule, file } from the same scanner run on the
+ * original and on the fixed code. The finding counts as removed when the rule no longer fires in that file.
+ * "not-applicable" means the scanner did not flag the original, so a clean rescan would prove nothing.
+ * rescanNew counts rules that fire after the fix in a file where they did not fire before.
+ */
+export function rescanVerdict(before, after, files) {
+  const key = (f) => `${f.rule}\u0000${f.file}`;
+  const watched = before.filter((f) => files.includes(f.file));
+  const afterKeys = new Set(after.map(key));
+  const beforeKeys = new Set(before.map(key));
+  const rescan = !watched.length ? "not-applicable" : watched.some((f) => afterKeys.has(key(f))) ? "still-flagged" : "clean";
+  return { rescan, rescanNew: [...afterKeys].filter((k) => !beforeKeys.has(k)).length };
+}
+
+/**
  * Score one fix attempt.
- * input: { answer, committed, testsPass, exploitCode, numstat, costUsd, seconds, status }
+ * input: { answer, committed, compiles, testsPass, exploitCode, rescan, rescanNew, numstat, costUsd, seconds, status }
+ * compiles is true or false for a language with a build step and null when there is none (Node cases).
+ * rescan is "clean", "still-flagged" or "not-applicable" (see rescanVerdict); only still-flagged fails a fix.
  * exploitCode 0 means the exploit check says the vulnerability is blocked; anything else means it is not (1: still
  * exploitable, 2: the function no longer works). A change that was not committed cannot be blocked.
  */
-export function scoreCase({ answer, committed, testsPass, exploitCode, numstat = [], costUsd = null, seconds = 0, status = "complete" }) {
+export function scoreCase({ answer, committed, compiles = null, testsPass, exploitCode, rescan = "not-applicable", rescanNew = 0, numstat = [], costUsd = null, seconds = 0, status = "complete" }) {
   const files = numstat.map((r) => r.file);
   const expected = new Set(answer.expectedFiles ?? []);
   // Tests the fix adds or edits are reported on their own and do not count as unexpected.
@@ -26,8 +43,9 @@ export function scoreCase({ answer, committed, testsPass, exploitCode, numstat =
   const exploitBlocked = committed && exploitCode === 0;
   const tests = committed && testsPass === true;
   return {
-    case: answer.id, committed, testsPass: tests, exploitBlocked,
-    fixed: committed && tests && exploitBlocked,
+    case: answer.id, committed, compiles: committed ? compiles : null, testsPass: tests, exploitBlocked,
+    rescan: committed ? rescan : "not-applicable", rescanNew: committed ? rescanNew : 0,
+    fixed: committed && compiles !== false && tests && exploitBlocked && rescan !== "still-flagged",
     exploitExit: committed ? exploitCode ?? null : null,
     files: files.length, linesAdded: numstat.reduce((a, r) => a + r.added, 0), linesRemoved: numstat.reduce((a, r) => a + r.removed, 0),
     onlyExpectedFiles: committed && unexpectedFiles.length === 0, unexpectedFiles,
@@ -49,6 +67,10 @@ export function summarizeCases(runs) {
       case: name, repeats: rs.length,
       fixed: rs.filter((r) => r.fixed).length,
       committed: rs.filter((r) => r.committed).length,
+      compiles: rs.filter((r) => r.compiles === true).length,
+      compileApplies: rs.filter((r) => r.compiles !== null).length,
+      rescanClean: rs.filter((r) => r.rescan === "clean").length,
+      rescanApplies: rs.filter((r) => r.rescan !== "not-applicable").length,
       testsPass: rs.filter((r) => r.testsPass).length,
       exploitBlocked: rs.filter((r) => r.exploitBlocked).length,
       onlyExpected: rs.filter((r) => r.onlyExpectedFiles).length,
@@ -78,6 +100,8 @@ export function aggregate(runs, repeats) {
     attempts: runs.length,
     fixRate: share(runs, (r) => r.fixed), fixRateSpread: spread(perRepeat),
     committedRate: share(runs, (r) => r.committed),
+    compileRate: share(runs.filter((r) => r.compiles !== null), (r) => r.compiles === true),
+    rescanCleanRate: share(runs.filter((r) => r.rescan !== "not-applicable"), (r) => r.rescan === "clean"),
     testsPassRate: share(runs, (r) => r.testsPass),
     exploitBlockedRate: share(runs, (r) => r.exploitBlocked),
     onlyExpectedRate: share(runs.filter((r) => r.committed), (r) => r.onlyExpectedFiles),
@@ -98,17 +122,17 @@ export function renderFixMarkdown(rows, total, meta) {
     `- Total cost: ${usd(total.costTotal)}`,
     `- Cases: ${rows.length}`,
     "",
-    `Fix rate: ${pct(total.fixRate)} of ${total.attempts} attempts (range over repeats ${range(total.fixRateSpread, pct)}). A fix counts when 0 committed a change, the project's own tests still pass and the hidden exploit check no longer succeeds.`,
+    `Fix rate: ${pct(total.fixRate)} of ${total.attempts} attempts (range over repeats ${range(total.fixRateSpread, pct)}). A fix counts when 0 committed a change, the project compiles (where it has a build), the project's own tests still pass, the hidden exploit check no longer succeeds and a rescan no longer flags the finding (where the scanner flagged the original).`,
     "",
-    `Committed ${pct(total.committedRate)}, tests pass ${pct(total.testsPassRate)}, exploit blocked ${pct(total.exploitBlockedRate)}, only the expected files touched ${pct(total.onlyExpectedRate)} of committed changes. Cost per fixed case ${usd(total.costPerFix)}.`,
+    `Committed ${pct(total.committedRate)}, compiles ${pct(total.compileRate)} (cases with a build), rescan clean ${pct(total.rescanCleanRate)} (cases the scanner flagged), tests pass ${pct(total.testsPassRate)}, exploit blocked ${pct(total.exploitBlockedRate)}, only the expected files touched ${pct(total.onlyExpectedRate)} of committed changes. Cost per fixed case ${usd(total.costPerFix)}.`,
     "",
     "Cells for fixed, committed, tests, exploit and expected files count attempts over the repeats. Lines are added plus removed; cost and time show the mean with min-max over the repeats.",
     "",
-    "| case | fixed | committed | tests pass | exploit blocked | expected files only | files | lines | cost | time (s) | not complete |",
-    "|---|---|---|---|---|---|---|---|---|---|---|",
+    "| case | fixed | committed | compiles | tests pass | exploit blocked | rescan clean | expected files only | files | lines | cost | time (s) | not complete |",
+    "|---|---|---|---|---|---|---|---|---|---|---|---|---|",
   ];
   for (const r of rows) {
-    lines.push(`| ${r.case} | ${r.fixed}/${r.repeats} | ${r.committed}/${r.repeats} | ${r.testsPass}/${r.repeats} | ${r.exploitBlocked}/${r.repeats} | ${r.onlyExpected}/${r.repeats} | ${range(r.filesSpread, String)} | ${r.linesMean === null ? "n/a" : r.linesMean.toFixed(0)} (${range(r.linesSpread, String)}) | ${usd(r.costMean)} (${range(r.costSpread, usd)}) | ${r.secondsMean.toFixed(0)} (${range(r.secondsSpread, (x) => x.toFixed(0))}) | ${r.failed.length ? r.failed.join("; ") : "-"} |`);
+    lines.push(`| ${r.case} | ${r.fixed}/${r.repeats} | ${r.committed}/${r.repeats} | ${r.compileApplies ? `${r.compiles}/${r.compileApplies}` : "n/a"} | ${r.testsPass}/${r.repeats} | ${r.exploitBlocked}/${r.repeats} | ${r.rescanApplies ? `${r.rescanClean}/${r.rescanApplies}` : "n/a"} | ${r.onlyExpected}/${r.repeats} | ${range(r.filesSpread, String)} | ${r.linesMean === null ? "n/a" : r.linesMean.toFixed(0)} (${range(r.linesSpread, String)}) | ${usd(r.costMean)} (${range(r.costSpread, usd)}) | ${r.secondsMean.toFixed(0)} (${range(r.secondsSpread, (x) => x.toFixed(0))}) | ${r.failed.length ? r.failed.join("; ") : "-"} |`);
   }
   const touched = rows.filter((r) => r.testsTouched > 0).map((r) => r.case);
   if (touched.length) lines.push("", `Test files were added or edited in: ${touched.join(", ")}. They are not counted as unexpected files, and scoring runs the original test files.`);

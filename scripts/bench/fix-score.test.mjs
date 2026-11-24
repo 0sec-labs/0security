@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { aggregate, parseNumstat, renderFixMarkdown, scoreCase, summarizeCases } from "./fix-score-lib.mjs";
+import { aggregate, parseNumstat, renderFixMarkdown, rescanVerdict, scoreCase, summarizeCases } from "./fix-score-lib.mjs";
 import { parseArgs } from "./fix-score.mjs";
 
 const answer = { id: "sqli", expectedFiles: ["src/users.js"] };
@@ -79,4 +79,35 @@ test("parseArgs requires exactly one of --run and --dry-run", () => {
   assert.deepEqual(o.cases, ["sqli", "unsafe-eval"]);
   assert.throws(() => parseArgs(["--run", "--repeat", "0"]));
   assert.throws(() => parseArgs(["--run", "--bogus"]));
+});
+
+test("a fix that does not compile or that a rescan still flags is not fixed", () => {
+  const base = { answer, committed: true, testsPass: true, exploitCode: 0, numstat: numstat.slice(0, 1) };
+  assert.equal(scoreCase({ ...base, compiles: true, rescan: "clean" }).fixed, true);
+  assert.equal(scoreCase({ ...base, compiles: false }).fixed, false);
+  assert.equal(scoreCase({ ...base, compiles: true, rescan: "still-flagged" }).fixed, false);
+  // No build step (null) and a scanner that never flagged the original (not-applicable) do not block a fix.
+  assert.equal(scoreCase({ ...base }).fixed, true);
+  assert.equal(scoreCase({ ...base, compiles: false, committed: false }).compiles, null);
+});
+
+test("rescanVerdict compares the same rule in the same file before and after", () => {
+  const before = [{ rule: "java/no-xxe", file: "src/A.java" }, { rule: "java/other", file: "src/B.java" }];
+  assert.deepEqual(rescanVerdict(before, [], ["src/A.java"]), { rescan: "clean", rescanNew: 0 });
+  assert.equal(rescanVerdict(before, [before[0]], ["src/A.java"]).rescan, "still-flagged");
+  // A finding elsewhere does not count against the fix.
+  assert.equal(rescanVerdict(before, [before[1]], ["src/A.java"]).rescan, "clean");
+  // The scanner was silent on the original: a clean rescan proves nothing.
+  assert.equal(rescanVerdict([], [], ["src/A.java"]).rescan, "not-applicable");
+  // A new rule firing after the fix is counted, not failed.
+  assert.equal(rescanVerdict(before, [{ rule: "java/no-path-traversal", file: "src/A.java" }], ["src/A.java"]).rescanNew, 1);
+});
+
+test("the markdown shows compile and rescan columns", () => {
+  const runs = [{ ...run(1, "a", true, 0.02), compiles: true, rescan: "clean" }, { ...run(2, "a", true, 0.02), compiles: true, rescan: "not-applicable" }];
+  const text = renderFixMarkdown(summarizeCases(runs), aggregate(runs, 2), { date: "2026-01-01", model: "m", repeat: 2, budget: 0.5 });
+  assert.match(text, /\| compiles \|/);
+  assert.match(text, /\| a \| 2\/2 \| 2\/2 \| 2\/2 \|/);
+  assert.match(text, /compiles 100%/);
+  assert.match(text, /rescan clean 100%/);
 });
