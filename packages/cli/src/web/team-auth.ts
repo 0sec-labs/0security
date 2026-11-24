@@ -96,7 +96,7 @@ export class TeamAuth {
   private table?: TeamUserTable;
   private scimTable?: ScimTable;
   private roles: Map<string, RoleDefinition>;
-  private readonly sessions = new Map<string, { userId: string; expires: number; role?: TeamIdentity["role"] }>();
+  private readonly sessions = new Map<string, { userId: string; expires: number; role?: string }>();
   private readonly saml?: TeamSaml;
   private readonly pending = new Map<string, { nonce: string; verifier: string; browser: string; expires: number }>();
   private readonly attempts = new Map<string, { count: number; expires: number }>();
@@ -117,6 +117,7 @@ export class TeamAuth {
       for (const user of this.config.users) if (user.passwordHash && !validHash(user.passwordHash)) throw new Error("Invalid team password hash; use hashTeamPassword");
       try { this.roles = resolveRoles(this.config.roles); } catch (error) { throw new Error(`Invalid team roles: ${error instanceof Error ? error.message : "unreadable"}`); }
       for (const user of this.config.users) if (!this.roles.has(user.role)) throw new Error(`Team user "${user.id}" has the unknown role "${user.role}"`);
+      for (const [group, role] of Object.entries(this.config.saml?.groupRoles ?? {})) if (!this.roles.has(role)) throw new Error(`SAML group "${group}" maps to the unknown role "${role}"`);
       for (const [group, role] of Object.entries(this.config.oidc?.groupRoles ?? {})) if (!this.roles.has(role)) throw new Error(`OIDC group "${group}" maps to the unknown role "${role}"`);
       for (const role of [...Object.values(this.config.scim?.groupRoles ?? {}), ...(this.config.scim?.defaultRole ? [this.config.scim.defaultRole] : [])]) if (!this.roles.has(role)) throw new Error(`The SCIM settings name the unknown role "${role}"`);
       for (const user of this.config.users) this.users.set(user.id, fileRow(user));
@@ -128,7 +129,7 @@ export class TeamAuth {
       }
       if (this.config.saml) {
         validateSamlConfig(this.config.saml, this.origin);
-        this.saml = new TeamSaml(this.config.saml, { now: this.now, cookie: (name, value, seconds) => this.cookie(name, value, seconds), findMember: nameId => { const user = this.config!.users.find(row => row.samlNameId === nameId); return user ? { id: user.id, role: this.users.get(user.id)?.role === "owner" || user.role === "owner" ? "owner" : nearestBuiltInRole(this.roles.get(this.users.get(user.id)?.role ?? user.role)?.permissions ?? []) } : undefined; } });
+        this.saml = new TeamSaml(this.config.saml, { now: this.now, cookie: (name, value, seconds) => this.cookie(name, value, seconds), findMember: nameId => { const user = this.config!.users.find(row => row.samlNameId === nameId); return user ? { id: user.id, role: this.users.get(user.id)?.role ?? user.role } : undefined; }, roleRank: role => this.roles.get(role)?.permissions.length ?? 0 });
       }
     }
     this.dummyHash = hashTeamPassword(opaque());
@@ -139,12 +140,12 @@ export class TeamAuth {
   private cookie(name: string, value: string, seconds: number): string {
     return `${name}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${seconds}${this.origin.startsWith("https:") ? "; Secure" : ""}`;
   }
-  lookupUser(id: string, role?: TeamIdentity["role"]): TeamIdentity | null {
+  lookupUser(id: string, role?: string): TeamIdentity | null {
     const user = this.users.get(id);
     // A deprovisioned account has no identity, so every session it had stops working at the next request.
     if (!user || !user.active || user.deleted) return null;
     // A role from a SAML group answers for this session; every other fact about the account comes from its row.
-    return this.identityFor(role && role !== (user.role === "owner" ? "owner" : nearestBuiltInRole(this.roles.get(user.role)?.permissions ?? [])) ? { ...user, role } : user);
+    return this.identityFor(role && role !== user.role && this.roles.has(role) ? { ...user, role } : user);
   }
   /**
    * Work out what an account may do. With the rbac license a role means its permissions. Without it only owner,
@@ -327,7 +328,7 @@ export class TeamAuth {
   status(req: Pick<IncomingMessage, "headers">) {
     return { enabled: this.enabled, ...(this.config ? { workspace: this.config.workspace } : {}), user: this.resolveSession(req), sso: !!this.config?.oidc, ...(this.saml ? { saml: true } : {}) };
   }
-  private issueSession(userId: string, role?: TeamIdentity["role"]) {
+  private issueSession(userId: string, role?: string) {
     for (const [id, session] of this.sessions) if (session.expires <= this.now()) this.sessions.delete(id);
     if (this.sessions.size >= 10000) throw new TeamAuthError("Session capacity reached", 503);
     const sessionId = opaque(); this.sessions.set(sessionId, { userId, expires: this.now() + SESSION_MS, ...(role ? { role } : {}) });

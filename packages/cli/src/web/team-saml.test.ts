@@ -2,7 +2,8 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { applyTestLicense } from "./__fixtures__/test-license.js";
 
 // The signature, audience, replay and XML checks live in enterprise/ and are tested there with real signed
 // documents. These tests cover the glue: license gate, browser binding, member lookup, role mapping, routes.
@@ -253,5 +254,63 @@ describe("team routes", () => {
     await expect(call(auth, "GET", "/api/team/auth/saml/acs")).rejects.toMatchObject({ statusCode: 404 });
     await expect(call(auth, "POST", "/api/team/auth/saml/sso")).rejects.toMatchObject({ statusCode: 404 });
     await expect(call(auth, "POST", "/api/team/auth/saml/acs")).rejects.toMatchObject({ statusCode: 404 });
+  });
+});
+
+describe("custom roles on SAML sessions", () => {
+  let restore: (() => void) | undefined;
+  afterEach(() => { restore?.(); restore = undefined; });
+  const roles = { roles: { "payments-triager": { permissions: ["findings.read", "findings.triage"], scope: { repos: ["acme/pay-*"] } }, "ops-lead": { permissions: ["workspace.read", "findings.read", "findings.triage", "threads.run", "settings.write"] } } };
+  const users = [
+    { id: "pat", name: "Pat", role: "payments-triager", samlNameId: "pat@corp.test" },
+    { id: "alex", name: "Alex", role: "viewer", samlNameId: "alex@corp.test" },
+  ] as TeamConfig["users"];
+  const build = (saml: Record<string, unknown> = {}) => new TeamAuth({ origin, config: { ...config(saml, users), ...roles } as TeamConfig });
+  const signedIn = async (auth: TeamAuth, nameId: string, groups?: string[]) => {
+    mocks.identity = { ...mocks.identity, nameId, attributes: groups ? { groups } : {} };
+    const { acs, cookie } = await signIn(auth);
+    return auth.samlComplete(ticketOf(acs.redirect), req(cookie));
+  };
+
+  it("keeps the permissions and scope of the member's own custom role", async () => {
+    restore = applyTestLicense(["rbac", "saml"]);
+    const auth = build();
+    const done = await signedIn(auth, "pat@corp.test");
+    expect(done.user).toMatchObject({ userId: "pat", roleName: "payments-triager", scope: ["acme/pay-*"] });
+    expect(done.user.permissions).toEqual(["findings.read", "findings.triage"]);
+    expect(auth.resolveSessionId(done.sessionId)).toMatchObject({ roleName: "payments-triager", permissions: ["findings.read", "findings.triage"] });
+  });
+
+  it("maps a group to a custom role and takes the one that can do the most", async () => {
+    restore = applyTestLicense(["rbac", "saml"]);
+    const mapped = { groupAttribute: "groups", groupRoles: { "sec-viewers": "viewer", "triage": "payments-triager", "ops": "ops-lead" } };
+    const auth = build(mapped);
+    const one = await signedIn(auth, "alex@corp.test", ["triage"]);
+    expect(one.user).toMatchObject({ roleName: "payments-triager", scope: ["acme/pay-*"] });
+    const two = await signedIn(auth, "alex@corp.test", ["sec-viewers", "triage", "ops"]);
+    expect(two.user.roleName).toBe("ops-lead");
+    expect(auth.resolveSessionId(two.sessionId)).toMatchObject({ roleName: "ops-lead", role: "owner" });
+    // The session role does not change what the account is: the next sign-in without that group is a viewer again.
+    expect((await signedIn(auth, "alex@corp.test", ["sec-viewers"])).user.roleName).toBe("viewer");
+  });
+
+  it("refuses a group that maps to a role that does not exist", () => {
+    expect(() => build({ groupAttribute: "groups", groupRoles: { ops: "no-such-role" } })).toThrow("unknown role");
+  });
+
+  it("falls back to the nearest free role, never owner, when the license has no rbac", async () => {
+    restore = applyTestLicense(["saml"]);
+    const mapped = { groupAttribute: "groups", groupRoles: { ops: "ops-lead" } };
+    const lead = await signedIn(build(mapped), "alex@corp.test", ["ops"]);
+    expect(lead.user).toMatchObject({ roleName: "ops-lead", role: "editor" });
+    expect(lead.user.permissions).not.toContain("settings.write");
+    const pat = await signedIn(build(), "pat@corp.test");
+    expect(pat.user).toMatchObject({ roleName: "payments-triager", role: "viewer", scope: ["acme/pay-*"] });
+  });
+
+  it("still lets a free role from a group override a custom one", async () => {
+    restore = applyTestLicense(["rbac", "saml"]);
+    const done = await signedIn(build({ groupAttribute: "groups", groupRoles: { admins: "owner" } }), "pat@corp.test", ["admins"]);
+    expect(done.user).toMatchObject({ roleName: "owner", role: "owner" });
   });
 });
