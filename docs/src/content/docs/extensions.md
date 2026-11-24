@@ -41,6 +41,33 @@ An extension installs disabled. Enabling asks you to approve the exact revision 
 
 A repository's `.0/` or `.claude/` folder (settings, `.mcp.json`, skills) never installs or enables an extension or MCP server. On first open, the app shows what the repo asks for, with the install prompt for each. If you ignore it, nothing runs. A plain `SKILL.md` is still read as instructions.
 
+## Check agent files in a repository
+
+AI coding tools read instruction, rules, MCP and settings files from the repository. A change to one of them can steer the tool or run a command. `0security sbom agent-config` reads those files and lists what to review.
+
+```sh
+0security sbom agent-config .
+0security sbom agent-config . --fail-on high
+0security sbom agent-config . --format sarif -o agent-config.sarif
+```
+
+The check reads files as text. It runs nothing, calls no model and uses no network, so it also works with `ZERO_ENTERPRISE` set. Import the SARIF file with `0security findings import agent-config.sarif`. Add `--allow-host` for each host your remote MCP servers may use.
+
+| Rule | Severity | What it finds |
+| --- | --- | --- |
+| `agent-config/hidden-unicode` | medium or high | Zero-width characters, bidirectional overrides, Unicode tag characters and variation selectors in an instruction file. An emoji joiner, a flag sequence and one leading byte order mark are allowed. |
+| `agent-config/injection-phrase` | low | Heuristic. Wording such as "ignore previous instructions" or "do not tell the user", a sensitive item sent to a URL, or a base64 block that decodes to text. In rules files it reports only hidden or encoded text. |
+| `agent-config/mcp-unpinned-launcher` | medium or high | `npx`, `bunx`, `uvx`, `pipx run`, `pnpm dlx`, `yarn dlx` without an exact version, `docker run` with `latest` or no tag, and a download piped into a shell. |
+| `agent-config/mcp-secret` | medium or high | A provider-shaped key or a high-entropy value in an MCP server's `env`, headers or arguments. The finding shows the first characters and the length only. |
+| `agent-config/broad-permission` | high or medium | `Bash(*)`, `Bash(curl:*)`, `Bash(rm:*)`, a wildcard allow, `bypassPermissions`, `--dangerously-skip-permissions`, `enableAllProjectMcpServers`, `enabledMcpjsonServers`, a Cursor yolo mode, Copilot `chat.tools.autoApprove` and Codex `approval_policy = "never"`. |
+| `agent-config/hook-command` | low, medium or high | Every hook that runs a shell command. It is medium when the command uses the network and high when it pipes a download into a shell. |
+| `agent-config/mcp-remote-insecure` | medium | A remote MCP server over plain http, or on a host you did not allow with `--allow-host`. |
+| `agent-config/mcp-project-autostart` | low | An MCP server defined in the repository. Your tool asks before it starts. Check it before you approve. |
+
+Each finding names the incident or reference behind its rule and says how to fix it. The sources include the rules file backdoor (Pillar Security), Trojan Source (CVE-2021-42574), MCPoison and CurXecute in Cursor (CVE-2025-54136, CVE-2025-54135), MCP tool poisoning, the Amazon Q Developer extension prompt injection and the Nx s1ngularity malware.
+
+The check reads JSON, JSON with comments and TOML settings. It reads YAML and Markdown only for hidden characters, wording and `allowed-tools`. It does not run your tool's own approval logic, and a clean result does not mean the files are safe.
+
 ## MCP servers
 
 In the browser app, open **Extensions**, press **Add**, then choose **MCP server**. Enter the command that starts it, or an https URL. It becomes a local extension with the same review as any other. Nothing runs until you read the exact command and approve it, and it is saved turned off. Once enabled, it starts only when a Thread first uses it, and its tools are pinned.

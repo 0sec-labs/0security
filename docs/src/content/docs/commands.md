@@ -1270,7 +1270,7 @@ Generate an SBOM from lockfiles, check one against known advisories, and scan mo
 0security sbom
 ```
 
-Subcommands: [generate](#sbom-generate) · [check](#sbom-check) · [licenses](#sbom-licenses) · [scan-models](#sbom-scan-models) · [java-usage](#sbom-java-usage).
+Subcommands: [generate](#sbom-generate) · [check](#sbom-check) · [licenses](#sbom-licenses) · [scan-models](#sbom-scan-models) · [agent-config](#sbom-agent-config) · [java-usage](#sbom-java-usage).
 
 #### sbom generate
 
@@ -1580,6 +1580,35 @@ Each file is listed with its format, a verdict (`DANGEROUS`, unrecognised import
 | Option | Registered default | Description |
 | --- | --- | --- |
 | `--format <format>` | `text` | Output: text, json or sarif |
+
+#### sbom agent-config
+
+Check the rules, MCP and settings files AI coding tools read in a repository for hidden text, unpinned launchers, secrets and broad permissions
+
+```text
+0security sbom agent-config [options] [path]
+```
+
+```bash
+0security sbom agent-config .
+```
+
+This reads `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `.cursor/`, `.claude/`, `.github/` instructions, prompts and agents, `.gemini/`, `.codex/`, `.windsurf/`, `.continue/`, `.clinerules`, `.vscode/mcp.json`, `.mcp.json`, `opencode.json` and `SKILL.md` files as text. It runs nothing, calls no model and makes no network request. It works with `ZERO_ENTERPRISE` set. A file over 1 MB is skipped and listed. A symbolic link that leaves the folder is not followed.
+
+Each finding has a rule id, a severity, the file and line, a short snippet and a fix hint. Secrets are shown as their first characters and length, never in full. The wording rule is a heuristic and is marked as one. See [Check agent files in a repository](/extensions/#check-agent-files-in-a-repository) for the rules.
+
+`--format sarif` writes one result per finding. Import it with `0security findings import agent-config.sarif`. Exit 1 when a finding is at or above `--fail-on`, and 2 on a usage error. Without `--fail-on` the exit code is 0.
+
+| Argument | Required | Description |
+| --- | --- | --- |
+| `path` | No | Folder to search, or one file (default: .) |
+
+| Option | Registered default | Description |
+| --- | --- | --- |
+| `--format <format>` | `text` | Output: text, json or sarif (SARIF imports with `0security findings import`) |
+| `-o, --output <file>` | — | Write the result to a file instead of stdout |
+| `--fail-on <severity>` | — | Exit 1 when a finding is at or above this severity: critical, high, medium, low or info |
+| `--allow-host <host>` | — | Host a remote MCP server may use; repeat the option or separate hosts with commas. `*.example.com` allows subdomains |
 
 #### sbom java-usage
 
