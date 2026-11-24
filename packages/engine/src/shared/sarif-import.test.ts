@@ -176,6 +176,15 @@ describe("dynamic scanner output", () => {
       const text = `${valid}\n${"\n".repeat(5_000_000)}${"x".repeat(600 * 1024)}\n${valid}x\n`;
       expect(parseNucleiJsonl(text).findings).toHaveLength(1);
     });
+    it("takes credentials out of evidence text", () => {
+      const line = JSON.stringify({ "template-id": "t", info: { name: "n", severity: "low" }, "matched-at": "http://h.test/x", request: "GET /x HTTP/1.1", "curl-command": "curl -X 'GET' -u 'admin:hunter2' -H 'Authorization: Bearer abc.def' -H 'Cookie: sid=1' -H 'Accept: */*' 'http://bob:pw@h.test/x'", "extracted-results": ["https://u:p@h.test/y"] });
+      const evidence = parseNucleiJsonl(line).findings[0]!.evidence!;
+      for (const secret of ["hunter2", "abc.def", "sid=1", "bob", ":pw@", "u:p@"]) expect(evidence).not.toContain(secret);
+      expect(evidence).toContain("Accept");
+      const sarif = hostile({ properties: { evidence: "GET http://a:b@h.test/ Authorization: Bearer zzz" } }).evidence!;
+      expect(sarif).not.toContain("zzz");
+      expect(sarif).not.toContain("a:b@");
+    });
     it("stops at the result limit", () => {
       const lines = Array.from({ length: MAX_SARIF_RESULTS + 1 }, (_, i) => JSON.stringify({ "template-id": `t${i}`, info: { name: "n", severity: "low" } })).join("\n");
       expect(() => parseNucleiJsonl(lines)).toThrow(/more than/);

@@ -107,6 +107,17 @@ function repoUriBase(uri: unknown): string {
   try { const decoded = decodeURIComponent(value); return decoded.startsWith("/") || /^[a-z]:[\\/]/i.test(decoded) ? decoded : ""; } catch { return ""; }
 }
 
+/**
+ * Evidence text with credentials taken out: user names and passwords in URLs, and the value of curl options and headers that carry
+ * a secret (-u, Authorization, Cookie, API keys, tokens). The scanner's own file keeps them; the finding does not.
+ */
+export function redactEvidence(text: string): string {
+  return text
+    .replace(/(\b[a-z][a-z0-9+.-]*:\/\/)[^\s'"\/?#@]+@/gi, "$1")
+    .replace(/(\s(?:-u|--user|--oauth2-bearer|--proxy-user)\s+)(?:'[^']*'|"[^"]*"|\S+)/g, "$1[removed]")
+    .replace(/((?:authorization|proxy-authorization|cookie|set-cookie|x-api-key|x-auth-token|x-csrf-token)\s*:\s*)(?:[^'"\r\n]*)/gi, "$1[removed]");
+}
+
 /** An http(s) URL without credentials or a fragment, or undefined when the value is anything else. */
 export function safeUrl(value: unknown): string | undefined {
   if (typeof value !== "string" || value.length > 2048) return undefined;
@@ -209,7 +220,7 @@ export function parseSarif(text: string, options: { tool?: string; roots?: reado
         : safeUrl(request.target) ?? safeUrl(artifact?.uri) ?? endpointOf(strix.endpoint, strix.target) ?? endpointOf(logical?.fullyQualifiedName, strix.target);
       const method = endpoint ? methodOf(request.method ?? strix.method) : undefined;
       const poc = isObject(strix.poc) ? clean(strix.poc.description, 1500) : "";
-      const evidenceText = [clean(resultProperties.evidence, 1500), poc].filter(Boolean).join("\n\n").slice(0, 3000) || undefined;
+      const evidenceText = redactEvidence([clean(resultProperties.evidence, 1500), poc].filter(Boolean).join("\n\n")).slice(0, 3000) || undefined;
 
       const partial = isObject(raw.partialFingerprints) ? Object.entries(raw.partialFingerprints).find(([, value]) => typeof value === "string" && value) : undefined;
       const key = partial
@@ -278,9 +289,9 @@ export function parseNucleiJsonl(text: string, options: { tool?: string } = {}):
     const status = typeof raw.response === "string" ? /^HTTP\/[\d.]+ (\d{3})/.exec(raw.response)?.[1] : undefined;
     const extracted = list(raw["extracted-results"]).map(value => clean(value, 300)).filter(Boolean).slice(0, 10);
     const evidence = [
-      clean(raw["curl-command"], 1500) ? `Request: ${clean(raw["curl-command"], 1500)}` : "",
+      clean(raw["curl-command"], 1500) ? `Request: ${redactEvidence(clean(raw["curl-command"], 1500))}` : "",
       status ? `Response status: ${status}` : "",
-      extracted.length ? `Matched: ${extracted.join(", ")}` : "",
+      extracted.length ? `Matched: ${redactEvidence(extracted.join(", "))}` : "",
     ].filter(Boolean).join("\n").slice(0, 3000) || undefined;
     findings.push({
       tool, ruleId, title, description, severity, category,
