@@ -21,6 +21,7 @@ on the GitHub Release tag.
 ### Fixed
 
 - opening a thread in the web console could show only part of the conversation until you refreshed. The console kept the message list from an earlier read while newer events arrived, so a reply or a whole turn could be missing for a few seconds (longer if you opened the thread from the cache). It now re-reads the messages as soon as a turn starts or ends, trusts a cached copy only if it was read a moment ago, and still shows a turn that only the event journal knows about.
+- saved threads in the web console's Threads list now show their folder under the title, like open threads do.
 
 ## [0.44.0] - 2026-11-23
 

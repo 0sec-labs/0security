@@ -18,7 +18,7 @@ import { SidebarListHeader } from "./sidebar/sidebar-list-header";
 import { RowAge, RowSubline, RowTitleLine, sidebarRowClasses } from "./sidebar/sidebar-row";
 import { rowNavigation } from "./sidebar/use-row-navigation";
 import { useSidebarDensity } from "./sidebar/use-sidebar-list";
-import { folderMonogram, threadShelf, threadSubline } from "@/lib/sidebar-rows";
+import { folderMonogram, rowWorkspacePath, threadShelf, threadSubline } from "@/lib/sidebar-rows";
 import { ConfirmDialog } from "@/ui/components/confirm-dialog";
 import { markMissionsDeleting } from "@/lib/deleting-missions";
 import { rememberSidebarActivity, sidebarChatTitle, sidebarChatTitlePending, sortSidebarChats, type SidebarChatActivity } from "@/console/sidebar-chat-order";
@@ -130,7 +130,7 @@ export function HostSidebarChatHistory(props: HostHistoryProps) {
   // Second line: the waiting/failed text in the accent colour, else the folder and the computer. Running work shows its spinner instead.
   const waiting = working ? undefined : attention;
   const hostLabel = `${host.name}${slice.offline ? " · offline" : ""}`;
-  const subline = threadSubline({ attention: waiting, workspacePath: (row.session as { workspacePath?: string }).workspacePath, computer: hostLabel });
+  const subline = threadSubline({ attention: waiting, workspacePath: rowWorkspacePath(row.session as { workspacePath?: string; cwd?: string }), computer: hostLabel });
   const age = formatRelativeAge(row.timestamp, now);
   return <div key={id} role="listitem" data-active={selected || undefined} onPointerEnter={event => { if (event.pointerType !== "touch") setActionsFor(id); }} onPointerLeave={event => { if (!event.currentTarget.contains(document.activeElement)) setActionsFor(current => current === id ? null : current); }} onFocus={() => setActionsFor(id)} onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setActionsFor(current => current === id ? null : current); }} className={cn("group", sidebarRowClasses(density))}>
     <a onPointerEnter={() => { if (prefetchTimer.current) clearTimeout(prefetchTimer.current); prefetchTimer.current = setTimeout(() => slice.actions.prefetch(session.id, isSaved), 80); }} onPointerLeave={() => { if (prefetchTimer.current) clearTimeout(prefetchTimer.current); }} onFocus={() => slice.actions.prefetch(session.id, isSaved)} aria-busy={slice.openingId === session.id || undefined} aria-current={selected ? "page" : undefined} href={backendRouteHref(host.id, `/chats/${isSaved ? "saved/" : ""}${encodeURIComponent(session.id)}`)} draggable={true}

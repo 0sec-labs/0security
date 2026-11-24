@@ -56,6 +56,11 @@ export function folderName(path: string | undefined): string {
 
 export const folderMonogram = (name: string): string => (name.match(/[\p{L}\p{N}]/u)?.[0] ?? "").toUpperCase();
 
+/** A live thread names its folder `workspacePath`; a saved one `cwd`. Either gives the folder chip. */
+export function rowWorkspacePath(session: { workspacePath?: string; cwd?: string }): string | undefined {
+  return session.workspacePath ?? session.cwd;
+}
+
 export type ThreadSubline = { kind: "needs-you"; text: string; folder: string } | { kind: "place"; folder: string; computer: string };
 
 /** Line 2 of a thread: the accent attention text when waiting on the operator, else its folder and computer. */
