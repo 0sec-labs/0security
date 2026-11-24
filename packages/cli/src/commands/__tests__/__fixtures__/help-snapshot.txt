@@ -261,7 +261,7 @@ Options:
 
 Commands:
   get [options] [key]           Print the effective value of one setting, or every setting with no
-                                key
+                                key. `license` shows the enterprise license status
   set [options] <key> <value>   Change one setting (global by default, --project for this folder)
   doctor [options] [checks...]  Check this machine and the engine, then suggest the next command
   help [command]                display help for command
@@ -346,7 +346,8 @@ Options:
 ### 0security config get
 Usage: 0security config get [options] [key]
 
-Print the effective value of one setting, or every setting with no key
+Print the effective value of one setting, or every setting with no key. `license` shows the
+enterprise license status
 
 Options:
   --format <format>  Output: text or json (choices: "text", "json")

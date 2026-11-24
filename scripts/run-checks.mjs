@@ -13,6 +13,7 @@ export const GROUPS = {
     "node --test scripts/check-architecture.test.mjs",
     "pnpm check:egress-inventory",
     "pnpm check:no-npm-publish",
+    "pnpm check:enterprise-boundary",
     "pnpm check:script-quotes",
     "pnpm check:workflow-triggers",
     "pnpm check:image-name",

@@ -32,7 +32,7 @@ export function checkNoNpmPublish(root) {
       }
     });
   }
-  const pkgs = ["package.json"];
+  const pkgs = ["package.json", "enterprise/package.json"];
   const pdir = join(root, "packages");
   if (existsSync(pdir)) for (const d of readdirSync(pdir)) pkgs.push(join("packages", d, "package.json"));
   for (const rel of pkgs) {
