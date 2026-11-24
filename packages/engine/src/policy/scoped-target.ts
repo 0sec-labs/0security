@@ -35,9 +35,9 @@ export interface ScopedTarget {
 
 const blocked = new BlockList();
 for (const [address, prefix] of [
-  ["0.0.0.0", 8], ["169.254.0.0", 16], ["224.0.0.0", 4], ["240.0.0.0", 4], ["100.100.100.200", 32], ["192.0.0.192", 32],
+  ["0.0.0.0", 8], ["169.254.0.0", 16], ["224.0.0.0", 4], ["240.0.0.0", 4], ["100.100.100.200", 32], ["192.0.0.192", 32], ["168.63.129.16", 32],
 ] as const) blocked.addSubnet(address, prefix, "ipv4");
-for (const [address, prefix] of [["::", 128], ["fe80::", 10], ["ff00::", 8], ["fd00:ec2::", 32]] as const) blocked.addSubnet(address, prefix, "ipv6");
+for (const [address, prefix] of [["::", 128], ["fe80::", 10], ["ff00::", 8], ["fd00:ec2::", 32], ["fd20:ce::", 32]] as const) blocked.addSubnet(address, prefix, "ipv6");
 const loopback = new BlockList();
 loopback.addSubnet("127.0.0.0", 8, "ipv4");
 loopback.addAddress("::1", "ipv6");

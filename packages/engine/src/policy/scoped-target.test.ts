@@ -11,7 +11,7 @@ describe("classifyAddress", () => {
     expect(["0:0:0:0:0:ffff:a00:1", "64:ff9b::808:808"].map(classifyAddress)).toEqual(["private", "public"]);
     expect(["10.1.2.3", "172.16.0.1", "192.168.1.1", "100.64.0.1", "fd12::1"].map(classifyAddress)).toEqual(Array(5).fill("private"));
     expect(["8.8.8.8", "172.32.0.1", "203.0.113.9"].map(classifyAddress)).toEqual(Array(3).fill("public"));
-    expect(["0:0:0:0:0:ffff:a9fe:a9fe", "0000:0000:0000:0000:0000:ffff:169.254.169.254", "::ffff:a9fe:a9fe", "64:ff9b::a9fe:a9fe", "::a9fe:a9fe", "169.254.169.254", "::ffff:169.254.169.254", "fe80::1", "fd00:ec2::254", "100.100.100.200", "0.0.0.0", "224.0.0.1", "garbage"].map(classifyAddress)).toEqual(Array(13).fill("blocked"));
+    expect(["0:0:0:0:0:ffff:a9fe:a9fe", "0000:0000:0000:0000:0000:ffff:169.254.169.254", "::ffff:a9fe:a9fe", "64:ff9b::a9fe:a9fe", "::a9fe:a9fe", "169.254.169.254", "::ffff:169.254.169.254", "fe80::1", "fd00:ec2::254", "fd20:ce::254", "168.63.129.16", "100.100.100.200", "0.0.0.0", "224.0.0.1", "garbage"].map(classifyAddress)).toEqual(Array(15).fill("blocked"));
   });
 });
 
