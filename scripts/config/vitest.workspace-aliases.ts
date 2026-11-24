@@ -10,4 +10,5 @@ export const osecWorkspaceAliases = {
   "@0/engine/storage": fromRoot("./packages/engine/src/storage/index.ts"),
   "@0/engine/shared": fromRoot("./packages/engine/src/shared/index.ts"),
   "@0/engine": fromRoot("./packages/engine/src/index.ts"),
+  "@0/enterprise": fromRoot("./enterprise/src/index.ts"),
 };

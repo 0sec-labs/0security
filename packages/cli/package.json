@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@0/engine": "workspace:*",
+    "@0/enterprise": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.32.2",
     "chalk": "^6.0.1",
     "commander": "^15.1.0",
