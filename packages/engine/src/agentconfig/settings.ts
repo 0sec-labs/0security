@@ -63,13 +63,14 @@ export function scanSettings(file: string, text: string, parsed: unknown): Agent
       walk(value, here, depth + 1);
     }
   };
-  const hookTree = (node: unknown, event: string): void => {
-    if (Array.isArray(node)) { node.forEach(item => hookTree(item, event)); return; }
+  const hookTree = (node: unknown, event: string, depth = 0): void => {
+    if (depth > 12 || full()) return;
+    if (Array.isArray(node)) { node.slice(0, 500).forEach(item => hookTree(item, event, depth + 1)); return; }
     if (!isObject(node)) return;
     for (const [key, value] of Object.entries(node)) {
       if (typeof value === "string" && (key === "command" || key === "bash" || key === "powershell" || key === "shell")) hook(value, event);
       else if (typeof value === "string" && key === "run") hook(value, event);
-      else hookTree(value, event || key);
+      else hookTree(value, event || key, depth + 1);
     }
   };
   walk(parsed, [], 0);

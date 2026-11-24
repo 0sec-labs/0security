@@ -211,3 +211,11 @@ describe("redaction and output bounds", () => {
     expect(report.findings.length).toBeGreaterThan(0);
   });
 });
+
+describe("deeply nested settings", () => {
+  it("does not overflow the stack on nested hooks", () => {
+    const deep = `${"[".repeat(3000)}${"]".repeat(3000)}`;
+    const nested = `{"hooks":{"Stop":${deep}}, "a":${deep}}`;
+    expect(() => scanAgentConfig(repo({ ".claude/settings.json": nested }))).not.toThrow();
+  });
+});
