@@ -1993,11 +1993,14 @@ The summary lists runs, cost, average time and counts per command. A proposed fi
 
 `--since` takes hours, days or weeks (`36h`, `7d`, `2w`) or a date. `--format json` prints the summary as JSON.
 
+`--by week` shows one row per week (starting Monday, UTC), and `--by model` one row per model. Cost per fix and the share verified in these rows come from fix runs only. Add `--format csv` to export the rows.
+
 | Option | Registered default | Description |
 | --- | --- | --- |
 | `--since <when>` | — | Only runs since then: 36h, 7d, 2w or a date such as 2026-11-01 |
 | `--command <name>` | — | Only this command: scan, fix, verify |
-| `--format <format>` | — | Output: text or json Choices: text, json. |
+| `--by <group>` | — | One row per command, week (Monday start) or model Choices: command, week, model. |
+| `--format <format>` | — | Output: text, json, or csv (with --by) Choices: text, json, csv. |
 
 #### findings rollup
 

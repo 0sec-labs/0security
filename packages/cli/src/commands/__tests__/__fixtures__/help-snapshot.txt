@@ -926,7 +926,9 @@ passed their checks
 Options:
   --since <when>     Only runs since then: 36h, 7d, 2w or a date such as 2026-11-01
   --command <name>   Only this command: scan, fix, verify
-  --format <format>  Output: text or json (choices: "text", "json")
+  --by <group>       One row per command, week (Monday start) or model (choices: "command", "week",
+                     "model")
+  --format <format>  Output: text, json, or csv (with --by) (choices: "text", "json", "csv")
   -h, --help         display help for command
 
 ### 0security findings reopen (hidden)
