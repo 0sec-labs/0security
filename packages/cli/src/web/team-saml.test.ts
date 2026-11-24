@@ -12,7 +12,8 @@ const mocks = vi.hoisted(() => ({
   begun: [] as string[],
   counter: 0,
 }));
-vi.mock("../enterprise-bridge.js", () => ({
+vi.mock("../enterprise-bridge.js", async importOriginal => ({
+  ...(await importOriginal<typeof import("../enterprise-bridge.js")>()),
   samlLicenseDenial: () => mocks.denial,
   samlLicensed: () => mocks.denial === null,
   parseIdpMetadata: (xml: string) => ({ entityId: "https://idp.test", ssoUrl: "https://idp.test/sso", certificates: [], xml }),

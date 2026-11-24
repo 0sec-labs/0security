@@ -124,7 +124,7 @@ export class TeamAuth {
       }
       if (this.config.saml) {
         validateSamlConfig(this.config.saml, this.origin);
-        this.saml = new TeamSaml(this.config.saml, { now: this.now, cookie: (name, value, seconds) => this.cookie(name, value, seconds), findMember: nameId => this.config!.users.find(user => user.samlNameId === nameId) });
+        this.saml = new TeamSaml(this.config.saml, { now: this.now, cookie: (name, value, seconds) => this.cookie(name, value, seconds), findMember: nameId => { const user = this.config!.users.find(row => row.samlNameId === nameId); return user ? { id: user.id, role: this.users.get(user.id)?.role === "owner" || user.role === "owner" ? "owner" : nearestBuiltInRole(this.roles.get(this.users.get(user.id)?.role ?? user.role)?.permissions ?? []) } : undefined; } });
       }
     }
     this.dummyHash = hashTeamPassword(opaque());
@@ -138,7 +138,7 @@ export class TeamAuth {
   lookupUser(id: string, role?: TeamIdentity["role"]): TeamIdentity | null {
     const user = this.users.get(id);
     // A role from a SAML group answers for this session; every other fact about the account comes from its row.
-    return user ? this.identityFor(role ? { ...user, role } : user) : null;
+    return user ? this.identityFor(role && role !== (user.role === "owner" ? "owner" : nearestBuiltInRole(this.roles.get(user.role)?.permissions ?? [])) ? { ...user, role } : user) : null;
   }
   /**
    * Work out what an account may do. With the rbac license a role means its permissions. Without it only owner,
