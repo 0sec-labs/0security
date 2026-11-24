@@ -23,9 +23,9 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: 0sec-labs/0security@v0.43.0
+      - uses: 0sec-labs/0security@v0.44.0
         with:
-          version: 0.43.0 # Pin the CLI
+          version: 0.44.0 # Pin the CLI
           fail-on: high
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -101,9 +101,9 @@ Pass Semgrep rules you already write with `rules`. Rules, tier maps, context, po
         with:
           repository: your-org/security-rules
           path: security-rules
-      - uses: 0sec-labs/0security@v0.43.0
+      - uses: 0sec-labs/0security@v0.44.0
         with:
-          version: 0.43.0 # Pin the CLI
+          version: 0.44.0 # Pin the CLI
           scanner: semgrep
           rules: security-rules/semgrep
 ```
@@ -124,9 +124,9 @@ Use the base branch's copy, never the pull request's. A change could otherwise e
           ref: ${{ github.base_ref }}
           path: base
       - uses: actions/checkout@v4
-      - uses: 0sec-labs/0security@v0.43.0
+      - uses: 0sec-labs/0security@v0.44.0
         with:
-          version: 0.43.0 # Pin the CLI
+          version: 0.44.0 # Pin the CLI
           scope: base/SECURITY.md
           fail-on: high
 ```
@@ -142,9 +142,9 @@ A tier map decides how much a repository gets scanned, or whether it is skipped.
         with:
           repository: your-org/security-config
           path: security-config
-      - uses: 0sec-labs/0security@v0.43.0
+      - uses: 0sec-labs/0security@v0.44.0
         with:
-          version: 0.43.0 # Pin the CLI
+          version: 0.44.0 # Pin the CLI
           tiers: security-config/scan-tiers.yaml
 ```
 
@@ -166,9 +166,9 @@ Give the scan what another tool already found. It looks for other classes of bug
 `mode: sbom` generates a CycloneDX SBOM from the lockfiles in `target`, checks every component against the public OSV database and uploads the advisories to code scanning as `0 sbom`. It also uploads the SBOM as the `0-sbom` artifact. It needs no model key.
 
 ```yaml
-      - uses: 0sec-labs/0security@v0.43.0
+      - uses: 0sec-labs/0security@v0.44.0
         with:
-          version: 0.43.0 # Pin the CLI
+          version: 0.44.0 # Pin the CLI
           mode: sbom
           licenses-preset: no-copyleft
           fail-on: high
@@ -201,9 +201,9 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: 0sec-labs/0security@v0.43.0 # pin to the release's commit SHA for a stricter pin
+      - uses: 0sec-labs/0security@v0.44.0 # pin to the release's commit SHA for a stricter pin
         with:
-          version: 0.43.0 # Pin the CLI
+          version: 0.44.0 # Pin the CLI
           fail-on: high
           budget: "3"
         env:
@@ -234,9 +234,9 @@ jobs:
         with:
           persist-credentials: false
       - id: zero
-        uses: 0sec-labs/0security@v0.43.0 # pin to the release's commit SHA for a stricter pin
+        uses: 0sec-labs/0security@v0.44.0 # pin to the release's commit SHA for a stricter pin
         with:
-          version: 0.43.0 # Pin the CLI
+          version: 0.44.0 # Pin the CLI
           budget: "20"
           fail-on: critical
           allow-partial: true
@@ -268,9 +268,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: 0sec-labs/0security@v0.43.0 # pin to the release's commit SHA for a stricter pin
+      - uses: 0sec-labs/0security@v0.44.0 # pin to the release's commit SHA for a stricter pin
         with:
-          version: 0.43.0 # Pin the CLI
+          version: 0.44.0 # Pin the CLI
           mode: sbom
           licenses-preset: no-copyleft
           fail-on: high
@@ -297,9 +297,9 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       # Your existing Semgrep or CodeQL step runs here and writes results/other-tool.sarif.
-      - uses: 0sec-labs/0security@v0.43.0 # pin to the release's commit SHA for a stricter pin
+      - uses: 0sec-labs/0security@v0.44.0 # pin to the release's commit SHA for a stricter pin
         with:
-          version: 0.43.0 # Pin the CLI
+          version: 0.44.0 # Pin the CLI
           known-sarif: results/other-tool.sarif
           only-new: true
           fail-on: high
@@ -332,9 +332,9 @@ jobs:
           repository: your-org/security-config
           path: security-config
           persist-credentials: false
-      - uses: 0sec-labs/0security@v0.43.0 # pin to the release's commit SHA for a stricter pin
+      - uses: 0sec-labs/0security@v0.44.0 # pin to the release's commit SHA for a stricter pin
         with:
-          version: 0.43.0 # Pin the CLI
+          version: 0.44.0 # Pin the CLI
           tiers: security-config/scan-tiers.yaml
           fail-on: high
         env:

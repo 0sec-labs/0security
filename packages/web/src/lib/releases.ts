@@ -8,6 +8,18 @@ export const RELEASES_URL = "https://github.com/0sec-labs/0security/releases";
 
 export const RELEASES: readonly Release[] = [
   {
+    version: "0.44.0",
+    date: "2026-11-23",
+    title: "Say what matters, and scans you can trust to finish",
+    summary: "Teams can declare which attack vectors they care about, and scans now retry, say why they stopped and check that they read the files. The command is now 0security, with 0 as a short alias.",
+    highlights: [
+      { icon: "ListChecks", title: "Declare what matters", text: "A Scope section in SECURITY.md says which vectors are in and out of scope. Findings outside it are listed apart and don't fail your build. 0 threat-model --interview asks specific questions about your code and your last scan, and writes the answers for you to review." },
+      { icon: "Gauge", title: "Scans that finish and explain", text: "A scan retries when the model provider drops a connection, limits each batch's time, and names the real cause when it stops early. It sends one follow-up for files it never opened, and warns when a scan with no findings read only part of the code." },
+      { icon: "Bug", title: "Cleaner findings", text: "Findings land in clearer categories such as broken access control, hardcoded secret and missing rate limit. The same flaw filed twice is merged, and a scan with no findings says that is not proof the code is safe." },
+      { icon: "ShieldCheck", title: "0security, and safer helpers", text: "The command is installed as 0security with 0 as an alias, and the Action gains inputs for scanners, rules, tiers and scope. Extension scripts get a clean environment, the address check blocks more IPv6 forms, and helpers ask before each command in Ask mode." },
+    ],
+  },
+  {
     version: "0.43.0",
     date: "2026-11-22",
     title: "Scan tiers, safer extensions, deeper dependency checks",

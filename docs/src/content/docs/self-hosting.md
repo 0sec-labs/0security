@@ -138,7 +138,7 @@ Add your domain and network settings to `/opt/zero/.env`:
 ZERO_DOMAIN=zero.internal.yourcompany.com
 ZERO_PUBLIC_URL=https://zero.internal.yourcompany.com
 ZERO_ALLOWED_HOSTS=zero.internal.yourcompany.com
-ZERO_IMAGE_TAG=v0.43.0
+ZERO_IMAGE_TAG=v0.44.0
 COMPOSE_FILE=docker-compose.yml:docker-compose.data-disk.yml
 ZERO_DATA_DIR=/data
 ```
@@ -167,7 +167,7 @@ ls -l /data/.0/0.db                          # the database file is on the mount
 Use ECS to avoid managing host operating systems.
 
 1. Create an ECS cluster with the EC2 launch type, which allows EBS attachments.
-2. Define one container task using `ghcr.io/0sec-labs/0security:v0.43.0`:
+2. Define one container task using `ghcr.io/0sec-labs/0security:v0.44.0`:
    - Mount host `/data` at container `/data`.
    - Map `secrets` from Secrets Manager or SSM Parameter Store to environment variables such as `ZERO_ACCESS_TOKEN` and `ANTHROPIC_API_KEY`.
    - Set the health check to `curl -fsS http://127.0.0.1:48123/healthz || exit 1`.
@@ -353,7 +353,7 @@ To report a vulnerability, see the [security policy](https://github.com/0sec-lab
 
 ### Rollbacks
 
-Migrations only go forward, so a rollback needs the pre-upgrade database. Pin the previous tag in `/opt/zero/.env`, for example `ZERO_IMAGE_TAG=v0.43.0`. Then run the [restore procedure](#4-restore-procedure) with the pre-upgrade backup. Step 5 runs `docker compose up -d`, which applies the pinned tag.
+Migrations only go forward, so a rollback needs the pre-upgrade database. Pin the previous tag in `/opt/zero/.env`, for example `ZERO_IMAGE_TAG=v0.44.0`. Then run the [restore procedure](#4-restore-procedure) with the pre-upgrade backup. Step 5 runs `docker compose up -d`, which applies the pinned tag.
 
 ---
 
