@@ -447,6 +447,89 @@ Migrations only go forward, so a rollback needs the pre-upgrade database. Pin th
 
 ---
 
+## Air-gapped installation
+
+An air-gapped network has no route to the internet. You carry 0 in on removable media, install it, and point it at a model endpoint inside the network.
+
+### What you can claim
+
+With `ZERO_ENTERPRISE=1` and a model endpoint inside your network, 0 contacts only that endpoint and the hosts you name yourself. The [data flow](/data-flow/) page lists every destination. The check below runs the real CLI with a recorder that refuses any non-loopback connection. It passed for the version, SBOM generation and a one-shot prompt against a local stub model. It also passed inside a container started with `--network none`.
+
+You cannot claim more than that:
+
+- The check covers those commands, not every feature. It does not prove that no code path ever connects.
+- It does not replace a network control. Keep the host in a network with no route out.
+- The signature is verified when you build the bundle, on the connected side. The offline installer checks file hashes only, so compare the archive hash you recorded.
+- Some features need the internet and do not work offline: update checks, public model prices, advisory lookups (`sbom check`), `web_search`, remote extension sources and resolving SBOM build tools.
+- The install bundle and the Helm install have not been run on a real isolated network.
+
+### Build the bundle on a connected machine
+
+The script downloads the release binary, verifies its checksum and signature, and packs it with a manifest. Add `--image` for the container image and `--chart` for the Helm chart. It needs `cosign`, and `docker` for the image:
+
+```bash
+scripts/airgap/build-bundle.sh --version 0.44.0 --out ./bundle --platform linux-x64 --image --chart
+tar cf 0-airgap-0.44.0.tar -C bundle . && shasum -a 256 0-airgap-0.44.0.tar
+```
+
+Record the hash. The image is the `linux/amd64` image.
+
+### Install on the isolated machine
+
+Copy the archive across and compare its hash with the one you recorded. Then run the installer from the extracted folder:
+
+```bash
+mkdir 0-bundle && tar xf 0-airgap-0.44.0.tar -C 0-bundle
+sh 0-bundle/install-bundle.sh
+```
+
+The installer checks every file against the manifest, installs `0security` and the `0` alias, and loads the image into docker or podman. It makes no network request. To use the image in a cluster, push it to your internal registry and set `image.repository` and `image.tag` in the [Helm chart](#run-on-kubernetes-with-helm).
+
+### Point 0 at an offline model
+
+Run a model gateway inside the network and use it as an OpenAI-compatible endpoint, as in [Custom and local providers](/models/#custom-and-local-providers). Set these on every computer or pod that runs 0:
+
+```bash
+export ZERO_ENTERPRISE=1
+export OPENAI_BASE_URL=https://models.internal.example/v1
+export OPENAI_API_KEY=your-internal-gateway-key
+export ZERO_SELECTED_PROVIDER=openai
+export ZERO_MODEL=your-internal-model
+```
+
+Use a model that supports tool calls. Models without a built-in price show no cost.
+
+### Verify that nothing leaves
+
+Run this from a source checkout after `pnpm --filter @0/engine build && pnpm --filter @0/cli build`:
+
+```bash
+node scripts/airgap/verify-no-egress.mjs
+```
+
+It starts a stub model on `127.0.0.1`, runs 0 with `ZERO_ENTERPRISE=1`, and fails if any run tries a non-loopback connection. It also checks that two commands refuse to run, and that a control run with the switch off is seen by the recorder. For the strongest check, run it inside the 0 image with no network:
+
+```bash
+docker run --rm --network none --tmpfs /tmp:size=300m --entrypoint node \
+  -v "$PWD/scripts/airgap:/airgap:ro" \
+  ghcr.io/0sec-labs/0security:v0.44.0 /airgap/verify-no-egress.mjs --cli /app/dist/0.js
+```
+
+### Update
+
+Repeat the build on the connected machine with the new version, carry the archive in, and run the installer again. Take a [backup](#scheduled-backups-and-restore) first. To roll back, install the previous bundle and restore the backup.
+
+### Checklist
+
+1. Build the bundle, record the archive hash, and verify the hash after transfer.
+2. Install with `install-bundle.sh` and load the image into your internal registry.
+3. Set `ZERO_ENTERPRISE=1` everywhere 0 runs.
+4. Point the provider at your in-network gateway and test one prompt.
+5. Run `verify-no-egress.mjs` and keep the output with your records.
+6. Block outbound traffic from the 0 hosts at the network.
+
+---
+
 ## Security hardening checklist
 
 - Run as the `ubuntu` user (uid 1000). Never set `user: root`.
