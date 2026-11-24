@@ -119,7 +119,7 @@ num() { [[ ${1:-} =~ ^[0-9]{1,9}$ ]] && printf '%s' "$1" || printf '0'; }
 out() { [ -n "${GITHUB_OUTPUT:-}" ] && printf '%s=%s\n' "$1" "$2" >> "$GITHUB_OUTPUT"; return 0; }
 summary() { [ -n "${GITHUB_STEP_SUMMARY:-}" ] && printf '%s\n' "$1" >> "$GITHUB_STEP_SUMMARY"; return 0; }
 
-ZERO=${ZERO_BIN:-0}
+ZERO=${ZERO_BIN:-0security}
 
 # --- scan -----------------------------------------------------------------------------------------------
 

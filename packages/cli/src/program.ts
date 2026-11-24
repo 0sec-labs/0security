@@ -9,7 +9,7 @@ export function createRootProgram(): Command {
   const program = new Command();
   program
     .name(invokedProgramName())
-    .description("Security sentinels for your repositories. Run 0security to open the console.")
+    .description("A security agent for your code: scan, fix, SBOM and evidence. Run 0security to open the console.")
     .version(VERSION)
     .enablePositionalOptions();
   return program;

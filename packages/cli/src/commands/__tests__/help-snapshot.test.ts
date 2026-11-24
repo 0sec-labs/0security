@@ -30,7 +30,7 @@ export function helpSnapshot(program: Command): string {
 
 // Same root as index.ts (name, description, positional options); the snapshot uses the canonical name `0security`; the real `--version` flag is not part of the fixture.
 function plainRoot(): Command {
-  return new Command().name("0security").description("Security sentinels for your repositories. Run 0security to open the console.").enablePositionalOptions();
+  return new Command().name("0security").description("A security agent for your code: scan, fix, SBOM and evidence. Run 0security to open the console.").enablePositionalOptions();
 }
 
 export function eagerProgram(): Command {

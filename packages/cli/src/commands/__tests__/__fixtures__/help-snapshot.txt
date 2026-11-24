@@ -1,7 +1,7 @@
 ### 0security
 Usage: 0security [options] [command]
 
-Security sentinels for your repositories. Run 0security to open the console.
+A security agent for your code: scan, fix, SBOM and evidence. Run 0security to open the console.
 
 Options:
   -h, --help                       display help for command

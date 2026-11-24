@@ -396,7 +396,7 @@ const attachedConsoleDefaults: AttachedConsoleDeps = {
 };
 /** Attach without restoring snapshots or changing the engine's grants/configuration. */
 export async function runAttachedConsole(options: ConsoleOptions, prompt: string, deps: AttachedConsoleDeps = attachedConsoleDefaults): Promise<void> {
-  if (!options.chat?.trim()) throw new Error("Engine chat requires --chat <id>; create one with 0 chats create.");
+  if (!options.chat?.trim()) throw new Error("Engine chat requires --chat <id>; start one with `0security threads start` or in the console.");
   if (!prompt.trim()) throw new Error("Supply --print with a nonempty prompt.");
   if (options.enginesConfig && !options.engine) throw new Error("--engines-config requires --engine.");
   if (options.engineTokenEnv && !options.engineUrl) throw new Error("--engine-token-env requires --engine-url.");
@@ -429,7 +429,7 @@ export async function runAttachedConsole(options: ConsoleOptions, prompt: string
         if (options.format === "json" || options.format === "ndjson") deps.write(`${JSON.stringify(result)}\n`);
         else deps.write(`${streamed ? "" : final.lastOutcome?.assistantText ?? ""}\n`);
         if (final.pendingDecisions.length) {
-          if (options.format !== "json" && options.format !== "ndjson") deps.write(`Chat ${id} needs a decision; continue in the dashboard or use 0 chats decide.\n`);
+          if (options.format !== "json" && options.format !== "ndjson") deps.write(`Chat ${id} needs a decision; continue in the dashboard or with 0security threads send.\n`);
           process.exitCode = 2;
         }
         else if (final.lastOutcome?.stopReason === "error" || final.session.status === "failed") process.exitCode = 1;

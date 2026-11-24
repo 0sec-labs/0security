@@ -12,6 +12,7 @@ on the GitHub Release tag.
 
 ## [Unreleased]
 
+- The first line of `0security --help` now describes the product as a security agent (scan, fix, SBOM and evidence) instead of "security sentinels". The messages for `--chat` no longer point at a `0 chats` command that does not exist. The GitHub Action calls `0security`.
 ### Changed
 
 - the docs, help examples, hints and error messages name the command `0security`; `0` stays as its short alias. Set `ZERO_PROGRAM_NAME=0security` or `0` to force the name that help shows (tests and docs generation).

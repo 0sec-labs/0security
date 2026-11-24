@@ -74,7 +74,7 @@ function fixture() {
   const log = join(root, "argv.log");
   const sarif = join(root, "fake.sarif");
   writeFileSync(sarif, JSON.stringify({ runs: [{ results: [] }] }));
-  writeFileSync(join(bin, "0"), `#!/bin/sh
+  writeFileSync(join(bin, "0security"), `#!/bin/sh
 { echo "--"; printf '%s\\n' "$@"; } >> "$FAKE_LOG"
 out=""; prev=""
 for a in "$@"; do [ "$prev" = -o ] && out="$a"; prev="$a"; done
@@ -84,7 +84,7 @@ if [ -n "$out" ]; then cp "$FAKE_SARIF" "$out"; fi
 if [ "$1" = sbom ]; then exit "\${FAKE_CHECK_EXIT:-0}"; fi
 exit "\${FAKE_EXIT:-0}"
 `);
-  chmodSync(join(bin, "0"), 0o755);
+  chmodSync(join(bin, "0security"), 0o755);
   const run = (mode, extra = {}) => {
     const gout = join(root, "output");
     const gsum = join(root, "summary");
