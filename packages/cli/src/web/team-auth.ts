@@ -155,11 +155,10 @@ export class TeamAuth {
   private identityFor(user: TeamUserRow): TeamIdentity {
     const def = this.roles.get(user.role) ?? BUILT_IN_ROLES.viewer!;
     let role = nearestBuiltInRole(def.permissions);
+    // Owner-only handlers read `role`. Only the role named owner is ever "owner", however many permissions another role holds.
+    if (role === "owner" && user.role !== "owner") role = "editor";
     let permissions = def.permissions;
-    if (!FREE_ROLES.has(user.role) && !hasFeature("rbac")) {
-      if (role === "owner") role = "editor";
-      permissions = BUILT_IN_ROLES[role]!.permissions;
-    }
+    if (!FREE_ROLES.has(user.role) && !hasFeature("rbac")) permissions = BUILT_IN_ROLES[role]!.permissions;
     if (user.role === "owner") role = "owner";
     return { workspaceId: this.config!.workspace.id, userId: user.id, displayName: user.name, role, roleName: user.role, permissions: [...permissions], scope: this.scopeOf(user, def) };
   }

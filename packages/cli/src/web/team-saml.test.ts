@@ -289,7 +289,7 @@ describe("custom roles on SAML sessions", () => {
     expect(one.user).toMatchObject({ roleName: "payments-triager", scope: ["acme/pay-*"] });
     const two = await signedIn(auth, "alex@corp.test", ["sec-viewers", "triage", "ops"]);
     expect(two.user.roleName).toBe("ops-lead");
-    expect(auth.resolveSessionId(two.sessionId)).toMatchObject({ roleName: "ops-lead", role: "owner" });
+    expect(auth.resolveSessionId(two.sessionId)).toMatchObject({ roleName: "ops-lead", role: "editor" });
     // The session role does not change what the account is: the next sign-in without that group is a viewer again.
     expect((await signedIn(auth, "alex@corp.test", ["sec-viewers"])).user.roleName).toBe("viewer");
   });
