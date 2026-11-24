@@ -163,6 +163,7 @@ Set them inline, for example `env ZERO_LOG_FORMAT=json 0`.
 | Variable | Default | Effect |
 | --- | --- | --- |
 | `ZERO_SANDBOX` | `auto` | OS sandbox for extension scripts and MCP servers: `auto` (extensions that declare a `sandbox` block), `require` (every extension, refuse when none is available) or `off`. See [Sandboxing](/extensions/#sandboxing). |
+| `ZERO_SANDBOX_NODE_PERMISSION` | on | Set to `off` to start sandboxed `node` programs without `--permission`. See [Node scripts and servers](/extensions/#node-scripts-and-servers). |
 | `ZERO_SANDBOX_CPU_SECONDS` | unset | CPU time limit for a sandboxed run. |
 | `ZERO_SANDBOX_MEMORY_MB` | unset | Memory limit for a sandboxed run. Linux only. |
 

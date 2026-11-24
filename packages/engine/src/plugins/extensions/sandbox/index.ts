@@ -3,3 +3,4 @@ export { detectSandbox, planSandbox, resetSandboxDetection, sandboxLimits, sandb
 export { TRUSTED_INTERPRETER_NAMES, type TrustedInterpreter } from "./policy.js";
 export { DEFAULT_DECL, describeSandbox, parseSandboxDecl, resolveDeclaredPath, resolveSandbox, sandboxLine, sandboxShape, WORKSPACE_TOKEN, type ResolvedSandbox, type SandboxDecl } from "./policy.js";
 export { seatbeltArgs, seatbeltProfile } from "./seatbelt.js";
+export { detectNodePermission, isNodeProgram, nodePermissionArgs, resetNodePermissionDetection, type NodePermissionSupport } from "./node-permission.js";
