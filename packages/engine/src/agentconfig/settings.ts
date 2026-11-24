@@ -56,9 +56,11 @@ export function scanSettings(file: string, text: string, parsed: unknown): Agent
       if (key === "enabledMcpjsonServers" && Array.isArray(value) && value.length) add(JSON.stringify(key), `${key}: ${value.slice(0, 5).map(String).join(", ")}`, `enabledMcpjsonServers pre-approves ${value.length} MCP server${value.length === 1 ? "" : "s"} defined in the repository.`, "medium");
       if (key === "trust" && value === true && path.some(part => /mcp/i.test(part))) add(JSON.stringify(key), `${dotted}: true`, `MCP server "${path[path.length - 1]}" is trusted, so its tool calls skip confirmation.`);
       if ((key === "chat.tools.global.autoApprove" && value === true) || (key === "chat.tools.terminal.autoApprove" && isObject(value) && Object.entries(value).some(([k, v]) => v === true && /^\/?\.\*\/?$/.test(k)))) add(JSON.stringify(key), `${key}: ${value === true ? "true" : "a rule that matches every command"}`, `${key} approves agent actions without asking. The VS Code documentation says to set it in User settings.`);
-      if ((key === "approval_policy" && value === "never") || (key === "sandbox_mode" && value === "danger-full-access")) add(JSON.stringify(key), `${key} = ${String(value)}`, `${key} ${String(value)} removes the check before an agent runs commands.`);
+      // Codex: https://developers.openai.com/codex/config-basic and https://developers.openai.com/codex/agent-approvals-security
+      if (key === "approval_policy" && value === "never") add(JSON.stringify(key), `${key} = never`, "approval_policy never stops Codex from asking before it runs commands.", "medium");
+      if ((key === "sandbox_mode" && value === "danger-full-access") || (key === "default_permissions" && value === ":danger-full-access")) add(JSON.stringify(key), `${key} = ${String(value)}`, `${key} ${String(value)} runs Codex with no sandbox.`);
       if (key === "hooks" && !inHooks) hookTree(value, "");
-      if (typeof value === "string" && /--dangerously-skip-permissions|--allow-dangerously-skip-permissions|--dangerously-bypass-approvals-and-sandbox|--yolo\b|--trust-all-tools/.test(value)) add(JSON.stringify(value), `${dotted}: ${value.slice(0, 120)}`, `${dotted} passes a flag that turns off the permission check.`);
+      if (typeof value === "string" && /--dangerously-skip-permissions|--allow-dangerously-skip-permissions|--dangerously-bypass-approvals-and-sandbox|--sandbox[ =]danger-full-access|--yolo\b|--trust-all-tools/.test(value)) add(JSON.stringify(value), `${dotted}: ${value.slice(0, 120)}`, `${dotted} passes a flag that turns off the permission check.`);
       walk(value, here, depth + 1);
     }
   };
