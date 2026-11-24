@@ -5,7 +5,7 @@ description: Which 0security files support evidence for which obligations of the
 
 The Cyber Resilience Act (Regulation (EU) 2024/2847) puts duties on manufacturers of products with digital elements. 0 produces records that can support evidence for some of them. This page maps the files to the duties.
 
-0 does not decide whether a product conforms, and no file here says it does. Conformity is the manufacturer's responsibility. Harmonised standards are still being written, and some product classes need a notified body. Check the article and annex references below against the text of the Regulation and with your legal and compliance advisers.
+0 does not decide whether a product conforms, and no file here says it does. Conformity is the manufacturer's responsibility. Some product classes need a notified body. The references below are to the [Official Journal text on EUR-Lex](https://eur-lex.europa.eu/eli/reg/2024/2847/oj). Confirm current requirements with your legal and compliance advisers.
 
 ## Produce the files
 
@@ -17,18 +17,18 @@ To sign the folder with your key, see [Sign an evidence folder](/ci/#sign-an-evi
 
 ## What each file supports
 
-| Area of the Regulation | File or command | Supports evidence for |
+| Provision | File or command | Supports evidence for |
 | --- | --- | --- |
-| Annex I Part II, identify and document vulnerabilities and components, including a software bill of materials | `sbom.cdx.json` from `0security sbom generate` | A machine-readable list of components read from your lockfiles |
-| Annex I Part II, regular tests and reviews of security | `findings.json`, `findings.md`, `findings.sarif` | Which scans found what, with severity, status, triage notes and times |
-| Annex I Part II, address and remediate vulnerabilities without delay | `findings.json` triage and workflow times, `fixes.md` | When a finding was recorded, how it was triaged, and which fix branches exist |
-| Annex I Part II, known vulnerabilities in components | `advisories.json` from `--check-advisories` | A lookup of your components in the public OSV database on a given date |
-| Article 13 and Annex VII, technical documentation | The whole folder with its `README.md` and `manifest.json` | Records you can attach to technical documentation, with tool version, models, scan ids and git commit |
-| Article 14, reporting actively exploited vulnerabilities | `0security findings report-draft` | A draft of each reporting stage that a person completes and submits |
+| Annex I Part II point 1; Annex VII points 2(b) and 8 | `sbom.cdx.json` from `0security sbom generate` | A machine-readable component list read from your lockfiles |
+| Annex I Part II point 3; Annex VII point 6 | `findings.json`, `findings.md`, `findings.sarif` | Security tests that were run: what they found, with severity, status, triage notes and times |
+| Annex I Part II point 2; Article 13(7) | `findings.json` triage and workflow times, `fixes.md` | Vulnerabilities you became aware of, when they were recorded, how they were triaged, and which fix branches exist |
+| Article 13(5) and 13(6) | `advisories.json` from `--check-advisories` | A lookup of your third-party components in the public OSV database on a given date |
+| Article 13(12), Article 31, Annex VII | The whole folder with its `README.md` and `manifest.json` | Records you can attach to technical documentation, with tool version, models, scan ids and git commit |
+| Article 14(2) | `0security findings report-draft` | A draft of the early warning (24 hours), the vulnerability notification (72 hours) and the final report that a person completes and submits |
 | Integrity of the records above | `evidence.dsse.json` and `0security evidence verify` | The files are unchanged since the holder of your key signed them |
-| Integrity of records of privileged actions | `0security config audit-verify`, `audit-export --with-proof` | The audit log was not edited, reordered or cut |
+| Integrity of your own audit records | `0security config audit-verify`, `audit-export --with-proof` | The audit log was not edited, reordered or cut |
 
-Signing and the retention of audit records are paid features. Verifying is free.
+The Regulation does not require a signature or an audit log. The last two rows help you show that your own records were not altered. Signing and retention of audit records are paid features. Verifying is free.
 
 ## What it does not show
 
@@ -38,8 +38,8 @@ Signing and the retention of audit records are paid features. Verifying is free.
 - That an advisory lookup is current beyond its date.
 - Who signed, beyond who holds the key. A signature does not show the findings are right.
 - That the audit log is honest. The chain shows it is consistent. Someone who can rewrite the whole database can rewrite the chain, so keep a copy of the head hash elsewhere.
-- Any duty that is not about records: the risk assessment, secure design, the support period, the coordinated disclosure policy, the declaration of conformity and notifying authorities. A person does those.
+- Any duty that is not about these records: the cybersecurity risk assessment (Article 13(2) to 13(4)), secure design (Annex I Part I), the support period, the coordinated vulnerability disclosure policy, the conformity assessment (Article 32), the declaration of conformity, and notifying the authorities through the single reporting platform. A person does those.
 
 ## Keep the files
 
-The Regulation sets how long a manufacturer keeps technical documentation. Confirm the period with your advisers, and keep the evidence folders, the public key and the audit archives for at least that long.
+Article 13(13) requires the technical documentation to be kept for at least 10 years after the product is placed on the market, or for the support period, whichever is longer. Keep the evidence folders, the public key and the audit archives for at least that long.
