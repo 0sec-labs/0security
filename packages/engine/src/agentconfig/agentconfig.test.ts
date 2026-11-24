@@ -34,6 +34,23 @@ describe("agent-config rules: each positive case fires and each decoy stays quie
   }
 });
 
+describe("rule references", () => {
+  it("gives every rule a non-empty list of https sources, and says which sources in the SARIF", () => {
+    for (const rule of AGENT_CONFIG_RULES) {
+      expect(rule.reference.length, rule.id).toBeGreaterThan(0);
+      for (const url of rule.reference) expect(url, rule.id).toMatch(/^https:\/\/[a-z0-9.-]+\/\S*$/);
+      expect(rule.explanation, rule.id).not.toMatch(/MCPoison|CurXecute|Amazon Q Developer|CVE-2025-8217|AWS-2025-015/);
+    }
+    const sarif = agentConfigToSarif([], { toolVersion: "0" }) as { runs: Array<{ tool: { driver: { rules: Array<{ helpUri: string; properties: { references: string[] } }> } } }> };
+    for (const rule of sarif.runs[0]!.tool.driver.rules) { expect(rule.helpUri).toMatch(/^https:/); expect(rule.properties.references.length).toBeGreaterThan(0); }
+  });
+  it("cites each CVE only for what its advisory says", () => {
+    const text = AGENT_CONFIG_RULES.map(rule => rule.explanation).join("\n");
+    expect(text).toContain("CVE-2025-54136: an approved MCP configuration could be changed");
+    expect(text).toContain("CVE-2025-54135: the agent could be made to create .cursor/mcp.json");
+  });
+});
+
 describe("hidden Unicode", () => {
   it("reports the code points, line and column of a run, and decodes tag characters", () => {
     const dir = repo({ "CLAUDE.md": `one\nab${cp(0x202e, 0x202e)}cd\ntwo ${[..."steal"].map(c => cp(0xe0000 + c.charCodeAt(0))).join("")}\n` });
