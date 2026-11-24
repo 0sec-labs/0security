@@ -58,7 +58,7 @@ export function scanSettings(file: string, text: string, parsed: unknown): Agent
       if ((key === "chat.tools.global.autoApprove" && value === true) || (key === "chat.tools.terminal.autoApprove" && isObject(value) && Object.entries(value).some(([k, v]) => v === true && /^\/?\.\*\/?$/.test(k)))) add(JSON.stringify(key), `${key}: ${value === true ? "true" : "a rule that matches every command"}`, `${key} approves agent actions without asking. The VS Code documentation says to set it in User settings.`);
       if ((key === "approval_policy" && value === "never") || (key === "sandbox_mode" && value === "danger-full-access")) add(JSON.stringify(key), `${key} = ${String(value)}`, `${key} ${String(value)} removes the check before an agent runs commands.`);
       if (key === "hooks" && !inHooks) hookTree(value, "");
-      if (typeof value === "string" && /--dangerously-skip-permissions|--allow-dangerously-skip-permissions|--yolo\b|--trust-all-tools/.test(value)) add(JSON.stringify(value), `${dotted}: ${value.slice(0, 120)}`, `${dotted} passes a flag that turns off the permission check.`);
+      if (typeof value === "string" && /--dangerously-skip-permissions|--allow-dangerously-skip-permissions|--dangerously-bypass-approvals-and-sandbox|--yolo\b|--trust-all-tools/.test(value)) add(JSON.stringify(value), `${dotted}: ${value.slice(0, 120)}`, `${dotted} passes a flag that turns off the permission check.`);
       walk(value, here, depth + 1);
     }
   };

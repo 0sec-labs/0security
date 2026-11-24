@@ -90,7 +90,7 @@ export const RULES: readonly AgentConfigRule[] = [
     // Cursor CLI: https://cursor.com/docs/cli/reference/permissions.md (.cursor/cli.json permissions.allow, Shell(curl:*))
     // Gemini CLI: https://github.com/google-gemini/gemini-cli/blob/main/docs/reference/configuration.md (mcpServers trust, --yolo)
     // VS Code: https://code.visualstudio.com/docs/agents/run/approvals (chat.tools.global.autoApprove, chat.tools.terminal.autoApprove)
-    // Codex: https://developers.openai.com/codex/config-basic (approval_policy, sandbox_mode)
+    // Codex: https://developers.openai.com/codex/config-basic (approval_policy, sandbox_mode), https://developers.openai.com/codex/agent-approvals-security (--dangerously-bypass-approvals-and-sandbox, alias --yolo)
     // Nx s1ngularity: https://www.wiz.io/blog/s1ngularitys-aftermath (the malware's CLI flags)
     reference: [
       "https://code.claude.com/docs/en/permissions",
@@ -100,9 +100,10 @@ export const RULES: readonly AgentConfigRule[] = [
       "https://github.com/google-gemini/gemini-cli/blob/main/docs/reference/configuration.md",
       "https://code.visualstudio.com/docs/agents/run/approvals",
       "https://developers.openai.com/codex/config-basic",
+      "https://developers.openai.com/codex/agent-approvals-security",
       "https://www.wiz.io/blog/s1ngularitys-aftermath",
     ],
-    explanation: "These settings remove the prompt that stops an injected instruction from running a command: a Claude Code allow rule such as Bash(*) (the same as Bash), Bash(curl:*) or Bash(rm:*); defaultMode bypassPermissions; enableAllProjectMcpServers and enabledMcpjsonServers, which approve the servers in a project's .mcp.json; a Cursor CLI Shell(curl:*) allow in .cursor/cli.json; a Gemini CLI MCP server with trust set to true; VS Code chat.tools.global.autoApprove; and Codex approval_policy never or sandbox_mode danger-full-access. The same goes for the flags --dangerously-skip-permissions, --yolo and --trust-all-tools. The Nx s1ngularity malware (August 2025) started the Claude, Gemini and Amazon Q command line tools with these flags (Wiz analysis). Where a tool honours these settings depends on the tool: Claude Code ignores enableAllProjectMcpServers and enabledMcpjsonServers from a project file until you trust the folder, and ignores bypassPermissions as defaultMode in project settings files. The VS Code documentation says to set the auto-approve settings in User settings.",
+    explanation: "These settings remove the prompt that stops an injected instruction from running a command: a Claude Code allow rule such as Bash(*) (the same as Bash), Bash(curl:*) or Bash(rm:*); defaultMode bypassPermissions; enableAllProjectMcpServers and enabledMcpjsonServers, which approve the servers in a project's .mcp.json; a Cursor CLI Shell(curl:*) allow in .cursor/cli.json; a Gemini CLI MCP server with trust set to true; VS Code chat.tools.global.autoApprove; and Codex approval_policy never or sandbox_mode danger-full-access. The same goes for the flags --dangerously-skip-permissions, --dangerously-bypass-approvals-and-sandbox (Codex), --yolo and --trust-all-tools. The Nx s1ngularity malware (August 2025) started the Claude, Gemini and Amazon Q command line tools with these flags (Wiz analysis). Where a tool honours these settings depends on the tool: Claude Code ignores enableAllProjectMcpServers and enabledMcpjsonServers from a project file until you trust the folder, and ignores bypassPermissions as defaultMode in project settings files. The VS Code documentation says to set the auto-approve settings in User settings.",
     fix: "Allow only the exact commands you need, for example Bash(git status). Remove blanket allows and auto-approval from files in the repository. Set personal choices in your user settings.",
   }),
   r({
