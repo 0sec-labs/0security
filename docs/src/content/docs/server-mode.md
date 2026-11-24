@@ -404,7 +404,7 @@ Groups are optional. With `groupAttribute` and `groupRoles`, a member's role is 
 
 The same browser that started the sign-in must finish it. The session cookie lasts eight hours, as with OIDC.
 
-Limits: the signature check relies on the open-source node-saml and xml-crypto libraries. It is tested with signed test responses and not yet against a real Okta or Entra ID tenant. Metadata is trusted as you supply it, and its own signature is not checked. Single logout, encrypted assertions and signed requests are not supported. Pending sign-ins and seen assertion IDs are kept in memory, so a restart forgets them. A `metadataUrl` is refused under `ZERO_ENTERPRISE`; use `metadataFile`.
+Limits: the signature check relies on the open-source node-saml and xml-crypto libraries. It is tested with signed test responses and not yet against a real Okta or Entra ID tenant. Metadata is trusted as you supply it, and its own signature is not checked. Single logout, encrypted assertions and signed requests are not supported. Pending sign-ins and seen assertion IDs are kept in memory, so a restart forgets them. Anyone can start a sign-in, so one address may hold 20 pending sign-ins and the server 1000. Behind a reverse proxy every visitor shares the proxy's address, so the per-address limit then protects nothing; rate limit `/api/team/auth/saml/sso` at the proxy. A `metadataUrl` is refused under `ZERO_ENTERPRISE`; use `metadataFile`.
 
 ## Teams and enterprise
 

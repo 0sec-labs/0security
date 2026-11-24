@@ -99,7 +99,7 @@ async function handleSamlRequest(req: IncomingMessage, url: URL, route: string, 
   };
   if (route === "metadata" && method === "GET") return { status: 200, xml: await auth.samlMetadata() };
   if (route === "sso" && method === "GET") {
-    try { const sso = await auth.beginSAML(); return { status: 302, redirect: sso.url, headers: { "Set-Cookie": sso.setCookie } }; } catch (error) { return denied(error); }
+    try { const sso = await auth.beginSAML(client); return { status: 302, redirect: sso.url, headers: { "Set-Cookie": sso.setCookie } }; } catch (error) { return denied(error); }
   }
   if (route === "acs" && method === "POST") {
     if (!readForm) throw new TeamAuthError("SAML sign-in is not available on this engine.", 404);

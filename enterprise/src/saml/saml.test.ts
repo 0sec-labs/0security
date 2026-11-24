@@ -255,11 +255,26 @@ describe("one-time use and replay", () => {
     expect(await reason(sp.consume({ SAMLResponse: TestIdp.encode(idp.response({ requestId: request.id })), RelayState: relayState }))).toBe("unknown-relay-state");
   });
 
-  it("bounds pending sign-ins", async () => {
+  it("bounds pending sign-ins per client and in total", async () => {
     const sp = provider();
-    for (let i = 0; i < 1000; i++) await sp.begin("b");
-    expect(await reason(sp.begin("b"))).toBe("pending-full");
-  }, 60_000);
+    for (let i = 0; i < 20; i++) await sp.begin("b", "203.0.113.1");
+    expect(await reason(sp.begin("b", "203.0.113.1"))).toBe("pending-full");
+    await sp.begin("b", "203.0.113.2"); // another client is not locked out by the first
+  }, 120_000);
+
+  it("takes the pending slot before awaiting, so parallel starts cannot pass the caps", async () => {
+    const sp = provider();
+    const results = await Promise.allSettled(Array.from({ length: 60 }, () => sp.begin("b", "198.51.100.7")));
+    expect(results.filter(r => r.status === "fulfilled")).toHaveLength(20);
+    expect(results.filter(r => r.status === "rejected")).toHaveLength(40);
+  }, 120_000);
+
+  it("enforces the global cap under parallel starts", async () => {
+    const sp = provider();
+    const results = await Promise.allSettled(Array.from({ length: 1100 }, (_, i) => sp.begin("b", `c${i}`)));
+    expect(results.filter(r => r.status === "fulfilled")).toHaveLength(1000);
+    expect(await reason(sp.begin("b", "late"))).toBe("pending-full");
+  }, 180_000);
 });
 
 describe("RelayState", () => {

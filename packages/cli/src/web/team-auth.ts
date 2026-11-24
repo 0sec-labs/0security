@@ -200,7 +200,7 @@ export class TeamAuth {
   }
   // SAML sign-in (enterprise license). The checks live in team-saml.ts and the enterprise package.
   private requireSaml(): TeamSaml { if (!this.saml) throw new TeamAuthError("SAML sign-in is not configured", 404); return this.saml; }
-  beginSAML() { return this.requireSaml().begin(); }
+  beginSAML(client = "") { return this.requireSaml().begin(client); }
   samlAcs(form: { SAMLResponse?: unknown; RelayState?: unknown }) { return this.requireSaml().acs(form); }
   samlMetadata() { return this.requireSaml().metadata(); }
   samlComplete(ticket: string | null, req: Pick<IncomingMessage, "headers">) {

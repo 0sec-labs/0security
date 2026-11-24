@@ -24,6 +24,7 @@ import { assertSafeResponseXml, assertStrongSignatureAlgorithms } from "./xml-gu
 
 const BEARER = "urn:oasis:names:tc:SAML:2.0:cm:bearer";
 const MAX_PENDING = 1000;
+const MAX_PENDING_PER_CLIENT = 20;
 const REQUEST_TTL_MS = 5 * 60 * 1000;
 const MAX_ASSERTION_AGE_MS = 10 * 60 * 1000;
 const MAX_RESPONSE_B64 = 700_000;
@@ -73,7 +74,7 @@ function fail(message: string): never { throw new SamlError("assertion-invalid",
 
 export class SamlServiceProvider {
   private readonly cache = new BoundedCache(4096);
-  private readonly pending = new Map<string, { requestId: string; binding: string; expires: number }>();
+  private readonly pending = new Map<string, { requestId: string; binding: string; client: string; expires: number }>();
   private readonly skew: number;
   private readonly requirement: SignatureRequirement;
   private readonly now: () => number;
@@ -129,15 +130,25 @@ export class SamlServiceProvider {
    * Start a sign-in. `binding` is an opaque value the caller ties to the browser (a cookie secret);
    * it is handed back with the identity so the caller can check the same browser finishes the flow.
    * The RelayState is a random lookup key, never a URL, so it cannot be turned into a redirect.
+   * `client` names who is asking (the socket address). Anyone can start a sign-in, so one client may hold only
+   * a few pending requests, and the slot is taken before any await so parallel starts cannot pass the caps.
    */
-  async begin(binding: string): Promise<SamlStart> {
+  async begin(binding: string, client = ""): Promise<SamlStart> {
     this.sweep();
     if (this.pending.size >= MAX_PENDING) throw new SamlError("pending-full", "Too many pending sign-ins.", 429);
+    let held = 0;
+    for (const entry of this.pending.values()) if (entry.client === client) held++;
+    if (held >= MAX_PENDING_PER_CLIENT) throw new SamlError("pending-full", "Too many pending sign-ins from this address.", 429);
     const relayState = randomBytes(24).toString("base64url");
-    let requestId = "";
-    const url = await this.saml(() => (requestId = `_${randomBytes(20).toString("hex")}`)).getAuthorizeUrlAsync(relayState, undefined, {});
-    this.pending.set(relayState, { requestId, binding, expires: this.now() + REQUEST_TTL_MS });
-    return { url, relayState };
+    const requestId = `_${randomBytes(20).toString("hex")}`;
+    this.pending.set(relayState, { requestId, binding, client, expires: this.now() + REQUEST_TTL_MS }); // reserved synchronously
+    try {
+      const url = await this.saml(() => requestId).getAuthorizeUrlAsync(relayState, undefined, {});
+      return { url, relayState };
+    } catch (error) {
+      this.pending.delete(relayState);
+      throw error;
+    }
   }
 
   /** Check a POSTed response against the request it answers. Throws SamlError on any doubt. */

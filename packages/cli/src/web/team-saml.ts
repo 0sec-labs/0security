@@ -110,11 +110,11 @@ export class TeamSaml {
     throw error;
   }
 
-  async begin(): Promise<{ url: string; setCookie: string }> {
+  async begin(client = ""): Promise<{ url: string; setCookie: string }> {
     try {
       const sp = await this.service();
       const binding = randomBytes(32).toString("base64url");
-      const { url } = await sp.begin(binding);
+      const { url } = await sp.begin(binding, client);
       return { url, setCookie: this.deps.cookie(SAML_COOKIE, binding, COOKIE_MS / 1000) };
     } catch (error) { return this.wrap(error); }
   }
