@@ -362,4 +362,23 @@ describe("runInterview", () => {
     expect(finalParsed.entries[0]?.paths).toEqual(["src/routes/export.js"]);
     expect(matchesScope({ category: "broken-access-control", path: "src/admin/delete.js" }, finalParsed.entries)).toBeUndefined();
   });
+
+  it("allows route-group parentheses in evidence paths and fails closed when every path of an entry is rejected", () => {
+    const routeGroup: InterviewQuestion = { id: "rg", question: "Auth?", category: "broken-access-control", evidence: "app/(auth)/login.ts:10" };
+    const kept = entriesFromAnswers([{ question: routeGroup, decision: "out", words: "public login" }], [], NOW);
+    expect(kept).toHaveLength(1);
+    expect(kept[0]?.paths).toEqual(["app/(auth)/login.ts"]);
+
+    const bracketRoute: InterviewQuestion = { id: "br", question: "Page?", category: "broken-access-control", evidence: "app/[id]/page.ts:12" };
+    const droppedEvidence = entriesFromAnswers([{ question: bracketRoute, decision: "out", words: "public page" }], [], NOW);
+    expect(droppedEvidence).toEqual([]);
+
+    const noEvidence: InterviewQuestion = { id: "ne", question: "Export?", category: "broken-access-control" };
+    const droppedWorded = entriesFromAnswers(
+      [{ question: noEvidence, decision: "out", words: "public export" }],
+      [{ questionId: "ne", reason: "public export", paths: ["src/a,b.ts", "../escape.ts"] }],
+      NOW,
+    );
+    expect(droppedWorded).toEqual([]);
+  });
 });
