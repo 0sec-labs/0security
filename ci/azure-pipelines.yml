@@ -1,0 +1,48 @@
+# Scan each pull request with 0 and show the findings in Bitbucket Code Insights.
+# Keep OPENAI_API_KEY and BITBUCKET_TOKEN in a variable group that needs approval. Each secret is mapped into one step only.
+trigger: none
+pr:
+  branches:
+    include: [main]
+
+variables:
+  VERSION: 0.44.0 # Pin the CLI
+
+pool:
+  vmImage: ubuntu-latest
+
+steps:
+  - checkout: self
+    fetchDepth: 0
+    persistCredentials: false
+  - bash: |
+      set -eu
+      RAW="https://raw.githubusercontent.com/0sec-labs/0security/v${VERSION}"
+      tools="$(mktemp -d)"; export INSTALL_DIR="$tools" PATH="$tools:$PATH"
+      curl -fsSL -o "$tools/install.sh" "$RAW/install.sh"
+      curl -fsSL -o "$tools/0-ci-scan.sh" "$RAW/ci/scripts/0-ci-scan.sh"
+      (cd "$tools" && RELEASE_BASE_URL="https://github.com/0sec-labs/0security/releases/download/v${VERSION}" sh install.sh)
+      base="${TARGET_BRANCH#refs/heads/}"
+      ZEROCI_BASE_BRANCH="$base" ZEROCI_OUT_DIR="$BUILD_ARTIFACTSTAGINGDIRECTORY" sh "$tools/0-ci-scan.sh"
+    displayName: 0 security scan
+    env:
+      VERSION: $(VERSION)
+      TARGET_BRANCH: $(System.PullRequest.TargetBranch)
+      OPENAI_API_KEY: $(OPENAI_API_KEY)
+  - bash: |
+      set -eu
+      RAW="https://raw.githubusercontent.com/0sec-labs/0security/v${VERSION}"
+      tools="$(mktemp -d)"; export INSTALL_DIR="$tools" PATH="$tools:$PATH"
+      curl -fsSL -o "$tools/install.sh" "$RAW/install.sh"
+      curl -fsSL -o "$tools/0-ci-publish.sh" "$RAW/ci/scripts/0-ci-publish.sh"
+      (cd "$tools" && RELEASE_BASE_URL="https://github.com/0sec-labs/0security/releases/download/v${VERSION}" sh install.sh)
+      ZEROCI_OUT_DIR="$BUILD_ARTIFACTSTAGINGDIRECTORY" ZEROCI_UPLOAD_TO=bitbucket-cloud sh "$tools/0-ci-publish.sh"
+    displayName: Publish report
+    condition: always()
+    env:
+      VERSION: $(VERSION)
+      ZEROCI_REPO: workspace/repo
+      BITBUCKET_TOKEN: $(BITBUCKET_TOKEN)
+  - publish: $(Build.ArtifactStagingDirectory)/scan.json
+    artifact: 0-scan
+    condition: always()

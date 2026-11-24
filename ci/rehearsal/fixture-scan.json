@@ -1,0 +1,23 @@
+{
+  "findings": [
+    {
+      "category": "sql-injection", "severity": "high", "title": "Rehearsal finding: SQL built from input",
+      "description": "Fixture for the Bitbucket Cloud rehearsal. Not a real finding.", "status": "confirmed", "confidence": 0.9,
+      "location": { "path": "README.md", "startLine": 1 },
+      "evidence": { "analysis": "CWE: CWE-89\nFixture text." }, "impact": { "rationale": "Fixture rationale." },
+      "suggestedFix": { "replacement": "use a parameterised query" }
+    },
+    {
+      "category": "weak-crypto", "severity": "medium", "title": "Rehearsal finding: weak hash",
+      "description": "Fixture for the Bitbucket Cloud rehearsal. Not a real finding.", "status": "confirmed", "confidence": 0.8,
+      "location": { "path": "README.md", "startLine": 2 },
+      "evidence": { "analysis": "CWE: CWE-327\nFixture text." }, "impact": { "rationale": "Fixture rationale." }
+    },
+    {
+      "category": "hardcoded-secret", "severity": "low", "title": "Rehearsal finding: placeholder secret",
+      "description": "Fixture for the Bitbucket Cloud rehearsal. Not a real finding.", "status": "confirmed", "confidence": 0.7,
+      "location": { "path": "README.md", "startLine": 3 },
+      "evidence": { "analysis": "CWE: CWE-798\nFixture text." }, "impact": { "rationale": "Fixture rationale." }
+    }
+  ]
+}

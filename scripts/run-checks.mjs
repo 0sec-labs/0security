@@ -22,7 +22,7 @@ export const GROUPS = {
     "pnpm docs:check",
     "pnpm check:docs-commands",
     "pnpm test:docs-pointers",
-    "node --test scripts/install-script.test.mjs scripts/stage-release-assets.test.mjs scripts/action-contract.test.mjs",
+    "node --test scripts/install-script.test.mjs scripts/stage-release-assets.test.mjs scripts/action-contract.test.mjs scripts/ci-recipes.test.mjs",
     "pnpm check:update-contract",
     "node --test scripts/bench/match.test.mjs scripts/bench/verify-score.test.mjs scripts/bench/fix-score.test.mjs scripts/bench/triage-score.test.mjs scripts/bench/real-apps.test.mjs scripts/bench/java.test.mjs",
     "node scripts/bench/run.mjs --dry-run",
