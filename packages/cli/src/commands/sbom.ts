@@ -1,4 +1,5 @@
 /**
+ * `0 sbom agent-config [path]` checks the files AI coding tools read (rules, MCP and settings) for hidden text, unpinned launchers, secrets and broad permissions.
  * `0 sbom scan-models <path>` lists the code-running imports in pickle-based model files.
  * `0 sbom generate [folder]` writes a CycloneDX (or SPDX) SBOM from the lockfiles in a folder, or runs syft, cdxgen or trivy; `0 sbom check <file>` looks every
  * component up in the public OSV advisory database. Nothing is installed or run: lockfiles, pom.xml and Gradle files are read as text.
@@ -8,7 +9,7 @@ import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { relative, resolve, sep } from "node:path";
 import { createInterface } from "node:readline/promises";
 import type { Command } from "commander";
-import { assertEgressAllowed, EXTERNAL_GENERATORS, generateSbom, ResolveFailedError, resolveJvmDependencies, parseDependencyReport, mergeComponents, scanJavaUsage, javaUsageToText, GeneratorNotInstalledError, IMAGE_GENERATORS, parseImageSource, LOCKFILES, modelScanToSarif, runExternalGenerator, scanModelPath, toSpdx, type Component, type ExternalGenerator, type ImageSource, type ModelFileResult } from "@0/engine";
+import { agentConfigToSarif, agentConfigToText, AGENT_CONFIG_SEVERITIES, assertEgressAllowed, EXTERNAL_GENERATORS, scanAgentConfig, generateSbom, ResolveFailedError, resolveJvmDependencies, parseDependencyReport, mergeComponents, scanJavaUsage, javaUsageToText, GeneratorNotInstalledError, IMAGE_GENERATORS, parseImageSource, LOCKFILES, modelScanToSarif, runExternalGenerator, scanModelPath, toSpdx, type Component, type ExternalGenerator, type ImageSource, type ModelFileResult } from "@0/engine";
 import { VERSION } from "@0/engine/shared";
 import { finishWithError, UsageError } from "./output.js";
 import { registerSbomLicenses } from "./sbom-licenses.js";
@@ -186,6 +187,30 @@ export function runScanModels(path: string, options: { format?: string }, deps: 
   return dangerous.length ? 1 : 0;
 }
 
+export interface AgentConfigOptions { format?: string; output?: string; failOn?: string; allowHost?: string[] }
+
+/** `0 sbom agent-config [path]`: reads the files AI coding tools take instructions and settings from, as text, and lists what could steer or endanger an agent. No model, no network. */
+export function runAgentConfig(path: string, options: AgentConfigOptions, deps: SbomDeps): number {
+  const format = options.format ?? "text";
+  if (!["text", "json", "sarif"].includes(format)) throw new UsageError("--format must be text, json or sarif.");
+  if (options.failOn !== undefined && !(AGENT_CONFIG_SEVERITIES as readonly string[]).includes(options.failOn)) throw new UsageError(`--fail-on must be one of: ${AGENT_CONFIG_SEVERITIES.join(", ")}.`);
+  const target = resolve(path);
+  let info; try { info = statSync(target); } catch { throw new UsageError(`'${path}' does not exist.`); }
+  const report = scanAgentConfig(target, options.allowHost?.length ? { allowHosts: options.allowHost } : {});
+  const base = info.isDirectory() ? report.root : target.split(sep).slice(0, -1).join(sep) || sep;
+  const toCwd = (file: string): string => { const absolute = resolve(base, file); const rel = relative(process.cwd(), absolute); return (rel && !rel.startsWith("..") ? rel : absolute).split(sep).join("/"); };
+  const body = format === "json" ? `${JSON.stringify({ root: path, filesScanned: report.filesScanned, findings: report.findings, skipped: report.skipped, truncated: report.truncated }, null, 2)}\n`
+    : format === "sarif" ? `${JSON.stringify(agentConfigToSarif(report.findings, { toolVersion: VERSION, uri: toCwd }), null, 2)}\n` : agentConfigToText(report);
+  if (options.output) { deps.write(resolve(options.output), body); deps.err(`Wrote ${options.output}`); } else deps.out(body);
+  const names: Record<string, string> = { "too-large": "larger than 1 MB", "symlink-outside": "a symbolic link that leaves the folder", "not-a-regular-file": "not a regular file", unreadable: "could not be read", "not-valid-json": "not valid JSON" };
+  for (const item of report.skipped.slice(0, 20)) deps.err(`not scanned: ${item.file} (${names[item.reason]})`);
+  if (report.skipped.length > 20) deps.err(`and ${report.skipped.length - 20} more files not scanned.`);
+  if (report.truncated) deps.err("The folder was too large to walk completely; some files were not looked at.");
+  if (format !== "text" || options.output) deps.err(`${report.findings.length} finding${report.findings.length === 1 ? "" : "s"} in ${report.filesScanned.length} agent configuration file${report.filesScanned.length === 1 ? "" : "s"}.`);
+  const limit = options.failOn === undefined ? -1 : AGENT_CONFIG_SEVERITIES.indexOf(options.failOn as typeof AGENT_CONFIG_SEVERITIES[number]);
+  return limit >= 0 && report.findings.some(item => AGENT_CONFIG_SEVERITIES.indexOf(item.severity) <= limit) ? 1 : 0;
+}
+
 /** `0 sbom java-usage <sbom> [folder]`: where the application's own source imports each Maven component. */
 export function runJavaUsage(file: string, folder: string, options: { format?: string }, deps: SbomDeps): void {
   const format = options.format ?? "text";
@@ -204,7 +229,7 @@ export function runJavaUsage(file: string, folder: string, options: { format?: s
 }
 
 export function registerSbomCommand(program: Command, deps: SbomDeps = defaults): void {
-  const sbom = program.command("sbom").description("Generate an SBOM from lockfiles, check one against known advisories, and scan model files");
+  const sbom = program.command("sbom").description("Generate an SBOM from lockfiles, check one against known advisories, and scan model files and agent configuration");
   sbom.command("generate")
     .description("Write an SBOM (CycloneDX 1.5 or SPDX 2.3) from the lockfiles in a folder (npm, pnpm, yarn, Cargo, Go, Python, Ruby, PHP, .NET, Maven, Gradle, Dart, Elixir)")
     .argument("[folder]", "Folder to read lockfiles from (default: .)")
@@ -231,6 +256,18 @@ export function registerSbomCommand(program: Command, deps: SbomDeps = defaults)
     .addHelpText("after", "\nFiles are read as bytes: nothing is loaded, imported or executed, and no Python is needed. Content decides the format, not the extension. Safetensors, GGUF, ONNX and TFLite are not pickle formats. 'No dangerous imports found' is not a statement that a file is safe.\nExit codes: 0 nothing dangerous, 1 a file imports something dangerous, 2 usage error.")
     .action((path: string, options: { format?: string }) => {
       try { const code = runScanModels(path, options, deps); if (code) process.exitCode = code; }
+      catch (error) { finishWithError(error, { err: deps.err }, options.format === "json"); }
+    });
+  sbom.command("agent-config")
+    .description("Check the rules, MCP and settings files AI coding tools read in a repository for hidden text, unpinned launchers, secrets and broad permissions")
+    .argument("[path]", "Folder to search, or one file (default: .)")
+    .option("--format <format>", "Output: text, json or sarif (SARIF imports with `0security findings import`)", "text")
+    .option("-o, --output <file>", "Write the result to a file instead of stdout")
+    .option("--fail-on <severity>", "Exit 1 when a finding is at or above this severity: critical, high, medium, low or info")
+    .option("--allow-host <host>", "Host a remote MCP server may use; repeat the option or separate hosts with commas. `*.example.com` allows subdomains", (value: string, previous: string[] = []) => [...previous, ...value.split(",").map(host => host.trim()).filter(Boolean)])
+    .addHelpText("after", "\nFiles are read as text and size-limited: nothing is executed, there is no model call and nothing goes over the network. Symbolic links that leave the folder are not followed. The wording rule is a heuristic and can miss or misjudge text.\nExit codes: 0 done (and nothing at or above --fail-on), 1 a finding at or above --fail-on, 2 usage error.")
+    .action((path: string | undefined, options: AgentConfigOptions) => {
+      try { const code = runAgentConfig(path ?? ".", options, deps); if (code) process.exitCode = code; }
       catch (error) { finishWithError(error, { err: deps.err }, options.format === "json"); }
     });
   sbom.command("check")

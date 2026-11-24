@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { UsageError } from "../output.js";
-import { runCheck, runGenerate, runGenerateWith, runJavaUsage, runScanModels, type SbomDeps } from "../sbom.js";
+import { runAgentConfig, runCheck, runGenerate, runGenerateWith, runJavaUsage, runScanModels, type SbomDeps } from "../sbom.js";
 
 const dirs: string[] = [];
 afterEach(() => dirs.splice(0).forEach(dir => rmSync(dir, { recursive: true, force: true })));
@@ -273,3 +273,46 @@ describe("0 sbom generate --resolve-from and java-usage", () => {
   });
 });
 
+
+describe("0 sbom agent-config", () => {
+  const zeroWidth = String.fromCodePoint(0x200b);
+  const noisy = () => project({ "CLAUDE.md": `rules${zeroWidth}\n`, ".mcp.json": JSON.stringify({ mcpServers: { s: { command: "npx", args: ["-y", "some-mcp"] } } }), ".claude/settings.json": JSON.stringify({ permissions: { allow: ["Bash(curl:*)"] } }) });
+  it("lists findings as text and exits 0 without --fail-on", () => {
+    const io = deps();
+    expect(runAgentConfig(noisy(), {}, io.deps)).toBe(0);
+    const text = io.out.join("");
+    expect(text).toContain("agent-config/hidden-unicode");
+    expect(text).toContain("agent-config/mcp-unpinned-launcher");
+    expect(text).toContain("agent-config/broad-permission");
+  });
+  it("exits 1 when a finding is at or above --fail-on, and 0 when none is", () => {
+    const dir = noisy();
+    expect(runAgentConfig(dir, { failOn: "high" }, deps().deps)).toBe(1);
+    expect(runAgentConfig(project({ "CLAUDE.md": "plain rules\n" }), { failOn: "info" }, deps().deps)).toBe(0);
+    expect(runAgentConfig(project({ ".mcp.json": JSON.stringify({ mcpServers: { s: { command: "npx", args: ["-y", "some-mcp"] } } }) }), { failOn: "high" }, deps().deps)).toBe(0);
+  });
+  it("writes SARIF and JSON, to a file with --output", () => {
+    const dir = noisy();
+    const io = deps();
+    runAgentConfig(dir, { format: "sarif" }, io.deps);
+    const sarif = JSON.parse(io.out.join(""));
+    expect(sarif.runs[0].tool.driver.name).toBe("0 sbom agent-config");
+    expect(sarif.runs[0].results.length).toBeGreaterThan(2);
+    const file = deps();
+    runAgentConfig(dir, { format: "json", output: join(dir, "out.json") }, file.deps);
+    expect(Object.keys(file.written)).toHaveLength(1);
+    expect(JSON.parse(Object.values(file.written)[0]!).findings.length).toBeGreaterThan(2);
+    expect(file.out).toEqual([]);
+  });
+  it("passes --allow-host to the remote server rule", () => {
+    const dir = project({ ".mcp.json": JSON.stringify({ mcpServers: { r: { url: "https://other.example.org/mcp" } } }) });
+    const io = deps();
+    runAgentConfig(dir, { format: "json", allowHost: ["mcp.example.com"] }, io.deps);
+    expect(JSON.parse(io.out.join("")).findings.map((item: { ruleId: string }) => item.ruleId)).toContain("agent-config/mcp-remote-insecure");
+  });
+  it("is a usage error for a missing path, a bad format or a bad severity", () => {
+    expect(() => runAgentConfig("/no/such/folder", {}, deps().deps)).toThrow("does not exist");
+    expect(() => runAgentConfig(noisy(), { format: "xml" }, deps().deps)).toThrow("--format must be text, json or sarif");
+    expect(() => runAgentConfig(noisy(), { failOn: "severe" }, deps().deps)).toThrow("--fail-on must be one of");
+  });
+});

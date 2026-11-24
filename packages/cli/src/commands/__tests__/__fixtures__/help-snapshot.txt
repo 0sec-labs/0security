@@ -17,7 +17,7 @@ Work:
   probe [options] <url>            Send adversarial messages to a live model or agent endpoint and
                                    report the ones it obeys
   sbom                             Generate an SBOM from lockfiles, check one against known
-                                   advisories, and scan model files
+                                   advisories, and scan model files and agent configuration
   findings [options]               Browse findings and change their status
   evidence                         Check that an evidence folder was signed with your key and is
                                    unchanged
@@ -1364,7 +1364,8 @@ Options:
 ### 0security sbom
 Usage: 0security sbom [options] [command]
 
-Generate an SBOM from lockfiles, check one against known advisories, and scan model files
+Generate an SBOM from lockfiles, check one against known advisories, and scan model files and agent
+configuration
 
 Options:
   -h, --help                                display help for command
@@ -1379,7 +1380,29 @@ Commands:
                                             lockfiles, against an allow or deny policy
   scan-models [options] <path>              Scan model files (pickle, PyTorch, joblib, numpy) for
                                             imports that can run code when loaded
+  agent-config [options] [path]             Check the rules, MCP and settings files AI coding tools
+                                            read in a repository for hidden text, unpinned
+                                            launchers, secrets and broad permissions
   help [command]                            display help for command
+
+### 0security sbom agent-config
+Usage: 0security sbom agent-config [options] [path]
+
+Check the rules, MCP and settings files AI coding tools read in a repository for hidden text,
+unpinned launchers, secrets and broad permissions
+
+Arguments:
+  path                  Folder to search, or one file (default: .)
+
+Options:
+  --format <format>     Output: text, json or sarif (SARIF imports with `0security findings import`)
+                        (default: "text")
+  -o, --output <file>   Write the result to a file instead of stdout
+  --fail-on <severity>  Exit 1 when a finding is at or above this severity: critical, high, medium,
+                        low or info
+  --allow-host <host>   Host a remote MCP server may use; repeat the option or separate hosts with
+                        commas. `*.example.com` allows subdomains
+  -h, --help            display help for command
 
 ### 0security sbom check
 Usage: 0security sbom check [options] <file>

@@ -5,6 +5,9 @@
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { extname, join, relative } from "node:path";
+import { extractMcpServers } from "../agentconfig/mcp.js";
+import { launcherIssues } from "../agentconfig/launchers.js";
+import { parseJsonc } from "../agentconfig/util.js";
 import { scanModelFile } from "../modelscan/index.js";
 
 export interface AiComponent {
@@ -29,7 +32,9 @@ const MODEL_FILES: Record<string, { format: string; pickle: boolean }> = {
   ".pt": { format: "pytorch", pickle: true }, ".pth": { format: "pytorch", pickle: true }, ".ckpt": { format: "checkpoint", pickle: true },
   ".pkl": { format: "pickle", pickle: true }, ".pickle": { format: "pickle", pickle: true }, ".joblib": { format: "joblib", pickle: true },
 };
-const MCP_CONFIGS = new Set(["mcp.json", ".mcp.json", "claude_desktop_config.json", "mcp_config.json"]);
+const MCP_CONFIGS = new Set(["mcp.json", ".mcp.json", "claude_desktop_config.json", "mcp_config.json", "opencode.json", "opencode.jsonc"]);
+/** Dot-folders where coding tools keep project configuration. Every other hidden folder is skipped. */
+const TOOL_DIRS = new Set([".cursor", ".vscode", ".claude", ".gemini", ".codex", ".windsurf", ".continue", ".github", ".roo", ".cline"]);
 const MAX_FILES = 8000;
 const MAX_TEXT_BYTES = 1024 * 1024;
 const HOSTED = /(?:^|[^\w.-])(?:model|model_name|modelName|model_id|modelId)\s*[:=]\s*["']((?:gpt-|o[134](?:-|["'])|chatgpt-|claude-|gemini-|gemma|llama|mistral|mixtral|codestral|deepseek-|qwen|grok-|command-|text-embedding-|sonar)[\w.:/-]{0,60})["']/g;
@@ -55,7 +60,7 @@ function listFiles(folder: string): string[] {
     for (const name of entries) {
       const path = join(dir, name);
       let info; try { info = statSync(path); } catch { continue; }
-      if (info.isDirectory()) { if (depth < 8 && !SKIP.has(name) && (!name.startsWith(".") || name === ".cursor" || name === ".vscode")) walk(path, depth + 1); continue; }
+      if (info.isDirectory()) { if (depth < 8 && !SKIP.has(name) && (!name.startsWith(".") || TOOL_DIRS.has(name))) walk(path, depth + 1); continue; }
       found.push(path);
       if (found.length >= MAX_FILES) return;
     }
@@ -89,17 +94,17 @@ export function detectAi(folder: string): { components: AiComponent[]; services:
       add({ type: "machine-learning-model", "bom-ref": `ml-file:${rel}`, name: name, properties: [{ name: "0:source", value: rel }, { name: "0:found-by", value: "model file" }, { name: "0:format", value: model.format }, ...(model.pickle ? [{ name: "0:risk", value: "pickle-based format: loading can run code" }, ...pickleScanRisk(path)] : [])] });
       continue;
     }
-    if (MCP_CONFIGS.has(name) || ((rel.startsWith(".cursor/") || rel.startsWith(".vscode/")) && name === "mcp.json")) {
-      try {
-        const config = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
-        const servers = (config.mcpServers ?? config.servers) as Record<string, { command?: unknown; args?: unknown; url?: unknown }> | undefined;
-        for (const [serverName, server] of Object.entries(servers && typeof servers === "object" ? servers : {})) {
-          const args = Array.isArray(server?.args) ? server.args.map(String) : [];
-          const command = [typeof server?.command === "string" ? server.command : "", ...args].join(" ").trim();
-          const unpinned = /\bnpx\b.*(?:^|\s)-y\b|\buvx\b|@latest\b|:latest\b/.test(command) && !/@\d+\.\d+\.\d+/.test(command);
-          services.set(`mcp:${rel}:${clean(serverName, 80)}`, { "bom-ref": `mcp:${rel}:${clean(serverName, 80)}`, name: `mcp:${clean(serverName, 80)}`, ...(typeof server?.url === "string" && /^https?:\/\//.test(server.url) ? { endpoints: [clean(server.url)] } : {}), properties: [{ name: "0:source", value: rel }, { name: "0:found-by", value: "MCP configuration" }, ...(command ? [{ name: "0:launch", value: clean(command) }] : []), ...(typeof server?.url === "string" ? [{ name: "0:url", value: clean(server.url) }] : []), ...(unpinned ? [{ name: "0:risk", value: "launched without a pinned version" }] : [])] });
-        }
-      } catch { /* not valid JSON: no servers listed */ }
+    if (MCP_CONFIGS.has(name) || (name === "settings.json" && /^\.(?:gemini|vscode|cursor|claude)\//.test(rel))) {
+      let info; try { info = statSync(path); } catch { continue; }
+      if (info.size > MAX_TEXT_BYTES) continue;
+      let config: unknown;
+      try { config = parseJsonc(readFileSync(path, "utf8")); } catch { continue; }
+      for (const server of extractMcpServers(config)) {
+        const command = (server.command ?? []).join(" ").trim();
+        const unpinned = command !== "" && launcherIssues(command).length > 0;
+        const ref = `mcp:${rel}:${clean(server.name, 80)}`;
+        services.set(ref, { "bom-ref": ref, name: `mcp:${clean(server.name, 80)}`, ...(server.url && /^https?:\/\//.test(server.url) ? { endpoints: [clean(server.url)] } : {}), properties: [{ name: "0:source", value: rel }, { name: "0:found-by", value: "MCP configuration" }, ...(command ? [{ name: "0:launch", value: clean(command) }] : []), ...(server.url ? [{ name: "0:url", value: clean(server.url) }] : []), ...(unpinned ? [{ name: "0:risk", value: "launched without a pinned version" }] : [])] });
+      }
       continue;
     }
     if (!CODE.has(extension)) continue;
