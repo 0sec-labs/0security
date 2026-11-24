@@ -514,7 +514,7 @@ During the 30 days of grace, nothing changes. After that, a role that is not own
 
 With an enterprise license that includes `scim`, your identity provider can create, update and disable accounts through SCIM 2.0. SCIM needs server mode and a team workspace. The endpoint is `/scim/v2` on your public address.
 
-An owner makes one token for each identity provider. The token is shown once.
+Only an owner can make, list or revoke SCIM tokens. A role with `users.manage` is not enough, because a token provisions accounts and sets their roles. Make one token for each identity provider. The token is shown once.
 
 ```bash
 curl -X POST "$URL/api/team/scim-tokens" -H "x-0-control-token: $TOKEN" -H "content-type: application/json" -d '{"name":"okta"}'
