@@ -134,6 +134,8 @@ Two conversation settings are worth knowing:
 
 `approvals` is `auto` or `ask`. With `auto`, the default, threads and Sentinels run commands without asking. With `ask`, 0 puts each command or change to you first.
 
+The same applies inside helpers. A subagent or a persistent worker that a thread starts also asks before each command or file change, so approving the spawn does not approve what the helper runs. An unattended Sentinel under `ask` waits for a decision on each call, and several workers at once queue several prompts. Use `auto` for runs nobody watches.
+
 Set it with **Ask before running commands** under **Settings → Helpers**. To override it for one run, pass `--approvals ask|auto` to `0 -p`. Threads and Sentinels follow this one setting. Reset all leaves it alone.
 
 ### Development source updates
