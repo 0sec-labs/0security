@@ -16,6 +16,7 @@ on the GitHub Release tag.
 - `0security findings rollup` counts open findings across repositories by severity, category, age and owner, in text, JSON or HTML. It reads rollup export files (`--export` writes one) and findings databases, and sends nothing. Fixed, false-positive, accepted and suppressed findings are left out of the open count.
 - The web console and the docs site both render Mermaid diagrams with Mermaid 12. A leftover override had pinned both to version 11.
 - Sentinels have a signed `webhook` trigger. Another system calls `/api/webhooks/trigger/<trigger-id>` in server mode and proves it with GitHub's `X-Hub-Signature-256`, Bitbucket's `X-Hub-Signature`, GitLab's `X-Gitlab-Token` or `X-0-Signature-256` with a timestamp. Each trigger has its own secret (`0security sentinels triggers secret`), the body is capped at 256 KB, and repeated deliveries start one run. Refs #430.
+- `0security findings metrics` takes `--by week` or `--by model` to show one row per week or model, and `--format csv` to export those rows.
 - The first line of `0security --help` now describes the product as a security agent (scan, fix, SBOM and evidence) instead of "security sentinels". The messages for `--chat` no longer point at a `0 chats` command that does not exist. The GitHub Action calls `0security`.
 ### Added
 

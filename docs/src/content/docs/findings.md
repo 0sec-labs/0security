@@ -508,7 +508,7 @@ Each scan, fix and verify run records its cost, duration and counts on your mach
 0security findings metrics --since 7d
 ```
 
-It shows cost per proposed fix and the share of proposed fixes whose checks passed. Add `--command fix` to look at one command, or `--format json` to export. See [findings metrics](/commands/#findings-metrics).
+It shows cost per proposed fix and the share of proposed fixes whose checks passed. Add `--command fix` to look at one command, or `--by week` or `--by model` to compare weeks or models. To export, add `--format json`, or `--format csv` with `--by`. See [findings metrics](/commands/#findings-metrics).
 
 To give a command a default budget and model, set them per workflow in your [settings file](/configuration/#set-a-budget-and-model-per-workflow). A flag on the command line wins.
 

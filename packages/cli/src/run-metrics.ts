@@ -129,6 +129,66 @@ export function summarizeMetrics(records: RunMetric[], filter: { since?: number;
   };
 }
 
+export const METRIC_GROUPS = ["command", "week", "model"] as const;
+export type MetricGroup = (typeof METRIC_GROUPS)[number];
+export interface GroupRow extends CommandSummary {
+  key: string;
+  /** Fix runs in the group: their cost divided by the fixes they proposed. Null when none was proposed. */
+  costPerProposedFix: number | null;
+  /** Fix runs in the group: proposed fixes whose checks all passed, divided by proposed fixes. Null when none was proposed. */
+  shareVerified: number | null;
+}
+
+/** The Monday (UTC) of the week a run started in, as a date such as 2026-11-16. */
+export function weekStart(at: string): string {
+  const day = new Date(at);
+  day.setUTCHours(0, 0, 0, 0);
+  day.setUTCDate(day.getUTCDate() - ((day.getUTCDay() + 6) % 7));
+  return day.toISOString().slice(0, 10);
+}
+
+/** One row per command, per week or per model, sorted by key. Cost per fix and share verified use fix runs only. */
+export function groupMetrics(records: RunMetric[], by: MetricGroup, filter: { since?: number; command?: MetricCommand } = {}): GroupRow[] {
+  const rows = records.filter(r => (filter.command === undefined || r.command === filter.command) && (filter.since === undefined || Date.parse(r.at) >= filter.since));
+  const groups = new Map<string, { all: CommandSummary; fix: CommandSummary }>();
+  const blank = (): CommandSummary => ({ runs: 0, costUsd: 0, durationSeconds: 0, attempted: 0, proposed: 0, checksPassed: 0, tokens: 0, failed: 0 });
+  const add = (s: CommandSummary, r: RunMetric) => {
+    s.runs++; s.costUsd += r.costUsd ?? 0; s.durationSeconds += r.durationSeconds; s.attempted += r.findingsAttempted ?? 0;
+    s.proposed += r.findingsProposed ?? 0; s.checksPassed += r.checksPassed ?? 0; s.tokens += r.tokens ?? 0; if (r.status === "failed") s.failed++;
+  };
+  for (const r of rows) {
+    const key = by === "command" ? r.command : by === "week" ? weekStart(r.at) : r.model;
+    const g = groups.get(key) ?? { all: blank(), fix: blank() };
+    groups.set(key, g);
+    add(g.all, r);
+    if (r.command === "fix") add(g.fix, r);
+  }
+  return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([key, { all, fix }]) => ({
+    key, ...all, costUsd: Number(all.costUsd.toFixed(6)),
+    costPerProposedFix: fix.proposed > 0 ? Number((fix.costUsd / fix.proposed).toFixed(6)) : null,
+    shareVerified: fix.proposed > 0 ? fix.checksPassed / fix.proposed : null,
+  }));
+}
+
+const csvCell = (value: string | number | null): string => value === null ? "" : /[",\n]/.test(String(value)) ? `"${String(value).replace(/"/g, '""')}"` : String(value);
+
+/** Grouped rows as CSV with a header line. Empty cells mean not available. */
+export function renderGroupsCsv(by: MetricGroup, rows: GroupRow[]): string {
+  const header = [by, "runs", "cost_usd", "duration_seconds", "attempted", "proposed", "checks_passed", "tokens", "failed", "cost_per_proposed_fix", "share_verified"];
+  return [header.join(","), ...rows.map(r => [r.key, r.runs, r.costUsd, r.durationSeconds, r.attempted, r.proposed, r.checksPassed, r.tokens, r.failed, r.costPerProposedFix, r.shareVerified === null ? null : Number(r.shareVerified.toFixed(4))].map(csvCell).join(","))].join("\n");
+}
+
+/** Grouped rows as a text table. */
+export function renderGroups(by: MetricGroup, rows: GroupRow[]): string {
+  if (!rows.length) return "No runs recorded yet. Metrics are written by 0security scan, 0security findings fix and 0security findings verify.";
+  const usd = (n: number | null) => n === null ? "n/a" : `$${n.toFixed(4)}`;
+  const width = Math.max(by.length, ...rows.map(r => r.key.length));
+  return [
+    `${by.padEnd(width)}  runs  cost        proposed  cost per fix  checks passed`,
+    ...rows.map(r => `${r.key.padEnd(width)}  ${String(r.runs).padStart(4)}  ${usd(r.costUsd).padEnd(10)}  ${String(r.proposed).padStart(8)}  ${usd(r.costPerProposedFix).padStart(12)}  ${(r.shareVerified === null ? "n/a" : `${Math.round(r.shareVerified * 100)}%`).padStart(13)}`),
+  ].join("\n");
+}
+
 export function renderMetrics(summary: MetricsSummary): string {
   if (!summary.runs) return "No runs recorded yet. Metrics are written by 0security scan, 0security findings fix and 0security findings verify.";
   const usd = (n: number | null) => n === null ? "n/a" : `$${n.toFixed(4)}`;
