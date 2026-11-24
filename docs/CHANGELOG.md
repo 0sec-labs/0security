@@ -18,6 +18,10 @@ on the GitHub Release tag.
 - Every skill on the Skills page now has a topic icon: built-in skills show an icon for what they do (a terminal for command injection, a database for SQL injection, a key for secrets) instead of the 0security mark. Your own skills get an icon when their name matches a topic, and keep their initials otherwise.
 - the docs, help examples, hints and error messages name the command `0security`; `0` stays as its short alias. Set `ZERO_PROGRAM_NAME=0security` or `0` to force the name that help shows (tests and docs generation).
 
+### Fixed
+
+- opening a thread in the web console could show only part of the conversation until you refreshed. The console kept the message list from an earlier read while newer events arrived, so a reply or a whole turn could be missing for a few seconds (longer if you opened the thread from the cache). It now re-reads the messages as soon as a turn starts or ends, trusts a cached copy only if it was read a moment ago, and still shows a turn that only the event journal knows about.
+
 ## [0.44.0] - 2026-11-23
 
 ### Added

@@ -40,6 +40,8 @@ import {
   findingSignal,
   pollDelay,
   shouldResyncSnapshot,
+  openSnapshotTime,
+  changesMessages,
   snapshotActive,
   waitForVisible
 } from "./workspace-events";
@@ -359,10 +361,12 @@ export function useConsoleWorkspace(
     }
     const poll = async () => {
       // A cache-hydrated snapshot can be hours old: its dataUpdatedAt makes the first pass a full resync, never an events delta.
-      let lastSnapshot = current ? (queryClient.getQueryState(snapshotKey)?.dataUpdatedAt ?? 0) : 0;
+      let lastSnapshot = current ? openSnapshotTime(queryClient.getQueryState(snapshotKey)?.dataUpdatedAt ?? 0) : 0;
       // Unknown until a full snapshot lands in this loop, so the first resync-time check is never skipped.
       let snapshotCursor = -1;
       let needsSnapshot = queryClient.getQueryState(snapshotKey)?.isInvalidated === true;
+      /** An event changed the message list: re-read the snapshot on the next pass (not a failure, so no recovery delay). */
+      let messagesStale = false;
       let longPollBroken = false;
       let heldTooBriefly = false;
       while (!signal.aborted) {
@@ -373,7 +377,7 @@ export function useConsoleWorkspace(
           if (
             shouldResyncSnapshot({
               missing: !current,
-              invalidated: needsSnapshot,
+              invalidated: needsSnapshot || messagesStale,
               age: Date.now() - lastSnapshot,
               active: snapshotActive(current),
               cursorMoved: (current?.cursor ?? -1) !== snapshotCursor,
@@ -387,6 +391,7 @@ export function useConsoleWorkspace(
               gcTime: SNAPSHOT_CACHE_MS,
             });
             needsSnapshot = false;
+            messagesStale = false;
             current = fetched;
             lastSnapshot = Date.now();
             snapshotCursor = fetched.cursor;
@@ -417,14 +422,18 @@ export function useConsoleWorkspace(
               heldTooBriefly = true;
             if (page.snapshot) {
               current = mergeWindowedSnapshot(current as WindowedSnapshot, page.snapshot as WindowedSnapshot);
+              messagesStale = false;
               lastSnapshot = Date.now();
               snapshotCursor = current.cursor;
             } else if (page.gap) {
               current = await loadSnapshot(signal);
+              messagesStale = false;
               lastSnapshot = Date.now();
               snapshotCursor = current.cursor;
             } else {
               current = applyEvents(current!, page.events, page.cursor);
+              // The messages only change with a full snapshot: ask for one as soon as an event says they changed.
+              if (changesMessages(page.events)) messagesStale = true;
               // A finished turn or a finding-related tool result may have changed the Findings count; no dashboard poll runs, so ask for it.
               if (page.events.some(findingSignal))
                 void queryClient.invalidateQueries({ queryKey: queryKeys.dashboard() });
@@ -432,7 +441,8 @@ export function useConsoleWorkspace(
           }
           if (signal.aborted) break;
           const previousSession = queryClient.getQueryData<ConsoleSessionSnapshot>(snapshotKey)?.session;
-          queryClient.setQueryData(snapshotKey, current);
+          // The stamp stays at the last full snapshot: events must not make a stale message list look fresh.
+          queryClient.setQueryData(snapshotKey, current, { updatedAt: lastSnapshot });
           // Session events carry status/title changes: keep this row of the shared list current between its slower polls.
           if (current && previousSession && previousSession !== current.session) {
             const updated = current.session;

@@ -558,6 +558,16 @@ export function reduceConversation(snapshot: ConsoleSessionSnapshot): ReducedTur
         matches.set(entry, turns[nextIndex - 1]);
       }
     }
+    // The messages come from the last full snapshot while the journal keeps moving. A prompt the journal has
+    // that is newer than every matched turn is a turn the messages have not caught up with: show it, never drop it.
+    let lastMatched = -1;
+    journal.forEach((entry, index) => { if (matches.has(entry)) lastMatched = index; });
+    for (let index = lastMatched + 1; index < journal.length; index++) {
+      const entry = journal[index];
+      if (matches.has(entry) || entry.id.startsWith("leading-")) continue;
+      turns.push(entry);
+      matches.set(entry, entry);
+    }
     for (const entry of journal) {
       const turn = matches.get(entry);
       if (!turn || turn === entry) continue;

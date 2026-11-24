@@ -55,6 +55,22 @@ export function shouldResyncSnapshot({
   return active || cursorMoved;
 }
 
+/** A cached snapshot older than this is not trusted as the thread's history when its chat opens. */
+export const OPEN_FRESH_MS = 2000;
+
+/**
+ * When the cached snapshot's messages were last known to match its cursor. Events move the cursor and the journal
+ * but never the messages, so only a full snapshot counts; an older (or hydrated) copy is re-read on open.
+ */
+export function openSnapshotTime(updatedAt: number, now: number = Date.now()): number {
+  return now - updatedAt <= OPEN_FRESH_MS ? updatedAt : 0;
+}
+
+/** Events that add or remove messages: the cached message list is out of date until the next full snapshot. */
+export function changesMessages(events: readonly DesktopConsoleEvent[]): boolean {
+  return events.some((event) => event.type === "user" || event.type === "turn-complete" || event.type === "clear" || event.type === "compaction");
+}
+
 /** Events after which the shared dashboard (Findings count) is worth refetching. */
 export function findingSignal(event: DesktopConsoleEvent): boolean {
   return (
