@@ -133,7 +133,6 @@
       "devalue@<5.9.2": "^5.9.2",
       "hono": "^4.13.16",
       "dompurify": "^3.4.17",
-      "mermaid": "^11.16.1",
       "postcss": "^8.5.18",
       "fast-uri": "^3.1.9",
       "shell-quote": "^1.11.0",
@@ -153,7 +152,8 @@
       "astro": "7.4.13",
       "vite": "^8.2.4",
       "@astrojs/markdown-remark": "^7.3.0",
-      "@hono/node-server@>=1.0.0 <2.1.6": "2.1.6"
+      "@hono/node-server@>=1.0.0 <2.1.6": "2.1.6",
+      "mermaid-isomorphic>mermaid": "^12.3.0"
     },
     "auditConfig": {
       "ignoreGhsas": [
