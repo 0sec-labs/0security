@@ -1,7 +1,7 @@
 import { chmodSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
-import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
+import { stripTypeScriptTypes } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, afterEach } from "vitest";
@@ -15,9 +15,7 @@ describe.skipIf(process.platform === "win32")("disk database creation permission
       chmodSync(root, 0o755);
       try {
         const modulePath = join(root, "shim.mjs");
-        writeFileSync(modulePath, transpileModule(readFileSync(new URL("./wasm-shim.ts", import.meta.url), "utf8"), {
-          compilerOptions: { module: ModuleKind.ESNext, target: ScriptTarget.ES2024 },
-        }).outputText);
+        writeFileSync(modulePath, stripTypeScriptTypes(readFileSync(new URL("./wasm-shim.ts", import.meta.url), "utf8")));
         symlinkSync(new URL("../../node_modules", import.meta.url), join(root, "node_modules"));
         const script = `
           import { createShimmedDatabase } from ${JSON.stringify(pathToFileURL(modulePath).href)};

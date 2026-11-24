@@ -18,7 +18,8 @@
     "clean": "rm -rf dist"
   },
   "devDependencies": {
-    "typescript": "^5.7.2",
+    "@types/node": "^25.5.0",
+    "typescript": "^7.0.2",
     "vitest": "^5.1.1",
     "xml-crypto": "6.4.0"
   },

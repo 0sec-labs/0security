@@ -17,9 +17,6 @@ updates:
       # Grammar ABI must match the vendored tree-sitter 0.21.1 runtime.
       - dependency-name: tree-sitter-c
         update-types: [version-update:semver-minor, version-update:semver-major]
-      # TypeScript 7 removes the JS API and the bin/tsc export the build uses; it needs its own migration.
-      - dependency-name: typescript
-        update-types: [version-update:semver-major]
   - package-ecosystem: github-actions
     directories: [/, /.github/actions/setup-ci]
     schedule:
