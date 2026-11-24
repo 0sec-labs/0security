@@ -40,7 +40,11 @@
 </p>
 
 <p align="center">
-  <sub>A real run, sped up only by trimming idle time. It uses <code>--no-pr</code> because the demo repository has no GitHub remote; the same command with a GitHub remote opens the pull request.</sub>
+  <a href="assets/readme-ui-demo.mp4">
+    <picture>
+      <img src="assets/readme-ui-demo.gif" alt="0 web UI: review a demo API, watch the investigation, then open findings with suggested fixes and verification" width="100%">
+    </picture>
+  </a>
 </p>
 
 ## Quick start
