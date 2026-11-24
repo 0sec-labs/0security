@@ -72,7 +72,7 @@ export function scanText(rel: string, text: string, options: Pick<ScanOptions, "
     if (parsed === undefined) invalidJson = true;
     else { findings.push(...scanSettings(rel, text, parsed), ...scanMcp(rel, text, extractMcpServers(parsed), options.allowHosts ? { allowHosts: options.allowHosts } : {})); }
   } else if (/\.(?:md|mdc|markdown)$/.test(lower)) findings.push(...scanAllowedTools(rel, text));
-  return { findings, invalidJson };
+  return { findings: findings.slice(0, 500), invalidJson };
 }
 
 const order = (a: AgentConfigFinding, b: AgentConfigFinding): number => (a.file < b.file ? -1 : a.file > b.file ? 1 : a.line - b.line || (a.ruleId < b.ruleId ? -1 : a.ruleId > b.ruleId ? 1 : a.message < b.message ? -1 : a.message > b.message ? 1 : 0));

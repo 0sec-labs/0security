@@ -56,11 +56,9 @@ export function scrub(text: string): string {
   return text
     .replace(/\b([a-z][a-z0-9+.-]*:\/\/)[^\s/@]*@/gi, "$1***@")
     .replace(/(\bhttps?:\/\/[^\s?#"']*)\?[^\s#"']*/gi, "$1?...")
-    .split(/(\s+)/)
-    .map(part => {
+    .replace(/[^\s"'`,;()[\]{}<>|&\\]+/g, part => {
       const bare = part.replace(/^[^=]*=/, "");
       const secret = part.length >= 8 ? looksLikeSecret(bare) : undefined;
       return secret ? `${part.slice(0, part.length - bare.length)}${secret.redacted}` : part;
-    })
-    .join("");
+    });
 }

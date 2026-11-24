@@ -3,6 +3,7 @@ import type { AgentConfigFinding, AgentConfigSeverity } from "./rules.js";
 import { finding, isObject, locator } from "./util.js";
 
 /** Rules agent-config/broad-permission and agent-config/hook-command, for settings files of coding tools. */
+const MAX_FINDINGS = 200;
 const RISKY_PROGRAMS = new Set(["curl", "wget", "rm", "sudo", "sh", "bash", "zsh", "eval", "ssh", "scp", "nc", "ncat", "dd", "chmod", "chown", "powershell", "pwsh"]);
 const NETWORK = /\b(?:curl|wget|nc|ncat|ssh|scp|sftp|ftp|telnet|Invoke-WebRequest|Invoke-RestMethod|iwr|irm)\b|https?:\/\/|\b(?:fetch|requests\.(?:get|post)|urllib)\b/i;
 
@@ -28,8 +29,10 @@ const AUTO_KEY = /^(?:.*yolo.*|autorun|auto_run|autorunmode|enableallprojectmcps
 export function scanSettings(file: string, text: string, parsed: unknown): AgentConfigFinding[] {
   const found: AgentConfigFinding[] = [];
   const where = locator(text);
-  const add = (needle: string, snippet: string, message: string, severity?: AgentConfigSeverity): void => { found.push(finding("agent-config/broad-permission", file, where(needle), snippet, message, severity ? { severity } : {})); };
+  const full = (): boolean => found.length >= MAX_FINDINGS;
+  const add = (needle: string, snippet: string, message: string, severity?: AgentConfigSeverity): void => { if (full()) return; found.push(finding("agent-config/broad-permission", file, where(needle), snippet, message, severity ? { severity } : {})); };
   const hook = (command: string, event: string): void => {
+    if (full()) return;
     const line = where(JSON.stringify(command));
     const issues = launcherIssues(command).filter(issue => issue.severity === "high");
     const network = NETWORK.test(command);
@@ -38,15 +41,15 @@ export function scanSettings(file: string, text: string, parsed: unknown): Agent
     found.push(finding("agent-config/hook-command", file, line, command, `Hook${event ? ` for ${event}` : ""} ${detail}: ${command.length > 120 ? `${command.slice(0, 117)}...` : command}`, { severity }));
   };
   const walk = (node: unknown, path: string[], depth: number): void => {
-    if (depth > 12) return;
-    if (Array.isArray(node)) { node.forEach((item, index) => walk(item, [...path, String(index)], depth + 1)); return; }
+    if (depth > 12 || full()) return;
+    if (Array.isArray(node)) { node.slice(0, 500).forEach((item, index) => walk(item, [...path, String(index)], depth + 1)); return; }
     if (!isObject(node)) return;
     const inHooks = path.includes("hooks");
-    for (const [key, value] of Object.entries(node)) {
+    for (const [key, value] of Object.entries(node).slice(0, 1000)) {
       const here = [...path, key];
       const dotted = here.join(".");
       if ((key === "allow" || key === "allowedTools" || key === "alwaysAllow") && Array.isArray(value)) {
-        for (const entry of value) if (typeof entry === "string") { const why = broadPermission(entry); if (why) add(JSON.stringify(entry), entry, `Permission ${entry} ${why}.`); }
+        for (const entry of value.slice(0, 500)) if (typeof entry === "string") { const why = broadPermission(entry); if (why) add(JSON.stringify(entry), entry, `Permission ${entry} ${why}.`); }
       }
       if (key === "defaultMode" && typeof value === "string" && value === "bypassPermissions") add(JSON.stringify(value), `${key}: ${value}`, `defaultMode ${value} turns off permission prompts.`);
       if (key === "permissionMode" && value === "bypassPermissions") add(JSON.stringify(value), `${key}: ${value}`, "permissionMode bypassPermissions turns off permission prompts.");
