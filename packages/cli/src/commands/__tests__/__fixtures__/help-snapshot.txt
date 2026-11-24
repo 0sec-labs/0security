@@ -1353,6 +1353,9 @@ Options:
   --delay <ms>            Pause between requests (default: "300")
   --timeout <seconds>     Seconds to wait for each reply (default: "30")
   --max-requests <n>      Send at most this many requests (default: "100")
+  --i-own-this <host>     Confirm you own or may test a public host by typing it exactly; local and
+                          private hosts need no flag, and link-local or metadata addresses are
+                          always refused
   --secret <text>         A secret known to be in the endpoint's prompt; a reply that contains it is
                           a definite leak
   --format <format>       Report format: json, md, sarif, html, pdf (default: "md")

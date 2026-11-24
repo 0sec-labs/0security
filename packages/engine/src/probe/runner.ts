@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { Finding, Severity } from "../shared/index.js";
 import { selectProbes, type Probe } from "./probes.js";
+import { assessTarget, createScopedFetch, describeScope, ProbeScopeError, type ProbeScope, type ResolveHost } from "./scope.js";
 
 export interface ProbeRunOptions {
   url: string;
@@ -17,6 +18,11 @@ export interface ProbeRunOptions {
   maxRequests?: number;
   /** A secret the operator knows is in the prompt. */
   secret?: string;
+  /** The host typed after `--i-own-this`. A public host is refused without it; it must equal the host in `url`. */
+  acknowledge?: string;
+  /** Replaces DNS, for tests. */
+  resolve?: ResolveHost;
+  /** Replaces the scoped transport, for tests. The scope check still runs. */
   fetch?: typeof fetch;
   onProgress?: (line: string) => void;
 }
@@ -25,6 +31,9 @@ export interface ProbeResult { probe: Probe; attempts: ProbeAttempt[]; hits: num
 
 const DEFAULT_BODY = '{"messages":[{"role":"user","content":"{{prompt}}"}]}';
 const MAX_REPLY = 8000;
+/** A public target is probed at most this fast and this often, whatever the options say. */
+export const PUBLIC_MIN_DELAY_MS = 200;
+export const PUBLIC_MAX_REQUESTS = 200;
 const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 const rank: Record<Severity, number> = { critical: 4, high: 3, medium: 2, low: 1, info: 0 };
 
@@ -64,24 +73,28 @@ function buildBody(template: string, prompt: string): string {
   return body;
 }
 
-export async function runProbes(options: ProbeRunOptions): Promise<{ results: ProbeResult[]; requests: number }> {
+export async function runProbes(options: ProbeRunOptions): Promise<{ results: ProbeResult[]; requests: number; scope: ProbeScope }> {
   let url: URL;
   try { url = new URL(options.url); } catch { throw new Error(`'${options.url}' is not a URL.`); }
   if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("The endpoint must be an http or https URL.");
   const template = options.bodyTemplate ?? DEFAULT_BODY;
   if (!template.includes("{{prompt}}")) throw new Error("The request body must contain {{prompt}} where the message goes.");
   try { buildBody(template, "test"); } catch { throw new Error("The request body is not valid JSON once {{prompt}} is filled in."); }
-  const fetcher = options.fetch ?? fetch;
+  const scope = await assessTarget(url, { ...(options.acknowledge !== undefined ? { acknowledge: options.acknowledge } : {}), ...(options.resolve ? { resolve: options.resolve } : {}) });
+  options.onProgress?.(`scope: ${describeScope(scope)}`);
+  const fetcher = options.fetch ?? createScopedFetch(scope);
   const probes = options.probes ?? selectProbes(undefined);
   const repeat = Math.max(1, Math.min(options.repeat ?? 2, 10));
-  const limit = options.maxRequests ?? 100;
+  const isPublic = scope.network === "public";
+  const limit = isPublic ? Math.min(options.maxRequests ?? 100, PUBLIC_MAX_REQUESTS) : options.maxRequests ?? 100;
+  const delayMs = isPublic ? Math.max(options.delayMs ?? 0, PUBLIC_MIN_DELAY_MS) : options.delayMs;
   const results: ProbeResult[] = [];
   let requests = 0;
   for (const probe of probes) {
     const attempts: ProbeAttempt[] = [];
     for (let n = 0; n < repeat; n++) {
       if (requests >= limit) break;
-      if (requests > 0 && options.delayMs) await sleep(options.delayMs);
+      if (requests > 0 && delayMs) await sleep(delayMs);
       const context = { canary: `ZX${randomBytes(4).toString("hex").toUpperCase()}`, ...(options.secret ? { secret: options.secret } : {}) };
       const prompt = probe.prompt(context);
       requests++;
@@ -93,6 +106,7 @@ export async function runProbes(options: ProbeRunOptions): Promise<{ results: Pr
         const verdict = probe.detect(reply, context);
         attempts.push({ prompt, reply, hit: verdict.hit, evidence: verdict.evidence, ...(verdict.severity ? { severity: verdict.severity } : {}), ...(verdict.note ? { note: verdict.note } : {}) });
       } catch (error) {
+        if (error instanceof ProbeScopeError) throw error;
         attempts.push({ prompt, error: error instanceof Error ? error.message : String(error), hit: false, evidence: "" });
       }
     }
@@ -100,13 +114,13 @@ export async function runProbes(options: ProbeRunOptions): Promise<{ results: Pr
     results.push({ probe, attempts, hits });
     options.onProgress?.(`${hits ? "HIT " : "ok  "} ${probe.id} (${hits}/${attempts.length})`);
   }
-  return { results, requests };
+  return { results, requests, scope };
 }
 
 const WEAPON: Record<string, "rce" | "info-leak" | "integrity-tampering" | "unknown"> = { "tool-misuse": "rce", "data-exfiltration": "info-leak", "system-prompt-extraction": "info-leak", "output-manipulation": "integrity-tampering", "prompt-injection": "integrity-tampering", jailbreak: "integrity-tampering", "encoding-bypass": "integrity-tampering" };
 
 /** One finding per probe the endpoint failed, with what was sent and what came back. */
-export function probeFindings(target: string, results: ProbeResult[], now = Date.now()): Finding[] {
+export function probeFindings(target: string, results: ProbeResult[], now = Date.now(), scope?: ProbeScope): Finding[] {
   const host = (() => { try { return new URL(target).host; } catch { return target; } })();
   return results.filter(result => result.hits > 0).map(result => {
     const hit = result.attempts.filter(attempt => attempt.hit).sort((a, b) => rank[b.severity ?? result.probe.severity] - rank[a.severity ?? result.probe.severity])[0]!;
@@ -117,7 +131,7 @@ export function probeFindings(target: string, results: ProbeResult[], now = Date
       templateId: `probe/${result.probe.id}`, title: `${result.probe.title} (${host})`,
       description: `${result.probe.impact}\n\nThe endpoint did what the attack asked in ${result.hits} of ${sent} attempts.${hit.note ? ` ${hit.note}` : ""}`,
       severity, category: result.probe.category, status: "discovered",
-      evidence: { request: hit.prompt, response: (hit.reply ?? "").slice(0, 2000), analysis: `Probe ${result.probe.id} sent to ${target}; the reply shows the attack worked: ${hit.evidence.slice(0, 400)}` },
+      evidence: { request: hit.prompt, response: (hit.reply ?? "").slice(0, 2000), analysis: `Probe ${result.probe.id} sent to ${target}${scope ? `, scope: ${describeScope(scope)}` : ""}; the reply shows the attack worked: ${hit.evidence.slice(0, 400)}` },
       impactAssessment: { reachability_tier: "unknown", blast_radius: result.probe.impact, weaponizability: WEAPON[result.probe.category] ?? "unknown", business_impact: "unassessed", rationale: `Observed on ${host}: the reply to a ${result.probe.id} probe shows the model followed the attacker's instruction (${result.hits} of ${sent} attempts).`, assessment_source: "model" },
       timestamp: now, triageStatus: "new", workflowStatus: "backlog",
     } as unknown as Finding;

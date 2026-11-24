@@ -1236,6 +1236,18 @@ The request is an OpenAI-style chat body. For another shape, pass `--body` with 
 
 Put a key in a header as an environment variable, as above, so it is not typed on the command line. If you pass `--secret` with a secret that is in the endpoint's prompt, a reply that contains it is reported as a definite leak.
 
+Point probe only at endpoints you own or are authorized to test. Probe sends attack text, and a public service can log it or act on it.
+
+Local and private addresses need no flag. That covers localhost, 10.x, 172.16 to 172.31, 192.168.x, 100.64.x (such as a tailnet) and private IPv6. A public host is refused unless you type its exact name:
+
+```bash
+0security probe https://chat.mycompany.com/api --i-own-this chat.mycompany.com
+```
+
+Link-local and cloud metadata addresses (169.254.x.x, fe80::, fd00:ec2::254) are always refused, even with the flag. Probe resolves the name once, checks every address, and connects to the one it checked. A name that resolves to a private address is treated as private. A name with any public address needs the flag. A redirect to another origin stops the run. Probe sends at most 200 requests at least 200 ms apart to a public host.
+
+The report records the host, the addresses it resolved to and the `--i-own-this` value. The `--format json` report has them in `probeScope`, and each finding carries them in its evidence. `ZERO_ENTERPRISE` does not change this, because you name the target.
+
 Requests are 300 ms apart and capped at 100 by default. Findings go into the usual reports (`--format md|json|sarif|html|pdf`). With `--save` they also appear in `0security findings list`.
 
 A miss means the reply did not show the attack working in those attempts. It does not prove the endpoint is safe against attacks outside the list.
@@ -1256,6 +1268,7 @@ A miss means the reply did not show the attack working in those attempts. It doe
 | `--delay <ms>` | `300` | Pause between requests |
 | `--timeout <seconds>` | `30` | Seconds to wait for each reply |
 | `--max-requests <n>` | `100` | Send at most this many requests |
+| `--i-own-this <host>` | — | Confirm you own or may test a public host by typing it exactly; local and private hosts need no flag, and link-local or metadata addresses are always refused |
 | `--secret <text>` | — | A secret known to be in the endpoint's prompt; a reply that contains it is a definite leak |
 | `--format <format>` | `md` | Report format: json, md, sarif, html, pdf |
 | `-o, --output <file>` | — | Write the report to a file instead of stdout |

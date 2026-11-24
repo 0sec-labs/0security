@@ -383,10 +383,11 @@
       "files": [
         "packages/engine/src/http.ts",
         "packages/engine/src/probe/runner.ts",
+        "packages/engine/src/probe/scope.ts",
         "packages/cli/src/commands/scan.ts"
       ],
       "when": "0 scan with a git URL, 0 probe, and PoC steps against a target the operator authorized.",
-      "sent": "A git clone, or HTTP requests to that target.",
+      "sent": "A git clone, or HTTP requests to that target. 0 probe also refuses a public host unless you pass --i-own-this with that exact host, always refuses link-local and cloud metadata addresses, connects to the address it checked, and follows no redirect off the named origin. ZERO_ENTERPRISE leaves it on, because you name the target.",
       "disable": "Scan local paths."
     },
     {

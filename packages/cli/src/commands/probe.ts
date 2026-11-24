@@ -1,12 +1,12 @@
 /**
  * `0 probe <url>`: send adversarial messages to a live model or agent endpoint and report the ones it obeys.
  * Each probe carries a canary, so a hit is a check on the reply and not another model's opinion. You name the URL;
- * requests are slow by default and capped, and the target is printed before anything is sent.
+ * requests are slow by default and capped, a public host needs `--i-own-this <host>`, and the target and its scope are printed before anything is sent.
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { Command } from "commander";
-import { exportReport, isReportExportFormat, PROBES, probeFindings, runProbes, selectProbes, type ProbeResult } from "@0/engine";
+import { exportReport, isReportExportFormat, PROBES, probeFindings, ProbeScopeError, runProbes, selectProbes, type ProbeResult, type ProbeScope, type ResolveHost } from "@0/engine";
 import type { Finding, ScanReport } from "@0/engine/shared";
 import { osecDB, resolveOsecDbPath } from "@0/engine/storage";
 import { finishWithError, UsageError } from "./output.js";
@@ -16,7 +16,7 @@ const SEVERITIES = ["critical", "high", "medium", "low", "info"] as const;
 
 export interface ProbeOptions {
   header?: string[]; body?: string; bodyFile?: string; model?: string; responsePath?: string; probes?: string; repeat: string; delay: string;
-  timeout: string; maxRequests: string; secret?: string; format: string; output?: string; failOn?: string; save?: boolean;
+  timeout: string; maxRequests: string; iOwnThis?: string; secret?: string; format: string; output?: string; failOn?: string; save?: boolean;
 }
 export interface ProbeDeps {
   out(bytes: Uint8Array | string): void;
@@ -25,6 +25,8 @@ export interface ProbeDeps {
   readText(path: string): string;
   env: NodeJS.ProcessEnv;
   fetch?: typeof fetch;
+  /** Replaces DNS, for tests. */
+  resolve?: ResolveHost;
   save?(target: string, findings: Finding[]): string;
 }
 const defaults: ProbeDeps = {
@@ -65,11 +67,12 @@ const positive = (name: string, value: string, max: number): number => {
   return n;
 };
 
-export function toReport(target: string, results: ProbeResult[], started: Date, completed: Date, findings: Finding[]): ScanReport {
+export function toReport(target: string, results: ProbeResult[], started: Date, completed: Date, findings: Finding[], scope?: ProbeScope): ScanReport {
   const count = (severity: string) => findings.filter(finding => finding.severity === severity).length;
   return {
     target, scanDepth: "default", startedAt: started.toISOString(), completedAt: completed.toISOString(), durationMs: completed.getTime() - started.getTime(), warnings: [],
     summary: { totalAttacks: results.reduce((sum, result) => sum + result.attempts.length, 0), totalFindings: findings.length, critical: count("critical"), high: count("high"), medium: count("medium"), low: count("low"), info: count("info") },
+    ...(scope ? { probeScope: scope } : {}),
     findings,
   } as unknown as ScanReport;
 }
@@ -88,13 +91,13 @@ export async function runProbe(url: string, options: ProbeOptions, deps: ProbeDe
   const started = new Date();
   let run;
   try {
-    run = await runProbes({ url, headers, probes, repeat, delayMs: delay, timeoutMs: timeout * 1000, maxRequests: max, ...(bodyTemplate ? { bodyTemplate } : {}), ...(options.responsePath ? { responsePath: options.responsePath } : {}), ...(options.secret ? { secret: options.secret } : {}), ...(deps.fetch ? { fetch: deps.fetch } : {}), onProgress: line => deps.err(`  ${line}`) });
-  } catch (error) { throw new UsageError(error instanceof Error ? error.message : String(error)); }
-  const findings = probeFindings(url, run.results);
+    run = await runProbes({ url, headers, probes, repeat, delayMs: delay, timeoutMs: timeout * 1000, maxRequests: max, ...(bodyTemplate ? { bodyTemplate } : {}), ...(options.responsePath ? { responsePath: options.responsePath } : {}), ...(options.secret ? { secret: options.secret } : {}), ...(options.iOwnThis !== undefined ? { acknowledge: options.iOwnThis } : {}), ...(deps.resolve ? { resolve: deps.resolve } : {}), ...(deps.fetch ? { fetch: deps.fetch } : {}), onProgress: line => deps.err(`  ${line}`) });
+  } catch (error) { if (error instanceof ProbeScopeError) throw new UsageError(error.message); throw new UsageError(error instanceof Error ? error.message : String(error)); }
+  const findings = probeFindings(url, run.results, Date.now(), run.scope);
   const errors = run.results.flatMap(result => result.attempts.filter(attempt => attempt.error));
   if (errors.length === run.requests) throw new Error(`Every request to ${host} failed: ${errors[0]!.error}`);
   if (errors.length) deps.err(`${errors.length} of ${run.requests} requests failed (${errors[0]!.error}); those probes were not judged.`);
-  const report = toReport(url, run.results, started, new Date(), findings);
+  const report = toReport(url, run.results, started, new Date(), findings, run.scope);
   const format = options.format === "md" ? "markdown" : options.format;
   if (!isReportExportFormat(format)) throw new UsageError(`--format must be one of: ${FORMATS.join(", ")}.`);
   const body = options.format === "json" ? `${JSON.stringify(report, null, 2)}\n` : (await exportReport(report, format, `0-probe-${host}`)).body;
@@ -119,6 +122,7 @@ export function registerProbeCommand(program: Command, deps: ProbeDeps = default
     .option("--delay <ms>", "Pause between requests", "300")
     .option("--timeout <seconds>", "Seconds to wait for each reply", "30")
     .option("--max-requests <n>", "Send at most this many requests", "100")
+    .option("--i-own-this <host>", "Confirm you own or may test a public host by typing it exactly; local and private hosts need no flag, and link-local or metadata addresses are always refused")
     .option("--secret <text>", "A secret known to be in the endpoint's prompt; a reply that contains it is a definite leak")
     .option("--format <format>", `Report format: ${FORMATS.join(", ")}`, "md")
     .option("-o, --output <file>", "Write the report to a file instead of stdout")
