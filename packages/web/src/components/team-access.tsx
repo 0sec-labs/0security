@@ -19,7 +19,7 @@ import { ShellFrame } from "@/components/shell-skeleton";
 import { errorText } from "@/lib/api-error";
 import { STORAGE_KEYS, storage } from "@/lib/storage";
 
-type TeamUser = { workspaceId: string; userId: string; displayName: string; role: "owner" | "editor" | "viewer" };
+type TeamUser = { workspaceId: string; userId: string; displayName: string; role: "owner" | "editor" | "viewer"; roleName?: string; permissions?: string[]; scope?: string[] | null };
 type TeamStatus = { enabled: boolean; workspace?: { id: string; name: string }; user?: TeamUser | null; sso: boolean };
 const TeamAccessContext = createContext<TeamStatus>({ enabled: false, sso: false });
 export const useTeamAccess = () => useContext(TeamAccessContext);

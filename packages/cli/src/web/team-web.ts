@@ -1,6 +1,7 @@
 import type { IncomingMessage } from "node:http";
 import { z } from "zod";
 import { TeamAuth, TeamAuthError, getSessionId, type TeamIdentity } from "./team-auth.js";
+import { decideRoute, hasFeature, requireFeature } from "../enterprise-bridge.js";
 import { CollaborationService, type CollaborationResourceKind } from "./collaboration.js";
 import type { ConsoleGateway } from "./console-gateway.js";
 import { audit, auditActor } from "./audit.js";
@@ -19,6 +20,16 @@ export function authorizeTeamApi(auth: TeamAuth, req: IncomingMessage, path: str
   const actor = auth.resolveSession(req);
   if (!actor) throw new TeamAuthError("Sign in to this workspace.");
   const method = req.method ?? "GET";
+  if (hasFeature("rbac")) {
+    // Licensed: one permission table decides every route. A route the table does not name is refused.
+    if (/^\/api\/backends\/[^/]+\/proxy/.test(path) && !path.startsWith("/api/backends/local/proxy") && !actor.permissions.includes("settings.write")) throw new TeamAuthError("Remote engine access requires the settings.write permission.", 403);
+    const decision = decideRoute(actor.permissions, method, path);
+    if (!decision.allowed) {
+      if (decision.code === "no_permission_defined") throw new TeamAuthError("This route has no permission rule and is refused.", 403);
+      throw new TeamAuthError(`Your role (${actor.roleName}) does not include the ${decision.permission} permission.`, 403);
+    }
+    return actor;
+  }
   // Registered remote engines carry machine credentials rather than browser account credentials.
   // Until a delegated team bridge exists, only the workspace owner may use them.
   if (/^\/api\/backends\/[^/]+\/proxy/.test(path) && !path.startsWith("/api/backends/local/proxy") && actor.role !== "owner") throw new TeamAuthError("Remote engine access requires a workspace owner.", 403);
@@ -57,6 +68,7 @@ export async function handleTeamRequest(req: IncomingMessage, url: URL, auth: Te
       throw error;
     }
     if (login.provisioned) audit({ actor: "sso", action: "user.provisioned", subject: login.user.userId, detail: { id: login.user.userId, role: login.user.role, source: "oidc", client } });
+    if (login.roleChange) audit({ actor: "sso", action: "user.role_changed", subject: login.roleChange.userId, detail: { id: login.roleChange.userId, old: login.roleChange.old, new: login.roleChange.new, source: login.roleChange.source, client } });
     auditSignIn(login.user, "sso", client);
     return { status: 302, redirect: login.redirect, headers: { "Set-Cookie": login.setCookies } };
   }
@@ -68,6 +80,23 @@ export async function handleTeamRequest(req: IncomingMessage, url: URL, auth: Te
     return reply;
   }
   if (!auth.resolveSession(req)) throw new TeamAuthError("Sign in to this workspace.");
+  if (path === "roles" && method === "GET") return { status: 200, data: { roles: auth.roleList(), licensed: hasFeature("rbac") } };
+  const accountRoute = /^users\/([^/]+)$/.exec(path);
+  if (accountRoute && method === "PATCH") {
+    const actor = auth.resolveSession(req)!;
+    const unavailable = requireFeature("rbac");
+    if (unavailable) throw new TeamAuthError(unavailable, 403);
+    if (!actor.permissions.includes("users.manage")) throw new TeamAuthError("Your role does not include the users.manage permission.", 403);
+    const parsed = z.object({ role: z.string().min(1).max(64).optional(), scope: z.unknown().optional() }).strict().safeParse(await readBody());
+    if (!parsed.success || (parsed.data.role === undefined && parsed.data.scope === undefined)) throw new TeamAuthError("Send a role, a scope, or both.", 400);
+    const userId = decodeURIComponent(accountRoute[1]!);
+    const change = auth.setAccess(userId, parsed.data);
+    const who = auditActor({ engineRequest: false, teamEnabled: true, displayName: actor.displayName });
+    if (change.before.role !== change.after.role) audit({ actor: who, action: "user.role_changed", subject: userId, detail: { id: userId, old: change.before.role, new: change.after.role, source: "admin" } });
+    const describe = (scope: { repos?: string[]; businessUnits?: string[] } | null) => scope ? [...(scope.repos ?? []), ...(scope.businessUnits ?? []).map(unit => `unit:${unit}`)].join(", ") || "none" : "none";
+    if (describe(change.before.scope) !== describe(change.after.scope)) audit({ actor: who, action: "user.scope_changed", subject: userId, detail: { id: userId, old: describe(change.before.scope), new: describe(change.after.scope), source: "admin" } });
+    return { status: 200, data: { user: auth.members().find(member => member.userId === userId) } };
+  }
   if (!collaboration) throw new TeamAuthError("Team resource not found.", 404);
   const session = getSessionId(req)!;
   if (path === "presence" && method === "GET") return { status: 200, data: collaboration.overview(session) };

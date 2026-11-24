@@ -425,6 +425,61 @@ The role is `viewer` or `editor`. Everyone your provider lets sign in to this cl
 
 Without the license, a person who is not in the file is refused as before, and the message says what is needed. OIDC sign-in for people you listed with an `oidcSub` stays free.
 
+### Roles
+
+Every account has one role. Without a license there are three: owner, editor and viewer. Owners change settings and add teammates. Editors run threads and triage findings. Viewers read.
+
+With an enterprise license that includes `rbac`, a role is a set of permissions, and two more roles exist.
+
+| Role | Can do |
+| --- | --- |
+| owner | Everything. |
+| editor | Read, run threads, triage findings. |
+| viewer | Read. |
+| triager | Read and triage findings. Cannot run threads. |
+| auditor | Read findings and the audit log. Nothing else. |
+
+The permissions are `workspace.read`, `findings.read`, `findings.triage`, `threads.run`, `settings.write`, `audit.read` and `users.manage`. Every API route needs exactly one of them. A route that has no rule is refused for everyone, including the owner.
+
+Owners change a role on the Members page, or with a request:
+
+```bash
+curl -X PATCH "$URL/api/team/users/morgan" -H "x-0-control-token: $TOKEN" -H "content-type: application/json" -d '{"role":"triager"}'
+```
+
+A change applies to the next request. Each change is written to the audit log as `user.role_changed` with the old and new role. 0 refuses to remove the last account that can manage users.
+
+#### Custom roles and scope
+
+Add `roles` and `businessUnits` to the team file. A role can be limited to some repositories. A business unit is a name for a group of repository patterns.
+
+```json
+{
+  "roles": {
+    "payments-triager": { "permissions": ["findings.read", "findings.triage"], "scope": { "businessUnits": ["payments"] } }
+  },
+  "businessUnits": { "payments": ["acme/pay-*"] }
+}
+```
+
+Set `scope` on one account with the same request and `{"scope":{"repos":["acme/web"]}}`. An account scope replaces the scope of its role. Send `{"scope":null}` to clear it. Each change is written to the audit log as `user.scope_changed`.
+
+A scope limits findings: the dashboard, scans, finding details and triage, and recent events. It matches scans whose target is a GitHub URL or `owner/name`. A scan of a local path matches no scope. Routes that return findings without a filter (reports, exports, work history) are refused to a scoped account. A scope does not limit threads, so give a scoped role no `workspace.read`. A scope limits sign-in sessions only. Findings API keys are workspace-wide credentials that an owner creates, and a scope does not narrow them. A scope stays in force if the license lapses.
+
+#### Roles from your identity provider
+
+Map groups from the ID token to roles. 0 uses the first entry in the list that the person belongs to.
+
+```json
+"oidc": { "groupRoles": { "sec-admins": "owner", "sec-triage": "triager" }, "groupsClaim": "groups" }
+```
+
+`groupsClaim` defaults to `groups`. The role is set again at each sign-in, for accounts that 0 created at first sign-in or whose role came from a group. A person with no mapped group gets the `jit` role, or viewer. An account that you listed in the team file, or whose role an owner changed, keeps its role.
+
+#### When the license lapses
+
+During the 30 days of grace, nothing changes. After that, a role that is not owner, editor or viewer counts as the nearest of those and never as owner. An auditor or a triager becomes a viewer. A custom role that can run threads becomes an editor. The permission table stops, and the three-role rules apply again.
+
 ## Teams and enterprise
 
 0 is open source under MIT OR Apache-2.0. The CLI, engine, browser app and team workspace are all in the [`0sec-labs/0security`](https://github.com/0sec-labs/0security) repository. None of them needs an account, a license key or a 0security-hosted service. Model calls go to the provider you choose with your own key. Findings stay on your computer, CI runner or servers. The only automatic upload is the anonymous telemetry described in [Configuration](/configuration/#telemetry).

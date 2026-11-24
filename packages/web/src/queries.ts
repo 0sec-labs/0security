@@ -65,6 +65,7 @@ export const queryKeys = {
   managedWorkers: key("managed-workers"),
   teamSession: key("team-session"),
   teamUsers: key("team-users"),
+  teamRoles: key("team-roles"),
   teamWorkspacePresence: key("team-workspace-presence"),
   // Sentinels: ["sentinels", backendId, "list" | "one" | ...]
   sentinels: key("sentinels"),

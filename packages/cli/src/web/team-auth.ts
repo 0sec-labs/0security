@@ -7,7 +7,7 @@ import { createRemoteJWKSet, jwtVerify } from "jose";
 import { TeamAuthError } from "./team-auth-error.js";
 import { TeamSaml, samlConfigSchema, validateSamlConfig } from "./team-saml.js";
 import { TeamUserConflictError, type TeamUserRow, type TeamUserTable } from "@0/engine/storage";
-import { hasFeature } from "../enterprise-bridge.js";
+import { BUILT_IN_ROLES, hasFeature, nearestBuiltInRole, parseScope, resolveRoles, roleFromGroups, scopePatterns, type Permission, type RoleDefinition, type RoleScope } from "../enterprise-bridge.js";
 
 const scrypt = promisify(scryptCallback);
 const COOKIE = "zero_team_session";
@@ -16,7 +16,7 @@ const SESSION_MS = 8 * 60 * 60 * 1000;
 const SSO_MS = 10 * 60 * 1000;
 const userSchema = z.object({
   id: z.string().min(1).max(160), name: z.string().min(1).max(160),
-  role: z.enum(["owner", "editor", "viewer"]), passwordHash: z.string().optional(), oidcSub: z.string().min(1).optional(), samlNameId: z.string().min(1).max(512).optional(),
+  role: z.string().min(1).max(64), passwordHash: z.string().optional(), oidcSub: z.string().min(1).optional(), samlNameId: z.string().min(1).max(512).optional(),
 }).strict();
 const configSchema = z.object({
   workspace: z.object({ id: z.string().min(1).max(160), name: z.string().min(1).max(160) }).strict(),
@@ -25,17 +25,39 @@ const configSchema = z.object({
     issuer: z.string().url(), clientId: z.string().min(1), clientSecretEnv: z.string().min(1).optional(), redirectUri: z.string().url(),
     /** Create an account the first time an OIDC user signs in. Needs the rbac license feature. */
     jit: z.object({ role: z.enum(["editor", "viewer"]) }).strict().optional(),
+    /** Group name in the groups claim to role name, in order of preference. Needs the rbac license feature. */
+    groupRoles: z.record(z.string().min(1).max(256), z.string().min(1).max(64)).optional(),
+    /** Name of the claim that lists the user's groups. Default "groups". */
+    groupsClaim: z.string().min(1).max(64).optional(),
   }).strict().optional(),
   saml: samlConfigSchema.optional(),
+  /** Custom roles (needs the rbac license feature to take effect). See the server mode page. */
+  roles: z.record(z.string(), z.unknown()).optional(),
+  /** Business units: a name for a group of repository patterns, used in role and account scopes. */
+  businessUnits: z.record(z.string().min(1).max(64), z.array(z.string().min(1).max(200)).max(200)).optional(),
 }).strict();
 export type TeamConfig = z.infer<typeof configSchema>;
 /** Accounts the free tier can hold. A server with the rbac license feature has no limit. */
 export const FREE_MEMBER_LIMIT = 1000;
 const NEEDS_LICENSE = "This needs an enterprise license that includes role-based access control.";
 export function parseTeamConfig(input: unknown): TeamConfig { return configSchema.parse(input); }
-export interface TeamIdentity { workspaceId: string; userId: string; displayName: string; role: "owner" | "editor" | "viewer" }
+/** The roles that need no license. */
+const FREE_ROLES: ReadonlySet<string> = new Set(["owner", "editor", "viewer"]);
+export interface TeamIdentity {
+  workspaceId: string; userId: string; displayName: string;
+  /** The nearest of owner, editor and viewer. Code that only knows the three free roles reads this. */
+  role: "owner" | "editor" | "viewer";
+  /** The role as assigned, for example "triager" or a custom name. */
+  roleName: string;
+  permissions: Permission[];
+  /** Repository patterns the account is limited to, or null for no limit. */
+  scope: string[] | null;
+}
+export interface TeamMember { userId: string; displayName: string; role: string; scope?: RoleScope }
+/** A role change made by an administrator or by the identity provider's group mapping. */
+export interface TeamRoleChange { userId: string; old: string; new: string; source: "admin" | "oidc-group" }
 export { TeamAuthError };
-const fileRow = (user: { id: string; name: string; role: string; passwordHash?: string | undefined; oidcSub?: string | undefined }): TeamUserRow => ({ id: user.id, name: user.name, role: user.role, passwordHash: user.passwordHash ?? null, oidcSub: user.oidcSub ?? null, source: "file", createdAt: "", updatedAt: "" });
+const fileRow = (user: { id: string; name: string; role: string; passwordHash?: string | undefined; oidcSub?: string | undefined }): TeamUserRow => ({ id: user.id, name: user.name, role: user.role, roleSource: "admin", scopeJson: null, passwordHash: user.passwordHash ?? null, oidcSub: user.oidcSub ?? null, source: "file", createdAt: "", updatedAt: "" });
 function opaque(): string { return randomBytes(32).toString("base64url"); }
 export function parseCookies(header: string | undefined): Record<string, string> {
   const cookies: Record<string, string> = Object.create(null) as Record<string, string>;
@@ -70,6 +92,7 @@ export class TeamAuth {
   /** Live accounts. The server database is the source of truth once a store is attached; until then the file users. */
   private readonly users = new Map<string, TeamUserRow>();
   private table?: TeamUserTable;
+  private roles: Map<string, RoleDefinition>;
   private readonly sessions = new Map<string, { userId: string; expires: number; role?: TeamIdentity["role"] }>();
   private readonly saml?: TeamSaml;
   private readonly pending = new Map<string, { nonce: string; verifier: string; browser: string; expires: number }>();
@@ -79,6 +102,7 @@ export class TeamAuth {
   private readonly dummyHash: Promise<string>;
   constructor(options: { configPath?: string; config?: TeamConfig; origin: string; now?: () => number }) {
     this.origin = new URL(options.origin).origin; this.now = options.now ?? Date.now;
+    this.roles = new Map(Object.entries(BUILT_IN_ROLES));
     const source = options.config ?? (options.configPath ? JSON.parse(readFileSync(options.configPath, "utf8")) as unknown : undefined);
     if (source !== undefined) {
       this.config = configSchema.parse(source);
@@ -88,6 +112,9 @@ export class TeamAuth {
       const samlIds = this.config.users.flatMap(user => user.samlNameId ? [user.samlNameId] : []);
       if (new Set(samlIds).size !== samlIds.length) throw new Error("SAML NameIDs must be unique");
       for (const user of this.config.users) if (user.passwordHash && !validHash(user.passwordHash)) throw new Error("Invalid team password hash; use hashTeamPassword");
+      try { this.roles = resolveRoles(this.config.roles); } catch (error) { throw new Error(`Invalid team roles: ${error instanceof Error ? error.message : "unreadable"}`); }
+      for (const user of this.config.users) if (!this.roles.has(user.role)) throw new Error(`Team user "${user.id}" has the unknown role "${user.role}"`);
+      for (const [group, role] of Object.entries(this.config.oidc?.groupRoles ?? {})) if (!this.roles.has(role)) throw new Error(`OIDC group "${group}" maps to the unknown role "${role}"`);
       for (const user of this.config.users) this.users.set(user.id, fileRow(user));
       if (this.config.oidc) {
         this.requireProviderURL(this.config.oidc.issuer);
@@ -97,7 +124,7 @@ export class TeamAuth {
       }
       if (this.config.saml) {
         validateSamlConfig(this.config.saml, this.origin);
-        this.saml = new TeamSaml(this.config.saml, { now: this.now, cookie: (name, value, seconds) => this.cookie(name, value, seconds), findMember: nameId => this.config!.users.find(user => user.samlNameId === nameId) });
+        this.saml = new TeamSaml(this.config.saml, { now: this.now, cookie: (name, value, seconds) => this.cookie(name, value, seconds), findMember: nameId => { const user = this.config!.users.find(row => row.samlNameId === nameId); return user ? { id: user.id, role: this.users.get(user.id)?.role === "owner" || user.role === "owner" ? "owner" : nearestBuiltInRole(this.roles.get(this.users.get(user.id)?.role ?? user.role)?.permissions ?? []) } : undefined; } });
       }
     }
     this.dummyHash = hashTeamPassword(opaque());
@@ -110,7 +137,29 @@ export class TeamAuth {
   }
   lookupUser(id: string, role?: TeamIdentity["role"]): TeamIdentity | null {
     const user = this.users.get(id);
-    return user ? { workspaceId: this.config!.workspace.id, userId: user.id, displayName: user.name, role: role ?? user.role as TeamIdentity["role"] } : null;
+    // A role from a SAML group answers for this session; every other fact about the account comes from its row.
+    return user ? this.identityFor(role && role !== (user.role === "owner" ? "owner" : nearestBuiltInRole(this.roles.get(user.role)?.permissions ?? [])) ? { ...user, role } : user) : null;
+  }
+  /**
+   * Work out what an account may do. With the rbac license a role means its permissions. Without it only owner,
+   * editor and viewer exist; any other role counts as the nearest of those and never as owner. A scope always applies,
+   * licensed or not, so a lapsed license cannot widen what a scoped account sees.
+   */
+  private identityFor(user: TeamUserRow): TeamIdentity {
+    const def = this.roles.get(user.role) ?? BUILT_IN_ROLES.viewer!;
+    let role = nearestBuiltInRole(def.permissions);
+    let permissions = def.permissions;
+    if (!FREE_ROLES.has(user.role) && !hasFeature("rbac")) {
+      if (role === "owner") role = "editor";
+      permissions = BUILT_IN_ROLES[role]!.permissions;
+    }
+    if (user.role === "owner") role = "owner";
+    return { workspaceId: this.config!.workspace.id, userId: user.id, displayName: user.name, role, roleName: user.role, permissions: [...permissions], scope: this.scopeOf(user, def) };
+  }
+  private scopeOf(user: TeamUserRow, def: RoleDefinition): string[] | null {
+    let own: RoleScope | undefined;
+    if (user.scopeJson) { try { own = parseScope(JSON.parse(user.scopeJson)); } catch { return []; } }
+    return scopePatterns(own ?? def.scope, this.config?.businessUnits);
   }
   /**
    * Move the accounts into the server database. Accounts in the configuration file that the database does
@@ -134,8 +183,45 @@ export class TeamAuth {
     return structuredClone(this.config);
   }
   configurationDigest(): string { return createHash("sha256").update(JSON.stringify(this.snapshotConfig())).digest("hex"); }
-  members(): Array<Pick<TeamIdentity, "userId" | "displayName" | "role">> {
-    return [...this.users.values()].map(user => ({ userId: user.id, displayName: user.name, role: user.role as TeamIdentity["role"] }));
+  members(): TeamMember[] {
+    return [...this.users.values()].map(user => {
+      const scope = user.scopeJson ? parseScope(JSON.parse(user.scopeJson)) : undefined;
+      return { userId: user.id, displayName: user.name, role: user.role, ...(scope ? { scope } : {}) };
+    });
+  }
+  /** Names and permissions of every role the server knows, for the roles page. */
+  roleList(): Array<{ name: string; builtIn: boolean; assignable: boolean; permissions: Permission[]; scope: RoleScope | null }> {
+    return [...this.roles].map(([name, def]) => ({ name, builtIn: name in BUILT_IN_ROLES, assignable: FREE_ROLES.has(name) || hasFeature("rbac"), permissions: [...def.permissions], scope: def.scope ?? null }));
+  }
+  /**
+   * Change the role or the scope of one account. The caller has checked the license and the permission.
+   * Returns what changed, for the audit log. Never leaves the workspace without an account that can manage users.
+   */
+  setAccess(userId: string, change: { role?: string; scope?: unknown }): { before: { role: string; scope: RoleScope | null }; after: { role: string; scope: RoleScope | null } } {
+    const user = this.users.get(userId);
+    if (!user) throw new TeamAuthError("No such account", 404);
+    if (change.role !== undefined && !this.roles.has(change.role)) throw new TeamAuthError("Unknown role", 400);
+    let scopeJson: string | null | undefined;
+    if (change.scope !== undefined) {
+      if (change.scope === null) scopeJson = null;
+      else {
+        try {
+          const scope = parseScope(change.scope);
+          for (const unit of scope?.businessUnits ?? []) if (!this.config?.businessUnits?.[unit]) throw new Error(`Unknown business unit "${unit}"`);
+          scopeJson = scope && (scope.repos?.length || scope.businessUnits?.length) ? JSON.stringify(scope) : null;
+        } catch (error) { throw new TeamAuthError(error instanceof Error ? error.message : "Invalid scope", 400); }
+      }
+    }
+    const nextRole = change.role ?? user.role;
+    if (nextRole !== user.role && this.roles.get(user.role)?.permissions.includes("users.manage") && !this.roles.get(nextRole)?.permissions.includes("users.manage")) {
+      const others = [...this.users.values()].filter(row => row.id !== user.id && this.roles.get(row.role)?.permissions.includes("users.manage"));
+      if (others.length === 0) throw new TeamAuthError("Keep at least one account that can manage users", 409);
+    }
+    const before = { role: user.role, scope: user.scopeJson ? parseScope(JSON.parse(user.scopeJson)) ?? null : null };
+    const next = { ...user, role: nextRole, roleSource: "admin" as const, scopeJson: scopeJson === undefined ? user.scopeJson : scopeJson };
+    this.table?.updateAccess(userId, { role: next.role, roleSource: "admin", scopeJson: next.scopeJson });
+    this.users.set(userId, next);
+    return { before, after: { role: next.role, scope: next.scopeJson ? parseScope(JSON.parse(next.scopeJson)) ?? null : null } };
   }
   memberCount(): number { return this.users.size; }
   /** The free tier stops at FREE_MEMBER_LIMIT accounts; the rbac license feature lifts that. */
@@ -147,10 +233,16 @@ export class TeamAuth {
     catch (error) { if (error instanceof TeamUserConflictError) throw new TeamAuthError(error.message, 409); throw error; }
     this.users.set(row.id, row); return row;
   }
+  /** Throws unless a new account may get this role: it exists, is not owner, and is licensed when it is not one of the three free roles. */
+  assertAssignableRole(role: string): void {
+    if (!this.roles.has(role) || role === "owner") throw new TeamAuthError("Unknown role", 400);
+    if (!FREE_ROLES.has(role) && !hasFeature("rbac")) throw new TeamAuthError(NEEDS_LICENSE, 403);
+  }
   /** Called only after an owner-authorized member has been durably persisted. */
-  addMember(input: { id: string; name: string; role: "editor" | "viewer"; passwordHash: string }): TeamIdentity {
+  addMember(input: { id: string; name: string; role: string; passwordHash: string }): TeamIdentity {
     if (!this.config) throw new TeamAuthError("Team sign-in is not configured", 404);
-    const member = userSchema.extend({ role: z.enum(["editor", "viewer"]), passwordHash: z.string() }).parse(input);
+    const member = userSchema.extend({ passwordHash: z.string() }).parse(input);
+    this.assertAssignableRole(member.role);
     if (!validHash(member.passwordHash)) throw new TeamAuthError("Invalid password hash", 400);
     if (this.users.has(member.id)) throw new TeamAuthError("That account ID already exists", 409);
     if (this.atMemberLimit()) throw new TeamAuthError("Workspace member limit reached", 409);
@@ -220,12 +312,12 @@ export class TeamAuth {
     return { url: url.href, setCookie: this.cookie(SSO_COOKIE, browser, SSO_MS / 1000) };
   }
   /** Create the account for a verified OIDC subject. The ID is derived from the subject, so it cannot collide with a local account ID. */
-  private provisionOidcUser(claims: { sub?: string; name?: unknown; preferred_username?: unknown; email?: unknown }, role: "editor" | "viewer"): TeamUserRow {
+  private provisionOidcUser(claims: { sub?: string; name?: unknown; preferred_username?: unknown; email?: unknown }, role: string, roleSource: "admin" | "group"): TeamUserRow {
     const sub = claims.sub!;
     const id = sub.length <= 120 ? `oidc:${sub}` : `oidc:${createHash("sha256").update(sub).digest("hex").slice(0, 48)}`;
     const label = [claims.name, claims.preferred_username, claims.email].find((value): value is string => typeof value === "string" && value.trim() !== "");
     const name = (label ?? sub).replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 160) || "SSO user";
-    return this.store({ id, name, role, passwordHash: null, oidcSub: sub, source: "oidc", createdAt: "", updatedAt: "" });
+    return this.store({ id, name, role, roleSource, scopeJson: null, passwordHash: null, oidcSub: sub, source: "oidc", createdAt: "", updatedAt: "" });
   }
   async callback(params: URLSearchParams, req: Pick<IncomingMessage, "headers">) {
     const state = params.get("state") ?? ""; const pending = this.pending.get(state);
@@ -245,15 +337,28 @@ export class TeamAuth {
     if (payload.nonce !== pending.nonce || (Array.isArray(payload.aud) && payload.aud.length > 1 && payload.azp !== oidc.clientId)) throw new TeamAuthError("SSO identity verification failed");
     let user = [...this.users.values()].find(row => row.oidcSub === payload.sub);
     let provisioned = false;
+    // Group mapping is a paid feature. The role comes from the first mapped group the user is in.
+    const groupRoles = hasFeature("rbac") ? oidc.groupRoles : undefined;
+    const mappedRole = roleFromGroups((payload as Record<string, unknown>)[oidc.groupsClaim ?? "groups"], groupRoles);
+    let roleChange: TeamRoleChange | undefined;
     if (!user && oidc.jit) {
       // Account creation on first sign-in is a paid feature. Without the license the sign-in stays "not a member".
       if (!hasFeature("rbac")) throw new TeamAuthError(`This SSO account is not a workspace member. Automatic account creation is set up, but ${NEEDS_LICENSE}`, 403);
       if (this.atMemberLimit()) throw new TeamAuthError("Workspace member limit reached", 409);
-      user = this.provisionOidcUser(payload, oidc.jit.role); provisioned = true;
+      user = this.provisionOidcUser(payload, mappedRole ?? oidc.jit.role, groupRoles ? "group" : "admin"); provisioned = true;
+    }
+    // An account whose role came from the groups follows the groups at every sign-in. An account an administrator set stays as set.
+    if (user && !provisioned && groupRoles && user.roleSource === "group") {
+      const wanted = mappedRole ?? oidc.jit?.role ?? "viewer";
+      if (wanted !== user.role) {
+        roleChange = { userId: user.id, old: user.role, new: wanted, source: "oidc-group" };
+        this.table?.updateAccess(user.id, { role: wanted });
+        user = { ...user, role: wanted }; this.users.set(user.id, user);
+      }
     }
     if (!user) throw new TeamAuthError("This SSO account is not a workspace member", 403);
     const session = this.issueSession(user.id);
-    return { ...session, provisioned, setCookies: [session.setCookie, this.cookie(SSO_COOKIE, "", 0)], redirect: "/" };
+    return { ...session, provisioned, ...(roleChange ? { roleChange } : {}), setCookies: [session.setCookie, this.cookie(SSO_COOKIE, "", 0)], redirect: "/" };
   }
   // SAML sign-in (enterprise license). The checks live in team-saml.ts and the enterprise package.
   private requireSaml(): TeamSaml { if (!this.saml) throw new TeamAuthError("SAML sign-in is not configured", 404); return this.saml; }
