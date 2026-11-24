@@ -10,8 +10,9 @@ export const SAML_COOKIE = "zero_team_saml";
 const COOKIE_MS = 10 * 60 * 1000;
 const TICKET_MS = 60 * 1000;
 const METADATA_REFRESH_MS = 12 * 60 * 60 * 1000;
-type Role = "owner" | "editor" | "viewer";
-const RANK: Record<Role, number> = { viewer: 0, editor: 1, owner: 2 };
+/** A role name: owner, editor, viewer, or any role the workspace defines. */
+type Role = string;
+const RANK: Record<string, number> = { viewer: 0, editor: 1, owner: 2 };
 
 export const samlConfigSchema = z.object({
   entityId: z.string().min(1).max(512),
@@ -19,7 +20,7 @@ export const samlConfigSchema = z.object({
   metadataUrl: z.string().url().optional(),
   metadataFile: z.string().min(1).max(1024).optional(),
   groupAttribute: z.string().min(1).max(512).optional(),
-  groupRoles: z.record(z.string().min(1).max(512), z.enum(["owner", "editor", "viewer"])).optional(),
+  groupRoles: z.record(z.string().min(1).max(512), z.string().min(1).max(64)).optional(),
   requireSignature: z.enum(["assertion", "either"]).optional(),
   clockSkewSeconds: z.number().int().min(0).max(300).optional(),
 }).strict().refine(c => Number(!!c.metadataUrl) + Number(!!c.metadataFile) === 1, { message: "Set exactly one of metadataUrl and metadataFile" })
@@ -45,6 +46,8 @@ export interface TeamSamlDeps {
   cookie: (name: string, value: string, seconds: number) => string;
   /** The workspace member whose configured `samlNameId` equals this NameID. */
   findMember: (nameId: string) => { id: string; role: Role } | undefined;
+  /** How much a role can do, to pick the highest one among a person's groups. Defaults to viewer < editor < owner. */
+  roleRank?: (role: Role) => number;
   /** Test seam for the provider; production builds it from the metadata. */
   createProvider?: (config: SamlConfig) => Promise<SamlServiceProvider>;
 }
@@ -59,12 +62,12 @@ function parseCookie(header: string | undefined, name: string): string | undefin
 }
 
 /** Highest role among the groups the identity provider asserted, or undefined when none is mapped. */
-export function roleFromGroups(groups: readonly string[], map: Readonly<Record<string, Role>>): Role | undefined {
+export function roleFromGroups(groups: readonly string[], map: Readonly<Record<string, Role>>, rank: (role: Role) => number = role => RANK[role] ?? 0): Role | undefined {
   let best: Role | undefined;
   for (const group of groups) {
     if (!Object.hasOwn(map, group)) continue;
     const role = map[group]!;
-    if (best === undefined || RANK[role] > RANK[best]) best = role;
+    if (best === undefined || rank(role) > rank(best)) best = role;
   }
   return best;
 }
@@ -127,7 +130,7 @@ export class TeamSaml {
     if (!member) throw new TeamAuthError("This SSO account is not a workspace member", 403, "not_a_member");
     let role = member.role;
     if (this.config.groupAttribute && this.config.groupRoles) {
-      const mapped = roleFromGroups(identity.attributes[this.config.groupAttribute] ?? [], this.config.groupRoles);
+      const mapped = roleFromGroups(identity.attributes[this.config.groupAttribute] ?? [], this.config.groupRoles, this.deps.roleRank);
       if (!mapped) throw new TeamAuthError("This SSO account has no role in this workspace", 403, "no_mapped_group");
       role = mapped;
     }
