@@ -23,7 +23,7 @@ import { selectHost, type Host } from "../host/index.js";
 import { MAX_REVIEWERS, commitSubject, footerText, isDraft, needsTicket, parseTicket, pullRequestTitle, renderBodyTemplate, resolveBranchPrefix, type PullRequestConventions } from "./fix-conventions.js";
 import { CODEOWNERS_PATHS, reviewersFromCodeowners } from "./fix-codeowners.js";
 import { finishWithError, UsageError } from "./output.js";
-import { runInSandbox, sandboxLabel, validateSandboxImage, type SandboxSpec } from "./fix-sandbox.js";
+import { isPinnedImage, makeSandboxCache, NETWORK_CANARY, runInSandbox, sandboxLabel, validateSandboxImage, type SandboxSpec } from "./fix-sandbox.js";
 import { appendRunMetric, type RunMetric } from "../run-metrics.js";
 import { applyWorkflowDefaults } from "../workflow-defaults.js";
 
@@ -131,13 +131,17 @@ const withoutCheckHeadings = (text: string): string => {
 };
 
 /** The sandbox line is written only when every check ran in a container and passed. */
-export function sandboxVerifiedLine(checks: CheckResult[]): string | undefined {
+export interface SandboxNotes { /** A setup step ran first with the network on. */ setup: boolean; pinned: boolean }
+export function sandboxVerifiedLine(checks: CheckResult[], notes?: SandboxNotes): string | undefined {
   if (!checks.length || checks.some(check => check.code !== 0 || !check.sandbox)) return undefined;
   const labels = [...new Set(checks.map(check => check.sandbox!))];
-  return labels.length === 1 ? `Verified in a sandbox: ${cell(labels[0]!)}.` : undefined;
+  if (labels.length !== 1) return undefined;
+  const setup = notes?.setup ? " Dependencies were downloaded first in a separate setup step with the network on; the checks ran with the network off, and a canary confirmed it." : "";
+  const pinned = notes ? (notes.pinned ? " The image is pinned by digest." : " The image is not pinned by digest, so the tag can change.") : "";
+  return `Verified in a sandbox: ${cell(labels[0]!)}.${setup}${pinned}`;
 }
 
-export function pullRequestBody(finding: FindingToFix, summary: string | undefined, checks: CheckResult[], footer?: string, draftUnchecked = false, layout?: { template: string; ticket?: string }, direct = false): string {
+export function pullRequestBody(finding: FindingToFix, summary: string | undefined, checks: CheckResult[], footer?: string, draftUnchecked = false, layout?: { template: string; ticket?: string }, direct = false, sandboxNotes?: SandboxNotes): string {
   const where = finding.path ? `\`${finding.path.replace(/`/g, "'")}${finding.startLine ? `:${finding.startLine}` : ""}\`` : "not given";
   const rows = checks.length ? checks.map(check => `| \`${escapeHtml(check.command.replace(/`/g, "'").replace(/\s+/g, " ")).replace(/\|/g, "\\|")}\` | ${check.code === 0 ? "passed" : `failed (exit ${check.code})`} |`).join("\n") : "| none were run | |";
   const failed = checks.filter(check => check.code !== 0);
@@ -149,7 +153,7 @@ export function pullRequestBody(finding: FindingToFix, summary: string | undefin
     checks: [
       "### Checks",
       `| Command | Result |\n| --- | --- |\n${rows}`,
-      ...(sandboxVerifiedLine(checks) ? ["", sandboxVerifiedLine(checks)!] : checks.some(check => check.sandbox) ? ["", "Not verified in a sandbox: a sandboxed check failed."] : checks.length ? ["", "These checks ran on the machine that ran 0, not in a sandbox."] : []),
+      ...(sandboxVerifiedLine(checks, sandboxNotes) ? ["", sandboxVerifiedLine(checks, sandboxNotes)!] : checks.some(check => check.sandbox) ? ["", "Not verified in a sandbox: a sandboxed check failed."] : checks.length ? ["", "These checks ran on the machine that ran 0, not in a sandbox."] : []),
       ...(tails ? ["", tails] : []),
     ].join("\n"),
     summary: [
@@ -169,7 +173,7 @@ export function pullRequestBody(finding: FindingToFix, summary: string | undefin
 }
 
 export interface FixOptions extends ConsoleTransportOptions {
-  repo?: string; base?: string; test?: string[]; ready?: boolean; budget: string; model?: string; timeout: string; pr: boolean; format?: string; policy?: string; repoPolicy?: boolean; sandbox?: string; sandboxImage?: string; sandboxNetwork?: boolean; ticket?: string;
+  repo?: string; base?: string; test?: string[]; ready?: boolean; budget: string; model?: string; timeout: string; pr: boolean; format?: string; policy?: string; repoPolicy?: boolean; sandbox?: string; sandboxImage?: string; sandboxNetwork?: boolean; sandboxSetup?: string[]; ticket?: string;
 }
 
 export interface FixOutcome {
@@ -200,7 +204,7 @@ async function defaultBase(deps: FixDeps, repo: string, requested?: string): Pro
 /** Check the sandbox flags together. Without --sandbox the checks run on this machine with your privileges. */
 export function sandboxSpec(options: FixOptions, env: NodeJS.ProcessEnv = process.env): SandboxSpec | undefined {
   if (!options.sandbox) {
-    if (options.sandboxImage || options.sandboxNetwork) throw new UsageError("--sandbox-image and --sandbox-network need --sandbox docker.");
+    if (options.sandboxImage || options.sandboxNetwork || options.sandboxSetup?.length) throw new UsageError("--sandbox-image, --sandbox-network and --sandbox-setup need --sandbox docker.");
     return undefined;
   }
   if (options.sandbox !== "docker") throw new UsageError("--sandbox must be docker.");
@@ -208,7 +212,9 @@ export function sandboxSpec(options: FixOptions, env: NodeJS.ProcessEnv = proces
   if (!options.test?.length) throw new UsageError("--sandbox runs your --test commands in the container; give at least one --test.");
   let image: string;
   try { image = validateSandboxImage(options.sandboxImage); } catch (error) { throw new UsageError(error instanceof Error ? error.message : String(error)); }
+  if (options.sandboxNetwork && options.sandboxSetup?.length) throw new UsageError("--sandbox-setup downloads with the network on and then runs the checks with it off; do not combine it with --sandbox-network.");
   if (options.sandboxNetwork) assertEgressAllowed("the network from the fix sandbox (--sandbox-network)", env);
+  if (options.sandboxSetup?.length) assertEgressAllowed("the network from the fix sandbox setup step (--sandbox-setup)", env);
   return { image, network: Boolean(options.sandboxNetwork) };
 }
 
@@ -232,6 +238,7 @@ async function runFixFlow(id: string, options: FixOptions, deps: FixDeps): Promi
   let tree = "";
   let madeBranch: { repo: string; branch: string; existed: boolean } | undefined;
   let committedBranch = false;
+  let cache: string | undefined;
   try {
     const budget = Number(options.budget);
     if (!Number.isFinite(budget) || budget <= 0) throw new UsageError("--budget must be a positive number of USD.");
@@ -294,7 +301,30 @@ async function runFixFlow(id: string, options: FixOptions, deps: FixDeps): Promi
     }
 
     const checks: CheckResult[] = [];
-    for (const command of options.test ?? []) { deps.err(`running${sandbox ? ` in a sandbox (${sandboxLabel(sandbox)})` : ""}: ${command}`); checks.push(await deps.check(tree, command, sandbox)); }
+    let sandboxNotes: SandboxNotes | undefined;
+    if (sandbox && options.sandboxSetup?.length) {
+      // Setup downloads dependencies into a cache folder with the network on. The checks then reuse that cache with the network off.
+      cache = makeSandboxCache();
+      const online = { ...sandbox, network: true, cache };
+      const offline = { ...sandbox, network: false, cache };
+      sandboxNotes = { setup: true, pinned: isPinnedImage(sandbox.image) };
+      let ready = true;
+      for (const command of options.sandboxSetup) {
+        deps.err(`setup in a sandbox (${sandboxLabel(online)}): ${command}`);
+        const result = await deps.check(tree, command, online);
+        if (result.code !== 0) { checks.push({ ...result, command: `setup: ${command}` }); ready = false; break; }
+      }
+      if (ready) {
+        deps.err("checking that the sandbox has no network");
+        const canary = await deps.check(tree, NETWORK_CANARY, offline);
+        checks.push({ ...canary, command: "network-off canary" });
+        ready = canary.code === 0;
+      }
+      if (ready) for (const command of options.test ?? []) { deps.err(`running in a sandbox (${sandboxLabel(offline)}): ${command}`); checks.push(await deps.check(tree, command, offline)); }
+    } else {
+      if (sandbox) sandboxNotes = { setup: false, pinned: isPinnedImage(sandbox.image) };
+      for (const command of options.test ?? []) { deps.err(`running${sandbox ? ` in a sandbox (${sandboxLabel(sandbox)})` : ""}: ${command}`); checks.push(await deps.check(tree, command, sandbox)); }
+    }
     const verified = checks.every(check => check.code === 0) && !thread.failed;
 
     await deps.git(tree, ["add", "-A"]);
@@ -311,7 +341,7 @@ async function runFixFlow(id: string, options: FixOptions, deps: FixDeps): Promi
     await host.pushBranch(branch);
     const bodyFile = join(temp, "body.md");
     const draft = isDraft(verified, conventions, !checks.length && !options.ready);
-    deps.writeFile(bodyFile, pullRequestBody(finding, thread.reply, checks, footerText(conventions), draft && verified && !checks.length, conventions?.bodyTemplate ? { template: conventions.bodyTemplate, ...(ticket ? { ticket } : {}) } : undefined, direct.applied));
+    deps.writeFile(bodyFile, pullRequestBody(finding, thread.reply, checks, footerText(conventions), draft && verified && !checks.length, conventions?.bodyTemplate ? { template: conventions.bodyTemplate, ...(ticket ? { ticket } : {}) } : undefined, direct.applied, sandboxNotes));
     const existing = await host.findOpenPullRequest(branch);
     let url: string; let created = false;
     if (existing) {
@@ -336,6 +366,7 @@ async function runFixFlow(id: string, options: FixOptions, deps: FixDeps): Promi
     // A branch this run made and never committed to is only clutter.
     if (madeBranch && !madeBranch.existed && !committedBranch) await deps.git(madeBranch.repo, ["branch", "-D", madeBranch.branch]).catch(() => undefined);
     if (temp) deps.removeTemp(temp);
+    if (cache) rmSync(cache, { recursive: true, force: true });
   }
 }
 
@@ -419,6 +450,7 @@ export function registerFixCommand(program: Command, deps: FixDeps = defaults): 
     .addOption(new Option("--sandbox <mode>", "Run the --test commands in a container instead of on this machine (docker)").choices(["docker"]))
     .option("--sandbox-image <image>", "Image for --sandbox docker, for example maven:3-eclipse-temurin-21. It must hold the tools and dependencies the tests need")
     .option("--sandbox-network", "Give the sandbox network access (to download dependencies). Off by default")
+    .option("--sandbox-setup <command>", "With --sandbox docker: run this once with the network on to download dependencies (for example mvn -q dependency:go-offline), then run the --test checks with the network off; repeat for several", collect)
     .option("--policy <file>", "Policy file (.json or .yaml) of approved libraries and fix rules; any path you name, relative to the current directory. Default: ~/.0/fix-policy.json|yaml|yml")
     .option("--ticket <key>", "Ticket key such as SEC-123 for the {ticket} placeholder in your policy's pull request settings")
     .option("--repo-policy", "Also read fix-policy.* or .zero/fix-policy.* from the repository being fixed (untrusted content; off by default)")
