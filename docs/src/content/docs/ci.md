@@ -343,6 +343,39 @@ jobs:
 
 If the second repository is private, give its checkout a token that can read it.
 
+## Run on a runner in your network
+
+Run scans on a runner you host, so source code is processed where it lives. The runner needs outbound access to GitHub and to your model endpoint, and nothing else.
+
+Install the runner on a machine in your network or cloud account, with a label such as `0-scan`. Use an ephemeral runner (`--ephemeral`) so each job starts clean. Then point the job at it:
+
+```yaml
+jobs:
+  scan:
+    runs-on: [self-hosted, linux, 0-scan]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: 0sec-labs/0security@v0.44.0
+        with:
+          version: 0.44.0
+          fail-on: high
+        env:
+          ZERO_ENTERPRISE: "1"
+          ZERO_SELECTED_PROVIDER: azure
+          AZURE_OPENAI_AUTH: entra
+          AZURE_OPENAI_BASE_URL: https://your-resource.openai.azure.com/openai/v1
+          ZERO_MODEL: your-deployment-id
+```
+
+Keep these boundaries:
+
+- Give the runner's machine identity access to the model, as in [Azure OpenAI](/models/#azure-openai) or an AWS role for [Amazon Bedrock](/models/#amazon-bedrock). No model key is stored in GitHub.
+- `ZERO_ENTERPRISE` keeps everything off except the model endpoint you configured. The action's SARIF upload goes to GitHub with the job's token. See [Data flow](/data-flow/).
+- Install `cosign` on the runner image, so the installer verifies the release [signature](/self-hosting/#verify-the-signature). Or put a pinned, verified binary in the runner image and skip the install.
+- Only run the job on trusted events. Do not run a self-hosted runner for pull requests from forks.
+
+This pattern is not tested on a real self-hosted runner yet.
+
 ## Limits
 
 - Only pull requests from the same repository work. A fork's pull request has no access to your secrets, so it cannot run a model. Do not use `pull_request_target` to get around this: it runs a model on untrusted code with your key.

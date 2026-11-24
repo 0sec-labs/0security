@@ -113,6 +113,11 @@ jobs:
   build-and-push:
     needs: plan
     if: needs.plan.outputs.publish == 'true'
+    permissions:
+      contents: read
+      packages: write
+      # Keyless signing uses the workflow's OIDC identity. No signing key exists.
+      id-token: write
     # Isolate build/pull storage from the shared runner pool. Layers are reused
     # through the scoped Actions cache below; amd64 requires no emulation.
     runs-on: ubuntu-24.04
@@ -339,3 +344,25 @@ jobs:
             echo "=== system python deps ===" && python3 -c "import requests, bs4; print(\"py deps ok\")"
             echo "ALL_TOOLS_OK"
           '
+
+      # Sign the pushed digest and attach a CycloneDX SBOM as a signed
+      # attestation. Both are keyless (Sigstore, OIDC) and are stored next to
+      # the image in GHCR.
+      - name: Install cosign
+        uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+
+      - name: Generate image SBOM
+        uses: anchore/sbom-action@dfcb83b97731532d72be422cbc51ee64adb6fd56 # v0.24.4
+        with:
+          image: ${{ steps.image.outputs.name }}@${{ steps.build_retry.outputs.digest || steps.build.outputs.digest }}
+          format: cyclonedx-json
+          output-file: image-sbom.cdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Sign image and attest SBOM (keyless)
+        run: |
+          set -euo pipefail
+          IMAGE="${{ steps.image.outputs.name }}@${{ steps.build_retry.outputs.digest || steps.build.outputs.digest }}"
+          cosign sign --yes "$IMAGE"
+          cosign attest --yes --type cyclonedx --predicate image-sbom.cdx.json "$IMAGE"

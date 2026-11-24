@@ -327,6 +327,35 @@ On macOS use `shasum -a 256 --check --ignore-missing checksums.txt` instead.
 
 The install script does the same for you. When `gh` is installed and logged in it verifies the `checksums.txt` attestation before it trusts any hash, and it prints a clear note and falls back to the plain `checksums.txt` check when `gh` is missing. Set `INSTALL_ATTESTATION=require` to fail instead of falling back, or `INSTALL_ATTESTATION=0` to skip the attestation on an air-gapped host or an internal mirror. Neither setting disables the checksum comparison. The FoxGuard companion is always checked against a SHA-256 pinned in the install script.
 
+### Verify the signature
+
+Releases also carry a keyless [Sigstore](https://docs.sigstore.dev) signature of `checksums.txt` and of the SBOM, made by the release workflow with its GitHub identity. No signing key exists to steal. Each file has a bundle named `<file>.sigstore.json`. With [cosign](https://docs.sigstore.dev/cosign/system_config/installation/) installed, verify the checksums without a GitHub login:
+
+```bash
+cosign verify-blob --bundle checksums.txt.sigstore.json \
+  --certificate-identity-regexp '^https://github\.com/0sec-labs/0security/\.github/workflows/release\.yml@refs/(tags/v[0-9].*|heads/main)$' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  checksums.txt
+```
+
+The install script runs this check when `cosign` is installed and the release has a bundle. It stops on a bad signature. Set `INSTALL_SIGNATURE=require` to stop when `cosign` or the bundle is missing, or `INSTALL_SIGNATURE=0` to skip it on an air-gapped host or an internal mirror. Releases made before signing began have no bundle.
+
+### Verify the container image
+
+Each image pushed to `ghcr.io/0sec-labs/0security` is signed by digest, with a CycloneDX SBOM attached as a signed attestation. Verify both before you pull by tag:
+
+```bash
+IMAGE=ghcr.io/0sec-labs/0security:v0.44.0
+cosign verify "$IMAGE" \
+  --certificate-identity-regexp '^https://github\.com/0sec-labs/0security/\.github/workflows/docker-publish\.yml@refs/heads/main$' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+cosign verify-attestation --type cyclonedx "$IMAGE" \
+  --certificate-identity-regexp '^https://github\.com/0sec-labs/0security/\.github/workflows/docker-publish\.yml@refs/heads/main$' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+Pin the image by the digest that `cosign verify` prints, not by tag, in production. The signing steps run in the publish workflow and have not yet run on a real release. Check that the first signed image verifies before you rely on this.
+
 To audit the dependencies of a release, run the SBOM through the advisory check:
 
 ```bash

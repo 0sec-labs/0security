@@ -101,6 +101,39 @@ else
   printf '%s\n' "Note: gh is not installed, not logged in, or too old for \`gh attestation\` (needs 2.49+), so the release attestation was not verified; falling back to the checksums.txt integrity check. See https://docs.0.security/self-hosting/#verify-a-release to verify manually." >&2
 fi
 
+# Signature: releases also publish checksums.txt.sigstore.json, a keyless Sigstore
+# bundle made by this repository's release workflow. When `cosign` is installed,
+# verify it so the checksums come from that workflow without needing a GitHub
+# login. INSTALL_SIGNATURE=auto (default) verifies when cosign and a bundle exist
+# and fails on a bad signature; `require` also fails when either is missing; `0`
+# skips (offline mirrors, air gaps).
+INSTALL_SIGNATURE="${INSTALL_SIGNATURE:-auto}"
+case "$INSTALL_SIGNATURE" in auto|require|0) ;; *) fail "INSTALL_SIGNATURE must be auto, require or 0" ;; esac
+SIGNATURE_IDENTITY="^https://github\.com/${REPO}/\.github/workflows/release\.yml@refs/(tags/v[0-9].*|heads/main)\$"
+SIGNATURE_ISSUER="https://token.actions.githubusercontent.com"
+signature_bundle="$(mktemp "${TMPDIR:-/tmp}/0-checksums-sig.XXXXXX")"
+trap 'rm -f "$manifest" "$binary" "$fg_binary" "$alias_link" "$signature_bundle"' EXIT HUP INT TERM
+if [ "$INSTALL_SIGNATURE" = "0" ]; then
+  printf '%s\n' "Skipping signature check (INSTALL_SIGNATURE=0)." >&2
+elif ! command -v cosign >/dev/null 2>&1; then
+  [ "$INSTALL_SIGNATURE" != "require" ] || fail "INSTALL_SIGNATURE=require needs cosign (https://docs.sigstore.dev/cosign/system_config/installation/)"
+  printf '%s\n' "Note: cosign is not installed, so the release signature was not verified. Install cosign to verify it." >&2
+elif ! curl --fail --location --silent --show-error --retry 3 --retry-delay 1 \
+    "${RELEASE_BASE_URL}/checksums.txt.sigstore.json" -o "$signature_bundle" 2>/dev/null; then
+  [ "$INSTALL_SIGNATURE" != "require" ] || fail "this release has no checksums.txt.sigstore.json signature bundle"
+  printf '%s\n' "Note: this release has no signature bundle, so the signature was not verified." >&2
+else
+  printf '%s\n' "Verifying checksums.txt signature with cosign…" >&2
+  if signature_output="$(cosign verify-blob --bundle "$signature_bundle" \
+      --certificate-identity-regexp "$SIGNATURE_IDENTITY" \
+      --certificate-oidc-issuer "$SIGNATURE_ISSUER" "$manifest" 2>&1)"; then
+    printf '%s\n' "checksums.txt signature verified for ${REPO}." >&2
+  else
+    printf '%s\n' "$signature_output" >&2
+    fail "could not verify the checksums.txt signature for ${REPO}; refusing to install (set INSTALL_SIGNATURE=0 to skip when offline or using a mirror)"
+  fi
+fi
+
 printf '%s\n' "Downloading ${NEW_ASSET}…" >&2
 if download "${RELEASE_BASE_URL}/${NEW_ASSET}" "$binary" 2>/dev/null; then
   ASSET="$NEW_ASSET"
