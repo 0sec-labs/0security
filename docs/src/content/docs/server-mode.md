@@ -272,6 +272,21 @@ In syslog the line is `<PRI>1 <ts> <host> 0 - <action> [audit@32473 eventId seq 
 
 The TLS sink is tested against a local listener with a self-signed certificate. It is not tested against a commercial collector. Collectors that need their own envelope, such as Splunk HEC, are not supported directly.
 
+
+### Check the audit log for tampering
+
+Each audit event stores a hash of the event before it and a hash of its own content. Changing, removing or reordering an event breaks the chain from that point on. Check it:
+
+```bash
+0security config audit-verify
+```
+
+The command prints the first break and exits 1 when the chain is broken. It is free, runs offline and needs no license.
+
+When the log reaches 50,000 events, the oldest are removed. A rotation checkpoint keeps the hash of the last removed event, so the rest still verifies. Events written before this feature existed are counted but cannot be verified.
+
+The check proves the log is consistent. It does not prove the log is honest: someone who can rewrite the whole database can rewrite the chain too. Copy the head hash that the command prints, or send the log to a SIEM, to keep a record they cannot reach. Removing the newest events with no new event after them is caught only when the database still records that they existed.
+
 ### Not supported
 
 - High availability, failover, or more than one replica.

@@ -294,6 +294,15 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
+### 0security config audit-verify (hidden)
+Usage: 0security config audit-verify [options]
+
+Check offline that the audit log was not edited, reordered or cut (hash chain)
+
+Options:
+  --format <format>  Output: text or json (choices: "text", "json")
+  -h, --help         display help for command
+
 ### 0security config db (hidden)
 Usage: 0security config db [options] [command]
 

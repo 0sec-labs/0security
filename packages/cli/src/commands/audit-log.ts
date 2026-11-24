@@ -3,7 +3,7 @@ import { chmodSync, closeSync, openSync, writeSync } from "node:fs";
 import { hostname } from "node:os";
 import type { Command } from "commander";
 import { VERSION } from "@0/engine/shared";
-import { AUDIT_EXPORT_FORMATS, formatAuditEvent, listAudit, parseAuditTime, queryAuditEvents, resolveOsecDbPath, type AuditEvent, type AuditExportFormat, type AuditRangeQuery } from "@0/engine/storage";
+import { AUDIT_EXPORT_FORMATS, formatAuditEvent, listAudit, parseAuditTime, queryAuditEvents, resolveOsecDbPath, verifyAuditLog, type AuditEvent, type AuditExportFormat, type AuditRangeQuery } from "@0/engine/storage";
 import { printJson, renderTable, sinks, UsageError, type ConsoleCommandDeps, type JsonOption } from "./console-support.js";
 
 export interface AuditLogOptions extends JsonOption { q?: string; limit?: string; before?: string }
@@ -115,6 +115,33 @@ export async function runAuditExport(options: AuditExportOptions, deps: AuditExp
   }
 }
 
+/** Checks the audit log hash chain offline. Free: no license. Exit 0 intact, 1 broken or unreadable, 2 usage. */
+export function runAuditVerify(options: JsonOption, deps: ConsoleCommandDeps = {}): void {
+  const io = sinks(deps);
+  try {
+    const report = verifyAuditLog({ dbPath: resolveOsecDbPath(deps.dbPath) });
+    if (options.json) printJson(io, report);
+    else if (report.ok) {
+      const parts = [`${report.rows} chained event${report.rows === 1 ? "" : "s"}`];
+      if (report.firstId !== null) parts.push(`ids ${report.firstId} to ${report.lastId}`);
+      if (report.rotatedRows) parts.push(`${report.rotatedRows} older event${report.rotatedRows === 1 ? "" : "s"} rotated out and covered by ${report.checkpoints} checkpoint${report.checkpoints === 1 ? "" : "s"}`);
+      io.out(`Audit log chain intact: ${parts.join(", ")}.`);
+      if (report.unchainedRows) io.out(`${report.unchainedRows} older event${report.unchainedRows === 1 ? " was" : "s were"} written before the chain existed and cannot be verified.`);
+      if (report.headHash) io.out(`Head hash: ${report.headHash}`);
+      io.out("This shows the log is consistent. Keep a copy of the head hash elsewhere (for example in your SIEM) to detect a rewritten log.");
+    } else {
+      const brk = report.firstBreak!;
+      io.out(`Audit log chain BROKEN${brk.id === null ? "" : ` at event ${brk.id}`}: ${brk.reason}.`);
+      io.out("Events from that point on cannot be trusted.");
+    }
+    io.exit(report.ok ? 0 : 1);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Could not read the audit log.";
+    io.err(options.json ? JSON.stringify({ error: message }) : `error: ${message}`);
+    io.exit(1);
+  }
+}
+
 export function registerAuditLogCommand(program: Command, deps: ConsoleCommandDeps = {}): void {
   program.command("audit-log").description("Show the local log of privileged actions (connections, settings, extensions)")
     .option("--q <text>", "Only events whose action, subject or actor contains this text")
@@ -131,4 +158,7 @@ export function registerAuditLogCommand(program: Command, deps: ConsoleCommandDe
     .option("-o, --output <file>", "Write to this file with owner-only permissions instead of stdout")
     .option("--follow", "Keep running and print new events as they are written (Ctrl+C stops)")
     .action((o: AuditExportOptions) => runAuditExport(o, deps));
+  program.command("audit-verify").description("Check offline that the audit log was not edited, reordered or cut (hash chain)")
+    .option("--json", "Print JSON")
+    .action((o: JsonOption) => runAuditVerify(o, deps));
 }
