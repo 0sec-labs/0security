@@ -5,7 +5,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
-import { parseSarif, type Finding, type ImportedFinding, type KnownItem } from "@0/engine/shared";
+import { locationLabel, parseSarif, type Finding, type ImportedFinding, type KnownItem } from "@0/engine/shared";
 import { UsageError } from "./commands/output.js";
 
 const MAX_KNOWN_FILE_BYTES = 20 * 1024 * 1024;
@@ -53,7 +53,7 @@ export function leadsToFindings(leads: readonly ImportedFinding[], now: Date): F
     if (seen.has(key)) key = `${key}-${index}`;
     seen.add(key);
     const id = `prepass-${createHash("sha256").update(key).digest("hex").slice(0, 16)}`;
-    const where = item.path ? `${item.path}${item.startLine ? `:${item.startLine}` : ""}` : "no location";
+    const where = locationLabel(item);
     return {
       id, fingerprint: `${id}`, templateId: `${item.tool}/${item.ruleId}`, title: item.title,
       description: `${PREPASS_ONLY_LABEL} ${item.description}`.trim(), category: item.category, severity: item.severity, tool: item.tool,

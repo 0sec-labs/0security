@@ -687,9 +687,10 @@ Commands:
   list [options]                    List findings from the database
   show [options] <id>               Show detailed information about a finding
   update [options] <id>             Change a finding's status
-  import [options] [file]           Import findings from another scanner's SARIF 2.1.0 file (use -
-                                    for stdin) or from GitHub security alerts. Nothing in the file
-                                    is executed.
+  import [options] [file]           Import findings from another scanner's SARIF 2.1.0 file (CodeQL,
+                                    Semgrep, ZAP, Strix, Nuclei and others) or Nuclei JSON Lines
+                                    (use - for stdin), or from GitHub security alerts. Nothing in
+                                    the file is executed.
   fix [options] <finding>           Fix one finding in an isolated git work tree and open a pull
                                     request for review
   burndown [options]                Work through open findings in batches: one fix branch and pull
@@ -875,11 +876,12 @@ Options:
 ### 0security findings import
 Usage: 0security findings import [options] [file]
 
-Import findings from another scanner's SARIF 2.1.0 file (use - for stdin) or from GitHub security
-alerts. Nothing in the file is executed.
+Import findings from another scanner's SARIF 2.1.0 file (CodeQL, Semgrep, ZAP, Strix, Nuclei and
+others) or Nuclei JSON Lines (use - for stdin), or from GitHub security alerts. Nothing in the file
+is executed.
 
 Arguments:
-  file                   SARIF file, or - to read standard input
+  file                   SARIF or Nuclei JSON Lines file, or - to read standard input
 
 Options:
   --github <owner/repo>  Import code scanning, Dependabot and secret scanning alerts from a GitHub

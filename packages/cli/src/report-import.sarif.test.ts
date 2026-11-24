@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -46,5 +46,27 @@ describe("SARIF import", () => {
 
   it("refuses a file that is not SARIF", () => {
     expect(() => prepareSarifImport(JSON.stringify({ findings: [] }))).toThrow("not a SARIF log");
+  });
+});
+
+describe("web scanner import", () => {
+  const fixture = (name: string) => readFileSync(new URL(`../../engine/src/shared/__fixtures__/${name}`, import.meta.url), "utf8");
+  for (const [name, expected] of [["strix.sarif", "GET http://127.0.0.1:18089/search"], ["zap.sarif", "GET http://127.0.0.1:18089/"], ["nuclei.jsonl", "GET http://127.0.0.1:18089/admin"]] as const) {
+    it(`stores ${name} findings with the method and URL as their place and no file annotation`, () => {
+      const dbPath = database();
+      expect(prepareSarifImport(fixture(name), { roots: ["/work/repo"] }).findings.some(finding => finding.evidence.request === expected)).toBe(true);
+      const outcome = importSarif({ sarifJson: fixture(name), dbPath, roots: ["/work/repo"] });
+      expect(outcome.findings).toBeGreaterThan(0);
+      const db = new osecDB(dbPath);
+      try {
+        const rows = db.getFindings(outcome.scanId);
+        expect(rows.every(row => !db.getFindingReviewFields(row.id).reviewAnnotation)).toBe(true);
+      } finally { db.close(); }
+    });
+  }
+  it("imports the same Nuclei file once", () => {
+    const dbPath = database();
+    const first = importSarif({ sarifJson: fixture("nuclei.jsonl"), dbPath });
+    expect(importSarif({ sarifJson: fixture("nuclei.jsonl"), dbPath })).toMatchObject({ scanId: first.scanId, alreadyImported: true });
   });
 });

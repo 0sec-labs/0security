@@ -64,8 +64,8 @@ const defaultDeps: FindingsImportDeps = {
 /** `0 findings import`: bring another scanner's SARIF results or GitHub security alerts in as findings. */
 export function registerFindingsImportCommand(parent: Command, deps: FindingsImportDeps = defaultDeps): void {
   parent.command("import")
-    .description("Import findings from another scanner's SARIF 2.1.0 file (use - for stdin) or from GitHub security alerts. Nothing in the file is executed.")
-    .argument("[file]", "SARIF file, or - to read standard input")
+    .description("Import findings from another scanner's SARIF 2.1.0 file (CodeQL, Semgrep, ZAP, Strix, Nuclei and others) or Nuclei JSON Lines (use - for stdin), or from GitHub security alerts. Nothing in the file is executed.")
+    .argument("[file]", "SARIF or Nuclei JSON Lines file, or - to read standard input")
     .option("--github <owner/repo>", "Import code scanning, Dependabot and secret scanning alerts from a GitHub repository, read with your own `gh` login (gh auth login); the 0 GitHub connector is not used")
     .option("--state <state>", "Filter alerts by state: open, dismissed, fixed, all", "open")
     .option("--types <types>", "Comma-separated alert kinds: code-scanning, dependabot, secret-scanning, all", "all")

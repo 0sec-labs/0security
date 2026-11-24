@@ -1,0 +1,56 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "ZAP",
+          "semanticVersion": "2.16.0",
+          "informationUri": "https://www.zaproxy.org/",
+          "rules": [
+            {
+              "id": "10038-1",
+              "name": "Content Security Policy (CSP) Header Not Set",
+              "shortDescription": { "text": "Content Security Policy (CSP) Header Not Set" },
+              "fullDescription": { "text": "Content Security Policy is an added layer of security that helps to detect and mitigate certain types of attacks." },
+              "help": { "text": "Ensure that your web server sets the Content-Security-Policy header." },
+              "properties": { "tags": ["CWE-693", "OWASP_2021_A05", "OWASP_2017_A06"], "precision": "high" }
+            },
+            {
+              "id": "40012",
+              "name": "Cross Site Scripting (Reflected)",
+              "shortDescription": { "text": "Cross Site Scripting (Reflected)" },
+              "fullDescription": { "text": "Cross-site Scripting (XSS) is an attack technique that involves echoing attacker-supplied code into a user's browser instance." },
+              "help": { "text": "Validate all input and encode all output." },
+              "properties": { "tags": ["CWE-79", "OWASP_2021_A03"], "precision": "medium" }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "10038-1",
+          "ruleIndex": 0,
+          "level": "warning",
+          "message": { "text": "Content Security Policy (CSP) Header Not Set" },
+          "locations": [{ "physicalLocation": { "artifactLocation": { "uri": "http://127.0.0.1:18089/" } } }],
+          "partialFingerprints": { "identifier": "10038-1:http://127.0.0.1:18089/:GET" },
+          "webRequest": { "protocol": "HTTP", "version": "1.1", "target": "http://127.0.0.1:18089/", "method": "GET" },
+          "webResponse": { "protocol": "HTTP", "version": "1.1", "statusCode": 200, "reasonPhrase": "OK" }
+        },
+        {
+          "ruleId": "40012",
+          "ruleIndex": 1,
+          "level": "error",
+          "message": { "text": "Cross Site Scripting (Reflected)" },
+          "locations": [{ "physicalLocation": { "artifactLocation": { "uri": "http://user:secret@127.0.0.1:18089/search?q=%3Cscript%3Ealert%281%29%3C%2Fscript%3E" } } }],
+          "partialFingerprints": { "identifier": "40012:http://127.0.0.1:18089/search:GET:q" },
+          "webRequest": { "protocol": "HTTP", "version": "1.1", "target": "http://127.0.0.1:18089/search?q=%3Cscript%3Ealert%281%29%3C%2Fscript%3E", "method": "get" },
+          "webResponse": { "protocol": "HTTP", "version": "1.1", "statusCode": 200, "reasonPhrase": "OK" },
+          "properties": { "confidence": "Medium", "evidence": "<script>alert(1)</script>" }
+        }
+      ]
+    }
+  ]
+}

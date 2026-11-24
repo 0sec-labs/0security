@@ -30,6 +30,11 @@ export interface ImportedFinding {
   /** Stable across runs of the same scanner on the same code. */
   fingerprint: string;
   cwe: string[];
+  /** For a web finding: the URL (or route) that was tested, and the HTTP method. Such a finding has no repo path. */
+  endpoint?: string;
+  method?: string;
+  /** Proof or evidence text the scanner gave (a request, a matched value, a proof-of-concept description). Never a runnable exploit. */
+  evidence?: string;
   /** Set when the rule came from a file the user supplied (`0 scan --rules`), not from the scanner's own rules. */
   ruleSource?: "custom";
 }
@@ -48,7 +53,6 @@ const CONTROL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g;
 function clean(value: unknown, max: number): string {
   return typeof value === "string" ? value.replace(CONTROL, "").trim().slice(0, max) : "";
 }
-const textOf = (value: unknown, max: number): string => isObject(value) ? clean(value.text ?? value.markdown, max) : clean(value, max);
 const positive = (value: unknown): number | undefined => typeof value === "number" && Number.isInteger(value) && value > 0 ? value : undefined;
 
 /** A SARIF artifact URI as a path inside the repository, or undefined when it points anywhere else. */
@@ -102,6 +106,75 @@ function repoUriBase(uri: unknown): string {
   try { const decoded = decodeURIComponent(value); return decoded.startsWith("/") || /^[a-z]:[\\/]/i.test(decoded) ? decoded : ""; } catch { return ""; }
 }
 
+const SENSITIVE_PARAM = /token|key|secret|pass|pwd|auth|signature|sig$|session|sid$|cookie|credential|bearer|jwt|otp/i;
+const SENSITIVE_HEADER = "authorization|proxy-authorization|cookie|set-cookie|x-api-key|api-key|x-auth-token|x-access-token|x-csrf-token|x-amz-security-token";
+/** A long run of URL-safe characters that mixes letters and digits looks like a key or token, whatever the parameter is called. */
+const looksLikeSecret = (value: string): boolean => value.length >= 24 && /^[A-Za-z0-9_\-+/=.]+$/.test(value) && /\d/.test(value) && /[A-Za-z]/.test(value);
+
+/** A URL without user name, password or fragment, and with the value of a secret-looking query parameter replaced. */
+function redactUrl(raw: string): string {
+  try {
+    const url = new URL(raw);
+    url.username = ""; url.password = ""; url.hash = "";
+    for (const [name, value] of [...url.searchParams.entries()]) if (SENSITIVE_PARAM.test(name) || looksLikeSecret(value)) url.searchParams.set(name, "REDACTED");
+    return url.href;
+  } catch { return raw.replace(/(\b[a-z][a-z0-9+.-]*:\/\/)[^\s'"\/?#@]+@/gi, "$1"); }
+}
+
+/**
+ * Text with credentials taken out: user names, passwords and secret-looking query values in every URL, the value of curl options
+ * and of headers that carry a secret (Authorization, Cookie, Set-Cookie, API keys, tokens). The scanner's own file keeps them;
+ * the finding does not.
+ */
+export function redactEvidence(text: string): string {
+  return text
+    .replace(/https?:\/\/[^\s'"<>)\]]+/gi, redactUrl)
+    .replace(/(\b[a-z][a-z0-9+.-]*:\/\/)[^\s'"\/?#@]+@/gi, "$1")
+    .replace(/(\s(?:-u|--user|--oauth2-bearer|--proxy-user)\s+)(?:'[^']*'|"[^"]*"|\S+)/g, "$1[removed]")
+    .replace(new RegExp(`("?(?:${SENSITIVE_HEADER})"?\\s*[:=]\\s*)"[^"]*"`, "gi"), '$1"[removed]"')
+    .replace(new RegExp(`((?:${SENSITIVE_HEADER})\\s*:\\s*)(?:[^'"\\r\\n]*)`, "gi"), "$1[removed]");
+}
+
+/** `clean`, then credentials out. For every text a scanner supplies that ends up in a finding. */
+const scrub = (value: unknown, max: number): string => redactEvidence(clean(value, max)).slice(0, max);
+const scrubText = (value: unknown, max: number): string => isObject(value) ? scrub(value.text ?? value.markdown, max) : scrub(value, max);
+
+/** An http(s) URL without credentials or a fragment, or undefined when the value is anything else. */
+export function safeUrl(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.length > 2048) return undefined;
+  const text = clean(value, 2048);
+  if (!/^https?:\/\//i.test(text)) return undefined;
+  try {
+    const url = new URL(text);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return undefined;
+    return redactUrl(url.href).slice(0, 2048);
+  } catch { return undefined; }
+}
+
+/** A tested endpoint: an http(s) URL, or a route such as /api/users joined to `origin` when that is a URL. */
+function endpointOf(value: unknown, origin?: unknown): string | undefined {
+  const url = safeUrl(value);
+  if (url) return url;
+  const route = clean(value, 500);
+  if (!route.startsWith("/") || route.startsWith("//") || route.includes("..")) return undefined;
+  if (route.includes("?")) { const redacted = new URL(redactUrl(new URL(route, "http://route.invalid").href)); if (!safeUrl(origin)) return `${redacted.pathname}${redacted.search}`; }
+  const base = safeUrl(origin);
+  if (base) { try { return redactUrl(new URL(route, base).href).slice(0, 2048); } catch { /* use the route alone */ } }
+  return route;
+}
+
+function methodOf(value: unknown): string | undefined {
+  const text = clean(value, 16).toUpperCase();
+  return /^[A-Z]{3,10}$/.test(text) ? text : undefined;
+}
+
+/** What the importer shows as the place of a finding: file and line, or method and URL, or `no location`. */
+export function locationLabel(item: Pick<ImportedFinding, "path" | "startLine" | "endpoint" | "method">): string {
+  if (item.path) return `${item.path}${item.startLine ? `:${item.startLine}` : ""}`;
+  if (item.endpoint) return `${item.method ? `${item.method} ` : ""}${item.endpoint}`;
+  return "no location";
+}
+
 const sha = (value: string): string => createHash("sha256").update(value).digest("hex").slice(0, 24);
 
 /** Parse a SARIF log. Throws a short message when the document is not SARIF 2.1.0 or is too large. */
@@ -131,38 +204,55 @@ export function parseSarif(text: string, options: { tool?: string; roots?: reado
       if (!isObject(raw)) continue;
       if (findings.length >= MAX_SARIF_RESULTS) throw new Error(`The log has more than ${MAX_SARIF_RESULTS} results; split it and import the parts.`);
       if (raw.suppressions && list(raw.suppressions).length) continue;
+      // Coverage and not-applicable entries (Strix writes them beside its findings) are not findings.
+      const kind = clean(raw.kind, 20);
+      if (kind === "pass" || kind === "notApplicable" || (kind && kind !== "fail" && (raw.level === undefined || raw.level === "none"))) continue;
       const index = typeof raw.ruleIndex === "number" ? raw.ruleIndex : -1;
       const ruleId = clean(raw.ruleId, 200) || clean(isObject(raw.rule) ? raw.rule.id : "", 200) || clean(rules[index]?.id, 200) || "unknown-rule";
       const rule = byId.get(ruleId) ?? rules[index];
-      const message = textOf(raw.message, 4000);
-      const ruleTitle = textOf(rule?.shortDescription, 300) || clean(rule?.name, 300);
+      const message = scrubText(raw.message, 4000);
+      const ruleTitle = scrubText(rule?.shortDescription, 300) || scrub(rule?.name, 300);
       const title = (ruleTitle || message.split("\n")[0] || ruleId).slice(0, 300);
-      const help = textOf(rule?.fullDescription, 2000) || textOf(rule?.help, 2000);
+      const help = scrubText(rule?.fullDescription, 2000) || scrubText(rule?.help, 2000);
       const description = [message, help && help !== message ? help : ""].filter(Boolean).join("\n\n").slice(0, 6000) || title;
 
       const physical = list(raw.locations).filter(isObject).map(location => location.physicalLocation).find(isObject);
       const artifact = physical && isObject(physical.artifactLocation) ? physical.artifactLocation : undefined;
-      const path = repoRelativePath(artifact?.uri, roots);
+      const resultProperties = isObject(raw.properties) ? raw.properties : {};
+      const strix = isObject(resultProperties.strix) ? resultProperties.strix : {};
+      // A scanner that anchors a location-less finding to a placeholder file says so; that file is not where the problem is.
+      const synthetic = resultProperties.synthetic_location === true;
+      const path = synthetic ? undefined : repoRelativePath(artifact?.uri, roots);
       const region = physical && isObject(physical.region) ? physical.region : undefined;
       const startLine = positive(region?.startLine);
       const endLine = positive(region?.endLine);
-      const snippet = region && isObject(region.snippet) ? clean(region.snippet.text, 2000) || undefined : undefined;
+      const snippet = region && isObject(region.snippet) ? scrub(region.snippet.text, 2000) || undefined : undefined;
 
       const ruleProperties = isObject(rule?.properties) ? rule.properties : {};
-      const resultProperties = isObject(raw.properties) ? raw.properties : {};
-      const cwe = cweNumbers(ruleProperties.tags, resultProperties.tags, ruleProperties.cwe, resultProperties.cwe);
+      const cwe = cweNumbers(ruleProperties.tags, resultProperties.tags, ruleProperties.cwe, resultProperties.cwe, [strix.cwe]);
       const fromCwe = cwe.map(number => CWE_CATEGORY[number]).find(Boolean);
       const category = fromCwe ?? normalizeAttackCategory(ruleId).category;
+
+      // Web findings: ZAP puts the request on the result, Strix an endpoint, Nuclei and others a URL as the artifact.
+      const request = isObject(raw.webRequest) ? raw.webRequest : {};
+      const logical = list(raw.locations).filter(isObject).flatMap(location => list(location.logicalLocations)).filter(isObject)
+        .find(entry => entry.kind === "endpoint" || entry.kind === "resource");
+      const endpoint = path ? undefined
+        : safeUrl(request.target) ?? safeUrl(artifact?.uri) ?? endpointOf(strix.endpoint, strix.target) ?? endpointOf(logical?.fullyQualifiedName, strix.target);
+      const method = endpoint ? methodOf(request.method ?? strix.method) : undefined;
+      const poc = isObject(strix.poc) ? clean(strix.poc.description, 1500) : "";
+      const evidenceText = redactEvidence([clean(resultProperties.evidence, 1500), poc].filter(Boolean).join("\n\n")).slice(0, 3000) || undefined;
 
       const partial = isObject(raw.partialFingerprints) ? Object.entries(raw.partialFingerprints).find(([, value]) => typeof value === "string" && value) : undefined;
       const key = partial
         ? `${partial[0]}:${clean(partial[1], 200)}`
-        : `${path ?? ""}:${startLine ?? ""}:${message.slice(0, 200)}`;
+        : `${path ?? ""}:${startLine ?? ""}:${method ?? ""} ${endpoint ?? ""}:${message.slice(0, 200)}`;
       findings.push({
         tool, ...(toolVersion ? { toolVersion } : {}), ruleId, title, description,
         severity: severityOf(raw.level ?? (isObject(rule?.defaultConfiguration) ? rule.defaultConfiguration.level : undefined), rule, raw),
         category, ...(path ? { path } : {}), ...(startLine ? { startLine } : {}), ...(endLine ? { endLine } : {}), ...(snippet ? { snippet } : {}),
-        fingerprint: `sarif:${sha(`${tool}\n${ruleId}\n${path ?? ""}\n${key}`)}`,
+        ...(endpoint ? { endpoint } : {}), ...(method ? { method } : {}), ...(evidenceText ? { evidence: evidenceText } : {}),
+        fingerprint: `sarif:${sha(`${tool}\n${ruleId}\n${path ?? ""}\n${method ?? ""} ${endpoint ?? ""}\n${key}`)}`,
         cwe: cwe.map(number => `CWE-${number}`),
       });
     }
@@ -174,4 +264,68 @@ export function parseSarif(text: string, options: { tool?: string; roots?: reado
 export function looksLikeSarif(text: string): boolean {
   if (!/"runs"\s*:/.test(text)) return false;
   try { const value = JSON.parse(text); return isObject(value) && Array.isArray(value.runs); } catch { return false; }
+}
+
+const MAX_JSONL_LINE = 512 * 1024;
+const NUCLEI_SEVERITY: Record<string, Severity> = { critical: "critical", high: "high", medium: "medium", low: "low", info: "info", unknown: "info" };
+
+/** True when the text is Nuclei's JSON Lines output (`-jsonl-export`): the first line is an object with a `template-id`. */
+export function looksLikeNucleiJsonl(text: string): boolean {
+  const newline = text.indexOf("\n");
+  const first = (newline === -1 ? text : text.slice(0, newline)).trim();
+  if (!first.startsWith("{") || first.length > MAX_JSONL_LINE) return false;
+  try { const value = JSON.parse(first); return isObject(value) && typeof value["template-id"] === "string"; } catch { return false; }
+}
+
+/**
+ * Read Nuclei's JSON Lines output. Nuclei's own SARIF export names only the host and drops the matched URL, the CWE and the
+ * severity name, so this reads the richer file. Same limits as the SARIF reader: untrusted text, nothing is executed or fetched.
+ */
+export function parseNucleiJsonl(text: string, options: { tool?: string } = {}): SarifImport {
+  const tool = options.tool?.trim() ? clean(options.tool, 80) : "Nuclei";
+  const findings: ImportedFinding[] = [];
+  // Walk the text line by line instead of splitting it: a file of millions of empty lines must not become an array.
+  for (let start = 0; start < text.length;) {
+    const newline = text.indexOf("\n", start);
+    const end = newline === -1 ? text.length : newline;
+    const line = end - start > MAX_JSONL_LINE ? "" : text.slice(start, end);
+    start = end + 1;
+    if (!line.trim()) continue;
+    let raw: unknown;
+    try { raw = JSON.parse(line); } catch { continue; }
+    if (!isObject(raw) || typeof raw["template-id"] !== "string") continue;
+    if (findings.length >= MAX_SARIF_RESULTS) throw new Error(`The file has more than ${MAX_SARIF_RESULTS} results; split it and import the parts.`);
+    const info = isObject(raw.info) ? raw.info : {};
+    const classification = isObject(info.classification) ? info.classification : {};
+    const ruleId = clean(raw["template-id"], 200) || "unknown-rule";
+    const title = (scrub(info.name, 300) || ruleId).slice(0, 300);
+    const remediation = scrub(info.remediation, 1500);
+    const description = [scrub(info.description, 3000), remediation ? `Fix: ${remediation}` : ""].filter(Boolean).join("\n\n") || title;
+    const severity = NUCLEI_SEVERITY[clean(info.severity, 12).toLowerCase()] ?? "info";
+    const cwe = cweNumbers(list(classification["cwe-id"]).map(value => typeof value === "string" ? value : ""));
+    const category = cwe.map(number => CWE_CATEGORY[number]).find(Boolean) ?? normalizeAttackCategory(ruleId).category;
+    const endpoint = safeUrl(raw["matched-at"]) ?? safeUrl(raw.url) ?? endpointOf(raw["matched-at"]);
+    const requestText = typeof raw.request === "string" ? raw.request : "";
+    const method = methodOf(/^([A-Za-z]{3,10}) /.exec(requestText)?.[1]);
+    const status = typeof raw.response === "string" ? /^HTTP\/[\d.]+ (\d{3})/.exec(raw.response)?.[1] : undefined;
+    const extracted = list(raw["extracted-results"]).map(value => clean(value, 300)).filter(Boolean).slice(0, 10);
+    const evidence = [
+      clean(raw["curl-command"], 1500) ? `Request: ${redactEvidence(clean(raw["curl-command"], 1500))}` : "",
+      status ? `Response status: ${status}` : "",
+      extracted.length ? `Matched: ${redactEvidence(extracted.join(", "))}` : "",
+    ].filter(Boolean).join("\n").slice(0, 3000) || undefined;
+    findings.push({
+      tool, ruleId, title, description, severity, category,
+      ...(endpoint ? { endpoint } : {}), ...(method ? { method } : {}), ...(evidence ? { evidence } : {}),
+      fingerprint: `sarif:${sha(`${tool}\n${ruleId}\n${method ?? ""} ${endpoint ?? ""}\n${clean(raw["matcher-name"], 100)}`)}`,
+      cwe: cwe.map(number => `CWE-${number}`),
+    });
+  }
+  if (!findings.length && !text.trim()) throw new Error("The file is empty.");
+  return { findings, tools: [tool] };
+}
+
+/** Read a scanner's output: Nuclei JSON Lines, or SARIF 2.1.0 (ZAP, Strix, Nuclei's SARIF export and most others). */
+export function parseScannerOutput(text: string, options: { tool?: string; roots?: readonly string[] } = {}): SarifImport {
+  return looksLikeNucleiJsonl(text) ? parseNucleiJsonl(text, options.tool ? { tool: options.tool } : {}) : parseSarif(text, options);
 }

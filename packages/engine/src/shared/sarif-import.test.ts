@@ -1,5 +1,6 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { looksLikeSarif, parseSarif, repoRelativePath } from "./sarif-import.js";
+import { locationLabel, looksLikeNucleiJsonl, looksLikeSarif, MAX_SARIF_RESULTS, parseNucleiJsonl, parseSarif, parseScannerOutput, redactEvidence, repoRelativePath } from "./sarif-import.js";
 
 const log = (results: unknown[], rules: unknown[] = [], extra: Record<string, unknown> = {}) => JSON.stringify({
   version: "2.1.0",
@@ -75,5 +76,156 @@ describe("parseSarif", () => {
     expect(repoRelativePath("/abs/x")).toBeUndefined();
     expect(repoRelativePath("C:\\x\\y")).toBeUndefined();
     expect(repoRelativePath("src\\a.ts")).toBe("src/a.ts");
+  });
+});
+
+describe("dynamic scanner output", () => {
+  const read = (name: string) => readFileSync(new URL(`./__fixtures__/${name}`, import.meta.url), "utf8");
+
+  it("reads Strix SARIF: web findings keep method and URL, the placeholder file is dropped, coverage entries are not findings", () => {
+    const parsed = parseSarif(read("strix.sarif"));
+    expect(parsed.tools).toEqual(["Strix"]);
+    expect(parsed.findings).toHaveLength(2);
+    const xss = parsed.findings.find(f => f.ruleId === "CWE-79")!;
+    expect(xss).toMatchObject({ severity: "high", category: "xss", endpoint: "http://127.0.0.1:18089/search", method: "GET", cwe: ["CWE-79"] });
+    expect(xss.path).toBeUndefined();
+    expect(xss.evidence).toContain("returns the script tag unescaped");
+    expect(xss.evidence).not.toContain("curl");
+    const admin = parsed.findings.find(f => f.ruleId === "CWE-306")!;
+    expect(admin).toMatchObject({ severity: "critical", endpoint: "http://127.0.0.1:18089/admin" });
+    expect(locationLabel(admin)).toBe("GET http://127.0.0.1:18089/admin");
+    expect(parsed.findings.some(f => f.ruleId.startsWith("strix-coverage"))).toBe(false);
+  });
+
+  it("reads ZAP SARIF: URL and method from the request, CWE from tags, credentials removed", () => {
+    const parsed = parseSarif(read("zap.sarif"));
+    expect(parsed.tools).toEqual(["ZAP"]);
+    expect(parsed.findings).toHaveLength(2);
+    const csp = parsed.findings[0]!;
+    expect(csp).toMatchObject({ ruleId: "10038-1", severity: "medium", endpoint: "http://127.0.0.1:18089/", method: "GET", cwe: ["CWE-693"] });
+    const xss = parsed.findings[1]!;
+    expect(xss).toMatchObject({ severity: "high", method: "GET", cwe: ["CWE-79"], evidence: "<script>alert(1)</script>" });
+    expect(xss.endpoint).toContain("127.0.0.1:18089/search?q=");
+    expect(xss.endpoint).not.toContain("secret");
+    expect(xss.path).toBeUndefined();
+  });
+
+  it("reads Nuclei SARIF as it is written: rule, severity from the score, host only", () => {
+    const parsed = parseSarif(read("nuclei.sarif"));
+    expect(parsed.tools).toEqual(["Nuclei"]);
+    expect(parsed.findings).toHaveLength(1);
+    expect(parsed.findings[0]).toMatchObject({ ruleId: "local-admin-panel-exposed", severity: "medium", toolVersion: "v3.11.1" });
+    expect(parsed.findings[0]!.path).toBeUndefined();
+  });
+
+  it("reads Nuclei JSON Lines: matched URL, method, CWE, severity and a request as evidence", () => {
+    const text = read("nuclei.jsonl");
+    expect(looksLikeNucleiJsonl(text)).toBe(true);
+    const parsed = parseScannerOutput(text);
+    expect(parsed.findings).toHaveLength(1);
+    expect(parsed.findings[0]).toMatchObject({ tool: "Nuclei", ruleId: "local-admin-panel-exposed", title: "Admin panel exposed without login", severity: "medium", endpoint: "http://127.0.0.1:18089/admin", method: "GET", cwe: ["CWE-306"] });
+    expect(parsed.findings[0]!.evidence).toContain("Response status: 200");
+    expect(parsed.findings[0]!.evidence).toContain("curl -X 'GET'");
+  });
+
+  it("does not treat SARIF as Nuclei JSON Lines", () => {
+    expect(looksLikeNucleiJsonl(read("zap.sarif"))).toBe(false);
+  });
+
+  describe("hostile input", () => {
+    const hostile = (result: Record<string, unknown>) => parseSarif(log([{ ruleId: "r", message: { text: "m" }, ...result }])).findings[0]!;
+    it("never turns a URL, absolute path or traversal into a repo path", () => {
+      for (const uri of ["http://evil.test/a", "file:///etc/passwd", "/etc/passwd", "../../etc/passwd", "a/../../b", "C:\\Windows\\win.ini", "javascript:alert(1)"]) {
+        expect(hostile({ locations: [at(uri)] }).path).toBeUndefined();
+      }
+    });
+    it("keeps only http and https URLs as endpoints", () => {
+      expect(hostile({ locations: [at("javascript:alert(1)")] }).endpoint).toBeUndefined();
+      expect(hostile({ locations: [at("ftp://host/x")] }).endpoint).toBeUndefined();
+      expect(hostile({ webRequest: { target: "file:///etc/passwd", method: "GET" } }).endpoint).toBeUndefined();
+      expect(hostile({ locations: [at("https://h.test/x#frag")] }).endpoint).toBe("https://h.test/x");
+    });
+    it("rejects an odd method and a route with traversal", () => {
+      expect(hostile({ webRequest: { target: "http://h.test/", method: "GET; rm -rf" } }).method).toBeUndefined();
+      const logical = { locations: [{ logicalLocations: [{ fullyQualifiedName: "/a/../../etc", kind: "endpoint" }] }] };
+      expect(hostile(logical).endpoint).toBeUndefined();
+    });
+    it("strips control characters and limits huge fields", () => {
+      const item = hostile({ message: { text: `bad\u0000\u001b[31m${"x".repeat(50000)}` }, properties: { evidence: `e\u0007${"y".repeat(50000)}` }, locations: [at(`http://h.test/${"a".repeat(5000)}`)] });
+      expect(item.description).not.toMatch(/[\u0000-\u0008\u000e-\u001f]/);
+      expect(item.description.length).toBeLessThanOrEqual(6000);
+      expect(item.evidence!.length).toBeLessThanOrEqual(3000);
+      expect(item.evidence).not.toContain("\u0007");
+      expect(item.endpoint).toBeUndefined();
+    });
+    it("applies the same limits to Nuclei JSON Lines", () => {
+      const line = JSON.stringify({ "template-id": "t\u0000x", info: { name: "n".repeat(9000), severity: "CRITICAL", description: "d\u001b".repeat(9000), classification: { "cwe-id": ["cwe-79", "../../x"] } }, "matched-at": "javascript:alert(1)", request: "G\u0000ET / HTTP/1.1", "curl-command": "c".repeat(9000) });
+      const item = parseNucleiJsonl(`${line}\nnot json\n[1,2]\n`).findings;
+      expect(item).toHaveLength(1);
+      expect(item[0]!.title.length).toBeLessThanOrEqual(300);
+      expect(item[0]!.ruleId).toBe("tx");
+      expect(item[0]!.severity).toBe("critical");
+      expect(item[0]!.endpoint).toBeUndefined();
+      expect(item[0]!.method).toBeUndefined();
+      expect(item[0]!.description.length).toBeLessThanOrEqual(3010);
+      expect(item[0]!.evidence!.length).toBeLessThanOrEqual(3000);
+      expect(item[0]!.cwe).toEqual(["CWE-79"]);
+    });
+    it("skips a huge run of empty lines and an over-long line without building a line array", () => {
+      const valid = JSON.stringify({ "template-id": "t", info: { name: "n", severity: "low" } });
+      const text = `${valid}\n${"\n".repeat(5_000_000)}${"x".repeat(600 * 1024)}\n${valid}x\n`;
+      expect(parseNucleiJsonl(text).findings).toHaveLength(1);
+    });
+    it("takes credentials out of evidence text", () => {
+      const line = JSON.stringify({ "template-id": "t", info: { name: "n", severity: "low" }, "matched-at": "http://h.test/x", request: "GET /x HTTP/1.1", "curl-command": "curl -X 'GET' -u 'admin:hunter2' -H 'Authorization: Bearer abc.def' -H 'Cookie: sid=1' -H 'Accept: */*' 'http://bob:pw@h.test/x'", "extracted-results": ["https://u:p@h.test/y"] });
+      const evidence = parseNucleiJsonl(line).findings[0]!.evidence!;
+      for (const secret of ["hunter2", "abc.def", "sid=1", "bob", ":pw@", "u:p@"]) expect(evidence).not.toContain(secret);
+      expect(evidence).toContain("Accept");
+      const sarif = hostile({ properties: { evidence: "GET http://a:b@h.test/ Authorization: Bearer zzz" } }).evidence!;
+      expect(sarif).not.toContain("zzz");
+      expect(sarif).not.toContain("a:b@");
+    });
+    describe("credentials in imported text", () => {
+      // Built at run time from fragments, so no secret-shaped literal sits in the repository.
+      const pw = ["hun", "ter", "2"].join("");
+      const tok = ["ab", "Cd", "12", "Ef", "34", "Gh", "56", "Ij", "78", "Kl", "90", "Mn", "op", "Qr"].join("");
+      const bearer = ["be", "ar", "er", "-", "val"].join("");
+      const sid = ["sess", "ion", "-", "val"].join("");
+      const all = (text: string) => { for (const secret of [pw, tok, bearer, sid]) expect(text).not.toContain(secret); };
+      const mixed = `http://bob:${pw}@h.test/p?token=${bearer}&keep=1&blob=${tok}&api_key=${sid}#frag Authorization: Bearer ${bearer}\nCookie: sid=${sid}\nSet-Cookie: s=${sid}\nX-API-Key: ${tok}`;
+      it("removes them from every field of a SARIF result, for any tool", () => {
+        const item = hostile({ message: { text: `Found at ${mixed}` }, locations: [{ physicalLocation: { artifactLocation: { uri: `https://u:${pw}@h.test/x?password=${pw}&q=1` }, region: { startLine: 3, snippet: { text: mixed } } } }], properties: { evidence: mixed } });
+        all(JSON.stringify(item));
+        expect(item.endpoint).toBe("https://h.test/x?password=REDACTED&q=1");
+        expect(item.snippet).toContain("keep=1");
+      });
+      it("removes them from the rule text, the Strix endpoint and the proof text", () => {
+        const parsed = parseSarif(log([{ ruleId: "r", message: { text: "m" }, locations: [{ logicalLocations: [{ fullyQualifiedName: `/api/x?auth=${bearer}&page=2`, kind: "endpoint" }] }], properties: { strix: { poc: { description: mixed } } } }], [{ id: "r", shortDescription: { text: `t ${mixed}` }, help: { text: mixed } }]));
+        all(JSON.stringify(parsed.findings));
+        expect(parsed.findings[0]!.endpoint).toBe("/api/x?auth=REDACTED&page=2");
+      });
+      it("removes them from Nuclei JSON Lines: matched URL, name, description, request and extracted values", () => {
+        const line = JSON.stringify({ "template-id": "t", info: { name: `n ${mixed}`, description: mixed, remediation: mixed, severity: "low" }, "matched-at": `http://bob:${pw}@h.test/x?token=${bearer}&z=1`, request: "GET /x HTTP/1.1", response: `HTTP/1.1 200 OK\r\nSet-Cookie: s=${sid}`, "curl-command": `curl -u '${["bo", "b"].join("")}:${pw}' -H 'Authorization: Bearer ${bearer}' '${`http://h.test/x?sig=${tok}`}'`, "extracted-results": [mixed] });
+        const found = parseNucleiJsonl(line).findings[0]!;
+        all(JSON.stringify(found));
+        expect(found.endpoint).toBe("http://h.test/x?token=REDACTED&z=1");
+      });
+      it("removes a secret query value from a route joined to the Strix target", () => {
+        const parsed = parseSarif(log([{ ruleId: "r", message: { text: "m" }, properties: { strix: { target: "http://h.test", endpoint: `/api/x?token=${bearer}&page=2` } } }]));
+        expect(parsed.findings[0]!.endpoint).toBe("http://h.test/api/x?token=REDACTED&page=2");
+      });
+      it("removes pass, passwd and user_pass values", () => {
+        const text = redactEvidence(`http://h.test/a?pass=${pw}&passwd=${pw}&user_pass=${pw}&page=2`);
+        expect(text).not.toContain(pw);
+        expect(text).toContain("page=2");
+      });
+      it("keeps harmless query values and short ids", () => {
+        expect(redactEvidence("GET http://h.test/a?page=2&sort=name&id=17")).toBe("GET http://h.test/a?page=2&sort=name&id=17");
+      });
+    });
+    it("stops at the result limit", () => {
+      const lines = Array.from({ length: MAX_SARIF_RESULTS + 1 }, (_, i) => JSON.stringify({ "template-id": `t${i}`, info: { name: "n", severity: "low" } })).join("\n");
+      expect(() => parseNucleiJsonl(lines)).toThrow(/more than/);
+    });
   });
 });

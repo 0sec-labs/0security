@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { osecDB } from "@0/engine/storage";
-import { parseSarif, type Finding, type ScanReport } from "@0/engine/shared";
+import { locationLabel, looksLikeNucleiJsonl, parseScannerOutput, type Finding, type ScanReport } from "@0/engine/shared";
 
 const MAX_REPORT_BYTES = 20 * 1024 * 1024;
 const MAX_METADATA_BYTES = 64 * 1024;
@@ -136,8 +136,8 @@ export function importCiReport(options: { reportJson: string; metadataJson?: str
  */
 export function prepareSarifImport(sarifJson: string, options: { tool?: string; roots?: string[]; now?: Date } = {}): Parameters<osecDB["importCiReport"]>[0] {
   if (Buffer.byteLength(sarifJson, "utf8") > MAX_REPORT_BYTES) throw new Error("The SARIF file exceeds the size limit.");
-  const parsed = parseSarif(sarifJson, { ...(options.tool ? { tool: options.tool } : {}), ...(options.roots ? { roots: options.roots } : {}) });
-  const digest = hash(canonical(JSON.parse(sarifJson)) + `\n${options.tool ?? ""}`);
+  const parsed = parseScannerOutput(sarifJson, { ...(options.tool ? { tool: options.tool } : {}), ...(options.roots ? { roots: options.roots } : {}) });
+  const digest = hash((looksLikeNucleiJsonl(sarifJson) ? sarifJson : canonical(JSON.parse(sarifJson))) + `\n${options.tool ?? ""}`);
   const scanId = `sarif-${digest}`;
   const now = options.now ?? new Date();
   const importedAt = now.toISOString();
@@ -148,14 +148,14 @@ export function prepareSarifImport(sarifJson: string, options: { tool?: string; 
     let key = item.fingerprint;
     if (seen.has(key)) key = `${key}-${index}`;
     seen.add(key);
-    const where = item.path ? `${item.path}${item.startLine ? `:${item.startLine}` : ""}` : "no location";
+    const where = locationLabel(item);
     return {
       id: `${scanId}-${key.replace(/^sarif:/, "")}`, fingerprint: `${scanId}:${key}`,
       templateId: `${item.tool}/${item.ruleId}`, title: item.title, description: item.description,
       category: item.category, severity: item.severity, tool: item.tool,
       evidence: {
-        request: where, response: item.snippet ?? "",
-        analysis: `Imported from ${item.tool}${item.toolVersion ? ` ${item.toolVersion}` : ""} (SARIF). Not verified by this engine.${item.cwe.length ? ` ${item.cwe.join(", ")}.` : ""}`,
+        request: where, response: item.snippet ?? item.evidence ?? "",
+        analysis: `Imported from ${item.tool}${item.toolVersion ? ` ${item.toolVersion}` : ""}. Not verified by this engine.${item.cwe.length ? ` ${item.cwe.join(", ")}.` : ""}${item.evidence && item.snippet ? `\n\nEvidence from the scanner: ${item.evidence}` : ""}`,
       },
       ...(item.path && item.startLine ? { reviewAnnotation: { path: item.path, startLine: item.startLine, ...(item.endLine && item.endLine >= item.startLine ? { endLine: item.endLine } : {}) } } : {}),
       timestamp: now.getTime(), status: "discovered", triageStatus: "new", workflowStatus: "backlog",
