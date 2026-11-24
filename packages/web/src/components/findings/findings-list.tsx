@@ -11,7 +11,7 @@ import type { FindingGroup, FindingWorkflowStatus } from "@/types";
 import { Link } from "react-router-dom";
 import { SeverityIcon, StatusIcon } from "./finding-icons";
 import {
-  ROW_HEIGHT, SETTABLE_STATUSES, REVIEW_LOCK_NOTE, statusLockedByReview, STATUS_LABEL, findingCode, findingStatus, layoutRows, missionName, normalizeSeverity, visibleRange, type ListRow, type MissionLabels,
+  ROW_HEIGHT, SETTABLE_STATUSES, REVIEW_LOCK_NOTE, statusLockedByReview, STATUS_LABEL, findingCode, findingPath, findingStatus, titleClickIntent, layoutRows, missionName, normalizeSeverity, visibleRange, type ListRow, type MissionLabels,
 } from "./findings-model";
 import { useMissionHrefs } from "./use-mission-href";
 import { listMemory } from "./use-findings-view";
@@ -231,7 +231,14 @@ const FindingRow = memo(function FindingRow({ group, style, thread, threadHref, 
       </button>
       <span className="grid size-4 shrink-0 place-items-center"><StatusIcon status={status} /></span>
       <span className="w-16 shrink-0 whitespace-nowrap text-xs tabular-nums text-muted-foreground-2 @max-lg/list:hidden">{findingCode(fingerprint)}</span>
-      <span className={cn("min-w-[10ch] flex-1 truncate", closed ? "text-muted-foreground-1" : "text-foreground")} title={latest.title}>{latest.title}</span>
+      <span className={cn("min-w-[10ch] flex-1 truncate", closed ? "text-muted-foreground-1" : "text-foreground")} title={latest.title}>
+        <Link
+          to={findingPath(fingerprint)}
+          tabIndex={-1}
+          onClick={event => { const intent = titleClickIntent(event); if (intent === "select") { event.preventDefault(); return; } event.stopPropagation(); if (intent === "open") { event.preventDefault(); onOpen(fingerprint); } }}
+          className="outline-none"
+        >{latest.title}</Link>
+      </span>
       {latest.tool ? <span className="max-w-32 shrink-0 truncate rounded-md border-[0.5px] border-border-2 px-1.5 py-px text-xs text-muted-foreground-1 @max-2xl/list:hidden">{latest.tool}</span> : null}
       {latest.category ? <span className="max-w-40 shrink-0 truncate rounded-md border-[0.5px] border-border-2 px-1.5 py-px text-xs text-muted-foreground-1 @max-2xl/list:hidden">{latest.category}</span> : null}
       {isAcceptedFinding(group) ? <span className="shrink-0 rounded-md border-[0.5px] border-border-2 px-1.5 py-px text-xs text-muted-foreground-1">Accepted</span> : null}

@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { createPortal } from "react-dom";
 import {
   DndContext, DragOverlay, KeyboardSensor, MouseSensor, TouchSensor, closestCenter, pointerWithin, useDraggable, useDroppable, useSensor, useSensors,
@@ -8,7 +9,7 @@ import { formatRelativeAge } from "@/lib/relative-time";
 import { cn } from "@/lib/utils";
 import type { FindingGroup } from "@/types";
 import { SeverityIcon, StatusIcon } from "./finding-icons";
-import { STATUS_LABEL, boardColumns, findingCode, findingStatus, normalizeSeverity, resolveDrop, type BoardColumn, type Direction, type FindingStatus, type OrderBy } from "./findings-model";
+import { STATUS_LABEL, boardColumns, findingCode, findingPath, findingStatus, titleClickIntent, normalizeSeverity, resolveDrop, type BoardColumn, type Direction, type FindingStatus, type OrderBy } from "./findings-model";
 
 export type FindingsBoardProps = {
   groups: FindingGroup[];
@@ -97,7 +98,7 @@ export function FindingsBoard(props: FindingsBoardProps) {
       onDragEnd={onDragEnd}
       onDragCancel={event => { reset(); swallowReleaseClick(event.activatorEvent); }}
     >
-      <div className="flex min-h-0 flex-1 gap-3 overflow-x-auto px-2 pb-2" role="group" aria-label="Findings board">
+      <div className="scroll-fade-x flex min-h-0 flex-1 gap-3 overflow-x-auto pr-6 pl-2 pb-2" role="group" aria-label="Findings board">
         {columns.map(column => <Column key={column.status} column={column} draggedStatus={draggedStatus} over={overColumn === column.status} {...props} />)}
       </div>
       {createPortal(<DragOverlay dropAnimation={null}>{dragged ? <Card group={dragged} overlay {...props} /> : null}</DragOverlay>, document.body)}
@@ -126,6 +127,7 @@ function Column({ column, draggedStatus, over, ...props }: { column: BoardColumn
         )}
       >
         {refused && over ? <p role="status" className="px-1.5 py-1 text-xs text-destructive">{decision.reason}</p> : null}
+        {column.items.length === 0 && !over ? <p className="px-1.5 py-1 text-xs text-muted-foreground-2">No findings</p> : null}
         {column.items.map(group => <Card key={group.fingerprint} group={group} {...props} />)}
       </div>
     </section>
@@ -163,7 +165,17 @@ function Card({ group, overlay = false, ...props }: { group: FindingGroup; overl
         <span className="tabular-nums">{findingCode(fingerprint)}</span>
         <span className="ml-auto tabular-nums">{saving ? "Saving…" : formatRelativeAge(latest.timestamp)}</span>
       </div>
-      <p className="line-clamp-2 text-sm leading-5 font-medium text-foreground" title={latest.title}>{latest.title}</p>
+      <p className="line-clamp-2 text-sm leading-5 font-medium text-foreground" title={latest.title}>
+        {overlay ? latest.title : (
+          <Link
+            to={findingPath(fingerprint)}
+            tabIndex={-1}
+            draggable={false}
+            onClick={event => { const intent = titleClickIntent(event); if (intent === "select") { event.preventDefault(); return; } event.stopPropagation(); if (intent === "open") { event.preventDefault(); props.onOpen(fingerprint); } }}
+            className="outline-none"
+          >{latest.title}</Link>
+        )}
+      </p>
       {latest.category || group.count > 1 ? (
         <div className="flex items-center gap-1.5 text-xs text-muted-foreground-1">
           {latest.category ? <span className="min-w-0 truncate rounded-md border-[0.5px] border-border-2 px-1.5 py-px">{latest.category}</span> : null}

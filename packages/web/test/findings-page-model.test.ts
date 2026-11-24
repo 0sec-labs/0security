@@ -154,3 +154,20 @@ describe("persisted view and activity", () => {
     expect(events[0]!.detail).toBe("looks real");
   });
 });
+
+import { findingPath, titleClickIntent } from "@/components/findings/findings-model";
+
+describe("finding links", () => {
+  const click = { button: 0, metaKey: false, ctrlKey: false, shiftKey: false, altKey: false };
+  it("builds the stable page address", () => {
+    expect(findingPath("abc123")).toBe("/findings/abc123");
+    expect(findingPath("a/b c")).toBe("/findings/a%2Fb%20c");
+  });
+  it("opens on a plain click, selects on Command or Control, leaves the rest to the browser", () => {
+    expect(titleClickIntent(click)).toBe("open");
+    expect(titleClickIntent({ ...click, metaKey: true })).toBe("select");
+    expect(titleClickIntent({ ...click, ctrlKey: true })).toBe("select");
+    expect(titleClickIntent({ ...click, button: 1 })).toBe("browser");
+    expect(titleClickIntent({ ...click, shiftKey: true })).toBe("browser");
+  });
+});

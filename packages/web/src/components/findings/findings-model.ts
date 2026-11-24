@@ -12,6 +12,21 @@ export function findingCode(fingerprint: string): string {
   return `F-${clean || "000000"}`;
 }
 
+/** The stable page address of a finding family, so a row can be a real link (middle-click, copy address, open in a new tab). */
+export function findingPath(fingerprint: string): string {
+  return `/findings/${encodeURIComponent(fingerprint)}`;
+}
+
+/**
+ * What a click on a finding's title link does. A plain click opens it in the app. Command or Control keeps its
+ * multi-select meaning. Any other click (middle button, Shift, Alt) is left to the browser, so it opens a new tab or window.
+ */
+export function titleClickIntent(event: { button: number; metaKey: boolean; ctrlKey: boolean; shiftKey: boolean; altKey: boolean }): "open" | "select" | "browser" {
+  if (event.button !== 0) return "browser";
+  if (event.metaKey || event.ctrlKey) return "select";
+  return event.shiftKey || event.altKey ? "browser" : "open";
+}
+
 /* ---------- status ---------- */
 
 /** Workflow status plus "accepted": a reviewed accepted risk. It leaves the review queue but is not closed. */
