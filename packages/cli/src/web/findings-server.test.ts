@@ -131,6 +131,15 @@ describe("ingest", () => {
     const reply = await send("/api/v1/findings/ingest?repo=acme/api", write, body);
     expect(await reply.json()).toMatchObject({ created: 1, source: "ci-main", format: "findings-json" });
   });
+  it("accepts a findings rollup export, and does not let it set a triage state", async () => {
+    const write = writeKey();
+    const row = (fingerprint: string, triage: string) => ({ repository: "acme/api", fingerprint, title: `Rolled up ${fingerprint}`, severity: "medium", category: "xss", status: "discovered", triage, owner: null, firstSeen: "2026-01-01T00:00:00Z", lastSeen: "2026-01-02T00:00:00Z" });
+    const body = JSON.stringify({ schema: "0.findings-rollup.v1", exportedAt: "2026-01-03T00:00:00Z", findings: [row("a", "new"), row("b", "suppressed")] });
+    const reply = await send("/api/v1/findings/ingest?repo=acme/api", write, body);
+    expect(await reply.json()).toMatchObject({ created: 2, format: "findings-json" });
+    const rows = (await (await fetch(`${base}/api/findings-server/overview`)).json() as { findings: Array<{ triageStatus: string }> }).findings;
+    expect(rows.map(item => item.triageStatus)).toEqual(["new", "new"]);
+  });
   it("rejects bad labels, bad JSON, wrong shapes, bad severities and too many findings", async () => {
     const write = writeKey();
     for (const [query, body, status] of [

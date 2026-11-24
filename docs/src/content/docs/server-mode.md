@@ -406,7 +406,7 @@ export ZERO_FINDINGS_API_KEY="<the key>"
 0security findings upload scan.sarif --to https://findings.example.com --repo acme/api --source ci-main
 ```
 
-The server accepts SARIF 2.1.0 or the JSON that `0security scan --format json` writes. It labels each finding with the repository and the source, and recognises a finding it has seen before in the same repository, so a second upload adds only what is new. Sending the same file twice stores it once. An upload is limited to 20 MB and 5,000 findings.
+The server accepts SARIF 2.1.0, the JSON that `0security scan --format json` writes, or a file from `0security findings rollup --export`. It labels each finding with the repository and the source, and recognises a finding it has seen before in the same repository, so a second upload adds only what is new. Sending the same file twice stores it once. An upload is limited to 20 MB and 5,000 findings.
 
 Open the Org tab on the Findings page to see counts by severity, status and repository, filter to one repository, and read the history of a finding. The history shows who changed it, when and why.
 
