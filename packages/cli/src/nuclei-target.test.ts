@@ -34,7 +34,7 @@ describe("nucleiArguments", () => {
   it("excludes intrusive, dos and fuzz templates, turns off out-of-band callbacks and update checks, and sets the limits", () => {
     const args = nucleiArguments({ url: "http://127.0.0.1:1", out: "/o.jsonl", rateLimit: 10, concurrency: 5 });
     expect(args.slice(args.indexOf("-etags"), args.indexOf("-etags") + 2)).toEqual(["-etags", "intrusive,dos,fuzz"]);
-    expect(args).toEqual(expect.arrayContaining(["-ni", "-duc", "-rl", "10", "-c", "5", "-pt", "http"]));
+    expect(args).toEqual(expect.arrayContaining(["-ni", "-duc", "-rl", "10", "-c", "5", "-pt", "http", "-dr"]));
     expect(args).not.toContain("-t");
   });
 });

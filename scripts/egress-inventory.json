@@ -401,7 +401,7 @@
         "packages/cli/src/nuclei-target.ts"
       ],
       "when": "0security scan --scanner nuclei --target-url, with a scope file or the typed host. 0 starts Nuclei, which you installed; Nuclei sends the requests.",
-      "sent": "HTTP requests from Nuclei to that one target, at 10 requests per second by default, from http templates only, without intrusive, dos or fuzz templates and without out-of-band callbacks. A public host needs --acknowledge-host with the exact host; link-local and cloud metadata addresses are always refused. ZERO_ENTERPRISE refuses every target that is not loopback.",
+      "sent": "HTTP requests from Nuclei to that one target, at 10 requests per second by default, from http templates only, with no redirect followed, without intrusive, dos or fuzz templates and without out-of-band callbacks. A public host needs --acknowledge-host with the exact host; link-local and cloud metadata addresses are always refused. ZERO_ENTERPRISE refuses every target that is not loopback.",
       "disable": "Do not use --target-url."
     },
     {

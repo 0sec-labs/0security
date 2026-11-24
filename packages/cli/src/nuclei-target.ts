@@ -93,6 +93,8 @@ export function nucleiArguments(options: { url: string; out: string; rateLimit: 
     "-ni", "-duc", "-silent", "-nc", "-retries", "0", "-timeout", "10",
     // Only http templates run: no dns, file, code, javascript, headless, tcp or whois templates, which can reach hosts other than the target.
     "-pt", "http",
+    // A redirect could lead off the target; none is followed, whatever a template asks.
+    "-dr",
     ...(options.templates ? ["-t", options.templates] : []),
     ...(options.pin ? ["-H", `Host: ${options.pin.host}`, "-sni", options.pin.hostname] : []),
   ];
