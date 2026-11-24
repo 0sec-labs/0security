@@ -76,6 +76,8 @@ export const queryKeys = {
   consoleInstructionsProject: key("console-instructions-project"),
   consoleSnapshot: key("console-snapshot"),
   findingsApiCredentials: key("findings-api-credentials"),
+  findingsOrg: key("findings-org"),
+  findingsOrgHistory: key("findings-org-history"),
   // Hosts
   chatHostHandshake: key("chat-host-handshake"),
   hostSidebarConnection: key("host-sidebar-connection"),

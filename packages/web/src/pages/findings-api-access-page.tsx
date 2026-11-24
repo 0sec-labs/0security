@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Feedback, QueryState } from "@/components/console-control/control-ui";
 import { errorText } from "@/lib/api-error";
+import { useOrgOverview } from "@/components/findings/findings-org";
 
 type ApiCredential = {
   id: string; name: string; scopes: string[]; createdAt: string;
@@ -32,6 +33,9 @@ export function FindingsApiAccessPage() {
       return response.json() as Promise<{ credentials: ApiCredential[] }>;
     },
   });
+  // Sending findings (a CI key) exists only with the shared findings server; without it the form is as it always was.
+  const canSend = useOrgOverview(null, canManage).data?.canWrite === true;
+  const [sendScope, setSendScope] = useState(false);
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
   const [created, setCreated] = useState<CreatedCredential | null>(null);
@@ -42,7 +46,7 @@ export function FindingsApiAccessPage() {
   const createKey = async () => {
     setBusy(true); setError(""); setMessage("");
     try {
-      const response = await localControlFetch("/api/findings-access", { method: "POST", body: JSON.stringify({ name: name.trim(), scopes: ["read:findings"] }) });
+      const response = await localControlFetch("/api/findings-access", { method: "POST", body: JSON.stringify({ name: name.trim(), scopes: [canSend && sendScope ? "write:findings" : "read:findings"] }) });
       if (!response.ok) throw new Error("Could not create this key. Check its name and your team access.");
       const result = await response.json() as CreatedCredential;
       if (typeof result.token !== "string" || !result.credential?.id) throw new Error("The key response was incomplete. Refresh the list before trying again.");
@@ -82,7 +86,8 @@ export function FindingsApiAccessPage() {
       </section>}
       {creating && <form className="space-y-4 rounded-[var(--radius-panel,16px)] border-[0.5px] border-[var(--card-hairline)] bg-card p-5" onSubmit={event => { event.preventDefault(); void createKey(); }}>
         <label className="block space-y-2 text-sm"><span>Key name</span><Input autoComplete="off" value={name} onChange={event => setName(event.target.value)} maxLength={160} required disabled={busy} placeholder="Reporting integration" /></label>
-        <p className="text-xs text-muted-foreground">Reads findings and evidence. Expires in 90 days.</p>
+        {canSend && <label className="block space-y-2 text-sm"><span>Access</span><select aria-label="Key access" value={sendScope ? "write" : "read"} onChange={event => setSendScope(event.target.value === "write")} disabled={busy} className="h-9 w-full rounded-md border-[0.5px] border-[var(--card-hairline)] bg-background px-2 text-sm"><option value="read">Read findings</option><option value="write">Send findings from CI</option></select></label>}
+        <p className="text-xs text-muted-foreground">{canSend && sendScope ? "Sends findings to this server and nothing else. Expires in 90 days." : "Reads findings and evidence. Expires in 90 days."}</p>
         <div className="flex gap-2"><Button type="submit" disabled={busy || !name.trim()}>{busy ? "Creating…" : "Create key"}</Button><Button type="button" variant="outline" disabled={busy} onClick={() => { setCreating(false); setName(""); setError(""); }}>Cancel</Button></div>
       </form>}
       <QueryState pending={credentials.isPending} error={credentials.error} retry={credentials.refetch} />
@@ -90,7 +95,7 @@ export function FindingsApiAccessPage() {
         {credentials.data.credentials.map(credential => {
           const expired = credential.expiresAt !== null && Date.parse(credential.expiresAt) <= Date.now();
           return <li key={credential.id} className="flex flex-wrap items-center justify-between gap-3 py-3">
-            <div className="min-w-0 space-y-1"><p className="break-words text-sm font-medium">{credential.name}</p><p className="text-xs text-muted-foreground">Read findings · Created {dateLabel(credential.createdAt)}{credential.revokedAt ? " · Revoked" : expired ? " · Expired" : credential.expiresAt ? ` · Expires ${dateLabel(credential.expiresAt)}` : " · No expiry"}</p>{credential.lastUsedAt && <p className="text-xs text-muted-foreground">Last used {dateLabel(credential.lastUsedAt)}</p>}</div>
+            <div className="min-w-0 space-y-1"><p className="break-words text-sm font-medium">{credential.name}</p><p className="text-xs text-muted-foreground">{credential.scopes.includes("write:findings") ? "Send findings" : "Read findings"} · Created {dateLabel(credential.createdAt)}{credential.revokedAt ? " · Revoked" : expired ? " · Expired" : credential.expiresAt ? ` · Expires ${dateLabel(credential.expiresAt)}` : " · No expiry"}</p>{credential.lastUsedAt && <p className="text-xs text-muted-foreground">Last used {dateLabel(credential.lastUsedAt)}</p>}</div>
             {!credential.revokedAt && <Button variant="outline" size="sm" disabled={busy} onClick={() => { setPendingRevoke(credential); setError(""); setMessage(""); }}>Revoke</Button>}
           </li>;
         })}
