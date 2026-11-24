@@ -171,15 +171,16 @@ export function registerSentinelsCommand(program: Command, deps: ConsoleCommandD
   const triggers = group.command("triggers").description("Control what starts a Sentinel's automations");
   consoleFlags(triggers.command("list <id>").description("List triggers"))
     .action((id: string, options: ConsoleFlags) => withConsole(options, deps, async client => ((await client.request("GET", `${ROOT}/${enc((await sentinel(client, id)).id)}/triggers`)) as { triggers: Trigger[] }).triggers, triggerTable));
-  consoleFlags(triggers.command("add <id>").description("Add a schedule, github-pr, release or check-completed trigger; it stays disabled unless --enable --yes")
-    .option("--automation <id>", "What the trigger starts (default: the only one this Sentinel owns)").option("--kind <kind>", "schedule | manual | github-pr | release | check-completed")
+  consoleFlags(triggers.command("add <id>").description("Add a schedule, github-pr, release, check-completed or webhook trigger; it stays disabled unless --enable --yes")
+    .option("--automation <id>", "What the trigger starts (default: the only one this Sentinel owns)").option("--kind <kind>", "schedule | manual | github-pr | release | check-completed | webhook")
     .option("--file <path>", "Trigger JSON object with schedule, github, release or check settings").option("--enable", "Enable immediately").option("--yes", "Confirm that an enabled trigger was reviewed")
     .option("--frequency <frequency>", `schedule: ${SCHEDULE_FREQUENCIES.join(", ")}`).option("--every <minutes>", "schedule, minutes: interval (5 or more)")
     .option("--at <HH:MM>", "schedule, daily, weekdays, weekly: time of day in --timezone (default UTC)").option("--weekday <day>", "schedule, weekly: sun, mon, ... or 0-6").option("--cron <expression>", "schedule, cron: five fields").option("--timezone <zone>", "schedule: IANA timezone (default UTC)")
     .option("--repo <owner/name>", "github-pr: repository to watch").option("--base-branch <branch>", "github-pr: only pull requests into this branch")
     .option("--comment", "github-pr: comment on each pull request with one short summary, edited in place on later pushes (default: off)")
-    .option("--include-forks", "github-pr: also review pull requests from forks, marked untrusted (default: skipped)"))
-    .action((id: string, options: ConsoleFlags & { automation?: string; kind?: string; file?: string; enable?: boolean; yes?: boolean; repo?: string; baseBranch?: string; comment?: boolean; includeForks?: boolean; frequency?: string; every?: string; at?: string; weekday?: string; cron?: string; timezone?: string }) => withConsole(options, deps, async client => {
+    .option("--include-forks", "github-pr: also review pull requests from forks, marked untrusted (default: skipped)")
+    .option("--label <text>", "webhook: a name for this webhook (default: webhook)"))
+    .action((id: string, options: ConsoleFlags & { automation?: string; kind?: string; file?: string; enable?: boolean; yes?: boolean; repo?: string; baseBranch?: string; comment?: boolean; includeForks?: boolean; label?: string; frequency?: string; every?: string; at?: string; weekday?: string; cron?: string; timezone?: string }) => withConsole(options, deps, async client => {
       const fromFile = options.file ? await readJsonObject(options.file, "Trigger definition") : {};
       const flags = { ...(options.repo ? { repo: options.repo } : {}), ...(options.baseBranch ? { baseBranch: options.baseBranch } : {}), ...(options.comment ? { commentOnPr: true } : {}), ...(options.includeForks ? { includeForks: true } : {}) };
       const scheduled = [options.frequency, options.every, options.at, options.weekday, options.cron, options.timezone].some(value => value !== undefined);
@@ -191,8 +192,10 @@ export function registerSentinelsCommand(program: Command, deps: ConsoleCommandD
       const owner = await sentinel(client, id);
       const owned = owner.automationIds ?? [];
       const automationId = options.automation ?? (typeof fromFile.automationId === "string" ? fromFile.automationId : owned.length === 1 ? owned[0] : undefined);
-      const body = { ...fromFile, ...github, ...schedule, ...(automationId ? { automationId } : {}), ...(kind ? { kind } : {}) };
-      if (!body.kind) throw new UsageError("Say what kind: --kind schedule | manual | github-pr | release | check-completed (a schedule also needs --frequency; release and check-completed take their settings with --file).");
+      if (options.label !== undefined && kind !== "webhook") throw new UsageError("--label applies to --kind webhook.");
+      const webhookSettings = kind === "webhook" ? { webhook: { ...(fromFile.webhook && typeof fromFile.webhook === "object" ? fromFile.webhook : {}), ...(options.label !== undefined ? { label: options.label } : {}) } } : {};
+      const body = { ...fromFile, ...github, ...schedule, ...webhookSettings, ...(automationId ? { automationId } : {}), ...(kind ? { kind } : {}) };
+      if (!body.kind) throw new UsageError("Say what kind: --kind schedule | manual | github-pr | release | check-completed | webhook (a schedule also needs --frequency; release and check-completed take their settings with --file).");
       if (!body.automationId) throw new UsageError(owned.length ? `This Sentinel owns ${owned.length} things a trigger can start. Pick one with --automation <id>: ${owned.join(", ")}.` : "A trigger needs something to start, and this Sentinel owns nothing yet that the CLI can list. Create it from a YAML file with `0security sentinels sync <folder> --apply`, which can include a schedule, or add the automation in the console and pass its full id with --automation <id>.");
       if (options.enable) requireYes(options.yes, "Enabling a trigger lets the Sentinel start runs unattended.");
       return ((await client.request("POST", `${ROOT}/${enc(owner.id)}/triggers`, { ...body, enabled: options.enable === true, ...(options.enable ? { approval: "enable-reviewed-trigger" } : {}) })) as { trigger: Trigger }).trigger;
@@ -213,6 +216,14 @@ export function registerSentinelsCommand(program: Command, deps: ConsoleCommandD
       const found = resolveId(((await client.request("GET", `${ROOT}/${enc(owner.id)}/triggers`)) as { triggers: Trigger[] }).triggers, triggerId, "Trigger");
       return ((await client.request("POST", `${ROOT}/${enc(owner.id)}/triggers/${enc(found.id)}/check`, {})) as { trigger: Trigger }).trigger;
     }, value => triggerTable([value]), { requireHost: "Checking a pull request trigger" }));
+  consoleFlags(triggers.command("secret <id> <trigger-id>").description("Create or replace the secret of a webhook trigger; the old one keeps working for 5 minutes. Printed once.").option("--yes", "Confirm; update the calling system afterwards"))
+    .action((id: string, triggerId: string, options: ConsoleFlags & { yes?: boolean }) => withConsole(options, deps, async client => {
+      requireYes(options.yes, "A new secret means the calling system must be updated with it.");
+      const owner = await sentinel(client, id);
+      const found = resolveId(((await client.request("GET", `${ROOT}/${enc(owner.id)}/triggers`)) as { triggers: Trigger[] }).triggers, triggerId, "Trigger");
+      if (found.kind !== "webhook") throw new UsageError("Only webhook triggers have a secret.");
+      return (await client.request("POST", `${WEBHOOK_ROOT}/triggers/${enc(found.id)}/secret`, {})) as { secret: string; graceSeconds?: number; webhook: { path: string; url?: string } };
+    }, value => [`Secret (shown once, store it now): ${value.secret}`, ...(value.graceSeconds ? [`The previous secret still works for ${value.graceSeconds / 60} minutes.`] : []), `URL: ${value.webhook.url ?? value.webhook.path}`, "Content type: application/json", "Send the secret as X-Gitlab-Token, or sign the body with it (X-Hub-Signature-256 or X-0-Signature-256)."].join("\n"), { requireHost: "Creating a webhook secret" }));
   // Server mode only; hidden because most installs poll. The secret is shown once by `secret rotate` and never again.
   const webhook = group.command("webhook", { hidden: true }).description("GitHub webhook for pull request Sentinels (server mode)");
   consoleFlags(webhook.command("status").description("Show whether the webhook is set up and the last deliveries"))

@@ -1743,12 +1743,12 @@ Commands:
 ### 0security sentinels triggers add (hidden)
 Usage: 0security sentinels triggers add [options] <id>
 
-Add a schedule, github-pr, release or check-completed trigger; it stays disabled unless --enable
---yes
+Add a schedule, github-pr, release, check-completed or webhook trigger; it stays disabled unless
+--enable --yes
 
 Options:
   --automation <id>        What the trigger starts (default: the only one this Sentinel owns)
-  --kind <kind>            schedule | manual | github-pr | release | check-completed
+  --kind <kind>            schedule | manual | github-pr | release | check-completed | webhook
   --file <path>            Trigger JSON object with schedule, github, release or check settings
   --enable                 Enable immediately
   --yes                    Confirm that an enabled trigger was reviewed
@@ -1765,6 +1765,7 @@ Options:
                            place on later pushes (default: off)
   --include-forks          github-pr: also review pull requests from forks, marked untrusted
                            (default: skipped)
+  --label <text>           webhook: a name for this webhook (default: webhook)
   --db-path <path>         Control database (default: the user database)
   --format <format>        Output: text or json (choices: "text", "json")
   -h, --help               display help for command
@@ -1817,6 +1818,18 @@ Delete a trigger
 
 Options:
   --yes              Confirm deletion
+  --db-path <path>   Control database (default: the user database)
+  --format <format>  Output: text or json (choices: "text", "json")
+  -h, --help         display help for command
+
+### 0security sentinels triggers secret (hidden)
+Usage: 0security sentinels triggers secret [options] <id> <trigger-id>
+
+Create or replace the secret of a webhook trigger; the old one keeps working for 5 minutes. Printed
+once.
+
+Options:
+  --yes              Confirm; update the calling system afterwards
   --db-path <path>   Control database (default: the user database)
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command

@@ -30,7 +30,7 @@ const HIDDEN_FILES = new Set(["CREW.md"]);
 const parseSentinelRow = (value: unknown): Sentinel => { const { crew: _removed, ...sentinel } = parseRow<Sentinel & { crew?: unknown }>(value, "sentinel_json"); const folder = folderFromRetiredScope(sentinel as { folder?: unknown; scope?: unknown }); const kept = { ...dropAccessFields(sentinel), folder } as unknown as Sentinel & { memory?: { enabled?: boolean; autoLearn?: unknown } }; const memory = kept.memory && "autoLearn" in kept.memory ? (({ autoLearn: _dropped, ...rest }) => rest)(kept.memory) : kept.memory; return { ...kept, ...(memory ? { memory } : {}), ...(kept.reviewedFingerprint ? { reviewedFingerprint: dropScopeFromFingerprint(kept.reviewedFingerprint) } : {}), ...(kept.homeFingerprint ? { homeFingerprint: dropScopeFromFingerprint(kept.homeFingerprint) } : {}) } as Sentinel; };
 const invalid = (error: unknown): never => { throw new SentinelStoreError(error instanceof Error ? error.message : "Invalid Sentinel.", 400); };
 
-const turnOriginOf = (kind: SentinelActivation["trigger"]["kind"]): Exclude<AgentTurnOrigin, "legacy" | "promote"> => kind === "github-pr" || kind === "release" || kind === "check-completed" ? "github" : kind === "manual" ? "user" : "schedule";
+const turnOriginOf = (kind: SentinelActivation["trigger"]["kind"]): Exclude<AgentTurnOrigin, "legacy" | "promote"> => kind === "webhook" ? "webhook" : kind === "github-pr" || kind === "release" || kind === "check-completed" ? "github" : kind === "manual" ? "user" : "schedule";
 function turnFromRow(value: unknown): AgentTurn {
   const r = value as Record<string, unknown>;
   const text = (key: string) => r[key] === null || r[key] === undefined ? undefined : String(r[key]);
@@ -87,7 +87,7 @@ export class SentinelStore {
       CREATE UNIQUE INDEX IF NOT EXISTS agent_turns_key ON agent_turns(agent_id, idempotency_key);
       CREATE TABLE IF NOT EXISTS sentinel_file_revisions (sentinel_id TEXT NOT NULL, path TEXT NOT NULL, revision INTEGER NOT NULL, content TEXT NOT NULL, digest TEXT NOT NULL, author_kind TEXT NOT NULL, author TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (sentinel_id, path, revision));`);
     // Trigger kinds that were removed (push, webhook, finding events) stay in the table but can never fire.
-    this.#db.exec("UPDATE sentinel_triggers SET enabled = 0 WHERE enabled = 1 AND kind NOT IN ('schedule', 'manual', 'github-pr', 'release', 'check-completed')");
+    this.#db.exec("UPDATE sentinel_triggers SET enabled = 0 WHERE enabled = 1 AND kind NOT IN ('schedule', 'manual', 'github-pr', 'release', 'check-completed', 'webhook')");
   }
 
   list(status?: SentinelStatus): Sentinel[] {
@@ -445,6 +445,8 @@ export class SentinelStore {
     if (input.kind === "check-completed" && !input.check) throw new SentinelStoreError("Check triggers need a repository.", 400);
     if (input.kind !== "release" && input.release) throw new SentinelStoreError("Only release triggers take release settings.", 400);
     if (input.kind !== "check-completed" && input.check) throw new SentinelStoreError("Only check triggers take check settings.", 400);
+    if (input.kind === "webhook" && !input.webhook) throw new SentinelStoreError("Webhook triggers need settings.", 400);
+    if (input.kind !== "webhook" && input.webhook) throw new SentinelStoreError("Only webhook triggers take webhook settings.", 400);
     return this.#db.transaction(() => {
       this.#require(sentinelId);
       if (this.listTriggers(sentinelId).length >= MAX_TRIGGERS_PER_SENTINEL) throw new SentinelStoreError("Trigger limit reached.", 409);
@@ -452,7 +454,7 @@ export class SentinelStore {
       const trigger: SentinelTrigger = {
         id: randomUUID(), sentinelId, automationId: input.automationId, kind: input.kind, enabled: input.enabled, version: 1,
         ...(input.schedule ? { schedule: input.schedule } : {}), ...(input.github ? { github: input.github } : {}),
-        ...(input.release ? { release: input.release } : {}), ...(input.check ? { check: input.check } : {}),
+        ...(input.release ? { release: input.release } : {}), ...(input.check ? { check: input.check } : {}), ...(input.webhook ? { webhook: input.webhook } : {}),
         nextFireAt: input.schedule ? new Date(nextSentinelFire(input.schedule, nowMs)).toISOString() : input.github || input.release || input.check ? stamp : null,
         createdAt: stamp, updatedAt: stamp,
       };
@@ -461,20 +463,20 @@ export class SentinelStore {
     })();
   }
   /** Editing timing or source never silently keeps a trigger enabled; the caller re-enables explicitly. */
-  updateTrigger(id: string, patch: { enabled?: boolean; schedule?: unknown; github?: unknown; release?: unknown; check?: unknown }, expectedVersion?: number, nowMs = Date.now()): SentinelTrigger {
+  updateTrigger(id: string, patch: { enabled?: boolean; schedule?: unknown; github?: unknown; release?: unknown; check?: unknown; webhook?: unknown }, expectedVersion?: number, nowMs = Date.now()): SentinelTrigger {
     return this.#db.transaction(() => {
       const current = this.getTrigger(id);
       if (!current) throw new SentinelStoreError("Trigger not found.", 404);
       if (expectedVersion !== undefined && current.version !== expectedVersion) throw new SentinelStoreError("Trigger changed. Reload before saving.", 409);
       if (current.activeClaim) throw new SentinelStoreError("Trigger is launching a run; try again in a moment.", 409);
-      const merged = SentinelTriggerCreateSchema.safeParse({ automationId: current.automationId, kind: current.kind, schedule: patch.schedule ?? current.schedule, github: patch.github ?? current.github, release: patch.release ?? current.release, check: patch.check ?? current.check, enabled: patch.enabled ?? current.enabled });
+      const merged = SentinelTriggerCreateSchema.safeParse({ automationId: current.automationId, kind: current.kind, schedule: patch.schedule ?? current.schedule, github: patch.github ?? current.github, release: patch.release ?? current.release, check: patch.check ?? current.check, webhook: patch.webhook ?? current.webhook, enabled: patch.enabled ?? current.enabled });
       if (!merged.success) return invalid(new Error(merged.error.issues.map(issue => issue.message).join("; ")));
-      const changedSource = patch.schedule !== undefined || patch.github !== undefined || patch.release !== undefined || patch.check !== undefined;
+      const changedSource = patch.schedule !== undefined || patch.github !== undefined || patch.release !== undefined || patch.check !== undefined || patch.webhook !== undefined;
       const enabled = changedSource && patch.enabled === undefined ? false : merged.data.enabled;
       const next: SentinelTrigger = {
         ...current, enabled, version: current.version + 1, updatedAt: new Date(nowMs).toISOString(),
         ...(merged.data.schedule ? { schedule: merged.data.schedule } : {}), ...(merged.data.github ? { github: merged.data.github } : {}),
-        ...(merged.data.release ? { release: merged.data.release } : {}), ...(merged.data.check ? { check: merged.data.check } : {}),
+        ...(merged.data.release ? { release: merged.data.release } : {}), ...(merged.data.check ? { check: merged.data.check } : {}), ...(merged.data.webhook ? { webhook: merged.data.webhook } : {}),
         nextFireAt: merged.data.schedule ? new Date(nextSentinelFire(merged.data.schedule, nowMs)).toISOString() : merged.data.github || merged.data.release || merged.data.check ? new Date(nowMs).toISOString() : null,
         lastStatus: enabled ? "scheduled" : "paused", lastError: undefined, ...(enabled && !current.enabled ? { consecutiveFailures: 0 } : {}),
         ...(changedSource ? { cursor: undefined } : {}),

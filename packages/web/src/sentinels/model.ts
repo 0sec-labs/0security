@@ -44,7 +44,7 @@ export interface Sentinel {
 }
 
 /** Why a turn happened. `user` is a person's own message; `legacy` is an older run from before turns were recorded. */
-export type AgentTurnOrigin = "schedule" | "github" | "user" | "promote" | "legacy";
+export type AgentTurnOrigin = "schedule" | "github" | "webhook" | "user" | "promote" | "legacy";
 export interface AgentTurn {
   id: string;
   agentId: string;
@@ -101,7 +101,7 @@ export interface SentinelActivation {
   id: string;
   sentinelId: string;
   sentinelVersion: number;
-  trigger: { kind: "manual" | "automation" | "schedule" | "github-pr" | "release" | "check-completed"; automationId?: string; triggerId?: string; event?: Record<string, string | number> };
+  trigger: { kind: "manual" | "automation" | "schedule" | "github-pr" | "release" | "check-completed" | "webhook"; automationId?: string; triggerId?: string; event?: Record<string, string | number> };
   status: "queued" | "running" | "completed" | "failed" | "cancelled" | "skipped";
   missionId?: string;
   parentMissionId?: string;
@@ -121,7 +121,7 @@ export type SentinelFileEntry = Omit<SentinelFile, "content"> & { bytes: number 
 export interface SentinelFileRevision { revision: number; content: string; authorKind: "human" | "agent"; author: string; createdAt: string }
 export interface SentinelAutomation { id: string; name: string; target?: string; template?: { id: string; revision: number } }
 
-export const SENTINEL_TRIGGER_KINDS = ["schedule", "manual", "github-pr", "release", "check-completed"] as const;
+export const SENTINEL_TRIGGER_KINDS = ["schedule", "manual", "github-pr", "release", "check-completed", "webhook"] as const;
 export type SentinelTriggerKind = (typeof SENTINEL_TRIGGER_KINDS)[number];
 export interface SentinelSchedule { frequency: "minutes" | "hourly" | "daily" | "weekdays" | "weekly" | "cron"; every?: number; time?: string; weekday?: number; cron?: string; timezone: string }
 export interface SentinelTrigger {
@@ -195,7 +195,7 @@ export function presentStatus(sentinel: Pick<Sentinel, "status" | "attention">):
 
 /** Review gate copy: why a Sentinel cannot run on its own and what acknowledging does. */
 export const NEEDS_REVIEW_COPY = "Its model, tools or access changed. It will not run on its own until you review the change and acknowledge it.";
-export const triggerKindLabel = (kind: SentinelTriggerKind): string => ({ schedule: "Schedule", manual: "Manual", "github-pr": "Pull requests", release: "Releases", "check-completed": "Checks" })[kind];
+export const triggerKindLabel = (kind: SentinelTriggerKind): string => ({ schedule: "Schedule", manual: "Manual", "github-pr": "Pull requests", release: "Releases", "check-completed": "Checks", webhook: "Webhook" })[kind];
 export function describeTrigger(trigger: Pick<SentinelTrigger, "kind" | "summary" | "github">): string {
   if (trigger.summary) return trigger.summary;
   if (trigger.kind === "github-pr" && trigger.github) return `Pull requests on ${trigger.github.repo}${trigger.github.commentOnPr ? ", comments on" : ""}${trigger.github.includeForks ? ", forks included" : ""}`;

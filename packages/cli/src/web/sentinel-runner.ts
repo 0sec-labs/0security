@@ -204,6 +204,18 @@ export class SentinelRunner {
     return true;
   }
 
+  /** Starts one webhook trigger for a signed delivery. `key` is the delivery id; the same key never starts two runs. Resolves false when the trigger is off, not a webhook or busy. */
+  async deliverSigned(triggerId: string, input: { key: string; fields: Record<string, string | number> }): Promise<boolean> {
+    if (this.#closed) return false;
+    const current = this.#store.getTrigger(triggerId);
+    if (!current || current.kind !== "webhook" || !current.webhook) return false;
+    const nowMs = this.#now();
+    const due = this.#store.requestCheck(triggerId, nowMs);
+    if (!due) return false;
+    await this.#fire(due, nowMs, "webhook", undefined, input);
+    return true;
+  }
+
   /** Is the one-standing-thread delivery on (the default)? */
   get persistentThread(): boolean { return this.#persistent(); }
 
@@ -276,7 +288,7 @@ export class SentinelRunner {
     }
   }
 
-  async #fire(due: SentinelTrigger, nowMs: number, via: "poll" | "check" | "webhook" = "poll", pushed?: GithubEvent): Promise<void> {
+  async #fire(due: SentinelTrigger, nowMs: number, via: "poll" | "check" | "webhook" = "poll", pushed?: GithubEvent, signed?: { key: string; fields: Record<string, string | number> }): Promise<void> {
     const sentinel = this.#store.get(due.sentinelId);
     if (!sentinel) { this.#store.deleteTrigger(due.id); return; }
     const nextFireAt = due.kind === "schedule" && due.schedule ? isoAt(nextSentinelFire(due.schedule, nowMs))
@@ -291,6 +303,7 @@ export class SentinelRunner {
       if (sentinel.status !== "active") { release({ lastStatus: "paused" }); return; }
       if (sentinelNeedsReview(sentinel)) { release({ lastStatus: "needs_review", lastError: "Model, tools or skills changed. Review and acknowledge the Sentinel before it runs on its own." }); return; }
       if (due.kind === "github-pr") { await this.#pollPullRequests(claimed, sentinel, automation, release, via); return; }
+      if (due.kind === "webhook") { await this.#runSignedWebhook(claimed, sentinel, automation, release, signed); return; }
       if (due.kind === "release" || due.kind === "check-completed") { await this.#runGithubEvents(claimed, sentinel, automation, release, via, pushed); return; }
       if (this.#persistent()) {
         const outcome = await this.#deliverSafely({ sentinel, origin: "schedule", via: "schedule", trigger: { id: due.id, kind: "schedule" }, automation, idempotencyKey: `schedule:${due.id}:${due.nextFireAt ?? nowMs}`, ...(due.nextFireAt ? { scheduledFor: due.nextFireAt } : {}) });
@@ -445,6 +458,22 @@ export class SentinelRunner {
     // A tag has no pull request to comment on, and a tag push can point at a tag object: the status goes on the commit the tag resolves to.
     if (event.kind === "release") return event.tag ? { repo: event.repo, mode: "status", headSha: "", ref: event.tag, fork: false } : undefined;
     return event.sha ? { repo: event.repo, mode: "status", headSha: event.sha, fork: false, ...(event.pr ? { pr: event.pr } : {}) } : undefined;
+  }
+
+  /** One signed delivery. Nothing is polled; a webhook trigger never runs without a delivery. */
+  async #runSignedWebhook(trigger: SentinelTrigger, sentinel: Sentinel, automation: SecurityWorkflow, release: (update: { lastStatus?: string; lastError?: string; lastActivationId?: string }) => unknown, signed?: { key: string; fields: Record<string, string | number> }): Promise<void> {
+    if (!signed || !trigger.webhook) { release({}); return; }
+    const isEnabled = () => this.#store.getTrigger(trigger.id)?.enabled === true;
+    if (!isEnabled()) { release({}); return; }
+    const event = { ...signed.fields, label: trigger.webhook.label };
+    const idempotencyKey = `webhook:${trigger.id}:${signed.key}`;
+    if (this.#persistent()) {
+      const outcome = await this.#deliverSafely({ sentinel, origin: "webhook", via: "webhook", trigger: { id: trigger.id, kind: "webhook" }, automation, event, idempotencyKey });
+      release(this.#turnRelease(outcome, trigger.id));
+      return;
+    }
+    const result = await this.#launchSafely(sentinel.id, { trigger: { kind: "webhook", automationId: automation.id, triggerId: trigger.id, event }, automation, autonomous: true, via: "webhook", idempotencyKey });
+    release(result.ok ? { lastStatus: "running", lastActivationId: result.activation.id, lastError: undefined } : { lastStatus: result.kind, lastError: result.reason });
   }
 
   async #runGithubEvents(trigger: SentinelTrigger, sentinel: Sentinel, automation: SecurityWorkflow, release: (update: { lastStatus?: string; lastError?: string; lastActivationId?: string; cursor?: Record<string, string> }) => unknown, via: string, pushed?: GithubEvent): Promise<void> {

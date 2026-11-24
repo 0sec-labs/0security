@@ -53,6 +53,7 @@ import { ServerModeGuard, handleHealth, isHealthRequest, isWildcardHost, resolve
 import { hostname } from "node:os";
 import { listAudit, startAuditSinkFromEnv, type AuditSink } from "@0/engine/storage";
 import { GITHUB_WEBHOOK_PATH, GitHubWebhookReceiver, WebhookSecretStore } from "../web/github-webhook.js";
+import { SignedWebhookReceiver, SignedWebhookSecrets, signedWebhookTriggerId } from "../web/signed-webhook.js";
 
 type DashboardOptions = {
   dbPath?: string;
@@ -182,7 +183,9 @@ export function registerDashboardCommand(program: Command): void {
         secrets: new WebhookSecretStore(homeStateDir()),
         dispatcher: () => { const service = webhookSentinels(); return service ? { targets: (repo, base) => service.webhookTargets(repo, base), check: id => service.checkTrigger(id), eventTargets: event => service.webhookEventTargets(event), deliver: (id, event) => service.deliverWebhookEvent(id, event) } : undefined; },
       }) : undefined;
-      const webhookConsole = webhook ? { receiver: webhook, ...(publicUrl ? { payloadUrl: new URL(GITHUB_WEBHOOK_PATH, publicUrl).toString() } : {}) } : undefined;
+      const signedWebhookSecrets = serverMode ? new SignedWebhookSecrets(homeStateDir()) : undefined;
+      const signedWebhook = signedWebhookSecrets ? new SignedWebhookReceiver({ secrets: signedWebhookSecrets, dispatcher: () => { const service = webhookSentinels(); return service ? { deliver: (id, input) => service.deliverSignedWebhook(id, input) } : undefined; } }) : undefined;
+      const webhookConsole = webhook ? { receiver: webhook, ...(signedWebhookSecrets ? { signed: { secrets: signedWebhookSecrets, isWebhookTrigger: (id: string) => webhookSentinels()?.isWebhookTrigger(id) ?? false, ...(publicUrl ? { baseUrl: publicUrl.toString() } : {}) } } : {}), ...(publicUrl ? { payloadUrl: new URL(GITHUB_WEBHOOK_PATH, publicUrl).toString() } : {}) } : undefined;
       let phase: ServerPhase = "starting";
       let dbProbe = { at: 0, ok: false };
       const dbOk = () => {
@@ -324,6 +327,8 @@ export function registerDashboardCommand(program: Command): void {
             // The one anonymous API path in server mode: GitHub cannot sign in, so it is authenticated by an HMAC of the raw
             // body inside the handler instead. It sits before the session gate and the control-token check and nothing else does.
             if (webhook && serverContext && isAnonymousApiExemption(requestUrl.pathname)) { await webhook.handle(req, res, serverContext.clientIp); return; }
+            const signedTrigger = signedWebhook && serverContext ? signedWebhookTriggerId(requestUrl.pathname) : undefined;
+            if (signedWebhook && serverContext && signedTrigger) { await signedWebhook.handle(req, res, serverContext.clientIp, signedTrigger); return; }
             if (serverGuard && serverContext) {
               if (await serverGuard.handleAccessRoute(req, res, requestUrl.pathname, serverContext, teamAuth, () => readJson(req, 16_384))) return;
               const hasBearer = typeof req.headers.authorization === "string" && req.headers.authorization.startsWith("Bearer ");

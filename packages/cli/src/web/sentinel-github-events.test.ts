@@ -27,7 +27,8 @@ describe("trigger settings", () => {
   it("accepts the new kinds on a trigger", () => {
     expect(SentinelTriggerCreateSchema.safeParse({ automationId: "a1", kind: "release", release: { repo: "acme/app" } }).success).toBe(true);
     expect(SentinelTriggerCreateSchema.safeParse({ automationId: "a1", kind: "check-completed", check: { repo: "acme/app", conclusion: "failure" } }).success).toBe(true);
-    expect(SentinelTriggerCreateSchema.safeParse({ automationId: "a1", kind: "release", webhook: {} }).success).toBe(false);
+    expect(SentinelTriggerCreateSchema.safeParse({ automationId: "a1", kind: "release", push: {} }).success).toBe(false);
+    expect(SentinelTriggerCreateSchema.safeParse({ automationId: "a1", kind: "webhook", webhook: { label: "ci" } }).success).toBe(true);
   });
 });
 

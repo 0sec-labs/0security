@@ -173,7 +173,7 @@ export interface SentinelActivation {
   id: string;
   sentinelId: string;
   sentinelVersion: number;
-  trigger: { kind: "manual" | "automation" | "schedule" | "github-pr" | "release" | "check-completed"; automationId?: string; triggerId?: string; /** Event context (for example PR number and head SHA). */ event?: Record<string, string | number> };
+  trigger: { kind: "manual" | "automation" | "schedule" | "github-pr" | "release" | "check-completed" | "webhook"; automationId?: string; triggerId?: string; /** Event context (for example PR number and head SHA). */ event?: Record<string, string | number> };
   status: SentinelActivationStatus;
   /** Mission (chat/session) for this activation; a child of the Sentinel's home mission. */
   missionId?: string;
@@ -194,7 +194,7 @@ export interface SentinelActivation {
 }
 
 /** What started a turn in a Sentinel's thread. A manual "Run now" is `user`; `legacy` marks an activation projected from before the turn ledger existed. */
-export const AGENT_TURN_ORIGINS = ["schedule", "github", "user", "promote", "legacy"] as const;
+export const AGENT_TURN_ORIGINS = ["schedule", "github", "webhook", "user", "promote", "legacy"] as const;
 export type AgentTurnOrigin = (typeof AGENT_TURN_ORIGINS)[number];
 /** Provenance detail of a turn. `via` says how it arrived (for example `poll` or `webhook` for GitHub, or the old trigger kind for a legacy row). */
 export interface AgentTurnOriginDetail { via?: string; triggerId?: string; automationId?: string; userId?: string; event?: Record<string, string | number> }

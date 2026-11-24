@@ -74,6 +74,7 @@ A Sentinel has shell access, like a thread. An optional sandbox (SmolVM or Docke
 | `github-pr` | Polls open pull requests through the connected `gh` account, at least every 60 seconds. |
 | `release` | A published GitHub release, or a pushed tag that starts with a prefix such as `v`. |
 | `check-completed` | A check run or check suite that finished, optionally only when it failed. |
+| `webhook` | A signed call from another system, such as GitLab, Bitbucket or your own script. Server mode only. |
 
 In the browser, open a Sentinel and choose **Add trigger** in its pane. A schedule fires only while the app and its computer are running.
 
@@ -162,6 +163,38 @@ A `check-completed` trigger starts a run when a check run or check suite finishe
 ```
 
 Polling reads the check runs on the tip of `branch`, or on the default branch when you leave it out. Checks on pull request commits reach the Sentinel only through the webhook.
+
+### Webhook trigger
+
+A `webhook` trigger starts a run when another system calls its URL. It needs [server mode](/server-mode/). Create the trigger, then create its secret. The secret is shown once.
+
+```bash
+0security sentinels triggers add <sentinel> --kind webhook --label ci
+0security sentinels triggers secret <sentinel> <trigger-id> --yes
+```
+
+Send a POST with a JSON body to `https://<your server>/api/webhooks/trigger/<trigger-id>`. Prove you hold the secret in one of four ways:
+
+| Header | Who sends it |
+| --- | --- |
+| `X-Hub-Signature-256: sha256=<hex>` | GitHub. HMAC-SHA256 of the raw body. |
+| `X-Hub-Signature: sha256=<hex>` | Bitbucket Cloud and Data Center. The same HMAC. |
+| `X-Gitlab-Token: <secret>` | GitLab. The secret itself, as plain text. |
+| `X-0-Signature-256: sha256=<hex>` and `X-0-Timestamp: <unix seconds>` | Your scripts. HMAC-SHA256 of the timestamp, a dot and the raw body. |
+
+Use the secret as the secret of the webhook in GitHub, GitLab or Bitbucket. For your own script:
+
+```bash
+ts=$(date +%s)
+sig=$(printf '%s.%s' "$ts" "$body" | openssl dgst -sha256 -hmac "$SECRET" -hex | sed 's/^.* //')
+curl -X POST "$URL" -H 'Content-Type: application/json' -H "X-0-Timestamp: $ts" -H "X-0-Signature-256: sha256=$sig" -d "$body"
+```
+
+Limits: the body is at most 256 KB. Signatures are compared in constant time. The scripted form is refused when the timestamp is more than five minutes off. A repeated delivery id, or a repeated body when the sender gives no id, starts one run. Calls are rate limited. A wrong signature gets 401 and starts nothing.
+
+The run sees the sender, the event name, and the `message`, `ref` and `url` fields of your JSON, cut short and cleaned as described below. Nothing else in the body reaches it. The call cannot choose a trigger or change a setting. Creating a new secret keeps the old one working for five minutes.
+
+This trigger posts nothing back. GitLab and Bitbucket calls were tested with their documented header formats and not against those services.
 
 ### What the run receives
 

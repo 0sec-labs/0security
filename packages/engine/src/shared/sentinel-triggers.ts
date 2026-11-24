@@ -5,7 +5,7 @@ import { DAY_MS } from "./units.js";
  * Triggers for Sentinel-owned automations. A trigger starts a run of one automation (workflow definition)
  * on behalf of its owner Sentinel. Schedules use wall-clock time in an IANA timezone.
  */
-export const SENTINEL_TRIGGER_KINDS = ["schedule", "manual", "github-pr", "release", "check-completed"] as const;
+export const SENTINEL_TRIGGER_KINDS = ["schedule", "manual", "github-pr", "release", "check-completed", "webhook"] as const;
 export type SentinelTriggerKind = (typeof SENTINEL_TRIGGER_KINDS)[number];
 /** Older records may hold kinds that were removed (push, webhook, finding events); they are kept disabled and hidden. */
 export const isSentinelTriggerKind = (kind: string): kind is SentinelTriggerKind => (SENTINEL_TRIGGER_KINDS as readonly string[]).includes(kind);
@@ -103,6 +103,13 @@ export const SentinelCheckConfigSchema = z.strictObject({
 });
 export type SentinelCheckConfig = z.output<typeof SentinelCheckConfigSchema>;
 
+/** A signed call from another system. Each trigger has its own secret; the callers URL carries the trigger id. */
+export const SentinelWebhookConfigSchema = z.strictObject({
+  /** Shown in the Sentinel and passed to the run, so a person can tell several webhooks apart. */
+  label: z.string().trim().min(1).max(60).regex(/^[\w .,:@/+()-]+$/, "Use letters, digits and simple punctuation.").default("webhook"),
+});
+export type SentinelWebhookConfig = z.output<typeof SentinelWebhookConfigSchema>;
+
 export const SentinelTriggerCreateSchema = z.strictObject({
   automationId: z.string().min(1).max(128).regex(/^[A-Za-z0-9_-]+$/),
   kind: z.enum(SENTINEL_TRIGGER_KINDS),
@@ -110,6 +117,7 @@ export const SentinelTriggerCreateSchema = z.strictObject({
   github: SentinelGithubPrConfigSchema.optional(),
   release: SentinelReleaseConfigSchema.optional(),
   check: SentinelCheckConfigSchema.optional(),
+  webhook: SentinelWebhookConfigSchema.optional(),
   enabled: z.boolean().default(false),
 });
 export type SentinelTriggerCreate = z.output<typeof SentinelTriggerCreateSchema>;
@@ -123,6 +131,7 @@ export interface SentinelTrigger {
   github?: SentinelGithubPrConfig;
   release?: SentinelReleaseConfig;
   check?: SentinelCheckConfig;
+  webhook?: SentinelWebhookConfig;
   enabled: boolean;
   version: number;
   nextFireAt: string | null;

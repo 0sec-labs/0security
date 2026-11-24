@@ -203,7 +203,7 @@ docker compose exec -it zero gh auth login
 
 The credential is kept under `/data/.config/gh`. Reviews are drafts in the app and post nothing to GitHub unless you turn on comments. See [Sentinels](/sentinels/#github-pull-request-trigger).
 
-With a public HTTPS address (`ZERO_PUBLIC_URL`), an optional GitHub webhook at `https://<your domain>/api/webhooks/github` makes pull request Sentinels react right after a push. It is the only address that answers without sign-in, and it requires a valid `X-Hub-Signature-256` on every request. Set it up as described in [Sentinels](/sentinels/#faster-with-a-github-webhook-server-mode). Keep `--trusted-proxy` set so the rate limit sees the real sender.
+With a public HTTPS address (`ZERO_PUBLIC_URL`), an optional GitHub webhook at `https://<your domain>/api/webhooks/github` makes pull request Sentinels react right after a push. It requires a valid `X-Hub-Signature-256` on every request. The only other address that answers without sign-in is `/api/webhooks/trigger/<trigger-id>` for [webhook triggers](/sentinels/#webhook-trigger), which needs that trigger's own secret. Set it up as described in [Sentinels](/sentinels/#faster-with-a-github-webhook-server-mode). Keep `--trusted-proxy` set so the rate limit sees the real sender.
 
 If the secret leaks, rotate it. The old secret works for 5 minutes.
 

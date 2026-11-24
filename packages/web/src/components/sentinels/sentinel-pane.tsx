@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { CircleCheck, Clock, GitPullRequest, Play, Plus, Tag } from "lucide-react";
+import { CircleCheck, Clock, GitPullRequest, Play, Plus, Tag, Webhook } from "lucide-react";
 import { errorText } from "@/lib/api-error";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -12,7 +12,7 @@ import { AddTriggerDialog } from "./add-trigger-dialog";
 import { ScheduleFields } from "./schedule-fields";
 import { SentinelDocument } from "./sentinel-document";
 
-const KIND_ICON = { schedule: Clock, "github-pr": GitPullRequest, manual: Play, release: Tag, "check-completed": CircleCheck } as const;
+const KIND_ICON = { schedule: Clock, "github-pr": GitPullRequest, manual: Play, release: Tag, "check-completed": CircleCheck, webhook: Webhook } as const;
 const WEEK = 7 * 86_400_000;
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {

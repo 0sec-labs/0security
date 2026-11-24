@@ -12,6 +12,7 @@
  *    credentials or global preferences need the workspace owner.
  */
 import { GITHUB_WEBHOOK_PATH } from "./github-webhook.js";
+import { signedWebhookTriggerId } from "./signed-webhook.js";
 
 const READ_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
@@ -64,6 +65,12 @@ export const ANONYMOUS_API_EXEMPTIONS: readonly { path: string; methods: readonl
 ];
 /** True for the exact paths in ANONYMOUS_API_EXEMPTIONS (any method: the handler answers 405 for the rest). */
 export function isAnonymousApiExemption(pathname: string): boolean { return ANONYMOUS_API_EXEMPTIONS.some(entry => entry.path === pathname); }
+/**
+ * The one anonymous path with an id in it: /api/webhooks/trigger/<trigger id>, for other systems that cannot sign in. The handler
+ * answers 404 unless that trigger has a secret, requires an HMAC (or GitLab token) under it, a 256 KB cap, a replay window or
+ * delivery-id dedupe, and rate limits. It only starts the one trigger the secret belongs to. Browser-only for the engine bearer.
+ */
+export function isSignedWebhookExemption(pathname: string): boolean { return signedWebhookTriggerId(pathname) !== undefined; }
 
 /** The engine bearer must never ride the registry proxy: it would borrow other backends' credentials or re-enter local routes after the gate. */
 const ENGINE_DENIED_ANY_METHOD = /^\/api\/backends\/[^/]+\/proxy(?:\/|$)/;
