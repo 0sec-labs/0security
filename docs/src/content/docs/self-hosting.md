@@ -399,7 +399,7 @@ cosign verify-blob --bundle checksums.txt.sigstore.json \
   checksums.txt
 ```
 
-The install script runs this check when `cosign` is installed and the release has a bundle. It stops on a bad signature. Set `INSTALL_SIGNATURE=require` to stop when `cosign` or the bundle is missing, or `INSTALL_SIGNATURE=0` to skip it on an air-gapped host or an internal mirror. Releases made before signing began have no bundle.
+The install script runs this check when `cosign` is installed and the release has a bundle. It stops on a bad signature. Set `INSTALL_SIGNATURE=require` to stop when `cosign` or the bundle is missing, or `INSTALL_SIGNATURE=0` to skip it on an air-gapped host or an internal mirror. Releases made before signing began have no bundle. Release v0.45.0 and later are signed.
 
 ### Verify the container image
 
@@ -415,7 +415,7 @@ cosign verify-attestation --type cyclonedx "$IMAGE" \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 
-Pin the image by the digest that `cosign verify` prints, not by tag, in production. The signing steps run in the publish workflow and have not yet run on a real release. Check that the first signed image verifies before you rely on this.
+Pin the image by the digest that `cosign verify` prints, not by tag, in production. The v0.45.0 image has a verified signature and a CycloneDX attestation. Check them yourself before you rely on them.
 
 To audit the dependencies of a release, run the SBOM through the advisory check:
 
