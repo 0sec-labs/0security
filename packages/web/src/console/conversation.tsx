@@ -364,7 +364,6 @@ export function Conversation({
                   </Button>
                 </div>
               )}
-              <QueuedMessages inline workspace={rootWorkspace} snapshot={snapshot} />
               {snapshot.pendingDecisions.length > 0 && (
                 <p data-slot="needs-you" role="status" className="text-xs font-medium text-primary-text">
                   Needs you
@@ -983,6 +982,7 @@ export function Composer({
               </div>
             </div>
           )}
+        {!worker && !home && <QueuedMessages dock workspace={workspace} snapshot={snapshot} />}
         <div>
           {!worker && home && (
             <div className="flex min-h-8 min-w-0 items-center justify-between gap-3 pb-1.5 pl-4 pr-4 text-muted-foreground">
@@ -1586,7 +1586,7 @@ export function Composer({
             </span>
           </div>
         )}
-        {queuedShortcut && (
+        {queuedShortcut && active && !snapshot.queuePausedReason && (
           <p role="status" className="mt-2 px-1 text-xs text-muted-foreground">
             Message queued. Current work and agents will continue; your message will send after this response.
           </p>

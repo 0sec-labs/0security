@@ -329,6 +329,9 @@ export function turnEndingKind(turn: {
   return undefined;
 }
 
+/** Why queued messages are waiting instead of sending when the thread is idle. */
+export type ConsoleQueuePauseReason = "stopped" | "error" | "restored";
+
 export interface ConsoleQueuedMessage {
   attachments?: ConsoleMessageInput["attachments"];
   id: string;
@@ -390,6 +393,8 @@ export interface ConsoleSessionSnapshot {
   pendingDecisions: DesktopConsoleDecision[];
   workers: ConsoleWorker[];
   queuedMessages: ConsoleQueuedMessage[];
+  /** Set only while queued messages are held back; absent means they send when the running turn ends. */
+  queuePausedReason?: ConsoleQueuePauseReason;
   runtime: ConsoleRuntimeSnapshot | null;
   execution?: ConsoleExecutionSnapshot;
   workspacePath?: string;
