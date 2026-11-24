@@ -74,7 +74,7 @@ To keep model traffic in your network, point the provider at an in-network gatew
 
 ## Chosen by you
 
-These are not blocked, because you name the destination. Leave them unused to keep the set closed.
+These are not blocked, because you name the destination, except where a row says `ZERO_ENTERPRISE` refuses it. Leave them unused to keep the set closed.
 
 | Entry | Destination | When | What is sent |
 | --- | --- | --- | --- |
@@ -87,6 +87,7 @@ These are not blocked, because you name the destination. Leave them unused to ke
 | `source-control-writes` | The git remote and GitHub host of your repository | `0security findings fix`, threat-model publishing, findings import, sentinel reviews, and Sentinel release and check triggers with `report` turned on. | The branch push, comment or commit status you asked for. Sentinel triggers also read releases, tags and check runs through `gh`. |
 | `fix-sandbox-docker` | The registry of the image you name, pulled by the Docker daemon. With `--sandbox-network`, whatever the build downloads. | `0security findings fix --sandbox docker`. The container has no network unless you pass `--sandbox-network`, which `ZERO_ENTERPRISE` refuses. | Nothing from 0. |
 | `bitbucket-code-insights` | `api.bitbucket.org`, or the Bitbucket Data Center URL you pass | `0security findings upload --to bitbucket-cloud` or `--to bitbucket-dc` with `BITBUCKET_TOKEN` set. | A Code Insights report and annotations from the scan's findings. A plain `http://` URL is refused unless the host is this machine or you pass `--allow-insecure-http`. |
+| `bitbucket-pr-review` | `api.bitbucket.org`, or the Bitbucket Data Center URL you pass, and the git remote of the clone you name | `0security sentinels bitbucket review` or `watch` with `BITBUCKET_TOKEN` set. | Reads of pull requests, diffs and comments. Comments and a Code Insights report. The scan fetches the pull request's commit from the clone's remote. `ZERO_ENTERPRISE` refuses all of it. |
 
 ## Local only
 

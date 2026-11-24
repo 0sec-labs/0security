@@ -537,6 +537,54 @@ steps:
 
 The pull request variables depend on the repository host Azure Pipelines builds, and the commit Azure builds on a pull request can be a merge commit that Bitbucket does not know. Pass the pull request's source commit with `--commit` when the report does not show up. Without a Bitbucket token the step still scans and fails on severity, and the artifact holds the findings.
 
+## Review Bitbucket pull requests on your own machine
+
+`0security sentinels bitbucket` reviews Bitbucket pull requests from a machine you run, on Bitbucket Cloud and Data Center. It needs no hosted service and no pipeline. Run `watch` to review pull requests as they open or change, or `review` for one.
+
+Each review scans only the files the pull request changes. It then publishes a Code Insights report for the head commit, keeps one summary comment up to date, and adds up to ten inline comments on changed lines.
+
+You need a local clone of the repository whose `origin` is the Bitbucket repository, and a token that can read pull requests, write comments and write Code Insights reports. Set it in `BITBUCKET_TOKEN`. The clone uses your own git credentials to fetch.
+
+```bash
+export BITBUCKET_TOKEN=...
+export OPENAI_API_KEY=...
+0security sentinels bitbucket watch --platform cloud --repo workspace/repo --checkout ~/code/repo
+```
+
+For Data Center, pass `--platform dc`, the repository as `PROJECT/repo` and `--url https://bitbucket.example.com`.
+
+### Use a webhook
+
+Polling needs nothing else. For faster reviews, add a webhook and let `watch` listen for it.
+
+```bash
+export BITBUCKET_WEBHOOK_SECRET=...   # at least 16 characters
+0security sentinels bitbucket watch --platform cloud --repo workspace/repo --checkout ~/code/repo --listen 127.0.0.1:7777
+```
+
+Put a TLS proxy in front of the listener and point the webhook at it. On Cloud, turn on **Pull request created** and **Pull request updated**. On Data Center, turn on **Opened** and **Source branch updated**. Set the same secret on the webhook. Bitbucket signs each delivery with it, and `watch` refuses a delivery that does not match. Polling still runs, so a missed delivery is caught on the next poll.
+
+### What a review does
+
+- Skips closed pull requests, drafts and pull requests from forks.
+- Skips a pull request that changes more than `--max-files` files (default 50) and says so in a comment.
+- Stops one scan at `--budget` USD (default 2). A scan that stops early is marked partial in the summary.
+- Reviews a commit once. A new commit on the pull request is reviewed again.
+- Edits its own summary comment instead of adding another, leaves inline comments that still apply, and removes the ones whose finding is gone.
+- Leaves out findings in files the pull request did not change.
+
+The Code Insights report follows the limits in [Publish to Bitbucket Code Insights](#publish-to-bitbucket-code-insights). Use `--no-comments` or `--no-insights` to post only one of the two.
+
+### Run it safely
+
+The scan reads code written by the pull request's author. Run `watch` on a machine that holds nothing you cannot lose, and give the clone read access only. The scan does not see `BITBUCKET_TOKEN` or `BITBUCKET_WEBHOOK_SECRET`, but it does see the model key. Use a key with a spend cap. See [Secrets and untrusted pull requests](#secrets-and-untrusted-pull-requests).
+
+The webhook listener binds the address you give it. Use `127.0.0.1` behind a proxy. `ZERO_ENTERPRISE` makes every Bitbucket request refuse.
+
+### What is tested
+
+The request bodies are checked against Atlassian's published API descriptions for Cloud and Data Center 9.6, and the webhook handling against the documented payloads and signature example. The tests run against a local fake server. Nothing has run against a live Bitbucket Cloud workspace or a Data Center server. Two details are unconfirmed: the Data Center inline comment anchor sends the file path as a string, and the comment marker is plain text at the end of each comment.
+
 ## Keep an SBOM and check it for advisories
 
 The EU Cyber Resilience Act expects a manufacturer to keep an SBOM and check it for advisories regularly. A scheduled job can regenerate the SBOM from your lockfiles and fail when a component has a known advisory. The lookup uses the public OSV database. The Action does the same with `mode: sbom` (see [SBOM mode](#sbom-mode)); the steps below do it without the Action.

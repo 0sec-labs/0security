@@ -196,6 +196,8 @@ export interface CodeInsightsTarget {
   commit: string;
   /** Data Center base URL, for example https://bitbucket.example.com (a context path is kept). */
   baseUrl?: string;
+  /** Cloud API root, default https://api.bitbucket.org/2.0. Only for a proxy or a test server. */
+  cloudApiUrl?: string;
 }
 
 export type FetchLike = (url: string, init: { method: string; headers: Record<string, string>; body: string; redirect: "manual" }) => Promise<{ ok: boolean; status: number; text(): Promise<string> }>;
@@ -204,7 +206,7 @@ export type FetchLike = (url: string, init: { method: string; headers: Record<st
 export function planRequests(payload: CodeInsightsPayload, target: CodeInsightsTarget): Array<{ method: "PUT" | "POST"; url: string; body: unknown }> {
   const part = (value: string) => encodeURIComponent(value);
   let base: string;
-  if (payload.platform === "bitbucket-cloud") base = `https://api.bitbucket.org/2.0/repositories/${part(target.owner)}/${part(target.repo)}/commit/${part(target.commit)}/reports/${part(payload.reportId)}`;
+  if (payload.platform === "bitbucket-cloud") base = `${(target.cloudApiUrl ?? "https://api.bitbucket.org/2.0").replace(/\/+$/, "")}/repositories/${part(target.owner)}/${part(target.repo)}/commit/${part(target.commit)}/reports/${part(payload.reportId)}`;
   else {
     if (!target.baseUrl) throw new Error("Data Center needs the server's base URL (--url or BITBUCKET_URL).");
     base = `${target.baseUrl.replace(/\/+$/, "")}/rest/insights/latest/projects/${part(target.owner)}/repos/${part(target.repo)}/commits/${part(target.commit)}/reports/${part(payload.reportId)}`;

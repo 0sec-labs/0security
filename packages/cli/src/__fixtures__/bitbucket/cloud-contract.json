@@ -1,0 +1,489 @@
+{
+ "source": "https://api.bitbucket.org/swagger.json (Bitbucket Cloud REST API 2.0, retrieved 2026-11-23). Excerpt: descriptions removed.",
+ "definitions": {
+  "report": {
+   "allOf": [
+    {
+     "$ref": "#/definitions/object"
+    },
+    {
+     "additionalProperties": true,
+     "type": "object",
+     "title": "Commit Report",
+     "properties": {
+      "uuid": {
+       "type": "string"
+      },
+      "title": {
+       "type": "string"
+      },
+      "details": {
+       "type": "string"
+      },
+      "external_id": {
+       "type": "string"
+      },
+      "reporter": {
+       "type": "string"
+      },
+      "link": {
+       "type": "string",
+       "format": "uri"
+      },
+      "remote_link_enabled": {
+       "type": "boolean"
+      },
+      "logo_url": {
+       "type": "string",
+       "format": "uri"
+      },
+      "report_type": {
+       "enum": [
+        "SECURITY",
+        "COVERAGE",
+        "TEST",
+        "BUG"
+       ],
+       "type": "string"
+      },
+      "result": {
+       "enum": [
+        "PASSED",
+        "FAILED",
+        "PENDING"
+       ],
+       "type": "string"
+      },
+      "data": {
+       "type": "array",
+       "items": {
+        "$ref": "#/definitions/report_data"
+       }
+      },
+      "created_on": {
+       "type": "string",
+       "format": "date-time"
+      },
+      "updated_on": {
+       "type": "string",
+       "format": "date-time"
+      }
+     }
+    }
+   ],
+   "x-bb-default-fields": [
+    "uuid",
+    "commitHash"
+   ],
+   "x-bb-url": "/rest/2.0/accounts/{workspace.uuid}/repositories/{repository.uuid}/commits/{commitHash}/reports/{uuid}"
+  },
+  "report_data": {
+   "type": "object",
+   "title": "Report Data",
+   "properties": {
+    "type": {
+     "enum": [
+      "BOOLEAN",
+      "DATE",
+      "DURATION",
+      "LINK",
+      "NUMBER",
+      "PERCENTAGE",
+      "TEXT"
+     ],
+     "type": "string"
+    },
+    "title": {
+     "type": "string"
+    },
+    "value": {
+     "type": "object"
+    }
+   }
+  },
+  "report_annotation": {
+   "allOf": [
+    {
+     "$ref": "#/definitions/object"
+    },
+    {
+     "additionalProperties": true,
+     "type": "object",
+     "title": "Report Annotation",
+     "properties": {
+      "external_id": {
+       "type": "string"
+      },
+      "uuid": {
+       "type": "string"
+      },
+      "annotation_type": {
+       "enum": [
+        "VULNERABILITY",
+        "CODE_SMELL",
+        "BUG"
+       ],
+       "type": "string"
+      },
+      "path": {
+       "type": "string"
+      },
+      "line": {
+       "type": "integer",
+       "minimum": 1
+      },
+      "summary": {
+       "type": "string"
+      },
+      "details": {
+       "type": "string"
+      },
+      "result": {
+       "enum": [
+        "PASSED",
+        "FAILED",
+        "SKIPPED",
+        "IGNORED"
+       ],
+       "type": "string"
+      },
+      "severity": {
+       "enum": [
+        "CRITICAL",
+        "HIGH",
+        "MEDIUM",
+        "LOW"
+       ],
+       "type": "string"
+      },
+      "link": {
+       "type": "string",
+       "format": "uri"
+      },
+      "created_on": {
+       "type": "string",
+       "format": "date-time"
+      },
+      "updated_on": {
+       "type": "string",
+       "format": "date-time"
+      }
+     }
+    }
+   ],
+   "x-bb-default-fields": [
+    "uuid"
+   ],
+   "x-bb-url": "/rest/2.0/accounts/{workspace.uuid}/repositories/{repository.uuid}/commits/{commit.hash}/reports/{reportUuid}/annotations/{uuid}"
+  },
+  "paginated_pullrequests": {
+   "type": "object",
+   "title": "Paginated Pull Requests",
+   "properties": {
+    "size": {
+     "type": "integer",
+     "minimum": 0
+    },
+    "page": {
+     "type": "integer",
+     "minimum": 1
+    },
+    "pagelen": {
+     "type": "integer",
+     "minimum": 1
+    },
+    "next": {
+     "type": "string",
+     "format": "uri"
+    },
+    "previous": {
+     "type": "string",
+     "format": "uri"
+    },
+    "values": {
+     "type": "array",
+     "items": {
+      "$ref": "#/definitions/pullrequest"
+     },
+     "minItems": 0,
+     "uniqueItems": true
+    }
+   },
+   "additionalProperties": false
+  },
+  "paginated_annotations": {
+   "type": "object",
+   "title": "Paginated Annotations",
+   "properties": {
+    "page": {
+     "type": "integer"
+    },
+    "values": {
+     "type": "array",
+     "minItems": 0,
+     "items": {
+      "$ref": "#/definitions/report_annotation"
+     }
+    },
+    "size": {
+     "type": "integer"
+    },
+    "pagelen": {
+     "type": "integer"
+    },
+    "next": {
+     "type": "string",
+     "format": "uri"
+    },
+    "previous": {
+     "type": "string",
+     "format": "uri"
+    }
+   }
+  },
+  "comment": {
+   "allOf": [
+    {
+     "$ref": "#/definitions/object"
+    },
+    {
+     "type": "object",
+     "title": "Comment",
+     "properties": {
+      "id": {
+       "type": "integer",
+       "format": "int64"
+      },
+      "created_on": {
+       "type": "string",
+       "format": "date-time"
+      },
+      "updated_on": {
+       "type": "string",
+       "format": "date-time"
+      },
+      "content": {
+       "type": "object",
+       "properties": {
+        "raw": {
+         "type": "string"
+        },
+        "markup": {
+         "type": "string",
+         "enum": [
+          "markdown",
+          "creole",
+          "plaintext"
+         ]
+        },
+        "html": {
+         "type": "string"
+        }
+       },
+       "additionalProperties": false
+      },
+      "user": {
+       "$ref": "#/definitions/account"
+      },
+      "deleted": {
+       "type": "boolean"
+      },
+      "parent": {
+       "$ref": "#/definitions/comment"
+      },
+      "inline": {
+       "type": "object",
+       "properties": {
+        "from": {
+         "type": "integer",
+         "minimum": 1
+        },
+        "to": {
+         "type": "integer",
+         "minimum": 1
+        },
+        "start_from": {
+         "type": "integer",
+         "minimum": 1
+        },
+        "start_to": {
+         "type": "integer",
+         "minimum": 1
+        },
+        "path": {
+         "type": "string"
+        }
+       },
+       "required": [
+        "path"
+       ],
+       "additionalProperties": false
+      },
+      "links": {
+       "type": "object",
+       "properties": {
+        "self": {
+         "type": "object",
+         "title": "Link",
+         "properties": {
+          "href": {
+           "type": "string",
+           "format": "uri"
+          },
+          "name": {
+           "type": "string"
+          }
+         },
+         "additionalProperties": false
+        },
+        "html": {
+         "type": "object",
+         "title": "Link",
+         "properties": {
+          "href": {
+           "type": "string",
+           "format": "uri"
+          },
+          "name": {
+           "type": "string"
+          }
+         },
+         "additionalProperties": false
+        },
+        "code": {
+         "type": "object",
+         "title": "Link",
+         "properties": {
+          "href": {
+           "type": "string",
+           "format": "uri"
+          },
+          "name": {
+           "type": "string"
+          }
+         },
+         "additionalProperties": false
+        }
+       },
+       "additionalProperties": false
+      }
+     },
+     "additionalProperties": true
+    }
+   ]
+  },
+  "pullrequest_comment": {
+   "allOf": [
+    {
+     "$ref": "#/definitions/comment"
+    },
+    {
+     "type": "object",
+     "title": "Pull Request Comment",
+     "properties": {
+      "pullrequest": {
+       "$ref": "#/definitions/pullrequest"
+      },
+      "resolution": {
+       "$ref": "#/definitions/comment_resolution"
+      },
+      "pending": {
+       "type": "boolean"
+      }
+     },
+     "additionalProperties": true
+    }
+   ]
+  }
+ },
+ "paths": {
+  "reportPut": "/repositories/{workspace}/{repo_slug}/commit/{commit}/reports/{reportId}",
+  "annotationsPost": "/repositories/{workspace}/{repo_slug}/commit/{commit}/reports/{reportId}/annotations",
+  "commentsPost": "/repositories/{workspace}/{repo_slug}/pullrequests/{pull_request_id}/comments",
+  "commentPut": "/repositories/{workspace}/{repo_slug}/pullrequests/{pull_request_id}/comments/{comment_id}",
+  "pullrequestsGet": "/repositories/{workspace}/{repo_slug}/pullrequests",
+  "diffGet": "/repositories/{workspace}/{repo_slug}/pullrequests/{pull_request_id}/diff"
+ },
+ "methods": {
+  "reportPut": {
+   "path": "/repositories/{workspace}/{repo_slug}/commit/{commit}/reports/{reportId}",
+   "method": "put",
+   "exists": true,
+   "responses": [
+    "200",
+    "400"
+   ]
+  },
+  "annotationsPost": {
+   "path": "/repositories/{workspace}/{repo_slug}/commit/{commit}/reports/{reportId}/annotations",
+   "method": "post",
+   "exists": true,
+   "responses": [
+    "200"
+   ]
+  },
+  "commentsPost": {
+   "path": "/repositories/{workspace}/{repo_slug}/pullrequests/{pull_request_id}/comments",
+   "method": "post",
+   "exists": true,
+   "responses": [
+    "201",
+    "403",
+    "404"
+   ]
+  },
+  "commentPut": {
+   "path": "/repositories/{workspace}/{repo_slug}/pullrequests/{pull_request_id}/comments/{comment_id}",
+   "method": "put",
+   "exists": true,
+   "responses": [
+    "200",
+    "403",
+    "404"
+   ]
+  },
+  "commentDelete": {
+   "path": "/repositories/{workspace}/{repo_slug}/pullrequests/{pull_request_id}/comments/{comment_id}",
+   "method": "delete",
+   "exists": true,
+   "responses": [
+    "204",
+    "403",
+    "404"
+   ]
+  },
+  "pullrequestsGet": {
+   "path": "/repositories/{workspace}/{repo_slug}/pullrequests",
+   "method": "get",
+   "exists": true,
+   "responses": [
+    "200",
+    "401",
+    "404"
+   ]
+  },
+  "diffGet": {
+   "path": "/repositories/{workspace}/{repo_slug}/pullrequests/{pull_request_id}/diff",
+   "method": "get",
+   "exists": true,
+   "responses": [
+    "302"
+   ]
+  }
+ },
+ "securitySchemes": [
+  "basic",
+  "oauth2",
+  "api_key"
+ ],
+ "bodies": {
+  "annotationsPost": {
+   "type": "array",
+   "items": {
+    "$ref": "#/definitions/report_annotation"
+   },
+   "minItems": 1,
+   "maxItems": 100
+  }
+ }
+}

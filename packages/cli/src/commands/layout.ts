@@ -112,6 +112,8 @@ const EXAMPLES: Readonly<Record<string, readonly string[]>> = {
   "threads stop": ["0security threads stop <id>"],
   sentinels: ["0security sentinels list --presets", '0security sentinels set --create --preset dependency-watcher --name "Nightly check"', "0security sentinels set <id> --state active", '0security sentinels run <id> --task "Re-test login" --yes'],
   "sentinels list": ["0security sentinels list", "0security sentinels list <id>", "0security sentinels list --presets"],
+  "sentinels bitbucket review": ["0security sentinels bitbucket review --platform cloud --repo acme/app --checkout ~/code/app --pr 42", "0security sentinels bitbucket review --platform dc --repo PROJ/app --checkout ~/code/app --pr 42 --url https://bitbucket.example.com"],
+  "sentinels bitbucket watch": ["0security sentinels bitbucket watch --platform cloud --repo acme/app --checkout ~/code/app", "0security sentinels bitbucket watch --platform dc --repo PROJ/app --checkout ~/code/app --url https://bitbucket.example.com --listen 127.0.0.1:7777", "0security sentinels bitbucket watch --platform cloud --repo acme/app --checkout ~/code/app --once"],
   "sentinels run": ['0security sentinels run <id> --task "Re-test login" --yes', "0security sentinels run <id> --history"],
   "sentinels set": ['0security sentinels set --create --preset pr-security-reviewer --name "PR review"', "0security sentinels set <id> --state paused", "0security sentinels set <id> --trigger add --kind schedule --frequency daily --at 09:00", "0security sentinels set <id> --files put NOTES.md --file ./notes.md"],
   skills: ["0security skills list", "0security skills list pr-diff-review", "0security skills add owner/repo@<full-sha>", "0security skills add ./my-skills"],
