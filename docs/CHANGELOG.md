@@ -12,7 +12,6 @@ on the GitHub Release tag.
 
 ## [Unreleased]
 
-- Air-gapped install path: `scripts/airgap/build-bundle.sh` packs the verified binary, image and chart, `install-bundle.sh` installs them with no network, and `verify-no-egress.mjs` runs the CLI under `ZERO_ENTERPRISE=1` with a recorder that refuses and reports any outside connection. It was run on the CLI and in a container with no network, not on a real isolated network.
 - `0security findings fix` now records its pull request in the same file as burndown, so `0security findings export-fixes` covers single fixes too. The report also gives the summary for each repository (`workspaces` in the JSON, a table in the Markdown), and the schema is documented.
 - `0security findings rollup` counts open findings across repositories by severity, category, age and owner, in text, JSON or HTML. It reads rollup export files (`--export` writes one) and findings databases, and sends nothing. Fixed, false-positive, accepted and suppressed findings are left out of the open count.
 - The web console and the docs site both render Mermaid diagrams with Mermaid 12. A leftover override had pinned both to version 11.
