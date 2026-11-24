@@ -139,6 +139,8 @@ export interface PlanOptions { env?: Readonly<Record<string, string | undefined>
 /** ZERO_SANDBOX_NODE_PERMISSION=off leaves node's permission flags out (an extension that needs a native addon, for example). */
 const nodePermissionWanted = (env: Readonly<Record<string, string | undefined>>): boolean => env.ZERO_SANDBOX_NODE_PERMISSION?.trim().toLowerCase() !== "off";
 
+const NODE_WIDENING_FLAG = /^--(?:allow[-_]|no[-_](?:experimental[-_])?permission|env[-_]file)/i;
+
 const resolveProgram = (name: string, pathEnv: string): string => (name.includes("/") ? name : whichIn(name, pathEnv) ?? name);
 const real = (p: string): string => { try { return fs.realpathSync(p); } catch { return p; } };
 
@@ -150,7 +152,14 @@ export function planSandbox(req: SandboxRequest, options: PlanOptions = {}): San
   if (!req.decl && m.mode === "auto") return { kind: "unsandboxed", status: `sandbox: not applied (${req.label} declares no sandbox block; set ZERO_SANDBOX=require to sandbox it with the strict defaults)` };
   const detected = options.status ?? detectSandbox(undefined, env);
   const pathEnv = req.env.PATH ?? process.env.PATH ?? "";
-  const program = resolveProgram(req.argv[0] ?? "", pathEnv);
+  const rawProgram = resolveProgram(req.argv[0] ?? "", pathEnv);
+  const envWrappedNode =
+    rawProgram && path.isAbsolute(rawProgram) && /^env(?:\.exe)?$/i.test(path.basename(rawProgram)) && req.argv[1] && !req.argv[1].startsWith("-")
+      ? resolveProgram(req.argv[1], pathEnv)
+      : undefined;
+  const usesEnvNode = Boolean(envWrappedNode && path.isAbsolute(envWrappedNode) && isNodeProgram(envWrappedNode, real(envWrappedNode)));
+  const program = usesEnvNode ? envWrappedNode! : rawProgram;
+  const programArgs = usesEnvNode ? req.argv.slice(2) : req.argv.slice(1);
   // Node's permission model: a layer for programs started with node, and the only one where no OS sandbox works.
   const nodeSupport = nodePermissionWanted(env) && program && path.isAbsolute(program) && isNodeProgram(program, real(program)) ? (options.nodeSupport ?? detectNodePermission(program)) : undefined;
   if (!detected.backend) {
@@ -174,11 +183,15 @@ export function planSandbox(req: SandboxRequest, options: PlanOptions = {}): San
   const policy = resolved.value;
   const cwd = usesWorkspace && policy.workspace ? policy.workspace : policy.extensionDir;
   const backendPath = detected.backend === "seatbelt" ? detected.seatbelt.path : detected.bwrap.path;
-  let argv = [program, ...req.argv.slice(1)];
+  let argv = [program, ...programArgs];
   let nodeNote = "";
   if (nodeSupport?.supported) {
     const flags = nodePermissionArgs(policy, nodeSupport);
-    if (flags.ok) { argv = [program, ...flags.args, ...req.argv.slice(1)]; nodeNote = `${nodeSupport.flag}: folders, child programs, workers`; }
+    if (flags.ok) {
+      // Flags that widen node's own permissions would win over ours, from the arguments, an env file or NODE_OPTIONS: refuse them.
+      const widens = programArgs.find(arg => NODE_WIDENING_FLAG.test(arg)) ?? (req.env.NODE_OPTIONS?.split(/\s+/).find(arg => NODE_WIDENING_FLAG.test(arg)));
+      if (widens) { cleanup(); return { kind: "refused", error: `cannot start ${req.label} in a sandbox: ${widens.slice(0, 60)} would change node's permissions` }; }
+      argv = [program, ...flags.args, ...programArgs]; nodeNote = `${nodeSupport.flag}: folders, child programs, workers`; }
     else if (!detected.backend) { cleanup(); return { kind: "unsandboxed", status: `sandbox: not available (${detected.reason}; ${flags.error}); ran without it` }; }
   }
   const limitNote = policy.limits.cpuSeconds || policy.limits.memoryMb ? `, limits ${[policy.limits.cpuSeconds ? `${policy.limits.cpuSeconds}s cpu` : "", policy.limits.memoryMb ? `${policy.limits.memoryMb} MB memory` : ""].filter(Boolean).join(" ")}` : "";
