@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "version": "0.44.0",
-  "description": "0security is software infrastructure to deploy sovereign, persistent AI security agents that find and fix security risks across any tech stack, work with any model, and run anywhere.",
+  "description": "0security is open-source software to deploy persistent AI security agents that find and fix security risks across any tech stack, work with any model, and run anywhere.",
   "bin": {
     "0": "dist/0.js"
   },

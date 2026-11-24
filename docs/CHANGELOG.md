@@ -15,6 +15,8 @@ on the GitHub Release tag.
 - The first line of `0security --help` now describes the product as a security agent (scan, fix, SBOM and evidence) instead of "security sentinels". The messages for `--chat` no longer point at a `0 chats` command that does not exist. The GitHub Action calls `0security`.
 ### Changed
 
+- The scan report is shown as readable text in a terminal (no `**`, backticks or `<details>` tags); files, pipes and `--output` still get markdown.
+- The one-line description and the README headline say "open-source" instead of "sovereign".
 - Every skill on the Skills page now has a topic icon: built-in skills show an icon for what they do (a terminal for command injection, a database for SQL injection, a key for secrets) instead of the 0security mark. Your own skills get an icon when their name matches a topic, and keep their initials otherwise.
 - the docs, help examples, hints and error messages name the command `0security`; `0` stays as its short alias. Set `ZERO_PROGRAM_NAME=0security` or `0` to force the name that help shows (tests and docs generation).
 

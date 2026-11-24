@@ -1,6 +1,6 @@
 ---
 title: Self-hosting on Azure and AWS
-description: Deploy the sovereign 0 container on Azure and AWS with persistent volumes, cloud secret stores, TLS ingress, automated backups, and upgrades.
+description: Deploy the 0security container on Azure and AWS with persistent volumes, cloud secret stores, TLS ingress, automated backups, and upgrades.
 ---
 
 Run 0 in your own cloud tenant to keep code analysis, findings and model conversations inside your perimeter. This guide runs the official image (`ghcr.io/0sec-labs/0security`) on AWS and Azure with a persistent disk, a secret store, TLS ingress, backups and upgrades.

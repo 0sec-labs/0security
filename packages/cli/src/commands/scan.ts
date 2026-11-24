@@ -5,6 +5,7 @@
  * the skill and a budget, waits, and prints what the thread recorded
  * (docs/design/scan-as-a-thread.md). The thread shows up in `0 threads` like any other.
  */
+import { renderMarkdownForTerminal } from "../terminal-markdown.js";
 import { execFile, spawn } from "node:child_process";
 import { closeSync, existsSync, mkdtempSync, openSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -76,6 +77,8 @@ export function headlessConsoleArgs(entry: string | undefined, dbPath?: string):
 export interface ScanDeps {
   open(options: ConsoleTransportOptions): Promise<ConsoleClient>;
   out(bytes: Uint8Array | string): void;
+  /** True when the report goes to a person's terminal, so it is shown as readable text instead of raw markdown. */
+  interactive?(): boolean;
   err(text: string): void;
   sleep(ms: number): Promise<void>;
   now(): Date;
@@ -130,6 +133,7 @@ export const defaultScanDeps: ScanDeps = {
   scopeHint: interactiveScopeHint,
   open: options => openConsole(options),
   out: bytes => { process.stdout.write(bytes); },
+  interactive: () => !!process.stdout.isTTY,
   err: text => process.stderr.write(`${text}\n`),
   sleep: ms => new Promise(resolve => setTimeout(resolve, ms)),
   now: () => new Date(),
@@ -467,7 +471,7 @@ async function inPool<T>(count: number, limit: number, task: (index: number) => 
 }
 
 /** Format the report and write it to --output or standard output. */
-async function writeReport(outcome: ScanOutcome, merged: ReturnType<typeof mergePasses>, stored: ScanReport, name: string, options: ScanOptions, deps: Pick<ScanDeps, "out" | "err" | "writeBytes" | "metrics" | "saveScope" | "scopeHint">): Promise<void> {
+async function writeReport(outcome: ScanOutcome, merged: ReturnType<typeof mergePasses>, stored: ScanReport, name: string, options: ScanOptions, deps: Pick<ScanDeps, "out" | "interactive" | "err" | "writeBytes" | "metrics" | "saveScope" | "scopeHint">): Promise<void> {
   // An empty-diff scan (thread "none") writes no line. A tier skip and a pre-pass-only run do: they are runs the operator chose.
   if (outcome.threadId !== "none" || outcome.tier?.skipped || outcome.tier?.prepassOnly) {
     const status = outcome.failed ? "failed" : outcome.tier?.skipped ? "skipped" : outcome.tier?.prepassOnly ? "prepass_only" : outcome.timedOut ? "timeout" : outcome.budgetExhausted ? "budget" : "ok";
@@ -490,7 +494,7 @@ async function writeReport(outcome: ScanOutcome, merged: ReturnType<typeof merge
     const bytes = typeof body === "string" ? new TextEncoder().encode(body) : body;
     deps.writeBytes(options.output, bytes);
     deps.err(`Wrote ${options.output} (${bytes.byteLength} bytes)`);
-  } else deps.out(body);
+  } else deps.out(options.format === "md" && typeof body === "string" && deps.interactive?.() ? renderMarkdownForTerminal(body, { color: !process.env.NO_COLOR }) : body);
   const hint = deps.scopeHint?.(merged, outcome.scope?.entries ?? [], outcome.roots?.[0], options.format === "json" && !options.output);
   if (hint) deps.err(hint);
 }
