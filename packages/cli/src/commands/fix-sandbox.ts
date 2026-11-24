@@ -8,11 +8,16 @@
  */
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { closeSync, constants, cpSync, mkdirSync, mkdtempSync, openSync, rmSync } from "node:fs";
+import { chmodSync, closeSync, constants, cpSync, mkdirSync, mkdtempSync, openSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-export interface SandboxSpec { image: string; network: boolean }
+export interface SandboxSpec {
+  image: string;
+  network: boolean;
+  /** A host folder shared by the setup step and the checks, mounted at /cache and used as HOME, so downloaded dependencies (~/.m2, ~/.gradle) survive between containers. */
+  cache?: string;
+}
 export interface SandboxResult { command: string; code: number; output: string; sandbox: string }
 
 export const SANDBOX_TIMEOUT_MS = 10 * 60 * 1000;
@@ -30,6 +35,29 @@ export function validateSandboxImage(image: string): string {
   return image;
 }
 
+/** An image named by its content digest, which cannot change under the same name. */
+export function isPinnedImage(image: string): boolean { return /@sha256:[0-9a-f]{64}$/.test(image); }
+
+/**
+ * Proof that a container started with `--network none` really has no network: the only interface in /sys/class/net is the
+ * loopback. It runs in the same image, with the same flags, as the checks. Needs a Linux image with `ls` (every common JDK image has it).
+ */
+export function networkCanary(interfaces = "/sys/class/net"): string {
+  return `[ -d ${interfaces} ] || { echo "cannot check the network: ${interfaces} does not exist in this image" >&2; exit 1; }; bad=$(ls ${interfaces} 2>/dev/null | grep -v '^lo$' | head -1); if [ -n "$bad" ]; then echo "network interface $bad is present" >&2; exit 1; fi; echo 'network-off canary: only the loopback interface exists'`;
+}
+export const NETWORK_CANARY = networkCanary();
+
+/** A fresh cache folder (world-writable, because the container runs as your user id) under the sandbox parent. Remove it with rmSync when the run ends. */
+export function makeSandboxCache(): string {
+  const chosen = process.env["ZERO_SANDBOX_DIR"]?.trim();
+  const parent = chosen ? resolve(chosen) : process.platform === "linux" ? tmpdir() : join(homedir(), ".0", "sandbox");
+  mkdirSync(parent, { recursive: true, mode: 0o700 });
+  const cache = mkdtempSync(join(parent, "cache-"));
+  mkdirSync(join(cache, "home"), { mode: 0o777 });
+  chmodSync(join(cache, "home"), 0o777);
+  return cache;
+}
+
 /** The text written in the pull request: which image, and whether the network was on. */
 export function sandboxLabel(spec: SandboxSpec): string { return `${spec.image}, network ${spec.network ? "on" : "off"}`; }
 
@@ -41,8 +69,8 @@ export function dockerRunArgs(spec: SandboxSpec, name: string, dir: string, comm
     "--memory", SANDBOX_LIMITS.memory, "--cpus", SANDBOX_LIMITS.cpus, "--pids-limit", SANDBOX_LIMITS.pids,
     "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
     ...(ids ? ["--user", `${ids.uid}:${ids.gid}`] : []),
-    "-e", "HOME=/tmp", "-e", "CI=true",
-    "-v", `${dir}:/work`, "-w", "/work",
+    "-e", spec.cache ? "HOME=/cache/home" : "HOME=/tmp", "-e", "CI=true",
+    "-v", `${dir}:/work`, ...(spec.cache ? ["-v", `${spec.cache}:/cache`] : []), "-w", "/work",
     "--entrypoint", "/bin/sh", spec.image, "-c", guarded(command),
   ];
 }

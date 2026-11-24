@@ -482,12 +482,12 @@
       "class": "operator",
       "enterprise": "allowed",
       "destinations": [
-        "the container registry of the image you name (the Docker daemon pulls it); with --sandbox-network, whatever the build downloads"
+        "the container registry of the image you name (the Docker daemon pulls it); with --sandbox-network or --sandbox-setup, whatever the build downloads"
       ],
       "files": [
         "packages/cli/src/commands/fix-sandbox.ts"
       ],
-      "when": "0 findings fix --sandbox docker. The container has no network unless you pass --sandbox-network; ZERO_ENTERPRISE refuses --sandbox-network.",
+      "when": "0 findings fix --sandbox docker. The container has no network unless you pass --sandbox-network; ZERO_ENTERPRISE refuses --sandbox-network and --sandbox-setup.",
       "sent": "Nothing from 0. The Docker daemon pulls the image when it is not present.",
       "disable": "Do not pass --sandbox; use a local image so nothing is pulled."
     },

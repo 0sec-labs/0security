@@ -2,8 +2,9 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, sy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { dockerRunArgs, runInSandbox, sandboxLabel, validateSandboxImage } from "../fix-sandbox.js";
-import { pullRequestBody, sandboxSpec, type CheckResult, type FindingToFix, type FixOptions } from "../fix.js";
+import { execFileSync } from "node:child_process";
+import { dockerRunArgs, isPinnedImage, makeSandboxCache, NETWORK_CANARY, networkCanary, runInSandbox, sandboxLabel, validateSandboxImage } from "../fix-sandbox.js";
+import { pullRequestBody, runFix, sandboxSpec, sandboxVerifiedLine, type CheckResult, type FindingToFix, type FixOptions } from "../fix.js";
 
 const finding: FindingToFix = { id: "f-1234567890ab", fingerprint: "x", title: "Vulnerable dependency", severity: "high", category: "dependency", tool: "0", description: "d", path: "pom.xml", startLine: 3 };
 const spec = { image: "maven:3-eclipse-temurin-21", network: false };
@@ -178,4 +179,115 @@ describe.skipIf(!process.env.ZERO_TEST_DOCKER_IMAGE)("real docker run", () => {
     const missing = await runInSandbox(dir, "true", { image: "0-no-such-image-xyz:1", network: false });
     expect(missing.code).not.toBe(0);
   }, 120_000);
+
+  it("shares a cache between an online setup and an offline check, and the canary tells the two apart", async () => {
+    const dir = tree();
+    const cache = makeSandboxCache();
+    try {
+      const image = process.env.ZERO_TEST_DOCKER_IMAGE!;
+      const online = { image, network: true, cache };
+      const offline = { image, network: false, cache };
+      expect((await runInSandbox(dir, 'echo downloaded > "$HOME/artifact.txt"', online)).code).toBe(0);
+      expect((await runInSandbox(dir, 'cat "$HOME/artifact.txt"', offline)).output).toContain("downloaded");
+      expect((await runInSandbox(dir, NETWORK_CANARY, offline)).code).toBe(0);
+      expect((await runInSandbox(dir, NETWORK_CANARY, online)).code).toBe(1);
+    } finally { rmSync(cache, { recursive: true, force: true }); }
+  }, 180_000);
+});
+
+describe("sandbox setup, cache, canary and pinning", () => {
+  const base: FixOptions = { budget: "3", timeout: "60", pr: true };
+  const digest = `maven@sha256:${"a".repeat(64)}`;
+
+  it("recognises an image pinned by digest and nothing else", () => {
+    expect(isPinnedImage(digest)).toBe(true);
+    expect(isPinnedImage("maven:3-eclipse-temurin-21")).toBe(false);
+    expect(isPinnedImage("maven@sha256:abc")).toBe(false);
+  });
+  it("mounts the cache folder and uses it as HOME only when given one", () => {
+    const withCache = dockerRunArgs({ ...spec, cache: "/host/cache" }, "n", "/copy", "mvn -o test");
+    expect(withCache).toEqual(expect.arrayContaining(["-v", "/host/cache:/cache", "HOME=/cache/home"]));
+    const without = dockerRunArgs(spec, "n", "/copy", "mvn -o test");
+    expect(without).toContain("HOME=/tmp");
+    expect(without.join(" ")).not.toContain("/cache");
+  });
+  it("makes a writable cache folder with a home inside", () => {
+    const cache = makeSandboxCache();
+    try { expect(existsSync(join(cache, "home"))).toBe(true); } finally { rmSync(cache, { recursive: true, force: true }); }
+  });
+  it("needs --sandbox docker for the setup, refuses it with --sandbox-network and under ZERO_ENTERPRISE", () => {
+    const full = { ...base, sandbox: "docker", sandboxImage: "a:1", test: ["t"], sandboxSetup: ["mvn -q dependency:go-offline"] };
+    expect(() => sandboxSpec({ ...base, sandboxSetup: ["x"] })).toThrow(/need --sandbox docker/);
+    expect(() => sandboxSpec({ ...full, sandboxNetwork: true }, {})).toThrow(/do not combine/);
+    expect(() => sandboxSpec(full, { ZERO_ENTERPRISE: "1" })).toThrow(/ZERO_ENTERPRISE/);
+    expect(sandboxSpec(full, {})).toEqual({ image: "a:1", network: false });
+  });
+  describe("the canary command", () => {
+    const run = (dir: string) => { try { execFileSync("/bin/sh", ["-c", networkCanary(dir)], { stdio: "pipe" }); return 0; } catch (error) { return (error as { status: number }).status; } };
+    it("passes with only the loopback interface, and fails with another one or with no interface list", () => {
+      const lo = mkdtempSync(join(tmpdir(), "0-net-")); mkdirSync(join(lo, "lo"));
+      const eth = mkdtempSync(join(tmpdir(), "0-net-")); mkdirSync(join(eth, "lo")); mkdirSync(join(eth, "eth0"));
+      expect(run(lo)).toBe(0);
+      expect(run(eth)).toBe(1);
+      expect(run(join(lo, "missing"))).toBe(1);
+    });
+  });
+  it("words the pull request line for a pinned image with setup, and for an unpinned one without", () => {
+    const check = (label: string): CheckResult => ({ command: "mvn -o test", code: 0, output: "", sandbox: label });
+    const pinned = sandboxVerifiedLine([check(`${digest}, network off`)], { setup: true, pinned: true })!;
+    expect(pinned).toContain("Verified in a sandbox:");
+    expect(pinned).toContain("setup step with the network on");
+    expect(pinned).toContain("canary confirmed it");
+    expect(pinned).toContain("pinned by digest");
+    expect(sandboxVerifiedLine([check("maven:3, network off")], { setup: false, pinned: false })).toContain("not pinned by digest");
+    expect(sandboxVerifiedLine([{ ...check("x"), code: 1 }], { setup: true, pinned: true })).toBeUndefined();
+  });
+
+  describe("the fix flow with a setup step", () => {
+    const flow = (results: Record<string, number>) => {
+      const calls: Array<{ command: string; network: boolean | undefined; cache: boolean }> = [];
+      const bodies: string[] = [];
+      const deps = {
+        open: async () => ({ request: async (method: string, path: string) => (method === "POST" && path.endsWith("/sessions") ? { session: { id: "t" } } : method === "GET" ? { snapshot: { session: { status: "ready" }, messages: [{ role: "assistant", content: [{ type: "text", text: "ok" }] }], usage: {} } } : {}) }) as never,
+        err: () => {}, sleep: async () => {}, startConsole: async () => () => {}, out: () => {},
+        git: async (_c: string, args: string[]) => (args[0] === "rev-parse" && args[1] === "--show-toplevel" ? "/repo\n" : args[0] === "symbolic-ref" ? "origin/main\n" : args[0] === "status" ? " M pom.xml\n" : ""),
+        gh: async (_c: string, args: string[]) => (args[1] === "list" ? "[]" : args[1] === "create" ? "https://github.com/o/r/pull/7\n" : ""),
+        check: async (_c: string, command: string, sandbox?: { network: boolean; cache?: string }) => {
+          calls.push({ command, network: sandbox?.network, cache: Boolean(sandbox?.cache) });
+          const key = Object.keys(results).find(name => command.includes(name));
+          return { command, code: key ? results[key]! : 0, output: "out", sandbox: sandbox ? `${digest}, network ${sandbox.network ? "on" : "off"}` : undefined };
+        },
+        loadFinding: () => finding, loadPolicy: () => undefined, makeTemp: () => "/tmp/x", removeTemp: () => {}, writeFile: (_p: string, text: string) => { bodies.push(text); },
+      } as unknown as Parameters<typeof runFix>[2];
+      return { deps, calls, bodies };
+    };
+    const opts: FixOptions = { ...base, sandbox: "docker", sandboxImage: digest, test: ["mvn -o -q test"], sandboxSetup: ["mvn -q dependency:go-offline"] };
+
+    it("runs setup online, then the canary and the tests offline, all sharing the cache", async () => {
+      const h = flow({});
+      const outcome = await runFix("f-1", opts, h.deps);
+      expect(h.calls.map(call => [call.command.slice(0, 22), call.network, call.cache])).toEqual([
+        ["mvn -q dependency:go-o", true, true],
+        ["[ -d /sys/class/net ] ", false, true],
+        ["mvn -o -q test", false, true],
+      ]);
+      expect(outcome).toMatchObject({ verified: true });
+      expect(outcome?.checks.map(check => check.command)).toEqual(["network-off canary", "mvn -o -q test"]);
+      expect(h.bodies.join("\n")).toContain("pinned by digest");
+      expect(h.bodies.join("\n")).toContain("setup step with the network on");
+    });
+    it("does not run the tests when setup fails, and shows the setup as the failed check", async () => {
+      const h = flow({ "go-offline": 1 });
+      const outcome = await runFix("f-1", opts, h.deps);
+      expect(h.calls).toHaveLength(1);
+      expect(outcome).toMatchObject({ verified: false });
+      expect(outcome?.checks[0]?.command).toContain("setup:");
+    });
+    it("does not run the tests when the canary finds a network", async () => {
+      const h = flow({ "/sys/class/net": 1 });
+      const outcome = await runFix("f-1", opts, h.deps);
+      expect(h.calls.map(call => call.network)).toEqual([true, false]);
+      expect(outcome).toMatchObject({ verified: false });
+    });
+  });
 });

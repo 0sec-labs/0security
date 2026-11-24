@@ -507,11 +507,29 @@ The model is told not to run builds or tests itself in this mode. It edits files
 
 The image must hold the tools and the dependencies the tests need, because the container has no network. Build an image with your dependencies cached in a folder any user can read. Or pass `--sandbox-network` to let the container download dependencies. The network is then on, and the pull request says "network on". `ZERO_ENTERPRISE` refuses `--sandbox-network`.
 
+### Download dependencies first
+
+To keep the checks offline without building your own image, add a setup step. It runs once with the network on and downloads dependencies into a cache. The checks then run with the network off and reuse the cache.
+
+```bash
+0security findings fix 3f2a \
+  --sandbox docker --sandbox-image maven@sha256:<digest> \
+  --sandbox-setup "mvn -q dependency:go-offline" \
+  --test "mvn -o -q test"
+```
+
+Before the checks, 0 runs a canary in the same container settings. It passes only when the container has no network interface other than loopback. If setup or the canary fails, the checks do not run and the pull request is a draft. The cache folder is deleted when the run ends. `ZERO_ENTERPRISE` refuses `--sandbox-setup`, and you cannot combine it with `--sandbox-network`.
+
+Name the image by digest to pin it. A tag such as `maven:3-eclipse-temurin-21` can change. The pull request says whether the image is pinned. Get a digest with `docker buildx imagetools inspect <image>`.
+
+The first run pulls the image if it is not on your machine. A Maven JDK image is several hundred megabytes, so the Docker VM needs that much free disk. A full disk makes the pull fail, which counts as a failed check.
+
 Docker pulls the image when it is not on your machine. Use a local image if nothing may be pulled. On macOS and Windows, Docker runs in a VM, so 0 copies the work tree under `~/.0/sandbox`. Set `ZERO_SANDBOX_DIR` to another folder your VM shares.
 
 Limits:
 
 - The sandbox is Docker's isolation. A flaw in Docker is outside what this gives you.
+- The setup step and canary were run for real with an Alpine Node image. A Maven image was not run for real, because the Docker VM had no disk for the pull.
 - Disk use inside the container is not limited.
 - The checks run in a copy, so files they write (such as build output) are not in the commit.
 - Only the `docker` mode exists. Private-repository credentials are not passed into the container.

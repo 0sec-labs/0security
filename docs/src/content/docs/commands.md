@@ -1888,6 +1888,7 @@ A policy file inside the repository being fixed is not read unless you pass `--r
 | `--sandbox <mode>` | — | Run the --test commands in a container instead of on this machine (docker) Choices: docker. |
 | `--sandbox-image <image>` | — | Image for --sandbox docker, for example maven:3-eclipse-temurin-21. It must hold the tools and dependencies the tests need |
 | `--sandbox-network` | — | Give the sandbox network access (to download dependencies). Off by default |
+| `--sandbox-setup <command>` | — | With --sandbox docker: run this once with the network on to download dependencies (for example mvn -q dependency:go-offline), then run the --test checks with the network off; repeat for several |
 | `--policy <file>` | — | Policy file (.json or .yaml) of approved libraries and fix rules; any path you name, relative to the current directory. Default: ~/.0/fix-policy.json\|yaml\|yml |
 | `--ticket <key>` | — | Ticket key such as SEC-123 for the {ticket} placeholder in your policy's pull request settings |
 | `--repo-policy` | — | Also read fix-policy.* or .zero/fix-policy.* from the repository being fixed (untrusted content; off by default) |
