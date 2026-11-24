@@ -239,7 +239,8 @@ const NUCLEI_SEVERITY: Record<string, Severity> = { critical: "critical", high: 
 
 /** True when the text is Nuclei's JSON Lines output (`-jsonl-export`): the first line is an object with a `template-id`. */
 export function looksLikeNucleiJsonl(text: string): boolean {
-  const first = text.split("\n", 1)[0]?.trim() ?? "";
+  const newline = text.indexOf("\n");
+  const first = (newline === -1 ? text : text.slice(0, newline)).trim();
   if (!first.startsWith("{") || first.length > MAX_JSONL_LINE) return false;
   try { const value = JSON.parse(first); return isObject(value) && typeof value["template-id"] === "string"; } catch { return false; }
 }
@@ -251,9 +252,13 @@ export function looksLikeNucleiJsonl(text: string): boolean {
 export function parseNucleiJsonl(text: string, options: { tool?: string } = {}): SarifImport {
   const tool = options.tool?.trim() ? clean(options.tool, 80) : "Nuclei";
   const findings: ImportedFinding[] = [];
-  for (const line of text.split("\n")) {
+  // Walk the text line by line instead of splitting it: a file of millions of empty lines must not become an array.
+  for (let start = 0; start < text.length;) {
+    const newline = text.indexOf("\n", start);
+    const end = newline === -1 ? text.length : newline;
+    const line = end - start > MAX_JSONL_LINE ? "" : text.slice(start, end);
+    start = end + 1;
     if (!line.trim()) continue;
-    if (line.length > MAX_JSONL_LINE) continue;
     let raw: unknown;
     try { raw = JSON.parse(line); } catch { continue; }
     if (!isObject(raw) || typeof raw["template-id"] !== "string") continue;

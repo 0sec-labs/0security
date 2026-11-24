@@ -171,6 +171,11 @@ describe("dynamic scanner output", () => {
       expect(item[0]!.evidence!.length).toBeLessThanOrEqual(3000);
       expect(item[0]!.cwe).toEqual(["CWE-79"]);
     });
+    it("skips a huge run of empty lines and an over-long line without building a line array", () => {
+      const valid = JSON.stringify({ "template-id": "t", info: { name: "n", severity: "low" } });
+      const text = `${valid}\n${"\n".repeat(5_000_000)}${"x".repeat(600 * 1024)}\n${valid}x\n`;
+      expect(parseNucleiJsonl(text).findings).toHaveLength(1);
+    });
     it("stops at the result limit", () => {
       const lines = Array.from({ length: MAX_SARIF_RESULTS + 1 }, (_, i) => JSON.stringify({ "template-id": `t${i}`, info: { name: "n", severity: "low" } })).join("\n");
       expect(() => parseNucleiJsonl(lines)).toThrow(/more than/);
