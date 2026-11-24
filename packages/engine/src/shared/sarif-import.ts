@@ -53,7 +53,6 @@ const CONTROL = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g;
 function clean(value: unknown, max: number): string {
   return typeof value === "string" ? value.replace(CONTROL, "").trim().slice(0, max) : "";
 }
-const textOf = (value: unknown, max: number): string => isObject(value) ? clean(value.text ?? value.markdown, max) : clean(value, max);
 const positive = (value: unknown): number | undefined => typeof value === "number" && Number.isInteger(value) && value > 0 ? value : undefined;
 
 /** A SARIF artifact URI as a path inside the repository, or undefined when it points anywhere else. */
@@ -107,16 +106,38 @@ function repoUriBase(uri: unknown): string {
   try { const decoded = decodeURIComponent(value); return decoded.startsWith("/") || /^[a-z]:[\\/]/i.test(decoded) ? decoded : ""; } catch { return ""; }
 }
 
+const SENSITIVE_PARAM = /token|key|secret|passw|pwd|auth|signature|sig$|session|sid$|cookie|credential|bearer|jwt|otp/i;
+const SENSITIVE_HEADER = "authorization|proxy-authorization|cookie|set-cookie|x-api-key|api-key|x-auth-token|x-access-token|x-csrf-token|x-amz-security-token";
+/** A long run of URL-safe characters that mixes letters and digits looks like a key or token, whatever the parameter is called. */
+const looksLikeSecret = (value: string): boolean => value.length >= 24 && /^[A-Za-z0-9_\-+/=.]+$/.test(value) && /\d/.test(value) && /[A-Za-z]/.test(value);
+
+/** A URL without user name, password or fragment, and with the value of a secret-looking query parameter replaced. */
+function redactUrl(raw: string): string {
+  try {
+    const url = new URL(raw);
+    url.username = ""; url.password = ""; url.hash = "";
+    for (const [name, value] of [...url.searchParams.entries()]) if (SENSITIVE_PARAM.test(name) || looksLikeSecret(value)) url.searchParams.set(name, "REDACTED");
+    return url.href;
+  } catch { return raw.replace(/(\b[a-z][a-z0-9+.-]*:\/\/)[^\s'"\/?#@]+@/gi, "$1"); }
+}
+
 /**
- * Evidence text with credentials taken out: user names and passwords in URLs, and the value of curl options and headers that carry
- * a secret (-u, Authorization, Cookie, API keys, tokens). The scanner's own file keeps them; the finding does not.
+ * Text with credentials taken out: user names, passwords and secret-looking query values in every URL, the value of curl options
+ * and of headers that carry a secret (Authorization, Cookie, Set-Cookie, API keys, tokens). The scanner's own file keeps them;
+ * the finding does not.
  */
 export function redactEvidence(text: string): string {
   return text
+    .replace(/https?:\/\/[^\s'"<>)\]]+/gi, redactUrl)
     .replace(/(\b[a-z][a-z0-9+.-]*:\/\/)[^\s'"\/?#@]+@/gi, "$1")
     .replace(/(\s(?:-u|--user|--oauth2-bearer|--proxy-user)\s+)(?:'[^']*'|"[^"]*"|\S+)/g, "$1[removed]")
-    .replace(/((?:authorization|proxy-authorization|cookie|set-cookie|x-api-key|x-auth-token|x-csrf-token)\s*:\s*)(?:[^'"\r\n]*)/gi, "$1[removed]");
+    .replace(new RegExp(`("?(?:${SENSITIVE_HEADER})"?\\s*[:=]\\s*)"[^"]*"`, "gi"), '$1"[removed]"')
+    .replace(new RegExp(`((?:${SENSITIVE_HEADER})\\s*:\\s*)(?:[^'"\\r\\n]*)`, "gi"), "$1[removed]");
 }
+
+/** `clean`, then credentials out. For every text a scanner supplies that ends up in a finding. */
+const scrub = (value: unknown, max: number): string => redactEvidence(clean(value, max)).slice(0, max);
+const scrubText = (value: unknown, max: number): string => isObject(value) ? scrub(value.text ?? value.markdown, max) : scrub(value, max);
 
 /** An http(s) URL without credentials or a fragment, or undefined when the value is anything else. */
 export function safeUrl(value: unknown): string | undefined {
@@ -126,8 +147,7 @@ export function safeUrl(value: unknown): string | undefined {
   try {
     const url = new URL(text);
     if (url.protocol !== "http:" && url.protocol !== "https:") return undefined;
-    url.username = ""; url.password = ""; url.hash = "";
-    return url.href.slice(0, 2048);
+    return redactUrl(url.href).slice(0, 2048);
   } catch { return undefined; }
 }
 
@@ -137,6 +157,7 @@ function endpointOf(value: unknown, origin?: unknown): string | undefined {
   if (url) return url;
   const route = clean(value, 500);
   if (!route.startsWith("/") || route.startsWith("//") || route.includes("..")) return undefined;
+  if (route.includes("?")) { const redacted = new URL(redactUrl(new URL(route, "http://route.invalid").href)); if (!safeUrl(origin)) return `${redacted.pathname}${redacted.search}`; }
   const base = safeUrl(origin);
   if (base) { try { return new URL(route, base).href.slice(0, 2048); } catch { /* use the route alone */ } }
   return route;
@@ -189,10 +210,10 @@ export function parseSarif(text: string, options: { tool?: string; roots?: reado
       const index = typeof raw.ruleIndex === "number" ? raw.ruleIndex : -1;
       const ruleId = clean(raw.ruleId, 200) || clean(isObject(raw.rule) ? raw.rule.id : "", 200) || clean(rules[index]?.id, 200) || "unknown-rule";
       const rule = byId.get(ruleId) ?? rules[index];
-      const message = textOf(raw.message, 4000);
-      const ruleTitle = textOf(rule?.shortDescription, 300) || clean(rule?.name, 300);
+      const message = scrubText(raw.message, 4000);
+      const ruleTitle = scrubText(rule?.shortDescription, 300) || scrub(rule?.name, 300);
       const title = (ruleTitle || message.split("\n")[0] || ruleId).slice(0, 300);
-      const help = textOf(rule?.fullDescription, 2000) || textOf(rule?.help, 2000);
+      const help = scrubText(rule?.fullDescription, 2000) || scrubText(rule?.help, 2000);
       const description = [message, help && help !== message ? help : ""].filter(Boolean).join("\n\n").slice(0, 6000) || title;
 
       const physical = list(raw.locations).filter(isObject).map(location => location.physicalLocation).find(isObject);
@@ -205,7 +226,7 @@ export function parseSarif(text: string, options: { tool?: string; roots?: reado
       const region = physical && isObject(physical.region) ? physical.region : undefined;
       const startLine = positive(region?.startLine);
       const endLine = positive(region?.endLine);
-      const snippet = region && isObject(region.snippet) ? clean(region.snippet.text, 2000) || undefined : undefined;
+      const snippet = region && isObject(region.snippet) ? scrub(region.snippet.text, 2000) || undefined : undefined;
 
       const ruleProperties = isObject(rule?.properties) ? rule.properties : {};
       const cwe = cweNumbers(ruleProperties.tags, resultProperties.tags, ruleProperties.cwe, resultProperties.cwe, [strix.cwe]);
@@ -277,9 +298,9 @@ export function parseNucleiJsonl(text: string, options: { tool?: string } = {}):
     const info = isObject(raw.info) ? raw.info : {};
     const classification = isObject(info.classification) ? info.classification : {};
     const ruleId = clean(raw["template-id"], 200) || "unknown-rule";
-    const title = (clean(info.name, 300) || ruleId).slice(0, 300);
-    const remediation = clean(info.remediation, 1500);
-    const description = [clean(info.description, 3000), remediation ? `Fix: ${remediation}` : ""].filter(Boolean).join("\n\n") || title;
+    const title = (scrub(info.name, 300) || ruleId).slice(0, 300);
+    const remediation = scrub(info.remediation, 1500);
+    const description = [scrub(info.description, 3000), remediation ? `Fix: ${remediation}` : ""].filter(Boolean).join("\n\n") || title;
     const severity = NUCLEI_SEVERITY[clean(info.severity, 12).toLowerCase()] ?? "info";
     const cwe = cweNumbers(list(classification["cwe-id"]).map(value => typeof value === "string" ? value : ""));
     const category = cwe.map(number => CWE_CATEGORY[number]).find(Boolean) ?? normalizeAttackCategory(ruleId).category;

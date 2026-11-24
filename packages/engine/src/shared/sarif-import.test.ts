@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { locationLabel, looksLikeNucleiJsonl, looksLikeSarif, MAX_SARIF_RESULTS, parseNucleiJsonl, parseSarif, parseScannerOutput, repoRelativePath } from "./sarif-import.js";
+import { locationLabel, looksLikeNucleiJsonl, looksLikeSarif, MAX_SARIF_RESULTS, parseNucleiJsonl, parseSarif, parseScannerOutput, redactEvidence, repoRelativePath } from "./sarif-import.js";
 
 const log = (results: unknown[], rules: unknown[] = [], extra: Record<string, unknown> = {}) => JSON.stringify({
   version: "2.1.0",
@@ -184,6 +184,35 @@ describe("dynamic scanner output", () => {
       const sarif = hostile({ properties: { evidence: "GET http://a:b@h.test/ Authorization: Bearer zzz" } }).evidence!;
       expect(sarif).not.toContain("zzz");
       expect(sarif).not.toContain("a:b@");
+    });
+    describe("credentials in imported text", () => {
+      // Built at run time from fragments, so no secret-shaped literal sits in the repository.
+      const pw = ["hun", "ter", "2"].join("");
+      const tok = ["ab", "Cd", "12", "Ef", "34", "Gh", "56", "Ij", "78", "Kl", "90", "Mn", "op", "Qr"].join("");
+      const bearer = ["be", "ar", "er", "-", "val"].join("");
+      const sid = ["sess", "ion", "-", "val"].join("");
+      const all = (text: string) => { for (const secret of [pw, tok, bearer, sid]) expect(text).not.toContain(secret); };
+      const mixed = `http://bob:${pw}@h.test/p?token=${bearer}&keep=1&blob=${tok}&api_key=${sid}#frag Authorization: Bearer ${bearer}\nCookie: sid=${sid}\nSet-Cookie: s=${sid}\nX-API-Key: ${tok}`;
+      it("removes them from every field of a SARIF result, for any tool", () => {
+        const item = hostile({ message: { text: `Found at ${mixed}` }, locations: [{ physicalLocation: { artifactLocation: { uri: `https://u:${pw}@h.test/x?password=${pw}&q=1` }, region: { startLine: 3, snippet: { text: mixed } } } }], properties: { evidence: mixed } });
+        all(JSON.stringify(item));
+        expect(item.endpoint).toBe("https://h.test/x?password=REDACTED&q=1");
+        expect(item.snippet).toContain("keep=1");
+      });
+      it("removes them from the rule text, the Strix endpoint and the proof text", () => {
+        const parsed = parseSarif(log([{ ruleId: "r", message: { text: "m" }, locations: [{ logicalLocations: [{ fullyQualifiedName: `/api/x?auth=${bearer}&page=2`, kind: "endpoint" }] }], properties: { strix: { poc: { description: mixed } } } }], [{ id: "r", shortDescription: { text: `t ${mixed}` }, help: { text: mixed } }]));
+        all(JSON.stringify(parsed.findings));
+        expect(parsed.findings[0]!.endpoint).toBe("/api/x?auth=REDACTED&page=2");
+      });
+      it("removes them from Nuclei JSON Lines: matched URL, name, description, request and extracted values", () => {
+        const line = JSON.stringify({ "template-id": "t", info: { name: `n ${mixed}`, description: mixed, remediation: mixed, severity: "low" }, "matched-at": `http://bob:${pw}@h.test/x?token=${bearer}&z=1`, request: "GET /x HTTP/1.1", response: `HTTP/1.1 200 OK\r\nSet-Cookie: s=${sid}`, "curl-command": `curl -u '${["bo", "b"].join("")}:${pw}' -H 'Authorization: Bearer ${bearer}' '${`http://h.test/x?sig=${tok}`}'`, "extracted-results": [mixed] });
+        const found = parseNucleiJsonl(line).findings[0]!;
+        all(JSON.stringify(found));
+        expect(found.endpoint).toBe("http://h.test/x?token=REDACTED&z=1");
+      });
+      it("keeps harmless query values and short ids", () => {
+        expect(redactEvidence("GET http://h.test/a?page=2&sort=name&id=17")).toBe("GET http://h.test/a?page=2&sort=name&id=17");
+      });
     });
     it("stops at the result limit", () => {
       const lines = Array.from({ length: MAX_SARIF_RESULTS + 1 }, (_, i) => JSON.stringify({ "template-id": `t${i}`, info: { name: "n", severity: "low" } })).join("\n");
