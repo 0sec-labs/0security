@@ -13,6 +13,7 @@ import {
 import { buildFindingConsoleCommand } from "../finding-handoff.js";
 import { resolveFindingId, shortFindingId, shortFingerprint } from "../finding-id.js";
 import { rowVerification, verificationPhrase } from "../finding-verification.js";
+import { reproductionDetail, reproductionPhrase, rowReproduction } from "../finding-reproduction.js";
 import { auditTriage, buildTriageRequest, triageLabel, type TriageFlags } from "./findings-triage.js";
 import { UsageError } from "./output.js";
 import { foldSimilarGroups } from "./findings-dedupe.js";
@@ -50,6 +51,9 @@ type FindingRow = {
   scopeSource?: string | null;
   /** JSON of the second-pass verification from `0 findings verify`; null until verified. */
   modelVerification?: string | null;
+  /** JSON of the proposed proof and harness result; null until either exists. */
+  reproduction?: string | null;
+  pocSteps?: string | null;
   timestamp: number;
   score?: number | null;
   cvssScore?: number | null;
@@ -185,9 +189,11 @@ function priorityFinding(row: PriorityRow) {
 function compareRows(a: PriorityRow, b: PriorityRow): number {
   return compareFindingsBySeverity(priorityFinding(a), priorityFinding(b)) || b.timestamp - a.timestamp || b.id.localeCompare(a.id);
 }
-function renderVerification(row: FindingRow): void {
+function renderVerification(row: FindingRow, withProof = true): void {
   const phrase = verificationPhrase(rowVerification(row));
   if (phrase) console.log(`  ${chalk.gray(phrase)}`);
+  const proof = withProof ? reproductionPhrase(row as { reproduction?: unknown; pocSteps?: unknown }) : undefined;
+  if (proof) console.log(`  ${chalk.gray(`proof: ${proof}`)}`);
 }
 /** Orders by severity moved by your business context, then as without it. Severity itself is never changed. */
 function contextComparer(context: BusinessContext): (a: FindingRow, b: FindingRow) => number {
@@ -357,9 +363,10 @@ export function registerFindingsCommand(program: Command): void {
         const related = finding.fingerprint ? db.getRelatedFindings(finding.fingerprint) as FindingRow[] : [finding];
 
         if (opts.json) {
-          const { modelVerification: _raw, ...plain } = finding;
+          const { modelVerification: _raw, reproduction: _rawRepro, ...plain } = finding as FindingRow & { reproduction?: unknown };
           const stored = rowVerification(finding);
-          console.log(JSON.stringify({ ...plain, ...(stored ? { verification: stored } : {}), related: related.map((row) => ({ id: row.id, scanId: row.scanId, status: row.status, triage: row.triageStatus ?? "new" })) }, null, 2));
+          const proofRecord = rowReproduction(finding as { reproduction?: unknown; pocSteps?: unknown });
+          console.log(JSON.stringify({ ...plain, ...(stored ? { verification: stored } : {}), ...(proofRecord ? { reproduction: proofRecord } : {}), related: related.map((row) => ({ id: row.id, scanId: row.scanId, status: row.status, triage: row.triageStatus ?? "new" })) }, null, 2));
           return;
         }
         console.log("");
@@ -367,7 +374,7 @@ export function registerFindingsCommand(program: Command): void {
         console.log("");
 
         renderPriority(finding);
-        renderVerification(finding);
+        renderVerification(finding, false);
         console.log(`  ${chalk.gray("Category:")} ${finding.category}`);
         if (finding.score != null) {
           console.log(`  ${chalk.gray("Score:")} ${chalk.cyan(String(finding.score) + "/100")}`);
@@ -391,6 +398,8 @@ export function registerFindingsCommand(program: Command): void {
           console.log(`  ${chalk.dim(verification.reasoning)}`);
           if (verification.applied) console.log(`  ${chalk.gray("Suppressed by 0security findings verify --apply.")}`);
         }
+        const proofDetail = reproductionDetail(finding as { reproduction?: unknown; pocSteps?: unknown });
+        if (proofDetail) console.log(`  ${chalk.gray(`${proofDetail.label}:`)}        ${proofDetail.line}`);
         console.log("");
         console.log(`  ${chalk.gray("Description:")}`);
         console.log(`  ${finding.description}`);

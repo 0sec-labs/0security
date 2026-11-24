@@ -140,6 +140,25 @@ A skill can declare the check. This command runs zizmor with the repository's ow
 
 A planted unpinned action must be flagged first, so a configuration that turns the detector off reads as Not verified.
 
+## Proof by reproduction
+
+A finding can carry a proof: steps that show the problem. The proof has two parts that are never mixed up.
+
+Proposed steps come from the model's own reasoning. The app, `0security findings show`, reports and SARIF label them "Proposed steps, not run". Nothing has checked them.
+
+A reproduction result exists only when a harness ran a recipe against a local copy of the app in a container. The result records the commit, the digest-pinned image, a canary, the times and a redacted log tail. The app shows it as "Reproduced on commit X in an isolated container". The model cannot set it, and neither can a finding import. Stored text that lacks the full record is ignored.
+
+A result has one of four states:
+
+- reproduced: the canary appeared.
+- not-reproduced: the canary did not appear.
+- inconclusive: the run could not show either.
+- error: the run did not happen.
+
+Not reproduced does not mean safe. It means this recipe did not work on this commit under these conditions. The app may need other input, other state or another route. Keep the finding open until you have read the code.
+
+The proof never changes a finding's severity, status or triage. It is stored next to the finding. Findings saved before this existed have none.
+
 ## Scan a folder
 
 ```bash

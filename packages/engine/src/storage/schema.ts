@@ -198,6 +198,11 @@ export const findings = sqliteTable(
      * `0 findings verify`. NULL until verified. Advisory: it never changes severity or status by itself.
      */
     modelVerification: text("modelVerification"),
+    /**
+     * JSON `{ proof?, result? }`: a proposed reproduction recipe (not run) and the harness result from
+     * `0 findings reproduce`. NULL until either exists. Additive: old rows are unaffected.
+     */
+    reproduction: text("reproduction"),
     /** Scanner that produced the finding when it was imported (for example `CodeQL`); NULL for findings 0 found itself. */
     tool: text("tool"),
     /** Repository a finding was sent from (`owner/name`), set only by the shared findings server's ingest. NULL otherwise. */

@@ -1,4 +1,5 @@
 import type { ImpactAssessment, PresentationEvent } from "@0/engine/shared";
+import type { FindingReproduction } from "@0/engine/shared/reproduction";
 
 export type ScanSummary = {
   totalFindings: number;
@@ -82,6 +83,8 @@ export type FindingRecord = {
   evidenceResponse: string;
   evidenceAnalysis?: string | null;
   impactAssessment?: ImpactAssessment | null;
+  /** Proposed recipe (never run) and the harness result, when there is one. */
+  reproduction?: FindingReproduction | null;
 };
 
 export type FindingWorkflowSummary = {

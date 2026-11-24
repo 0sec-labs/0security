@@ -1,5 +1,5 @@
 import { posix, win32 } from "node:path";
-import { attackerImpactSentence, describeAttackerImpact, compareFindingsBySeverity } from "../shared/index.js";
+import { attackerImpactSentence, describeAttackerImpact, compareFindingsBySeverity, reproductionFor, reproductionLine, proofLine } from "../shared/index.js";
 import type { PocStep, ScanReport, Finding, Severity } from "../shared/index.js";
 import { VERSION } from "../shared/index.js";
 
@@ -203,6 +203,13 @@ function findingToResult(finding: Finding, target: string, suppressOutOfScope = 
   if (finding.dedupRefs) result.properties["dedupRefs"] = finding.dedupRefs;
   if (finding.advisoryMatches) result.properties["advisoryMatches"] = finding.advisoryMatches;
   if (finding.verification_result) result.properties["verificationResult"] = finding.verification_result;
+  const reproduction = reproductionFor(finding, finding.reproduction);
+  if (reproduction) {
+    result.properties["reproduction"] = {
+      ...(reproduction.proof ? { proof: reproduction.proof, proofLabel: proofLine(reproduction.proof) } : {}),
+      ...(reproduction.result ? { result: reproduction.result, resultLabel: reproductionLine(reproduction.result) } : {}),
+    };
+  }
   if (finding.inlineValidation) result.properties["inlineValidation"] = finding.inlineValidation;
   if (finding.supplyChain) result.properties["supplyChain"] = finding.supplyChain;
   if (finding.kernelExploit) result.properties["kernelExploit"] = finding.kernelExploit;

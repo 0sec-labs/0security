@@ -39,6 +39,7 @@ import type {
   TrustGraphEdgeInput,
   TrustGraphEdgeRow,
 } from "./types.js";
+import type { FindingReproduction } from "../shared/reproduction.js";
 import type { FindingModelVerification, PersistedFindingReviewFields, WorkflowStatus } from "./finding-helpers.js";
 import type { TriageDetails } from "./repositories/finding-repository.js";
 import { createRepositories, type Repositories } from "./repositories/index.js";
@@ -225,6 +226,14 @@ export class osecDB {
 
   setFindingScope(findingId: string, label: { scope: "in-scope" | "out-of-scope"; reason: string; source: string }): void {
     return this.repos.findings.setFindingScope(findingId, label);
+  }
+
+  getFindingReproduction(findingId: string): FindingReproduction | undefined {
+    return this.repos.findings.getFindingReproduction(findingId);
+  }
+
+  setFindingReproduction(findingId: string, patch: FindingReproduction): void {
+    return this.repos.findings.setFindingReproduction(findingId, patch);
   }
 
   setFindingModelVerification(findingId: string, verification: FindingModelVerification): void {

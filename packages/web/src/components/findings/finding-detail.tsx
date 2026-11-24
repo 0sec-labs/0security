@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { describeAttackerImpact } from "@0/engine/shared/attacker-impact";
+import { proofLine, reproductionLine } from "@0/engine/shared/reproduction";
 import { ShieldCheck, ShieldOff, ShieldQuestion } from "lucide-react";
 import { CapyChevronDownIcon as ChevronDown, CapyCopyIcon as Copy, CapyChatIcon as MessageSquare, CapyUserIcon as User } from "@/ui/icons/capy";
 import { useBackendApi } from "@/api";
@@ -84,6 +85,8 @@ export function FindingDetail(props: FindingDetailProps) {
           </section>
 
           <EvidenceSection group={group} latest={latest} workflow={workflow} fingerprint={fingerprint} />
+
+          <ProofSection reproduction={latest.reproduction ?? null} />
 
           <section aria-label="Review" className="flex max-w-4xl flex-col gap-3">
             <SectionLabel>Review</SectionLabel>
@@ -210,6 +213,25 @@ function EvidenceSection({ group, latest, workflow, fingerprint }: { group: Find
       <div className="rounded-md border-[0.5px] border-border-1 bg-card">
         {artifacts.map(artifact => <EvidenceArtifactRow key={artifact.kind} artifact={artifact} defaultOpen={artifact.kind === "analysis"} />)}
       </div>
+    </section>
+  );
+}
+
+function ProofSection({ reproduction }: { reproduction: FindingGroup["latest"]["reproduction"] }) {
+  if (!reproduction) return null;
+  const { proof, result } = reproduction;
+  return (
+    <section aria-label="Proof" className="flex max-w-4xl flex-col gap-2">
+      <SectionLabel>Proof</SectionLabel>
+      {result ? <p className="text-[13px] leading-6 text-muted-foreground-1">{reproductionLine(result)}.</p> : null}
+      {proof ? (
+        <div className="flex flex-col gap-1">
+          <p className="text-[13px] leading-6 text-muted-foreground-1">{result ? "Recipe that was proposed" : `${proofLine(proof)}.`}</p>
+          <ol className="list-decimal pl-5 text-xs leading-5 break-words text-muted-foreground-1">
+            {proof.steps.map(step => <li key={step.id}><code>{step.kind === "http" ? `${step.method} ${step.path}` : step.cmd}</code></li>)}
+          </ol>
+        </div>
+      ) : null}
     </section>
   );
 }

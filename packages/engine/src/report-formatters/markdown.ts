@@ -1,4 +1,4 @@
-import { describeAttackerImpact, compareFindingsBySeverity, orderByScope, splitByScope } from "../shared/index.js";
+import { reproductionFor, reproductionLine, proofLine, describeAttackerImpact, compareFindingsBySeverity, orderByScope, splitByScope } from "../shared/index.js";
 import type { ScanReport, Finding, FindingRemediation, PocStep } from "../shared/index.js";
 
 /**
@@ -285,6 +285,12 @@ function formatFinding(finding: Finding): string {
 
   if (finding.pocSteps && finding.pocSteps.length > 0) {
     lines.push(...reproductionSection(finding.pocSteps));
+  }
+
+  const repro = reproductionFor(finding, finding.reproduction);
+  if (repro) {
+    lines.push(`**Proof:** ${repro.result ? reproductionLine(repro.result) : proofLine(repro.proof)}.`);
+    lines.push("");
   }
 
   if (finding.remediation) {

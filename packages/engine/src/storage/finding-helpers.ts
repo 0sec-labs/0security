@@ -2,6 +2,7 @@
 import { and, or } from "drizzle-orm";
 import { createHash } from "node:crypto";
 import type { Finding, SourceVerificationSummary, VerificationResult } from "../shared/index.js";
+import { parseFindingReproduction, type FindingReproduction } from "../shared/reproduction.js";
 import { findingWorkflowStatuses, type FindingWorkflowStatusDB } from "./schema.js";
 
 
@@ -45,6 +46,7 @@ export interface PersistedFindingReviewFields {
   verification_result?: VerificationResult;
   reviewAnnotation?: FindingReviewAnnotation;
   sourceVerification?: SourceVerificationSummary;
+  reproduction?: FindingReproduction;
 }
 
 
@@ -200,16 +202,19 @@ export function restoreFindingReviewFields(
     verificationResult?: unknown;
     reviewAnnotation?: unknown;
     sourceVerification?: unknown;
+    reproduction?: unknown;
   } | null | undefined,
 ): PersistedFindingReviewFields {
   if (!row) return {};
   const verificationResult = parseFindingVerificationResult(row.verificationResult);
   const reviewAnnotation = parseFindingReviewAnnotation(row.reviewAnnotation);
   const sourceVerification = parseFindingSourceVerification(row.sourceVerification);
+  const reproduction = parseFindingReproduction(row.reproduction);
   return {
     ...(verificationResult ? { verification_result: verificationResult } : {}),
     ...(reviewAnnotation ? { reviewAnnotation } : {}),
     ...(sourceVerification ? { sourceVerification } : {}),
+    ...(reproduction ? { reproduction } : {}),
   };
 }
 
@@ -327,4 +332,15 @@ export function serializeFindingModelVerification(value: FindingModelVerificatio
   const usable = parseFindingModelVerification(value);
   if (!usable) throw new Error("Not a usable verification record.");
   return JSON.stringify(usable);
+}
+
+
+/**
+ * Stored text for a reproduction record, or NULL when there is nothing usable.
+ * A result without the full harness record is dropped by the parser, so a
+ * "reproduced" status cannot be stored without one.
+ */
+export function serializeFindingReproduction(value: unknown): string | null {
+  const usable = parseFindingReproduction(value);
+  return usable ? JSON.stringify(usable) : null;
 }
