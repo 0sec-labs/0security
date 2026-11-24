@@ -665,7 +665,7 @@ Inspect, export, and import the two-level console configuration
 0security config
 ```
 
-Subcommands: [get](#config-get) · [set](#config-set) · [doctor](#config-doctor) · [show](#config-show) · [list](#config-list) · [reset](#config-reset) · [export](#config-export) · [import](#config-import) · [audit-log](#config-audit-log) · [audit-export](#config-audit-export) · [team](#config-team) · [db](#config-db) · [github](#config-github).
+Subcommands: [get](#config-get) · [set](#config-set) · [doctor](#config-doctor) · [show](#config-show) · [list](#config-list) · [reset](#config-reset) · [export](#config-export) · [import](#config-import) · [audit-log](#config-audit-log) · [audit-export](#config-audit-export) · [audit-verify](#config-audit-verify) · [team](#config-team) · [db](#config-db) · [github](#config-github).
 
 #### config show
 
@@ -1033,6 +1033,23 @@ Show the local log of privileged actions: connection and settings changes, exten
 | `--q <text>` | — | Only events whose action, subject or actor contains this text |
 | `--limit <n>` | — | Maximum events to show |
 | `--before <id>` | — | Only events older than this id (pagination) |
+| `--json` | — | Print JSON |
+| `--format <format>` | — | Output: text or json Choices: text, json. |
+
+### config audit-verify
+
+Check that the audit log was not edited, reordered or cut. Each event stores a hash of the event before it, so a change breaks the chain from that point on. The check is free, runs offline and needs no license. It prints the first break and exits 1. See [Check the audit log for tampering](/server-mode/#check-the-audit-log-for-tampering).
+
+```text
+0security config audit-verify [options]
+```
+
+```bash
+0security config audit-verify
+```
+
+| Option | Registered default | Description |
+| --- | --- | --- |
 | `--json` | — | Print JSON |
 | `--format <format>` | — | Output: text or json Choices: text, json. |
 

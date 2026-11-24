@@ -23,7 +23,7 @@ export function nest(parent: Command, group: string, registrars: readonly Regist
 export const NEW_HOME: Readonly<Record<string, string>> = {
   reports: "findings",
   connections: "models", usage: "models",
-  "audit-log": "config", "audit-export": "config", team: "config", db: "config", github: "config",
+  "audit-log": "config", "audit-export": "config", "audit-verify": "config", team: "config", db: "config", github: "config",
   upgrade: "doctor", workbench: "doctor",
 };
 
@@ -95,6 +95,7 @@ const EXAMPLES: Readonly<Record<string, readonly string[]>> = {
   findings: ["0security findings list --severity high", "0security findings show 3f2a", '0security findings update 3f2a --status accepted --reason "fix scheduled" --expires 90d --approver "security lead"'],
   "findings list": ["0security findings list --expiring 30", "0security findings list --context context.json", "0security findings list --severity high --status verified", "0security findings list --format json", "0security findings list --format sarif -o findings.sarif"],
   "findings show": ["0security findings show 3f2a"],
+  "config audit-verify": ["0security config audit-verify", "0security config audit-verify --json"],
   "findings evidence": ["0security findings evidence ./evidence --repo .", "0security findings evidence ./evidence --repo . --check-advisories"],
   "findings export-fixes": ["0security findings export-fixes", "0security findings export-fixes --check-merged -o ./fix-report", "0security findings export-fixes --repo . --since 2026-01-01 --format json"],
   "findings report-draft": ["0security findings report-draft 3f2a --stage early-warning --product app --contact \"Jo, security@example.com\"", "0security findings report-draft 3f2a --stage notification --facts facts.json -o notification.md"],

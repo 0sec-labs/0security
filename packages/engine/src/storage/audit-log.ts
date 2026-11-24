@@ -1,5 +1,6 @@
 import { ensureDatabaseDirectory } from "./db-directory.js";
 import { resolveOsecDbPath } from "./database.js";
+import { AUDIT_GENESIS_HASH, auditCheckpointHash, auditRowHash, checkAuditChain, type AuditChainReport, type AuditChainRow, type AuditCheckpoint } from "./audit-chain.js";
 import { createShimmedDatabase, type ShimmedDatabase } from "./wasm-shim.js";
 
 /** Rows kept in the local audit log. Older rows are rotated out; nothing else ever deletes or edits a row. */
@@ -70,12 +71,33 @@ function open(path: string) {
   if (path !== ":memory:") ensureDatabaseDirectory(path);
   const db = createShimmedDatabase(path);
   db.pragma("busy_timeout = 5000");
-  db.exec(`CREATE TABLE IF NOT EXISTS audit_events (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL, actor TEXT NOT NULL, action TEXT NOT NULL, subject TEXT NOT NULL, outcome TEXT NOT NULL, detail_json TEXT NOT NULL);
+  db.exec(`CREATE TABLE IF NOT EXISTS audit_events (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL, actor TEXT NOT NULL, action TEXT NOT NULL, subject TEXT NOT NULL, outcome TEXT NOT NULL, detail_json TEXT NOT NULL, prev_hash TEXT, hash TEXT);
     CREATE INDEX IF NOT EXISTS audit_events_ts ON audit_events(ts);
-    CREATE TRIGGER IF NOT EXISTS audit_events_no_update BEFORE UPDATE ON audit_events BEGIN SELECT RAISE(ABORT, 'audit log is append-only'); END;`);
+    CREATE TRIGGER IF NOT EXISTS audit_events_no_update BEFORE UPDATE ON audit_events BEGIN SELECT RAISE(ABORT, 'audit log is append-only'); END;
+    CREATE TABLE IF NOT EXISTS audit_checkpoints (id INTEGER PRIMARY KEY AUTOINCREMENT, through_id INTEGER NOT NULL, through_hash TEXT NOT NULL, dropped INTEGER NOT NULL, ts TEXT NOT NULL, prev_checkpoint_hash TEXT NOT NULL, hash TEXT NOT NULL);
+    CREATE TRIGGER IF NOT EXISTS audit_checkpoints_no_update BEFORE UPDATE ON audit_checkpoints BEGIN SELECT RAISE(ABORT, 'audit log is append-only'); END;`);
+  // A database made before the hash chain has no hash columns. Add them; old rows stay unchained.
+  const columns = (db.prepare("PRAGMA table_info(audit_events)").all() as Array<Record<string, unknown>>).map(row => String(row.name));
+  for (const column of ["prev_hash", "hash"]) {
+    if (columns.includes(column)) continue;
+    try { db.exec(`ALTER TABLE audit_events ADD COLUMN ${column} TEXT`); } catch { /* another process added it first */ }
+  }
   const entry = { db, inserts: 0 };
   handles.set(path, entry);
   return entry;
+}
+/** Removes rows up to `throughId` and records a checkpoint with the hash of the last removed row, so the chain still verifies. */
+function rotate(db: ShimmedDatabase, throughId: number): void {
+  if (throughId < 1) return;
+  const last = db.prepare("SELECT id, hash FROM audit_events WHERE id <= ? ORDER BY id DESC LIMIT 1").get(throughId) as { id?: number; hash?: string | null } | undefined;
+  if (!last?.id) return;
+  const dropped = Number((db.prepare("SELECT COUNT(*) AS n FROM audit_events WHERE id <= ?").get(last.id) as { n?: number } | undefined)?.n ?? 0);
+  // A dropped row from before the chain has no hash; the chain then starts after it, from the genesis hash.
+  const previous = db.prepare("SELECT hash FROM audit_checkpoints ORDER BY id DESC LIMIT 1").get() as { hash?: string } | undefined;
+  const cp = { throughId: last.id, throughHash: last.hash ?? AUDIT_GENESIS_HASH, dropped, ts: new Date().toISOString(), prevCheckpointHash: previous?.hash ?? AUDIT_GENESIS_HASH };
+  db.prepare("INSERT INTO audit_checkpoints (through_id, through_hash, dropped, ts, prev_checkpoint_hash, hash) VALUES (?, ?, ?, ?, ?, ?)")
+    .run(cp.throughId, cp.throughHash, cp.dropped, cp.ts, cp.prevCheckpointHash, auditCheckpointHash(cp));
+  db.prepare("DELETE FROM audit_events WHERE id <= ?").run(last.id);
 }
 const resolvePath = (target?: AuditTarget) => target?.dbPath === ":memory:" ? ":memory:" : resolveOsecDbPath(target?.dbPath);
 
@@ -91,10 +113,24 @@ export function recordAudit(input: AuditInput, target?: AuditTarget): void {
     const entry = open(resolvePath(target));
     const maxRows = Math.max(1, target?.maxRows ?? AUDIT_MAX_ROWS);
     const outcome: AuditOutcome = input.outcome === "denied" || input.outcome === "error" ? input.outcome : "ok";
-    entry.db.prepare("INSERT INTO audit_events (ts, actor, action, subject, outcome, detail_json) VALUES (?, ?, ?, ?, ?, ?)")
-      .run(input.ts ?? new Date().toISOString(), scrub(String(input.actor ?? "system")), scrub(String(input.action ?? "unknown")), scrub(String(input.subject ?? "")), outcome, JSON.stringify(redactAuditDetail(input.detail)));
-    entry.inserts += 1;
-    if (entry.inserts % Math.min(100, maxRows) === 0) entry.db.prepare("DELETE FROM audit_events WHERE id <= (SELECT MAX(id) FROM audit_events) - ?").run(maxRows);
+    const row = {
+      ts: input.ts ?? new Date().toISOString(), actor: scrub(String(input.actor ?? "system")), action: scrub(String(input.action ?? "unknown")),
+      subject: scrub(String(input.subject ?? "")), outcome, detailJson: JSON.stringify(redactAuditDetail(input.detail)),
+    };
+    const { db } = entry;
+    // One immediate transaction: another process cannot write between reading the previous hash and inserting.
+    db.transaction(() => {
+      const last = db.prepare("SELECT id, hash FROM audit_events ORDER BY id DESC LIMIT 1").get() as { id?: number; hash?: string | null } | undefined;
+      const seq = db.prepare("SELECT seq FROM sqlite_sequence WHERE name = 'audit_events'").get() as { seq?: number } | undefined;
+      const checkpoint = db.prepare("SELECT through_hash FROM audit_checkpoints ORDER BY id DESC LIMIT 1").get() as { through_hash?: string } | undefined;
+      const id = Math.max(Number(seq?.seq ?? 0), Number(last?.id ?? 0)) + 1;
+      const prevHash = last ? (last.hash ?? AUDIT_GENESIS_HASH) : (checkpoint?.through_hash ?? AUDIT_GENESIS_HASH);
+      const hash = auditRowHash(prevHash, { id, ...row });
+      db.prepare("INSERT INTO audit_events (id, ts, actor, action, subject, outcome, detail_json, prev_hash, hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+        .run(id, row.ts, row.actor, row.action, row.subject, row.outcome, row.detailJson, prevHash, hash);
+      entry.inserts += 1;
+      if (entry.inserts % Math.min(100, maxRows) === 0) rotate(db, id - maxRows);
+    }).immediate();
   } catch { /* never surface */ }
 }
 
@@ -167,4 +203,18 @@ export function latestAuditId(target?: AuditTarget): number {
     const row = open(resolvePath(target)).db.prepare("SELECT MAX(id) AS id FROM audit_events").get() as { id?: number | null } | undefined;
     return Number(row?.id ?? 0) || 0;
   } catch { return 0; }
+}
+
+/**
+ * Checks the hash chain of the audit log. Read-only and free: it needs no license and no network.
+ * Throws when the database cannot be read.
+ */
+export function verifyAuditLog(target?: AuditTarget): AuditChainReport {
+  const { db } = open(resolvePath(target));
+  const rows = (db.prepare("SELECT id, ts, actor, action, subject, outcome, detail_json, prev_hash, hash FROM audit_events ORDER BY id ASC").all() as Array<Record<string, unknown>>)
+    .map((row): AuditChainRow => ({ id: Number(row.id), ts: String(row.ts), actor: String(row.actor), action: String(row.action), subject: String(row.subject), outcome: String(row.outcome), detailJson: String(row.detail_json), prevHash: row.prev_hash === null ? null : String(row.prev_hash), hash: row.hash === null ? null : String(row.hash) }));
+  const checkpoints = (db.prepare("SELECT id, through_id, through_hash, dropped, ts, prev_checkpoint_hash, hash FROM audit_checkpoints ORDER BY id ASC").all() as Array<Record<string, unknown>>)
+    .map((row): AuditCheckpoint => ({ id: Number(row.id), throughId: Number(row.through_id), throughHash: String(row.through_hash), dropped: Number(row.dropped), ts: String(row.ts), prevCheckpointHash: String(row.prev_checkpoint_hash), hash: String(row.hash) }));
+  const seq = db.prepare("SELECT seq FROM sqlite_sequence WHERE name = 'audit_events'").get() as { seq?: number } | undefined;
+  return checkAuditChain({ rows, checkpoints, highestIdEver: seq?.seq === undefined ? null : Number(seq.seq) });
 }
