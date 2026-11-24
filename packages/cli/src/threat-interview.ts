@@ -157,11 +157,15 @@ const questionFiles = (question: InterviewQuestion): string[] => {
   return [...files];
 };
 
+const isUnsafeGlob = (glob: string): boolean => !glob || /[,[\]\s()]/.test(glob) || glob.startsWith("/") || glob.split("/").includes("..");
+
 /** A glob is kept only when it names the evidence file, a folder above it, or something the person typed. */
 export function allowedGlob(glob: string, question: InterviewQuestion, words: string): boolean {
-  const base = glob.replace(/\/?\*\*?.*$/, "").replace(/\/+$/, "");
+  const normalized = glob.replace(/\\/g, "/").replace(/^\.\//, "");
+  if (isUnsafeGlob(normalized)) return false;
+  const base = normalized.replace(/\/?\*\*?.*$/, "").replace(/\/+$/, "");
   if (base && questionFiles(question).some(path => path === base || path.startsWith(`${base}/`))) return true;
-  return glob.length > 2 && words.toLowerCase().includes(glob.toLowerCase());
+  return normalized.length > 2 && words.toLowerCase().includes(normalized.toLowerCase());
 }
 
 const validDate = (value: string): boolean => /^\d{4}-\d{2}-\d{2}$/.test(value) && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
@@ -184,7 +188,9 @@ export function parseWording(reply: string | undefined): Wording[] {
     const item = raw as Record<string, unknown>;
     const questionId = plainLine(item.questionId, 40);
     if (!questionId) continue;
-    const paths = Array.isArray(item.paths) ? item.paths.map(path => plainLine(path, 200).replace(/\s/g, "")).filter(Boolean).slice(0, 5) : undefined;
+    const paths = Array.isArray(item.paths)
+      ? item.paths.map(path => plainLine(path, 200).replace(/\s/g, "").replace(/\\/g, "/").replace(/^\.\//, "")).filter(p => !isUnsafeGlob(p)).slice(0, 5)
+      : undefined;
     out.push({ questionId, reason: plainLine(item.reason, 400), ...(paths ? { paths } : {}), ...(typeof item.until === "string" ? { until: plainLine(item.until, 10) } : {}) });
   }
   return out;

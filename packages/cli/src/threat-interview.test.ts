@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseScope } from "@0/engine/shared";
+import { matchesScope, parseScope, renderScopeSection } from "@0/engine/shared";
 import {
   allowedGlob, allowedUntil, askQuestions, confirmEntries, diffText, ensureScopeLink, entriesFromAnswers, entriesFromList, extractJson, FIXED_QUESTIONS, groundedReason, parseDecision, parseEntryLine, parseQuestions,
   parseWording, plainLine, runInterview, scopeLinkFor, upsertScopeDecisions, type InterviewIO, type InterviewModel, type InterviewQuestion,
@@ -327,5 +327,39 @@ describe("runInterview", () => {
     const result = await runInterview({ ...base, securityText: "# Security\n", io: terminal(["3"]), model });
     expect(result.entries).toEqual([]);
     expect(result.securityText).toBeUndefined();
+  });
+
+  it("refuses comma and bracket metacharacters in Mode 2 path globs so an answer cannot widen scope to the whole repo", async () => {
+    const entries = entriesFromAnswers(
+      [{ question: export_, decision: "out", words: "public download" }],
+      [{ questionId: "export-auth", reason: "public download", paths: ["src/routes/export.js*,*,*/*,*/*/*"] }],
+      NOW,
+    );
+    const rendered = renderScopeSection(entries);
+    const parsed = parseScope(rendered);
+    expect(parsed.entries[0]?.paths).toEqual(["src/routes/export.js"]);
+    expect(matchesScope({ category: "broken-access-control", path: "src/admin/delete.js" }, parsed.entries)).toBeUndefined();
+
+    // Also test end-to-end through runInterview with bracket/comma injection in Mode 2 wording.
+    const model: InterviewModel = async prompt => {
+      if (prompt.includes("Mode 1")) return { reply: draftReply([export_]), failed: false };
+      return {
+        reply: fenced({
+          entries: [
+            {
+              questionId: "export-auth",
+              reason: "public download",
+              paths: ["src/routes/export.js*,*,*/*,*/*/*", "src/routes/export.js] [paths: *"],
+            },
+          ],
+        }),
+        failed: false,
+      };
+    };
+    const io = terminal(["2: public download", "a", "y"]);
+    const result = await runInterview({ ...base, securityText: "# Security\n", io, model });
+    const finalParsed = parseScope(result.securityText!);
+    expect(finalParsed.entries[0]?.paths).toEqual(["src/routes/export.js"]);
+    expect(matchesScope({ category: "broken-access-control", path: "src/admin/delete.js" }, finalParsed.entries)).toBeUndefined();
   });
 });
