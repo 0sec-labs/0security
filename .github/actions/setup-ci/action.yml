@@ -29,4 +29,11 @@ runs:
         echo "$INSTALL_DIR" >> "$GITHUB_PATH"
     - name: Install dependencies
       shell: bash
-      run: pnpm install --frozen-lockfile
+      # The package registry sometimes times out from the runners: retry with backoff.
+      run: |
+        for attempt in 1 2 3 4 5; do
+          pnpm install --frozen-lockfile --fetch-retries 5 --fetch-retry-mintimeout 10000 && exit 0
+          echo "::warning::pnpm install failed (attempt ${attempt}/5); retrying"
+          sleep $((attempt * 15))
+        done
+        exit 1
