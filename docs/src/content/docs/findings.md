@@ -359,7 +359,7 @@ Plan for these:
 
 ## Import findings from another scanner
 
-Import a SARIF 2.1.0 file, or read a repository's alerts from GitHub. Nothing in the file is executed.
+Import a SARIF 2.1.0 file, or read a repository's alerts from GitHub. Nothing in the file is executed. To bring in results from Nuclei, ZAP or Strix, see [Use Nuclei, ZAP or Strix](/use-dynamic-scanners/).
 
 ```bash
 0security findings import ./other-scanner.sarif --tool "Other scanner"

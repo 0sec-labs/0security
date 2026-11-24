@@ -3,7 +3,7 @@
 // once per finding, labelled with the repository and source.
 import type { IncomingMessage } from "node:http";
 import { createHash } from "node:crypto";
-import { normalizeAttackCategory, parseSarif, type Finding } from "@0/engine/shared";
+import { locationLabel, normalizeAttackCategory, parseSarif, type Finding } from "@0/engine/shared";
 import type { IngestFindingsResult } from "@0/engine/storage";
 import { FindingsAccessError } from "./findings-access-tokens.js";
 import { WebRequestError } from "./dashboard-http.js";
@@ -45,10 +45,10 @@ function fromSarif(text: string, repo: string, now: number): Finding[] {
   const findings: Finding[] = [];
   for (const item of parsed.findings) {
     // Stable when lines move: the rule, the file and what the code says, not where it sits.
-    const fingerprint = ingestFingerprint(repo, [item.tool, item.ruleId, item.path ?? "", (item.snippet ?? item.description).replace(/\s+/g, " ").trim().slice(0, 300)].join("\n"));
+    const fingerprint = ingestFingerprint(repo, [item.tool, item.ruleId, item.path ?? "", `${item.method ?? ""} ${item.endpoint ?? ""}`, (item.snippet ?? item.description).replace(/\s+/g, " ").trim().slice(0, 300)].join("\n"));
     if (seen.has(fingerprint)) continue;
     seen.add(fingerprint);
-    const where = item.path ? `${item.path}${item.startLine ? `:${item.startLine}` : ""}` : "no location";
+    const where = locationLabel(item);
     findings.push({
       id: `fx-${fingerprint.slice(3)}-${sha(`${now}${findings.length}`).slice(0, 8)}`, fingerprint, templateId: `${item.tool}/${item.ruleId}`, title: item.title, description: item.description,
       category: item.category, severity: item.severity, tool: item.tool,

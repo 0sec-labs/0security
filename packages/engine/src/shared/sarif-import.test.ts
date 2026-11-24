@@ -1,5 +1,6 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { looksLikeSarif, parseSarif, repoRelativePath } from "./sarif-import.js";
+import { locationLabel, looksLikeNucleiJsonl, looksLikeSarif, MAX_SARIF_RESULTS, parseNucleiJsonl, parseSarif, parseScannerOutput, repoRelativePath } from "./sarif-import.js";
 
 const log = (results: unknown[], rules: unknown[] = [], extra: Record<string, unknown> = {}) => JSON.stringify({
   version: "2.1.0",
@@ -75,5 +76,104 @@ describe("parseSarif", () => {
     expect(repoRelativePath("/abs/x")).toBeUndefined();
     expect(repoRelativePath("C:\\x\\y")).toBeUndefined();
     expect(repoRelativePath("src\\a.ts")).toBe("src/a.ts");
+  });
+});
+
+describe("dynamic scanner output", () => {
+  const read = (name: string) => readFileSync(new URL(`./__fixtures__/${name}`, import.meta.url), "utf8");
+
+  it("reads Strix SARIF: web findings keep method and URL, the placeholder file is dropped, coverage entries are not findings", () => {
+    const parsed = parseSarif(read("strix.sarif"));
+    expect(parsed.tools).toEqual(["Strix"]);
+    expect(parsed.findings).toHaveLength(2);
+    const xss = parsed.findings.find(f => f.ruleId === "CWE-79")!;
+    expect(xss).toMatchObject({ severity: "high", category: "xss", endpoint: "http://127.0.0.1:18089/search", method: "GET", cwe: ["CWE-79"] });
+    expect(xss.path).toBeUndefined();
+    expect(xss.evidence).toContain("returns the script tag unescaped");
+    expect(xss.evidence).not.toContain("curl");
+    const admin = parsed.findings.find(f => f.ruleId === "CWE-306")!;
+    expect(admin).toMatchObject({ severity: "critical", endpoint: "http://127.0.0.1:18089/admin" });
+    expect(locationLabel(admin)).toBe("GET http://127.0.0.1:18089/admin");
+    expect(parsed.findings.some(f => f.ruleId.startsWith("strix-coverage"))).toBe(false);
+  });
+
+  it("reads ZAP SARIF: URL and method from the request, CWE from tags, credentials removed", () => {
+    const parsed = parseSarif(read("zap.sarif"));
+    expect(parsed.tools).toEqual(["ZAP"]);
+    expect(parsed.findings).toHaveLength(2);
+    const csp = parsed.findings[0]!;
+    expect(csp).toMatchObject({ ruleId: "10038-1", severity: "medium", endpoint: "http://127.0.0.1:18089/", method: "GET", cwe: ["CWE-693"] });
+    const xss = parsed.findings[1]!;
+    expect(xss).toMatchObject({ severity: "high", method: "GET", cwe: ["CWE-79"], evidence: "<script>alert(1)</script>" });
+    expect(xss.endpoint).toContain("127.0.0.1:18089/search?q=");
+    expect(xss.endpoint).not.toContain("secret");
+    expect(xss.path).toBeUndefined();
+  });
+
+  it("reads Nuclei SARIF as it is written: rule, severity from the score, host only", () => {
+    const parsed = parseSarif(read("nuclei.sarif"));
+    expect(parsed.tools).toEqual(["Nuclei"]);
+    expect(parsed.findings).toHaveLength(1);
+    expect(parsed.findings[0]).toMatchObject({ ruleId: "local-admin-panel-exposed", severity: "medium", toolVersion: "v3.11.1" });
+    expect(parsed.findings[0]!.path).toBeUndefined();
+  });
+
+  it("reads Nuclei JSON Lines: matched URL, method, CWE, severity and a request as evidence", () => {
+    const text = read("nuclei.jsonl");
+    expect(looksLikeNucleiJsonl(text)).toBe(true);
+    const parsed = parseScannerOutput(text);
+    expect(parsed.findings).toHaveLength(1);
+    expect(parsed.findings[0]).toMatchObject({ tool: "Nuclei", ruleId: "local-admin-panel-exposed", title: "Admin panel exposed without login", severity: "medium", endpoint: "http://127.0.0.1:18089/admin", method: "GET", cwe: ["CWE-306"] });
+    expect(parsed.findings[0]!.evidence).toContain("Response status: 200");
+    expect(parsed.findings[0]!.evidence).toContain("curl -X 'GET'");
+  });
+
+  it("does not treat SARIF as Nuclei JSON Lines", () => {
+    expect(looksLikeNucleiJsonl(read("zap.sarif"))).toBe(false);
+  });
+
+  describe("hostile input", () => {
+    const hostile = (result: Record<string, unknown>) => parseSarif(log([{ ruleId: "r", message: { text: "m" }, ...result }])).findings[0]!;
+    it("never turns a URL, absolute path or traversal into a repo path", () => {
+      for (const uri of ["http://evil.test/a", "file:///etc/passwd", "/etc/passwd", "../../etc/passwd", "a/../../b", "C:\\Windows\\win.ini", "javascript:alert(1)"]) {
+        expect(hostile({ locations: [at(uri)] }).path).toBeUndefined();
+      }
+    });
+    it("keeps only http and https URLs as endpoints", () => {
+      expect(hostile({ locations: [at("javascript:alert(1)")] }).endpoint).toBeUndefined();
+      expect(hostile({ locations: [at("ftp://host/x")] }).endpoint).toBeUndefined();
+      expect(hostile({ webRequest: { target: "file:///etc/passwd", method: "GET" } }).endpoint).toBeUndefined();
+      expect(hostile({ locations: [at("https://h.test/x#frag")] }).endpoint).toBe("https://h.test/x");
+    });
+    it("rejects an odd method and a route with traversal", () => {
+      expect(hostile({ webRequest: { target: "http://h.test/", method: "GET; rm -rf" } }).method).toBeUndefined();
+      const logical = { locations: [{ logicalLocations: [{ fullyQualifiedName: "/a/../../etc", kind: "endpoint" }] }] };
+      expect(hostile(logical).endpoint).toBeUndefined();
+    });
+    it("strips control characters and limits huge fields", () => {
+      const item = hostile({ message: { text: `bad\u0000\u001b[31m${"x".repeat(50000)}` }, properties: { evidence: `e\u0007${"y".repeat(50000)}` }, locations: [at(`http://h.test/${"a".repeat(5000)}`)] });
+      expect(item.description).not.toMatch(/[\u0000-\u0008\u000e-\u001f]/);
+      expect(item.description.length).toBeLessThanOrEqual(6000);
+      expect(item.evidence!.length).toBeLessThanOrEqual(3000);
+      expect(item.evidence).not.toContain("\u0007");
+      expect(item.endpoint).toBeUndefined();
+    });
+    it("applies the same limits to Nuclei JSON Lines", () => {
+      const line = JSON.stringify({ "template-id": "t\u0000x", info: { name: "n".repeat(9000), severity: "CRITICAL", description: "d\u001b".repeat(9000), classification: { "cwe-id": ["cwe-79", "../../x"] } }, "matched-at": "javascript:alert(1)", request: "G\u0000ET / HTTP/1.1", "curl-command": "c".repeat(9000) });
+      const item = parseNucleiJsonl(`${line}\nnot json\n[1,2]\n`).findings;
+      expect(item).toHaveLength(1);
+      expect(item[0]!.title.length).toBeLessThanOrEqual(300);
+      expect(item[0]!.ruleId).toBe("tx");
+      expect(item[0]!.severity).toBe("critical");
+      expect(item[0]!.endpoint).toBeUndefined();
+      expect(item[0]!.method).toBeUndefined();
+      expect(item[0]!.description.length).toBeLessThanOrEqual(3010);
+      expect(item[0]!.evidence!.length).toBeLessThanOrEqual(3000);
+      expect(item[0]!.cwe).toEqual(["CWE-79"]);
+    });
+    it("stops at the result limit", () => {
+      const lines = Array.from({ length: MAX_SARIF_RESULTS + 1 }, (_, i) => JSON.stringify({ "template-id": `t${i}`, info: { name: "n", severity: "low" } })).join("\n");
+      expect(() => parseNucleiJsonl(lines)).toThrow(/more than/);
+    });
   });
 });

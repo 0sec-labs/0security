@@ -1,4 +1,4 @@
-import type { ImportedFinding } from "./sarif-import.js";
+import { locationLabel, type ImportedFinding } from "./sarif-import.js";
 import { knownBlock, type KnownItem } from "./known-findings.js";
 
 /** A pattern scanner's hits, as a block a scan thread can check. The hits are leads, not findings. */
@@ -11,7 +11,7 @@ const oneLine = (text: string, max: number) => text.replace(/\s+/g, " ").trim().
 export function prePassBlock(prePass: PrePassLeads | undefined): string {
   if (!prePass || !prePass.leads.length) return "";
   const custom = prePass.leads.some(lead => lead.ruleSource === "custom");
-  const rows = prePass.leads.slice(0, MAX_LEADS).map(lead => `- ${prePass.tools.length > 1 ? `${lead.tool} ` : ""}${lead.ruleSource === "custom" ? "custom-rule " : ""}${lead.severity} ${lead.path ? `${lead.path}${lead.startLine ? `:${lead.startLine}` : ""}` : "no location"} ${lead.ruleId}: ${oneLine(lead.title, 160)}`);
+  const rows = prePass.leads.slice(0, MAX_LEADS).map(lead => `- ${prePass.tools.length > 1 ? `${lead.tool} ` : ""}${lead.ruleSource === "custom" ? "custom-rule " : ""}${lead.severity} ${locationLabel(lead)} ${lead.ruleId}: ${oneLine(lead.title, 160)}`);
   const more = prePass.total > rows.length ? `\n- … and ${prePass.total - rows.length} more not listed` : "";
   return [
     `${prePass.tools.length === 1 ? "A fast pattern scanner" : "Fast pattern scanners"} (${prePass.tools.join(", ")}) already ran on this folder and reported ${prePass.total} hit${prePass.total === 1 ? "" : "s"}. They are leads, not findings: pattern matches are often wrong (a parameterized query flagged as injection) and they miss logic bugs such as a missing ownership check.`,

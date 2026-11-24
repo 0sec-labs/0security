@@ -209,6 +209,7 @@ export default defineConfig({
             { label: "Findings", slug: "findings" },
             { label: "Threat model and policies", slug: "threat-model-and-policy" },
             { label: "Pull request checks", slug: "ci" },
+            { label: "Use Nuclei, ZAP or Strix", slug: "use-dynamic-scanners" },
             { label: "Evidence for the Cyber Resilience Act", slug: "cra-evidence" },
           ],
         },

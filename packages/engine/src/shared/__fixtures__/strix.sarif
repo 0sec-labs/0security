@@ -1,0 +1,271 @@
+{
+  "version": "2.1.0",
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "Strix",
+          "informationUri": "https://strix.ai",
+          "rules": [
+            {
+              "id": "CWE-79",
+              "name": "Reflected XSS in search parameter",
+              "shortDescription": {
+                "text": "Reflected XSS in search parameter"
+              },
+              "fullDescription": {
+                "text": "The q parameter is echoed without encoding."
+              },
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "help": {
+                "text": "The q parameter is echoed without encoding.\n\nScript runs in the victim's browser.\n\nEncode output for the HTML context.",
+                "markdown": "The q parameter is echoed without encoding.\n\nScript runs in the victim's browser.\n\nEncode output for the HTML context."
+              },
+              "properties": {
+                "security-severity": "7.4",
+                "tags": [
+                  "security",
+                  "CWE-79",
+                  "stride:T",
+                  "stride:I"
+                ]
+              },
+              "helpUri": "https://cwe.mitre.org/data/definitions/79.html"
+            },
+            {
+              "id": "CWE-306",
+              "name": "Missing authorization on admin page",
+              "shortDescription": {
+                "text": "Missing authorization on admin page"
+              },
+              "fullDescription": {
+                "text": "The admin page answers without a session."
+              },
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "help": {
+                "text": "The admin page answers without a session.",
+                "markdown": "The admin page answers without a session."
+              },
+              "properties": {
+                "security-severity": "9.5",
+                "tags": [
+                  "security",
+                  "CWE-306",
+                  "stride:S",
+                  "stride:E"
+                ]
+              },
+              "helpUri": "https://cwe.mitre.org/data/definitions/306.html"
+            },
+            {
+              "id": "strix-coverage/sql-injection",
+              "name": "SQL injection",
+              "shortDescription": {
+                "text": "Coverage: SQL injection"
+              },
+              "fullDescription": {
+                "text": "Coverage of SQL injection across the assessed attack surface."
+              },
+              "defaultConfiguration": {
+                "level": "none"
+              },
+              "help": {
+                "text": "Coverage of SQL injection across the assessed attack surface.",
+                "markdown": "Coverage of SQL injection across the assessed attack surface."
+              },
+              "properties": {
+                "tags": [
+                  "coverage"
+                ]
+              }
+            },
+            {
+              "id": "strix-coverage/rate-limiting",
+              "name": "Rate limiting",
+              "shortDescription": {
+                "text": "Coverage: Rate limiting"
+              },
+              "fullDescription": {
+                "text": "Coverage of Rate limiting across the assessed attack surface."
+              },
+              "defaultConfiguration": {
+                "level": "none"
+              },
+              "help": {
+                "text": "Coverage of Rate limiting across the assessed attack surface.",
+                "markdown": "Coverage of Rate limiting across the assessed attack surface."
+              },
+              "properties": {
+                "tags": [
+                  "coverage"
+                ]
+              }
+            }
+          ],
+          "version": "0.9.0"
+        }
+      },
+      "results": [
+        {
+          "ruleId": "CWE-79",
+          "ruleIndex": 0,
+          "level": "error",
+          "message": {
+            "text": "Reflected XSS in search parameter\n\nThe q parameter is echoed without encoding."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "SECURITY.md"
+                }
+              }
+            },
+            {
+              "logicalLocations": [
+                {
+                  "fullyQualifiedName": "/search",
+                  "kind": "endpoint"
+                }
+              ]
+            }
+          ],
+          "partialFingerprints": {
+            "primaryLocationLineHash": "f3108a5a4cd08c084813145ef3f561fa4b78f93f328683510760d24be18161f7"
+          },
+          "properties": {
+            "security-severity": "7.4",
+            "strix_vuln_class_hash": "841d192a59e6812ef6a771cf84fa82963f628884ed58037aa16b7e6cdd3695f8",
+            "synthetic_location": true,
+            "strix": {
+              "id": "vuln-0001",
+              "severity": "high",
+              "cvss": 7.4,
+              "timestamp": "2026-11-24T10:00:00Z",
+              "target": "http://127.0.0.1:18089",
+              "endpoint": "/search",
+              "method": "GET",
+              "cwe": "CWE-79",
+              "impact": "Script runs in the victim's browser.",
+              "technical_analysis": "Input reaches the response body unescaped.",
+              "remediation_steps": "Encode output for the HTML context.",
+              "poc": {
+                "description": "GET /search?q=%3Cscript%3Ealert(1)%3C/script%3E returns the script tag unescaped.",
+                "script_available": true
+              }
+            }
+          }
+        },
+        {
+          "ruleId": "CWE-306",
+          "ruleIndex": 1,
+          "level": "error",
+          "message": {
+            "text": "Missing authorization on admin page\n\nThe admin page answers without a session."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "SECURITY.md"
+                }
+              }
+            },
+            {
+              "logicalLocations": [
+                {
+                  "fullyQualifiedName": "http://127.0.0.1:18089/admin",
+                  "kind": "endpoint"
+                }
+              ]
+            }
+          ],
+          "partialFingerprints": {
+            "primaryLocationLineHash": "97459e1466c0c630c36bd426262654ac6ced6a21647b566e74294a5e3b31b6ed"
+          },
+          "properties": {
+            "security-severity": "9.5",
+            "strix_vuln_class_hash": "5ee6a552af68df5dbe9d3dc6c9cb22f4fd25db9c99cbfd25a5a81badb87e4638",
+            "synthetic_location": true,
+            "strix": {
+              "id": "vuln-0002",
+              "severity": "critical",
+              "timestamp": "2026-11-24T10:05:00Z",
+              "target": "http://127.0.0.1:18089",
+              "endpoint": "http://127.0.0.1:18089/admin",
+              "method": "GET",
+              "cwe": "306"
+            }
+          }
+        },
+        {
+          "ruleId": "strix-coverage/sql-injection",
+          "ruleIndex": 2,
+          "kind": "pass",
+          "level": "none",
+          "message": {
+            "text": "SQL injection \u2014 no_issue_found: /search\n\nNo error or timing change."
+          },
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "fullyQualifiedName": "/search"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "strix": {
+              "coverage_outcome": "no_issue_found",
+              "risk_area": "SQL injection",
+              "surface": "/search",
+              "recorded_by": "agent",
+              "source": "agent_reported"
+            }
+          }
+        },
+        {
+          "ruleId": "strix-coverage/rate-limiting",
+          "ruleIndex": 3,
+          "kind": "open",
+          "level": "none",
+          "message": {
+            "text": "Rate limiting \u2014 needs_follow_up: /login\n\nNot tested."
+          },
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "fullyQualifiedName": "/login"
+                }
+              ]
+            }
+          ],
+          "properties": {
+            "strix": {
+              "coverage_outcome": "needs_follow_up",
+              "risk_area": "Rate limiting",
+              "surface": "/login",
+              "recorded_by": "agent",
+              "source": "agent_reported"
+            }
+          }
+        }
+      ],
+      "invocations": [
+        {
+          "executionSuccessful": true
+        }
+      ],
+      "properties": {
+        "syntheticLocationCount": 2
+      }
+    }
+  ]
+}

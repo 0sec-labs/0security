@@ -1841,7 +1841,7 @@ Import findings from another scanner's SARIF 2.1.0 file (use - for stdin). Nothi
 0security findings import --github acme/app
 ```
 
-Each result becomes a finding that keeps the scanner's name, rule, severity, CWE and file and line. The scan it creates is marked imported and unverified, and importing the same file again changes nothing. Absolute paths become repo-relative under `--root`; paths outside it are dropped. Stop a running console on the same database first.
+Each result becomes a finding that keeps the scanner's name, rule, severity, CWE and file and line. A result from a web scanner keeps the HTTP method and URL instead of a file, and any proof text. Nuclei JSON Lines (`-jsonl-export`) is read as well as SARIF. See [Use Nuclei, ZAP or Strix](/use-dynamic-scanners/). The scan it creates is marked imported and unverified, and importing the same file again changes nothing. Absolute paths become repo-relative under `--root`; paths outside it are dropped. Stop a running console on the same database first.
 
 `--github owner/repo` imports that repository's code scanning, Dependabot and secret scanning alerts instead of a file. Give a file or `--github`, not both.
 
@@ -1853,7 +1853,7 @@ Secret alerts record the type, validity and, for the first 50 alerts, the file a
 
 | Argument | Required | Description |
 | --- | --- | --- |
-| `file` | No | SARIF file, or - to read standard input |
+| `file` | No | SARIF or Nuclei JSON Lines file, or - to read standard input |
 
 | Option | Registered default | Description |
 | --- | --- | --- |
