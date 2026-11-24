@@ -62,6 +62,8 @@ Add about 1 vCPU and 1 to 2 GB of memory for each concurrent scan or fix Thread.
 
 This is the simplest setup: an EC2 instance with an attached EBS volume.
 
+For a build from source with usage metrics off, OIDC sign-in and a teardown, see [Reference deployment on AWS](/aws-reference/).
+
 #### 1. Provision storage and compute (untested)
 
 1. Launch an Ubuntu 24.04 LTS instance, for example `t3.xlarge` or `m7g.large`.

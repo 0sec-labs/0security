@@ -218,6 +218,7 @@ export default defineConfig({
             { label: "Computers", slug: "computers" },
             { label: "Server mode and Docker", slug: "server-mode" },
             { label: "Self-hosting on Azure and AWS", slug: "self-hosting" },
+            { label: "Reference deployment on AWS", slug: "aws-reference" },
             { label: "Data flow and no-egress mode", slug: "data-flow" },
           ],
         },

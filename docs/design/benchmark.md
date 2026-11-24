@@ -26,6 +26,8 @@ The fix and triage scorecards run the same way, each with `--dry-run` and `--run
 node scripts/bench/fix-score.mjs --dry-run                 # every exploit check fails before a fix and passes with the reference fix
 node scripts/bench/fix-score.mjs --run --repeat 2 --budget 0.5 --total-budget 4
 node scripts/bench/triage-score.mjs --run --fixtures clean-app,python-flask,node-express
+node scripts/bench/triage-truth.mjs --dry-run --owasp <BenchmarkJava checkout>   # sample, classify and render without a model
+node scripts/bench/triage-truth.mjs --run --owasp <BenchmarkJava checkout> --per-class 3
 ```
 
 `--total-budget` stops the fix scorecard from starting new fixes once that much is spent.
@@ -83,18 +85,26 @@ The skill was then tightened: the absence of a caller, a write or a route in the
 
 ## Fix quality (`0security findings fix`)
 
-Measured with `node scripts/bench/fix-score.mjs --run --repeat 2`. It uses ten small projects under `scripts/bench/fix-cases/`, each with one planted vulnerability: SQL injection, path traversal, command injection, unsafe `eval` of pasted settings, MD5 password hashing, an open redirect, a missing authorization check, a hardcoded signing key, an allowlist bypass in a URL check and prototype pollution. All ten are plain Node with `node --test` and no installs.
+Measured with `node scripts/bench/fix-score.mjs --run --repeat 2`. It uses fourteen small projects under `scripts/bench/fix-cases/`, each with one planted vulnerability. Ten are plain Node with `node --test` and no installs: SQL injection, path traversal, command injection, unsafe `eval` of pasted settings, MD5 password hashing, an open redirect, a missing authorization check, a hardcoded signing key, an allowlist bypass in a URL check and prototype pollution. Four are plain Java with no dependencies, built with `javac` and tested by a `Tests` class: path traversal, XML external entities, command injection and unsafe deserialization.
 
-A case has the project and its tests, a SARIF file with the finding, a note on what a correct fix must do, a hidden exploit script and a reference fix. The reference fix is used only by `--dry-run`, which proves each exploit check fails on the vulnerable code and passes on a correct fix, with the tests green both times. A run copies the project to a fresh git repository and a fresh home, imports the finding, runs `0security findings fix <id> --no-pr --budget 0.5` with the project's tests as the check, then scores the committed branch in the copy. The tests are the original files, restored before they run. A fix counts when it committed, the original tests pass and the exploit check exits 0.
+A case has the project and its tests, a SARIF file with the finding, a note on what a correct fix must do, a hidden proof of vulnerability and a reference fix. The proof is `exploit.mjs` for Node cases and `pov/Pov.java` for Java cases. Both exit 0 when the vulnerability is blocked, 1 when it still works and 2 when the function broke. The reference fix is used only by `--dry-run`, which proves each check fails on the vulnerable code and passes on a correct fix, with the tests green both times.
 
-2026-11-23, default model (gpt-6-luna), 2 repeats, `--budget 0.5` per fix, total cost $0.05:
+A run copies the project to a fresh git repository and a fresh home, imports the finding, runs `0security findings fix <id> --no-pr --budget 0.5` with the project's tests as the check, then scores the committed branch in the copy. The tests are the original files, restored before they run. A fix counts when all of these hold:
 
-- Fix rate 90% (18 of 20 attempts; 90% in both repeats). All 20 attempts committed and kept the tests green. 18 blocked the exploit.
+- It committed.
+- The project compiles (Java cases; Node has no build).
+- The original tests pass.
+- The hidden proof exits 0.
+- A rescan with FoxGuard no longer reports the finding's rule in that file. This applies only where FoxGuard flagged the original: it did for 6 of the 14 cases (command injection and XML external entities in Java; command injection, SQL injection, `eval` and weak hashing in Node). Elsewhere the rescan column reads n/a, because a clean rescan would prove nothing.
+
+2026-11-24, default model (gpt-6-luna), 2 repeats, `--budget 0.5` per fix, total cost $0.08. The table is in `scripts/bench/results/fix-2026-11-24T07-59-17-725Z.md`.
+
+- Fix rate 93% (26 of 28 attempts). All 28 committed, compiled where there is a build, kept the tests green and left the rescan clean where it applied. 26 blocked the proof.
+- The four Java cases were fixed 8 of 8 times. Cost per fix $0.0026 to $0.0039, 41 to 55 seconds.
 - Both failures were the hardcoded-secret case. The model moved the key to `SESSION_SECRET` but kept a fallback to a default key. The case requires failing closed, so the exploit check counts that as not fixed. It is a strict reading, and the answer note for the case says so.
-- Every fix touched the expected source file and added or edited a test; 7 to 43 lines changed in total. Cost per fix $0.0017 to $0.0035, 21 to 40 seconds.
-- A first pass of the same run scored the open-redirect case 0 of 2 because the exploit check treated `/%2f/` paths as unsafe. Browsers do not decode that sequence in a redirect, so the check was wrong, not the fixes. It was removed and the run repeated; the table above is the second run.
+- Every fix touched the expected source file and added or edited a test.
 
-What it shows: on single-bug textbook cases the fix flow commits a working change that keeps the tests passing. What it does not show: how it behaves in a repository with many files, a build, or a vulnerability that spans modules. The exploit scripts are ours and test the cases we thought of. A fix that blocks our payloads and misses another one would pass. The cases are also small enough that the model may have seen close variants of them.
+What it shows: on single-bug textbook cases the fix flow commits a change that applies, compiles, keeps the tests passing and blocks our proof. What it does not show: how it behaves in a repository with many files, a build tool, a dependency or a vulnerability that spans modules. The Java cases are small programs we wrote, not Vul4J or WebGoat projects, and the rescan uses the free scanner, not a model scan. The proofs are ours and test the cases we thought of. A fix that blocks our payloads and misses another one would pass. The cases are also small enough that the model may have seen close variants of them.
 
 ## Agent triage (`0security findings verify`)
 
@@ -115,6 +125,20 @@ The number to watch is real bugs that verify called false-positive. Real means t
 - Precision of the list before triage 93%, and the same after dropping false-positive verdicts, because verify dropped nothing.
 
 This run had a single noise finding, so it says almost nothing about how much noise verify removes. It only repeats the earlier result: verify did not drop real bugs. A harder test needs fixtures that produce more false positives, and the OWASP Benchmark ground truth and the hand-labelled Java findings that the original issue asks for are not done.
+
+### Against the OWASP Benchmark
+
+`scripts/bench/triage-truth.mjs` runs the same scan and `findings verify --apply` on files whose ground truth comes from outside this repository. With `--owasp <checkout>` it reads `expectedresults-1.2.csv` of a BenchmarkJava checkout, takes a seeded sample with the same number of real and not-real cases in each of the eleven categories, copies only those test files to a scratch folder and scans that. A finding counts against a case when it is in that case's file and its text names the case's category. Any other finding is left out of the rates. The checkout is not committed (it is GPL and large).
+
+2026-11-24, default model, `--per-class 3 --seed 1`: 66 cases (33 real, 33 not real), one run, total cost $0.24 (verify $0.04). The report is `scripts/bench/results/triage-truth-2026-11-24T07-42-38-349Z.md`.
+
+- The scan reported 24 findings; 17 were verified. Of those, 15 matched real cases and 2 matched not-real cases.
+- Real bugs that verify called false-positive: 0 of 15 (recall loss 0%). True-positive verdicts: 11 of the 15 real findings (73%); 3 were uncertain.
+- Noise removed: 0 of 2. Both noise findings were answered uncertain.
+
+This is a first measurement, not an answer. Two noise findings cannot show a false-positive reduction. The scan found few of the 66 cases, so most real cases were never findings for verify to judge. A larger sample, repeats and a per-category breakdown are needed.
+
+A hand-labelled set from a real application uses the same script: `--labels <file> --app <folder>`, with a JSON file of `{ path, line, label }` entries where label is `real` or `noise`. No such set is committed. The 45 hand-labelled findings from a real open-source Java application that issue 448 asks for have not been made.
 
 ## What it does not prove
 
