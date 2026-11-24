@@ -309,4 +309,66 @@ describe("protected paths: sensitive state under ~/.0", () => {
       ).not.toBeNull();
     });
   });
+
+  describe("parser, wrapper, flag, and omitted-state bypasses", () => {
+    const extCtx = { home: "/home/op", cwd: "/work", extensionFilesReadable: true };
+
+    it("detects protected paths through ANSI-C $'...' quoting and hex/unicode escapes", () => {
+      expect(findProtectedPathUse("cat $'/home/op/.0/credentials.json'", [], extCtx)).not.toBeNull();
+      expect(findProtectedPathUse("cat $'\\x2fhome/op/.0/credentials.json'", [], extCtx)).not.toBeNull();
+      expect(findProtectedPathUse("cat $'\\u002fhome/op/.0/access-token'", [], extCtx)).not.toBeNull();
+    });
+
+    it("detects extension script clobbering via noclobber >| redirection", () => {
+      expect(
+        findProtectedPathUse("echo overwrite >| /home/op/.0/extensions/ext/rev1/scripts/run.sh", [], extCtx),
+      ).not.toBeNull();
+    });
+
+    it("tracks cd and pushd targets even when flags like -P, -L, -n, or -- precede them", () => {
+      expect(hit("cd -P ~/.0 && cat credentials.json")).not.toBeNull();
+      expect(hit("cd -L ~/.0 && cat tui-settings.json")).not.toBeNull();
+      expect(hit("cd -- ~/.0 && rm -rf extensions")).not.toBeNull();
+      expect(hit("pushd -n ~/.0 && cat 0.db")).not.toBeNull();
+    });
+
+    it.each([
+      "access-token",
+      "AGENTS.md",
+      "workspaces/ws.json",
+      "team-configs/team.json",
+      "console-sessions/s1.json",
+      "skills-library/custom/SKILL.md",
+      "engagements/e1.json",
+    ])("protects sensitive state entry ~/.0/%s", (entry) => {
+      expect(hit(`cat ~/.0/${entry}`)).not.toBeNull();
+      expect(hit(`echo x > ~/.0/${entry}`)).not.toBeNull();
+    });
+
+    it("enforces protected paths case-insensitively on case-insensitive filesystems", () => {
+      const ciCtx = { home: "/home/op", cwd: "/work", caseInsensitive: true };
+      expect(findProtectedPathUse("cat ~/.0/CREDENTIALS.JSON", [], ciCtx)).not.toBeNull();
+      expect(findProtectedPathUse("echo x > ~/.0/WEB-CONNECTIONS.JSON", [], ciCtx)).not.toBeNull();
+      expect(findProtectedPathUse("cat /HOME/OP/.0/0.DB", [], ciCtx)).not.toBeNull();
+    });
+
+    it("catches approval commands behind ANSI-C quotes, full-path wrappers, env -S, exec -a, node flags, bun, and skill aliases", () => {
+      for (const command of [
+        "$'0' skills extensions enable demo --yes",
+        "/usr/bin/env -u ZERO_AGENT_SESSION 0security skills extensions enable demo --yes",
+        'env -S "0 skills extensions enable demo --yes"',
+        "env --split-string='0security plugin enable demo' true",
+        "exec -a z 0security skills add x --yes",
+        "node -r ./p.js /opt/0/0.js skills add x --yes",
+        "bun /opt/0/0.js skills add x --yes",
+        "0security skills list demo --enable",
+        "0security skills list demo --disable",
+        "0security skills list demo --mcp-remove",
+        "0security skills link /tmp/evil-skills",
+        "0security skills import /tmp/evil.zip",
+      ]) {
+        expect(findApprovalCommand(command), command).not.toBeNull();
+      }
+    });
+  });
 });
