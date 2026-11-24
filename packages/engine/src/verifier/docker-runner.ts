@@ -11,6 +11,24 @@ import { exec } from "./process.js";
 
 type Exec = typeof exec;
 
+/** The `create` argument list for one step. Pure, so the limits can be tested without a container runtime. */
+export function buildCreateArgs(name: string, request: StepRequest, options: { storage?: boolean } = {}): string[] {
+  const withSetup = Boolean(request.setup) && request.network === "none";
+  const limits = request.limits;
+  return [
+    "create", "--name", name, "--label", "0.verify=1", "--cap-drop", "ALL", "--cap-add", "DAC_OVERRIDE", "--cap-add", "FOWNER", "--security-opt", "no-new-privileges",
+    "--pids-limit", String(limits?.pidsLimit ?? 512), "--memory", limits?.memory ?? "2g", "--workdir", "/work",
+    ...(limits?.memory ? ["--memory-swap", limits.memory] : []),
+    ...(limits?.cpus ? ["--cpus", limits.cpus] : []),
+    ...(limits?.readOnlyRoot ? ["--read-only"] : []),
+    ...(limits?.tmpfs ?? []).flatMap((mount) => ["--tmpfs", mount]),
+    ...(limits?.storageSize && options.storage !== false ? ["--storage-opt", `size=${limits.storageSize}`] : []),
+    ...(request.network === "none" && !withSetup ? ["--network", "none"] : []),
+    "--entrypoint", "sh", request.image ?? "",
+    "-c", withSetup || request.setup ? "sleep 86400" : request.command,
+  ];
+}
+
 export interface OciRunnerOptions {
   /** Candidate binaries in order of preference. */
   binaries?: string[];
@@ -38,23 +56,22 @@ export class OciRunner implements ContainerRunner {
 
   async run(request: StepRequest): Promise<StepOutcome> {
     const started = Date.now();
-    const out = (partial: Partial<StepOutcome>): StepOutcome => ({ exitCode: null, output: "", timedOut: false, durationMs: Date.now() - started, ...partial });
+    const notApplied: string[] = [];
+    const out = (partial: Partial<StepOutcome>): StepOutcome => ({ exitCode: null, output: "", timedOut: false, durationMs: Date.now() - started, ...(notApplied.length ? { limitsNotApplied: notApplied } : {}), ...partial });
     if (!request.image) return out({ infraError: "no image declared for this step" });
     if (!this.#bin) { const probe = await this.probe(); if (!probe.ok) return out({ infraError: probe.reason }); }
     const bin = this.#bin!;
     const name = `0-verify-${randomBytes(6).toString("hex")}`;
     const remaining = () => Math.max(1000, request.timeoutMs - (Date.now() - started));
     const run = (args: string[], timeoutMs = remaining()) => this.#exec(bin, args, { timeoutMs, ...(request.signal ? { signal: request.signal } : {}) });
-    const withSetup = Boolean(request.setup) && request.network === "none";
-    const createArgs = [
-      "create", "--name", name, "--label", "0.verify=1", "--cap-drop", "ALL", "--cap-add", "DAC_OVERRIDE", "--cap-add", "FOWNER", "--security-opt", "no-new-privileges",
-      "--pids-limit", "512", "--memory", "2g", "--workdir", "/work",
-      ...(request.network === "none" && !withSetup ? ["--network", "none"] : []),
-      "--entrypoint", "sh", request.image,
-      "-c", withSetup || request.setup ? "sleep 86400" : request.command,
-    ];
     try {
-      const created = await run(createArgs, Math.max(remaining(), 300_000)); // first use may pull the image
+      let created = await run(buildCreateArgs(name, request), Math.max(remaining(), 300_000)); // first use may pull the image
+      if (created.code !== 0 && request.limits?.storageSize && /storage-opt|storage option|quota/i.test(created.output)) {
+        // The storage driver cannot cap the writable layer. Run without that one cap and say so; the other limits still apply.
+        await this.#exec(bin, ["rm", "-f", name], { timeoutMs: 20_000 });
+        notApplied.push("storage-size");
+        created = await run(buildCreateArgs(name, request, { storage: false }), Math.max(remaining(), 300_000));
+      }
       if (created.code !== 0) return out({ infraError: `could not create container: ${created.output.trim().split("\n").pop() ?? ""}` });
       const copied = await run(["cp", `${request.dir}/.`, `${name}:/work`]);
       if (copied.code !== 0) return out({ infraError: `could not copy the snapshot: ${copied.output.trim().split("\n").pop() ?? ""}` });

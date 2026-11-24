@@ -10,12 +10,13 @@ import { afterEach, describe, expect, it } from "vitest";
 import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import type { ContainerRunner, StepOutcome, StepRequest } from "../verifier/port.js";
 import { exec } from "../verifier/process.js";
 import { HostRunner } from "../verifier/host-runner.js";
 import { parseFindingReproduction, proposeProof, type ReproProof } from "../shared/reproduction.js";
-import { hashAppFiles, reproduceFinding } from "./harness.js";
+import { REPRODUCTION_LIMITS, REPRODUCTION_TIMEOUT_MS, hashAppFiles, reproduceFinding } from "./harness.js";
 import { planPathTraversal } from "./path-traversal.js";
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "../../../../scripts/bench/repro-fixtures/path-traversal");
@@ -156,6 +157,19 @@ describe("an untrusted app cannot get a hit without a request that reaches the c
   });
 });
 
+describe("container limits", () => {
+  it("asks the runner for process, memory, CPU, tmpfs and storage caps and a wall-clock timeout", async () => {
+    let seen: StepRequest | undefined;
+    const spy: ContainerRunner = { isolation: "container", async probe() { return { ok: true, runtime: "fake" }; }, async run(request) { seen = request; return { exitCode: 0, output: "", timedOut: false, durationMs: 1, limitsNotApplied: ["storage-size"] }; } };
+    const result = await reproduceFinding({ proof: traversal, snapshotDir: join(FIXTURES, "fixed"), commit: COMMIT, image: IMAGE, runner: spy });
+    expect(seen?.limits).toEqual(REPRODUCTION_LIMITS);
+    expect(REPRODUCTION_LIMITS).toMatchObject({ pidsLimit: 128, memory: "512m", cpus: "1", storageSize: "256m", tmpfs: ["/tmp:rw,size=64m,noexec,nosuid"] });
+    expect(seen?.timeoutMs).toBe(REPRODUCTION_TIMEOUT_MS);
+    expect(seen?.network).toBe("none");
+    expect(result.logTail).toContain("limits not applied: storage-size");
+  });
+});
+
 describe("hashing the app files", () => {
   it("is stable, and changes when a file changes", () => {
     const dir = appDir("a");
@@ -212,6 +226,25 @@ describe("the intentionally vulnerable fixture", () => {
     expect(listens.length).toBeGreaterThan(0);
     expect(listens.every((l) => l.includes('"127.0.0.1"'))).toBe(true);
   });
+  it("serves nothing above the folder that holds its copy, and only to loopback peers", async () => {
+    expect(source).toMatch(/LOOPBACK\.has\(req\.socket\.remoteAddress\)/);
+    const parent = mkdtempSync(join(tmpdir(), "0-repro-fx-"));
+    scratch.push(parent);
+    const work = join(parent, "work");
+    cpSync(join(FIXTURES, "vulnerable"), work, { recursive: true });
+    writeFileSync(join(parent, "inside.txt"), "inside-the-limit");
+    const port = nextPort++;
+    const child = spawn("node", ["server.js"], { cwd: work, env: { ...process.env, PORT: String(port), REPRO_FIXTURE_ACK: "intentionally-vulnerable" }, stdio: "ignore" });
+    try {
+      let reached = false;
+      for (let i = 0; i < 40 && !reached; i++) { try { await fetch(`http://127.0.0.1:${port}/`); reached = true; } catch { await new Promise((r) => setTimeout(r, 100)); } }
+      expect(reached).toBe(true);
+      const get = async (name: string) => { const r = await fetch(`http://127.0.0.1:${port}/download?name=${name}`); return { status: r.status, text: await r.text() }; };
+      expect(await get("hello.txt")).toMatchObject({ status: 200 });
+      expect(await get("../../inside.txt")).toEqual({ status: 200, text: "inside-the-limit" }); // the planted flaw: leaves public/
+      expect(await get("../../../../../../../../etc/hosts")).toMatchObject({ status: 403 }); // but never leaves the temp folder
+    } finally { child.kill("SIGKILL"); }
+  }, 30_000);
   it("has no package.json, no start script and no workflow that runs it", () => {
     for (const variant of ["vulnerable", "fixed"]) expect(existsSync(join(FIXTURES, variant, "package.json"))).toBe(false);
     const root = join(FIXTURES, "../../../..");

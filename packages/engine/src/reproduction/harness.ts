@@ -11,7 +11,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { lstatSync, readdirSync, readFileSync, readlinkSync } from "node:fs";
 import { join } from "node:path";
-import type { ContainerRunner } from "../verifier/port.js";
+import type { ContainerLimits, ContainerRunner } from "../verifier/port.js";
 import { redactLog } from "../verifier/redact.js";
 import { imageDigest, isPinnedImage } from "../verifier/spec.js";
 import { tailOf } from "../verifier/result.js";
@@ -42,6 +42,21 @@ export interface ReproduceInput {
 }
 
 const MAX_START = 500;
+
+/**
+ * Limits for every reproduction container: the app is untrusted code. Processes, memory, CPU and writable storage are
+ * capped, /tmp is a small tmpfs, and the run has a wall-clock timeout. The root file system is not read-only: the
+ * snapshot is copied into the container and the canary is planted in the app folder's parent, both of which need
+ * writable space, and `docker cp` cannot write into a tmpfs.
+ */
+export const REPRODUCTION_LIMITS: ContainerLimits = {
+  pidsLimit: 128,
+  memory: "512m",
+  cpus: "1",
+  tmpfs: ["/tmp:rw,size=64m,noexec,nosuid"],
+  storageSize: "256m",
+};
+export const REPRODUCTION_TIMEOUT_MS = 120_000;
 
 /** SHA-256 over the relative paths and contents of every file under `dir`, in a fixed order. Symlinks hash their target text. */
 export function hashAppFiles(dir: string): string {
@@ -95,10 +110,11 @@ export async function reproduceFinding(input: ReproduceInput): Promise<Reproduct
   try { appSha256 = hashAppFiles(input.snapshotDir); }
   catch (error) { return done("error", "app-files-could-not-be-hashed", { logTail: tailOf(redactLog(error instanceof Error ? error.message : String(error))) }); }
   const outcome = await input.runner.run({
-    image: input.image, dir: input.snapshotDir, command, network: "none", timeoutMs: input.timeoutMs ?? 120_000,
+    image: input.image, dir: input.snapshotDir, command, network: "none", timeoutMs: input.timeoutMs ?? REPRODUCTION_TIMEOUT_MS, limits: REPRODUCTION_LIMITS,
     ...(input.signal ? { signal: input.signal } : {}),
   });
-  const logTail = tailOf(redactLog(tailOf(outcome.output, 4096)));
+  const notApplied = outcome.limitsNotApplied?.length ? `limits not applied: ${outcome.limitsNotApplied.join(", ")}\n` : "";
+  const logTail = tailOf(redactLog(`${notApplied}${tailOf(outcome.output, 4096)}`));
   const common = { commit: input.commit, imageDigest: imageDigest(input.image), isolation: (isolated ? "container" : "unisolated") as "container" | "unisolated", network: "loopback" as const, recipeSha256, appSha256, logTail };
 
   if (outcome.infraError) return done("error", "runner-failed", { logTail: tailOf(redactLog(outcome.infraError)) });
