@@ -15,6 +15,7 @@ import os from "node:os";
 import path from "node:path";
 import { bwrapArgs } from "./bwrap.js";
 import { DEFAULT_DECL, describeSandbox, resolveSandbox, WORKSPACE_TOKEN, type ResolvedSandbox, type SandboxDecl } from "./policy.js";
+import { detectNodePermission, isNodeProgram, nodePermissionArgs, type NodePermissionSupport } from "./node-permission.js";
 import { seatbeltArgs, seatbeltProfile } from "./seatbelt.js";
 
 export type SandboxMode = "auto" | "require" | "off";
@@ -133,7 +134,10 @@ export type SandboxPlan =
   | { kind: "unsandboxed"; status: string }
   | { kind: "refused"; error: string };
 
-export interface PlanOptions { env?: Readonly<Record<string, string | undefined>>; status?: SandboxStatus; scratchRoot?: string }
+export interface PlanOptions { env?: Readonly<Record<string, string | undefined>>; status?: SandboxStatus; scratchRoot?: string; nodeSupport?: NodePermissionSupport }
+
+/** ZERO_SANDBOX_NODE_PERMISSION=off leaves node's permission flags out (an extension that needs a native addon, for example). */
+const nodePermissionWanted = (env: Readonly<Record<string, string | undefined>>): boolean => env.ZERO_SANDBOX_NODE_PERMISSION?.trim().toLowerCase() !== "off";
 
 const resolveProgram = (name: string, pathEnv: string): string => (name.includes("/") ? name : whichIn(name, pathEnv) ?? name);
 const real = (p: string): string => { try { return fs.realpathSync(p); } catch { return p; } };
@@ -145,15 +149,19 @@ export function planSandbox(req: SandboxRequest, options: PlanOptions = {}): San
   if (m.mode === "off") return { kind: "unsandboxed", status: "sandbox: not applied (ZERO_SANDBOX=off)" };
   if (!req.decl && m.mode === "auto") return { kind: "unsandboxed", status: `sandbox: not applied (${req.label} declares no sandbox block; set ZERO_SANDBOX=require to sandbox it with the strict defaults)` };
   const detected = options.status ?? detectSandbox(undefined, env);
+  const pathEnv = req.env.PATH ?? process.env.PATH ?? "";
+  const program = resolveProgram(req.argv[0] ?? "", pathEnv);
+  // Node's permission model: a layer for programs started with node, and the only one where no OS sandbox works.
+  const nodeSupport = nodePermissionWanted(env) && program && path.isAbsolute(program) && isNodeProgram(program, real(program)) ? (options.nodeSupport ?? detectNodePermission(program)) : undefined;
   if (!detected.backend) {
-    if (m.mode === "require") return { kind: "refused", error: `ZERO_SANDBOX=require but no sandbox is available (${detected.reason}). Run \`0security doctor\` to see what is missing, or set ZERO_SANDBOX=auto to run without one.` };
-    return { kind: "unsandboxed", status: `sandbox: not available (${detected.reason}); ran without it` };
+    const nodeOnly = nodeSupport?.supported === true;
+    // require means every declared limit is enforced. Node's model cannot enforce "no network", so it only stands in when the network is declared on.
+    if (m.mode === "require" && !(nodeOnly && (req.decl ?? DEFAULT_DECL).network)) return { kind: "refused", error: `ZERO_SANDBOX=require but no sandbox is available (${detected.reason}). Run \`0security doctor\` to see what is missing, or set ZERO_SANDBOX=auto to run without one.` };
+    if (!nodeOnly) return { kind: "unsandboxed", status: `sandbox: not available (${detected.reason}); ran without it` };
   }
   const decl = req.decl ?? DEFAULT_DECL;
   const usesWorkspace = [...decl.readPaths, ...decl.writePaths].includes(WORKSPACE_TOKEN);
   const workspace = usesWorkspace ? req.workspace : null;
-  const pathEnv = req.env.PATH ?? process.env.PATH ?? "";
-  const program = resolveProgram(req.argv[0] ?? "", pathEnv);
   if (!req.argv[0] || !path.isAbsolute(program)) return { kind: "refused", error: `cannot start ${req.label} in a sandbox: ${req.argv[0] ?? "(nothing)"} was not found in PATH` };
   const interpreterPaths = req.interpreters.flatMap(n => { const p = whichIn(n, pathEnv); return p ? [p, real(p)] : []; });
   const execAllow = [program, real(program), ...interpreterPaths, "/usr/bin/env", real("/usr/bin/env"), "/bin/sh", real("/bin/sh"), "/bin/bash", real("/bin/bash")].filter(p => fs.existsSync(p));
@@ -166,8 +174,18 @@ export function planSandbox(req: SandboxRequest, options: PlanOptions = {}): San
   const policy = resolved.value;
   const cwd = usesWorkspace && policy.workspace ? policy.workspace : policy.extensionDir;
   const backendPath = detected.backend === "seatbelt" ? detected.seatbelt.path : detected.bwrap.path;
-  const argv = [program, ...req.argv.slice(1)];
-  const cmd = sandboxedCommand(detected.backend, policy, argv, cwd, backendPath);
+  let argv = [program, ...req.argv.slice(1)];
+  let nodeNote = "";
+  if (nodeSupport?.supported) {
+    const flags = nodePermissionArgs(policy, nodeSupport);
+    if (flags.ok) { argv = [program, ...flags.args, ...req.argv.slice(1)]; nodeNote = `${nodeSupport.flag}: folders, child programs, workers`; }
+    else if (!detected.backend) { cleanup(); return { kind: "unsandboxed", status: `sandbox: not available (${detected.reason}; ${flags.error}); ran without it` }; }
+  }
   const limitNote = policy.limits.cpuSeconds || policy.limits.memoryMb ? `, limits ${[policy.limits.cpuSeconds ? `${policy.limits.cpuSeconds}s cpu` : "", policy.limits.memoryMb ? `${policy.limits.memoryMb} MB memory` : ""].filter(Boolean).join(" ")}` : "";
-  return { kind: "sandboxed", ...cmd, cwd, env: { ...req.env, TMPDIR: scratch, ZERO_SANDBOX_ACTIVE: "1" }, status: `sandbox: applied (${describeSandbox(detected.backend, policy)}${limitNote})`, cleanup };
+  if (!detected.backend) {
+    const alone = withLimits(argv[0]!, argv.slice(1), policy.limits);
+    return { kind: "sandboxed", ...alone, cwd, env: { ...req.env, TMPDIR: scratch, ZERO_SANDBOX_ACTIVE: "1" }, status: `sandbox: applied (${nodeNote}; writes only to a scratch folder${policy.writePaths.length ? " and declared paths" : ""}; the network is NOT restricted by this layer${limitNote})`, cleanup };
+  }
+  const cmd = sandboxedCommand(detected.backend, policy, argv, cwd, backendPath);
+  return { kind: "sandboxed", ...cmd, cwd, env: { ...req.env, TMPDIR: scratch, ZERO_SANDBOX_ACTIVE: "1" }, status: `sandbox: applied (${describeSandbox(detected.backend, policy)}${nodeNote ? `; ${nodeNote}` : ""}${limitNote})`, cleanup };
 }

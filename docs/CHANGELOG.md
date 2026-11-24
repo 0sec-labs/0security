@@ -13,6 +13,8 @@ on the GitHub Release tag.
 ## [Unreleased]
 
 - `0security findings fix` now records its pull request in the same file as burndown, so `0security findings export-fixes` covers single fixes too. The report also gives the summary for each repository (`workspaces` in the JSON, a table in the Markdown), and the schema is documented.
+- Extension scripts and MCP servers started with `node` now also run with Node's permission flags (`--permission`): reads limited to the extension folder, declared paths and scratch, writes to scratch and declared paths, no child programs without `process`. Where no operating system sandbox works (Windows, a Linux container without user namespaces) this is the only layer and the status line says the network is not restricted. Set `ZERO_SANDBOX_NODE_PERMISSION=off` to leave it out. Refs #389.
+
 - `0security findings rollup` counts open findings across repositories by severity, category, age and owner, in text, JSON or HTML. It reads rollup export files (`--export` writes one) and findings databases, and sends nothing. Fixed, false-positive, accepted and suppressed findings are left out of the open count.
 - The web console and the docs site both render Mermaid diagrams with Mermaid 12. A leftover override had pinned both to version 11.
 - Sentinels have a signed `webhook` trigger. Another system calls `/api/webhooks/trigger/<trigger-id>` in server mode and proves it with GitHub's `X-Hub-Signature-256`, Bitbucket's `X-Hub-Signature`, GitLab's `X-Gitlab-Token` or `X-0-Signature-256` with a timestamp. Each trigger has its own secret (`0security sentinels triggers secret`), the body is capped at 256 KB, and repeated deliveries start one run. Refs #430.

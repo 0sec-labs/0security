@@ -124,6 +124,16 @@ Every script run starts its output with a line such as `[sandbox: applied (seatb
 
 When a sandboxed run fails because it needs something it did not declare, the error is the operating system's, for example `Operation not permitted`. Add the missing permission to the `sandbox` block, or set `ZERO_SANDBOX=off` to run without it.
 
+### Node scripts and servers
+
+When the program is `node` and it supports the permission model (Node 20 or later), 0 also starts it with `--permission`. The process can read its own folder, declared paths and scratch, and write scratch and declared `writePaths`. It can start child programs only with `process`, and never starts workers. This layer runs inside the operating system sandbox when there is one.
+
+It is the only layer on Windows and on Linux hosts where bubblewrap cannot start, such as a container without user namespaces. Node cannot block the network, so this layer does not. In that case the status line says the network is not restricted. `require` still refuses to run without an operating system sandbox, unless the extension declares `network: true`.
+
+Set `ZERO_SANDBOX_NODE_PERMISSION=off` to leave the flags out, for example for a program that loads a native addon.
+
+Scripts started by `sh` or `python` get no Node layer. A Linux host without a working sandbox runs them unsandboxed, and 0 says so. Windows has no operating system backend.
+
 Optional limits apply to sandboxed runs: `ZERO_SANDBOX_CPU_SECONDS` (macOS and Linux) and `ZERO_SANDBOX_MEMORY_MB` (Linux only; macOS does not enforce it). The timeout of the bash tool still applies.
 
 ### Sandbox your own MCP servers
