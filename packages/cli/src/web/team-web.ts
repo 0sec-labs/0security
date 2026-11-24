@@ -100,9 +100,11 @@ export async function handleTeamRequest(req: IncomingMessage, url: URL, auth: Te
   const tokenRoute = /^scim-tokens(?:\/([^/]+))?$/.exec(path);
   if (tokenRoute) {
     const actor = auth.resolveSession(req)!;
+    // A SCIM token provisions accounts and sets their roles, so only the workspace owner may make, list or revoke one.
+    // No other role is enough, whatever permissions it holds (users.manage included).
+    if (actor.role !== "owner") throw new TeamAuthError("Only workspace owners can manage SCIM tokens.", 403);
     // Making a token is a paid feature. Listing and revoking tokens always work, so a lapsed license never keeps one alive.
     if (method === "POST") { const unavailable = requireFeature("scim"); if (unavailable) throw new TeamAuthError(unavailable, 403); }
-    if (!actor.permissions.includes("users.manage")) throw new TeamAuthError("Your role does not include the users.manage permission.", 403);
     const store = auth.scim;
     if (!store) throw new TeamAuthError("SCIM needs the account database.", 409);
     const who = auditActor({ engineRequest: false, teamEnabled: true, displayName: actor.displayName });
