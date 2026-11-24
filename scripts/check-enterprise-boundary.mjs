@@ -28,6 +28,7 @@ export const LICENSE_FIELD = "SEE LICENSE IN LICENSE";
  */
 export const ALLOWED_BRIDGES = [
   "packages/cli/src/enterprise-bridge.ts", // `0security config get license`
+  "packages/cli/src/findings-server-bridge.ts", // the shared findings server: ingest, write keys, org dashboard
 ];
 
 const SKIP_DIRS = new Set(["node_modules", "dist", "dist-bin", ".git", ".astro", ".claude", ".worktrees", ".cache", "vendor"]);

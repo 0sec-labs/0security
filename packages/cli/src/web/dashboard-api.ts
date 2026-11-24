@@ -25,6 +25,7 @@ import { MAX_SNAPSHOT_WINDOW, MAX_EVENTS_WAIT_SECONDS, parseSnapshotWindow, pars
 import { openSharedDb, evictSharedDb } from "./shared-db.js";
 import { findingsServiceFor } from "./findings-service.js";
 import { handleFindingFamilyRequest } from "./finding-family-routes.js";
+import { handleFindingsOrgRequest, parseFindingsOrgPath } from "./findings-org-routes.js";
 import { invalidateReadCache, readThrough } from "./read-cache.js";
 import { handleSelfEditRequest } from "./self-edit-routes.js";
 import { SkillsCatalogService, handleSkillsCatalogRequest } from "./skills-catalog.js";
@@ -587,6 +588,12 @@ export async function handleApiRequest(
     } finally {
       db.close();
     }
+    return true;
+  }
+
+  const orgPath = parseFindingsOrgPath(pathname);
+  if (orgPath) {
+    await handleFindingsOrgRequest(req, res, new URL(req.url ?? "/", "http://localhost"), orgPath, dbPath);
     return true;
   }
 

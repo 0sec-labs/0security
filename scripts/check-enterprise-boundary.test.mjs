@@ -32,7 +32,7 @@ test("a clean layout passes", () => {
 });
 
 test("the shipped allow list names only existing bridge files", () => {
-  assert.deepEqual(ALLOWED_BRIDGES, ["packages/cli/src/enterprise-bridge.ts"]);
+  assert.deepEqual(ALLOWED_BRIDGES, ["packages/cli/src/enterprise-bridge.ts", "packages/cli/src/findings-server-bridge.ts"]);
 });
 
 test("moduleSpecifiers finds static, dynamic and require forms", () => {
