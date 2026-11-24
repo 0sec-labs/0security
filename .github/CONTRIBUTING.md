@@ -10,6 +10,8 @@ Thanks for helping improve 0.
 - Do not submit customer data, credentials, raw target traces, embargoed
   vulnerabilities, or undisclosed exploit material.
 - Discuss broad changes in an issue before writing a large patch.
+- Do not open pull requests that change `enterprise/`. That directory has its
+  own license (`enterprise/LICENSE`) and takes no outside contributions.
 
 ## Setup
 

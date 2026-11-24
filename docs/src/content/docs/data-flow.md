@@ -96,6 +96,8 @@ These are not blocked, because you name the destination. Leave them unused to ke
 | `local-socket` | A local unix socket | Nothing leaves the computer. |
 | `no-network-matches` | None | Source text that looks like a network call but is not one. |
 
+The enterprise license check makes no network call. It verifies a signed key on your computer with the local clock. Nothing is registered, reported or looked up, so it needs no entry in the inventory.
+
 ## Keeping this page honest
 
 The inventory lives in `scripts/egress-inventory.json`. `pnpm check:egress-inventory` fails when a source file under `packages/engine/src` or `packages/cli/src` makes an outbound call that the inventory does not list, when a listed file stops matching, when a new `https://` host appears in code that is not reviewed, and when this page does not mention an entry or one of its hosts. When you add a call site, add it to the inventory, document it here, and decide how `ZERO_ENTERPRISE` treats it.

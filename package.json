@@ -19,6 +19,7 @@
     "docs:sync": "node scripts/sync-cli-docs.mjs --write",
     "check:docs-commands": "node scripts/check-docs-commands.mjs",
     "check:no-npm-publish": "node scripts/check-no-npm-publish.mjs",
+    "check:enterprise-boundary": "node scripts/check-enterprise-boundary.mjs && node --test scripts/check-enterprise-boundary.test.mjs",
     "check:script-quotes": "node scripts/check-script-quotes.mjs",
     "test:script-quotes": "node --test scripts/check-script-quotes.test.mjs",
     "test:no-npm-publish": "node --test scripts/check-no-npm-publish.test.mjs",

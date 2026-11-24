@@ -270,7 +270,7 @@ export function checkLinks(file, markdown, rootDir = root) {
 
 function sourceHas(name, rootDir) {
   try {
-    execFileSync("git", ["grep", "-q", "-F", "-e", name, "--", ":(glob)packages/*/src/**", ":(glob)scripts/**", ":(glob).github/**", "install.sh", ":(exclude,glob)**/*.test.*", ":(exclude,glob)**/__tests__/**"], { cwd: rootDir, stdio: "ignore" });
+    execFileSync("git", ["grep", "-q", "-F", "-e", name, "--", ":(glob)packages/*/src/**", ":(glob)enterprise/src/**", ":(glob)scripts/**", ":(glob).github/**", "install.sh", ":(exclude,glob)**/*.test.*", ":(exclude,glob)**/__tests__/**"], { cwd: rootDir, stdio: "ignore" });
     return true;
   } catch { return false; }
 }

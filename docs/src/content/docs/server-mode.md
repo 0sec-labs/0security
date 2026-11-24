@@ -356,6 +356,38 @@ Register the exact callback URL with your provider. Omit `clientSecretEnv` for a
 
 0 is open source under MIT OR Apache-2.0. The CLI, engine, browser app and team workspace are all in the [`0sec-labs/0security`](https://github.com/0sec-labs/0security) repository. None of them needs an account, a license key or a 0security-hosted service. Model calls go to the provider you choose with your own key. Findings stay on your computer, CI runner or servers. The only automatic upload is the anonymous telemetry described in [Configuration](/configuration/#telemetry).
 
+### Free and paid
+
+Everything you use today is free: scans, fixes, findings, SBOMs, the web console, the team workspace and audit log export. Verifying a compliance bundle or an audit log is always free.
+
+The `enterprise/` folder in the same repository holds the paid features:
+
+- A shared findings server for many repositories and teams.
+- Finer roles, SCIM provisioning and SAML sign-in.
+- Signed compliance evidence bundles, a tamper-evident audit log and retention policies.
+
+You can read that code. Running it in production needs a license key. Development and testing need none. See [LICENSING.md](https://github.com/0sec-labs/0security/blob/main/LICENSING.md).
+
+A key is a signed string. 0 checks it on your machine and never contacts a server. Set it in the environment of the process that runs 0:
+
+```bash
+export ZERO_LICENSE="<your key>"
+```
+
+Or point to a file that holds the key:
+
+```bash
+export ZERO_LICENSE_FILE=/etc/0security/license.txt
+```
+
+See what your key unlocks:
+
+```bash
+0security config get license
+```
+
+When a key expires, paid features keep working for 30 days with a warning. After that, paid writes stop. You can still read, export and verify your data, and the server still starts. `ZERO_ENTERPRISE` is the separate no-egress switch and does not need a key.
+
 A team workspace shares one computer between members. It is not multi-tenant. Sessions are held in memory, so members sign in again after a restart. Results from several computers are not merged.
 
 Enterprise is arranged with us, not self-served. We can help you run 0 on your own infrastructure, or operate a dedicated deployment for you, one customer per deployment, by contract. We publish no Helm chart or Terraform module and offer no shared multi-tenant cloud. [Book a demo](https://0.security/enterprise/).

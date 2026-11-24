@@ -1,0 +1,60 @@
+0security Enterprise License
+
+Copyright 2026 0 Labs
+
+This license applies only to the files in the enterprise/ directory of this
+repository and to copies of those files (the "Enterprise Software"). It does
+not apply to anything else in the repository. Everything outside enterprise/ is
+available under MIT OR Apache-2.0, as described in LICENSING.md. For the
+avoidance of doubt, the rest of this repository can be used and run without
+infringing this license.
+
+1. What you may do
+
+   You may view the Enterprise Software and modify it for your own use.
+
+   You may use the Enterprise Software for development, testing and evaluation
+   without a subscription.
+
+   You may use the Enterprise Software in production only with a valid
+   enterprise license key issued by 0 Labs, for the features, seats and period
+   that the key names.
+
+2. What you may not do
+
+   a. Copy, distribute, sell, rent or lend the Enterprise Software, or a
+      modified version of it, to anyone else.
+
+   b. Sublicense the Enterprise Software.
+
+   c. Offer the Enterprise Software, or a modified version of it, to third
+      parties as a hosted or managed service, or as part of one.
+
+   d. Remove, disable or circumvent the license key check, or any notice,
+      header or limit that enforces it.
+
+   e. Use the Enterprise Software in production without a valid key.
+
+3. Ownership
+
+   0 Labs and its licensors keep all rights in the Enterprise Software that
+   this license does not grant. Contributions to enterprise/ are not accepted
+   unless 0 Labs agrees to them in writing beforehand.
+
+4. Third-party components
+
+   Third-party components keep their own licenses.
+
+5. Termination
+
+   If you breach this license, your rights under it end. They end at once for
+   a breach of section 2(d) or 2(e).
+
+6. No warranty and limit of liability
+
+   The Enterprise Software is provided "as is", without warranty of any kind.
+   To the extent the law allows, 0 Labs is not liable for any damages arising
+   from its use. A written subscription agreement with 0 Labs can replace these
+   terms for the customer who signs it.
+
+Questions about licensing: https://0.security/enterprise/

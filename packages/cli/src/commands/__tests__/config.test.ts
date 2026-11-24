@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
   runConfigExport,
+  runConfigGet,
   runConfigImport,
   runConfigSet,
   runConfigShow,
@@ -202,5 +203,33 @@ describe("config import", () => {
     runConfigImport(file, cap.deps({ homeDir: makeDir("cfg-home-"), projectDir: makeDir("cfg-proj-") }));
     expect(process.exitCode).toBe(1);
     expect(cap.err.join("\n")).toMatch(/no recognised settings/);
+  });
+});
+
+describe("config get license", () => {
+  const saved = { inline: process.env.ZERO_LICENSE, file: process.env.ZERO_LICENSE_FILE };
+  afterEach(() => {
+    for (const [name, value] of [["ZERO_LICENSE", saved.inline], ["ZERO_LICENSE_FILE", saved.file]] as const) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  });
+
+  it("says there is no license when none is set", () => {
+    delete process.env.ZERO_LICENSE;
+    delete process.env.ZERO_LICENSE_FILE;
+    const cap = capture();
+    runConfigGet("license", cap.deps());
+    expect(cap.out.join("\n")).toContain("License: none");
+    expect(process.exitCode).toBe(0);
+  });
+
+  it("reports an invalid key without echoing it", () => {
+    process.env.ZERO_LICENSE = "not-a-real-key.abc";
+    const cap = capture();
+    runConfigGet("license", { ...cap.deps(), json: true });
+    const status = JSON.parse(cap.out.join("\n"));
+    expect(status).toMatchObject({ state: "invalid", source: "env", features: [] });
+    expect(cap.out.join("\n")).not.toContain("not-a-real-key");
   });
 });

@@ -23,6 +23,7 @@ import type { Command } from "commander";
 
 import { UsageError, exitWhenDone, expectOk, printJson, runConsoleCommand, type ConsoleCommandDeps as ConsoleDeps } from "./console-support.js";
 
+import { licenseStatusLines, readLicenseStatus } from "../enterprise-bridge.js";
 import {
   DEFAULT_SETTINGS,
   SETTING_DEFS,
@@ -279,6 +280,12 @@ function parseValue(key: keyof TuiSettings, raw: string): unknown {
 }
 
 export function runConfigGet(key: string, deps: ConfigCommandDeps & { json?: boolean } = {}): void {
+  if (key === "license") {
+    const status = readLicenseStatus();
+    outOf(deps)(deps.json ? JSON.stringify(status) : licenseStatusLines(status).join("\n"));
+    process.exitCode = EXIT_OK;
+    return;
+  }
   try {
     const name = publicKey(key);
     const { settings, sources } = loadLayeredSettings({ homeDir: deps.homeDir, projectDir: deps.projectDir });
@@ -340,7 +347,7 @@ export function registerConfigCommand(program: Command): void {
 
   config
     .command("get [key]")
-    .description("Print the effective value of one setting, or every setting with no key")
+    .description("Print the effective value of one setting, or every setting with no key. `license` shows the enterprise license status")
     .option("--json", "Print JSON with the source layer")
     .action((key: string | undefined, opts: { json?: boolean }) => {
       if (key === undefined) runConfigShow({ json: opts.json });

@@ -95,4 +95,4 @@ Report bugs in [issues](https://github.com/0sec-labs/0security/issues), improve 
 
 ## License
 
-[MIT](LICENSE-MIT) OR [Apache-2.0](LICENSE-APACHE).
+[MIT](LICENSE-MIT) OR [Apache-2.0](LICENSE-APACHE), except the `enterprise/` directory, which has its own license and needs a key in production. See [LICENSING.md](LICENSING.md).

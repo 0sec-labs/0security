@@ -38,6 +38,7 @@ WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY scripts ./scripts
 COPY packages ./packages
+COPY enterprise ./enterprise
 COPY assets ./assets
 COPY vendor ./vendor
 
