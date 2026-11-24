@@ -4,12 +4,12 @@
 // that reaches the run is copied field by field into short strings with control characters, angle brackets and backticks
 // removed, so the run sees data and never markup or instructions. Nothing here authorises anything: a payload only
 // LOCATES enabled triggers (repository, tag prefix, branch, check name); the trigger's own settings decide.
-import type { SentinelCheckConfig, SentinelReleaseConfig } from "@0/engine/shared";
+import { isSafeGitRef, type SentinelCheckConfig, type SentinelReleaseConfig } from "@0/engine/shared";
 
 export const REPO_SHAPE = /^[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/;
-const TAG_SHAPE = /^[A-Za-z0-9._/-]{1,100}$/;
-const BRANCH_SHAPE = /^[A-Za-z0-9._/-]{1,200}$/;
 const SHA_SHAPE = /^[0-9a-f]{40}$/;
+const isSafeTag = (value: string): boolean => isSafeGitRef(value, { maxLength: 100 });
+const isSafeBranch = (value: string): boolean => isSafeGitRef(value, { maxLength: 200 });
 
 /** The webhook event name for a push (not a git command; single quotes keep the egress scan from reading it as one). */
 const PUSH_EVENT = 'push';
@@ -48,7 +48,7 @@ const positiveInt = (value: unknown): number | undefined => (typeof value === "n
 const compact = (fields: Record<string, string | number | undefined>): Record<string, string | number> => Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined && value !== "")) as Record<string, string | number>;
 
 export function releaseEvent(input: { repo: string; source: "release" | "tag"; tag: string; sha?: string; name?: unknown; url?: unknown; prerelease?: unknown }): GithubEvent | undefined {
-  if (!REPO_SHAPE.test(input.repo) || !TAG_SHAPE.test(input.tag)) return undefined;
+  if (!REPO_SHAPE.test(input.repo) || !isSafeTag(input.tag)) return undefined;
   const sha = input.sha && SHA_SHAPE.test(input.sha) ? input.sha : undefined;
   return {
     kind: "release", repo: input.repo, key: input.tag, source: input.source, tag: input.tag, ...(sha ? { sha } : {}),
@@ -57,7 +57,7 @@ export function releaseEvent(input: { repo: string; source: "release" | "tag"; t
 }
 
 export function checkEvent(input: { repo: string; id: number; name?: string; conclusion: string; sha: string; branch?: unknown; pr?: unknown; url?: unknown }): GithubEvent | undefined {
-  const branch = typeof input.branch === "string" && BRANCH_SHAPE.test(input.branch) ? input.branch : undefined;
+  const branch = typeof input.branch === "string" && isSafeBranch(input.branch) ? input.branch : undefined;
   if (!REPO_SHAPE.test(input.repo) || !SHA_SHAPE.test(input.sha) || !/^[a-z_]{1,30}$/.test(input.conclusion)) return undefined;
   const pr = positiveInt(input.pr);
   const name = input.name ? cleanField(input.name, 100) : undefined;
@@ -169,7 +169,7 @@ export const CHECKS_JQ = ".check_runs[] | {id, name, status, conclusion, head_sh
 // ---------- reporting ----------
 
 export const isCommitSha = (value: string): boolean => SHA_SHAPE.test(value);
-export const isSafeRef = (value: string): boolean => TAG_SHAPE.test(value);
+export const isSafeRef = (value: string): boolean => isSafeGitRef(value, { maxLength: 200 });
 
 /** A commit status context that is the same on every run of one Sentinel, so GitHub shows one line that is replaced. */
 export const statusContext = (sentinelName: string): string => `0/sentinel/${(sentinelName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "run")}`;

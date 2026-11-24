@@ -9,7 +9,7 @@ import {
 } from "./sentinel-github-events.js";
 import { diffRightLines, inlineMarker, planInlineSuggestions, type SuggestionFinding } from "./pr-review.js";
 import {
-  nextSentinelFire, sentinelNeedsReview, sentinelPollMs, sentinelReviewFingerprint,
+  isSafeGitRef, nextSentinelFire, sentinelNeedsReview, sentinelPollMs, sentinelReviewFingerprint,
   type ShareSafeReport, type Sentinel, type SentinelActivation, type SentinelTrigger, type SecurityWorkflow,
 } from "@0/engine/shared";
 import { consoleExecutionProfile } from "../console-execution.js";
@@ -423,6 +423,9 @@ export class SentinelRunner {
     const run = async (args: string[]) => (await this.#gh.run(args)).stdout;
     if (trigger.release) {
       const config = trigger.release;
+      if (config.on !== "release" && !isSafeGitRef(config.tagPrefix, { maxLength: 40, allowEmpty: true, allowTrailingSlash: true })) {
+        throw new Error("The tag prefix is not usable.");
+      }
       const found = config.on === "release"
         ? releasesFromPoll(config.repo, await run(["api", `repos/${config.repo}/releases?per_page=100`, "--jq", RELEASES_JQ]))
         : tagsFromPoll(config.repo, await run(["api", "--paginate", `repos/${config.repo}/git/matching-refs/tags/${config.tagPrefix}`, "--jq", TAGS_JQ]));

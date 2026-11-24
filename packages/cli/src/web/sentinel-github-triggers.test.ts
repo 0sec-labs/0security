@@ -244,4 +244,14 @@ describe("results back to GitHub", () => {
     expect(calls.filter(args => args.includes("PATCH") && args.includes("repos/acme/app/issues/comments/901")).length).toBeGreaterThanOrEqual(1);
     vi.unstubAllEnvs();
   });
+
+  it("refuses a traversal segment returned in repository default_branch before calling check-runs gh api", async () => {
+    const calls: string[][] = [];
+    const f = fixture(args => (args[1] === "repos/acme/app" ? "../../pulls/1\n" : ""), calls);
+    const { triggerId } = await f.armed("check-completed", {});
+    await f.poll(0);
+    const trigger = f.store.getTrigger(triggerId);
+    expect(trigger?.lastStatus).toBe("blocked");
+    expect(calls.some(c => c.some(arg => arg.includes("..")))).toBe(false);
+  });
 });

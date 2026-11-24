@@ -50,8 +50,25 @@ export const SentinelGithubPrConfigSchema = z.strictObject({
 });
 export type SentinelGithubPrConfig = z.output<typeof SentinelGithubPrConfigSchema>;
 
+export function isSafeGitRef(
+  value: string,
+  options: { maxLength?: number; allowEmpty?: boolean; allowTrailingSlash?: boolean } = {},
+): boolean {
+  const { maxLength = 200, allowEmpty = false, allowTrailingSlash = false } = options;
+  if (!/^[A-Za-z0-9._/-]*$/.test(value)) return false;
+  if (value.length === 0) return allowEmpty;
+  if (value.length > maxLength) return false;
+  if (value.startsWith("/") || value.startsWith("-") || value.includes("//") || value.includes("..")) return false;
+  if (!allowTrailingSlash && value.endsWith("/")) return false;
+  const trimmed = allowTrailingSlash && value.endsWith("/") ? value.slice(0, -1) : value;
+  if (!trimmed) return false;
+  return !trimmed.split("/").some(seg => seg === "." || seg === ".." || seg.endsWith(".lock"));
+}
+
 const githubRepo = z.string().trim().regex(/^(?!\.{1,2}\/)[A-Za-z0-9_.-]{1,100}\/(?!\.{1,2}$)[A-Za-z0-9_.-]{1,100}$/, "Use owner/name.");
-const gitRefPart = z.string().trim().min(1).max(200).regex(/^[A-Za-z0-9._\/-]+$/, "Use letters, digits and . _ / - only.");
+const gitRefPart = z.string().trim().min(1).max(200)
+  .regex(/^[A-Za-z0-9._\/-]+$/, "Use letters, digits and . _ / - only.")
+  .refine(value => isSafeGitRef(value, { maxLength: 200 }), "Invalid git ref path.");
 const pollMs = z.number().int().min(MIN_GITHUB_POLL_MS).max(3_600_000).default(300_000);
 
 /** Where a run posts its summary. `none` (the default) posts nothing: runs stay in the Sentinel. */
@@ -64,7 +81,10 @@ export const SentinelReleaseConfigSchema = z.strictObject({
   repo: githubRepo,
   /** `release`: a published (not draft) release. `tag`: a tag that was pushed. */
   on: z.enum(["release", "tag"]).default("release"),
-  tagPrefix: z.string().trim().max(40).regex(/^[A-Za-z0-9._\/-]*$/, "Use letters, digits and . _ / - only.").default("v"),
+  tagPrefix: z.string().trim().max(40)
+    .regex(/^[A-Za-z0-9._\/-]*$/, "Use letters, digits and . _ / - only.")
+    .refine(value => isSafeGitRef(value, { maxLength: 40, allowEmpty: true, allowTrailingSlash: true }), "Invalid tag prefix.")
+    .default("v"),
   pollMs,
   report,
 });
