@@ -20,7 +20,48 @@ const needRead = (mode: Mode): void => { if (mode === "none") refuse(); };
 
 export const SCIM_BASE = "/scim/v2";
 const MAX_BODY = 1_048_576;
-const failureBooks = new WeakMap<TeamAuth, Map<string, { count: number; until: number }>>();
+/** Most addresses the failed-sign-in throttle remembers. Past that the least recently failing address is forgotten. */
+export const THROTTLE_MAX_ENTRIES = 1000;
+const THROTTLE_FAILURES = 10;
+const THROTTLE_WINDOW_MS = 60_000;
+
+/** An IPv4 address as is, an IPv4-mapped IPv6 address as IPv4, and any other IPv6 address as its /64 (a client owns a whole /64). */
+export function throttleKey(address: string): string {
+  const ip = address.trim().toLowerCase().replace(/%.*$/, "");
+  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(ip);
+  if (mapped) return mapped[1]!;
+  if (!ip.includes(":")) return ip.slice(0, 64);
+  const [head = "", tail] = ip.split("::");
+  const left = head === "" ? [] : head.split(":");
+  const right = tail === undefined || tail === "" ? [] : tail.split(":");
+  const groups = tail === undefined ? left : [...left, ...Array(Math.max(0, 8 - left.length - right.length)).fill("0"), ...right];
+  return `${groups.slice(0, 4).map(group => group.padStart(4, "0")).join(":")}::/64`.slice(0, 64);
+}
+
+/** Failed bearer tokens per address, in a table of fixed size: a flood of distinct addresses cannot grow it. */
+export class FailureThrottle {
+  private readonly rows = new Map<string, { count: number; until: number }>();
+  constructor(private readonly maxEntries = THROTTLE_MAX_ENTRIES) {}
+  get size(): number { return this.rows.size; }
+  /** Seconds until the address may try again, or 0. */
+  retryAfter(address: string, now: number): number {
+    const row = this.rows.get(throttleKey(address));
+    return row && row.until > now && row.count >= THROTTLE_FAILURES ? Math.ceil((row.until - now) / 1000) : 0;
+  }
+  fail(address: string, now: number): void {
+    const key = throttleKey(address);
+    const known = this.rows.get(key);
+    const row = known && known.until > now ? known : { count: 0, until: now + THROTTLE_WINDOW_MS };
+    row.count++;
+    this.rows.delete(key); this.rows.set(key, row); // most recent last
+    for (const [oldKey, old] of this.rows) { if (old.until > now || this.rows.size <= 1) break; this.rows.delete(oldKey); }
+    while (this.rows.size > this.maxEntries) this.rows.delete(this.rows.keys().next().value as string);
+  }
+  clear(address: string): void { this.rows.delete(throttleKey(address)); }
+}
+const failureBooks = new WeakMap<TeamAuth, FailureThrottle>();
+/** For tests: how many addresses the throttle of this workspace holds. */
+export function throttleSize(auth: TeamAuth): number { return failureBooks.get(auth)?.size ?? 0; }
 
 export interface ScimContext {
   auth: TeamAuth;
@@ -226,20 +267,18 @@ export async function handleScimRequest(req: IncomingMessage, res: ServerRespons
     if (!ctx.auth.enabled || !ctx.auth.scim) throw new ScimError(404, undefined, "SCIM needs a team workspace");
     const now = Date.now();
     let failures = failureBooks.get(ctx.auth);
-    if (!failures) { failures = new Map(); failureBooks.set(ctx.auth, failures); }
-    const blocked = failures.get(ctx.clientIp);
-    if (blocked && blocked.until > now && blocked.count >= 10) { send(res, 429, { ...errorFrom(new ScimError(429, "tooMany", "Too many failed sign-ins")).body }, { "Retry-After": String(Math.ceil((blocked.until - now) / 1000)) }); return; }
+    if (!failures) { failures = new FailureThrottle(); failureBooks.set(ctx.auth, failures); }
+    const wait = failures.retryAfter(ctx.clientIp, now);
+    if (wait > 0) { send(res, 429, { ...errorFrom(new ScimError(429, "tooMany", "Too many failed sign-ins")).body }, { "Retry-After": String(wait) }); return; }
     const presented = bearer(req);
     const token = presented ? ctx.auth.scim.verifyToken(presented) : null;
     if (!token) {
-      const row = blocked && blocked.until > now ? blocked : { count: 0, until: now + 60_000 };
-      row.count++; failures.set(ctx.clientIp, row);
-      if (failures.size > 1000) for (const [ip, entry] of failures) if (entry.until <= now) failures.delete(ip);
+      failures.fail(ctx.clientIp, now);
       audit({ actor: "anonymous", action: "scim.auth_failed", subject: url.pathname, outcome: "denied", detail: { client: ctx.clientIp, status: 401 } });
       send(res, 401, errorFrom(new ScimError(401, undefined, "A valid bearer token is required")).body, { "WWW-Authenticate": 'Bearer realm="scim"' });
       return;
     }
-    failures.delete(ctx.clientIp);
+    failures.clear(ctx.clientIp);
     const mode = featureMode("scim");
     const actor = `scim:${token.name}`;
     const path = url.pathname.slice(SCIM_BASE.length).replace(/\/+$/, "");

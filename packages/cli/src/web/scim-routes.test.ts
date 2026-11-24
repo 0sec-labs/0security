@@ -12,7 +12,7 @@ import { scimFixtures } from "../enterprise-bridge.js";
 const { ENTRA, FILTERS, OKTA, RFC7643_8_2_FULL_USER, RFC7643_8_4_GROUP } = scimFixtures;
 import { FindingsAccessTokenStore } from "./findings-access-tokens.js";
 import { configureAudit } from "./audit.js";
-import { SCIM_BASE, handleScimRequest } from "./scim-routes.js";
+import { FailureThrottle, SCIM_BASE, THROTTLE_MAX_ENTRIES, handleScimRequest, throttleKey, throttleSize } from "./scim-routes.js";
 import { TeamAuth, hashTeamPassword, type TeamConfig } from "./team-auth.js";
 import { applyTestLicense } from "./__fixtures__/test-license.js";
 
@@ -71,6 +71,51 @@ describe("SCIM with the scim license", () => {
     const statuses: number[] = [];
     for (let i = 0; i < 12; i++) statuses.push((await call("GET", "/Users", undefined, `scim_bad${i}`)).status);
     expect(statuses).toContain(429);
+  });
+
+  it("keeps the failed-sign-in table at a fixed size however many addresses fail, IPv4 and IPv6", async () => {
+    const throttle = new FailureThrottle();
+    const now = 1_000_000;
+    const addresses: string[] = [];
+    for (let i = 0; i < THROTTLE_MAX_ENTRIES * 3; i++) addresses.push(i % 2 === 0 ? `10.${(i >> 8) & 255}.${i & 255}.${(i >> 4) & 255}` : `2001:db8:${(i >> 8).toString(16)}:${(i & 255).toString(16)}::${i.toString(16)}`);
+    for (const address of addresses) throttle.fail(address, now);
+    expect(throttle.size).toBeLessThanOrEqual(THROTTLE_MAX_ENTRIES);
+    expect(throttle.size).toBeGreaterThan(THROTTLE_MAX_ENTRIES / 2);
+    // The most recent addresses are still tracked; the oldest were forgotten.
+    for (let k = 0; k < 10; k++) throttle.fail(addresses.at(-1)!, now);
+    expect(throttle.retryAfter(addresses.at(-1)!, now)).toBeGreaterThan(0);
+    expect(throttle.retryAfter(addresses[0]!, now)).toBe(0);
+  });
+
+  it("forgets expired entries first, and a throttled address stays throttled until its window ends", () => {
+    const throttle = new FailureThrottle(5);
+    for (let i = 0; i < 10; i++) throttle.fail("203.0.113.9", 0);
+    expect(throttle.retryAfter("203.0.113.9", 1_000)).toBeGreaterThan(0);
+    expect(throttle.retryAfter("203.0.113.9", 61_000)).toBe(0);
+    for (let i = 0; i < 4; i++) throttle.fail(`198.51.100.${i}`, 0);
+    throttle.fail("192.0.2.1", 120_000); // the older rows have expired and go first
+    expect(throttle.size).toBe(1);
+    throttle.clear("192.0.2.1");
+    expect(throttle.size).toBe(0);
+  });
+
+  it("treats one IPv6 /64 as one client, and an IPv4-mapped address as its IPv4 address", () => {
+    expect(throttleKey("2001:db8:1:2:aaaa:bbbb:cccc:dddd")).toBe(throttleKey("2001:0db8:0001:0002::1"));
+    expect(throttleKey("2001:db8:1:3::1")).not.toBe(throttleKey("2001:db8:1:2::1"));
+    expect(throttleKey("::ffff:203.0.113.7")).toBe("203.0.113.7");
+    expect(throttleKey("fe80::1%eth0")).toBe(throttleKey("fe80::2"));
+    expect(throttleKey("::1").length).toBeLessThanOrEqual(64);
+    const throttle = new FailureThrottle();
+    for (let i = 0; i < 12; i++) throttle.fail(`2001:db8:1:2:${i.toString(16)}::${i.toString(16)}`, 0);
+    expect(throttle.size).toBe(1);
+    expect(throttle.retryAfter("2001:db8:1:2::ffff", 0)).toBeGreaterThan(0);
+  });
+
+  it("bounds the table in the real handler, and still throttles one address", async () => {
+    const { call, auth } = await fixture();
+    for (let i = 0; i < 12; i++) await call("GET", "/Users", undefined, `scim_bad${i}`);
+    expect(throttleSize(auth)).toBe(1);
+    expect((await call("GET", "/Users", undefined, "scim_bad")).status).toBe(429);
   });
 
   it("describes itself: service provider config, resource types and schemas", async () => {
