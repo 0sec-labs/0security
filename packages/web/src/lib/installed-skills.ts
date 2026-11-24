@@ -1,4 +1,5 @@
 import { cleanSkillSummary, matchesWords, type BrowsableSkill } from "@/components/skills-model";
+import { matchSkillIcon, skillIconName, type SkillIconName } from "@/lib/skill-icons";
 
 export type InstalledSkill = BrowsableSkill & { source: string; origin?: { repo: string; sha: string; publisher?: string | null; catalogId?: string | null } };
 
@@ -28,14 +29,16 @@ export const originOwner = (skill: Pick<InstalledSkill, "origin">): string | und
 
 export type SkillTile =
   | { kind: "publisher"; owner: string; name: string }
-  | { kind: "brand" }
+  | { kind: "icon"; icon: SkillIconName }
   | { kind: "extension" }
   | { kind: "monogram"; name: string };
 
-/** Tile content: GitHub skills show their publisher, bundled ones the 0security mark, extensions the puzzle icon, yours a monogram. */
+/** Tile content: GitHub skills show their publisher, extensions the puzzle icon. Bundled skills always get a topic icon; yours get one only when its name matches a topic, else initials so a custom skill stays recognisable. */
 export function installedTile(skill: InstalledSkill): SkillTile {
-  if (skill.scope === "builtin") return { kind: "brand" };
+  if (skill.scope === "builtin") return { kind: "icon", icon: skillIconName(skill) };
   if (skill.scope === "extension") return { kind: "extension" };
   if (skill.origin) return { kind: "publisher", owner: originOwner(skill)!, name: skill.origin.repo.split("/")[0]! };
+  const icon = matchSkillIcon(skill);
+  if (icon) return { kind: "icon", icon };
   return { kind: "monogram", name: skill.name };
 }

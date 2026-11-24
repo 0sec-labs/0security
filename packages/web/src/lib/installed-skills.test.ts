@@ -28,9 +28,12 @@ describe("installedSource", () => {
 
 describe("installedTile", () => {
   it("picks the tile by origin", () => {
-    expect(installedTile(make("a", "builtin", { category: "Web" }))).toEqual({ kind: "brand" });
+    expect(installedTile(make("sqli-advanced", "builtin", { category: "Injection" }))).toEqual({ kind: "icon", icon: "Database" });
+    expect(installedTile(make("zzz", "builtin"))).toEqual({ kind: "icon", icon: "BookOpen" });
     expect(installedTile(make("a", "extension"))).toEqual({ kind: "extension" });
     expect(installedTile(make("a", "workspace", { origin: { repo: "Owner/r", sha: "x" } }))).toEqual({ kind: "publisher", owner: "owner", name: "Owner" });
     expect(installedTile(make("a", "personal"))).toEqual({ kind: "monogram", name: "a" });
+    expect(installedTile(make("my-terraform-notes", "personal"))).toEqual({ kind: "icon", icon: "Boxes" });
+    expect(installedTile(make("Acme style", "workspace", { summary: "Reusable instructions for the agent." }))).toEqual({ kind: "monogram", name: "Acme style" });
   });
 });
