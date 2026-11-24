@@ -355,7 +355,7 @@ If the second repository is private, give its checkout a token that can read it.
 
 The Action is GitHub only. Elsewhere, install the same pinned release and run the same three steps: scan the change, upload, fail on severity. Every example below installs a release you pin, and the installer refuses a download whose checksum does not match that release's `checksums.txt`.
 
-These examples were written from the products' public documentation. They have not been run on a live Bitbucket, Jenkins or Azure Pipelines instance, so try them on a branch first.
+The templates and scripts are tested with stand-in programs. They have not been run on a live Bitbucket, Jenkins, Azure Pipelines or GitLab instance, so try them on a branch first.
 
 ### Secrets and untrusted pull requests
 
@@ -385,12 +385,34 @@ The scan runs a model agent over the pull request's code, and the text in that c
 
 Re-running for the same commit and report id replaces the report and updates annotations with the same id. Annotations of an earlier run that no longer apply stay until the report is deleted. Reports on Data Center expire after 60 days.
 
+### Use the templates
+
+The `ci/` folder of the repository holds a template for each CI below and the two scripts they share. `0-ci-scan.sh` scans the change and records the result. `0-ci-publish.sh` sends the result to Bitbucket Code Insights and exits with the scan's code.
+
+Each template installs a release you pin, fetches the scripts from the same release tag, and keeps the Bitbucket token in a separate step from the model key. The scripts read their settings from environment variables, and refuse a value with a space or a leading dash. The scripts need a release that contains `ci/scripts`.
+
+The exit codes are those of `0security scan`: 1 when a finding is at or above `--fail-on` or the scan failed, 2 for a usage error, 3 when the scan stopped before it reviewed everything. Code 3 is not a failure, so the publish step maps it to 0 after the upload. The scan step always passes so that the publish step can report.
+
 ### Bitbucket Pipelines
 
-Add your model key as a secured repository variable. Store `BITBUCKET_TOKEN` as a deployment variable on an environment that only the publish step uses (here `security-report`), so the scan step cannot read it.
+Add your model key as a secured repository variable. Store `BITBUCKET_TOKEN` as a deployment variable on an environment that only the publish step uses (here `security-report`).
 
 ```yaml
+# Scan each pull request with 0 and show the findings in Bitbucket Code Insights.
+# Add OPENAI_API_KEY (or your model's key) as a secured repository variable.
+# Add BITBUCKET_TOKEN as a deployment variable on the "security-report" environment, so only the publish step can read it.
 image: node:22
+
+definitions:
+  scripts:
+    - &install |
+      VERSION=0.44.0 # Pin the CLI
+      RAW="https://raw.githubusercontent.com/0sec-labs/0security/v${VERSION}"
+      tools="$(mktemp -d)" && export INSTALL_DIR="$tools" PATH="$tools:$PATH"
+      curl -fsSL -o "$tools/install.sh" "$RAW/install.sh"
+      curl -fsSL -o "$tools/0-ci-scan.sh" "$RAW/ci/scripts/0-ci-scan.sh"
+      curl -fsSL -o "$tools/0-ci-publish.sh" "$RAW/ci/scripts/0-ci-publish.sh"
+      (cd "$tools" && RELEASE_BASE_URL="https://github.com/0sec-labs/0security/releases/download/v${VERSION}" sh install.sh)
 
 pipelines:
   pull-requests:
@@ -398,43 +420,36 @@ pipelines:
       - step:
           name: 0 security scan
           script:
-            - VERSION=0.41.0 # Pin the CLI
-            - export INSTALL_DIR="$HOME/.0/bin" PATH="$HOME/.0/bin:$PATH"
-            - curl -fsSL -o install.sh "https://raw.githubusercontent.com/0sec-labs/0security/v${VERSION}/install.sh"
-            - RELEASE_BASE_URL="https://github.com/0sec-labs/0security/releases/download/v${VERSION}" sh install.sh
-            - git fetch --no-tags --depth=1 origin "+refs/heads/${BITBUCKET_PR_DESTINATION_BRANCH}:refs/remotes/origin/${BITBUCKET_PR_DESTINATION_BRANCH}"
-            - code=0
-            - 0security scan . --diff "origin/${BITBUCKET_PR_DESTINATION_BRANCH}" --format json -o scan.json --fail-on high || code=$?
-            - echo "$code" > scan.exit
+            - *install
+            - ZEROCI_BASE_BRANCH="$BITBUCKET_PR_DESTINATION_BRANCH" ZEROCI_COMMIT="$BITBUCKET_COMMIT" sh "$tools/0-ci-scan.sh"
           artifacts:
             - scan.json
             - scan.exit
+            - scan.commit
       - step:
           name: Publish report
           deployment: security-report
           script:
-            - VERSION=0.41.0 # Pin the CLI
-            - tools="$(mktemp -d)" && export INSTALL_DIR="$tools" PATH="$tools:$PATH"
-            - curl -fsSL -o "$tools/install.sh" "https://raw.githubusercontent.com/0sec-labs/0security/v${VERSION}/install.sh"
-            - (cd "$tools" && RELEASE_BASE_URL="https://github.com/0sec-labs/0security/releases/download/v${VERSION}" sh install.sh)
-            - code="$(cat scan.exit)"
-            - if [ "$code" -ne 2 ]; then 0security findings upload scan.json --to bitbucket-cloud; fi
-            - if [ "$code" -eq 3 ]; then echo "The scan stopped at its budget; the findings are partial."; code=0; fi
-            - exit "$code"
+            - *install
+            - ZEROCI_UPLOAD_TO=bitbucket-cloud sh "$tools/0-ci-publish.sh"
 ```
-
-The exit codes are those of `0security scan`: 1 when a finding is at or above `--fail-on` or the scan failed, 2 for a usage error, 3 when the scan stopped before it reviewed everything (not a failure; the scripts below map it to 0 after the upload). The scan step always passes so that the publish step can report; the publish step exits with the scan's code.
 
 ### Jenkins
 
-A declarative pipeline for a multibranch job. Define it in a trusted place (see above). Store the Bitbucket token and model key as separate Jenkins credentials and bind each in its own stage. Single-quoted `sh` strings keep secrets out of Groovy interpolation.
+A declarative pipeline for a multibranch job. Define it in a trusted place (see above). Store the Bitbucket token and model key as separate Jenkins credentials and bind each in its own stage. Single-quoted `sh` strings keep secrets out of Groovy interpolation. Use `ZEROCI_UPLOAD_TO=bitbucket-cloud` for Bitbucket Cloud.
+
+The scan records the pull request's own commit. When Jenkins checks out the merge of the pull request with its target, the scan uses the merge's second parent, which is the pull request's head.
 
 ```groovy
+// Scan each pull request with 0 and show the findings in Bitbucket Code Insights.
+// Use a multibranch job and keep this file in a trusted place (the target branch or a separate repository).
+// Store the model key as a Jenkins credential "openai-api-key" and the Bitbucket token as "bitbucket-token".
 pipeline {
   agent any
   environment {
-    VERSION = '0.41.0' // Pin the CLI
-    BITBUCKET_URL = 'https://bitbucket.example.com' // Data Center only
+    VERSION = '0.44.0' // Pin the CLI
+    BITBUCKET_URL = 'https://bitbucket.example.com' // Data Center server
+    ZEROCI_REPO = 'PROJECT/repo'
   }
   stages {
     stage('scan') {
@@ -442,14 +457,13 @@ pipeline {
       steps {
         withCredentials([string(credentialsId: 'openai-api-key', variable: 'OPENAI_API_KEY')]) {
           sh '''
-            set -u
-            export INSTALL_DIR="${WORKSPACE}/.0/bin" PATH="${WORKSPACE}/.0/bin:$PATH"
-            curl -fsSL -o install.sh "https://raw.githubusercontent.com/0sec-labs/0security/v${VERSION}/install.sh"
-            RELEASE_BASE_URL="https://github.com/0sec-labs/0security/releases/download/v${VERSION}" sh install.sh
-            git fetch --no-tags --depth=1 origin "+refs/heads/${CHANGE_TARGET}:refs/remotes/origin/${CHANGE_TARGET}"
-            code=0
-            0 scan . --diff "origin/${CHANGE_TARGET}" --format json -o scan.json --fail-on high || code=$?
-            echo "$code" > scan.exit
+            set -eu
+            RAW="https://raw.githubusercontent.com/0sec-labs/0security/v${VERSION}"
+            tools="$(mktemp -d)"; export INSTALL_DIR="$tools" PATH="$tools:$PATH"
+            curl -fsSL -o "$tools/install.sh" "$RAW/install.sh"
+            curl -fsSL -o "$tools/0-ci-scan.sh" "$RAW/ci/scripts/0-ci-scan.sh"
+            (cd "$tools" && RELEASE_BASE_URL="https://github.com/0sec-labs/0security/releases/download/v${VERSION}" sh install.sh)
+            ZEROCI_BASE_BRANCH="$CHANGE_TARGET" sh "$tools/0-ci-scan.sh"
           '''
         }
       }
@@ -459,17 +473,14 @@ pipeline {
       steps {
         withCredentials([string(credentialsId: 'bitbucket-token', variable: 'BITBUCKET_TOKEN')]) {
           sh '''
-            set -u
+            set -eu
+            RAW="https://raw.githubusercontent.com/0sec-labs/0security/v${VERSION}"
             tools="$(mktemp -d)"; export INSTALL_DIR="$tools" PATH="$tools:$PATH"
-            cp scan.json scan.exit "$tools/"
-            curl -fsSL -o "$tools/install.sh" "https://raw.githubusercontent.com/0sec-labs/0security/v${VERSION}/install.sh"
+            cp scan.json scan.exit scan.commit "$tools/"
+            curl -fsSL -o "$tools/install.sh" "$RAW/install.sh"
+            curl -fsSL -o "$tools/0-ci-publish.sh" "$RAW/ci/scripts/0-ci-publish.sh"
             (cd "$tools" && RELEASE_BASE_URL="https://github.com/0sec-labs/0security/releases/download/v${VERSION}" sh install.sh)
-            code="$(cat "$tools/scan.exit")"
-            if [ "$code" -ne 2 ]; then
-              0 findings upload "$tools/scan.json" --to bitbucket-dc --repo PROJECT/repo --commit "$GIT_COMMIT"
-            fi
-            [ "$code" -eq 3 ] && code=0
-            exit "$code"
+            ZEROCI_OUT_DIR="$tools" ZEROCI_UPLOAD_TO=bitbucket-dc sh "$tools/0-ci-publish.sh"
           '''
         }
       }
@@ -479,17 +490,20 @@ pipeline {
 }
 ```
 
-Use `--to bitbucket-cloud --repo workspace/repo` for Bitbucket Cloud. There is no Jenkins shared library for this yet; the pipeline above is the supported route.
-
 ### Azure Pipelines
 
 Azure Pipelines can build a Bitbucket Cloud or GitHub repository. Keep the keys in a variable group that needs approval, and map each secret only into the step that needs it, because secrets are not exposed to steps automatically.
 
 ```yaml
+# Scan each pull request with 0 and show the findings in Bitbucket Code Insights.
+# Keep OPENAI_API_KEY and BITBUCKET_TOKEN in a variable group that needs approval. Each secret is mapped into one step only.
 trigger: none
 pr:
   branches:
     include: [main]
+
+variables:
+  VERSION: 0.44.0 # Pin the CLI
 
 pool:
   vmImage: ubuntu-latest
@@ -497,45 +511,101 @@ pool:
 steps:
   - checkout: self
     fetchDepth: 0
+    persistCredentials: false
   - bash: |
-      set -u
-      VERSION=0.41.0 # Pin the CLI
-      export INSTALL_DIR="$HOME/.0/bin" PATH="$HOME/.0/bin:$PATH"
-      curl -fsSL -o install.sh "https://raw.githubusercontent.com/0sec-labs/0security/v${VERSION}/install.sh"
-      RELEASE_BASE_URL="https://github.com/0sec-labs/0security/releases/download/v${VERSION}" sh install.sh
+      set -eu
+      RAW="https://raw.githubusercontent.com/0sec-labs/0security/v${VERSION}"
+      tools="$(mktemp -d)"; export INSTALL_DIR="$tools" PATH="$tools:$PATH"
+      curl -fsSL -o "$tools/install.sh" "$RAW/install.sh"
+      curl -fsSL -o "$tools/0-ci-scan.sh" "$RAW/ci/scripts/0-ci-scan.sh"
+      (cd "$tools" && RELEASE_BASE_URL="https://github.com/0sec-labs/0security/releases/download/v${VERSION}" sh install.sh)
       base="${TARGET_BRANCH#refs/heads/}"
-      git fetch --no-tags --depth=1 origin "+refs/heads/${base}:refs/remotes/origin/${base}"
-      code=0
-      0 scan . --diff "origin/${base}" --format json -o "$BUILD_ARTIFACTSTAGINGDIRECTORY/scan.json" --fail-on high || code=$?
-      echo "$code" > "$BUILD_ARTIFACTSTAGINGDIRECTORY/scan.exit"
+      ZEROCI_BASE_BRANCH="$base" ZEROCI_OUT_DIR="$BUILD_ARTIFACTSTAGINGDIRECTORY" sh "$tools/0-ci-scan.sh"
     displayName: 0 security scan
     env:
+      VERSION: $(VERSION)
       TARGET_BRANCH: $(System.PullRequest.TargetBranch)
       OPENAI_API_KEY: $(OPENAI_API_KEY)
   - bash: |
-      set -u
-      VERSION=0.41.0 # Pin the CLI
+      set -eu
+      RAW="https://raw.githubusercontent.com/0sec-labs/0security/v${VERSION}"
       tools="$(mktemp -d)"; export INSTALL_DIR="$tools" PATH="$tools:$PATH"
-      cp "$BUILD_ARTIFACTSTAGINGDIRECTORY/scan.json" "$BUILD_ARTIFACTSTAGINGDIRECTORY/scan.exit" "$tools/"
-      curl -fsSL -o "$tools/install.sh" "https://raw.githubusercontent.com/0sec-labs/0security/v${VERSION}/install.sh"
+      curl -fsSL -o "$tools/install.sh" "$RAW/install.sh"
+      curl -fsSL -o "$tools/0-ci-publish.sh" "$RAW/ci/scripts/0-ci-publish.sh"
       (cd "$tools" && RELEASE_BASE_URL="https://github.com/0sec-labs/0security/releases/download/v${VERSION}" sh install.sh)
-      code="$(cat "$tools/scan.exit")"
-      if [ "$code" -ne 2 ] && [ -n "${BITBUCKET_TOKEN:-}" ]; then
-        0 findings upload "$tools/scan.json" --to bitbucket-cloud --repo workspace/repo --commit "$SOURCE_VERSION"
-      fi
-      [ "$code" -eq 3 ] && code=0
-      exit "$code"
+      ZEROCI_OUT_DIR="$BUILD_ARTIFACTSTAGINGDIRECTORY" ZEROCI_UPLOAD_TO=bitbucket-cloud sh "$tools/0-ci-publish.sh"
     displayName: Publish report
     condition: always()
     env:
-      SOURCE_VERSION: $(Build.SourceVersion)
+      VERSION: $(VERSION)
+      ZEROCI_REPO: workspace/repo
       BITBUCKET_TOKEN: $(BITBUCKET_TOKEN)
   - publish: $(Build.ArtifactStagingDirectory)/scan.json
     artifact: 0-scan
     condition: always()
 ```
 
-The pull request variables depend on the repository host Azure Pipelines builds, and the commit Azure builds on a pull request can be a merge commit that Bitbucket does not know. Pass the pull request's source commit with `--commit` when the report does not show up. Without a Bitbucket token the step still scans and fails on severity, and the artifact holds the findings.
+The pull request variables depend on the repository host Azure Pipelines builds. For a pull request, Azure often builds a merge commit that Bitbucket does not know. The scan records the merge's second parent instead. Without a Bitbucket token the publish step still exits with the scan's code, and the artifact holds the findings.
+
+### GitLab CI/CD
+
+GitLab has no Code Insights target. This job scans each merge request and fails on severity. The findings stay in the job log and the `scan.json` artifact.
+
+```yaml
+# Scan each merge request with 0 and fail the job on a finding at or above ZEROCI_FAIL_ON.
+# Add OPENAI_API_KEY (or your model's key) as a masked, protected CI/CD variable.
+# GitLab has no Code Insights target. The findings stay in the job log and in the scan.json artifact.
+stages: [scan]
+
+zero-security:
+  stage: scan
+  image: node:22
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  variables:
+    VERSION: 0.44.0 # Pin the CLI
+    GIT_DEPTH: "0"
+    ZEROCI_FAIL_ON: high
+  script:
+    - RAW="https://raw.githubusercontent.com/0sec-labs/0security/v${VERSION}"
+    - tools="$(mktemp -d)" && export INSTALL_DIR="$tools" PATH="$tools:$PATH"
+    - curl -fsSL -o "$tools/install.sh" "$RAW/install.sh"
+    - curl -fsSL -o "$tools/0-ci-scan.sh" "$RAW/ci/scripts/0-ci-scan.sh"
+    - (cd "$tools" && RELEASE_BASE_URL="https://github.com/0sec-labs/0security/releases/download/v${VERSION}" sh install.sh)
+    - ZEROCI_BASE_BRANCH="$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" ZEROCI_COMMIT="$CI_MERGE_REQUEST_SOURCE_BRANCH_SHA" ZEROCI_EXIT_WITH_RESULT=1 sh "$tools/0-ci-scan.sh"
+  artifacts:
+    when: always
+    paths:
+      - scan.json
+```
+
+### Try a recipe on your own Bitbucket Data Center and Jenkins
+
+`ci/test-env/docker-compose.yml` starts Bitbucket Data Center 9.4.14, PostgreSQL 16 and Jenkins 2.580.2 on your machine. You need a Data Center trial license from Atlassian.
+
+```bash
+export BITBUCKET_LICENSE=...
+export BITBUCKET_ADMIN_PASSWORD=...
+export POSTGRES_PASSWORD=...
+docker compose -f ci/test-env/docker-compose.yml up -d
+```
+
+Bitbucket answers on `http://localhost:7990` and Jenkins on `http://localhost:8080`. Create a repository and a pull request in Bitbucket, add the Bitbucket Branch Source plugin to Jenkins, and point a multibranch job at the repository with the `ci/Jenkinsfile` template.
+
+The environment has not been started by the authors. The setup variables follow Atlassian's automated-setup properties, so check them against the Bitbucket version you run.
+
+### Rehearse the Code Insights recipe on Bitbucket Cloud
+
+`ci/rehearsal/bitbucket-cloud.sh` uploads a fixture report with three findings to a test repository, reads the report and its annotations back, uploads again to check nothing is duplicated, and prints the checks to make by hand on the pull request. It needs no model key.
+
+```bash
+export BITBUCKET_TOKEN=...
+export REHEARSAL_REPO=workspace/test-repo
+export REHEARSAL_COMMIT=...   # head commit of a test pull request
+sh ci/rehearsal/bitbucket-cloud.sh
+```
+
+Run it with `--dry-run` to see the plan without sending anything. The script has not been run against a live workspace. Record the date and the Bitbucket plan in the issue when you do.
 
 ## Keep an SBOM and check it for advisories
 
@@ -555,7 +625,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install 0
         run: |
-          VERSION=0.41.0 # Pin the CLI
+          VERSION=0.44.0 # Pin the CLI
           RELEASE_BASE_URL="https://github.com/0sec-labs/0security/releases/download/v${VERSION}" INSTALL_DIR="$RUNNER_TEMP/0" sh <(curl -fsSL "https://raw.githubusercontent.com/0sec-labs/0security/v${VERSION}/install.sh")
           echo "$RUNNER_TEMP/0" >> "$GITHUB_PATH"
       - run: 0security sbom generate . -o sbom.cdx.json

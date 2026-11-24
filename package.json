@@ -25,6 +25,7 @@
     "test:no-npm-publish": "node --test scripts/check-no-npm-publish.test.mjs",
     "check:workflow-triggers": "node scripts/check-workflow-triggers.mjs",
     "test:action": "node --test scripts/action-contract.test.mjs",
+    "test:ci-recipes": "node --test scripts/ci-recipes.test.mjs",
     "test:workflow-triggers": "node --test scripts/check-workflow-triggers.test.mjs",
     "check:image-name": "node scripts/check-image-name.mjs",
     "test:image-name": "node --test scripts/check-image-name.test.mjs",

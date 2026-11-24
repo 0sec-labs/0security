@@ -1,0 +1,47 @@
+// Scan each pull request with 0 and show the findings in Bitbucket Code Insights.
+// Use a multibranch job and keep this file in a trusted place (the target branch or a separate repository).
+// Store the model key as a Jenkins credential "openai-api-key" and the Bitbucket token as "bitbucket-token".
+pipeline {
+  agent any
+  environment {
+    VERSION = '0.44.0' // Pin the CLI
+    BITBUCKET_URL = 'https://bitbucket.example.com' // Data Center server
+    ZEROCI_REPO = 'PROJECT/repo'
+  }
+  stages {
+    stage('scan') {
+      when { changeRequest() }
+      steps {
+        withCredentials([string(credentialsId: 'openai-api-key', variable: 'OPENAI_API_KEY')]) {
+          sh '''
+            set -eu
+            RAW="https://raw.githubusercontent.com/0sec-labs/0security/v${VERSION}"
+            tools="$(mktemp -d)"; export INSTALL_DIR="$tools" PATH="$tools:$PATH"
+            curl -fsSL -o "$tools/install.sh" "$RAW/install.sh"
+            curl -fsSL -o "$tools/0-ci-scan.sh" "$RAW/ci/scripts/0-ci-scan.sh"
+            (cd "$tools" && RELEASE_BASE_URL="https://github.com/0sec-labs/0security/releases/download/v${VERSION}" sh install.sh)
+            ZEROCI_BASE_BRANCH="$CHANGE_TARGET" sh "$tools/0-ci-scan.sh"
+          '''
+        }
+      }
+    }
+    stage('publish') {
+      when { changeRequest() }
+      steps {
+        withCredentials([string(credentialsId: 'bitbucket-token', variable: 'BITBUCKET_TOKEN')]) {
+          sh '''
+            set -eu
+            RAW="https://raw.githubusercontent.com/0sec-labs/0security/v${VERSION}"
+            tools="$(mktemp -d)"; export INSTALL_DIR="$tools" PATH="$tools:$PATH"
+            cp scan.json scan.exit scan.commit "$tools/"
+            curl -fsSL -o "$tools/install.sh" "$RAW/install.sh"
+            curl -fsSL -o "$tools/0-ci-publish.sh" "$RAW/ci/scripts/0-ci-publish.sh"
+            (cd "$tools" && RELEASE_BASE_URL="https://github.com/0sec-labs/0security/releases/download/v${VERSION}" sh install.sh)
+            ZEROCI_OUT_DIR="$tools" ZEROCI_UPLOAD_TO=bitbucket-dc sh "$tools/0-ci-publish.sh"
+          '''
+        }
+      }
+    }
+  }
+  post { always { archiveArtifacts artifacts: 'scan.json', allowEmptyArchive: true } }
+}

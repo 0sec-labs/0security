@@ -1,0 +1,34 @@
+# Scan each pull request with 0 and show the findings in Bitbucket Code Insights.
+# Add OPENAI_API_KEY (or your model's key) as a secured repository variable.
+# Add BITBUCKET_TOKEN as a deployment variable on the "security-report" environment, so only the publish step can read it.
+image: node:22
+
+definitions:
+  scripts:
+    - &install |
+      VERSION=0.44.0 # Pin the CLI
+      RAW="https://raw.githubusercontent.com/0sec-labs/0security/v${VERSION}"
+      tools="$(mktemp -d)" && export INSTALL_DIR="$tools" PATH="$tools:$PATH"
+      curl -fsSL -o "$tools/install.sh" "$RAW/install.sh"
+      curl -fsSL -o "$tools/0-ci-scan.sh" "$RAW/ci/scripts/0-ci-scan.sh"
+      curl -fsSL -o "$tools/0-ci-publish.sh" "$RAW/ci/scripts/0-ci-publish.sh"
+      (cd "$tools" && RELEASE_BASE_URL="https://github.com/0sec-labs/0security/releases/download/v${VERSION}" sh install.sh)
+
+pipelines:
+  pull-requests:
+    "**":
+      - step:
+          name: 0 security scan
+          script:
+            - *install
+            - ZEROCI_BASE_BRANCH="$BITBUCKET_PR_DESTINATION_BRANCH" ZEROCI_COMMIT="$BITBUCKET_COMMIT" sh "$tools/0-ci-scan.sh"
+          artifacts:
+            - scan.json
+            - scan.exit
+            - scan.commit
+      - step:
+          name: Publish report
+          deployment: security-report
+          script:
+            - *install
+            - ZEROCI_UPLOAD_TO=bitbucket-cloud sh "$tools/0-ci-publish.sh"

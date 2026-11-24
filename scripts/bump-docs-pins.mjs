@@ -12,6 +12,7 @@ const RULES = [
   { re: /(0sec-labs\/0security:v?)(\d+\.\d+)(?![\d.])/g, parts: 2 },
   { re: /(ZERO_IMAGE_TAG=v?)(\d+\.\d+\.\d+)(?![\d.])/g, parts: 3 },
   { re: /(version:\s*v?)(\d+\.\d+\.\d+)(?=\s*#\s*Pin the CLI)/g, parts: 3 },
+  { re: /(\bVERSION\s*[=:]\s*['"]?)(\d+\.\d+\.\d+)(?=['"]?\s*(?:#|\/\/)\s*Pin the CLI)/g, parts: 3 },
   { re: /(0sec-labs\/0security@v)(\d+\.\d+\.\d+)(?![\d.])/g, parts: 3 },
 ];
 
@@ -29,6 +30,9 @@ export function pinFiles(root) {
     }
   };
   walk(join(root, "docs/src/content/docs"));
+  for (const name of ["bitbucket-pipelines.yml", "azure-pipelines.yml", "gitlab-ci.yml", "Jenkinsfile"]) {
+    if (existsSync(join(root, "ci", name))) out.push(join(root, "ci", name));
+  }
   for (const extra of ["README.md", "packages/cli/README.md", "deploy/compose/.env.example", "deploy/compose/README.md"]) {
     if (existsSync(join(root, extra))) out.push(join(root, extra));
   }

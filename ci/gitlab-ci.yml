@@ -1,0 +1,25 @@
+# Scan each merge request with 0 and fail the job on a finding at or above ZEROCI_FAIL_ON.
+# Add OPENAI_API_KEY (or your model's key) as a masked, protected CI/CD variable.
+# GitLab has no Code Insights target. The findings stay in the job log and in the scan.json artifact.
+stages: [scan]
+
+zero-security:
+  stage: scan
+  image: node:22
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  variables:
+    VERSION: 0.44.0 # Pin the CLI
+    GIT_DEPTH: "0"
+    ZEROCI_FAIL_ON: high
+  script:
+    - RAW="https://raw.githubusercontent.com/0sec-labs/0security/v${VERSION}"
+    - tools="$(mktemp -d)" && export INSTALL_DIR="$tools" PATH="$tools:$PATH"
+    - curl -fsSL -o "$tools/install.sh" "$RAW/install.sh"
+    - curl -fsSL -o "$tools/0-ci-scan.sh" "$RAW/ci/scripts/0-ci-scan.sh"
+    - (cd "$tools" && RELEASE_BASE_URL="https://github.com/0sec-labs/0security/releases/download/v${VERSION}" sh install.sh)
+    - ZEROCI_BASE_BRANCH="$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" ZEROCI_COMMIT="$CI_MERGE_REQUEST_SOURCE_BRANCH_SHA" ZEROCI_EXIT_WITH_RESULT=1 sh "$tools/0-ci-scan.sh"
+  artifacts:
+    when: always
+    paths:
+      - scan.json
