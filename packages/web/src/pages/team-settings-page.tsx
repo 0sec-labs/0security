@@ -82,7 +82,7 @@ export function TeamSettingsPage() {
   const cancel = () => { setAdding(false); setPassword(""); setError(""); };
 
   if (!team.enabled) return <>
-    <PageHeader title="Members" />
+    <PageHeader title="Members" summary="Share this server with teammates. Each person signs in with their own account and a role that sets what they can change." />
     {creating ? <WorkspaceChoice stacked initialMode="team" onContinue={() => setCreating(false)} /> : <Button className="self-start" onClick={() => setCreating(true)}>Create a team</Button>}
   </>;
 
