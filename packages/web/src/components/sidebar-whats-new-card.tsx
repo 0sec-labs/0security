@@ -18,7 +18,7 @@ export function SidebarWhatsNewCard() {
         <ReleaseHero release={LATEST_RELEASE} className="size-10 shrink-0 rounded-md" />
         <span className="min-w-0 space-y-0.5">
           <span className="block truncate font-medium">Version {LATEST_RELEASE.version}</span>
-          <span className="block truncate text-muted-foreground-2">{LATEST_RELEASE.summary}</span>
+          <span className="line-clamp-2 text-muted-foreground-2" title={LATEST_RELEASE.summary}>{LATEST_RELEASE.title}</span>
         </span>
       </button>
       <Button type="button" variant="ghost" size="icon-sm" aria-label={`Dismiss what's new in ${LATEST_RELEASE.version}`} onClick={() => setSeen(LATEST_RELEASE.version)} className="absolute top-2 right-2 size-6 text-muted-foreground-2"><X strokeWidth={1.5} aria-hidden="true" /></Button>
