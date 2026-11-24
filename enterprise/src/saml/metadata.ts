@@ -49,7 +49,7 @@ function secureUrl(value: string): string {
 
 export function parseIdpMetadata(xml: string): IdpMetadata {
   assertNoDtd(xml);
-  const doc = parseStrictXml(xml, "metadata", "The identity provider metadata is not well-formed XML.");
+  const doc = parseStrictXml(xml, "metadata", "The identity provider metadata is not well-formed XML.", { allowComments: true });
   let entity = doc.documentElement as El;
   if (entity.namespaceURI === NS_MD && entity.localName === "EntitiesDescriptor") {
     const inner = children(entity, NS_MD, "EntityDescriptor");
