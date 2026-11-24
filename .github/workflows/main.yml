@@ -86,6 +86,8 @@ jobs:
             dist
             packages/*/dist
             packages/*/tsconfig.tsbuildinfo
+            enterprise/dist
+            enterprise/tsconfig.tsbuildinfo
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
