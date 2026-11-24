@@ -77,8 +77,11 @@ ingress:
   className: ""
   host: ""
   annotations: {}
-  # Name of a TLS Secret. Leave empty when the load balancer terminates TLS.
+  # Name of a TLS Secret. The console carries sign-in credentials, so the chart refuses
+  # an ingress with neither this nor tlsTerminatedUpstream.
   tlsSecretName: ""
+  # Set to true only when a load balancer in front terminates TLS and blocks plain HTTP.
+  tlsTerminatedUpstream: false
 
 networkPolicy:
   enabled: true

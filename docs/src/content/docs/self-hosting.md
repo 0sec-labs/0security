@@ -195,7 +195,8 @@ helm install zero deploy/helm/zero -n zero \
   --set model.provider=bedrock \
   --set model.name=global.anthropic.claude-sonnet-4-5-20250929-v1:0 \
   --set model.awsRegion=eu-central-1 \
-  --set ingress.enabled=true --set ingress.className=nginx --set ingress.host=0.example.com
+  --set ingress.enabled=true --set ingress.className=nginx --set ingress.host=0.example.com \
+  --set ingress.tlsSecretName=zero-tls
 helm test zero -n zero
 ```
 
@@ -203,6 +204,7 @@ helm test zero -n zero
 
 Set these values for your environment:
 
+- `ingress.tlsSecretName`: a TLS Secret for the host. If a load balancer terminates TLS and blocks plain HTTP instead, set `ingress.tlsTerminatedUpstream=true`. The chart refuses an ingress with neither.
 - `trustedProxy`: the addresses of your ingress controller, so `X-Forwarded-*` headers are trusted.
 - `networkPolicy.ingressFrom`: the namespace or pods of your ingress controller. The default is the `ingress-nginx` namespace.
 - `networkPolicy.egressCIDRs`: where the console may connect on port 443. Narrow it to your VPC endpoints for the model.

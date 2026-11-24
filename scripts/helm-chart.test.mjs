@@ -36,9 +36,15 @@ test("the replica count cannot be raised", { skip }, () => {
 });
 
 test("an ingress needs a host, and the host becomes the allowed host and public URL", { skip }, () => {
-  assert.notEqual(template("--set", "ingress.enabled=true").status, 0);
-  const out = template("--set", "ingress.enabled=true", "--set", "ingress.host=0.example.test");
+  assert.notEqual(template("--set", "ingress.enabled=true", "--set", "ingress.tlsSecretName=x").status, 0);
+  const plain = template("--set", "ingress.enabled=true", "--set", "ingress.host=0.example.test");
+  assert.notEqual(plain.status, 0);
+  assert.match(plain.stderr, /tlsSecretName/);
+  const out = template("--set", "ingress.enabled=true", "--set", "ingress.host=0.example.test", "--set", "ingress.tlsSecretName=zero-tls");
   assert.equal(out.status, 0, out.stderr);
+  assert.match(out.stdout, /secretName: zero-tls/);
+  const upstream = template("--set", "ingress.enabled=true", "--set", "ingress.host=0.example.test", "--set", "ingress.tlsTerminatedUpstream=true");
+  assert.equal(upstream.status, 0, upstream.stderr);
   assert.match(out.stdout, /localhost,127\.0\.0\.1,0\.example\.test/);
   assert.match(out.stdout, /https:\/\/0\.example\.test/);
   assert.match(out.stdout, /kind: Ingress/);
