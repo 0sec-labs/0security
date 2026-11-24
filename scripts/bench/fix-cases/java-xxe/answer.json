@@ -1,0 +1,11 @@
+{
+  "id": "java-xxe",
+  "title": "XML external entity injection in XmlSettings.title",
+  "category": "xxe",
+  "severity": "high",
+  "language": "java",
+  "expectedFiles": [
+    "src/app/XmlSettings.java"
+  ],
+  "note": "The parser must not resolve external entities or load local files named in a DOCTYPE. Ordinary XML, including the predefined entities such as the ampersand, keeps parsing."
+}
