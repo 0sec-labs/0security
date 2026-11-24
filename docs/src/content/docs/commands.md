@@ -177,7 +177,12 @@ Add `--allow-partial` when a partial scan should not fail the job. The exit code
 | `--passes <n>` | `1` | Scan this many times and merge the findings (a scan misses some issues that another run finds); the budget is split between them, up to 5 |
 | `--diff <ref>` | — | Review only the files that differ from this git ref (for example origin/main), and what they connect to; an empty diff scans nothing |
 | `--prepass <mode>` | `auto` | auto runs the pattern scanners first when they are installed and gives their hits to the scan as leads; off skips them |
-| `--scanner <id>` | — | Scanner for the pre-pass (foxguard, semgrep, opengrep, gitleaks, trivy, osv-scanner, checkov); repeat or separate with commas to use several (default: foxguard). gitleaks, trivy and osv-scanner must be installed; secret values are redacted |
+| `--scanner <id>` | — | Scanner for the pre-pass (foxguard, semgrep, opengrep, gitleaks, trivy, osv-scanner, checkov); nuclei is only for --target-url; repeat or separate with commas to use several (default: foxguard). gitleaks, trivy and osv-scanner must be installed; secret values are redacted |
+| `--target-url <url>` | — | With --scanner nuclei: test this running app with Nuclei, which you installed. Needs --scope-file or --acknowledge-host. 0 sends no request itself; link-local and cloud metadata addresses are always refused |
+| `--scope-file <file>` | — | With --target-url: a file listing the hosts you may test, one host or host:port per line |
+| `--acknowledge-host <host>` | — | With --target-url: type the exact host being tested. A public host is refused without it |
+| `--rate-limit <n>` | `10` | With --target-url: Nuclei requests per second (1 to 150) |
+| `--templates <path>` | — | With --target-url: a Nuclei template file or folder to run instead of the templates Nuclei has installed. 0 never downloads templates |
 | `--rules <file-or-folder>` | — | Semgrep or OpenGrep rules for the pre-pass (a file or a folder); repeat for several. Replaces the default rules and needs --scanner semgrep or opengrep. Rules are never read from the scanned folder unless you name them |
 | `--context <file>` | — | Give the scan this file (a threat model, notes on who may do what) as lower-priority background; repeat for several. It can steer what the scan weighs but cannot change how it works |
 | `--policy <file-or-folder>` | — | Check the code against these Markdown policies (a file or a folder of .md files) and report pass or fail for each; repeat for several. Runs the policy-check skill |
@@ -194,7 +199,7 @@ Add `--allow-partial` when a partial scan should not fail the job. The exit code
 | `--retries <n>` | `2` | Run a batch again when it fails for a reason that may pass: a dropped connection, a provider timeout, rate limit or server error (0 to 5; 0 turns it off). A thread that is not a batch is asked once to continue. The cost of every attempt counts against --budget |
 | `--coverage-rounds <n>` | `1` | After a thread ends, send it a follow-up that names the source files it never opened, up to this many times (0 to 5; 0 turns it off). Each round counts against --budget |
 | `--batch-timeout <seconds>` | `900` | Longest one batch may run before it is cancelled and left pending (the scan goes on with the next batch); --timeout still limits the whole scan |
-| `--concurrency <n>` | `1` | Batches that run at the same time (1 to 3) |
+| `--concurrency <n>` | `1` | Batches that run at the same time (1 to 3). With --target-url: Nuclei templates that run at once (1 to 25, default 5) |
 | `--resume <scan>` | — | Continue the units an earlier batched scan of this folder did not reach (a scan id from its report, or latest); refuses when the git HEAD changed unless --force |
 | `--force` | — | With --resume: continue even though the folder's git HEAD changed |
 | `--coverage [scan]` | — | Print the coverage ledger of a batched scan of this folder (the latest, or the id given) and exit; --format json for JSON |
@@ -270,6 +275,19 @@ A change under review can edit files in the folder to hide findings. So the scan
 Checkov reads `.checkov.yaml` and `.checkov.yml` from the folder and has no option to ignore them. 0 skips Checkov when the folder has one of those files, unless you pass `--repo-ignores`.
 
 Secret values stay out of the prompt and the findings. gitleaks runs with `--redact`, and trivy masks values by default. 0 also drops the snippet and any `Match:` line from a secret lead, so the thread sees the rule, the file and the line. The thread can still read the file itself, as it reads any file in the folder. `0security findings import` is unchanged.
+
+To test a running app with Nuclei, pass the target and say what you may test. 0 starts Nuclei, which you installed. Nuclei sends the requests, not 0.
+
+```bash
+0security scan --scanner nuclei --target-url http://127.0.0.1:8080 --scope-file scope.txt
+```
+
+`scope.txt` lists one host or `host:port` per line. Or type the host with `--acknowledge-host`. A public host needs `--acknowledge-host` with the exact host, and refuses to run without it. Link-local and cloud metadata addresses are always refused. With `ZERO_ENTERPRISE` set, only loopback targets run.
+
+Nuclei runs at 10 requests per second and 5 templates at once. Change them with `--rate-limit` and `--concurrency`. Templates tagged `intrusive`, `dos` or `fuzz` are skipped, and out-of-band callbacks and update checks are off. Nuclei must be on your path, or set `ZERO_NUCLEI_PATH`. 0 never downloads Nuclei or its templates: run `nuclei -update-templates` yourself, or pass `--templates <file-or-folder>`.
+
+The report says what authorised the run. The findings are saved for triage as unverified, and no model reviews them. See [Use Nuclei, ZAP or Strix](/use-dynamic-scanners/).
+
 FoxGuard ships next to `0security`; set `ZERO_FOXGUARD_PATH` to use another copy. Pass `--prepass off` to skip it. `--scanner` adds or replaces scanners (`foxguard`, `semgrep`, `opengrep`, `checkov`); repeat the flag for several. A scanner that is not installed is skipped. A Semgrep rule pack such as `p/default` is downloaded when it runs.
 
 `--rules <file-or-folder>` gives Semgrep or OpenGrep your own rules for the pre-pass. Repeat it for several. The scanner runs only those rules, not its default pack, so add `--scanner semgrep` or `--scanner opengrep`. FoxGuard has its own rule format and does not read them, so `--rules` alone is a usage error.

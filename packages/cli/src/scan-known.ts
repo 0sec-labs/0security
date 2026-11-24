@@ -57,7 +57,7 @@ export function leadsToFindings(leads: readonly ImportedFinding[], now: Date): F
     return {
       id, fingerprint: `${id}`, templateId: `${item.tool}/${item.ruleId}`, title: item.title,
       description: `${PREPASS_ONLY_LABEL} ${item.description}`.trim(), category: item.category, severity: item.severity, tool: item.tool,
-      evidence: { request: where, response: item.snippet ?? "", analysis: `${PREPASS_ONLY_LABEL} Reported by ${item.tool}${item.toolVersion ? ` ${item.toolVersion}` : ""}; the pattern may be wrong.${item.cwe.length ? ` ${item.cwe.join(", ")}.` : ""}` },
+      evidence: { request: where, response: item.snippet ?? item.evidence ?? "", analysis: `${PREPASS_ONLY_LABEL} Reported by ${item.tool}${item.toolVersion ? ` ${item.toolVersion}` : ""}; the pattern may be wrong.${item.cwe.length ? ` ${item.cwe.join(", ")}.` : ""}` },
       ...(item.path && item.startLine ? { reviewAnnotation: { path: item.path, startLine: item.startLine, ...(item.endLine && item.endLine >= item.startLine ? { endLine: item.endLine } : {}) } } : {}),
       timestamp: now.getTime(), status: "discovered", triageStatus: "new", workflowStatus: "backlog",
     } as Finding;

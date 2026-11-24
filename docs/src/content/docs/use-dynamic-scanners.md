@@ -22,6 +22,17 @@ nuclei -u https://staging.example.com -jsonl-export nuclei.jsonl
 
 0security also reads Nuclei's SARIF export (`-sarif-export`). That file names only the host, not the matched URL, so prefer the JSON Lines file.
 
+## Run Nuclei from 0security
+
+0security can start Nuclei for you and import the result in one step. You install Nuclei, name the target, and say what you may test.
+
+```bash
+echo "staging.example.com" > scope.txt
+0security scan --scanner nuclei --target-url https://staging.example.com --acknowledge-host staging.example.com --scope-file scope.txt
+```
+
+Nuclei sends the requests. 0security sends none. It runs at 10 requests per second, skips intrusive, dos and fuzz templates, and turns off out-of-band callbacks. See [scan](/commands/#scan) for the flags and the refusals.
+
 ## Import ZAP results
 
 Add a report job with the `sarif-json` template to your ZAP automation plan.

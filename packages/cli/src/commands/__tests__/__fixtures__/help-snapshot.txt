@@ -1534,9 +1534,20 @@ Options:
   --prepass <mode>           auto runs the pattern scanners first when they are installed and gives
                              their hits to the scan as leads; off skips them (default: "auto")
   --scanner <id>             Scanner for the pre-pass (foxguard, semgrep, opengrep, gitleaks, trivy,
-                             osv-scanner, checkov); repeat or separate with commas to use several
-                             (default: foxguard). gitleaks, trivy and osv-scanner must be installed;
-                             secret values are redacted
+                             osv-scanner, checkov); nuclei is only for --target-url; repeat or
+                             separate with commas to use several (default: foxguard). gitleaks,
+                             trivy and osv-scanner must be installed; secret values are redacted
+  --target-url <url>         With --scanner nuclei: test this running app with Nuclei, which you
+                             installed. Needs --scope-file or --acknowledge-host. 0 sends no request
+                             itself; link-local and cloud metadata addresses are always refused
+  --scope-file <file>        With --target-url: a file listing the hosts you may test, one host or
+                             host:port per line
+  --acknowledge-host <host>  With --target-url: type the exact host being tested. A public host is
+                             refused without it
+  --rate-limit <n>           With --target-url: Nuclei requests per second (1 to 150) (default:
+                             "10")
+  --templates <path>         With --target-url: a Nuclei template file or folder to run instead of
+                             the templates Nuclei has installed. 0 never downloads templates
   --rules <file-or-folder>   Semgrep or OpenGrep rules for the pre-pass (a file or a folder); repeat
                              for several. Replaces the default rules and needs --scanner semgrep or
                              opengrep. Rules are never read from the scanned folder unless you name
@@ -1585,7 +1596,8 @@ Options:
   --batch-timeout <seconds>  Longest one batch may run before it is cancelled and left pending (the
                              scan goes on with the next batch); --timeout still limits the whole
                              scan (default: "900")
-  --concurrency <n>          Batches that run at the same time (1 to 3) (default: "1")
+  --concurrency <n>          Batches that run at the same time (1 to 3). With --target-url: Nuclei
+                             templates that run at once (1 to 25, default 5) (default: "1")
   --resume <scan>            Continue the units an earlier batched scan of this folder did not reach
                              (a scan id from its report, or latest); refuses when the git HEAD
                              changed unless --force

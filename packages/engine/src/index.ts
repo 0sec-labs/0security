@@ -163,6 +163,7 @@ export {
   presentationEventSink,
 } from "./events/bus.js";
 export { ENTERPRISE_ENV, EnterpriseEgressError, assertEgressAllowed, enterpriseMode } from "./policy/enterprise.js";
+export { ScopedTargetError, assertScopedTarget, classifyAddress as classifyTargetAddress, describeScopedTarget, parseScopeFile, type ResolveHost as ResolveTargetHost, type ScopedTarget, type ScopedTargetOptions } from "./policy/scoped-target.js";
 // Consent-gated analytics pipeline — the single choke point that may transmit
 // analytics. The CLI entry must set `ZERO_ANALYTICS_LEVEL` from the operator's
 // setting and call `maybeSubscribeAnalyticsPipeline()` (mirrors the cloud sink
