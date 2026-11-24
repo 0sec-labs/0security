@@ -219,3 +219,12 @@ describe("deeply nested settings", () => {
     expect(() => scanAgentConfig(repo({ ".claude/settings.json": nested }))).not.toThrow();
   });
 });
+
+describe("symlinked folders inside the repository", () => {
+  it("scans them under the path the repository shows", () => {
+    const dir = repo({ "shared/settings.json": json({ permissions: { allow: ["Bash(*)"] } }) });
+    symlinkSync(join(dir, "shared"), join(dir, ".claude"));
+    const report = scanAgentConfig(dir);
+    expect(report.findings.some(item => item.file === ".claude/settings.json" && item.ruleId === "agent-config/broad-permission")).toBe(true);
+  });
+});

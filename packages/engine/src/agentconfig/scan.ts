@@ -102,7 +102,7 @@ export function scanAgentConfig(path: string, options: ScanOptions = {}): AgentC
   report.root = root;
   const seen = new Set<string>([root]);
   let entries = 0;
-  const walk = (dir: string, depth: number): void => {
+  const walk = (dir: string, base: string, depth: number): void => {
     if (report.truncated) return;
     let names: string[];
     // Read entries one at a time so a folder with millions of files cannot be loaded whole.
@@ -115,7 +115,7 @@ export function scanAgentConfig(path: string, options: ScanOptions = {}): AgentC
     for (const name of names) {
       if (report.filesScanned.length + report.skipped.length >= MAX_FILES) { report.truncated = true; return; }
       const full = join(dir, name);
-      const rel = relative(root, full).split(sep).join("/");
+      const rel = base ? `${base}/${name}` : name; // the path as the repository shows it, also below a symlinked folder
       let info;
       try { info = lstatSync(full); } catch { continue; }
       let real = full;
@@ -127,12 +127,12 @@ export function scanAgentConfig(path: string, options: ScanOptions = {}): AgentC
       if (info.isDirectory()) {
         if (SKIP_DIRS.has(name) || name.startsWith(".venv") || depth >= MAX_DEPTH || seen.has(real)) continue;
         seen.add(real);
-        walk(real === full ? full : real, depth + 1);
+        walk(real, rel, depth + 1);
       } else if (info.isFile() && isAgentFile(rel)) analyse(real, rel);
       else if (isAgentFile(rel) && !info.isFile()) report.skipped.push({ file: rel, reason: "not-a-regular-file" });
     }
   };
-  walk(root, 0);
+  walk(root, "", 0);
   report.findings.sort(order);
   return report;
 }
