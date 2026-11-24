@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { SentinelCheckConfigSchema, SentinelReleaseConfigSchema, SentinelTriggerCreateSchema } from "@0/engine/shared";
 import {
-  checksFromPoll, cleanField, matchesCheck, matchesRelease, parseGithubWebhook, releasesFromPoll, statusContext, statusFor, tagsFromPoll,
+  checksFromPoll, cleanField, isSafeRef, matchesCheck, matchesRelease, parseGithubWebhook, releasesFromPoll, statusContext, statusFor, tagsFromPoll,
 } from "./sentinel-github-events.js";
 
 const sha = "a".repeat(40);
@@ -105,5 +105,28 @@ describe("commit status text", () => {
     expect(mixed.description).toBe("3 findings (1 critical, 1 high). Details are in the Sentinel.");
     expect(statusFor([{ severity: "low" }]).state).toBe("success");
     expect(statusContext("My Sentinel: Prod!")).toBe("0/sentinel/my-sentinel-prod");
+  });
+
+  it("rejects dot-segment, double-slash, leading-dash, and .lock path traversal refs across schemas, webhooks, and isSafeRef", () => {
+    for (const bad of ["../../pulls/1", "a/../b", "v1..v2", "/main", "a//b", "v1/", ".", "..", "-flag", "v1.lock"]) {
+      expect(isSafeRef(bad), bad).toBe(false);
+      expect(SentinelCheckConfigSchema.safeParse({ repo: "acme/app", branch: bad }).success, bad).toBe(false);
+      if (!bad.endsWith("/")) {
+        expect(SentinelReleaseConfigSchema.safeParse({ repo: "acme/app", tagPrefix: bad }).success, bad).toBe(false);
+      }
+      expect(parseGithubWebhook("release", release({ tag_name: bad })).ok, bad).toBe(false);
+      expect(parseGithubWebhook("push", { ref: `refs/tags/${bad}`, after: sha, deleted: false, repository: { full_name: "acme/app" } }).ok, bad).toBe(false);
+      const runParsed = parseGithubWebhook("check_run", {
+        action: "completed",
+        repository: { full_name: "acme/app" },
+        check_run: { id: 91, name: "build", status: "completed", conclusion: "failure", head_sha: sha, pull_requests: [], check_suite: { head_branch: bad } },
+      });
+      if (runParsed.ok) expect(runParsed.event.branch, bad).toBeUndefined();
+    }
+    // Valid nested branch / tag names and trailing-slash tagPrefix remain allowed.
+    expect(isSafeRef("release/v1.0.0")).toBe(true);
+    expect(isSafeRef("feat/fix-1")).toBe(true);
+    expect(SentinelReleaseConfigSchema.safeParse({ repo: "acme/app", tagPrefix: "release/" }).success).toBe(true);
+    expect(SentinelReleaseConfigSchema.safeParse({ repo: "acme/app", tagPrefix: "" }).success).toBe(true);
   });
 });
