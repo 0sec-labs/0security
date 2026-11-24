@@ -157,11 +157,15 @@ const questionFiles = (question: InterviewQuestion): string[] => {
   return [...files];
 };
 
+const isUnsafeGlob = (glob: string): boolean => !glob || /[,[\]\s]/.test(glob) || glob.startsWith("/") || glob.split("/").includes("..");
+
 /** A glob is kept only when it names the evidence file, a folder above it, or something the person typed. */
 export function allowedGlob(glob: string, question: InterviewQuestion, words: string): boolean {
-  const base = glob.replace(/\/?\*\*?.*$/, "").replace(/\/+$/, "");
+  const normalized = glob.replace(/\\/g, "/").replace(/^\.\//, "");
+  if (isUnsafeGlob(normalized)) return false;
+  const base = normalized.replace(/\/?\*\*?.*$/, "").replace(/\/+$/, "");
   if (base && questionFiles(question).some(path => path === base || path.startsWith(`${base}/`))) return true;
-  return glob.length > 2 && words.toLowerCase().includes(glob.toLowerCase());
+  return normalized.length > 2 && words.toLowerCase().includes(normalized.toLowerCase());
 }
 
 const validDate = (value: string): boolean => /^\d{4}-\d{2}-\d{2}$/.test(value) && new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value;
@@ -184,7 +188,9 @@ export function parseWording(reply: string | undefined): Wording[] {
     const item = raw as Record<string, unknown>;
     const questionId = plainLine(item.questionId, 40);
     if (!questionId) continue;
-    const paths = Array.isArray(item.paths) ? item.paths.map(path => plainLine(path, 200).replace(/\s/g, "")).filter(Boolean).slice(0, 5) : undefined;
+    const paths = Array.isArray(item.paths)
+      ? item.paths.map(path => plainLine(path, 200).replace(/\s/g, "").replace(/\\/g, "/").replace(/^\.\//, "")).filter(p => !isUnsafeGlob(p)).slice(0, 5)
+      : undefined;
     out.push({ questionId, reason: plainLine(item.reason, 400), ...(paths ? { paths } : {}), ...(typeof item.until === "string" ? { until: plainLine(item.until, 10) } : {}) });
   }
   return out;
@@ -196,16 +202,20 @@ export function parseWording(reply: string | undefined): Wording[] {
  * evidence file unless the person says otherwise.
  */
 export function entriesFromAnswers(answers: readonly InterviewAnswer[], wording: readonly Wording[], now: Date): ProposedEntry[] {
-  return answers.map(answer => {
+  return answers.flatMap(answer => {
     const word = wording.find(item => item.questionId === answer.question.id);
     const words = answer.words;
     const reason = words ? (word?.reason && groundedReason(word.reason, words) ? word.reason : words) : "not given";
     const wordedPaths = (word?.paths ?? []).filter(glob => allowedGlob(glob, answer.question, words));
     // An out-of-scope answer covers the places the question named. A class that spans more files than an entry can list stays class-wide: the entry is shown and can be edited before it is written.
     const files = questionFiles(answer.question);
-    const paths = wordedPaths.length ? wordedPaths : answer.decision === "out" && files.length && files.length <= MAX_SCOPE_PATHS ? files : [];
+    const safeFiles = files.map(p => p.replace(/\\/g, "/").replace(/^\.\//, "")).filter(p => !isUnsafeGlob(p));
+    const expectsFiles = answer.decision === "out" && files.length > 0 && files.length <= MAX_SCOPE_PATHS;
+    const paths = wordedPaths.length ? wordedPaths : expectsFiles ? safeFiles : [];
+    // Fail closed: if an entry had candidate paths (worded or evidence files) and none survived validation, drop it rather than rendering a repo-wide entry.
+    if ((expectsFiles || (word?.paths?.length ?? 0) > 0) && paths.length === 0) return [];
     const until = word?.until && allowedUntil(word.until, words, now) ? word.until : undefined;
-    return { kind: answer.decision, vector: answer.question.category, reason: plainLine(reason, 400).replace(/^[\u201c\u2018"']+|[\u201d\u2019"']+$/g, ""), ...(until ? { until } : {}), paths, questionId: answer.question.id };
+    return [{ kind: answer.decision, vector: answer.question.category, reason: plainLine(reason, 400).replace(/^[\u201c\u2018"']+|[\u201d\u2019"']+$/g, ""), ...(until ? { until } : {}), paths, questionId: answer.question.id }];
   });
 }
 
