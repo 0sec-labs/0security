@@ -35,7 +35,7 @@ export function TeamSettingsPage() {
     },
   });
   const roles = useQuery({
-    queryKey: [...queryKey, "roles"],
+    queryKey: queryKeys.teamRoles(team.workspace?.id),
     enabled: team.enabled && Boolean(team.user),
     queryFn: async ({ signal }): Promise<RoleList> => {
       const response = await localControlFetch("/api/team/roles", { signal });
