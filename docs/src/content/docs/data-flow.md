@@ -35,6 +35,8 @@ Nothing is sent when the switch is on, so `~/.0/analytics-sent.log`, which recor
 
 The repository tests this in the engine and CLI test suites. Each test starts a local stub model server, turns on the switch, runs the call sites that the switch blocks, and patches `fetch`, `node:http`, `node:https`, sockets and the `gh`, `curl`, `git` and `ssh` launchers to record every attempt. It fails when anything other than the stub is contacted. A control case runs the same lookups with the switch off and checks that the recorder sees them, so a silent recorder cannot pass. A second check fails when a source file adds an outbound call that is not in the inventory below.
 
+To check a real install, run `node scripts/airgap/verify-no-egress.mjs`. See [Air-gapped installation](/self-hosting/#air-gapped-installation).
+
 For a stronger guarantee than a test, also block egress at the network: run 0 in a container or network namespace whose only route is your model gateway, then run a scan with `ZERO_ENTERPRISE=1`. The switch gives you the same result without relying on the block, and the block catches a mistake the switch could not.
 
 ## Blocked by `ZERO_ENTERPRISE`
