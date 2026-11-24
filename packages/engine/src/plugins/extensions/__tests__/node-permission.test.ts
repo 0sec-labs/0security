@@ -76,7 +76,7 @@ describe("planning with node permission", () => {
   it("unwraps env node so node --permission still applies", () => {
     const p = planSandbox(req(decl(), ["/usr/bin/env", nodePath, path.join(ext, "run.mjs")]), { env: {}, status: noOs, nodeSupport: supported });
     expect(p.kind).toBe("sandboxed");
-    if (p.kind === "sandboxed") { p.cleanup(); expect(p.file).toBe(nodePath); expect(p.args[0]).toBe("--permission"); expect(p.args).toContain("--"); }
+    if (p.kind === "sandboxed") { p.cleanup(); expect(p.file).toBe(nodePath); expect(p.args[0]).toBe("--permission"); }
   });
 });
 
@@ -115,31 +115,16 @@ t("spawn", () => cp.execFileSync(process.execPath, ["-e", "0"]));
     const lines = Object.fromEntries(r.stdout.trim().split("\n").map(l => l.split(":") as [string, string]));
     expect(lines["write-declared"]).toBe("ALLOWED"); expect(lines["spawn"]).toBe("ALLOWED"); expect(lines["write-outside"]).toBe("ERR_ACCESS_DENIED");
   });
-  it("does not allow extension args (--allow-fs-read=*, --allow-child-process) to bypass node --permission", async () => {
-    fs.writeFileSync(path.join(ext, "run.mjs"), probe);
-    const plan = planSandbox({
-      decl: decl(),
-      extensionDir: ext,
-      workspace: null,
-      argv: [process.execPath, "--allow-fs-read=*", "--allow-fs-write=*", "--allow-child-process", path.join(ext, "run.mjs")],
-      interpreters: ["node"],
-      env: { PATH: path.dirname(process.execPath) },
-      cwd: tmp,
-      label: "MCP server evil of extension evil",
-    }, { env: {}, status: noOs });
-    expect(plan.kind).toBe("sandboxed");
-    if (plan.kind !== "sandboxed") return;
-    let stdout = "";
-    try {
-      const r = await run(plan.file, plan.args, { cwd: plan.cwd, env: plan.env, timeout: 15_000 });
-      stdout = r.stdout;
-    } catch (e) {
-      stdout = (e as { stdout?: string }).stdout ?? "";
-    } finally {
-      plan.cleanup();
+  it("refuses extension args or NODE_OPTIONS that would widen node's permissions, and keeps ordinary node flags", () => {
+    const base = { decl: decl(), extensionDir: ext, workspace: null, interpreters: ["node"], cwd: tmp, label: "MCP server evil of extension evil" };
+    for (const arg of ["--allow-fs-read=*", "--allow-fs-write=*", "--allow-child-process", "--allow_fs_read=*", "--no-permission", "--env-file=x.env"]) {
+      const plan = planSandbox({ ...base, argv: [process.execPath, arg, path.join(ext, "run.mjs")], env: { PATH: path.dirname(process.execPath) } }, { env: {}, status: noOs, nodeSupport: supported });
+      expect(plan.kind).toBe("refused");
     }
-    expect(stdout).not.toContain("read-outside:ALLOWED");
-    expect(stdout).not.toContain("write-outside:ALLOWED");
-    expect(stdout).not.toContain("spawn:ALLOWED");
+    const viaEnv = planSandbox({ ...base, argv: [process.execPath, path.join(ext, "run.mjs")], env: { PATH: path.dirname(process.execPath), NODE_OPTIONS: "--allow-fs-read=*" } }, { env: {}, status: noOs, nodeSupport: supported });
+    expect(viaEnv.kind).toBe("refused");
+    const ok = planSandbox({ ...base, argv: [process.execPath, "--enable-source-maps", path.join(ext, "run.mjs")], env: { PATH: path.dirname(process.execPath), NODE_OPTIONS: "--max-old-space-size=256" } }, { env: {}, status: noOs, nodeSupport: supported });
+    expect(ok.kind).toBe("sandboxed");
+    if (ok.kind === "sandboxed") { ok.cleanup(); expect(ok.args).toContain("--enable-source-maps"); expect(ok.args).not.toContain("--"); }
   });
 });

@@ -139,6 +139,8 @@ export interface PlanOptions { env?: Readonly<Record<string, string | undefined>
 /** ZERO_SANDBOX_NODE_PERMISSION=off leaves node's permission flags out (an extension that needs a native addon, for example). */
 const nodePermissionWanted = (env: Readonly<Record<string, string | undefined>>): boolean => env.ZERO_SANDBOX_NODE_PERMISSION?.trim().toLowerCase() !== "off";
 
+const NODE_WIDENING_FLAG = /^--(?:allow[-_]|no[-_](?:experimental[-_])?permission|env[-_]file)/i;
+
 const resolveProgram = (name: string, pathEnv: string): string => (name.includes("/") ? name : whichIn(name, pathEnv) ?? name);
 const real = (p: string): string => { try { return fs.realpathSync(p); } catch { return p; } };
 
@@ -185,7 +187,11 @@ export function planSandbox(req: SandboxRequest, options: PlanOptions = {}): San
   let nodeNote = "";
   if (nodeSupport?.supported) {
     const flags = nodePermissionArgs(policy, nodeSupport);
-    if (flags.ok) { argv = [program, ...flags.args, "--", ...programArgs]; nodeNote = `${nodeSupport.flag}: folders, child programs, workers`; }
+    if (flags.ok) {
+      // Flags that widen node's own permissions would win over ours, from the arguments, an env file or NODE_OPTIONS: refuse them.
+      const widens = programArgs.find(arg => NODE_WIDENING_FLAG.test(arg)) ?? (req.env.NODE_OPTIONS?.split(/\s+/).find(arg => NODE_WIDENING_FLAG.test(arg)));
+      if (widens) { cleanup(); return { kind: "refused", error: `cannot start ${req.label} in a sandbox: ${widens.slice(0, 60)} would change node's permissions` }; }
+      argv = [program, ...flags.args, ...programArgs]; nodeNote = `${nodeSupport.flag}: folders, child programs, workers`; }
     else if (!detected.backend) { cleanup(); return { kind: "unsandboxed", status: `sandbox: not available (${detected.reason}; ${flags.error}); ran without it` }; }
   }
   const limitNote = policy.limits.cpuSeconds || policy.limits.memoryMb ? `, limits ${[policy.limits.cpuSeconds ? `${policy.limits.cpuSeconds}s cpu` : "", policy.limits.memoryMb ? `${policy.limits.memoryMb} MB memory` : ""].filter(Boolean).join(" ")}` : "";
