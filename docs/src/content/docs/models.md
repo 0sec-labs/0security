@@ -165,6 +165,29 @@ Include `/openai/v1` in a Responses base URL. With an existing Azure CLI sign-in
 
 0 probes the endpoint once to learn its region. That is a diagnostic, not a residency guarantee.
 
+### Azure OpenAI with Entra ID
+
+Use the identity of the machine or pod instead of a key. Set `AZURE_OPENAI_AUTH=entra` and leave `AZURE_OPENAI_API_KEY` unset:
+
+```bash
+export AZURE_OPENAI_AUTH=entra
+export AZURE_OPENAI_BASE_URL="https://your-resource.openai.azure.com/openai/v1"
+env ZERO_SELECTED_PROVIDER=azure ZERO_MODEL="your-deployment-id" \
+  0 -p "Review ./authorized-repo"
+```
+
+0 gets a token for `https://cognitiveservices.azure.com/.default` from the first source that applies:
+
+1. Workload identity: `AZURE_FEDERATED_TOKEN_FILE`, `AZURE_CLIENT_ID` and `AZURE_TENANT_ID`, which AKS sets for you. `AZURE_AUTHORITY_HOST` selects a sovereign cloud.
+2. A managed identity endpoint your host injects (`IDENTITY_ENDPOINT` and `IDENTITY_HEADER`).
+3. The instance metadata service of an Azure VM. Set `AZURE_CLIENT_ID` to pick a user-assigned identity.
+
+Set `AZURE_OPENAI_BASE_URL` to your Azure OpenAI endpoint. 0 sends the token only to an `https` Azure endpoint, and never uses `OPENAI_BASE_URL` for it.
+
+Grant the identity the Cognitive Services OpenAI User role on the resource. 0 keeps the token in memory, refreshes it before it expires and sends it as a bearer token. It never writes the token to disk or a log.
+
+With `ZERO_ENTERPRISE` set, 0 refuses the public sign-in authority unless `AZURE_AUTHORITY_HOST` names yours. The metadata addresses are local to the host and stay allowed. The region probe is skipped because it needs a key.
+
 ### Amazon Bedrock
 
 0 calls Bedrock directly with the AWS SDK, with no proxy in between. Authentication uses the standard AWS credential chain: environment keys, `AWS_PROFILE` (including SSO), an ECS task role, a web identity token or an instance role. You can also set `AWS_BEARER_TOKEN_BEDROCK` for a Bedrock API key. 0 stores no AWS secret.

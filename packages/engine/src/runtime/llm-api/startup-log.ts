@@ -1,4 +1,5 @@
 import { appendFileSync } from "node:fs";
+import { AZURE_ENTRA_PLACEHOLDER } from "./azure-entra.js";
 import { diag } from "../../diagnostics/channel.js";
 import { probeAzureRegion } from "./azure-region.js";
 import { type ApiProvider, type WireApi } from "./provider-config.js";
@@ -81,7 +82,8 @@ export async function logProviderStartup(
     return;
   }
 
-  const region = await probeAzureRegion(baseUrl, apiKey, fetchImpl);
+  // The region probe sends the key; with Entra ID there is none to send, and the region stays unknown.
+  const region = apiKey === AZURE_ENTRA_PLACEHOLDER ? "unknown" : await probeAzureRegion(baseUrl, apiKey, fetchImpl);
 
   diag.info("provider_initialized", "Azure OpenAI provider initialized", {
     provider,

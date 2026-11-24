@@ -4,6 +4,7 @@ import { resolveWorkbenchProviderProxy } from "../workbench-provider-proxy.js";
 import { BEDROCK_DEFAULT_MODEL, AZURE_FOUNDRY_DEPLOYMENT_IDS, TOGETHER_DEFAULT_MODEL, togetherBaseUrl, CODEX_API_ENDPOINT, CODEX_DEFAULT_MODEL, DEEPSEEK_DEFAULT_BASE_URL, DEEPSEEK_DEFAULT_MODEL, DEFAULT_ANTHROPIC_MODEL, DEFAULT_OPENAI_MODEL, DEFAULT_OPENROUTER_MODEL, isRemovedProvider, KIMI_DEFAULT_BASE_URL, KIMI_DEFAULT_MODEL, OPENCODE_DEFAULT_BASE_URL, OPENCODE_DEFAULT_MODEL, QWEN_DEFAULT_BASE_URL, QWEN_DEFAULT_MODEL, QWEN_TOKEN_PLAN_DEEPSEEK_MODEL, XAI_DEFAULT_BASE_URL, XAI_DEFAULT_MODEL, ZAI_DEFAULT_BASE_URL, ZAI_DEFAULT_MODEL, openAICompatibleWireApi, opencodeWireApiForModel, type ApiProvider, type WireApi } from "./provider-config.js";
 import { resolveFailoverProvider } from "./fallback.js";
 import { parseCodexAzureConfig } from "./provider-config.js";
+import { AZURE_ENTRA_PLACEHOLDER, azureEntraEnabled } from "./azure-entra.js";
 import { readChatGptCodexAuthFile, readChatGptCodexEnv } from "./codex-auth.js";
 
 export interface ApiRuntimeDiagnostics {
@@ -23,6 +24,12 @@ export interface ApiRuntimeDiagnostics {
  * picking one provider for the whole process. Returns undefined → fall back to
  * the env-priority chain (existing behaviour).
  */
+/** With Entra ID there is no key to leak, but a token must never reach the public OpenAI default or an unrelated OPENAI_BASE_URL. */
+function azureBaseUrl(env: Readonly<NodeJS.ProcessEnv>, key: string, codexBaseUrl: string | undefined): string {
+  if (key === AZURE_ENTRA_PLACEHOLDER) return env.AZURE_OPENAI_BASE_URL ?? codexBaseUrl ?? "";
+  return env.AZURE_OPENAI_BASE_URL ?? env.OPENAI_BASE_URL ?? codexBaseUrl ?? "https://api.openai.com/v1";
+}
+
 export function providerForModel(model: string | undefined, env: Readonly<NodeJS.ProcessEnv>): ApiProvider | undefined {
   if (!model) return undefined;
   const m = model.toLowerCase();
@@ -35,7 +42,7 @@ export function providerForModel(model: string | undefined, env: Readonly<NodeJS
   // DeepSeek failover key; otherwise env priority would send the Azure model
   // to the direct endpoint.
   if (AZURE_FOUNDRY_DEPLOYMENT_IDS[m]) {
-    return env.AZURE_OPENAI_API_KEY ? "azure" : undefined;
+    return env.AZURE_OPENAI_API_KEY || azureEntraEnabled(env) ? "azure" : undefined;
   }
   // Alibaba Token Plan DeepSeek revision: qwen-served, exact id.
   if (m === QWEN_TOKEN_PLAN_DEEPSEEK_MODEL) {
@@ -224,17 +231,13 @@ export function detectProvider(configApiKey: string | undefined, preferredModel:
         baseUrl: env.DEEPSEEK_BASE_URL ?? DEEPSEEK_DEFAULT_BASE_URL,
         defaultModel: DEEPSEEK_DEFAULT_MODEL, wireApi: "responses" };
     case "azure": {
-      const azureKey = env.AZURE_OPENAI_API_KEY;
+      const azureKey = env.AZURE_OPENAI_API_KEY || (azureEntraEnabled(env) ? AZURE_ENTRA_PLACEHOLDER : undefined);
       if (!azureKey) break;
       const azureConfig = parseCodexAzureConfig(env);
       return {
         provider: "azure",
         apiKey: azureKey,
-        baseUrl:
-          env.AZURE_OPENAI_BASE_URL ??
-          env.OPENAI_BASE_URL ??
-          azureConfig.baseUrl ??
-          "https://api.openai.com/v1",
+        baseUrl: azureBaseUrl(env, azureKey, azureConfig.baseUrl),
         defaultModel:
           preferredModel ??
           env.AZURE_OPENAI_MODEL ??
@@ -349,13 +352,13 @@ export function detectProvider(configApiKey: string | undefined, preferredModel:
     };
   }
 
-  const azureKey = env.AZURE_OPENAI_API_KEY;
+  const azureKey = env.AZURE_OPENAI_API_KEY || (azureEntraEnabled(env) ? AZURE_ENTRA_PLACEHOLDER : undefined);
   if (azureKey) {
     const azureConfig = parseCodexAzureConfig(env);
     return {
       provider: "azure",
       apiKey: azureKey,
-      baseUrl: env.AZURE_OPENAI_BASE_URL ?? env.OPENAI_BASE_URL ?? azureConfig.baseUrl ?? "https://api.openai.com/v1",
+      baseUrl: azureBaseUrl(env, azureKey, azureConfig.baseUrl),
       defaultModel: env.AZURE_OPENAI_MODEL ?? azureConfig.model ?? DEFAULT_OPENAI_MODEL,
       wireApi: openAICompatibleWireApi(env, "AZURE_OPENAI_WIRE_API", azureConfig.wireApi),
       reasoningEffort: azureConfig.reasoningEffort,

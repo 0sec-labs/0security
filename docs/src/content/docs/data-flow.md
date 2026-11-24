@@ -67,6 +67,7 @@ For a stronger guarantee than a test, also block egress at the network: run 0 in
 | Entry | Destination | When | What is sent |
 | --- | --- | --- | --- |
 | `llm-model-endpoint` | The provider base URL or gateway you configured | Every model call and model-list discovery. | Prompts, tool results and code excerpts the model needs. |
+| `azure-entra-token` | `login.microsoftonline.com` or the authority in `AZURE_AUTHORITY_HOST`, the Azure instance metadata address `169.254.169.254`, or the `IDENTITY_ENDPOINT` your host injects. The token is for `cognitiveservices.azure.com`. | Only with `AZURE_OPENAI_AUTH=entra`, at the first model call and shortly before the token expires. | A token request. No prompts or code. |
 | `provider-sign-in` | The provider you sign in to with OAuth or a subscription | Only when you choose that sign-in. | The OAuth exchange and that provider's model requests. |
 | `provider-health` | The API of a provider you connected | The console shows connection status. | A key-validation or usage GET. |
 

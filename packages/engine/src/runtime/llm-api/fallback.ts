@@ -1,4 +1,5 @@
 import { diag } from "../../diagnostics/channel.js";
+import { AZURE_ENTRA_PLACEHOLDER, azureEntraEnabled } from "./azure-entra.js";
 import { BEDROCK_CREDENTIAL_CHAIN_MARKER, bedrockBaseUrl, hasBedrockCredentialSignals, togetherBaseUrl, CODEX_API_ENDPOINT, DEEPSEEK_DEFAULT_BASE_URL, KIMI_DEFAULT_BASE_URL, OPENCODE_DEFAULT_BASE_URL, QWEN_DEFAULT_BASE_URL, XAI_DEFAULT_BASE_URL, ZAI_DEFAULT_BASE_URL, openAICompatibleWireApi, opencodeWireApiForModel, type ApiProvider, type WireApi } from "./provider-config.js";
 import { readChatGptCodexAuthFile } from "./codex-auth.js";
 import { parseCodexAzureConfig } from "./provider-config.js";
@@ -86,10 +87,10 @@ export function resolveFailoverProvider(
       return { apiKey: key, baseUrl: "https://openrouter.ai/api/v1", wireApi: openAICompatibleWireApi(env, "OPENROUTER_WIRE_API") };
     }
     case "azure": {
-      const key = apiKey ?? env.AZURE_OPENAI_API_KEY;
+      const key = apiKey ?? (env.AZURE_OPENAI_API_KEY || (azureEntraEnabled(env) ? AZURE_ENTRA_PLACEHOLDER : undefined));
       if (!key) return undefined;
       const azureConfig = parseCodexAzureConfig(env);
-      const url = env.AZURE_OPENAI_BASE_URL ?? env.OPENAI_BASE_URL ?? azureConfig.baseUrl;
+      const url = env.AZURE_OPENAI_BASE_URL ?? (key === AZURE_ENTRA_PLACEHOLDER ? undefined : env.OPENAI_BASE_URL) ?? azureConfig.baseUrl;
       if (!url) return undefined;
       return { apiKey: key, baseUrl: url, wireApi: openAICompatibleWireApi(env, "AZURE_OPENAI_WIRE_API", azureConfig.wireApi) };
     }
