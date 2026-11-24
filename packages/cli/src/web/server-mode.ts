@@ -19,6 +19,7 @@ import { audit } from "./audit.js";
 import { htmlSecurityHeaders } from "./dashboard-csp.js";
 import { WebRequestError, json } from "./dashboard-http.js";
 import { TeamAuth, TeamAuthError, parseCookies } from "./team-auth.js";
+import { isCrossSiteSignInReturn, isSamlAcsPost } from "./team-sso-routes.js";
 
 export const ACCESS_COOKIE = "zero_access";
 export const ACCESS_ROUTE_PREFIX = "/_access/";
@@ -209,9 +210,9 @@ export class ServerModeGuard {
     const forwardedProto = trusted ? first(req.headers["x-forwarded-proto"])?.toLowerCase() : undefined;
     const https = this.publicHttps || forwardedProto === "https";
     const expectedOrigin = `${https ? "https" : "http"}://${authority.toLowerCase()}`;
-    if (req.headers.origin !== undefined && req.headers.origin.toLowerCase() !== expectedOrigin) throw new WebRequestError("Cross-origin web application requests are not allowed.", 403);
-    const ssoCallback = req.method === "GET" && /^\/api\/team\/auth\/callback(?:\?|$)/.test(req.url ?? "");
-    if (req.url?.startsWith("/api/") && req.headers["sec-fetch-site"] === "cross-site" && !ssoCallback) throw new WebRequestError("Cross-site control requests are not allowed.", 403);
+    // The SAML identity provider posts its signed response from its own origin; see isSamlAcsPost.
+    if (req.headers.origin !== undefined && req.headers.origin.toLowerCase() !== expectedOrigin && !isSamlAcsPost(req.method, req.url)) throw new WebRequestError("Cross-origin web application requests are not allowed.", 403);
+    if (req.url?.startsWith("/api/") && req.headers["sec-fetch-site"] === "cross-site" && !isCrossSiteSignInReturn(req.method, req.url)) throw new WebRequestError("Cross-site control requests are not allowed.", 403);
     if (!req.url?.startsWith("/") || req.url.startsWith("//")) throw new WebRequestError("Invalid request target.", 400);
     return { authority, https, clientIp: trusted ? this.forwardedClient(req, peer) : peer, viaTrustedProxy: trusted };
   }
@@ -318,8 +319,8 @@ export class ServerModeGuard {
   /** The page an anonymous visitor gets instead of the console: no control token, no application code. */
   sendLoginPage(req: IncomingMessage, res: ServerResponse, ctx: ServerRequestContext, team: TeamAuth): void {
     const teamMode = team.enabled;
-    const sso = teamMode && team.status({ headers: {} }).sso;
-    const html = loginHtml({ teamMode, sso });
+    const status = teamMode ? team.status({ headers: {} }) : undefined;
+    const html = loginHtml({ teamMode, sso: Boolean(status?.sso), saml: "saml" in (status ?? {}) });
     const headers: Record<string, string> = { ...htmlSecurityHeaders(html), "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" };
     if (ctx.https) headers["Strict-Transport-Security"] = "max-age=31536000";
     res.writeHead(200, headers);
@@ -327,10 +328,10 @@ export class ServerModeGuard {
   }
 }
 
-function loginHtml(mode: { teamMode: boolean; sso: boolean }): string {
+function loginHtml(mode: { teamMode: boolean; sso: boolean; saml: boolean }): string {
   const field = mode.teamMode
     ? `<label>User ID<input name="userId" autocomplete="username" required autofocus></label><label>Password<input name="password" type="password" autocomplete="current-password" required></label>`
     : `<label>Access token<input name="token" type="password" autocomplete="off" required autofocus></label>`;
   const script = `const f=document.querySelector("form"),m=document.querySelector("#m");f.addEventListener("submit",async e=>{e.preventDefault();m.textContent="";const b=Object.fromEntries(new FormData(f));try{const r=await fetch("/_access/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b),credentials:"same-origin"});if(r.ok){location.replace("/");return}const d=await r.json().catch(()=>({}));m.textContent=d.error||"Sign-in failed."}catch{m.textContent="Could not reach the server."}});`;
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>Sign in - 0</title><style>:root{color-scheme:light dark}body{font:15px system-ui,sans-serif;display:grid;place-items:center;min-height:100vh;margin:0}main{width:min(22rem,90vw)}h1{font-size:1.2rem}label{display:block;margin:1rem 0 .3rem}input{display:block;width:100%;box-sizing:border-box;padding:.55rem;font:inherit;margin-top:.3rem}button,a.b{display:block;margin-top:1rem;padding:.6rem;width:100%;box-sizing:border-box;font:inherit;text-align:center;cursor:pointer}#m{color:#c0392b;min-height:1.2rem;margin-top:.8rem}</style></head><body><main><h1>Sign in to 0</h1><form>${field}<button type="submit">Sign in</button></form>${mode.sso ? `<a class="b" href="/api/team/auth/sso">Sign in with single sign-on</a>` : ""}<p id="m" role="alert"></p></main><script>${script}</script></body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>Sign in - 0</title><style>:root{color-scheme:light dark}body{font:15px system-ui,sans-serif;display:grid;place-items:center;min-height:100vh;margin:0}main{width:min(22rem,90vw)}h1{font-size:1.2rem}label{display:block;margin:1rem 0 .3rem}input{display:block;width:100%;box-sizing:border-box;padding:.55rem;font:inherit;margin-top:.3rem}button,a.b{display:block;margin-top:1rem;padding:.6rem;width:100%;box-sizing:border-box;font:inherit;text-align:center;cursor:pointer}#m{color:#c0392b;min-height:1.2rem;margin-top:.8rem}</style></head><body><main><h1>Sign in to 0</h1><form>${field}<button type="submit">Sign in</button></form>${mode.sso ? `<a class="b" href="/api/team/auth/sso">Sign in with single sign-on</a>` : ""}${mode.saml ? `<a class="b" href="/api/team/auth/saml/sso">Sign in with SAML</a>` : ""}<p id="m" role="alert"></p></main><script>${script}</script></body></html>`;
 }

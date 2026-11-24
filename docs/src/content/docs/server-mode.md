@@ -367,6 +367,45 @@ Add an `oidc` object and give each member the provider's verified `oidcSub`. Nam
 
 Register the exact callback URL with your provider. Omit `clientSecretEnv` for a public client. Sign-in uses the authorization code flow with PKCE and checks issuer, audience, nonce and signature. Session cookies are HTTP-only and last eight hours.
 
+### SAML sign-in
+
+SAML sign-in lets members sign in through an identity provider that does not offer OIDC. It needs an enterprise license with the `saml` feature (see [Free and paid](#free-and-paid)). Without one, the SAML routes answer that a license is needed.
+
+Add a `saml` object and give each member the `samlNameId` the provider sends. The NameID must match exactly. Names, email addresses and groups never create a member.
+
+```json
+{
+  "users": [
+    { "id": "alex", "name": "Alex", "role": "viewer", "samlNameId": "alex@example.com" }
+  ],
+  "saml": {
+    "entityId": "https://0.example.com/saml",
+    "acsUrl": "https://0.example.com/api/team/auth/saml/acs",
+    "metadataFile": "/etc/0security/idp-metadata.xml",
+    "groupAttribute": "groups",
+    "groupRoles": { "sec-owners": "owner", "sec-editors": "editor", "sec-viewers": "viewer" }
+  }
+}
+```
+
+Give the provider two values: the entity ID as the audience, and the ACS URL as the reply URL. Or give it the metadata from `/api/team/auth/saml/metadata`. In the provider's metadata, 0 needs an HTTP-Redirect sign-in address and a signing certificate. Set exactly one of `metadataFile` (a path, needs no network) or `metadataUrl` (an https address, fetched on first use and every 12 hours). Members sign in at `/api/team/auth/saml/sso`, and the login page links there.
+
+Groups are optional. With `groupAttribute` and `groupRoles`, a member's role is the highest role among their groups, and a member with no mapped group cannot sign in. Without them, the member's configured `role` applies. The attribute name must match the provider's exactly. Okta sends the name you choose for the group attribute. Microsoft Entra ID sends group object IDs under `http://schemas.microsoft.com/ws/2008/06/identity/claims/groups` unless you change the claim.
+
+0 accepts a response only when all of these hold:
+
+- The assertion is signed with the provider's certificate. Set `"requireSignature": "either"` to accept a signed response instead.
+- The signature does not use SHA-1.
+- The issuer, audience and ACS URL match your configuration.
+- The response answers a sign-in that this server started, and that sign-in has not been used before.
+- The assertion is within its validity window, with up to 60 seconds of clock skew (`clockSkewSeconds`, at most 300).
+- The assertion ID has not been seen before.
+- The message has no DTD, entity, comment, CDATA section or second assertion.
+
+The same browser that started the sign-in must finish it. The session cookie lasts eight hours, as with OIDC.
+
+Limits: the signature check relies on the open-source node-saml and xml-crypto libraries. It is tested with signed test responses and not yet against a real Okta or Entra ID tenant. Metadata is trusted as you supply it, and its own signature is not checked. Single logout, encrypted assertions and signed requests are not supported. Pending sign-ins and seen assertion IDs are kept in memory, so a restart forgets them. A `metadataUrl` is refused under `ZERO_ENTERPRISE`; use `metadataFile`.
+
 ## Teams and enterprise
 
 0 is open source under MIT OR Apache-2.0. The CLI, engine, browser app and team workspace are all in the [`0sec-labs/0security`](https://github.com/0sec-labs/0security) repository. None of them needs an account, a license key or a 0security-hosted service. Model calls go to the provider you choose with your own key. Findings stay on your computer, CI runner or servers. The only automatic upload is the anonymous telemetry described in [Configuration](/configuration/#telemetry).

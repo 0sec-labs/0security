@@ -5,11 +5,11 @@ import { CollaborationService, type CollaborationResourceKind } from "./collabor
 import type { ConsoleGateway } from "./console-gateway.js";
 import { audit, auditActor } from "./audit.js";
 
-type Reply = { status: number; data?: unknown; headers?: Record<string, string | string[]>; redirect?: string };
+type Reply = { status: number; data?: unknown; headers?: Record<string, string | string[]>; redirect?: string; xml?: string };
 const readOnly = (method: string) => method === "GET" || method === "HEAD";
 
 /** Sign-in is attributed to the named member; no credential, token or cookie value is recorded. */
-function auditSignIn(user: TeamIdentity, kind: "password" | "sso", client: string): void {
+function auditSignIn(user: TeamIdentity, kind: "password" | "sso" | "saml", client: string): void {
   audit({ actor: auditActor({ engineRequest: false, teamEnabled: true, displayName: user.displayName }), action: "access.login", subject: "console", detail: { id: user.userId, kind, role: user.role, client } });
 }
 
@@ -32,7 +32,7 @@ export function authorizeTeamApi(auth: TeamAuth, req: IncomingMessage, path: str
   return actor;
 }
 
-export async function handleTeamRequest(req: IncomingMessage, url: URL, auth: TeamAuth, collaboration: CollaborationService | undefined, gateway: ConsoleGateway, readBody: () => Promise<unknown>, validateResource?: (kind: CollaborationResourceKind, id: string) => void | Promise<void>): Promise<Reply | undefined> {
+export async function handleTeamRequest(req: IncomingMessage, url: URL, auth: TeamAuth, collaboration: CollaborationService | undefined, gateway: ConsoleGateway, readBody: () => Promise<unknown>, validateResource?: (kind: CollaborationResourceKind, id: string) => void | Promise<void>, readForm?: () => Promise<Record<string, string>>): Promise<Reply | undefined> {
   if (!url.pathname.startsWith("/api/team/")) return;
   const method = req.method ?? "GET";
   const path = url.pathname.slice("/api/team/".length);
@@ -59,6 +59,7 @@ export async function handleTeamRequest(req: IncomingMessage, url: URL, auth: Te
     auditSignIn(login.user, "sso", client);
     return { status: 302, redirect: login.redirect, headers: { "Set-Cookie": login.setCookies } };
   }
+  if (path.startsWith("auth/saml/")) return handleSamlRequest(req, url, path.slice("auth/saml/".length), method, auth, readForm);
   if (path === "auth/logout" && method === "POST") {
     const user = auth.resolveSession(req); // resolve before the session is destroyed
     const reply = { status: 200, data: { ok: true }, headers: { "Set-Cookie": auth.logout(req).setCookie } };
@@ -87,6 +88,31 @@ export async function handleTeamRequest(req: IncomingMessage, url: URL, auth: Te
   if (!match[2] && method === "GET") return { status: 200, data: collaboration.snapshot(id, session) };
   if (match[2] === "presence" && method === "POST") return { status: 200, data: collaboration.heartbeat(id, session, await readBody()) };
   throw new TeamAuthError("Method not allowed.", 405);
+}
+
+/** SAML sign-in routes. Anonymous by nature; the response is verified, not the caller. */
+async function handleSamlRequest(req: IncomingMessage, url: URL, route: string, method: string, auth: TeamAuth, readForm?: () => Promise<Record<string, string>>): Promise<Reply> {
+  const client = req.socket.remoteAddress ?? "loopback";
+  const denied = (error: unknown): never => {
+    if (error instanceof TeamAuthError) audit({ actor: "anonymous", action: "access.login_failed", subject: "console", outcome: "denied", detail: { kind: "saml", reason: error.reason ?? "verification_failed", status: error.statusCode, client } });
+    throw error;
+  };
+  if (route === "metadata" && method === "GET") return { status: 200, xml: await auth.samlMetadata() };
+  if (route === "sso" && method === "GET") {
+    try { const sso = await auth.beginSAML(); return { status: 302, redirect: sso.url, headers: { "Set-Cookie": sso.setCookie } }; } catch (error) { return denied(error); }
+  }
+  if (route === "acs" && method === "POST") {
+    if (!readForm) throw new TeamAuthError("SAML sign-in is not available on this engine.", 404);
+    try { return { status: 303, redirect: (await auth.samlAcs(await readForm())).redirect }; } catch (error) { return denied(error); }
+  }
+  if (route === "complete" && method === "GET") {
+    try {
+      const login = auth.samlComplete(url.searchParams.get("ticket"), req);
+      auditSignIn(login.user, "saml", client);
+      return { status: 302, redirect: login.redirect, headers: { "Set-Cookie": login.setCookies } };
+    } catch (error) { return denied(error); }
+  }
+  throw new TeamAuthError("Team resource not found.", 404);
 }
 
 export function assertTeamConsoleMutation(req: IncomingMessage, id: string, auth: TeamAuth, collaboration: CollaborationService | undefined, gateway: ConsoleGateway): void {

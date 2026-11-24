@@ -1,5 +1,8 @@
 // The only file in packages/cli that imports the key-gated enterprise package (see scripts/check-enterprise-boundary.mjs).
-import { EvidenceKeyError, formatLicenseStatus, hasFeature, licenseStatus, requireFeature, signEvidenceStatement, type DsseEnvelope, type LicenseStatus } from "@0/enterprise";
+import { EvidenceKeyError, SamlError, SamlServiceProvider, formatLicenseStatus, hasFeature, licenseStatus, parseIdpMetadata, requireFeature, signEvidenceStatement, type DsseEnvelope, type LicenseStatus, type SamlIdentity } from "@0/enterprise";
+
+export { SamlError, SamlServiceProvider, parseIdpMetadata };
+export type { SamlIdentity };
 
 /** License status read from the process environment. Contains no secret. */
 export function readLicenseStatus(): LicenseStatus {
@@ -23,3 +26,13 @@ export function signEvidence(statementJson: string, privateKeyPem: string): Dsse
 
 export { EvidenceKeyError };
 export type { DsseEnvelope };
+
+/** True when the license in the process environment unlocks SAML sign-in. */
+export function samlLicensed(): boolean {
+  return hasFeature("saml");
+}
+
+/** Why SAML sign-in is unavailable, in words for the operator, or null when it is licensed. */
+export function samlLicenseDenial(): string | null {
+  return requireFeature("saml");
+}
