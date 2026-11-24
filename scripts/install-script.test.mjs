@@ -30,7 +30,9 @@ cp "$FIXTURE/$asset" "$dest" 2>/dev/null || exit 22
 `, { mode: 0o755 });
   // Default gh stub: not logged in, so the attestation step falls back deterministically.
   writeFileSync(join(tools, "gh"), '#!/bin/sh\nif [ "$1" = auth ]; then exit "${GH_AUTH_EXIT:-1}"; fi\nif [ "$1" = attestation ] && [ "$2" = --help ]; then exit "${GH_ATTESTATION_HELP_EXIT:-0}"; fi\nif [ "$1" = attestation ]; then echo "$*" >> "$FIXTURE/gh.log"; [ "${GH_VERIFY_EXIT:-0}" = 0 ] || echo "gh: HTTP 404: Not Found" >&2; exit "${GH_VERIFY_EXIT:-0}"; fi\nexit 1\n', { mode: 0o755 });
-  const env = { ...process.env, HOME: home, SHELL: "/bin/bash", PATH: `${tools}:${process.env.PATH}`, FIXTURE: root, INSTALL_FOXGUARD: "0" };
+  // cosign stub: records its arguments; COSIGN_EXIT controls the verdict. A missing one is simulated with NO_COSIGN.
+  writeFileSync(join(tools, "cosign"), '#!/bin/sh\necho "$*" >> "$FIXTURE/cosign.log"\nexit "${COSIGN_EXIT:-0}"\n', { mode: 0o755 });
+  const env = { ...process.env, HOME: home, SHELL: "/bin/bash", PATH: `${tools}:${process.env.PATH}`, FIXTURE: root, INSTALL_FOXGUARD: "0", INSTALL_SIGNATURE: "0" };
   delete env.INSTALL_DIR;
   return { root, home, env };
 }
@@ -221,5 +223,55 @@ test("a missing checksum entry for the downloaded name installs nothing", () => 
     assert.notEqual(installed.status, 0);
     assert.match(installed.stderr, /no entry for 0security-linux-arm64/);
     assert.equal(existsSync(join(home, ".0", "bin", "0security")), false);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test("a signature bundle is verified with cosign against the release workflow identity", () => {
+  const { root, env } = fixture();
+  try {
+    writeFileSync(join(root, "checksums.txt.sigstore.json"), "{}");
+    const installed = spawnSync("bash", ["install.sh"], { env: { ...env, INSTALL_SIGNATURE: "auto" }, encoding: "utf8" });
+    assert.equal(installed.status, 0, installed.stderr);
+    assert.match(installed.stderr, /signature verified/);
+    const log = readFileSync(join(root, "cosign.log"), "utf8");
+    assert.match(log, /verify-blob --bundle \S+ --certificate-identity-regexp \^https:\/\/github\\\.com\/0sec-labs\/0security\/\\\.github\/workflows\/release\\\.yml@refs/);
+    assert.match(log, /--certificate-oidc-issuer https:\/\/token\.actions\.githubusercontent\.com/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+test("a bad signature stops the install before any download", () => {
+  const { root, home, env } = fixture();
+  try {
+    writeFileSync(join(root, "checksums.txt.sigstore.json"), "{}");
+    const installed = spawnSync("bash", ["install.sh"], { env: { ...env, INSTALL_SIGNATURE: "auto", COSIGN_EXIT: "1" }, encoding: "utf8" });
+    assert.notEqual(installed.status, 0);
+    assert.match(installed.stderr, /could not verify the checksums\.txt signature/);
+    assert.doesNotMatch(readFileSync(join(root, "curl.log"), "utf8"), /0security-linux-arm64/);
+    assert.equal(existsSync(join(home, ".0", "bin", "0security")), false);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+test("a release without a signature bundle installs with a note unless the signature is required", () => {
+  const { root, env } = fixture();
+  try {
+    const installed = spawnSync("bash", ["install.sh"], { env: { ...env, INSTALL_SIGNATURE: "auto" }, encoding: "utf8" });
+    assert.equal(installed.status, 0, installed.stderr);
+    assert.match(installed.stderr, /no signature bundle/);
+    const required = spawnSync("bash", ["install.sh"], { env: { ...env, INSTALL_SIGNATURE: "require" }, encoding: "utf8" });
+    assert.notEqual(required.status, 0);
+    assert.match(required.stderr, /no checksums\.txt\.sigstore\.json/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+test("INSTALL_SIGNATURE=require fails without cosign, and 0 skips the check", () => {
+  const { root, env } = fixture();
+  try {
+    const noCosign = { ...env, PATH: `${join(root, "tools-no-cosign")}:/usr/bin:/bin` };
+    mkdirSync(join(root, "tools-no-cosign"));
+    for (const name of ["uname", "curl", "gh"]) writeFileSync(join(root, "tools-no-cosign", name), readFileSync(join(root, "tools", name)), { mode: 0o755 });
+    const required = spawnSync("bash", ["install.sh"], { env: { ...noCosign, INSTALL_SIGNATURE: "require" }, encoding: "utf8" });
+    assert.notEqual(required.status, 0);
+    assert.match(required.stderr, /needs cosign/);
+    const skipped = spawnSync("bash", ["install.sh"], { env: { ...env, INSTALL_SIGNATURE: "0" }, encoding: "utf8" });
+    assert.equal(skipped.status, 0, skipped.stderr);
+    assert.match(skipped.stderr, /Skipping signature check/);
+    assert.equal(existsSync(join(root, "cosign.log")), false);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
