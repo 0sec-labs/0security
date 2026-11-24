@@ -97,6 +97,32 @@ export async function handleTeamRequest(req: IncomingMessage, url: URL, auth: Te
     if (describe(change.before.scope) !== describe(change.after.scope)) audit({ actor: who, action: "user.scope_changed", subject: userId, detail: { id: userId, old: describe(change.before.scope), new: describe(change.after.scope), source: "admin" } });
     return { status: 200, data: { user: auth.members().find(member => member.userId === userId) } };
   }
+  const tokenRoute = /^scim-tokens(?:\/([^/]+))?$/.exec(path);
+  if (tokenRoute) {
+    const actor = auth.resolveSession(req)!;
+    const unavailable = requireFeature("scim");
+    if (unavailable) throw new TeamAuthError(unavailable, 403);
+    if (!actor.permissions.includes("users.manage")) throw new TeamAuthError("Your role does not include the users.manage permission.", 403);
+    const store = auth.scim;
+    if (!store) throw new TeamAuthError("SCIM needs the account database.", 409);
+    const who = auditActor({ engineRequest: false, teamEnabled: true, displayName: actor.displayName });
+    if (!tokenRoute[1] && method === "GET") return { status: 200, data: { tokens: store.listTokens() } };
+    if (!tokenRoute[1] && method === "POST") {
+      const parsed = z.object({ name: z.string().trim().min(1).max(80) }).strict().safeParse(await readBody());
+      if (!parsed.success) throw new TeamAuthError("Give the token a name of up to 80 characters.", 400);
+      const created = store.createToken(parsed.data.name);
+      audit({ actor: who, action: "scim.token.created", subject: created.record.id, detail: { id: created.record.id, name: created.record.name } });
+      // The token is shown once. Only its hash is stored.
+      return { status: 201, data: { token: created.token, record: created.record } };
+    }
+    if (tokenRoute[1] && method === "DELETE") {
+      const record = store.revokeToken(decodeURIComponent(tokenRoute[1]));
+      if (!record) throw new TeamAuthError("No such token.", 404);
+      audit({ actor: who, action: "scim.token.revoked", subject: record.id, detail: { id: record.id, name: record.name } });
+      return { status: 200, data: { record } };
+    }
+    throw new TeamAuthError("Method not allowed.", 405);
+  }
   if (!collaboration) throw new TeamAuthError("Team resource not found.", 404);
   const session = getSessionId(req)!;
   if (path === "presence" && method === "GET") return { status: 200, data: collaboration.overview(session) };

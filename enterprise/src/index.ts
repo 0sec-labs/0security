@@ -32,6 +32,7 @@ export {
 } from "./findings-server.js";
 export type { HistoryAction, IngestFormat, IngestLabels, OrgRow, OrgSummary, ParsedIngestBody } from "./findings-server.js";
 export * from "./rbac/index.js";
+export * from "./scim/index.js";
 export type {
   EnterpriseFeature,
   FeatureMode,

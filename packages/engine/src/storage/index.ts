@@ -67,6 +67,7 @@ export type { SecurityWorkflowVersion } from "./security-workflows.js";
 export { SENTINEL_CLAIM_STALE_MS, SentinelStore, SentinelStoreError, defaultSentinelFiles } from "./sentinels.js";
 
 export type { RankedFindingOptions, FindingFamilyPrioritySummary, LatestFindingMetadata } from "./finding-priority.js";
+export { ScimTable, type ScimGroupRecord, type ScimTokenRecord } from "./scim-store.js";
 export { TeamUserConflictError, TeamUserTable, type TeamRoleSource, type TeamUserInput, type TeamUserRow, type TeamUserSource } from "./team-users.js";
 export { AUDIT_DETAIL_KEYS, AUDIT_MAX_ROWS, closeAuditLog, verifyAuditLog, queryAuditChainRows, planAuditPrune, pruneAuditLog, auditCheckpointHashAt, type AuditPruneResult, isSecretName, latestAuditId, listAudit, queryAuditEvents, scrubAuditText, type AuditRangeQuery, recordAudit, redactAuditDetail, type AuditEvent, type AuditInput, type AuditOutcome, type AuditPage, type AuditQuery, type AuditTarget } from "./audit-log.js";
 export * from "./findings-source/index.js";

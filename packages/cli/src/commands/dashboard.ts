@@ -35,6 +35,7 @@ import { findTeamConfigPath, handleTeamSetupRequest, TeamSetupService } from "..
 import { TeamAuth, TeamAuthError } from "../web/team-auth.js";
 import { CollaborationService } from "../web/collaboration.js";
 import { scopeFilterFor, scopedRouteDenied } from "../web/findings-scope.js";
+import { SCIM_BASE, handleScimRequest } from "../web/scim-routes.js";
 import { authorizeTeamApi, handleTeamRequest, assertTeamConsoleMutation } from "../web/team-web.js";
 import { isTeamSsoRoute } from "../web/team-sso-routes.js";
 import { handleTeamPresenceStream } from "../web/team-presence-stream.js";
@@ -337,6 +338,8 @@ export function registerDashboardCommand(program: Command): void {
             if (webhook && serverContext && isAnonymousApiExemption(requestUrl.pathname)) { await webhook.handle(req, res, serverContext.clientIp); return; }
             const signedTrigger = signedWebhook && serverContext ? signedWebhookTriggerId(requestUrl.pathname) : undefined;
             if (signedWebhook && serverContext && signedTrigger) { await signedWebhook.handle(req, res, serverContext.clientIp, signedTrigger); return; }
+            // SCIM: an identity provider cannot sign in with a browser session, so it uses its own bearer token, checked in the handler.
+            if (serverContext && (requestUrl.pathname === SCIM_BASE || requestUrl.pathname.startsWith(`${SCIM_BASE}/`))) { await handleScimRequest(req, res, requestUrl, { auth: teamAuth, revokeApiKeys: userId => findingsAccess.revokeCreatedBy(userId), clientIp: serverContext.clientIp, baseUrl: publicOrigin }); return; }
             if (serverGuard && serverContext) {
               if (await serverGuard.handleAccessRoute(req, res, requestUrl.pathname, serverContext, teamAuth, () => readJson(req, 16_384))) return;
               const hasBearer = typeof req.headers.authorization === "string" && req.headers.authorization.startsWith("Bearer ");

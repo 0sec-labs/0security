@@ -59,6 +59,7 @@ export function samlLicenseDenial(): string | null {
   return requireFeature("saml");
 }
 // Role-based access control. These are pure functions of their input; the license is checked at the call site with hasFeature("rbac").
+export { scimFixtures, ScimError, applyPatch, errorFrom, matchesFilter, paginate, parseFilter, resourceTypes, schemaDocuments, serviceProviderConfig, SCHEMA_GROUP, SCHEMA_USER } from "@0/enterprise";
 export { BUILT_IN_ROLES, PERMISSIONS, ROUTE_RULES, decideRoute, nearestBuiltInRole, parseScope, repoOfTarget, resolveRoles, roleFromGroups, routePermission, scopePatterns, targetFilter } from "@0/enterprise";
 export type { Permission, RoleDefinition, RoleScope, RouteDecision } from "@0/enterprise";
 

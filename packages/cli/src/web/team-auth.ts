@@ -1,12 +1,12 @@
 import { readFileSync } from "node:fs";
-import { createHash, randomBytes, scrypt as scryptCallback, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, randomUUID, scrypt as scryptCallback, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import { promisify } from "node:util";
 import { z } from "zod";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import { TeamAuthError } from "./team-auth-error.js";
 import { TeamSaml, samlConfigSchema, validateSamlConfig } from "./team-saml.js";
-import { TeamUserConflictError, type TeamUserRow, type TeamUserTable } from "@0/engine/storage";
+import { ScimTable, TeamUserConflictError, type TeamUserRow, type TeamUserTable } from "@0/engine/storage";
 import { BUILT_IN_ROLES, hasFeature, nearestBuiltInRole, parseScope, resolveRoles, roleFromGroups, scopePatterns, type Permission, type RoleDefinition, type RoleScope } from "../enterprise-bridge.js";
 
 const scrypt = promisify(scryptCallback);
@@ -31,6 +31,8 @@ const configSchema = z.object({
     groupsClaim: z.string().min(1).max(64).optional(),
   }).strict().optional(),
   saml: samlConfigSchema.optional(),
+  /** SCIM provisioning (needs the scim license feature). Group names to roles, in order of preference, and the role for everyone else. */
+  scim: z.object({ defaultRole: z.string().min(1).max(64).optional(), groupRoles: z.record(z.string().min(1).max(256), z.string().min(1).max(64)).optional() }).strict().optional(),
   /** Custom roles (needs the rbac license feature to take effect). See the server mode page. */
   roles: z.record(z.string(), z.unknown()).optional(),
   /** Business units: a name for a group of repository patterns, used in role and account scopes. */
@@ -53,11 +55,11 @@ export interface TeamIdentity {
   /** Repository patterns the account is limited to, or null for no limit. */
   scope: string[] | null;
 }
-export interface TeamMember { userId: string; displayName: string; role: string; scope?: RoleScope }
+export interface TeamMember { userId: string; displayName: string; role: string; scope?: RoleScope; disabled?: true }
 /** A role change made by an administrator or by the identity provider's group mapping. */
-export interface TeamRoleChange { userId: string; old: string; new: string; source: "admin" | "oidc-group" }
+export interface TeamRoleChange { userId: string; old: string; new: string; source: "admin" | "oidc-group" | "scim-group" }
 export { TeamAuthError };
-const fileRow = (user: { id: string; name: string; role: string; passwordHash?: string | undefined; oidcSub?: string | undefined }): TeamUserRow => ({ id: user.id, name: user.name, role: user.role, roleSource: "admin", scopeJson: null, passwordHash: user.passwordHash ?? null, oidcSub: user.oidcSub ?? null, source: "file", createdAt: "", updatedAt: "" });
+const fileRow = (user: { id: string; name: string; role: string; passwordHash?: string | undefined; oidcSub?: string | undefined }): TeamUserRow => ({ id: user.id, name: user.name, role: user.role, roleSource: "admin", scopeJson: null, active: true, deleted: false, userName: null, externalId: null, email: null, passwordHash: user.passwordHash ?? null, oidcSub: user.oidcSub ?? null, source: "file", createdAt: "", updatedAt: "" });
 function opaque(): string { return randomBytes(32).toString("base64url"); }
 export function parseCookies(header: string | undefined): Record<string, string> {
   const cookies: Record<string, string> = Object.create(null) as Record<string, string>;
@@ -92,6 +94,7 @@ export class TeamAuth {
   /** Live accounts. The server database is the source of truth once a store is attached; until then the file users. */
   private readonly users = new Map<string, TeamUserRow>();
   private table?: TeamUserTable;
+  private scimTable?: ScimTable;
   private roles: Map<string, RoleDefinition>;
   private readonly sessions = new Map<string, { userId: string; expires: number; role?: TeamIdentity["role"] }>();
   private readonly saml?: TeamSaml;
@@ -115,6 +118,7 @@ export class TeamAuth {
       try { this.roles = resolveRoles(this.config.roles); } catch (error) { throw new Error(`Invalid team roles: ${error instanceof Error ? error.message : "unreadable"}`); }
       for (const user of this.config.users) if (!this.roles.has(user.role)) throw new Error(`Team user "${user.id}" has the unknown role "${user.role}"`);
       for (const [group, role] of Object.entries(this.config.oidc?.groupRoles ?? {})) if (!this.roles.has(role)) throw new Error(`OIDC group "${group}" maps to the unknown role "${role}"`);
+      for (const role of [...Object.values(this.config.scim?.groupRoles ?? {}), ...(this.config.scim?.defaultRole ? [this.config.scim.defaultRole] : [])]) if (!this.roles.has(role)) throw new Error(`The SCIM settings name the unknown role "${role}"`);
       for (const user of this.config.users) this.users.set(user.id, fileRow(user));
       if (this.config.oidc) {
         this.requireProviderURL(this.config.oidc.issuer);
@@ -137,8 +141,10 @@ export class TeamAuth {
   }
   lookupUser(id: string, role?: TeamIdentity["role"]): TeamIdentity | null {
     const user = this.users.get(id);
+    // A deprovisioned account has no identity, so every session it had stops working at the next request.
+    if (!user || !user.active || user.deleted) return null;
     // A role from a SAML group answers for this session; every other fact about the account comes from its row.
-    return user ? this.identityFor(role && role !== (user.role === "owner" ? "owner" : nearestBuiltInRole(this.roles.get(user.role)?.permissions ?? [])) ? { ...user, role } : user) : null;
+    return this.identityFor(role && role !== (user.role === "owner" ? "owner" : nearestBuiltInRole(this.roles.get(user.role)?.permissions ?? [])) ? { ...user, role } : user);
   }
   /**
    * Work out what an account may do. With the rbac license a role means its permissions. Without it only owner,
@@ -169,14 +175,16 @@ export class TeamAuth {
   attachStore(table: TeamUserTable): { imported: number; total: number } {
     if (!this.config) throw new TeamAuthError("Team sign-in is not configured", 404);
     const added = table.importMissing(this.config.users.map(user => ({ id: user.id, name: user.name, role: user.role, passwordHash: user.passwordHash ?? null, oidcSub: user.oidcSub ?? null, source: "file" as const })));
-    this.table = table; this.users.clear();
+    this.table = table; this.scimTable?.close(); this.scimTable = new ScimTable(table.databasePath); this.users.clear();
     const rows = table.list();
     for (const row of rows) this.users.set(row.id, row);
     for (const [id, session] of this.sessions) if (!this.users.has(session.userId)) this.sessions.delete(id);
     return { imported: added.length, total: rows.length };
   }
   /** Close the database connection, if a store is attached. */
-  closeStore(): void { this.table?.close(); this.table = undefined; }
+  closeStore(): void { this.table?.close(); this.table = undefined; this.scimTable?.close(); this.scimTable = undefined; }
+  /** SCIM tokens and groups. Undefined until the accounts are in the database. */
+  get scim(): ScimTable | undefined { return this.scimTable; }
   /** Trusted server configuration only; never serialize this through a browser API. */
   snapshotConfig(): TeamConfig {
     if (!this.config) throw new TeamAuthError("Team sign-in is not configured", 404);
@@ -184,9 +192,9 @@ export class TeamAuth {
   }
   configurationDigest(): string { return createHash("sha256").update(JSON.stringify(this.snapshotConfig())).digest("hex"); }
   members(): TeamMember[] {
-    return [...this.users.values()].map(user => {
+    return [...this.users.values()].filter(user => !user.deleted).map(user => {
       const scope = user.scopeJson ? parseScope(JSON.parse(user.scopeJson)) : undefined;
-      return { userId: user.id, displayName: user.name, role: user.role, ...(scope ? { scope } : {}) };
+      return { userId: user.id, displayName: user.name, role: user.role, ...(scope ? { scope } : {}), ...(user.active ? {} : { disabled: true }) };
     });
   }
   /** Names and permissions of every role the server knows, for the roles page. */
@@ -223,15 +231,64 @@ export class TeamAuth {
     this.users.set(userId, next);
     return { before, after: { role: next.role, scope: next.scopeJson ? parseScope(JSON.parse(next.scopeJson)) ?? null : null } };
   }
-  memberCount(): number { return this.users.size; }
+  memberCount(): number { return [...this.users.values()].filter(user => !user.deleted).length; }
   /** The free tier stops at FREE_MEMBER_LIMIT accounts; the rbac license feature lifts that. */
-  atMemberLimit(): boolean { return this.users.size >= FREE_MEMBER_LIMIT && !hasFeature("rbac"); }
+  atMemberLimit(): boolean { return this.memberCount() >= FREE_MEMBER_LIMIT && !hasFeature("rbac"); }
   private store(input: TeamUserRow): TeamUserRow {
     const stamp = new Date(this.now()).toISOString();
     const row = { ...input, createdAt: input.createdAt || stamp, updatedAt: input.updatedAt || stamp };
     try { this.table?.insert(row); }
     catch (error) { if (error instanceof TeamUserConflictError) throw new TeamAuthError(error.message, 409); throw error; }
     this.users.set(row.id, row); return row;
+  }
+  /** End every session of an account. Returns how many ended. */
+  revokeSessions(userId: string): number {
+    let count = 0;
+    for (const [id, session] of this.sessions) if (session.userId === userId) { this.sessions.delete(id); count++; }
+    return count;
+  }
+  /** The accounts SCIM manages: the ones it created. Accounts from the team file or created by an owner are never listed. */
+  scimAccounts(): TeamUserRow[] { return [...this.users.values()].filter(user => user.source === "scim" && !user.deleted); }
+  scimAccount(id: string): TeamUserRow | undefined { const user = this.users.get(id); return user && user.source === "scim" && !user.deleted ? user : undefined; }
+  /** Create an account for a person the identity provider assigned. It has no password. */
+  scimCreate(input: { userName: string; name: string; externalId: string | null; email: string | null; active: boolean }): TeamUserRow {
+    if (this.atMemberLimit()) throw new TeamAuthError("Workspace member limit reached", 409);
+    const taken = [...this.users.values()].some(user => !user.deleted && user.source === "scim" && user.userName?.toLowerCase() === input.userName.toLowerCase());
+    if (taken) throw new TeamAuthError("userName is already in use", 409);
+    return this.store({ id: `scim-${randomBytes(10).toString("hex")}`, name: input.name, role: this.config?.scim?.defaultRole ?? "viewer", roleSource: "group", scopeJson: null, active: input.active, deleted: false, userName: input.userName, externalId: input.externalId, email: input.email, passwordHash: null, oidcSub: null, source: "scim", createdAt: "", updatedAt: "" });
+  }
+  /** Change the profile of a SCIM account. Ending the sessions of a disabled account is the caller's step. */
+  scimUpdate(id: string, change: { name?: string; active?: boolean; deleted?: boolean; userName?: string; externalId?: string | null; email?: string | null }): TeamUserRow {
+    const user = this.users.get(id);
+    if (!user) throw new TeamAuthError("No such account", 404);
+    if (change.userName !== undefined && [...this.users.values()].some(row => row.id !== id && !row.deleted && row.source === "scim" && row.userName?.toLowerCase() === change.userName!.toLowerCase())) throw new TeamAuthError("userName is already in use", 409);
+    const next = this.table?.updateProfile(id, change) ?? { ...user, ...change, name: change.name ?? user.name, active: change.active ?? user.active, deleted: change.deleted ?? user.deleted, userName: change.userName ?? user.userName, externalId: change.externalId === undefined ? user.externalId : change.externalId, email: change.email === undefined ? user.email : change.email };
+    this.users.set(id, next);
+    return next;
+  }
+  /** True when taking this account away would leave nobody able to manage users. */
+  isLastManager(id: string): boolean {
+    const manages = (user: TeamUserRow) => user.active && !user.deleted && Boolean(this.roles.get(user.role)?.permissions.includes("users.manage"));
+    const user = this.users.get(id);
+    return Boolean(user && manages(user) && ![...this.users.values()].some(other => other.id !== id && manages(other)));
+  }
+  /**
+   * Set the role of SCIM accounts from their SCIM groups: the first group in scim.groupRoles that holds the account, or
+   * scim.defaultRole (viewer). Accounts an owner set by hand keep their role. Returns the changes, for the audit log.
+   */
+  applyScimGroupRoles(): TeamRoleChange[] {
+    const groups = this.scimTable?.listGroups() ?? [];
+    const mapping = Object.entries(this.config?.scim?.groupRoles ?? {});
+    const changes: TeamRoleChange[] = [];
+    for (const user of this.scimAccounts()) {
+      if (user.roleSource !== "group") continue;
+      const wanted = mapping.find(([name]) => groups.some(group => group.displayName === name && group.memberIds.includes(user.id)))?.[1] ?? this.config?.scim?.defaultRole ?? "viewer";
+      if (wanted === user.role) continue;
+      this.table?.updateAccess(user.id, { role: wanted });
+      this.users.set(user.id, { ...user, role: wanted });
+      changes.push({ userId: user.id, old: user.role, new: wanted, source: "scim-group" });
+    }
+    return changes;
   }
   /** Throws unless a new account may get this role: it exists, is not owner, and is licensed when it is not one of the three free roles. */
   assertAssignableRole(role: string): void {
@@ -279,7 +336,7 @@ export class TeamAuth {
     attempt.count++; this.attempts.set(key, attempt);
     const user = this.users.get(parsed.data.userId);
     const matches = await passwordMatches(parsed.data.password, user?.passwordHash ?? await this.dummyHash);
-    if (!user?.passwordHash || !matches) throw new TeamAuthError("Invalid user ID or password");
+    if (!user?.passwordHash || !user.active || user.deleted || !matches) throw new TeamAuthError("Invalid user ID or password");
     return this.issueSession(user.id);
   }
   logout(req: Pick<IncomingMessage, "headers">): { setCookie: string } {
@@ -311,13 +368,22 @@ export class TeamAuth {
     for (const [key, value] of Object.entries({ response_type: "code", scope: "openid profile", client_id: oidc.clientId, redirect_uri: oidc.redirectUri, state, nonce, code_challenge: createHash("sha256").update(verifier).digest("base64url"), code_challenge_method: "S256" })) url.searchParams.set(key, value);
     return { url: url.href, setCookie: this.cookie(SSO_COOKIE, browser, SSO_MS / 1000) };
   }
+  private linkScimAccount(claims: Record<string, unknown>): TeamUserRow | undefined {
+    if (claims.email_verified === false) return undefined;
+    const names = [claims.email, claims.preferred_username].filter((value): value is string => typeof value === "string" && value !== "").map(value => value.toLowerCase());
+    const found = [...this.users.values()].find(row => row.source === "scim" && !row.deleted && !row.oidcSub && [row.userName, row.email].some(value => value && names.includes(value.toLowerCase())));
+    if (!found || typeof claims.sub !== "string") return undefined;
+    const next = this.table?.updateProfile(found.id, { oidcSub: claims.sub }) ?? { ...found, oidcSub: claims.sub };
+    this.users.set(found.id, next);
+    return next;
+  }
   /** Create the account for a verified OIDC subject. The ID is derived from the subject, so it cannot collide with a local account ID. */
   private provisionOidcUser(claims: { sub?: string; name?: unknown; preferred_username?: unknown; email?: unknown }, role: string, roleSource: "admin" | "group"): TeamUserRow {
     const sub = claims.sub!;
     const id = sub.length <= 120 ? `oidc:${sub}` : `oidc:${createHash("sha256").update(sub).digest("hex").slice(0, 48)}`;
     const label = [claims.name, claims.preferred_username, claims.email].find((value): value is string => typeof value === "string" && value.trim() !== "");
     const name = (label ?? sub).replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 160) || "SSO user";
-    return this.store({ id, name, role, roleSource, scopeJson: null, passwordHash: null, oidcSub: sub, source: "oidc", createdAt: "", updatedAt: "" });
+    return this.store({ id, name, role, roleSource, scopeJson: null, active: true, deleted: false, userName: null, externalId: null, email: null, passwordHash: null, oidcSub: sub, source: "oidc", createdAt: "", updatedAt: "" });
   }
   async callback(params: URLSearchParams, req: Pick<IncomingMessage, "headers">) {
     const state = params.get("state") ?? ""; const pending = this.pending.get(state);
@@ -336,6 +402,9 @@ export class TeamAuth {
     catch { throw new TeamAuthError("SSO identity verification failed"); }
     if (payload.nonce !== pending.nonce || (Array.isArray(payload.aud) && payload.aud.length > 1 && payload.azp !== oidc.clientId)) throw new TeamAuthError("SSO identity verification failed");
     let user = [...this.users.values()].find(row => row.oidcSub === payload.sub);
+    // An account SCIM created has no OIDC subject yet. The first sign-in links it when the verified email or username matches.
+    if (!user && hasFeature("scim")) user = this.linkScimAccount(payload as Record<string, unknown>);
+    if (user && (!user.active || user.deleted)) throw new TeamAuthError("This account has been disabled by your administrator", 403);
     let provisioned = false;
     // Group mapping is a paid feature. The role comes from the first mapped group the user is in.
     const groupRoles = hasFeature("rbac") ? oidc.groupRoles : undefined;
