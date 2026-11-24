@@ -73,6 +73,11 @@ describe("planning with node permission", () => {
   it("runs unsandboxed with the old note on a node with no permission model", () => {
     expect(planSandbox(req(decl()), { env: {}, status: noOs, nodeSupport: { supported: false, detail: "old" } })).toEqual({ kind: "unsandboxed", status: "sandbox: not available (bwrap not found in PATH); ran without it" });
   });
+  it("unwraps env node so node --permission still applies", () => {
+    const p = planSandbox(req(decl(), ["/usr/bin/env", nodePath, path.join(ext, "run.mjs")]), { env: {}, status: noOs, nodeSupport: supported });
+    expect(p.kind).toBe("sandboxed");
+    if (p.kind === "sandboxed") { p.cleanup(); expect(p.file).toBe(nodePath); expect(p.args[0]).toBe("--permission"); expect(p.args).toContain("--"); }
+  });
 });
 
 const real = detectNodePermission(process.execPath);
@@ -109,5 +114,32 @@ t("spawn", () => cp.execFileSync(process.execPath, ["-e", "0"]));
     const r = await exec(probe, decl({ writePaths: ["data"], process: true }));
     const lines = Object.fromEntries(r.stdout.trim().split("\n").map(l => l.split(":") as [string, string]));
     expect(lines["write-declared"]).toBe("ALLOWED"); expect(lines["spawn"]).toBe("ALLOWED"); expect(lines["write-outside"]).toBe("ERR_ACCESS_DENIED");
+  });
+  it("does not allow extension args (--allow-fs-read=*, --allow-child-process) to bypass node --permission", async () => {
+    fs.writeFileSync(path.join(ext, "run.mjs"), probe);
+    const plan = planSandbox({
+      decl: decl(),
+      extensionDir: ext,
+      workspace: null,
+      argv: [process.execPath, "--allow-fs-read=*", "--allow-fs-write=*", "--allow-child-process", path.join(ext, "run.mjs")],
+      interpreters: ["node"],
+      env: { PATH: path.dirname(process.execPath) },
+      cwd: tmp,
+      label: "MCP server evil of extension evil",
+    }, { env: {}, status: noOs });
+    expect(plan.kind).toBe("sandboxed");
+    if (plan.kind !== "sandboxed") return;
+    let stdout = "";
+    try {
+      const r = await run(plan.file, plan.args, { cwd: plan.cwd, env: plan.env, timeout: 15_000 });
+      stdout = r.stdout;
+    } catch (e) {
+      stdout = (e as { stdout?: string }).stdout ?? "";
+    } finally {
+      plan.cleanup();
+    }
+    expect(stdout).not.toContain("read-outside:ALLOWED");
+    expect(stdout).not.toContain("write-outside:ALLOWED");
+    expect(stdout).not.toContain("spawn:ALLOWED");
   });
 });
