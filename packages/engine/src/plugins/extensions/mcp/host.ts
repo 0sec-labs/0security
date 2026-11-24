@@ -20,6 +20,7 @@ import type { LoadedExtension } from "../runtime.js";
 import { planSandbox, TRUSTED_INTERPRETER_NAMES } from "../sandbox/index.js";
 import { buildDefinitions, indexDefinition, indexEntry, indexName, serverId } from "./core/definitions.js";
 import { launchFor, launchHookInput } from "./core/launch.js";
+import { safeText } from "./core/sanitize.js";
 import { findDuplicateToolNames, mcpToolHash, hashTools, type McpToolInfo } from "./core/tool-hash.js";
 import { labelUntrustedOutput } from "./core/untrusted.js";
 import type { McpConnector, McpGate, McpObservationLog, McpPinStore, McpSession, McpSnapshotStore } from "./ports.js";
@@ -156,11 +157,11 @@ export class ExtensionMcpHost implements McpToolHost {
       const operator = this.#operator;
       const hook = await this.#o.gate(launchHookInput(launch, operator?.thread() ?? {}, operator?.cwd ?? ext.dir)).catch(e => ({ decision: "deny" as const, reason: `gate failed: ${message(e)}` }));
       if (server.sessionToken !== token) return cancelled();
-      if (hook.decision === "deny") { const r = `denied before it started: ${hook.reason}`; this.#block(server, token, r); return fail(r); }
+      if (hook.decision === "deny") { const r = `denied before it started: ${safeText(hook.reason, 240)}`; this.#block(server, token, r); return fail(r); }
       if (hook.decision === "ask") {
-        const what = launch.kind === "stdio" ? `start ${[launch.command, ...launch.args].join(" ")}` : `connect to ${launch.url}`;
+        const what = safeText(launch.kind === "stdio" ? `start ${[launch.command, ...launch.args].join(" ")}` : `connect to ${launch.url}`, 240);
         if (!operator?.approve) { const r = `needs your approval to ${what} and no one can be asked here`; this.#block(server, token, r); return fail(r); }
-        const ok = await operator.approve({ name: "mcp_server_start", summary: `Extension ${ext.name} wants to ${what} (MCP server ${decl.name}). ${hook.reason}` });
+        const ok = await operator.approve({ name: "mcp_server_start", summary: safeText(`Extension ${ext.name} wants to ${what} (MCP server ${decl.name}). ${hook.reason}`, 400) });
         if (server.sessionToken !== token) return cancelled();
         if (!ok) { const r = "you did not approve starting it"; this.#block(server, token, r); return fail(r); }
       }
