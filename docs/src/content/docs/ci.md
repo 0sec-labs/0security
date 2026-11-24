@@ -722,6 +722,8 @@ jobs:
 
 The Cyber Resilience Act (Regulation (EU) 2024/2847) requires a manufacturer to keep records of security testing and vulnerability handling, and to report actively exploited vulnerabilities to the authorities. 0 prepares the paperwork. It decides nothing and never claims a product complies.
 
+[Evidence for the Cyber Resilience Act](/cra-evidence/) maps each file to the duties it supports.
+
 To write the evidence into one folder, run:
 
 ```bash
