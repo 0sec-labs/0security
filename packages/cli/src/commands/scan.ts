@@ -308,11 +308,11 @@ export async function connect(options: ConsoleTransportOptions, deps: Pick<ScanD
     catch (error) { if (!NO_CONSOLE.test(message(error))) { stop(); throw error; } }
     // A console that already died is not coming; say why now instead of waiting out the clock.
     const failure = stop.failure?.();
-    if (failure) { stop(); throw new Error(`The console this scan starts for itself stopped: ${failure}. Start one with \`0 --headless\` and run the scan again.`); }
+    if (failure) { stop(); throw new Error(`The console this scan starts for itself stopped: ${failure}. Start one with \`0security --headless\` and run the scan again.`); }
     await deps.sleep(500);
   }
   stop();
-  throw new Error("Could not start a console within 30s. Start one with `0 --headless` and run the scan again.");
+  throw new Error("Could not start a console within 30s. Start one with `0security --headless` and run the scan again.");
 }
 
 interface PassContext { /** The source files a thread is expected to open (empty: no check). */ scopeFiles: readonly string[]; prePass?: PrePassLeads; scope?: string[]; known?: KnownItem[]; extras: Partial<ScanOutcome>; steering: Steering; client: ConsoleClient; deps: ScanDeps; resolved: ResolvedTarget; options: ScanOptions; total: number; budget: number; deadline: number }
@@ -338,7 +338,7 @@ export async function waitForThread(client: ConsoleClient, deps: Pick<ScanDeps, 
       // A console busy with several scans, or a provider timing out, can miss a status request while the thread keeps working.
       // Give up only after a run of failures, and say where the thread is.
       if (++failedPolls > MAX_FAILED_POLLS) {
-        throw new Error(`Lost contact with the console while scanning: ${error instanceof Error ? error.message : String(error)}. The scan may still be running as thread ${id}; its findings are kept (\`0 findings export --scan ${id}\`).`);
+        throw new Error(`Lost contact with the console while scanning: ${error instanceof Error ? error.message : String(error)}. The scan may still be running as thread ${id}; its findings are kept (\`0security findings export --scan ${id}\`).`);
       }
       await deps.sleep(Math.min(5000, 1000 * failedPolls));
       continue;
@@ -387,7 +387,7 @@ async function runPass(ctx: PassContext, index: number, extra: PassExtra = {}): 
     const removed = await client.request("POST", `${path}/delete`, {}).then(() => true, () => false);
     const reason = error instanceof Error ? error.message : String(error);
     const hint = /model/i.test(reason) && !/No provider credential found/i.test(reason) ? ` Pick another with --model (default ${DEFAULT_SCAN_MODEL}).` : "";
-    throw new Error(`${reason}${hint}${removed ? "" : ` (thread ${id} was created; remove it with \`0 threads delete ${id} --yes\`)`}`);
+    throw new Error(`${reason}${hint}${removed ? "" : ` (thread ${id} was created; remove it with \`0security threads delete ${id} --yes\`)`}`);
   }
   deps.err(`scanning ${resolved.label} in thread ${id} (${part ? `${part}, ` : ""}budget $${Number(budget.toFixed(4))})`);
 
@@ -888,7 +888,7 @@ export function registerScanCommand(program: Command, deps: ScanDeps = defaultSc
     .option("--known <sarif>", "SARIF from other tools: the scan is told what is already known and looks for what they missed; findings are labelled new or already-known (confirmedIndependently when the scan analysed it itself). Repeat for several", (value: string, previous: string[] = []) => [...previous, value])
     .option("--only-new", "With --known: leave findings that match a known item out of the report")
     .option("--timeout <seconds>", "Maximum seconds for the whole scan; what it reviewed so far is reported as partial", String(DEFAULT_TIMEOUT_SECONDS)))
-    .addHelpText("after", "\nExit codes: 0 done, 1 findings at or above --fail-on or the scan failed, 2 usage error, 3 stopped before it reviewed everything (budget, time limit, or entry points not reached): not finished, not failed; --allow-partial exits 0 or 1 instead.\nThe scan is a thread: follow it with `0 threads list`.")
+    .addHelpText("after", "\nExit codes: 0 done, 1 findings at or above --fail-on or the scan failed, 2 usage error, 3 stopped before it reviewed everything (budget, time limit, or entry points not reached): not finished, not failed; --allow-partial exits 0 or 1 instead.\nThe scan is a thread: follow it with `0security threads list`.")
     .action(async (target: string, options: ScanOptions, command: Command) => {
       // Precedence: a flag you typed (or set in the environment) > the tier map > the operator's workflow defaults > the built-in default.
       // Workflow defaults fill budget and model here; runScan lets a tier replace them unless the flag was typed.

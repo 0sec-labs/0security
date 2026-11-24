@@ -6,7 +6,7 @@ Please report suspected vulnerabilities privately through GitHub private vulnera
 
 <https://github.com/0sec-labs/0security/security/advisories/new>
 
-Do not open a public issue, pull request or discussion for a suspected vulnerability. Include the affected version (`0 --version`), what you observed, and the steps or proof of concept needed to reproduce it. If the report concerns the `0` engine, the CLI, the container image or the install script, it belongs here. Vulnerabilities in the companion scanner are best reported in its own repository (<https://github.com/0sec-labs/foxguard>); we will forward anything that lands here by mistake.
+Do not open a public issue, pull request or discussion for a suspected vulnerability. Include the affected version (`0security --version`), what you observed, and the steps or proof of concept needed to reproduce it. If the report concerns the `0` engine, the CLI, the container image or the install script, it belongs here. Vulnerabilities in the companion scanner are best reported in its own repository (<https://github.com/0sec-labs/foxguard>); we will forward anything that lands here by mistake.
 
 ## What to expect
 

@@ -9,8 +9,8 @@ import { consoleDefaults, consoleFlags, enc, readJsonObject, renderFields, rende
 const ROOT = "/api/console/sentinels";
 const WEBHOOK_ROOT = "/api/console/github/webhook";
 interface WebhookView { serverMode: boolean; configured?: boolean; payloadUrl?: string; lastDeliveryAt?: string; lastResult?: string; lastReason?: string; graceUntil?: string; deliveries?: Array<{ at: string; result: string; event?: string; reason?: string }> }
-const webhookText = (view: WebhookView): string => !view.serverMode ? "Not available: the webhook exists only in server mode (0 --server-mode). Polling is used."
-  : renderFields({ configured: view.configured ? "yes" : "no (run: 0 sentinels webhook secret rotate --yes)", "payload URL": view.payloadUrl ?? "set --public-url on the server", "content type": "application/json", events: "Pull requests", "last delivery": view.lastDeliveryAt ? `${view.lastDeliveryAt} ${view.lastResult}${view.lastReason ? ` (${view.lastReason})` : ""}` : "none yet", "old secret valid until": view.graceUntil })
+const webhookText = (view: WebhookView): string => !view.serverMode ? "Not available: the webhook exists only in server mode (0security --server-mode). Polling is used."
+  : renderFields({ configured: view.configured ? "yes" : "no (run: 0security sentinels webhook secret rotate --yes)", "payload URL": view.payloadUrl ?? "set --public-url on the server", "content type": "application/json", events: "Pull requests", "last delivery": view.lastDeliveryAt ? `${view.lastDeliveryAt} ${view.lastResult}${view.lastReason ? ` (${view.lastReason})` : ""}` : "none yet", "old secret valid until": view.graceUntil })
     + (view.deliveries?.length ? `\n\n${renderTable(view.deliveries, [{ header: "TIME", value: d => d.at }, { header: "RESULT", value: d => d.result }, { header: "EVENT", value: d => d.event }, { header: "REASON", value: d => d.reason }])}` : "");
 
 interface Sentinel { id: string; name: string; mission?: string; automationIds?: string[]; status: string; version: number; attention?: { needsYou: boolean; reason?: string } }
@@ -72,7 +72,7 @@ export function registerSentinelsCommand(program: Command, deps: ConsoleCommandD
       rows => renderTable(rows, [{ header: "ID", value: p => p.id }, { header: "NAME", value: p => p.name }, { header: "DESCRIPTION", value: p => p.description }])));
 
   ignoredAccessOptions(consoleFlags(group.command("create").description("Create a Sentinel from a preset or a JSON definition")
-    .option("--preset <id>", "Start from a preset (see `0 sentinels list --presets`)").option("--name <name>", "Name").option("--file <path>", "Sentinel JSON object (overrides preset fields)")))
+    .option("--preset <id>", "Start from a preset (see `0security sentinels list --presets`)").option("--name <name>", "Name").option("--file <path>", "Sentinel JSON object (overrides preset fields)")))
     .action((options: ConsoleFlags & { preset?: string; name?: string; access?: string; autonomy?: string; file?: string }) => withConsole(options, deps, async client => {
       noteIgnoredAccessFlags(givenAccessOption(options as Record<string, unknown>), { json: options.json });
       if (!options.preset && !options.file) throw new UsageError("Provide --preset <id> or --file <path>.");
@@ -129,7 +129,7 @@ export function registerSentinelsCommand(program: Command, deps: ConsoleCommandD
       requireYes(options.yes, "Running a Sentinel starts an autonomous thread in its folder.");
       const current = await sentinel(client, id);
       return await client.request("POST", `${ROOT}/${enc(current.id)}/run`, { approval: "launch-authorized-run", version: current.version, ...(options.task ? { task: options.task } : {}) }) as { activation: { id: string; status: string; missionId?: string } };
-    }, ({ activation }) => `${renderFields({ activation: activation.id, status: activation.status, thread: activation.missionId })}${activation.missionId ? `\nRead it: 0 threads show ${activation.missionId} --wait` : ""}`, { requireHost: "Running a Sentinel" }));
+    }, ({ activation }) => `${renderFields({ activation: activation.id, status: activation.status, thread: activation.missionId })}${activation.missionId ? `\nRead it: 0security threads show ${activation.missionId} --wait` : ""}`, { requireHost: "Running a Sentinel" }));
 
   consoleFlags(group.command("activations <id>").description("List a Sentinel's recent runs").option("--limit <n>", "Maximum rows (1-200)", "50"))
     .action((id: string, options: ConsoleFlags & { limit: string }) => withConsole(options, deps, async client => {
@@ -193,7 +193,7 @@ export function registerSentinelsCommand(program: Command, deps: ConsoleCommandD
       const automationId = options.automation ?? (typeof fromFile.automationId === "string" ? fromFile.automationId : owned.length === 1 ? owned[0] : undefined);
       const body = { ...fromFile, ...github, ...schedule, ...(automationId ? { automationId } : {}), ...(kind ? { kind } : {}) };
       if (!body.kind) throw new UsageError("Say what kind: --kind schedule | manual | github-pr | release | check-completed (a schedule also needs --frequency; release and check-completed take their settings with --file).");
-      if (!body.automationId) throw new UsageError(owned.length ? `This Sentinel owns ${owned.length} things a trigger can start. Pick one with --automation <id>: ${owned.join(", ")}.` : "A trigger needs something to start, and this Sentinel owns nothing yet that the CLI can list. Create it from a YAML file with `0 sentinels sync <folder> --apply`, which can include a schedule, or add the automation in the console and pass its full id with --automation <id>.");
+      if (!body.automationId) throw new UsageError(owned.length ? `This Sentinel owns ${owned.length} things a trigger can start. Pick one with --automation <id>: ${owned.join(", ")}.` : "A trigger needs something to start, and this Sentinel owns nothing yet that the CLI can list. Create it from a YAML file with `0security sentinels sync <folder> --apply`, which can include a schedule, or add the automation in the console and pass its full id with --automation <id>.");
       if (options.enable) requireYes(options.yes, "Enabling a trigger lets the Sentinel start runs unattended.");
       return ((await client.request("POST", `${ROOT}/${enc(owner.id)}/triggers`, { ...body, enabled: options.enable === true, ...(options.enable ? { approval: "enable-reviewed-trigger" } : {}) })) as { trigger: Trigger }).trigger;
     }, value => triggerTable([value])));
@@ -222,7 +222,7 @@ export function registerSentinelsCommand(program: Command, deps: ConsoleCommandD
     .action((options: ConsoleFlags & { yes?: boolean }) => withConsole(options, deps, async client => {
       requireYes(options.yes, "Rotating the webhook secret means GitHub must be updated with the new one.");
       const current = ((await client.request("GET", WEBHOOK_ROOT)) as { webhook: WebhookView }).webhook;
-      if (!current.serverMode) throw new UsageError("The webhook exists only in server mode (0 --server-mode).");
+      if (!current.serverMode) throw new UsageError("The webhook exists only in server mode (0security --server-mode).");
       return (await client.request("POST", `${WEBHOOK_ROOT}/secret${current.configured ? "/rotate" : ""}`, {})) as { secret: string; graceSeconds?: number; webhook: WebhookView };
     }, value => [`Secret (shown once, store it now): ${value.secret}`, ...(value.graceSeconds ? [`The previous secret still works for ${value.graceSeconds / 60} minutes.`] : []), `Payload URL: ${value.webhook.payloadUrl ?? "set --public-url on the server to derive it"}`, "Content type: application/json", "Events: Pull requests"].join("\n"), { requireHost: "Rotating the webhook secret" }));
   consoleFlags(triggers.command("rm <id> <trigger-id>").description("Delete a trigger").option("--yes", "Confirm deletion"))

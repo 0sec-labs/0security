@@ -108,7 +108,7 @@ export function buildNotes({ version, changelog, release = null, repo = REPO }) 
     "",
     "```bash",
     `curl -fsSL https://raw.githubusercontent.com/${repo}/main/install.sh | bash`,
-    "0 --version",
+    "0security --version",
     "```",
     "",
     "Windows (experimental): download `0security-windows-x64.exe` below (also published as `0-windows-x64.exe`, kept so existing installs can update). Docker: `docker run --rm ghcr.io/0sec-labs/0security:latest --help`.",

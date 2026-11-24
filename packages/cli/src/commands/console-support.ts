@@ -65,7 +65,7 @@ export function renderTable(headers: string[], rows: string[][]): string {
 }
 
 export async function readSecret(options: { keyEnv?: string; stdin?: boolean }, deps: ConsoleCommandDeps, label: string): Promise<string> {
-  if (Boolean(options.keyEnv) === Boolean(options.stdin)) throw new UsageError(`Provide the ${label} with exactly one of --key-env <VAR> or --stdin, for example: 0 models connect anthropic --key-env ANTHROPIC_API_KEY`);
+  if (Boolean(options.keyEnv) === Boolean(options.stdin)) throw new UsageError(`Provide the ${label} with exactly one of --key-env <VAR> or --stdin, for example: 0security models connect anthropic --key-env ANTHROPIC_API_KEY`);
   let value: string | undefined;
   if (options.keyEnv) {
     value = (deps.env ?? process.env)[options.keyEnv];

@@ -239,7 +239,7 @@ async function runVerifyFlow(ids: string[], options: VerifyOptions, deps: Verify
   const maxConsecutive = parseNumber("--max-consecutive-failures", options.maxConsecutiveFailures, n => Number.isInteger(n) && n >= 1, "a whole number of at least 1");
   const limit = options.limit === undefined ? Infinity : parseNumber("--limit", options.limit, n => Number.isInteger(n) && n >= 1, "a whole number of at least 1");
   parseNumber("--timeout", options.timeout, n => n > 0, "a positive number of seconds");
-  if (options.computer || options.engineUrl) throw new UsageError("0 findings verify reads files on this machine; run it against the local console.");
+  if (options.computer || options.engineUrl) throw new UsageError("0security findings verify reads files on this machine; run it against the local console.");
   const folder = resolve(options.folder ?? process.cwd());
   if (!deps.exists(folder, ".")) throw new UsageError(`The folder ${folder} does not exist. Pass the folder that was scanned with --folder.`);
 
@@ -384,7 +384,7 @@ export function registerVerifyCommand(program: Command, deps: VerifyDeps = defau
     .option("--timeout <seconds>", "Maximum seconds to wait for one thread", "600")
     .option("--dry-run", "List what would be checked and skipped; change nothing")
     .addOption(new Option("--format <format>", "Output: text or json").choices(["text", "json"])))
-    .addHelpText("after", "\nA verdict is advice stored next to the finding: severity and status stay as they were. With --apply only a false-positive verdict that cites a control at path:line suppresses a finding, with a note you can read in `0 findings show`. Running it again skips findings that already have a verdict.\nExit codes: 0 done, 1 a check returned no verdict or the run stopped on failures, 2 usage error, 3 the total budget ran out.")
+    .addHelpText("after", "\nA verdict is advice stored next to the finding: severity and status stay as they were. With --apply only a false-positive verdict that cites a control at path:line suppresses a finding, with a note you can read in `0security findings show`. Running it again skips findings that already have a verdict.\nExit codes: 0 done, 1 a check returned no verdict or the run stopped on failures, 2 usage error, 3 the total budget ran out.")
     .action(async (findings: string[], options: VerifyOptions, command: Command) => {
       const json = options.format === "json";
       const err = (text: string) => process.stderr.write(`${text}\n`);

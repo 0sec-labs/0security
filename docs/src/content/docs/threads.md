@@ -11,7 +11,7 @@ A thread is a conversation with the agent. You describe a job in plain words, an
 0
 ```
 
-`0` starts the browser app on this computer and opens it. No account is needed. It binds to `127.0.0.1:48123`.
+`0security` starts the browser app on this computer and opens it. No account is needed. It binds to `127.0.0.1:48123`.
 
 | Flag | Default | Effect |
 | --- | --- | --- |
@@ -21,7 +21,7 @@ A thread is a conversation with the agent. You describe a job in plain words, an
 | `--db-path <path>` | local store | SQLite database for findings and runs. |
 | `--ready-json` | | Print the bound URL as JSON, for scripts. |
 
-Run `0 --help` for the full list.
+Run `0security --help` for the full list.
 
 ## Run a thread
 
@@ -43,12 +43,12 @@ Type `/` for a menu. Each entry mirrors a CLI command, and anything that changes
 
 | Slash command | CLI |
 | --- | --- |
-| `/threads start`, `/threads list`, `/threads export` | `0 threads start`, `0 threads list`, `0 threads list <id> --export` |
-| `/findings list`, `/fix [finding-id]` | `0 findings list`, `0 threads start` |
-| `/scan <folder>` | `0 scan <folder>`; in chat it scans in this thread instead of a new one |
-| `/sentinels list`, `/sentinels create` | `0 sentinels list`, `0 sentinels set --create` |
-| `/computers list`, `/models list`, `/skills list` | the same words after `0` |
-| `/config get`, `/doctor` | `0 config get`, `0 config doctor` |
+| `/threads start`, `/threads list`, `/threads export` | `0security threads start`, `0security threads list`, `0security threads list <id> --export` |
+| `/findings list`, `/fix [finding-id]` | `0security findings list`, `0security threads start` |
+| `/scan <folder>` | `0security scan <folder>`; in chat it scans in this thread instead of a new one |
+| `/sentinels list`, `/sentinels create` | `0security sentinels list`, `0security sentinels set --create` |
+| `/computers list`, `/models list`, `/skills list` | the same words after `0security` |
+| `/config get`, `/doctor` | `0security config get`, `0security config doctor` |
 
 Chat-only commands are `/help`, `/status`, `/tools`, `/explain [topic]`, `/feedback <message>`, `/shortcuts` and `/usage`.
 
@@ -74,32 +74,32 @@ Search with ⌘K. It matches message text and titles, and skips tool payloads an
 
 ## Control threads from the terminal
 
-`0 threads` works on the app that `0` started:
+`0security threads` works on the app that `0security` started:
 
 ```bash
-id=$(0 threads start "Map the login flow" --folder ~/code/app)
-0 threads list "$id" --set --effort high
-0 threads stop "$id"
-0 threads send "$id" --retry
-0 threads list "$id" --rename "Login flow"
-0 threads list "$id" --export --format md -o login-flow.md
-0 threads list "$id" --delete --yes
+id=$(0security threads start "Map the login flow" --folder ~/code/app)
+0security threads list "$id" --set --effort high
+0security threads stop "$id"
+0security threads send "$id" --retry
+0security threads list "$id" --rename "Login flow"
+0security threads list "$id" --export --format md -o login-flow.md
+0security threads list "$id" --delete --yes
 ```
 
 `threads start` creates the thread, runs one turn and prints the thread ID. Add `--force` to `stop` if owned execution does not drain.
 
 Add `--wait` to block until the turn ends. It prints only the reply on stdout and the thread ID, tokens and cost on stderr. It exits 1 if the turn errored. `threads send <id> ... --wait` and `threads show <id> --wait` work the same way on an existing thread.
 
-Every `0 threads` command needs a running app. Without one it prints `No console running. Start one with: 0 --headless` and exits non-zero.
+Every `0security threads` command needs a running app. Without one it prints `No console running. Start one with: 0 --headless` and exits non-zero.
 
 ## Run a prompt headless
 
-`0 -p` runs one prompt through the same app process and exits.
+`0security -p` runs one prompt through the same app process and exits.
 
 ```bash
-0 -p "Review the selected folder"
-0 -p "Summarize the open findings" --format json
-printf '%s' 'Summarize the selected findings' | 0 -p
+0security -p "Review the selected folder"
+0security -p "Summarize the open findings" --format json
+printf '%s' 'Summarize the selected findings' | 0security -p
 ```
 
 | Option | Effect |
@@ -108,17 +108,17 @@ printf '%s' 'Summarize the selected findings' | 0 -p
 | `-m, --model <id>` | Model to use. |
 | `--approvals <ask\|auto>` | With `ask`, each command is put to you first. A headless run cannot answer, so effectful tools are refused. Default `auto`, or your `approvals` setting. |
 | `--finding <id>`, `--finding-intent <intent>` | Focus on one saved finding: `investigate`, `verify`, `draft_fix` or `impact`. |
-| `--resume <id>`, `--continue` | Continue a saved thread by ID or prefix, or the most recent one (`0 -r <id>`, `0 -c`). |
+| `--resume <id>`, `--continue` | Continue a saved thread by ID or prefix, or the most recent one (`0security -r <id>`, `0security -c`). |
 
 A task that needs a human decision cannot finish headless. Open it in the browser. To continue a live thread, pass `--chat <id>`. The thread keeps its own model, so `--model` is rejected, and pending decisions are reported, not approved.
 
 On a server or in CI, start the app without a browser:
 
 ```bash
-0 --headless --ready-json
+0security --headless --ready-json
 ```
 
-This serves the API only. To drive a running app from scripts, use `0 api`. It calls the backend HTTP API with the normal authentication and approval checks. Keep the token in an environment variable, for example `--engine-token-env ZERO_AGENT_TOKEN`, never on the command line.
+This serves the API only. To drive a running app from scripts, use `0security api`. It calls the backend HTTP API with the normal authentication and approval checks. Keep the token in an environment variable, for example `--engine-token-env ZERO_AGENT_TOKEN`, never on the command line.
 
 ## Commands, skills and Sentinels
 

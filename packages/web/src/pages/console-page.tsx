@@ -959,7 +959,7 @@ function ConsolePageContent({
         messageWorkspace.setDraft("");
         setNotice(
           choice
-            ? `Default model: ${choice.model} (${choice.providerId}). Same as 0 models set.`
+            ? `Default model: ${choice.model} (${choice.providerId}). Same as 0security models set.`
             : "No default model yet. Pick one from the model button, or use /models list.",
         );
         return;

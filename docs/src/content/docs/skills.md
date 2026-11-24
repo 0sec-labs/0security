@@ -9,7 +9,7 @@ A skill is a folder of instructions the agent loads when a task calls for it. It
 
 ## Add a skill
 
-1. Run `0` and open **Skills** in the sidebar.
+1. Run `0security` and open **Skills** in the sidebar.
 2. Press **Browse** to add a skill from GitHub, **New skill** to write one, or **Import** to bring one in.
 3. Ask the agent to use the skill, or let it find the skill itself.
 
@@ -20,26 +20,26 @@ The **Installed** tab lists your own skills first, then the bundled guides. The 
 Every action on the Skills page has a command. With the console running, commands go through it. Otherwise they use the same files directly.
 
 ```sh
-0 skills list
-0 skills catalog --search handoff
-0 skills add mattpocock~skills~handoff --yes
-0 skills add ./my-skill --yes
-0 skills import ./code-review
-0 skills edit code-review --file ./SKILL.md
-0 skills export code-review -o code-review.skill.json
-0 skills link ~/team-skills
-0 skills delete code-review --yes
-0 scan . --skill my-skill
+0security skills list
+0security skills catalog --search handoff
+0security skills add mattpocock~skills~handoff --yes
+0security skills add ./my-skill --yes
+0security skills import ./code-review
+0security skills edit code-review --file ./SKILL.md
+0security skills export code-review -o code-review.skill.json
+0security skills link ~/team-skills
+0security skills delete code-review --yes
+0security scan . --skill my-skill
 ```
 
 `skills add` accepts an Agent Skills folder (a `SKILL.md` with name and description front matter, plus optional scripts and references) or a git repository. It shows what the skill can do before it installs. `--yes` installs and enables it, then prints the skill id, its files and the scripts it bundles. `skills import` takes a folder with `SKILL.md` or an exported bundle. `skills link` mounts a folder without copying it.
 
 ## Use an installed skill in a scan
 
-Pass a skill to `0 scan` with `--skill`. A bare name such as `my-skill` is looked up once, when the scan starts, among the skills you installed. A full id such as `extension/my-skill/my-skill` names exactly one skill. If two installed skills share a name, 0 stops and lists their ids.
+Pass a skill to `0security scan` with `--skill`. A bare name such as `my-skill` is looked up once, when the scan starts, among the skills you installed. A full id such as `extension/my-skill/my-skill` names exactly one skill. If two installed skills share a name, 0 stops and lists their ids.
 
 ```sh
-0 scan . --skill my-skill
+0security scan . --skill my-skill
 ```
 
 You choose the skill. The text of its `SKILL.md` goes to the model as instructions, so install only skills you have read. Bundled scripts do not run when a skill is installed or loaded. The model can run one only after you approve it.

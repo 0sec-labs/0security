@@ -165,7 +165,7 @@ export async function runBurndown(options: BurndownOptions, deps: BurndownDeps):
   const minAttempts = parseNumber("--min-attempts", options.minAttempts ?? "4", n => Number.isInteger(n) && n >= 1, "a whole number of at least 1");
   const limit = options.limit === undefined ? Infinity : parseNumber("--limit", options.limit, n => Number.isInteger(n) && n >= 1, "a whole number of at least 1");
   parseNumber("--timeout", options.timeout, n => n > 0, "a positive number of seconds");
-  if (options.computer || options.engineUrl) throw new UsageError("0 findings burndown edits files on this machine; run it against the local console.");
+  if (options.computer || options.engineUrl) throw new UsageError("0security findings burndown edits files on this machine; run it against the local console.");
 
   let repo: string;
   try { repo = await deps.repoRoot(resolve(options.repo ?? process.cwd())); }

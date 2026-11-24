@@ -111,7 +111,7 @@ export function registerDashboardCommand(program: Command): void {
     .option("--shutdown-timeout <seconds>", "Server mode: seconds to finish in-flight requests on SIGTERM (default 20)")
     .option("--ready-json", "Emit the bound console URL as machine-readable JSON")
     .option("--no-open", "Do not auto-open a browser")
-    .option("--headless", "Serve the API only: no browser, and no web app files needed (use with `0 threads`)")
+    .option("--headless", "Serve the API only: no browser, and no web app files needed (use with `0security threads`)")
     .action(async (opts: DashboardOptions) => {
       if (opts.headless) opts.open = false;
       const serverMode = opts.serverMode === true || process.env.ZERO_SERVER_MODE === "1";

@@ -48,7 +48,7 @@
 ```bash
 curl -fsSL https://raw.githubusercontent.com/0sec-labs/0security/main/install.sh | bash
 export OPENAI_API_KEY="your-api-key"
-0 scan ./your-repo
+0security scan ./your-repo
 ```
 
 The installer adds the command as `0security` and as the short alias `0`. Both run the same program.
@@ -65,7 +65,7 @@ Windows, Docker and source installs are in the [docs](https://docs.0.security/).
 - **Produces evidence.** SBOMs, license and advisory checks, and CRA report drafts.
 - **Reviews AI apps.** LLM apps, MCP servers and live model endpoints.
 
-It is one binary and uses your own model keys. Run `0` for an optional web console.
+It is one binary and uses your own model keys. Run `0security` for an optional web console.
 
 ## Learn more
 

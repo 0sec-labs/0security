@@ -37,7 +37,7 @@ export class GitHubIssueTracker implements IssueTracker {
       if (existing.has(name)) { usable.push(name); continue; }
       const colour = COLOURS[name.startsWith("severity:") ? name.slice(9) : name] ?? "ededed";
       try {
-        await this.gh(["api", "--method", "POST", `repos/${this.repo}/labels`, "--input", "-"], JSON.stringify({ name, color: colour, description: name === "security" ? "Mirrored from 0 findings" : "Severity of a mirrored 0 finding" }));
+        await this.gh(["api", "--method", "POST", `repos/${this.repo}/labels`, "--input", "-"], JSON.stringify({ name, color: colour, description: name === "security" ? "Mirrored from 0security findings" : "Severity of a mirrored 0 finding" }));
         usable.push(name);
       } catch (error) { warnings.push(`could not create label '${name}' (${errorLine(error)}); skipping it`); }
     }

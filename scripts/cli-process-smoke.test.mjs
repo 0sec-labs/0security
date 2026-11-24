@@ -69,7 +69,7 @@ test("fresh local CLI supports credential-free discovery, JSON and actionable er
   const noConsole = cli(["threads", "list", "--format", "json"]);
   assert.equal(noConsole.status, 1, "threads need a running console, never an empty list");
   assert.equal(noConsole.stdout, "");
-  assert.match(JSON.parse(noConsole.stderr).error, /^No console running\. Start one with: 0 --headless/);
+  assert.match(JSON.parse(noConsole.stderr).error, /^No console running\. Start one with: 0security --headless/);
   assert.equal(jsonSuccess(cli(["config", "get", "--export"])).executionProfile, "local");
   const empty = cli(["findings", "list", "--format", "json"]);
   assert.equal(empty.status, 0, "an empty export is an empty list, not a failure");
@@ -133,7 +133,7 @@ test("CLI starts a loopback host and controls live sessions across independent C
   assert.ok(templates.some(template => template.id === "repository-review"));
   const missing = cli(["threads", "list", "missing-session", ...attach], tokenEnv);
   assert.equal(missing.status, 1);
-  assert.match(JSON.parse(missing.stderr).error, /^Thread not found\. List threads with `0 threads list`\.$/);
+  assert.match(JSON.parse(missing.stderr).error, /^Thread not found\. List threads with `0security threads list`\.$/);
 });
 
 test("server mode refuses a busy port instead of moving to another one", async t => {

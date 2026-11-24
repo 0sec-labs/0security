@@ -197,7 +197,7 @@ export function pullRequestBody(summary: string | undefined, problems: string[],
     "",
     "It was written by a model from what the code shows, so it can be wrong or incomplete. Review it like any document: correct it, answer the items marked `unknown: confirm with the team` (listed under Open questions), and mark any section you wrote or approved with `<!-- human -->` so later runs keep it unchanged.",
     "",
-    `Once merged, scans use it as context: \`0 scan . --context ${path}\`.${interview ? " To honour the declared scope, pass the base branch's copy: `0 scan . --scope base-security.md`." : ""} In CI read it from the base branch, not from the pull request head, so a change under review cannot edit the rules it is checked against.`,
+    `Once merged, scans use it as context: \`0security scan . --context ${path}\`.${interview ? " To honour the declared scope, pass the base branch's copy: `0security scan . --scope base-security.md`." : ""} In CI read it from the base branch, not from the pull request head, so a change under review cannot edit the rules it is checked against.`,
     ...(problems.length ? ["", `Checks 0 ran on the file found problems: ${inert(problems.join("; "))}.`] : []),
     ...(humanKept === undefined ? [] : ["", humanKept ? "Sections marked human from the earlier file were kept unchanged." : "Warning: a section marked human in the earlier file differs from the new one. Compare them in the diff before merging."]),
     "",
@@ -252,14 +252,14 @@ export async function runThreatModel(folderArg: string | undefined, options: Thr
     if (!Number.isFinite(Number(options.timeout)) || Number(options.timeout) <= 0) throw new UsageError("--timeout must be a positive number of seconds.");
     const interviewBudget = Number(options.interviewBudget ?? DEFAULT_INTERVIEW_BUDGET_USD);
     if (!Number.isFinite(interviewBudget) || interviewBudget <= 0) throw new UsageError("--interview-budget must be a positive number of USD.");
-    if (options.computer || options.engineUrl) throw new UsageError("0 threat-model writes a file on this machine; run it against the local console.");
+    if (options.computer || options.engineUrl) throw new UsageError("0security threat-model writes a file on this machine; run it against the local console.");
     if (options.interviewBudget !== undefined && !options.interview) throw new UsageError("--interview-budget applies to --interview.");
     if ((options.scan || options.fromScan !== undefined || options.scanBudget !== undefined) && !options.interview) throw new UsageError("--scan, --from-scan and --scan-budget apply to --interview.");
     if (options.scan && options.fromScan !== undefined) throw new UsageError("Use --scan or --from-scan, not both.");
     if (options.scanBudget !== undefined && !options.scan) throw new UsageError("--scan-budget applies to --scan.");
     const scanBudget = Number(options.scanBudget ?? DEFAULT_SCAN_BUDGET_USD);
     if (!Number.isFinite(scanBudget) || scanBudget <= 0) throw new UsageError("--scan-budget must be a positive number of USD.");
-    if (options.interview && !(deps.isTTY?.() ?? false)) throw new UsageError("0 threat-model --interview asks questions on the terminal. Run it in a terminal.");
+    if (options.interview && !(deps.isTTY?.() ?? false)) throw new UsageError("0security threat-model --interview asks questions on the terminal. Run it in a terminal.");
     const folder = resolve(folderArg ?? ".");
     if (!existsSync(folder) || !statSync(folder).isDirectory()) throw new UsageError(`${folderArg ?? "."} is not a folder.`);
     const rel = resolveOutputPath(folder, options.output);
@@ -376,7 +376,7 @@ export async function runThreatModel(folderArg: string | undefined, options: Thr
       if (interview.securityText !== undefined) { (deps.writePublic ?? deps.writeFile)(securityPath, interview.securityText); wroteSecurity = true; }
       const latest = deps.readFile(target);
       if (interview.writeNotes && interview.notes.length) {
-        if (latest === undefined) notices.push(`the threat model was not drafted, so your answers are not in ${rel}; run 0 threat-model again when a model is available`);
+        if (latest === undefined) notices.push(`the threat model was not drafted, so your answers are not in ${rel}; run 0security threat-model again when a model is available`);
         else {
           const found = parseScope(interview.securityText ?? securityBefore ?? "").found;
           const date = (deps.now ?? (() => new Date()))().toISOString().slice(0, 10);
@@ -431,7 +431,7 @@ export async function runThreatModel(folderArg: string | undefined, options: Thr
     // A clean machine or an Actions runner has no git identity; use a neutral one rather than fail the commit.
     const configured = (await deps.git(tree, ["config", "user.email"]).catch(() => "")).trim();
     const identity = configured ? [] : ["-c", "user.name=0", "-c", "user.email=noreply@0.security"];
-    await deps.git(tree, [...identity, "commit", "--quiet", "-m", `docs: ${before === undefined ? "draft" : "update"} the threat model${wroteSecurity ? " and declare its scope" : ""}\n\nWritten by 0 threat-model${options.interview ? " --interview" : ""} for review.`]);
+    await deps.git(tree, [...identity, "commit", "--quiet", "-m", `docs: ${before === undefined ? "draft" : "update"} the threat model${wroteSecurity ? " and declare its scope" : ""}\n\nWritten by 0security threat-model${options.interview ? " --interview" : ""} for review.`]);
     committed = true;
     await deps.git(tree, ["push", "--set-upstream", "origin", `${THREAT_MODEL_BRANCH}:${THREAT_MODEL_BRANCH}`]);
     const bodyFile = join(temp!, "body.md");
@@ -457,14 +457,14 @@ export function registerThreatModelCommand(program: Command, deps: ThreatModelDe
     .option("--interview", "After the draft, ask a few specific questions on the terminal and write your answers to the Scope section of SECURITY.md and to a human block of the threat model. Needs a terminal")
     .option("--interview-budget <usd>", `With --interview: the most each interview thread may spend (default: ${DEFAULT_INTERVIEW_BUDGET_USD})`)
     .option("--scan", "With --interview: run a scan of the folder first and ask about the classes of vulnerability it finds. Shows the estimated cost and asks before it runs")
-    .option("--from-scan <report>", "With --interview: ask about the classes in this saved report (from 0 scan --format json). Without --scan or --from-scan, the latest scan of the folder from the last 30 days is used when there is one")
+    .option("--from-scan <report>", "With --interview: ask about the classes in this saved report (from 0security scan --format json). Without --scan or --from-scan, the latest scan of the folder from the last 30 days is used when there is one")
     .option("--scan-budget <usd>", `With --scan: the most the scan may spend (default: ${DEFAULT_SCAN_BUDGET_USD})`)
     .option("--output <path>", `Where to write the threat model, relative to the folder, a .md file (default: ${THREAT_MODEL_PATH}); for example THREAT_MODEL.md`)
     .option("--format <format>", "json prints the outcome as JSON")
     .option("--budget <usd>", "Stop when the estimated spend reaches this many USD", String(DEFAULT_BUDGET_USD))
     .option("--model <model>", `Model for the thread (default: ${DEFAULT_SCAN_MODEL})`)
     .option("--timeout <seconds>", "Maximum seconds to wait", String(DEFAULT_TIMEOUT_SECONDS)))
-    .addHelpText("after", `\nSections you mark with <!-- human --> are kept unchanged when the file is updated. Later scans take the file with \`0 scan --context ${THREAT_MODEL_PATH}\`.\nExit codes: 0 file written and well formed, 1 not written or malformed, 2 usage error, 3 stopped at the budget or time limit.`)
+    .addHelpText("after", `\nSections you mark with <!-- human --> are kept unchanged when the file is updated. Later scans take the file with \`0security scan --context ${THREAT_MODEL_PATH}\`.\nExit codes: 0 file written and well formed, 1 not written or malformed, 2 usage error, 3 stopped at the budget or time limit.`)
     .action(async (folder: string | undefined, options: ThreatModelOptions) => {
       try {
         const outcome = await runThreatModel(folder, options, deps);

@@ -12,6 +12,9 @@ import { configureGroupedHelp, registerCommandTree } from "../tree.js";
 import { loadAllTopLevel, registerLazyCommandTree } from "../lazy-tree.js";
 import { addCommandStubs, createRootProgram } from "../../program.js";
 
+// Help names the command `0security` here, whatever name the test runner was started under.
+process.env["ZERO_PROGRAM_NAME"] = "0security";
+
 const FIXTURE = fileURLToPath(new URL("./__fixtures__/help-snapshot.txt", import.meta.url));
 
 export function helpSnapshot(program: Command): string {
@@ -21,13 +24,13 @@ export function helpSnapshot(program: Command): string {
     sections.push(`### ${path}${(command as unknown as { _hidden?: boolean })._hidden ? " (hidden)" : ""}\n${command.helpInformation()}`);
     for (const sub of [...command.commands].sort((a, b) => a.name().localeCompare(b.name()))) walk(sub, `${path} ${sub.name()}`);
   };
-  walk(program, "0");
+  walk(program, "0security");
   return `${sections.join("\n")}\n`;
 }
 
-// Same root as index.ts (name, description, positional options); the real `--version` flag is not part of the fixture.
+// Same root as index.ts (name, description, positional options); the snapshot uses the canonical name `0security`; the real `--version` flag is not part of the fixture.
 function plainRoot(): Command {
-  return new Command().name("0").description("Security sentinels for your repositories. Run 0 to open the console.").enablePositionalOptions();
+  return new Command().name("0security").description("Security sentinels for your repositories. Run 0security to open the console.").enablePositionalOptions();
 }
 
 export function eagerProgram(): Command {

@@ -21,35 +21,35 @@ New to 0? Read the [Quickstart](/) first. Settings and environment variables are
 
 ## The eleven commands
 
-`0` with no arguments opens the web console. Everything else is one of eleven commands.
+`0security` with no arguments opens the web console. `0` is a short alias for it. Everything else is one of eleven commands.
 
 | Command | What it does | Subcommands |
 | --- | --- | --- |
-| `0 scan` | Scan a folder or git repository for security bugs; prints the findings as a report. | none |
-| `0 threat-model` | Draft the repository's threat model as a file for people to review (optionally as a pull request). | none |
-| `0 probe` | Send adversarial messages to a live model or agent endpoint and report the ones it obeys. | none |
-| `0 sbom` | Generate an SBOM from lockfiles, check one against known advisories, and check its licenses against a policy. | `generate`, `check`, `licenses` |
-| `0 findings` | Browse findings and change their status. `--format` exports, `--import` loads a report. | `list`, `show`, `update`, `import`, `fix` |
-| `0 threads` | Start, follow and stop threads. | `list`, `show`, `send`, `start`, `stop` |
-| `0 sentinels` | Create, run and change Sentinels. | `list`, `run`, `set` |
-| `0 skills` | Skills and extensions: list, add. | `list`, `add` |
-| `0 models` | Models and provider connections. | `list`, `set`, `connect` |
-| `0 computers` | Remote computers that run 0. | `list`, `add` (alias `deploy`), `stop` |
-| `0 config` | Settings, API keys, team setup and `config doctor`. | `get`, `set`, `doctor` |
+| `0security scan` | Scan a folder or git repository for security bugs; prints the findings as a report. | none |
+| `0security threat-model` | Draft the repository's threat model as a file for people to review (optionally as a pull request). | none |
+| `0security probe` | Send adversarial messages to a live model or agent endpoint and report the ones it obeys. | none |
+| `0security sbom` | Generate an SBOM from lockfiles, check one against known advisories, and check its licenses against a policy. | `generate`, `check`, `licenses` |
+| `0security findings` | Browse findings and change their status. `--format` exports, `--import` loads a report. | `list`, `show`, `update`, `import`, `fix` |
+| `0security threads` | Start, follow and stop threads. | `list`, `show`, `send`, `start`, `stop` |
+| `0security sentinels` | Create, run and change Sentinels. | `list`, `run`, `set` |
+| `0security skills` | Skills and extensions: list, add. | `list`, `add` |
+| `0security models` | Models and provider connections. | `list`, `set`, `connect` |
+| `0security computers` | Remote computers that run 0. | `list`, `add` (alias `deploy`), `stop` |
+| `0security config` | Settings, API keys, team setup and `config doctor`. | `get`, `set`, `doctor` |
 
 ## Invocation and safety
 
-Run commands as `0 <command>`. Run `0 --version` for your release and `0 <command> --help` for a command's flags.
+Run commands as `0security <command>`. Run `0security --version` for your release and `0security <command> --help` for a command's flags.
 
 The browser app's chat uses the same words as slash commands: `/threads list`,
-`/findings list`, `/models default` and `/config get` mirror `0 threads list`,
-`0 findings list`, `0 models set` and `0 config get`. See [Slash commands](/threads/#slash-commands).
+`/findings list`, `/models default` and `/config get` mirror `0security threads list`,
+`0security findings list`, `0security models set` and `0security config get`. See [Slash commands](/threads/#slash-commands).
 
 Option tables show the default each flag is registered with. A dash means no default is registered: the command may read it from configuration or require a value. A `--no-*` option shows the default of the positive flag. See [Configuration](/configuration/) for environment variables.
 
-- With no arguments, `0` opens the browser app. No account is needed. See [Browser app](/threads/).
-- `0 -p "<prompt>"` runs one headless chat prompt. `0 -c` continues the last chat and `0 --resume <id>` a saved one.
-- `0 --help` lists the eleven commands.
+- With no arguments, `0security` opens the browser app. No account is needed. See [Browser app](/threads/).
+- `0security -p "<prompt>"` runs one headless chat prompt. `0security -c` continues the last chat and `0security --resume <id>` a saved one.
+- `0security --help` lists the eleven commands.
 - Use explicit commands in automation. 0 routes a recognizable bare target to a command and refuses ambiguous input.
 - With the SmolVM workbench profile on, the whole CLI runs inside an online Kali guest. `workbench` and `config` stay on the host, and a failure never falls back to host execution.
 
@@ -64,7 +64,7 @@ Change a finding's status to `accepted`, `suppressed`, `open` or `false-positive
 Accepting a risk needs `--reason` and `--expires`. `--approver` is optional. The approver is a label you type: 0 does not check who you are. See [findings accept](#findings-accept).
 
 ```text
-0 findings update [options] <id>
+0security findings update [options] <id>
 ```
 
 | Argument | Required | Description |
@@ -85,7 +85,7 @@ Accepting a risk needs `--reason` and `--expires`. `--approver` is optional. The
 Show or choose the default model. It takes the same arguments as `models default`.
 
 ```text
-0 models set [options] [model]
+0security models set [options] [model]
 ```
 
 | Argument | Required | Description |
@@ -101,7 +101,7 @@ Show or choose the default model. It takes the same arguments as `models default
 Add a provider connection, or list, test or remove one with `--list`, `--test` and `--remove`. These run `models connections add`, `list`, `test` and `remove`.
 
 ```text
-0 models connect [options] [provider]
+0security models connect [options] [provider]
 ```
 
 | Argument | Required | Description |
@@ -121,7 +121,7 @@ Add a provider connection, or list, test or remove one with `--list`, `--test` a
 Check this machine and the engine, including which OS sandbox backends are available (`sandbox-exec`, `bwrap`, Docker). `--fix` repairs the local database. The subcommands of `doctor` also work here: `config doctor upgrade`, `config doctor workbench` and `config doctor checks`.
 
 ```text
-0 config doctor [options] [checks...]
+0security config doctor [options] [checks...]
 ```
 
 | Argument | Required | Description |
@@ -141,16 +141,16 @@ Check this machine and the engine, including which OS sandbox backends are avail
 Scan a folder or git repository for security bugs and print the findings as a report.
 
 ```text
-0 scan [options] [target]
+0security scan [options] [target]
 ```
 
 Run it on a folder or a git URL:
 
 ```bash
-0 scan ~/code/app --format sarif -o scan.sarif --fail-on high
+0security scan ~/code/app --format sarif -o scan.sarif --fail-on high
 ```
 
-A scan is a thread that follows the `scan` skill, so it appears in `0 threads` and in the web app. Findings are stored under the thread id, and `0 findings export --scan <thread id>` gives the same report later.
+A scan is a thread that follows the `scan` skill, so it appears in `0security threads` and in the web app. Findings are stored under the thread id, and `0security findings export --scan <thread id>` gives the same report later.
 
 The scan uses the running console, or the engine named by `--engine-url` or `--computer`. With none running, it starts a headless console and stops it afterwards.
 
@@ -235,23 +235,23 @@ The check reads shell commands such as `cat`, `sed`, `head` and `grep` on a file
 To see what a scan involves before you run it, use `--plan`. It lists the entry points, the batches and a rough cost, and calls no model:
 
 ```bash
-0 scan ~/code/app --plan
+0security scan ~/code/app --plan
 ```
 
 To review a change instead of the whole folder, pass `--diff <ref>`, for example in a pull request job:
 
 ```bash
-0 scan . --diff origin/main --format sarif -o scan.sarif
+0security scan . --diff origin/main --format sarif -o scan.sarif
 ```
 
 0 reviews the files that differ from the ref (committed or not) and the code they connect to. The folder must be a git work tree. An empty diff starts no thread and writes an empty report.
 
 If FoxGuard is installed, the scan runs it first. It takes seconds and costs nothing. The thread treats its hits as leads, checks each against the code, records only the real ones and says which it rejected. A pattern scanner cannot see logic bugs such as a missing ownership check, so the thread still reviews the entry points itself.
 
-FoxGuard ships next to `0`; set `ZERO_FOXGUARD_PATH` to use another copy. Pass `--prepass off` to skip it. `--scanner` chooses the scanners (`foxguard`, `semgrep`, `opengrep`, `gitleaks`, `trivy`, `osv-scanner`); repeat the flag or separate ids with commas to run several. A scanner that is not installed is skipped, and 0 says how to install it. A Semgrep rule pack such as `p/default` is downloaded when it runs.
+FoxGuard ships next to `0security`; set `ZERO_FOXGUARD_PATH` to use another copy. Pass `--prepass off` to skip it. `--scanner` chooses the scanners (`foxguard`, `semgrep`, `opengrep`, `gitleaks`, `trivy`, `osv-scanner`); repeat the flag or separate ids with commas to run several. A scanner that is not installed is skipped, and 0 says how to install it. A Semgrep rule pack such as `p/default` is downloaded when it runs.
 
 ```bash
-0 scan ~/code/app --scanner foxguard,gitleaks,trivy
+0security scan ~/code/app --scanner foxguard,gitleaks,trivy
 ```
 
 The default stays FoxGuard alone. The other scanners are not installed with 0. Set `ZERO_GITLEAKS_PATH`, `ZERO_TRIVY_PATH` or `ZERO_OSV_SCANNER_PATH` to use a binary outside your path.
@@ -268,8 +268,8 @@ A change under review can edit files in the folder to hide findings. So the scan
 
 Checkov reads `.checkov.yaml` and `.checkov.yml` from the folder and has no option to ignore them. 0 skips Checkov when the folder has one of those files, unless you pass `--repo-ignores`.
 
-Secret values stay out of the prompt and the findings. gitleaks runs with `--redact`, and trivy masks values by default. 0 also drops the snippet and any `Match:` line from a secret lead, so the thread sees the rule, the file and the line. The thread can still read the file itself, as it reads any file in the folder. `0 findings import` is unchanged.
-FoxGuard ships next to `0`; set `ZERO_FOXGUARD_PATH` to use another copy. Pass `--prepass off` to skip it. `--scanner` adds or replaces scanners (`foxguard`, `semgrep`, `opengrep`, `checkov`); repeat the flag for several. A scanner that is not installed is skipped. A Semgrep rule pack such as `p/default` is downloaded when it runs.
+Secret values stay out of the prompt and the findings. gitleaks runs with `--redact`, and trivy masks values by default. 0 also drops the snippet and any `Match:` line from a secret lead, so the thread sees the rule, the file and the line. The thread can still read the file itself, as it reads any file in the folder. `0security findings import` is unchanged.
+FoxGuard ships next to `0security`; set `ZERO_FOXGUARD_PATH` to use another copy. Pass `--prepass off` to skip it. `--scanner` adds or replaces scanners (`foxguard`, `semgrep`, `opengrep`, `checkov`); repeat the flag for several. A scanner that is not installed is skipped. A Semgrep rule pack such as `p/default` is downloaded when it runs.
 
 `--rules <file-or-folder>` gives Semgrep or OpenGrep your own rules for the pre-pass. Repeat it for several. The scanner runs only those rules, not its default pack, so add `--scanner semgrep` or `--scanner opengrep`. FoxGuard has its own rule format and does not read them, so `--rules` alone is a usage error.
 
@@ -285,7 +285,7 @@ rules:
 ```
 
 ```bash
-0 scan ~/code/app --scanner semgrep --rules ~/rules/company.yml
+0security scan ~/code/app --scanner semgrep --rules ~/rules/company.yml
 ```
 
 A hit from your rules is a lead like any other. The scan checks it against the code and records it only when it is real. A finding at the rule's lines gets `ruleSource: "custom"` in JSON and in the SARIF properties, and its description names the rule id. Semgrep prefixes the id with the rule file's folder.
@@ -342,7 +342,7 @@ A hit from your rules is a lead like any other. The scan checks it against the c
 To review Terraform, CloudFormation, Kubernetes manifests, Dockerfiles and GitHub Actions workflows, run Checkov as the pre-pass and load the `iac-review` skill:
 
 ```bash
-0 scan ~/code/infra --scanner checkov --skill iac-review
+0security scan ~/code/infra --scanner checkov --skill iac-review
 ```
 
 Checkov flags single settings, such as an open port. The skill follows references between resources: a subnet named private whose route table reaches an internet gateway, a database group that trusts an open group, an `iam:PassRole` on `*`, a workflow that runs pull request code with secrets. Checkov hits are leads, and the thread keeps one only when it can show how it is exploitable.
@@ -361,14 +361,14 @@ A folder with more than 8 entry points, or more than 150 source files, is review
 
 ```text
 Stopped by the $5 budget; 16 of 57 entry points not reached.
-Continue with: 0 scan /home/you/code/app --resume scan-1f3a9c
+Continue with: 0security scan /home/you/code/app --resume scan-1f3a9c
 ```
 
 Run that command, or read the ledger with `--coverage`:
 
 ```bash
-0 scan ~/code/app --resume latest
-0 scan ~/code/app --coverage
+0security scan ~/code/app --resume latest
+0security scan ~/code/app --coverage
 ```
 
 `--batches off` keeps one thread. See [Large repositories](/findings/#large-repositories).
@@ -397,7 +397,7 @@ repositories:
 Name the file with `--tiers`, or save it as scan-tiers.yaml, scan-tiers.yml or scan-tiers.json in the 0 state folder (`~/.0`). 0 never reads a tier file from the folder it scans, because a change could edit its own tier.
 
 ```bash
-0 scan ~/code/payments --tiers ~/security/scan-tiers.yaml
+0security scan ~/code/payments --tiers ~/security/scan-tiers.yaml
 ```
 
 0 finds the target's repository from its `origin` remote (or from the git URL you pass) and its folder path. The most specific entry wins: an exact repository, then an exact path, then the first pattern in the file that matches, then `default` (`standard` when the file names none). A `*` matches inside one name or folder; `**` matches across folders.
@@ -416,7 +416,7 @@ Code often passes other scanners before it reaches you. `--known` takes their SA
 
 ```bash
 semgrep scan --sarif --config p/default -o semgrep.sarif .
-0 scan . --known semgrep.sarif --format json -o scan.json
+0security scan . --known semgrep.sarif --format json -o scan.json
 ```
 
 The thread gets a bounded list of what is known (location, rule and a one-line message) as lower-priority data. It is asked to look for other classes of bug, especially authorization and business-logic flaws, and to record a listed item only with its own evidence.
@@ -474,26 +474,26 @@ Paths in a known file must be relative to the scanned folder, or absolute inside
 Draft the repository's threat model as a file for people to review.
 
 ```text
-0 threat-model [options] [folder]
+0security threat-model [options] [folder]
 ```
 
 A thread follows the `threat-model` skill and writes `.0/threat-model.md` in the folder, or the path in `--output`. The file has a summary, what matters most, assets, actors, trust boundaries, entry points, authorization and business rules, data flows and open questions. Front matter holds the date and the commit.
 
 ```bash
-0 threat-model
-0 threat-model ~/code/app --pr
-0 threat-model --interview
-0 threat-model --output THREAT_MODEL.md
+0security threat-model
+0security threat-model ~/code/app --pr
+0security threat-model --interview
+0security threat-model --output THREAT_MODEL.md
 ```
 
 `--interview` asks up to 8 specific questions on the terminal after the draft and writes your answers to the `## Scope` section of SECURITY.md and to a human block of the threat model. It asks one question per class of vulnerability, from the latest scan of the folder and from the code. It needs a terminal and exits with 2 without one.
 
 ```bash
-0 threat-model --interview --from-scan report.json
-0 threat-model --interview --scan --scan-budget 2
+0security threat-model --interview --from-scan report.json
+0security threat-model --interview --scan --scan-budget 2
 ```
 
-`--from-scan` takes a report from `0 scan --format json`. `--scan` shows a rough cost estimate and asks before it scans. See [Declare what is in and out of scope](/threat-model-and-policy/#declare-what-is-in-and-out-of-scope).
+`--from-scan` takes a report from `0security scan --format json`. `--scan` shows a rough cost estimate and asks before it scans. See [Declare what is in and out of scope](/threat-model-and-policy/#declare-what-is-in-and-out-of-scope).
 
 The file names only what the thread saw and marks the rest `unknown: confirm with the team`. Running it again updates the file and keeps every section marked `<!-- human -->`.
 
@@ -512,7 +512,7 @@ It writes files on this machine, so it needs the local console and rejects `--co
 | `--interview` | — | After the draft, ask a few specific questions on the terminal and write your answers to the Scope section of SECURITY.md and to a human block of the threat model. Needs a terminal |
 | `--interview-budget <usd>` | — | With --interview: the most each interview thread may spend (default: 0.5) |
 | `--scan` | — | With --interview: run a scan of the folder first and ask about the classes of vulnerability it finds. Shows the estimated cost and asks before it runs |
-| `--from-scan <report>` | — | With --interview: ask about the classes in this saved report (from 0 scan --format json). Without --scan or --from-scan, the latest scan of the folder from the last 30 days is used when there is one |
+| `--from-scan <report>` | — | With --interview: ask about the classes in this saved report (from 0security scan --format json). Without --scan or --from-scan, the latest scan of the folder from the last 30 days is used when there is one |
 | `--scan-budget <usd>` | — | With --scan: the most the scan may spend (default: 3) |
 | `--output <path>` | — | Where to write the threat model, relative to the folder, a .md file (default: .0/threat-model.md); for example THREAT_MODEL.md |
 | `--format <format>` | — | json prints the outcome as JSON |
@@ -532,7 +532,7 @@ It writes files on this machine, so it needs the local console and rejects `--co
 Open the local browser workspace for threads and findings.
 
 ```text
-0 web [options]
+0security web [options]
 ```
 
 | Option | Registered default | Description |
@@ -556,7 +556,7 @@ Open the local browser workspace for threads and findings.
 | `--shutdown-timeout <seconds>` | — | Server mode: seconds to finish in-flight requests on SIGTERM (default 20) |
 | `--ready-json` | — | Emit the bound console URL as machine-readable JSON |
 | `--no-open` | — | Do not auto-open a browser |
-| `--headless` | — | Serve the API only: no browser, and no web app files needed (use with `0 threads`) |
+| `--headless` | — | Serve the API only: no browser, and no web app files needed (use with `0security threads`) |
 | `--engines-config <path>` | — | Trusted engine connection registry JSON (default ~/.0/engines.json) |
 
 ### api
@@ -564,13 +564,13 @@ Open the local browser workspace for threads and findings.
 Call an admitted HTTP API on a running engine without sending a model prompt.
 
 ```text
-0 api [options] [path]
+0security api [options] [path]
 ```
 
 Pick the engine with `--engine <id>` from an operator-managed registry, or with both `--engine-url <url>` and `--engine-token-env <name>`. The path defaults to `/api/backend/handshake` and must be an admitted `/api/` route.
 
 ```bash
-0 api /api/backend/handshake --engine-url http://127.0.0.1:48123 --engine-token-env ZERO_ENGINE_TOKEN
+0security api /api/backend/handshake --engine-url http://127.0.0.1:48123 --engine-token-env ZERO_ENGINE_TOKEN
 ```
 
 Before it sends the request, 0 checks the engine's identity and advertised capabilities. A missing credential, an unsupported route, a redirect or a capability mismatch fails. It never falls back to local execution.
@@ -599,19 +599,19 @@ A successful request does not mean queued work has finished. Keep the returned r
 Import retained CI artifacts into a local browser workspace without starting an assessment.
 
 ```text
-0 findings reports
+0security findings reports
 ```
 
 Subcommands: [import](#findings-reports-import) · [export](#findings-reports-export).
 
 #### findings reports import
 
-Read a JSON report and an optional `run.json`, validate them, and keep a passive snapshot in the database you select. Stop any engine using that database first, then open `0 web --db-path <same-path>`. The same report and metadata import once.
+Read a JSON report and an optional `run.json`, validate them, and keep a passive snapshot in the database you select. Stop any engine using that database first, then open `0security web --db-path <same-path>`. The same report and metadata import once.
 
 Imported findings stay discovered and unverified. Importing does not restore execution state or authorize fixes.
 
 ```text
-0 findings reports import [options] <report>
+0security findings reports import [options] <report>
 ```
 
 | Argument | Required | Description |
@@ -630,7 +630,7 @@ Write a share-safe copy of a JSON report. The copy keeps the target, summary and
 Free-text descriptions are left out unless you pass `--include-description`. The command only writes the copy; it sends nothing.
 
 ```text
-0 findings reports export [options] <report>
+0security findings reports export [options] <report>
 ```
 
 | Argument | Required | Description |
@@ -647,7 +647,7 @@ Free-text descriptions are left out unless you pass `--include-description`. The
 Check local runtime prerequisites and suggest the next command
 
 ```text
-0 doctor [options]
+0security doctor [options]
 ```
 
 | Option | Registered default | Description |
@@ -662,7 +662,7 @@ Subcommands: [upgrade](#doctor-upgrade) · [workbench](#doctor-workbench).
 Inspect, export, and import the two-level console configuration
 
 ```text
-0 config
+0security config
 ```
 
 Subcommands: [get](#config-get) · [set](#config-set) · [doctor](#config-doctor) · [show](#config-show) · [list](#config-list) · [reset](#config-reset) · [export](#config-export) · [import](#config-import) · [audit-log](#config-audit-log) · [audit-export](#config-audit-export) · [team](#config-team) · [db](#config-db) · [github](#config-github).
@@ -672,7 +672,7 @@ Subcommands: [get](#config-get) · [set](#config-set) · [doctor](#config-doctor
 Show each setting's effective value and source: default, global, or project.
 
 ```text
-0 config show [options]
+0security config show [options]
 ```
 
 | Option | Registered default | Description |
@@ -685,7 +685,7 @@ Show each setting's effective value and source: default, global, or project.
 Same as `config show`. Add `--json` for each key's value and source layer.
 
 ```text
-0 config list [options]
+0security config list [options]
 ```
 
 | Option | Registered default | Description |
@@ -698,7 +698,7 @@ Same as `config show`. Add `--json` for each key's value and source layer.
 Print one setting's effective value. `--json` adds the layer it comes from.
 
 ```text
-0 config get [options] [key]
+0security config get [options] [key]
 ```
 
 | Argument | Required | Description |
@@ -715,12 +715,12 @@ Print one setting's effective value. `--json` adds the layer it comes from.
 Change one setting, with the same validation as the Settings page. It writes the global layer unless `--project` is given; operator-global settings refuse `--project`. Security-sensitive settings need `--yes`. Exit code 2 means a bad key or value; 1 means the engine refused the change.
 
 ```text
-0 config set [options] <key> <value>
+0security config set [options] <key> <value>
 ```
 
 ```bash
-0 config set compactionThreshold 85%
-0 config set allowModelSelfExtension on --yes
+0security config set compactionThreshold 85%
+0security config set allowModelSelfExtension on --yes
 ```
 
 | Argument | Required | Description |
@@ -740,7 +740,7 @@ Change one setting, with the same validation as the Settings page. It writes the
 Reset named settings, or every engine setting when none is named, to their defaults. Safety settings never reset to a looser value; the command lists any it kept. Requires `--yes`.
 
 ```text
-0 config reset [options] [keys...]
+0security config reset [options] [keys...]
 ```
 
 | Argument | Required | Description |
@@ -758,7 +758,7 @@ Reset named settings, or every engine setting when none is named, to their defau
 Export effective configuration as JSON. Use `--global` for the global layer. Output goes to stdout unless a file is supplied.
 
 ```text
-0 config export [options] [file]
+0security config export [options] [file]
 ```
 
 | Argument | Required | Description |
@@ -774,7 +774,7 @@ Export effective configuration as JSON. Use `--global` for the global layer. Out
 Merge a shared config into the global (default) or --project layer
 
 ```text
-0 config import [options] <file>
+0security config import [options] <file>
 ```
 
 | Argument | Required | Description |
@@ -789,18 +789,18 @@ Merge a shared config into the global (default) or --project layer
 
 ### models connections
 
-Manage model provider connections, the same actions as Settings → Connections in the browser. These commands use a running `0 web` engine when there is one, and otherwise apply the change directly on this computer. Keys are never passed as an argument: use `--key-env` or `--stdin`.
+Manage model provider connections, the same actions as Settings → Connections in the browser. These commands use a running `0security web` engine when there is one, and otherwise apply the change directly on this computer. Keys are never passed as an argument: use `--key-env` or `--stdin`.
 
 ```text
-0 models connections
+0security models connections
 ```
 
 ```bash
 export OPENAI_API_KEY_FOR_0="sk-..."
-0 models connections add openai --key-env OPENAI_API_KEY_FOR_0
-0 models connections list
-0 models connections test openai
-0 models connections remove openai --yes
+0security models connections add openai --key-env OPENAI_API_KEY_FOR_0
+0security models connections list
+0security models connections test openai
+0security models connections remove openai --yes
 ```
 
 Subcommands: [list](#models-connections-list) · [add](#models-connections-add) · [test](#models-connections-test) · [remove](#models-connections-remove).
@@ -810,7 +810,7 @@ Subcommands: [list](#models-connections-list) · [add](#models-connections-add) 
 List providers with their status and saved accounts. `*` marks the active account.
 
 ```text
-0 models connections list [options]
+0security models connections list [options]
 ```
 
 | Option | Registered default | Description |
@@ -823,7 +823,7 @@ List providers with their status and saved accounts. `*` marks the active accoun
 Verify and save an API key for a provider. Exit code 2 means no key source was given; 1 means the provider rejected it.
 
 ```text
-0 models connections add [options] <provider>
+0security models connections add [options] <provider>
 ```
 
 | Argument | Required | Description |
@@ -845,7 +845,7 @@ Verify and save an API key for a provider. Exit code 2 means no key source was g
 Check that a connected provider answers and lists models.
 
 ```text
-0 models connections test [options] <provider>
+0security models connections test [options] <provider>
 ```
 
 | Argument | Required | Description |
@@ -862,7 +862,7 @@ Check that a connected provider answers and lists models.
 Remove a provider's saved credentials, or one saved account with `--account`. Requires `--yes`. A key supplied by an environment variable cannot be removed here.
 
 ```text
-0 models connections remove [options] <provider>
+0security models connections remove [options] <provider>
 ```
 
 | Argument | Required | Description |
@@ -881,13 +881,13 @@ Remove a provider's saved credentials, or one saved account with `--account`. Re
 List the models your connected providers offer and choose the default, as on the Models page.
 
 ```text
-0 models
+0security models
 ```
 
 ```bash
-0 models list --provider openai
-0 models default --provider openai gpt-5.4-mini
-0 models recommended
+0security models list --provider openai
+0security models default --provider openai gpt-5.4-mini
+0security models recommended
 ```
 
 Subcommands: [list](#models-list) · [set](#models-set) · [connect](#models-connect) · [default](#models-default) · [recommended](#models-recommended) · [connections](#models-connections) · [usage](#models-usage).
@@ -897,7 +897,7 @@ Subcommands: [list](#models-list) · [set](#models-set) · [connect](#models-con
 List models offered by connected providers, with price and context size.
 
 ```text
-0 models list [options]
+0security models list [options]
 ```
 
 | Option | Registered default | Description |
@@ -911,7 +911,7 @@ List models offered by connected providers, with price and context size.
 Show the default model, or set it. Setting requires `--provider`, and the provider must be connected.
 
 ```text
-0 models default [options] [model]
+0security models default [options] [model]
 ```
 
 | Argument | Required | Description |
@@ -929,7 +929,7 @@ Show the default model, or set it. Setting requires `--provider`, and the provid
 Show the recommended model for each role, chosen from your connected providers.
 
 ```text
-0 models recommended [options]
+0security models recommended [options]
 ```
 
 | Option | Registered default | Description |
@@ -942,13 +942,13 @@ Show the recommended model for each role, chosen from your connected providers.
 Check or connect the GitHub account used to publish fixes, as in Settings → Git.
 
 ```text
-0 config github
+0security config github
 ```
 
 ```bash
-0 config github status
-0 config github connect --stdin < token.txt
-0 config github repos --search api
+0security config github status
+0security config github connect --stdin < token.txt
+0security config github repos --search api
 ```
 
 Subcommands: [status](#config-github-status) · [connect](#config-github-connect) · [repos](#config-github-repos).
@@ -958,7 +958,7 @@ Subcommands: [status](#config-github-status) · [connect](#config-github-connect
 Show whether GitHub is signed in and which scopes are missing.
 
 ```text
-0 config github status [options]
+0security config github status [options]
 ```
 
 | Option | Registered default | Description |
@@ -971,7 +971,7 @@ Show whether GitHub is signed in and which scopes are missing.
 Sign in with a personal access token read from an environment variable or stdin. The token is never printed.
 
 ```text
-0 config github connect [options]
+0security config github connect [options]
 ```
 
 | Option | Registered default | Description |
@@ -986,7 +986,7 @@ Sign in with a personal access token read from an environment variable or stdin.
 List repositories the signed-in account can reach (cached for five minutes).
 
 ```text
-0 config github repos [options]
+0security config github repos [options]
 ```
 
 | Option | Registered default | Description |
@@ -998,14 +998,14 @@ List repositories the signed-in account can reach (cached for five minutes).
 
 ### models usage
 
-Show spend and tokens of the open threads, by model or by thread. Open threads are only tracked by a running `0 web` engine; without one the report is empty.
+Show spend and tokens of the open threads, by model or by thread. Open threads are only tracked by a running `0security web` engine; without one the report is empty.
 
 ```text
-0 models usage [options]
+0security models usage [options]
 ```
 
 ```bash
-0 models usage --by thread --json
+0security models usage --by thread --json
 ```
 
 | Option | Registered default | Description |
@@ -1019,11 +1019,11 @@ Show spend and tokens of the open threads, by model or by thread. Open threads a
 Show the local log of privileged actions: connection and settings changes, extension installs and denied attempts. The log is append-only.
 
 ```text
-0 config audit-log [options]
+0security config audit-log [options]
 ```
 
 ```bash
-0 config audit-log --q connection --limit 20
+0security config audit-log --q connection --limit 20
 ```
 
 | Option | Registered default | Description |
@@ -1039,11 +1039,11 @@ Show the local log of privileged actions: connection and settings changes, exten
 Write the audit log as NDJSON, CEF or syslog lines for a SIEM, oldest first. Each event has a stable `eventId`. Secret-looking values are redacted again on the way out. See [Send the audit log to a SIEM](/server-mode/#send-the-audit-log-to-a-siem).
 
 ```text
-0 config audit-export [options]
+0security config audit-export [options]
 ```
 
 ```bash
-0 config audit-export --format cef --since 24h -o audit.cef
+0security config audit-export --format cef --since 24h -o audit.cef
 ```
 
 | Option | Registered default | Description |
@@ -1061,7 +1061,7 @@ Write the audit log as NDJSON, CEF or syslog lines for a SIEM, oldest first. Eac
 Set up and inspect the online SmolVM security workbench on Apple Silicon macOS. The local Linux guest contains 0, the security tools and the browser. Docker is not required.
 
 ```text
-0 doctor workbench
+0security doctor workbench
 ```
 
 Subcommands: [run-agent](#doctor-workbench-run-agent) · [console-agent](#doctor-workbench-console-agent) · [setup](#doctor-workbench-setup) · [status](#doctor-workbench-status) · [providers](#doctor-workbench-providers) · [configure](#doctor-workbench-configure) · [disable](#doctor-workbench-disable).
@@ -1071,15 +1071,15 @@ Subcommands: [run-agent](#doctor-workbench-run-agent) · [console-agent](#doctor
 Internal entrypoint for the CLI engine inside the workbench guest. Normal commands select it automatically when the workbench profile is on. Outside an admitted guest it is refused.
 
 ```text
-0 doctor workbench run-agent
+0security doctor workbench run-agent
 ```
 
 #### doctor workbench console-agent
 
-Internal entrypoint for the chat engine inside the workbench guest. Use `0 -p` or `0` to start a chat. Outside an admitted guest it is refused.
+Internal entrypoint for the chat engine inside the workbench guest. Use `0security -p` or `0security` to start a chat. Outside an admitted guest it is refused.
 
 ```text
-0 doctor workbench console-agent
+0security doctor workbench console-agent
 ```
 
 #### doctor workbench setup
@@ -1087,7 +1087,7 @@ Internal entrypoint for the chat engine inside the workbench guest. Use `0 -p` o
 Verify or provision the signed native runtime, approve a local archive by digest, and save the operator-global SmolVM profile.
 
 ```text
-0 doctor workbench setup [options]
+0security doctor workbench setup [options]
 ```
 
 | Option | Registered default | Description |
@@ -1110,7 +1110,7 @@ The supported provider grant is `chatgpt-codex`: model requests go through the h
 Show configuration, native runtime readiness, image approval, effective privacy, network mode, broker resource ceilings and retained guest admission. It does not download or launch a VM or reveal credential values.
 
 ```text
-0 doctor workbench status [options]
+0security doctor workbench status [options]
 ```
 
 | Option | Registered default | Description |
@@ -1122,7 +1122,7 @@ Show configuration, native runtime readiness, image approval, effective privacy,
 List the exact identifiers accepted by `--provider`; this does not expose credentials.
 
 ```text
-0 doctor workbench providers
+0security doctor workbench providers
 ```
 
 #### doctor workbench configure
@@ -1130,7 +1130,7 @@ List the exact identifiers accepted by `--provider`; this does not expose creden
 Replace integration grants or operator-approved sibling image references.
 
 ```text
-0 doctor workbench configure [options]
+0security doctor workbench configure [options]
 ```
 
 | Option | Registered default | Description |
@@ -1147,7 +1147,7 @@ Replace integration grants or operator-approved sibling image references.
 Explicitly switch to host-local execution. Approved image and guest state remain.
 
 ```text
-0 doctor workbench disable
+0security doctor workbench disable
 ```
 
 ### doctor upgrade
@@ -1155,7 +1155,7 @@ Explicitly switch to host-local execution. Approved image and guest state remain
 Fetch and install the latest release binary for 0 (re-runs install.sh).
 
 ```text
-0 doctor upgrade [options]
+0security doctor upgrade [options]
 ```
 
 | Option | Registered default | Description |
@@ -1170,7 +1170,7 @@ Fetch and install the latest release binary for 0 (re-runs install.sh).
 Send adversarial messages to a live model or agent endpoint and report the ones it obeys
 
 ```text
-0 probe [options] <url>
+0security probe [options] <url>
 ```
 
 Probe sends ten attacks to the URL you name and reports the ones whose reply shows they worked:
@@ -1189,14 +1189,14 @@ Probe sends ten attacks to the URL you name and reports the ones whose reply sho
 Each attack carries a unique canary, so a hit is a check on the reply (the canary came back, a credential appeared, `uid=` came back from a command), not another model's opinion. Models vary, so each probe is sent twice by default and one hit counts.
 
 ```bash
-0 probe https://api.example.com/v1/chat/completions -H "Authorization: Bearer $OPENAI_API_KEY" --format sarif -o probe.sarif
+0security probe https://api.example.com/v1/chat/completions -H "Authorization: Bearer $OPENAI_API_KEY" --format sarif -o probe.sarif
 ```
 
 The request is an OpenAI-style chat body. For another shape, pass `--body` with `{{prompt}}` where the message goes. 0 finds the reply in common JSON shapes, or at `--response-path`.
 
 Put a key in a header as an environment variable, as above, so it is not typed on the command line. If you pass `--secret` with a secret that is in the endpoint's prompt, a reply that contains it is reported as a definite leak.
 
-Requests are 300 ms apart and capped at 100 by default. Findings go into the usual reports (`--format md|json|sarif|html|pdf`). With `--save` they also appear in `0 findings list`.
+Requests are 300 ms apart and capped at 100 by default. Findings go into the usual reports (`--format md|json|sarif|html|pdf`). With `--save` they also appear in `0security findings list`.
 
 A miss means the reply did not show the attack working in those attempts. It does not prove the endpoint is safe against attacks outside the list.
 
@@ -1220,14 +1220,14 @@ A miss means the reply did not show the attack working in those attempts. It doe
 | `--format <format>` | `md` | Report format: json, md, sarif, html, pdf |
 | `-o, --output <file>` | — | Write the report to a file instead of stdout |
 | `--fail-on <severity>` | — | Exit 1 when a finding is at or above this severity |
-| `--save` | — | Also store the findings, so they show in `0 findings list` |
+| `--save` | — | Also store the findings, so they show in `0security findings list` |
 
 ### sbom
 
 Generate an SBOM from lockfiles, check one against known advisories, and scan model files
 
 ```text
-0 sbom
+0security sbom
 ```
 
 Subcommands: [generate](#sbom-generate) · [check](#sbom-check) · [licenses](#sbom-licenses) · [scan-models](#sbom-scan-models).
@@ -1237,11 +1237,11 @@ Subcommands: [generate](#sbom-generate) · [check](#sbom-check) · [licenses](#s
 Write a CycloneDX 1.5 SBOM from the lockfiles in a folder (npm, pnpm, yarn, Cargo, Go, Python, Ruby, PHP, .NET, Maven, Gradle, Dart, Elixir)
 
 ```text
-0 sbom generate [options] [folder]
+0security sbom generate [options] [folder]
 ```
 
 ```bash
-0 sbom generate . -o sbom.cdx.json
+0security sbom generate . -o sbom.cdx.json
 ```
 
 The default `builtin` generator reads these lockfiles as text, anywhere under the folder, and installs or runs nothing: `package-lock.json`, `npm-shrinkwrap.json`, `pnpm-lock.yaml`, `yarn.lock`, `Cargo.lock`, `go.mod`, `poetry.lock`, `Pipfile.lock`, pinned `requirements.txt`, `Gemfile.lock`, `composer.lock`, `packages.lock.json`, `gradle.lockfile`, `pubspec.lock` and `mix.lock`. It skips `node_modules`, build output and hidden folders.
@@ -1253,7 +1253,7 @@ It also reads Maven and Gradle declarations as text, with the same rules: nothin
 - `pom.xml`: direct dependencies, with versions taken from the literal version, `<properties>`, `<dependencyManagement>`, and a parent POM or imported BOM, but only when that parent or BOM is in the repository (the `relativePath`, or any POM in the folder with the same coordinates and version). Every `pom.xml` under the folder is read, so a multi-module project is aggregated; a child's own properties override its parent's. Modules of the repository are not listed as third-party components, and `test` scope is marked `excluded`.
 - `gradle.lockfile`, `gradle/libs.versions.toml` and the dependency lines of `build.gradle` and `build.gradle.kts`: a version is read only when it is a literal. When `gradle.lockfile` pins an artifact, the lockfile's version is used and a declared version of the same artifact is dropped. A version catalog is read as declared, so an entry the build never uses is still listed.
 
-What is not analysed is listed as unresolved, never guessed: profiles (their dependencies and properties), a parent POM or imported BOM that is not in the repository, a version from a property that no POM in the repository defines (including `env.` and system properties), version ranges and `LATEST`/`RELEASE`, a dependency with no managed version, a declared module with no POM, and in Gradle a variable, a dynamic version (`1.+`, a range, `latest.release`), a missing version, a `platform(...)` BOM and an unknown `version.ref`. The final line of `generate` reads `resolved N, unresolved M` (components with a known version, and items skipped), followed by the first 20 skipped items. The SBOM records each as a `0:unresolved` metadata property, and `0 sbom check` prints the same line from them.
+What is not analysed is listed as unresolved, never guessed: profiles (their dependencies and properties), a parent POM or imported BOM that is not in the repository, a version from a property that no POM in the repository defines (including `env.` and system properties), version ranges and `LATEST`/`RELEASE`, a dependency with no managed version, a declared module with no POM, and in Gradle a variable, a dynamic version (`1.+`, a range, `latest.release`), a missing version, a `platform(...)` BOM and an unknown `version.ref`. The final line of `generate` reads `resolved N, unresolved M` (components with a known version, and items skipped), followed by the first 20 skipped items. The SBOM records each as a `0:unresolved` metadata property, and `0security sbom check` prints the same line from them.
 
 Without `--resolve` this is a declaration reader, not a build. It does not resolve transitive dependencies, private registries or mirrors, or `settings.xml`, and it makes no claim about whether vulnerable code is reachable.
 
@@ -1278,7 +1278,7 @@ Without `--resolve` this is a declaration reader, not a build. It does not resol
 Add `--resolve` to run your own build tool and get the full dependency tree, including transitive packages, BOMs, parent POMs and profiles.
 
 ```bash
-0 sbom generate . --resolve --allow-build-tools -o sbom.cdx.json
+0security sbom generate . --resolve --allow-build-tools -o sbom.cdx.json
 ```
 
 With a `pom.xml`, 0 runs `mvn dependency:tree`. With `build.gradle` or `build.gradle.kts` files, 0 runs `gradle dependencies --configuration runtimeClasspath` once for each project folder, up to 25. It reads the trees, adds the transitive graph to the SBOM, and marks each component the tool resolved with the property `0:resolved` set to `true`. A resolved version replaces a declared version of the same package. Declared packages the tool did not report stay in the SBOM without the mark.
@@ -1317,8 +1317,8 @@ The builtin generator does not read CocoaPods, SwiftPM, C and C++ package manage
 To describe a container image, pass `--image` with `syft` or `trivy`. The value is a reference such as `nginx:1.25`, the path of a `docker save` archive, or the path of an OCI image layout folder. Then check the result against known advisories:
 
 ```bash
-0 sbom generate --generator syft --image nginx:1.25 -o img.cdx.json
-0 sbom check img.cdx.json
+0security sbom generate --generator syft --image nginx:1.25 -o img.cdx.json
+0security sbom check img.cdx.json
 ```
 
 syft or trivy reads the image, from your local Docker daemon or by pulling it from a registry. 0 does not unpack layers itself, so the SBOM is only as complete as that tool's catalogue. `--image` is refused with the builtin generator and with cdxgen, with a folder argument, and with a value that starts with `-`, has spaces, or names a folder that is not an OCI layout. 0 passes the reference after `--`, so it cannot be read as an option.
@@ -1353,14 +1353,14 @@ The two cdxgen flags keep it from running the project's package manager. These t
 Look every component of an SBOM up in the public OSV database and list the advisories
 
 ```text
-0 sbom check [options] <file>
+0security sbom check [options] <file>
 ```
 
 Each advisory is listed under its component with its aliases, severity, the version that fixes it and a one-line summary, most severe first. Exit 0 when there are no advisories and 1 when there are, so a scheduled job can fail or open an issue.
 
 ```bash
-0 sbom generate . -o sbom.cdx.json
-0 sbom check sbom.cdx.json
+0security sbom generate . -o sbom.cdx.json
+0security sbom check sbom.cdx.json
 ```
 
 ```text
@@ -1373,11 +1373,11 @@ The fixed version is the lowest version above the installed one that the advisor
 
 A package that OSV lists as malicious (an id that starts with `MAL-`) is shown as `MALICIOUS PACKAGE` at critical severity, under a banner line. Remove it, and treat any machine or pipeline that installed it as compromised. It makes the exit code 1 like any advisory.
 
-`--format sarif` writes one result per vulnerable component and advisory. The rule id is the advisory id, the level follows severity, and the message names the fixed version. The location is the lockfile the component came from when the SBOM records it (`0 sbom generate` does), and the SBOM file otherwise. Write it to a file and import it:
+`--format sarif` writes one result per vulnerable component and advisory. The rule id is the advisory id, the level follows severity, and the message names the fixed version. The location is the lockfile the component came from when the SBOM records it (`0security sbom generate` does), and the SBOM file otherwise. Write it to a file and import it:
 
 ```bash
-0 sbom check sbom.cdx.json --format sarif -o deps.sarif
-0 findings import deps.sarif
+0security sbom check sbom.cdx.json --format sarif -o deps.sarif
+0security findings import deps.sarif
 ```
 
 Importing the same results again changes nothing. `--format json` writes the advisories with their fixed version, severity and a `malicious` flag.
@@ -1388,11 +1388,11 @@ The network use is the lookup at `https://api.osv.dev`: package URLs go out and 
 
 | Argument | Required | Description |
 | --- | --- | --- |
-| `file` | Yes | CycloneDX SBOM (JSON), for example from `0 sbom generate` |
+| `file` | Yes | CycloneDX SBOM (JSON), for example from `0security sbom generate` |
 
 | Option | Registered default | Description |
 | --- | --- | --- |
-| `--format <format>` | `text` | Output: text, json or sarif (SARIF imports with `0 findings import`) |
+| `--format <format>` | `text` | Output: text, json or sarif (SARIF imports with `0security findings import`) |
 | `-o, --output <file>` | — | Write the result to a file instead of stdout |
 | `--outdated` | — | Also list components with a newer version (looks packages up at https://api.deps.dev; information only, not a vulnerability) |
 
@@ -1401,13 +1401,13 @@ The network use is the lookup at `https://api.osv.dev`: package URLs go out and 
 Check the licenses in an SBOM, or in a folder's lockfiles, against an allow or deny policy
 
 ```text
-0 sbom licenses [options] [sbom-file-or-folder]
+0security sbom licenses [options] [sbom-file-or-folder]
 ```
 
 ```bash
-0 sbom licenses . --preset permissive
-0 sbom licenses sbom.cdx.json --deny 'GPL-*,AGPL-*' --format sarif > licenses.sarif
-0 sbom licenses . --policy license-policy.yaml --resolve
+0security sbom licenses . --preset permissive
+0security sbom licenses sbom.cdx.json --deny 'GPL-*,AGPL-*' --format sarif > licenses.sarif
+0security sbom licenses . --policy license-policy.yaml --resolve
 ```
 
 Pass a CycloneDX SBOM file, or a folder. For a folder, 0 reads the lockfiles as in [sbom generate](#sbom-generate) and checks the result. The output lists each component as denied, not allowed, unknown or allowed. The output and this page are information from lockfiles and registries. They are not legal advice.
@@ -1477,18 +1477,18 @@ A license `name` in free text, an `id` that is not on the SPDX list, and an expr
 
 Use `--exclude-dev` to skip components that are development-only. A violation is a denied or not-allowed component, or an unknown one when `unknown` is `fail`. 0 exits 1 on any violation, 0 otherwise, and 2 on a usage error.
 
-`--format json` lists every component with its verdict. `--format sarif` writes one result per violating component, and per unknown component unless `unknown` is `allow`. The rule id is `license/<spdx-id>` (`license/unknown` for unknown), the location is the lockfile that lists the component (the SBOM file when you pass one), and the fingerprint is stable between runs. Import it with `0 findings import licenses.sarif`.
+`--format json` lists every component with its verdict. `--format sarif` writes one result per violating component, and per unknown component unless `unknown` is `allow`. The rule id is `license/<spdx-id>` (`license/unknown` for unknown), the location is the lockfile that lists the component (the SBOM file when you pass one), and the fingerprint is stable between runs. Import it with `0security findings import licenses.sarif`.
 
 #### sbom scan-models
 
 Scan model files (pickle, PyTorch, joblib, numpy) for imports that can run code when loaded
 
 ```text
-0 sbom scan-models [options] <path>
+0security sbom scan-models [options] <path>
 ```
 
 ```bash
-0 sbom scan-models ./models
+0security sbom scan-models ./models
 ```
 
 Pickle-based model files (`.pkl`, `.pickle`, `.joblib`, `.pt`, `.pth`, `.ckpt`, `.bin`, `.npy`, `.npz`, including the `data.pkl` inside a PyTorch zip) run the callables they reference when they are loaded. This command reads the files as bytes and sorts every imported callable into three groups:
@@ -1503,7 +1503,7 @@ Each file is listed with its format, a verdict (`DANGEROUS`, unrecognised import
 
 "No dangerous imports found" means exactly that. The scanner can miss what it cannot parse, and the result does not say a file is safe or that the weights are trustworthy.
 
-`--format sarif` writes one result per dangerous file, located at the file. Exit 1 when any file is dangerous and 2 on a usage error. `0 sbom generate --ai` adds a `0:risk` property to a model file in the inventory when this scan finds it dangerous.
+`--format sarif` writes one result per dangerous file, located at the file. Exit 1 when any file is dangerous and 2 on a usage error. `0security sbom generate --ai` adds a `0:risk` property to a model file in the inventory when this scan finds it dangerous.
 
 | Argument | Required | Description |
 | --- | --- | --- |
@@ -1518,7 +1518,7 @@ Each file is listed with its format, a verdict (`DANGEROUS`, unrecognised import
 Browse and manage persisted findings
 
 ```text
-0 findings [options]
+0security findings [options]
 ```
 
 Triage (`new`, `accepted`, `suppressed`) and verification are separate states. Accepting a finding records your decision; reproduction and fix verification are separate steps.
@@ -1534,7 +1534,7 @@ Subcommands: [list](#findings-list) · [show](#findings-show) · [update](#findi
 | `--status <status>` | — | Filter by status: discovered, verified, confirmed, scored, reported, fixed, false-positive |
 | `--triage <triage>` | — | Filter by triage: new, accepted, suppressed |
 | `--expiring <days>` | — | Only accepted risks that expire within this many days |
-| `--scope <scope>` | — | in: findings not labelled out of scope; out: only those the declared scope (0 scan --scope) labelled out of scope; all (default): both, each labelled |
+| `--scope <scope>` | — | in: findings not labelled out of scope; out: only those the declared scope (0security scan --scope) labelled out of scope; all (default): both, each labelled |
 | `--limit <n>` | `50` | Max findings/groups to show |
 | `--all` | `false` | Show raw finding rows instead of grouped fingerprints |
 
@@ -1543,7 +1543,7 @@ Subcommands: [list](#findings-list) · [show](#findings-show) · [update](#findi
 List findings from the database
 
 ```text
-0 findings list [options]
+0security findings list [options]
 ```
 
 `--scope in|out|all` filters by the label a declared scope gave. A finding labelled out of scope shows `[out of scope]` and its reason.
@@ -1562,7 +1562,7 @@ An accepted risk shows `accepted until <date>`. Once that date passes, the findi
 | `--status <status>` | — | Filter by status: discovered, verified, confirmed, scored, reported, fixed, false-positive |
 | `--triage <triage>` | — | Filter by triage: new, accepted, suppressed |
 | `--expiring <days>` | — | Only accepted risks that expire within this many days |
-| `--scope <scope>` | — | in: findings not labelled out of scope; out: only those the declared scope (0 scan --scope) labelled out of scope; all (default): both, each labelled |
+| `--scope <scope>` | — | in: findings not labelled out of scope; out: only those the declared scope (0security scan --scope) labelled out of scope; all (default): both, each labelled |
 | `--limit <n>` | — | Max findings/groups to show |
 
 #### findings show
@@ -1570,7 +1570,7 @@ An accepted risk shows `accepted until <date>`. Once that date passes, the findi
 Show detailed information about a finding
 
 ```text
-0 findings show [options] <id>
+0security findings show [options] <id>
 ```
 
 | Argument | Required | Description |
@@ -1588,18 +1588,18 @@ Show detailed information about a finding
 Mark a finding family as accepted
 
 ```text
-0 findings accept [options] <id>
+0security findings accept [options] <id>
 ```
 
 ```bash
-0 findings accept 3f2a --reason "Fix scheduled for the next release" --expires 90d --approver "security lead"
+0security findings accept 3f2a --reason "Fix scheduled for the next release" --expires 90d --approver "security lead"
 ```
 
 An accepted risk needs a reason and an expiry. `--expires` takes a date like `2026-12-31` (it ends at the end of that day, UTC) or a number of days like `90d`. The reason is at most 500 characters. `--note` works as `--reason`.
 
-The approver is a name you type. 0 stores it and exports it, but does not check it against any login. Each change writes one entry to the audit log (`0 config get audit`) with your system user name, the reason, the expiry and the approver.
+The approver is a name you type. 0 stores it and exports it, but does not check it against any login. Each change writes one entry to the audit log (`0security config get audit`) with your system user name, the reason, the expiry and the approver.
 
-After the expiry the finding is open again in lists, exports and the next scan. Exports show the reason, expiry and approver: JSON fields, a Markdown line, and a SARIF `suppressions` entry with `kind` external and your reason as the justification. `0 findings evidence` includes them too.
+After the expiry the finding is open again in lists, exports and the next scan. Exports show the reason, expiry and approver: JSON fields, a Markdown line, and a SARIF `suppressions` entry with `kind` external and your reason as the justification. `0security findings evidence` includes them too.
 
 | Argument | Required | Description |
 | --- | --- | --- |
@@ -1618,7 +1618,7 @@ After the expiry the finding is open again in lists, exports and the next scan. 
 Suppress a finding family across duplicate occurrences
 
 ```text
-0 findings suppress [options] <id>
+0security findings suppress [options] <id>
 ```
 
 | Argument | Required | Description |
@@ -1636,7 +1636,7 @@ Suppress a finding family across duplicate occurrences
 Reset a finding family back to new
 
 ```text
-0 findings reopen [options] <id>
+0security findings reopen [options] <id>
 ```
 
 | Argument | Required | Description |
@@ -1653,12 +1653,12 @@ Reset a finding family back to new
 Import findings from another scanner's SARIF 2.1.0 file (use - for stdin). Nothing in the file is executed.
 
 ```text
-0 findings import [options] [file]
+0security findings import [options] [file]
 ```
 
 ```bash
-0 findings import results.sarif
-0 findings import --github acme/app
+0security findings import results.sarif
+0security findings import --github acme/app
 ```
 
 Each result becomes a finding that keeps the scanner's name, rule, severity, CWE and file and line. The scan it creates is marked imported and unverified, and importing the same file again changes nothing. Absolute paths become repo-relative under `--root`; paths outside it are dropped. Stop a running console on the same database first.
@@ -1691,11 +1691,11 @@ Secret alerts record the type, validity and, for the first 50 alerts, the file a
 Fix one finding in an isolated git work tree and open a pull request for review
 
 ```text
-0 findings fix [options] <finding>
+0security findings fix [options] <finding>
 ```
 
 ```bash
-0 findings fix 3f2a --test "pnpm test"
+0security findings fix 3f2a --test "pnpm test"
 ```
 
 A thread follows the `fix-finding` skill in a separate git work tree, so your checkout is never touched. It makes the smallest change it can. Then the command runs each `--test` check, commits on a branch named `0/fix-<id>` and opens a pull request, as a draft when a check fails or when you gave no `--test`; the body then says "No checks were run." Pass `--ready` to open it ready for review without checks. Running it again for the same finding updates the same pull request.
@@ -1767,7 +1767,7 @@ Templates take the placeholders `{id}`, `{title}`, `{severity}`, `{category}` an
 
 Labels that do not exist are created. If the host refuses, 0 prints a warning and skips that label. A refused reviewer is a warning too, because the pull request is already open. Without a `pullRequest` object nothing changes.
 
-The settings are read only from your own policy file. A policy file inside the repository (`--repo-policy`) cannot set them, because the repository is untrusted. `0 findings evidence` lists fix branches by the default `0/fix-` prefix, so branches with another prefix are not listed there.
+The settings are read only from your own policy file. A policy file inside the repository (`--repo-policy`) cannot set them, because the repository is untrusted. `0security findings evidence` lists fix branches by the default `0/fix-` prefix, so branches with another prefix are not listed there.
 
 | Argument | Required | Description |
 | --- | --- | --- |
@@ -1798,14 +1798,14 @@ The settings are read only from your own policy file. A policy file inside the r
 Report what happened to the fixes burndown proposed: counts, pull requests, checks, cost and, on request, merged or closed
 
 ```text
-0 findings export-fixes [options]
+0security findings export-fixes [options]
 ```
 
 ```bash
-0 findings export-fixes --check-merged -o ./fix-report
+0security findings export-fixes --check-merged -o ./fix-report
 ```
 
-The report reads `~/.0/burndown.json`, so it covers fixes made with `0 findings burndown`. A single `0 findings fix` run is not recorded there.
+The report reads `~/.0/burndown.json`, so it covers fixes made with `0security findings burndown`. A single `0security findings fix` run is not recorded there.
 
 It writes `fix-outcomes.md` and `fix-outcomes.json` to the folder you pass with `-o`, or prints one to the terminal. Each fix lists the finding id, title, severity, branch, pull request link, whether the checks passed, cost and when it was recorded. The summary counts fixes attempted, proposed, pull requests opened, drafts, checks passed and failed.
 
@@ -1828,14 +1828,14 @@ The JSON has the schema `0.fix-outcomes.v1`: `generatedAt`, `since`, `repo`, `ch
 Write a draft early warning, notification or final report about one finding (Markdown; nothing is sent)
 
 ```text
-0 findings report-draft [options] <finding>
+0security findings report-draft [options] <finding>
 ```
 
 Use this when a manufacturer has to tell the authorities about an actively exploited vulnerability (Article 14 of the Cyber Resilience Act, Regulation (EU) 2024/2847). Confirm the current requirements and deadlines yourself.
 
 The text is built without a model. Each field is copied from the finding record (title, severity, category, location, status, triage state, creation time, and the attacker-impact sentence when someone assessed it), taken from a fact you pass with a flag or in a `--facts` JSON file, or left as `[to be completed by the manufacturer: ...]`. Nothing says the vulnerability is exploited, that users are affected or that a fix exists unless you supplied it.
 
-`--evidence-file` lists a file's name, size and SHA-256 and never copies its content. `--stage all` writes the three stages one after another. The finding can be a full id, an id prefix, or `fp:` plus a fingerprint prefix from `0 findings list`.
+`--evidence-file` lists a file's name, size and SHA-256 and never copies its content. `--stage all` writes the three stages one after another. The finding can be a full id, an id prefix, or `fp:` plus a fingerprint prefix from `0security findings list`.
 
 The draft says that a person must review it and submit it through the authority's own channel. 0 submits nothing.
 
@@ -1868,7 +1868,7 @@ The draft says that a person must review it and submit it through the authority'
 Write one folder of findings, SARIF, SBOM and fix branches, with a README that says what it does and does not show
 
 ```text
-0 findings evidence [options] <folder>
+0security findings evidence [options] <folder>
 ```
 
 The folder holds:
@@ -1906,7 +1906,7 @@ The README makes no claim of compliance. The folder is evidence for your own rec
 Work through open findings in batches: one fix branch and pull request each, then a report
 
 ```text
-0 findings burndown [options]
+0security findings burndown [options]
 ```
 
 Burndown selects open findings (not fixed, false positive, accepted or suppressed; one per fingerprint, worst severity first) and runs each through the same flow as [findings fix](#findings-fix): its own git work tree, a branch named `0/fix-<id>`, your `--test` checks, and one pull request, a draft when a check fails. Nothing is pushed to the base branch and nothing is merged.
@@ -1972,10 +1972,10 @@ Exit codes:
 Show what scan, fix and verify runs cost and produced: cost per proposed fix and the share that passed their checks
 
 ```text
-0 findings metrics [options]
+0security findings metrics [options]
 ```
 
-Every `0 scan`, `0 findings fix` and `0 findings verify` run adds one line to `~/.0/metrics.ndjson`. The line holds the command, model, budget, cost, duration, counts, tokens when the thread reports them, and finding ids. It holds no finding text, file paths or credentials. Only you can read the file. It moves to `metrics.ndjson.1` at 1 MB, so about two files of history remain. `0 findings burndown` runs one fix per finding, so each of its fixes adds a line.
+Every `0security scan`, `0security findings fix` and `0security findings verify` run adds one line to `~/.0/metrics.ndjson`. The line holds the command, model, budget, cost, duration, counts, tokens when the thread reports them, and finding ids. It holds no finding text, file paths or credentials. Only you can read the file. It moves to `metrics.ndjson.1` at 1 MB, so about two files of history remain. `0security findings burndown` runs one fix per finding, so each of its fixes adds a line.
 
 The summary lists runs, cost, average time and counts per command. A proposed fix is a committed change. The share verified is the proposed fixes whose checks all passed. Cost per proposed fix is the cost of all fix runs divided by the fixes they proposed. The run does not see the CI result of the pull request it opens, so CI is recorded as unknown.
 
@@ -1992,7 +1992,7 @@ The summary lists runs, cost, average time and counts per command. A proposed fi
 Experimental: re-check findings with a fresh thread each and record a verdict next to them
 
 ```text
-0 findings verify [options] [finding...]
+0security findings verify [options] [finding...]
 ```
 
 Verify re-checks findings the way a second reviewer would. Each finding gets its own thread, or with `--batch` a few findings of one file share one. The thread gets only the finding's title, location, category, description and claimed impact, never the scan that produced it. It follows the experimental `verify-finding` skill: it reads the code, traces the input from an entry point to the sink, looks for a control, and builds a concrete attack or says it cannot. It answers true-positive, false-positive, fixed, uncertain or duplicate (a duplicate is only found inside a batch) with reasoning that cites `path:line`, and an advisory severity.
@@ -2001,7 +2001,7 @@ Pass the folder that was scanned with `--folder` (default: the current directory
 
 The verdict is stored next to the finding by its id. [findings list](#findings-list) and [findings show](#findings-show) print it, for example `verified: likely false positive`. Severity and status do not change, and the advisory severity is kept apart from the finding's own. A thread that returns no verdict for a finding is recorded as uncertain with the reason `no verdict returned`. A thread that fails to run stores nothing, so the next run tries it again.
 
-`--apply` never suppresses a critical or high finding. It suppresses a lower-severity finding only when the verdict is false-positive and it names a control at `path:line` that exists in the folder and the reasoning cites a `path:line` too. The suppression note starts with `False positive (model-verified):` and `0 findings reopen` undoes it. Without `--apply` no status changes.
+`--apply` never suppresses a critical or high finding. It suppresses a lower-severity finding only when the verdict is false-positive and it names a control at `path:line` that exists in the folder and the reasoning cites a `path:line` too. The suppression note starts with `False positive (model-verified):` and `0security findings reopen` undoes it. Without `--apply` no status changes.
 
 `--budget` is the total for the run and `--per-finding` caps one finding. `--concurrency` (1 to 3) runs threads side by side. The run stops when `--max-consecutive-failures` threads in a row return no verdict, or when the budget is spent. `--dry-run` lists what would be checked. `--format json` prints the report with counts per verdict, the reasoning, the cost and what `--apply` did.
 
@@ -2050,23 +2050,23 @@ Exit codes:
 Upload findings to GitHub code scanning (SARIF) or to Bitbucket Code Insights (scan JSON or SARIF)
 
 ```text
-0 findings upload [options] <file>
+0security findings upload [options] <file>
 ```
 
 Run the scan in a pull request check, then upload the result:
 
 ```bash
-0 scan . --diff origin/main --format sarif -o scan.sarif
-0 findings upload scan.sarif
+0security scan . --diff origin/main --format sarif -o scan.sarif
+0security findings upload scan.sarif
 ```
 
 The repository, commit and ref come from the clone (`GITHUB_SHA` and `GITHUB_REF` in Actions). The file is compressed, uploaded with `gh` and checked until GitHub has processed it; a refused file is reported with GitHub's reason. GitHub matches alerts by fingerprint, so an upload for a later commit updates them. `gh` needs permission to write security events (`security-events: write` in Actions).
 
-With `--to bitbucket-cloud` or `--to bitbucket-dc` the findings go to Bitbucket Code Insights instead. Upload the file from `0 scan --format json`, which carries the agent's verdict, rationale and fix guidance. With `BITBUCKET_TOKEN` set the report and its annotations are sent; without it the payload is printed. See [Bitbucket, Jenkins and Azure Pipelines](/ci/#bitbucket-jenkins-and-azure-pipelines).
+With `--to bitbucket-cloud` or `--to bitbucket-dc` the findings go to Bitbucket Code Insights instead. Upload the file from `0security scan --format json`, which carries the agent's verdict, rationale and fix guidance. With `BITBUCKET_TOKEN` set the report and its annotations are sent; without it the payload is printed. See [Bitbucket, Jenkins and Azure Pipelines](/ci/#bitbucket-jenkins-and-azure-pipelines).
 
 | Argument | Required | Description |
 | --- | --- | --- |
-| `file` | Yes | SARIF 2.1.0 file from `0 scan --format sarif -o scan.sarif`; for Bitbucket also `0 scan --format json -o scan.json` |
+| `file` | Yes | SARIF 2.1.0 file from `0security scan --format sarif -o scan.sarif`; for Bitbucket also `0security scan --format json -o scan.json` |
 
 | Option | Registered default | Description |
 | --- | --- | --- |
@@ -2079,7 +2079,7 @@ With `--to bitbucket-cloud` or `--to bitbucket-dc` the findings go to Bitbucket 
 | `--commit <sha>` | — | Commit the results are for (default: HEAD, or GITHUB_SHA in Actions) |
 | `--ref <ref>` | — | refs/heads/&lt;branch&gt; or refs/pull/&lt;n&gt;/merge (default: the current branch, or GITHUB_REF in Actions) |
 | `--tool <name>` | — | Name the tool shown in GitHub |
-| `--include-out-of-scope` | — | Also send findings the declared scope (0 scan --scope) labelled out of scope; they are skipped by default |
+| `--include-out-of-scope` | — | Also send findings the declared scope (0security scan --scope) labelled out of scope; they are skipped by default |
 | `--no-wait` | — | Return when GitHub has accepted the upload instead of waiting for it to be processed |
 | `--format <format>` | `text` | Output: text or json |
 
@@ -2088,12 +2088,12 @@ With `--to bitbucket-cloud` or `--to bitbucket-dc` the findings go to Bitbucket 
 Mirror findings into GitHub Issues, one issue per finding, kept in sync without duplicates
 
 ```text
-0 findings issues [options]
+0security findings issues [options]
 ```
 
 ```bash
-0 findings issues --repo acme/app --dry-run
-0 findings issues --repo acme/app --min-severity high --max 10
+0security findings issues --repo acme/app --dry-run
+0security findings issues --repo acme/app --min-severity high --max 10
 ```
 
 Run `--dry-run` first. It prints what would be created, updated, closed or reopened and changes nothing.
@@ -2115,21 +2115,21 @@ The issue text holds only the title, severity, category, location (`path:line`),
 | `--max <n>` | `25` | Most issues to create, update, close or reopen in one run |
 | `--delay <ms>` | `1000` | Wait this long between changes to respect rate limits |
 | `--dry-run` | — | Print what would change and change nothing |
-| `--include-out-of-scope` | — | Also open issues for findings the declared scope (0 scan --scope) labelled out of scope; they are skipped by default |
+| `--include-out-of-scope` | — | Also open issues for findings the declared scope (0security scan --scope) labelled out of scope; they are skipped by default |
 | `--db-path <path>` | — | Path to SQLite database (default: the shared database and every scan's) |
 | `--format <format>` | `text` | Output: text or json |
 
 #### findings export
 
-Export selected findings, or a whole scan, as `json`, `md`, `sarif`, `html` or `pdf`. Reads the local database; no engine needs to run. IDs accept a unique prefix. For a share-safe copy of a JSON report use `0 findings reports export`.
+Export selected findings, or a whole scan, as `json`, `md`, `sarif`, `html` or `pdf`. Reads the local database; no engine needs to run. IDs accept a unique prefix. For a share-safe copy of a JSON report use `0security findings reports export`.
 
 ```text
-0 findings export [options] [ids...]
+0security findings export [options] [ids...]
 ```
 
 ```bash
-0 findings export 3f2a 91bc --format sarif -o findings.sarif
-0 findings export --scan 20260101-abc --format pdf -o report.pdf
+0security findings export 3f2a 91bc --format sarif -o findings.sarif
+0security findings export --scan 20260101-abc --format pdf -o report.pdf
 ```
 
 | Argument | Required | Description |
@@ -2153,11 +2153,11 @@ Export selected findings, or a whole scan, as `json`, `md`, `sarif`, `html` or `
 Manage read-only API access keys for the findings API. The secret is printed once at creation and never stored in plaintext. Team workspaces manage keys in the browser.
 
 ```text
-0 findings keys
+0security findings keys
 ```
 
 ```bash
-0 findings keys create ci-reader --expires-in 30
+0security findings keys create ci-reader --expires-in 30
 ```
 
 Subcommands: [list](#findings-keys-list) · [create](#findings-keys-create) · [revoke](#findings-keys-revoke).
@@ -2167,11 +2167,11 @@ Subcommands: [list](#findings-keys-list) · [create](#findings-keys-create) · [
 List keys with their expiry and status. Secrets are never shown.
 
 ```text
-0 findings keys list [options]
+0security findings keys list [options]
 ```
 
 ```bash
-0 findings keys list --json
+0security findings keys list --json
 ```
 
 | Option | Registered default | Description |
@@ -2185,11 +2185,11 @@ List keys with their expiry and status. Secrets are never shown.
 Create a read-only key. Default expiry is 90 days.
 
 ```text
-0 findings keys create [options] <name>
+0security findings keys create [options] <name>
 ```
 
 ```bash
-0 findings keys create ci-reader --expires-in 30
+0security findings keys create ci-reader --expires-in 30
 ```
 
 | Argument | Required | Description |
@@ -2208,11 +2208,11 @@ Create a read-only key. Default expiry is 90 days.
 Revoke a key. Requires `--yes`.
 
 ```text
-0 findings keys revoke [options] <id>
+0security findings keys revoke [options] <id>
 ```
 
 ```bash
-0 findings keys revoke 643b88a4-2fae-409b-b4d9-bea00fc75812 --yes
+0security findings keys revoke 643b88a4-2fae-409b-b4d9-bea00fc75812 --yes
 ```
 
 | Argument | Required | Description |
@@ -2231,7 +2231,7 @@ Revoke a key. Requires `--yes`.
 Manage the local findings database.
 
 ```text
-0 config db
+0security config db
 ```
 
 Subcommands: [repair](#config-db-repair) · [reset](#config-db-reset).
@@ -2241,7 +2241,7 @@ Subcommands: [repair](#config-db-repair) · [reset](#config-db-reset).
 Back up a malformed local SQLite database and recreate a clean one
 
 ```text
-0 config db repair [options]
+0security config db repair [options]
 ```
 
 | Option | Registered default | Description |
@@ -2253,7 +2253,7 @@ Back up a malformed local SQLite database and recreate a clean one
 Delete the local SQLite database and optionally reseed the verification workbench
 
 ```text
-0 config db reset [options]
+0security config db reset [options]
 ```
 
 | Option | Registered default | Description |
@@ -2276,7 +2276,7 @@ Symlinks are removed as links and never followed. The browser's reset-database a
 Add and manage remote computers. A computer is a remote 0 engine that runs threads and automations on its host. Select it in the browser's computer menu to work there.
 
 ```text
-0 computers
+0security computers
 ```
 
 Subcommands: [list](#computers-list) · [add](#computers-add) · [stop](#computers-stop) · [repair](#computers-repair) · [remove](#computers-remove) · [hosts](#computers-hosts).
@@ -2288,11 +2288,11 @@ List the registered remote computers with their host and whether 0 deployed them
 (managed computers can be reconnected and stopped from here).
 
 ```text
-0 computers list [options]
+0security computers list [options]
 ```
 
 ```bash
-0 computers list --json
+0security computers list --json
 ```
 
 | Option | Registered default | Description |
@@ -2306,13 +2306,13 @@ List the registered remote computers with their host and whether 0 deployed them
 Deploy the built CLI engine onto a running Linux Lima instance or an SSH host and register its connection locally. Run `pnpm build` in a source checkout first.
 
 ```bash
-0 computers add --ssh me@build-box
+0security computers add --ssh me@build-box
 ```
 
 Use `--ssh` for an SSH host alias or `user@host`. Without it, the command uses the `zero-worker` Lima instance. SSH deployment uses noninteractive key authentication.
 
 ```text
-0 computers add [options]
+0security computers add [options]
 ```
 
 Use `--target-git` with an `https://` URL to clone your repository into the remote workspace. Deployment installs runtime dependencies and starts the engine on the remote machine.
@@ -2339,7 +2339,7 @@ Aliases: `deploy`.
 Reconnect a deployed computer from its saved deployment details. The command starts the retained engine if needed and recreates its SSH tunnel. It keeps remote files and refuses to replace an unrelated process or an occupied engine port. If the deployment files are missing, add the computer again.
 
 ```text
-0 computers repair <id>
+0security computers repair <id>
 ```
 
 The result is JSON with the backend ID, reconnection status, and whether the
@@ -2356,7 +2356,7 @@ Aliases: `reconnect`.
 Stop a computer that 0 deployed and close its local tunnel. Before it signals the process, the command checks the saved deployment details, the remote working directory, and the process ID and command. The remote workspace and the saved registration stay, so you can add the computer again later.
 
 ```text
-0 computers stop <id>
+0security computers stop <id>
 ```
 
 | Argument | Required | Description |
@@ -2369,10 +2369,10 @@ Remove a remote computer from this machine: closes the tunnel and forgets its
 saved connection. Files on the remote computer stay in place.
 
 ```text
-0 computers remove [options] <id>
+0security computers remove [options] <id>
 ```
 
-Run `0 computers list` to see the IDs.
+Run `0security computers list` to see the IDs.
 
 | Argument | Required | Description |
 | --- | --- | --- |
@@ -2387,7 +2387,7 @@ Run `0 computers list` to see the IDs.
 List SSH host aliases from `~/.ssh/config`, with their resolved host and user. It does not check connectivity or whether a host can run a Linux engine.
 
 ```text
-0 computers hosts
+0security computers hosts
 ```
 
 ### skills
@@ -2395,15 +2395,15 @@ List SSH host aliases from `~/.ssh/config`, with their resolved host and user. I
 Browse, add, create, edit, import, export and link skills
 
 ```text
-0 skills
+0security skills
 ```
 
 Every command works with the app running or on its own, and takes `--json`. Adding from GitHub or the catalog shows a review first and needs `--yes`.
 
 ```bash
-0 skills list
-0 skills catalog --search handoff
-0 skills add mattpocock~skills~handoff --yes
+0security skills list
+0security skills catalog --search handoff
+0security skills add mattpocock~skills~handoff --yes
 ```
 
 Subcommands: [list](#skills-list) · [add](#skills-add) · [show](#skills-show) · [new](#skills-new) · [edit](#skills-edit) · [copy](#skills-copy) · [delete](#skills-delete) · [import](#skills-import) · [export](#skills-export) · [link](#skills-link) · [unlink](#skills-unlink) · [catalog](#skills-catalog) · [extensions](#skills-extensions) · [remove](#skills-remove).
@@ -2413,7 +2413,7 @@ Subcommands: [list](#skills-list) · [add](#skills-add) · [show](#skills-show) 
 List installed skills and linked folders
 
 ```text
-0 skills list [options]
+0security skills list [options]
 ```
 
 | Option | Registered default | Description |
@@ -2427,7 +2427,7 @@ List installed skills and linked folders
 Show a skill's SKILL.md and files
 
 ```text
-0 skills show [options] <id-or-name>
+0security skills show [options] <id-or-name>
 ```
 
 | Argument | Required | Description |
@@ -2445,7 +2445,7 @@ Show a skill's SKILL.md and files
 Create a skill from a SKILL.md file
 
 ```text
-0 skills new [options] <file>
+0security skills new [options] <file>
 ```
 
 | Argument | Required | Description |
@@ -2463,7 +2463,7 @@ Create a skill from a SKILL.md file
 Replace a skill's SKILL.md with the contents of --file
 
 ```text
-0 skills edit [options] <id>
+0security skills edit [options] <id>
 ```
 
 | Argument | Required | Description |
@@ -2482,7 +2482,7 @@ Replace a skill's SKILL.md with the contents of --file
 Save a workspace copy of a skill under a new name
 
 ```text
-0 skills copy [options] <id>
+0security skills copy [options] <id>
 ```
 
 | Argument | Required | Description |
@@ -2501,7 +2501,7 @@ Save a workspace copy of a skill under a new name
 Delete a skill from the workspace library
 
 ```text
-0 skills delete [options] <id>
+0security skills delete [options] <id>
 ```
 
 | Argument | Required | Description |
@@ -2520,7 +2520,7 @@ Delete a skill from the workspace library
 Import a skill bundle (.skill.json) or a folder with SKILL.md
 
 ```text
-0 skills import [options] <bundle>
+0security skills import [options] <bundle>
 ```
 
 | Argument | Required | Description |
@@ -2538,7 +2538,7 @@ Import a skill bundle (.skill.json) or a folder with SKILL.md
 Export a skill as a bundle
 
 ```text
-0 skills export [options] <id>
+0security skills export [options] <id>
 ```
 
 | Argument | Required | Description |
@@ -2557,7 +2557,7 @@ Export a skill as a bundle
 Link a folder of skills; they stay where they are
 
 ```text
-0 skills link [options] <folder>
+0security skills link [options] <folder>
 ```
 
 | Argument | Required | Description |
@@ -2572,10 +2572,10 @@ Link a folder of skills; they stay where they are
 
 #### skills unlink
 
-Unlink a folder by its link id (see `0 skills list --json`)
+Unlink a folder by its link id (see `0security skills list --json`)
 
 ```text
-0 skills unlink [options] <id>
+0security skills unlink [options] <id>
 ```
 
 | Argument | Required | Description |
@@ -2593,7 +2593,7 @@ Unlink a folder by its link id (see `0 skills list --json`)
 Browse the skills catalog
 
 ```text
-0 skills catalog [options]
+0security skills catalog [options]
 ```
 
 | Option | Registered default | Description |
@@ -2608,7 +2608,7 @@ Browse the skills catalog
 Add a skill from the catalog or GitHub (owner/repo[/path]); shows a review first
 
 ```text
-0 skills add [options] <source>
+0security skills add [options] <source>
 ```
 
 | Argument | Required | Description |
@@ -2627,20 +2627,20 @@ Add a skill from the catalog or GitHub (owner/repo[/path]); shows a review first
 
 #### skills extensions
 
-Installed extensions: list, info, enable, disable, update, remove (install with `0 skills add`)
+Installed extensions: list, info, enable, disable, update, remove (install with `0security skills add`)
 
 ```text
-0 skills extensions
+0security skills extensions
 ```
 
 Subcommands: [add](#skills-extensions-add) · [mcp](#skills-extensions-mcp) · [list](#skills-extensions-list) · [info](#skills-extensions-info) · [enable](#skills-extensions-enable) · [disable](#skills-extensions-disable) · [remove](#skills-extensions-remove) · [update](#skills-extensions-update) · [import](#skills-extensions-import).
 
 #### skills extensions add
 
-Install an extension: <url|owner/repo|folder>@<full sha>; same as `0 skills add`
+Install an extension: <url|owner/repo|folder>@<full sha>; same as `0security skills add`
 
 ```text
-0 skills extensions add [options] <source>
+0security skills extensions add [options] <source>
 ```
 
 | Argument | Required | Description |
@@ -2662,7 +2662,7 @@ Install an extension: <url|owner/repo|folder>@<full sha>; same as `0 skills add`
 Add one MCP server as a local extension
 
 ```text
-0 skills extensions mcp [options] <name> [command...]
+0security skills extensions mcp [options] <name> [command...]
 ```
 
 | Argument | Required | Description |
@@ -2686,7 +2686,7 @@ Add one MCP server as a local extension
 List installed extensions and built-ins
 
 ```text
-0 skills extensions list [options]
+0security skills extensions list [options]
 ```
 
 | Option | Registered default | Description |
@@ -2701,7 +2701,7 @@ List installed extensions and built-ins
 Show the install prompt for an installed extension
 
 ```text
-0 skills extensions info [options] <name>
+0security skills extensions info [options] <name>
 ```
 
 | Argument | Required | Description |
@@ -2719,7 +2719,7 @@ Show the install prompt for an installed extension
 Enable globally, or for one project with --project
 
 ```text
-0 skills extensions enable [options] <name>
+0security skills extensions enable [options] <name>
 ```
 
 | Argument | Required | Description |
@@ -2739,7 +2739,7 @@ Enable globally, or for one project with --project
 Disable globally, or for one project with --project
 
 ```text
-0 skills extensions disable [options] <name>
+0security skills extensions disable [options] <name>
 ```
 
 | Argument | Required | Description |
@@ -2759,7 +2759,7 @@ Disable globally, or for one project with --project
 Remove an installed extension and its stored revisions
 
 ```text
-0 skills extensions remove [options] <name>
+0security skills extensions remove [options] <name>
 ```
 
 | Argument | Required | Description |
@@ -2778,7 +2778,7 @@ Remove an installed extension and its stored revisions
 Show the diff and install prompt for a newer revision; --yes --to <sha> approves it
 
 ```text
-0 skills extensions update [options] <name>
+0security skills extensions update [options] <name>
 ```
 
 | Argument | Required | Description |
@@ -2798,7 +2798,7 @@ Show the diff and install prompt for a newer revision; --yes --to <sha> approves
 Import earlier plugins, MCP servers and skills (runs once automatically); shows what could not be migrated
 
 ```text
-0 skills extensions import [options]
+0security skills extensions import [options]
 ```
 
 | Option | Registered default | Description |
@@ -2813,7 +2813,7 @@ Import earlier plugins, MCP servers and skills (runs once automatically); shows 
 Remove a skill that was added from GitHub or the catalog
 
 ```text
-0 skills remove [options] <name>
+0security skills remove [options] <name>
 ```
 
 | Argument | Required | Description |
@@ -2832,7 +2832,7 @@ Remove a skill that was added from GitHub or the catalog
 Saved automations.
 
 ```text
-0 automation
+0security automation
 ```
 
 Subcommands: [list](#automation-list) · [show](#automation-show) · [create](#automation-create) · [edit](#automation-edit) · [duplicate](#automation-duplicate) · [versions](#automation-versions) · [rollback](#automation-rollback) · [delete](#automation-delete).
@@ -2843,7 +2843,7 @@ Subcommands: [list](#automation-list) · [show](#automation-show) · [create](#a
 List saved automations and templates.
 
 ```text
-0 automation list [options]
+0security automation list [options]
 ```
 
 | Option | Registered default | Description |
@@ -2861,7 +2861,7 @@ List saved automations and templates.
 Inspect one saved automation or select a template with `--template`.
 
 ```text
-0 automation show [options] [id]
+0security automation show [options] [id]
 ```
 
 | Argument | Required | Description |
@@ -2883,12 +2883,12 @@ Inspect one saved automation or select a template with `--template`.
 Create an automation from a template or a JSON definition.
 
 ```text
-0 automation create [options]
+0security automation create [options]
 ```
 
 | Option | Registered default | Description |
 | --- | --- | --- |
-| `--template <id>` | — | Start from a template (see `0 sentinels list --automation --templates`) |
+| `--template <id>` | — | Start from a template (see `0security sentinels list --automation --templates`) |
 | `--file <path>` | — | Definition JSON object |
 | `--name <name>` | — | Name for the new automation |
 | `--target <target>` | — | Target the automation runs against |
@@ -2900,7 +2900,7 @@ Create an automation from a template or a JSON definition.
 Replace an automation's definition from a JSON file.
 
 ```text
-0 automation edit [options] <id>
+0security automation edit [options] <id>
 ```
 
 | Argument | Required | Description |
@@ -2919,7 +2919,7 @@ Replace an automation's definition from a JSON file.
 Save a copy of an automation.
 
 ```text
-0 automation duplicate [options] <id>
+0security automation duplicate [options] <id>
 ```
 
 | Argument | Required | Description |
@@ -2937,7 +2937,7 @@ Save a copy of an automation.
 List saved revisions of an automation.
 
 ```text
-0 automation versions [options] <id>
+0security automation versions [options] <id>
 ```
 
 | Argument | Required | Description |
@@ -2954,7 +2954,7 @@ List saved revisions of an automation.
 Restore an earlier revision as a new revision.
 
 ```text
-0 automation rollback [options] <id>
+0security automation rollback [options] <id>
 ```
 
 | Argument | Required | Description |
@@ -2963,7 +2963,7 @@ Restore an earlier revision as a new revision.
 
 | Option | Registered default | Description |
 | --- | --- | --- |
-| `--revision <n>` **required** | — | Revision to restore (see `0 sentinels set --automation versions`) |
+| `--revision <n>` **required** | — | Revision to restore (see `0security sentinels set --automation versions`) |
 | `--json` | — | Print machine-readable JSON |
 | `--db-path <path>` | — | Control database (default: the user database) |
 
@@ -2972,7 +2972,7 @@ Restore an earlier revision as a new revision.
 Delete a saved automation and its schedules.
 
 ```text
-0 automation delete [options] <id>
+0security automation delete [options] <id>
 ```
 
 | Argument | Required | Description |
@@ -2991,11 +2991,11 @@ Delete a saved automation and its schedules.
 Inspect and control the same live threads the browser uses. Attach with `--engine`, or with `--engine-url` and `--engine-token-env`, or use the discovered local engine. These commands keep the engine's current admission grants.
 
 ```text
-0 threads
+0security threads
 ```
 
 ```bash
-0 threads list --engine production
+0security threads list --engine production
 ```
 
 Subcommands: [list](#threads-list) · [show](#threads-show) · [send](#threads-send) · [start](#threads-start) · [stop](#threads-stop) · [create](#threads-create) · [continue](#threads-continue) · [cancel](#threads-cancel) · [force-stop](#threads-force-stop) · [events](#threads-events) · [resume](#threads-resume) · [decide](#threads-decide) · [retry](#threads-retry) · [set](#threads-set) · [rename](#threads-rename) · [clear](#threads-clear) · [close](#threads-close) · [archive](#threads-archive) · [delete](#threads-delete) · [export](#threads-export).
@@ -3005,11 +3005,11 @@ Subcommands: [list](#threads-list) · [show](#threads-show) · [send](#threads-s
 List live sessions, or retained snapshots with --saved. Listing does not resume work.
 
 ```text
-0 threads list [options]
+0security threads list [options]
 ```
 
 ```bash
-0 threads list --saved --engine production
+0security threads list --saved --engine production
 ```
 
 | Option | Registered default | Description |
@@ -3028,11 +3028,11 @@ List live sessions, or retained snapshots with --saved. Listing does not resume 
 Read an existing live session without recreating it or restoring approvals.
 
 ```text
-0 threads show [options] <id>
+0security threads show [options] <id>
 ```
 
 ```bash
-0 threads show SESSION_ID --engine production
+0security threads show SESSION_ID --engine production
 ```
 
 | Argument | Required | Description |
@@ -3056,11 +3056,11 @@ Read an existing live session without recreating it or restoring approvals.
 Create a session within the engine's authorized workspace and model configuration. --config reads a bounded JSON object; it cannot expand engine grants.
 
 ```text
-0 threads create [options]
+0security threads create [options]
 ```
 
 ```bash
-0 threads create --config session.json --engine production
+0security threads create --config session.json --engine production
 ```
 
 | Option | Registered default | Description |
@@ -3079,11 +3079,11 @@ Create a session within the engine's authorized workspace and model configuratio
 Send text to a live engine session. The engine runs the turn using its configured provider and tools.
 
 ```text
-0 threads send [options] <id> <text>
+0security threads send [options] <id> <text>
 ```
 
 ```bash
-0 threads send SESSION_ID "Review the current findings" --engine production
+0security threads send SESSION_ID "Review the current findings" --engine production
 ```
 
 | Argument | Required | Description |
@@ -3108,11 +3108,11 @@ Send text to a live engine session. The engine runs the turn using its configure
 Continue the selected live session with optional text. This preserves the existing engine context.
 
 ```text
-0 threads continue [options] <id> [text]
+0security threads continue [options] <id> [text]
 ```
 
 ```bash
-0 threads continue SESSION_ID --engine production
+0security threads continue SESSION_ID --engine production
 ```
 
 | Argument | Required | Description |
@@ -3137,11 +3137,11 @@ Continue the selected live session with optional text. This preserves the existi
 Explicitly cancel the session's active work. Transport disconnect alone does not request cancellation from an attached engine.
 
 ```text
-0 threads cancel [options] <id>
+0security threads cancel [options] <id>
 ```
 
 ```bash
-0 threads cancel SESSION_ID --engine production
+0security threads cancel SESSION_ID --engine production
 ```
 
 | Argument | Required | Description |
@@ -3163,11 +3163,11 @@ Explicitly cancel the session's active work. Transport disconnect alone does not
 Read engine session events after an optional nonnegative cursor. Cursors belong to that engine and session.
 
 ```text
-0 threads events [options] <id>
+0security threads events [options] <id>
 ```
 
 ```bash
-0 threads events SESSION_ID --after 0 --engine production
+0security threads events SESSION_ID --after 0 --engine production
 ```
 
 | Argument | Required | Description |
@@ -3187,20 +3187,20 @@ Read engine session events after an optional nonnegative cursor. Cursors belong 
 
 #### threads force-stop
 
-Stop a session's owned execution process and registered resources. Use the exact live ID from `0 threads list`. The command never restores a saved chat or substitutes a replacement session.
+Stop a session's owned execution process and registered resources. Use the exact live ID from `0security threads list`. The command never restores a saved chat or substitutes a replacement session.
 
 The owning engine checks authorization and supervisor availability. Unsupported execution returns an error, and teardown that is not confirmed stays quarantined. Nothing is escalated or replayed automatically.
 
 ```text
-0 threads force-stop [options] <id>
+0security threads force-stop [options] <id>
 ```
 
 ```bash
-0 threads force-stop LIVE_SESSION_ID --engine production
-0 threads force-stop LIVE_SESSION_ID --engine-url http://127.0.0.1:48123 --engine-token-env ZERO_ENGINE_TOKEN
+0security threads force-stop LIVE_SESSION_ID --engine production
+0security threads force-stop LIVE_SESSION_ID --engine-url http://127.0.0.1:48123 --engine-token-env ZERO_ENGINE_TOKEN
 ```
 
-Force stop works for qualified Bun sessions on macOS and Linux. Completed external effects are not undone. After an error, run `0 threads show` before you take another action.
+Force stop works for qualified Bun sessions on macOS and Linux. Completed external effects are not undone. After an error, run `0security threads show` before you take another action.
 
 | Argument | Required | Description |
 | --- | --- | --- |
@@ -3221,11 +3221,11 @@ Force stop works for qualified Bun sessions on macOS and Linux. Completed extern
 Restore a retained snapshot as a new session under current engine grants. Stored transcripts do not restore approval or filesystem grants.
 
 ```text
-0 threads resume [options] <saved-id>
+0security threads resume [options] <saved-id>
 ```
 
 ```bash
-0 threads resume SAVED_ID --engine production
+0security threads resume SAVED_ID --engine production
 ```
 
 | Argument | Required | Description |
@@ -3247,11 +3247,11 @@ Restore a retained snapshot as a new session under current engine grants. Stored
 Respond to an existing session decision using a JSON response file. The engine checks the decision belongs to that live session.
 
 ```text
-0 threads decide [options] <id> <decision-id>
+0security threads decide [options] <id> <decision-id>
 ```
 
 ```bash
-0 threads decide SESSION_ID DECISION_ID --response response.json --engine production
+0security threads decide SESSION_ID DECISION_ID --response response.json --engine production
 ```
 
 | Argument | Required | Description |
@@ -3275,11 +3275,11 @@ Respond to an existing session decision using a JSON response file. The engine c
 Create a thread, send the first prompt and print its ID. With `--wait`, block until the turn ends and print the reply.
 
 ```text
-0 threads start [options] <prompt>
+0security threads start [options] <prompt>
 ```
 
 ```bash
-0 threads start "Triage the open findings" --model gpt-5 --effort high --mode recon --wait
+0security threads start "Triage the open findings" --model gpt-5 --effort high --mode recon --wait
 ```
 
 | Argument | Required | Description |
@@ -3312,11 +3312,11 @@ Create a thread, send the first prompt and print its ID. With `--wait`, block un
 Cancel a thread's active work. `--force` force stops owned execution that did not drain.
 
 ```text
-0 threads stop [options] <id>
+0security threads stop [options] <id>
 ```
 
 ```bash
-0 threads stop 3f2a --force
+0security threads stop 3f2a --force
 ```
 
 | Argument | Required | Description |
@@ -3341,11 +3341,11 @@ Cancel a thread's active work. `--force` force stops owned execution that did no
 Re-run the last turn of a thread.
 
 ```text
-0 threads retry [options] <id>
+0security threads retry [options] <id>
 ```
 
 ```bash
-0 threads retry 3f2a
+0security threads retry 3f2a
 ```
 
 | Argument | Required | Description |
@@ -3369,11 +3369,11 @@ Re-run the last turn of a thread.
 Change a thread's model, reasoning effort, mode or folder. A computer is chosen when the thread starts.
 
 ```text
-0 threads set [options] <id>
+0security threads set [options] <id>
 ```
 
 ```bash
-0 threads set 3f2a --mode copilot --folder ~/code/app
+0security threads set 3f2a --mode copilot --folder ~/code/app
 ```
 
 | Argument | Required | Description |
@@ -3401,11 +3401,11 @@ Change a thread's model, reasoning effort, mode or folder. A computer is chosen 
 Rename a thread, or generate a new title from its conversation.
 
 ```text
-0 threads rename [options] <id> [title]
+0security threads rename [options] <id> [title]
 ```
 
 ```bash
-0 threads rename 3f2a --regenerate
+0security threads rename 3f2a --regenerate
 ```
 
 | Argument | Required | Description |
@@ -3431,11 +3431,11 @@ Rename a thread, or generate a new title from its conversation.
 Erase a thread's conversation but keep the thread. Requires `--yes`.
 
 ```text
-0 threads clear [options] <id>
+0security threads clear [options] <id>
 ```
 
 ```bash
-0 threads clear 3f2a --yes
+0security threads clear 3f2a --yes
 ```
 
 | Argument | Required | Description |
@@ -3460,11 +3460,11 @@ Erase a thread's conversation but keep the thread. Requires `--yes`.
 Stop and close a live thread. Its saved copy stays.
 
 ```text
-0 threads close [options] <id>
+0security threads close [options] <id>
 ```
 
 ```bash
-0 threads close 3f2a
+0security threads close 3f2a
 ```
 
 | Argument | Required | Description |
@@ -3488,11 +3488,11 @@ Stop and close a live thread. Its saved copy stays.
 Archive a thread, or a retained snapshot with `--saved`.
 
 ```text
-0 threads archive [options] <id>
+0security threads archive [options] <id>
 ```
 
 ```bash
-0 threads archive 3f2a
+0security threads archive 3f2a
 ```
 
 | Argument | Required | Description |
@@ -3517,11 +3517,11 @@ Archive a thread, or a retained snapshot with `--saved`.
 Permanently delete a thread or, with `--saved`, a retained snapshot. Requires `--yes`.
 
 ```text
-0 threads delete [options] <id>
+0security threads delete [options] <id>
 ```
 
 ```bash
-0 threads delete 3f2a --yes
+0security threads delete 3f2a --yes
 ```
 
 | Argument | Required | Description |
@@ -3547,11 +3547,11 @@ Permanently delete a thread or, with `--saved`, a retained snapshot. Requires `-
 Export a thread transcript as JSON or Markdown.
 
 ```text
-0 threads export [options] <id>
+0security threads export [options] <id>
 ```
 
 ```bash
-0 threads export 3f2a --format md -o transcript.md
+0security threads export 3f2a --format md -o transcript.md
 ```
 
 | Argument | Required | Description |
@@ -3577,7 +3577,7 @@ Export a thread transcript as JSON or Markdown.
 Create, inspect and control Sentinels.
 
 ```text
-0 sentinels
+0security sentinels
 ```
 
 Subcommands: [list](#sentinels-list) · [run](#sentinels-run) · [set](#sentinels-set) · [sync](#sentinels-sync) · [export](#sentinels-export) · [show](#sentinels-show) · [presets](#sentinels-presets) · [create](#sentinels-create) · [pause](#sentinels-pause) · [resume](#sentinels-resume) · [acknowledge](#sentinels-acknowledge) · [archive](#sentinels-archive) · [delete](#sentinels-delete) · [activations](#sentinels-activations) · [files](#sentinels-files) · [triggers](#sentinels-triggers) · [webhook](#sentinels-webhook).
@@ -3587,12 +3587,12 @@ Subcommands: [list](#sentinels-list) · [run](#sentinels-run) · [set](#sentinel
 Make Sentinels match the YAML files in a folder. Shows what would change; --apply writes it.
 
 ```text
-0 sentinels sync [options] <folder>
+0security sentinels sync [options] <folder>
 ```
 
 ```bash
-0 sentinels sync ./sentinels
-0 sentinels sync ./sentinels --apply
+0security sentinels sync ./sentinels
+0security sentinels sync ./sentinels --apply
 ```
 
 Each `*.yaml` file is one Sentinel: name, mission, instructions, skills, model, folder, and automations with their triggers (see [Sentinels as files](/sentinels/#sentinels-as-files)). Without `--apply` nothing is written.
@@ -3621,7 +3621,7 @@ Stop a running console on the same database first.
 Write a Sentinel as a YAML definition file, so a team can start from what it already has
 
 ```text
-0 sentinels export [options] <id>
+0security sentinels export [options] <id>
 ```
 
 Prints the definition, or writes `<name>.yaml` into `--out`. Syncing the exported file back changes nothing.
@@ -3640,7 +3640,7 @@ Prints the definition, or writes `<name>.yaml` into `--out`. Syncing the exporte
 List Sentinels.
 
 ```text
-0 sentinels list [options]
+0security sentinels list [options]
 ```
 
 | Option | Registered default | Description |
@@ -3655,7 +3655,7 @@ List Sentinels.
 Show a Sentinel (full or prefix ID).
 
 ```text
-0 sentinels show [options] <id>
+0security sentinels show [options] <id>
 ```
 
 | Argument | Required | Description |
@@ -3673,7 +3673,7 @@ Show a Sentinel (full or prefix ID).
 List Sentinel presets.
 
 ```text
-0 sentinels presets [options]
+0security sentinels presets [options]
 ```
 
 | Option | Registered default | Description |
@@ -3687,12 +3687,12 @@ List Sentinel presets.
 Create a Sentinel from a preset or a JSON definition.
 
 ```text
-0 sentinels create [options]
+0security sentinels create [options]
 ```
 
 | Option | Registered default | Description |
 | --- | --- | --- |
-| `--preset <id>` | — | Start from a preset (see `0 sentinels list --presets`) |
+| `--preset <id>` | — | Start from a preset (see `0security sentinels list --presets`) |
 | `--name <name>` | — | Name |
 | `--file <path>` | — | Sentinel JSON object (overrides preset fields) |
 | `--json` | — | Print machine-readable JSON |
@@ -3704,7 +3704,7 @@ Create a Sentinel from a preset or a JSON definition.
 Change a Sentinel's settings.
 
 ```text
-0 sentinels set [options] <id>
+0security sentinels set [options] <id>
 ```
 
 | Argument | Required | Description |
@@ -3728,7 +3728,7 @@ Change a Sentinel's settings.
 Pause a Sentinel.
 
 ```text
-0 sentinels pause [options] <id>
+0security sentinels pause [options] <id>
 ```
 
 | Argument | Required | Description |
@@ -3746,7 +3746,7 @@ Pause a Sentinel.
 Resume a paused Sentinel.
 
 ```text
-0 sentinels resume [options] <id>
+0security sentinels resume [options] <id>
 ```
 
 | Argument | Required | Description |
@@ -3765,7 +3765,7 @@ Resume a paused Sentinel.
 Mark changed model or tools as reviewed.
 
 ```text
-0 sentinels acknowledge [options] <id>
+0security sentinels acknowledge [options] <id>
 ```
 
 | Argument | Required | Description |
@@ -3783,7 +3783,7 @@ Mark changed model or tools as reviewed.
 Archive a Sentinel; its history stays.
 
 ```text
-0 sentinels archive [options] <id>
+0security sentinels archive [options] <id>
 ```
 
 | Argument | Required | Description |
@@ -3801,7 +3801,7 @@ Archive a Sentinel; its history stays.
 Delete a Sentinel; its automations are detached, not deleted.
 
 ```text
-0 sentinels delete [options] <id>
+0security sentinels delete [options] <id>
 ```
 
 | Argument | Required | Description |
@@ -3820,7 +3820,7 @@ Delete a Sentinel; its automations are detached, not deleted.
 Run a Sentinel now; starts a thread (needs a running engine).
 
 ```text
-0 sentinels run [options] <id>
+0security sentinels run [options] <id>
 ```
 
 | Argument | Required | Description |
@@ -3840,7 +3840,7 @@ Run a Sentinel now; starts a thread (needs a running engine).
 List a Sentinel's recent runs.
 
 ```text
-0 sentinels activations [options] <id>
+0security sentinels activations [options] <id>
 ```
 
 | Argument | Required | Description |
@@ -3860,7 +3860,7 @@ List a Sentinel's recent runs.
 Read and edit a Sentinel's instructions and notes files.
 
 ```text
-0 sentinels files
+0security sentinels files
 ```
 
 Subcommands: [list](#sentinels-files-list) · [get](#sentinels-files-get) · [put](#sentinels-files-put) · [rm](#sentinels-files-rm).
@@ -3870,7 +3870,7 @@ Subcommands: [list](#sentinels-files-list) · [get](#sentinels-files-get) · [pu
 List files.
 
 ```text
-0 sentinels files list [options] <id>
+0security sentinels files list [options] <id>
 ```
 
 | Argument | Required | Description |
@@ -3888,7 +3888,7 @@ List files.
 Print a file's content.
 
 ```text
-0 sentinels files get [options] <id> <path>
+0security sentinels files get [options] <id> <path>
 ```
 
 | Argument | Required | Description |
@@ -3907,7 +3907,7 @@ Print a file's content.
 Create or replace a file from --file or --content.
 
 ```text
-0 sentinels files put [options] <id> <path>
+0security sentinels files put [options] <id> <path>
 ```
 
 | Argument | Required | Description |
@@ -3928,7 +3928,7 @@ Create or replace a file from --file or --content.
 Delete a file.
 
 ```text
-0 sentinels files rm [options] <id> <path>
+0security sentinels files rm [options] <id> <path>
 ```
 
 | Argument | Required | Description |
@@ -3948,7 +3948,7 @@ Delete a file.
 Control what starts a Sentinel's automations.
 
 ```text
-0 sentinels triggers
+0security sentinels triggers
 ```
 
 Subcommands: [list](#sentinels-triggers-list) · [add](#sentinels-triggers-add) · [enable](#sentinels-triggers-enable) · [disable](#sentinels-triggers-disable) · [check](#sentinels-triggers-check) · [rm](#sentinels-triggers-rm).
@@ -3958,7 +3958,7 @@ Subcommands: [list](#sentinels-triggers-list) · [add](#sentinels-triggers-add) 
 List triggers.
 
 ```text
-0 sentinels triggers list [options] <id>
+0security sentinels triggers list [options] <id>
 ```
 
 | Argument | Required | Description |
@@ -3976,7 +3976,7 @@ List triggers.
 Add a trigger for an automation the Sentinel owns; disabled unless --enable --yes.
 
 ```text
-0 sentinels triggers add [options] <id>
+0security sentinels triggers add [options] <id>
 ```
 
 | Argument | Required | Description |
@@ -4009,7 +4009,7 @@ Add a trigger for an automation the Sentinel owns; disabled unless --enable --ye
 Enable a trigger after reviewing it.
 
 ```text
-0 sentinels triggers enable [options] <id> <trigger-id>
+0security sentinels triggers enable [options] <id> <trigger-id>
 ```
 
 | Argument | Required | Description |
@@ -4029,7 +4029,7 @@ Enable a trigger after reviewing it.
 Pause a trigger.
 
 ```text
-0 sentinels triggers disable [options] <id> <trigger-id>
+0security sentinels triggers disable [options] <id> <trigger-id>
 ```
 
 | Argument | Required | Description |
@@ -4048,7 +4048,7 @@ Pause a trigger.
 Poll a pull request trigger now instead of waiting for its next poll.
 
 ```text
-0 sentinels triggers check [options] <id> <trigger-id>
+0security sentinels triggers check [options] <id> <trigger-id>
 ```
 
 | Argument | Required | Description |
@@ -4067,7 +4067,7 @@ Poll a pull request trigger now instead of waiting for its next poll.
 Delete a trigger.
 
 ```text
-0 sentinels triggers rm [options] <id> <trigger-id>
+0security sentinels triggers rm [options] <id> <trigger-id>
 ```
 
 | Argument | Required | Description |
@@ -4087,7 +4087,7 @@ Delete a trigger.
 GitHub webhook for pull request Sentinels (server mode). Hidden: most installs poll. See [Sentinels](/sentinels/#faster-with-a-github-webhook-server-mode).
 
 ```text
-0 sentinels webhook
+0security sentinels webhook
 ```
 
 Subcommands: [status](#sentinels-webhook-status) · [secret](#sentinels-webhook-secret).
@@ -4097,7 +4097,7 @@ Subcommands: [status](#sentinels-webhook-status) · [secret](#sentinels-webhook-
 Show whether the webhook is set up and the last deliveries.
 
 ```text
-0 sentinels webhook status [options]
+0security sentinels webhook status [options]
 ```
 
 | Option | Registered default | Description |
@@ -4111,7 +4111,7 @@ Show whether the webhook is set up and the last deliveries.
 Manage the webhook secret.
 
 ```text
-0 sentinels webhook secret
+0security sentinels webhook secret
 ```
 
 Subcommands: [rotate](#sentinels-webhook-secret-rotate).
@@ -4121,7 +4121,7 @@ Subcommands: [rotate](#sentinels-webhook-secret-rotate).
 Create the secret, or replace it; the old one keeps working for 5 minutes. Printed once.
 
 ```text
-0 sentinels webhook secret rotate [options]
+0security sentinels webhook secret rotate [options]
 ```
 
 | Option | Registered default | Description |
@@ -4136,7 +4136,7 @@ Create the secret, or replace it; the old one keeps working for 5 minutes. Print
 ### config team
 
 ```text
-0 config team
+0security config team
 ```
 
 Provision opt-in accounts for a team engine you control. Local use without accounts stays the default. Creating a config does not activate it on a running host. See [Team workspaces](/computers/) for roles and deployment boundaries.
@@ -4145,10 +4145,10 @@ Subcommands: [init](#config-team-init) · [add-user](#config-team-add-user) · [
 
 ### config team init
 
-Create a private configuration with the first owner account. The password comes from protected terminal input or stdin and is stored as a salted hash. No email invitation is sent. Then start `0 web --team-config <path>`.
+Create a private configuration with the first owner account. The password comes from protected terminal input or stdin and is stored as a salted hash. No email invitation is sent. Then start `0security web --team-config <path>`.
 
 ```text
-0 config team init [options]
+0security config team init [options]
 ```
 
 | Option | Registered default | Description |
@@ -4163,7 +4163,7 @@ Create a private configuration with the first owner account. The password comes 
 Add an account to a private configuration with the role `owner`, `editor` or `viewer`. A viewer cannot control agents. Restart the team engine to load changes. The password is never a command-line argument.
 
 ```text
-0 config team add-user [options]
+0security config team add-user [options]
 ```
 
 | Option | Registered default | Description |
@@ -4178,7 +4178,7 @@ Add an account to a private configuration with the role `owner`, `editor` or `vi
 List account IDs, display names and roles. Password hashes are not shown. The configuration must be a private regular file.
 
 ```text
-0 config team list [options]
+0security config team list [options]
 ```
 
 | Option | Registered default | Description |

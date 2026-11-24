@@ -229,7 +229,7 @@ async function runFixFlow(id: string, options: FixOptions, deps: FixDeps): Promi
     if (!Number.isFinite(budget) || budget <= 0) throw new UsageError("--budget must be a positive number of USD.");
     if (!Number.isFinite(Number(options.timeout)) || Number(options.timeout) <= 0) throw new UsageError("--timeout must be a positive number of seconds.");
     const sandbox = sandboxSpec(options);
-    if (options.computer || options.engineUrl) throw new UsageError("0 fix edits files on this machine; run it against the local console.");
+    if (options.computer || options.engineUrl) throw new UsageError("0security fix edits files on this machine; run it against the local console.");
     const finding = deps.loadFinding(id, options.dbPath);
     try { repo = (await deps.git(resolve(options.repo ?? process.cwd()), ["rev-parse", "--show-toplevel"])).trim(); }
     catch { throw new UsageError("Run this inside the git repository the finding is in, or pass --repo."); }

@@ -62,7 +62,7 @@ export function configureGroupedHelp(program: Command): void {
         }
         out.push("");
       }
-      if (!cmd.parent) out.push("Run `0 <command>` to list its subcommands; `0 <command> <subcommand> --help` for flags.", "", examplesBlock(ROOT_EXAMPLES));
+      if (!cmd.parent) out.push("Run `0security <command>` to list its subcommands; `0security <command> <subcommand> --help` for flags.", "", examplesBlock(ROOT_EXAMPLES));
       return out.join("\n").replace(/\n+$/, "\n");
     },
   });
@@ -75,57 +75,57 @@ const ROOT_OPTIONS: readonly (readonly [string, string])[] = [
   ["-r, --resume <id>", "With -p: continue a saved thread"],
 ];
 const ROOT_EXAMPLES: readonly string[] = [
-  '0 -p "Review ./app for injection bugs"',
-  '0 threads start "Map the login flow" --wait',
-  "0 findings list --severity high --format json",
-  "0 sentinels list --presets",
+  '0security -p "Review ./app for injection bugs"',
+  '0security threads start "Map the login flow" --wait',
+  "0security findings list --severity high --format json",
+  "0security sentinels list --presets",
 ];
 const examplesBlock = (lines: readonly string[]): string => `Examples:\n${lines.map((line) => `  ${line}`).join("\n")}\n`;
 
 /** Short, real examples for the visible commands, keyed by command path. */
 const EXAMPLES: Readonly<Record<string, readonly string[]>> = {
-  scan: ["0 scan ~/code/app", "0 scan ~/code/app --format sarif -o scan.sarif --fail-on high", "0 scan https://github.com/acme/app --budget 2 --format json", "0 scan . --context .0/threat-model.md --policy ./policies --org-policy ~/org-policies", "0 scan . --scope SECURITY.md --fail-on high"],
-  probe: ["0 probe https://api.example.com/v1/chat/completions -H \"Authorization: Bearer $OPENAI_API_KEY\" --model gpt-4o-mini", "0 probe https://app.example.com/api/chat --body '{\"message\":\"{{prompt}}\"}' --response-path reply", "0 probe https://app.example.com/api/chat --secret sk-live-1234 --format sarif -o probe.sarif --fail-on medium"],
-  "threat-model": ["0 threat-model", "0 threat-model ~/code/app --pr", "0 threat-model --interview", "0 threat-model --output THREAT_MODEL.md", "0 scan ~/code/app --context ~/code/app/.0/threat-model.md"],
-  sbom: ["0 sbom generate . -o sbom.cdx.json", "0 sbom check sbom.cdx.json", "0 sbom check sbom.cdx.json --format json", "0 sbom scan-models ./models"],
-  "sbom scan-models": ["0 sbom scan-models ./models", "0 sbom scan-models model.pkl", "0 sbom scan-models . --format sarif > models.sarif"],
-  "sbom generate": ["0 sbom generate . -o sbom.cdx.json", "0 sbom generate ~/code/app --name app"],
-  "sbom licenses": ["0 sbom licenses . --preset permissive", "0 sbom licenses sbom.cdx.json --deny 'GPL-*,AGPL-*'", "0 sbom licenses . --policy license-policy.yaml --resolve --format sarif > licenses.sarif"],
-  "sbom check": ["0 sbom check sbom.cdx.json", "0 sbom check sbom.cdx.json --format json"],
-  findings: ["0 findings list --severity high", "0 findings show 3f2a", '0 findings update 3f2a --status accepted --reason "fix scheduled" --expires 90d --approver "security lead"'],
-  "findings list": ["0 findings list --expiring 30", "0 findings list --severity high --status verified", "0 findings list --format json", "0 findings list --format sarif -o findings.sarif"],
-  "findings show": ["0 findings show 3f2a"],
-  "findings evidence": ["0 findings evidence ./evidence --repo .", "0 findings evidence ./evidence --repo . --check-advisories"],
-  "findings export-fixes": ["0 findings export-fixes", "0 findings export-fixes --check-merged -o ./fix-report", "0 findings export-fixes --repo . --since 2026-01-01 --format json"],
-  "findings report-draft": ["0 findings report-draft 3f2a --stage early-warning --product app --contact \"Jo, security@example.com\"", "0 findings report-draft 3f2a --stage notification --facts facts.json -o notification.md"],
-  "findings issues": ["0 findings issues --repo acme/app --dry-run", "0 findings issues --repo acme/app --min-severity high --max 10"],
-  "findings update": ['0 findings update 3f2a --status accepted --reason "fix scheduled" --expires 90d --approver "security lead"', '0 findings update 3f2a --status false-positive --reason "test fixture"'],
-  "findings verify": ["0 findings verify --severity high,medium --folder ~/code/app", "0 findings verify 3f2a --folder ~/code/app", "0 findings verify --apply --budget 1 --folder ~/code/app"],
-  "findings metrics": ["0 findings metrics", "0 findings metrics --since 7d --command fix", "0 findings metrics --format json"],
-  "findings burndown": ["0 findings burndown --severity high --limit 10 --test \"pnpm test\"", "0 findings burndown --dry-run", "0 findings burndown --history --format json"],
-  threads: ['0 threads start "Map the login flow" --folder ~/code/app --wait', "0 threads list", "0 threads show <id>", '0 threads send <id> "Now the logout path" --wait', "0 threads stop <id>"],
-  "threads list": ["0 threads list", "0 threads list --format json"],
-  "threads show": ["0 threads show <id>", "0 threads show <id> --wait", "0 threads show <id> --format json"],
-  "threads start": ['id=$(0 threads start "Review ./app for injection bugs")', '0 threads start "Summarize open findings" --wait', '0 threads start "Audit CI" --skill workflow-hardening --wait --timeout 900'],
-  "threads send": ['0 threads send <id> "Also check the API routes" --wait', '0 threads send new "Review ./app"'],
-  "threads stop": ["0 threads stop <id>"],
-  sentinels: ["0 sentinels list --presets", '0 sentinels set --create --preset dependency-watcher --name "Nightly check"', "0 sentinels set <id> --state active", '0 sentinels run <id> --task "Re-test login" --yes'],
-  "sentinels list": ["0 sentinels list", "0 sentinels list <id>", "0 sentinels list --presets"],
-  "sentinels run": ['0 sentinels run <id> --task "Re-test login" --yes', "0 sentinels run <id> --history"],
-  "sentinels set": ['0 sentinels set --create --preset pr-security-reviewer --name "PR review"', "0 sentinels set <id> --state paused", "0 sentinels set <id> --trigger add --kind schedule --frequency daily --at 09:00", "0 sentinels set <id> --files put NOTES.md --file ./notes.md"],
-  skills: ["0 skills list", "0 skills list pr-diff-review", "0 skills add owner/repo@<full-sha>", "0 skills add ./my-skills"],
-  "skills list": ["0 skills list", "0 skills list pr-diff-review", "0 skills list --catalog"],
-  "skills add": ["0 skills add ./my-skills", "0 skills add owner/repo@<full-sha> --yes"],
-  models: ["0 models connect", "0 models connect anthropic --key-env ANTHROPIC_API_KEY", "0 models list", "0 models set claude-sonnet-4-6 --provider anthropic"],
-  "models list": ["0 models list", "0 models list --provider anthropic --format json"],
-  "models set": ["0 models set", "0 models set claude-sonnet-4-6 --provider anthropic"],
-  "models connect": ["0 models connect", "0 models connect anthropic --key-env ANTHROPIC_API_KEY", "0 models connect anthropic --test", "0 models connect anthropic --remove --yes"],
-  computers: ["0 computers list", "0 computers add --ssh me@build-box", "0 computers stop <id>"],
-  "computers add": ["0 computers add --ssh me@build-box"],
-  config: ["0 config doctor", "0 config get approvals", "0 config set approvals ask", "0 config get --all"],
-  "config get": ["0 config get", "0 config get approvals", "0 config get --all --format json"],
-  "config set": ["0 config set approvals ask", "0 config set approvals auto --project"],
-  "config doctor": ["0 config doctor", "0 config doctor --fix"],
+  scan: ["0security scan ~/code/app", "0security scan ~/code/app --format sarif -o scan.sarif --fail-on high", "0security scan https://github.com/acme/app --budget 2 --format json", "0security scan . --context .0/threat-model.md --policy ./policies --org-policy ~/org-policies", "0security scan . --scope SECURITY.md --fail-on high"],
+  probe: ["0security probe https://api.example.com/v1/chat/completions -H \"Authorization: Bearer $OPENAI_API_KEY\" --model gpt-4o-mini", "0security probe https://app.example.com/api/chat --body '{\"message\":\"{{prompt}}\"}' --response-path reply", "0security probe https://app.example.com/api/chat --secret sk-live-1234 --format sarif -o probe.sarif --fail-on medium"],
+  "threat-model": ["0security threat-model", "0security threat-model ~/code/app --pr", "0security threat-model --interview", "0security threat-model --output THREAT_MODEL.md", "0security scan ~/code/app --context ~/code/app/.0/threat-model.md"],
+  sbom: ["0security sbom generate . -o sbom.cdx.json", "0security sbom check sbom.cdx.json", "0security sbom check sbom.cdx.json --format json", "0security sbom scan-models ./models"],
+  "sbom scan-models": ["0security sbom scan-models ./models", "0security sbom scan-models model.pkl", "0security sbom scan-models . --format sarif > models.sarif"],
+  "sbom generate": ["0security sbom generate . -o sbom.cdx.json", "0security sbom generate ~/code/app --name app"],
+  "sbom licenses": ["0security sbom licenses . --preset permissive", "0security sbom licenses sbom.cdx.json --deny 'GPL-*,AGPL-*'", "0security sbom licenses . --policy license-policy.yaml --resolve --format sarif > licenses.sarif"],
+  "sbom check": ["0security sbom check sbom.cdx.json", "0security sbom check sbom.cdx.json --format json"],
+  findings: ["0security findings list --severity high", "0security findings show 3f2a", '0security findings update 3f2a --status accepted --reason "fix scheduled" --expires 90d --approver "security lead"'],
+  "findings list": ["0security findings list --expiring 30", "0security findings list --severity high --status verified", "0security findings list --format json", "0security findings list --format sarif -o findings.sarif"],
+  "findings show": ["0security findings show 3f2a"],
+  "findings evidence": ["0security findings evidence ./evidence --repo .", "0security findings evidence ./evidence --repo . --check-advisories"],
+  "findings export-fixes": ["0security findings export-fixes", "0security findings export-fixes --check-merged -o ./fix-report", "0security findings export-fixes --repo . --since 2026-01-01 --format json"],
+  "findings report-draft": ["0security findings report-draft 3f2a --stage early-warning --product app --contact \"Jo, security@example.com\"", "0security findings report-draft 3f2a --stage notification --facts facts.json -o notification.md"],
+  "findings issues": ["0security findings issues --repo acme/app --dry-run", "0security findings issues --repo acme/app --min-severity high --max 10"],
+  "findings update": ['0security findings update 3f2a --status accepted --reason "fix scheduled" --expires 90d --approver "security lead"', '0security findings update 3f2a --status false-positive --reason "test fixture"'],
+  "findings verify": ["0security findings verify --severity high,medium --folder ~/code/app", "0security findings verify 3f2a --folder ~/code/app", "0security findings verify --apply --budget 1 --folder ~/code/app"],
+  "findings metrics": ["0security findings metrics", "0security findings metrics --since 7d --command fix", "0security findings metrics --format json"],
+  "findings burndown": ["0security findings burndown --severity high --limit 10 --test \"pnpm test\"", "0security findings burndown --dry-run", "0security findings burndown --history --format json"],
+  threads: ['0security threads start "Map the login flow" --folder ~/code/app --wait', "0security threads list", "0security threads show <id>", '0security threads send <id> "Now the logout path" --wait', "0security threads stop <id>"],
+  "threads list": ["0security threads list", "0security threads list --format json"],
+  "threads show": ["0security threads show <id>", "0security threads show <id> --wait", "0security threads show <id> --format json"],
+  "threads start": ['id=$(0security threads start "Review ./app for injection bugs")', '0security threads start "Summarize open findings" --wait', '0security threads start "Audit CI" --skill workflow-hardening --wait --timeout 900'],
+  "threads send": ['0security threads send <id> "Also check the API routes" --wait', '0security threads send new "Review ./app"'],
+  "threads stop": ["0security threads stop <id>"],
+  sentinels: ["0security sentinels list --presets", '0security sentinels set --create --preset dependency-watcher --name "Nightly check"', "0security sentinels set <id> --state active", '0security sentinels run <id> --task "Re-test login" --yes'],
+  "sentinels list": ["0security sentinels list", "0security sentinels list <id>", "0security sentinels list --presets"],
+  "sentinels run": ['0security sentinels run <id> --task "Re-test login" --yes', "0security sentinels run <id> --history"],
+  "sentinels set": ['0security sentinels set --create --preset pr-security-reviewer --name "PR review"', "0security sentinels set <id> --state paused", "0security sentinels set <id> --trigger add --kind schedule --frequency daily --at 09:00", "0security sentinels set <id> --files put NOTES.md --file ./notes.md"],
+  skills: ["0security skills list", "0security skills list pr-diff-review", "0security skills add owner/repo@<full-sha>", "0security skills add ./my-skills"],
+  "skills list": ["0security skills list", "0security skills list pr-diff-review", "0security skills list --catalog"],
+  "skills add": ["0security skills add ./my-skills", "0security skills add owner/repo@<full-sha> --yes"],
+  models: ["0security models connect", "0security models connect anthropic --key-env ANTHROPIC_API_KEY", "0security models list", "0security models set claude-sonnet-4-6 --provider anthropic"],
+  "models list": ["0security models list", "0security models list --provider anthropic --format json"],
+  "models set": ["0security models set", "0security models set claude-sonnet-4-6 --provider anthropic"],
+  "models connect": ["0security models connect", "0security models connect anthropic --key-env ANTHROPIC_API_KEY", "0security models connect anthropic --test", "0security models connect anthropic --remove --yes"],
+  computers: ["0security computers list", "0security computers add --ssh me@build-box", "0security computers stop <id>"],
+  "computers add": ["0security computers add --ssh me@build-box"],
+  config: ["0security config doctor", "0security config get approvals", "0security config set approvals ask", "0security config get --all"],
+  "config get": ["0security config get", "0security config get approvals", "0security config get --all --format json"],
+  "config set": ["0security config set approvals ask", "0security config set approvals auto --project"],
+  "config doctor": ["0security config doctor", "0security config doctor --fix"],
 };
 
 const isLeaf = (command: Command): boolean => command.commands.length === 0;
@@ -175,9 +175,9 @@ interface NewFormStub { readonly name: string; readonly args: string; readonly d
 
 /** Visible subcommands that have no implementation command of their own: `command-grammar.ts` rewrites them before parsing, so the action only runs on incomplete input. */
 const NEW_FORM_STUBS: Readonly<Record<string, readonly NewFormStub[]>> = {
-  findings: [{ name: "update", args: "<id>", description: "Change a finding's status", usage: "0 findings update <id> --status accepted|suppressed|open|false-positive [--note <text>] [--reason <text> --expires <date|90d> --approver <name>]", options: [["--status <status>", "accepted | suppressed | open | false-positive"], ["--note <text>", "Why (optional)"], ["--reason <text>", "Why; required with accepted and false-positive"], ["--expires <date|90d>", "Accepted: when the acceptance ends (required)"], ["--approver <name>", "Accepted: who approved it, a label not a login"], ["--db-path <path>", "Path to SQLite database"]] }],
+  findings: [{ name: "update", args: "<id>", description: "Change a finding's status", usage: "0security findings update <id> --status accepted|suppressed|open|false-positive [--note <text>] [--reason <text> --expires <date|90d> --approver <name>]", options: [["--status <status>", "accepted | suppressed | open | false-positive"], ["--note <text>", "Why (optional)"], ["--reason <text>", "Why; required with accepted and false-positive"], ["--expires <date|90d>", "Accepted: when the acceptance ends (required)"], ["--approver <name>", "Accepted: who approved it, a label not a login"], ["--db-path <path>", "Path to SQLite database"]] }],
   models: [
-    { name: "set", args: "[model]", description: "Show or choose the default model", usage: "0 models set <model> --provider <id>", options: [["--provider <provider>", "Provider of the model"]] },
+    { name: "set", args: "[model]", description: "Show or choose the default model", usage: "0security models set <model> --provider <id>", options: [["--provider <provider>", "Provider of the model"]] },
     { name: "connect", args: "[provider]", description: "Add, list, test or remove a provider connection", options: [["--key-env <VAR>", "Add: read the API key from this environment variable"], ["--stdin", "Add: read the API key from stdin"], ["--list", "List connections (the default with no provider)"], ["--test", "Test a connection"], ["--remove", "Remove a connection (with --yes)"]] },
   ],
   config: [{ name: "doctor", args: "[checks...]", description: "Check this machine and the engine, then suggest the next command", options: [["--fix", "Repair the local database"], ["--json", "Print JSON"]] }],
@@ -189,8 +189,8 @@ const NEW_FORM_HELP: Readonly<Record<string, string>> = {
   "threads send": "`send new <prompt>` starts a thread. With an id: --retry, --resume or --decide <decision-id>.",
   "sentinels list": "With an id: show that Sentinel. --presets lists the starting points.",
   "sentinels run": "--history lists past activations.",
-  "sentinels set": "--create --preset <id> --name <name> makes a Sentinel. With an id: --state active|paused|acknowledged|archived|deleted, --trigger <list|add|enable|disable|check|rm> ... (see `0 sentinels set <id> --trigger add --help`), --files <list|get|put|rm> ...",
-  "skills list": "With a name: show that skill. --catalog browses the catalog. Extensions: `0 skills extensions list|info|enable|disable|update|remove`; --info, --enable, --disable and --mcp-remove on a name reach them.",
+  "sentinels set": "--create --preset <id> --name <name> makes a Sentinel. With an id: --state active|paused|acknowledged|archived|deleted, --trigger <list|add|enable|disable|check|rm> ... (see `0security sentinels set <id> --trigger add --help`), --files <list|get|put|rm> ...",
+  "skills list": "With a name: show that skill. --catalog browses the catalog. Extensions: `0security skills extensions list|info|enable|disable|update|remove`; --info, --enable, --disable and --mcp-remove on a name reach them.",
   "skills add": "<src> may be a catalog id, a repository, a folder of skills or a bundle. An extension is <repo>@<full sha>: you see one prompt first. Also: --mcp <url> adds an MCP server as a local extension, --preview checks a folder, --remove <name> removes a skill.",
   "models list": "Also: --usage shows tokens and cost, --recommended the suggested models.",
   "computers list": "--hosts lists SSH hosts you could add.",
@@ -223,7 +223,7 @@ export function applyNewSurface(top: Command): void {
     for (const [flags, text] of stub.options ?? []) added.option(flags, text);
     added.action(() => {
       const opts = added.opts<Record<string, unknown>>();
-      if (top.name() === "findings" && stub.name === "update" && opts["status"] === "false-positive" && !opts["reason"]) throw new Error("--reason <text> is required with --status false-positive: say why the finding is not real, for example 0 findings update <id> --status false-positive --reason \"test fixture\".");
+      if (top.name() === "findings" && stub.name === "update" && opts["status"] === "false-positive" && !opts["reason"]) throw new Error("--reason <text> is required with --status false-positive: say why the finding is not real, for example 0security findings update <id> --status false-positive --reason \"test fixture\".");
       throw new Error(`${stub.usage ? `Usage: ${stub.usage}. ` : "Incomplete. "}See \`0 ${top.name()} ${stub.name} --help\`.`);
     });
     top.addCommand(added);

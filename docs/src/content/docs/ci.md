@@ -5,7 +5,7 @@ description: Scan only what a pull request changes with the 0 Action, and show t
 
 The 0 Action scans the files a pull request changes and uploads the result to GitHub code scanning. Add it to a workflow to see findings in the repository's **Security** tab and as annotations on the pull request.
 
-The action needs no server. It installs a verified release of `0`, runs `0 scan --diff`, and uploads the SARIF file with `0 findings upload`. With `mode: sbom` it checks your dependencies instead.
+The action needs no server. It installs a verified release of `0security`, runs `0security scan --diff`, and uploads the SARIF file with `0security findings upload`. With `mode: sbom` it checks your dependencies instead.
 
 ```yaml
 name: 0 security
@@ -36,9 +36,9 @@ Set the key of the provider for your model (see [Models](/models/)). The default
 ## What the action does
 
 1. Installs the release you pin in `version`. The installer refuses a download whose checksum does not match the release's `checksums.txt`.
-2. Checks every input. A value with a space, a newline or a leading dash is refused, and so is a path that leaves the workspace. Inputs reach the shell only as environment variables and go to `0` as separate arguments.
+2. Checks every input. A value with a space, a newline or a leading dash is refused, and so is a path that leaves the workspace. Inputs reach the shell only as environment variables and go to `0security` as separate arguments.
 3. Compares the pull request with its base branch and scans only the files that differ and the code they connect to. This costs a fraction of a full scan. A FoxGuard pattern scan runs first, and its hits go to the scan as leads.
-4. Uploads the findings to code scanning with `0 findings upload`. Alerts match by fingerprint, so pushing again updates them.
+4. Uploads the findings to code scanning with `0security findings upload`. Alerts match by fingerprint, so pushing again updates them.
 5. Writes a job summary and sets the outputs.
 6. Fails the job when a finding is at or above `fail-on`, or when the scan is partial and `allow-partial` is `false`. The upload happens first, so the findings show either way.
 
@@ -90,7 +90,7 @@ A scan is partial when it stops before it reviews everything. The exit code is 3
 
 With `allow-partial: false` (the default), the action uploads the findings so far, then fails the job. A partial scan is a scan you cannot rely on, so the failure makes it visible.
 
-With `allow-partial: true`, the action passes `--allow-partial` to `0`. The scan exits by its findings alone, so a partial run exits 0, or 1 when a finding reaches `fail-on`. The job logs a warning, and `status` is `partial`. To finish the review, run `0 scan <folder> --resume latest` with a higher `budget`. A pull request diff is usually small enough to finish within the default budget. `fail-on` still fails the job on a finding in the part that was reviewed.
+With `allow-partial: true`, the action passes `--allow-partial` to `0security`. The scan exits by its findings alone, so a partial run exits 0, or 1 when a finding reaches `fail-on`. The job logs a warning, and `status` is `partial`. To finish the review, run `0security scan <folder> --resume latest` with a higher `budget`. A pull request diff is usually small enough to finish within the default budget. `fail-on` still fails the job on a finding in the part that was reviewed.
 
 ## Add your own rules
 
@@ -212,7 +212,7 @@ jobs:
 
 ### Scan the whole repository every night
 
-A nightly full scan can run out of budget on a large repository. With `allow-partial` the job stays green and the summary says what was not reached. To finish the review, run `0 scan . --resume latest` on a machine that kept the earlier scan's state in `~/.0`. A hosted runner starts clean, so resume suits a self-hosted runner or a local run. It refuses when the git HEAD changed unless you pass `--force`.
+A nightly full scan can run out of budget on a large repository. With `allow-partial` the job stays green and the summary says what was not reached. To finish the review, run `0security scan . --resume latest` on a machine that kept the earlier scan's state in `~/.0`. A hosted runner starts clean, so resume suits a self-hosted runner or a local run. It refuses when the git HEAD changed unless you pass `--force`.
 
 ```yaml
 name: 0 nightly scan
@@ -368,11 +368,11 @@ The scan runs a model agent over the pull request's code, and the text in that c
 
 ### Publish to Bitbucket Code Insights
 
-`0 findings upload --to bitbucket-cloud` (or `--to bitbucket-dc` for Data Center) turns the scan into a Code Insights report with one annotation per finding. Scan with `--format json`: that file carries the agent's verdict, rationale and fix guidance, which a SARIF file does not.
+`0security findings upload --to bitbucket-cloud` (or `--to bitbucket-dc` for Data Center) turns the scan into a Code Insights report with one annotation per finding. Scan with `--format json`: that file carries the agent's verdict, rationale and fix guidance, which a SARIF file does not.
 
 ```bash
-0 scan . --diff origin/main --format json -o scan.json --fail-on high
-0 findings upload scan.json --to bitbucket-cloud --repo workspace/repo
+0security scan . --diff origin/main --format json -o scan.json --fail-on high
+0security findings upload scan.json --to bitbucket-cloud --repo workspace/repo
 ```
 
 - With `BITBUCKET_TOKEN` set, the command sends the report and its annotations. Without it, it prints the payload (the report body and the annotation batches) so a CI step can send it. `--print` prints even when the token is set. The token is sent only in the `Authorization` header and is never written to a log.
@@ -404,7 +404,7 @@ pipelines:
             - RELEASE_BASE_URL="https://github.com/0sec-labs/0security/releases/download/v${VERSION}" sh install.sh
             - git fetch --no-tags --depth=1 origin "+refs/heads/${BITBUCKET_PR_DESTINATION_BRANCH}:refs/remotes/origin/${BITBUCKET_PR_DESTINATION_BRANCH}"
             - code=0
-            - 0 scan . --diff "origin/${BITBUCKET_PR_DESTINATION_BRANCH}" --format json -o scan.json --fail-on high || code=$?
+            - 0security scan . --diff "origin/${BITBUCKET_PR_DESTINATION_BRANCH}" --format json -o scan.json --fail-on high || code=$?
             - echo "$code" > scan.exit
           artifacts:
             - scan.json
@@ -418,12 +418,12 @@ pipelines:
             - curl -fsSL -o "$tools/install.sh" "https://raw.githubusercontent.com/0sec-labs/0security/v${VERSION}/install.sh"
             - (cd "$tools" && RELEASE_BASE_URL="https://github.com/0sec-labs/0security/releases/download/v${VERSION}" sh install.sh)
             - code="$(cat scan.exit)"
-            - if [ "$code" -ne 2 ]; then 0 findings upload scan.json --to bitbucket-cloud; fi
+            - if [ "$code" -ne 2 ]; then 0security findings upload scan.json --to bitbucket-cloud; fi
             - if [ "$code" -eq 3 ]; then echo "The scan stopped at its budget; the findings are partial."; code=0; fi
             - exit "$code"
 ```
 
-The exit codes are those of `0 scan`: 1 when a finding is at or above `--fail-on` or the scan failed, 2 for a usage error, 3 when the scan stopped before it reviewed everything (not a failure; the scripts below map it to 0 after the upload). The scan step always passes so that the publish step can report; the publish step exits with the scan's code.
+The exit codes are those of `0security scan`: 1 when a finding is at or above `--fail-on` or the scan failed, 2 for a usage error, 3 when the scan stopped before it reviewed everything (not a failure; the scripts below map it to 0 after the upload). The scan step always passes so that the publish step can report; the publish step exits with the scan's code.
 
 ### Jenkins
 
@@ -558,14 +558,14 @@ jobs:
           VERSION=0.41.0 # Pin the CLI
           RELEASE_BASE_URL="https://github.com/0sec-labs/0security/releases/download/v${VERSION}" INSTALL_DIR="$RUNNER_TEMP/0" sh <(curl -fsSL "https://raw.githubusercontent.com/0sec-labs/0security/v${VERSION}/install.sh")
           echo "$RUNNER_TEMP/0" >> "$GITHUB_PATH"
-      - run: 0 sbom generate . -o sbom.cdx.json
-      - run: 0 sbom check sbom.cdx.json
+      - run: 0security sbom generate . -o sbom.cdx.json
+      - run: 0security sbom check sbom.cdx.json
       - uses: actions/upload-artifact@v4
         if: always()
         with: { name: sbom, path: sbom.cdx.json }
 ```
 
-`0 sbom check` exits 1 when it finds an advisory, which fails the job. The output is evidence for your records. It does not make a product compliant.
+`0security sbom check` exits 1 when it finds an advisory, which fails the job. The output is evidence for your records. It does not make a product compliant.
 
 ## Collect evidence and draft vulnerability reports
 
@@ -574,7 +574,7 @@ The Cyber Resilience Act (Regulation (EU) 2024/2847) requires a manufacturer to 
 To write the evidence into one folder, run:
 
 ```bash
-0 findings evidence ./evidence --repo .
+0security findings evidence ./evidence --repo .
 ```
 
 The folder holds:
@@ -591,7 +591,7 @@ Add `--check-advisories` to look the SBOM up in the public OSV database. This is
 To keep a record for each release, run the command in a job and upload the folder:
 
 ```yaml
-      - run: 0 findings evidence evidence --repo . --check-advisories
+      - run: 0security findings evidence evidence --repo . --check-advisories
       - uses: actions/upload-artifact@v4
         with: { name: security-evidence, path: evidence }
 ```
@@ -603,7 +603,7 @@ The folder shows what was found, how it was triaged and which components are lis
 For an actively exploited vulnerability, write the draft text for one stage:
 
 ```bash
-0 findings report-draft <finding> --stage early-warning
+0security findings report-draft <finding> --stage early-warning
 ```
 
 The stage is `early-warning`, `notification` or `final`. The draft takes the title, severity, location, status and timestamps from the finding. You supply the rest with `--product`, `--affected-versions`, `--exploited-since`, `--exploitation-evidence`, `--mitigation`, `--contact` or `--facts file.json`.

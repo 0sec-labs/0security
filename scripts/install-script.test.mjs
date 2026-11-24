@@ -44,7 +44,7 @@ test("installer makes fresh shells usable, quotes paths, and does not duplicate 
     for (const profile of [".profile", ".bashrc"]) {
       const text = readFileSync(join(home, profile), "utf8");
       assert.equal(text.match(/# 0.security CLI/g).length, 1);
-      const shell = spawnSync("bash", ["-c", `. "$HOME/${profile}"; 0 --help`], { env, encoding: "utf8" });
+      const shell = spawnSync("bash", ["-c", `. "$HOME/${profile}"; 0security --help`], { env, encoding: "utf8" });
       assert.equal(shell.status, 0, shell.stderr);
       assert.equal(shell.stdout.trim(), "installed");
     }

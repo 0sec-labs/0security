@@ -132,6 +132,6 @@ describe("0 findings upload --to bitbucket-*", () => {
 
   it("refuses a file that is neither scan JSON nor SARIF", async () => {
     const { value } = deps({});
-    await expect(runBitbucketUpload("x", { wait: false, to: "bitbucket-cloud" }, { ...value, readText: () => "{}" })).rejects.toThrow("0 scan --format json");
+    await expect(runBitbucketUpload("x", { wait: false, to: "bitbucket-cloud" }, { ...value, readText: () => "{}" })).rejects.toThrow("0security scan --format json");
   });
 });

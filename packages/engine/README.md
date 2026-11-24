@@ -44,8 +44,8 @@ Feature flags are declared in `src/agent/features.ts`. Each flag maps to a
 has no flag for them; set the environment variable before running it:
 
 ```bash
-env ZERO_FEATURE_WEB_SEARCH=0 0 scan ./app
-env ZERO_FEATURE_PRESET=fp-moat ZERO_FEATURE_POV_GATE=0 0 scan ./app
+env ZERO_FEATURE_WEB_SEARCH=0 0security scan ./app
+env ZERO_FEATURE_PRESET=fp-moat ZERO_FEATURE_POV_GATE=0 0security scan ./app
 ```
 
 Use the exact environment-variable suffix from `src/agent/features.ts`, not a

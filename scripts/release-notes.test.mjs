@@ -61,7 +61,7 @@ test("buildNotes groups, moves Security, strips relative links, adds footer", ()
   assert.doesNotMatch(md, /Skipped group/);
   assert.match(md, /### Highlights\n\n- Big thing\./);
   assert.match(md, /install\.sh \| bash/);
-  assert.match(md, /0 --version/);
+  assert.match(md, /0security --version/);
   assert.match(md, /checksums\.txt/);
   assert.match(md, /blob\/v1\.2\.0\/docs\/CHANGELOG\.md/);
 });

@@ -41,7 +41,7 @@ import { Tabs, TabItem, Steps, CardGrid, LinkCard } from "@astrojs/starlight/com
     node packages/cli/dist/index.js web
     ```
 
-    You need Node.js 24 or newer and pnpm. A source build has no global `0` command, so start it with `node packages/cli/dist/index.js`.
+    You need Node.js 24 or newer and pnpm. A source build has no global `0security` command, so start it with `node packages/cli/dist/index.js`.
   </TabItem>
 </Tabs>
 
@@ -52,7 +52,7 @@ import { Tabs, TabItem, Steps, CardGrid, LinkCard } from "@astrojs/starlight/com
 To update now, run:
 
 ```bash
-0 config doctor upgrade
+0security config doctor upgrade
 ```
 
 The command verifies the checksum, then replaces the binary you started it from.
@@ -67,7 +67,7 @@ curl -fsSL https://raw.githubusercontent.com/0sec-labs/0security/main/install.sh
 
 <Steps>
 
-1. Run `0`. The browser app opens at `http://127.0.0.1:48123`. You do not need an account.
+1. Run `0security`. The browser app opens at `http://127.0.0.1:48123`. You do not need an account.
 
 2. Open **Settings → Models** and add a provider key or sign in. See [Models](/models/).
 
@@ -89,11 +89,11 @@ Everything the console does is also a command. Connect a model first, then scan 
 
 ```bash
 export OPENAI_API_KEY=...
-0 scan ./your-repo
-0 findings list
+0security scan ./your-repo
+0security findings list
 ```
 
-To export findings, add `--format sarif` or `--format json` to `0 findings list`. To scan only what a branch changed, see [Pull request checks](/ci/). The [CLI reference](/commands/) lists every command.
+To export findings, add `--format sarif` or `--format json` to `0security findings list`. To scan only what a branch changed, see [Pull request checks](/ci/). The [CLI reference](/commands/) lists every command.
 
 ## The words 0 uses
 
@@ -112,7 +112,7 @@ To export findings, add `--format sarif` or `--format json` to `0 findings list`
 To check the runtime, your model provider and the CLIs on your path, run:
 
 ```bash
-0 config doctor
+0security config doctor
 ```
 
 ### 0: command not found
@@ -123,11 +123,11 @@ Open a new terminal. Or add 0 to your path:
 export PATH="$HOME/.0/bin:$PATH"
 ```
 
-A source build has no global `0`. Run `node packages/cli/dist/index.js` instead.
+A source build has no global `0security`. Run `node packages/cli/dist/index.js` instead.
 
 ### Download or checksum error
 
-The installer refuses a binary that does not match the release `checksums.txt`. Run it again. Release assets are `0security-darwin-arm64`, `0security-linux-x64` and `0security-linux-arm64`. The installer falls back to the older `0-<platform>` names, which are published too so existing installs can update. For Windows, download `0security-windows-x64.exe` yourself. Intel Macs have no native release, so use Docker or a source build. `0 config doctor upgrade` does not support Windows.
+The installer refuses a binary that does not match the release `checksums.txt`. Run it again. Release assets are `0security-darwin-arm64`, `0security-linux-x64` and `0security-linux-arm64`. The installer falls back to the older `0-<platform>` names, which are published too so existing installs can update. For Windows, download `0security-windows-x64.exe` yourself. Intel Macs have no native release, so use Docker or a source build. `0security config doctor upgrade` does not support Windows.
 
 ### Model provider shows missing or bad
 
@@ -137,25 +137,25 @@ The installer refuses a binary that does not match the release `checksums.txt`. 
 
 Two processes are writing the same SQLite file. Stop the other one. Do not delete a live database.
 
-`0 config doctor --fix` moves a damaged file aside and creates a new one. It does not recover rows, so back up first.
+`0security config doctor --fix` moves a damaged file aside and creates a new one. It does not recover rows, so back up first.
 
 ### The app does not open
 
 Start 0 without opening a browser, then open the URL it prints:
 
 ```bash
-0 --no-open
+0security --no-open
 ```
 
 On macOS, the first access to Desktop, Documents or Downloads asks for permission. If you declined, enable the app that runs 0 under **System Settings → Privacy & Security → Files & Folders**.
 
 ### Docker prints help and exits
 
-The image runs `0 --help` by default and mounts nothing. Pass your folder, your key and a command. See [Server mode and Docker](/server-mode/).
+The image runs `0security --help` by default and mounts nothing. Pass your folder, your key and a command. See [Server mode and Docker](/server-mode/).
 
 ### Still stuck
 
-Run `0 config doctor` and [open an issue](https://github.com/0sec-labs/0security/issues) with its output, the command and the error. Remove keys, tokens and target data first. To report a vulnerability in 0 itself, follow [SECURITY.md](https://github.com/0sec-labs/0security/blob/main/.github/SECURITY.md).
+Run `0security config doctor` and [open an issue](https://github.com/0sec-labs/0security/issues) with its output, the command and the error. Remove keys, tokens and target data first. To report a vulnerability in 0 itself, follow [SECURITY.md](https://github.com/0sec-labs/0security/blob/main/.github/SECURITY.md).
 
 ## What next
 

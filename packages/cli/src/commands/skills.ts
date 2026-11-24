@@ -53,7 +53,7 @@ async function resolveSkill(client: ConsoleClient, reference: string): Promise<s
   const named = rows.filter(row => row.name === reference);
   if (named.length === 1) return named[0]!.id;
   if (named.length > 1) throw new Error(`Several skills are named ${reference}; use one of: ${named.map(row => row.id).join(", ")}.`);
-  throw new Error(`No skill matches ${reference}. See \`0 skills list\`.`);
+  throw new Error(`No skill matches ${reference}. See \`0security skills list\`.`);
 }
 
 const listSkills = async (io: CommandIo, options: OutputOptions) => runConsole(io, options, async client => {
@@ -121,7 +121,7 @@ export function registerSkillsCommand(program: Command, io: CommandIo = defaultI
     emit(io, options, { mount }, () => `Linked ${String(mount.path)} (${String(mount.id)}).`);
   }));
 
-  consoleOptions(skills.command("unlink <id>").description("Unlink a folder by its link id (see `0 skills list --json`)")).action((id: string, options: OutputOptions) => run(options, async client => {
+  consoleOptions(skills.command("unlink <id>").description("Unlink a folder by its link id (see `0security skills list --json`)")).action((id: string, options: OutputOptions) => run(options, async client => {
     expectOk(await client.request("DELETE", `/api/skills/mounts/${encodeURIComponent(id)}`));
     emit(io, options, { ok: true, id }, () => `Unlinked ${id}.`);
   }));

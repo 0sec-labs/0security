@@ -136,7 +136,7 @@ export function renderFixReportMarkdown(report: FixOutcomeReport): string {
       : ["- Merged, closed and edited: not measured. Run again with --check-merged to ask the code host."]),
     "", "## Fixes", "",
   ];
-  if (!report.fixes.length) return `${out.join("\n")}No fix outcomes are recorded yet. Run 0 findings burndown first.\n`;
+  if (!report.fixes.length) return `${out.join("\n")}No fix outcomes are recorded yet. Run 0security findings burndown first.\n`;
   out.push("| Finding | Severity | Title | Result | Pull request | Draft | Checks | Cost | State | Recorded |", "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
   for (const r of report.fixes) {
     out.push(`| ${cell(shortFindingId(r.finding))} | ${cell(r.severity)} | ${cell(r.title)} | ${cell(r.result)} | ${cell(r.pullRequestUrl ?? r.branch)} | ${r.draft === null ? "-" : r.draft ? "yes" : "no"} | ${r.checksPassing === null ? "-" : r.checksPassing ? "passed" : "failed"} | ${r.costUsd === null ? "-" : `$${r.costUsd.toFixed(4)}`} | ${cell(r.pullRequest ? `${r.pullRequest.state}${r.pullRequest.editedAfterOpening ? ", edited" : ""}` : report.checkedMerged ? "-" : "not checked")} | ${cell(r.recordedAt.slice(0, 19))} |`);
@@ -192,7 +192,7 @@ export function registerFindingsExportFixesCommand(parent: Command, deps: Export
     .option("--check-merged", "Ask the code host whether each pull request was merged, closed or edited (one request each)")
     .option("-o, --output <dir>", "Write fix-outcomes.md and fix-outcomes.json into this folder instead of printing")
     .addOption(new Option("--format <format>", "Printed output: markdown or json").choices(["markdown", "json"]).default("markdown"))
-    .addHelpText("after", "\nIt reads ~/.0/burndown.json, so it covers fixes made by 0 findings burndown. Finding evidence is never included.")
+    .addHelpText("after", "\nIt reads ~/.0/burndown.json, so it covers fixes made by 0security findings burndown. Finding evidence is never included.")
     .action(async (options: ExportFixesOptions) => {
       try { await runExportFixes(options, deps); }
       catch (error) { finishWithError(error, deps, options.format === "json"); }

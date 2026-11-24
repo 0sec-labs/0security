@@ -40,10 +40,10 @@ export function loadable(store: ExtensionStore, projectKey: string | null, secre
   const out: LoadResult = { extensions: [], builtins: BUILTIN_EXTENSIONS.filter(b => state.value.builtins[b.name]?.enabled !== false).map(b => b.name), refused: [] };
   for (const entry of Object.values(state.value.extensions)) {
     if (entry.legacy) { if (isEnabledFor(entry, projectKey)) out.refused.push({ name: entry.name, code: "legacy", reason: entry.legacy.reason }); continue; }
-    if (entry.sealBroken) { out.refused.push({ name: entry.name, code: "not_approved", reason: "its approval record did not verify (edited by hand or never sealed): approve it again with `0 skills extensions enable --yes`" }); continue; }
+    if (entry.sealBroken) { out.refused.push({ name: entry.name, code: "not_approved", reason: "its approval record did not verify (edited by hand or never sealed): approve it again with `0security skills extensions enable --yes`" }); continue; }
     if (!isEnabledFor(entry, projectKey) || !entry.active) continue;
     const record = entry.revisions[entry.active];
-    if (!record?.approvedAt) { out.refused.push({ name: entry.name, code: "not_approved", reason: "not approved: re-approve it with `0 skills extensions enable --yes`" }); continue; }
+    if (!record?.approvedAt) { out.refused.push({ name: entry.name, code: "not_approved", reason: "not approved: re-approve it with `0security skills extensions enable --yes`" }); continue; }
     const files = readVerified(store, entry, entry.active);
     if (!files.ok) { out.refused.push({ name: entry.name, code: files.error.code === "tampered" ? "tampered" : "missing", reason: files.error.message }); continue; }
     const manifest = parseManifest(files.value, { fallbackName: entry.name });

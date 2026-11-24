@@ -3,7 +3,7 @@ title: Server mode and Docker
 description: Run one-shot prompts from the 0 container image, or run the app on a server for a team (experimental, single node).
 ---
 
-The 0 container image runs one-shot prompts, or the web console on a server for a team. The image is Linux amd64 only. Its entry point is the `0` CLI, so arguments after the image name are `0` arguments. With no arguments it starts the web console (see [Run the app on a server](#run-the-app-on-a-server-experimental-single-node)).
+The 0 container image runs one-shot prompts, or the web console on a server for a team. The image is Linux amd64 only. Its entry point is the `0security` CLI, so arguments after the image name are `0security` arguments. With no arguments it starts the web console (see [Run the app on a server](#run-the-app-on-a-server-experimental-single-node)).
 
 ## One-shot prompts
 
@@ -92,7 +92,7 @@ Open the address and enter the access token. If you left `ZERO_ACCESS_TOKEN` emp
 
 ### Server mode flags
 
-`0 --host 0.0.0.0 --server-mode` is the image default. A plain `0` binds loopback only.
+`0security --host 0.0.0.0 --server-mode` is the image default. A plain `0security` binds loopback only.
 
 | Flag | Environment | Purpose |
 |---|---|---|
@@ -146,7 +146,7 @@ The container never updates itself. On Docker, the console's update card shows `
 
 ### Remote computers over SSH
 
-The image includes the OpenSSH client. Settings or `0 computers add --ssh user@host` can install and connect a [remote computer](/computers/) from inside the container. Host key checking stays on, so the remote host must already be in `known_hosts`.
+The image includes the OpenSSH client. Settings or `0security computers add --ssh user@host` can install and connect a [remote computer](/computers/) from inside the container. Host key checking stays on, so the remote host must already be in `known_hosts`.
 
 1. Create a dedicated key without a passphrase, because the deploy runs non-interactively. Add `zero_ed25519.pub` to the remote user's `authorized_keys`.
 
@@ -218,9 +218,9 @@ The audit log records privileged actions: settings changes, extension installs, 
 Export a day of events as NDJSON, CEF or RFC 5424 syslog lines:
 
 ```bash
-0 config audit-export --since 24h
-0 config audit-export --format cef --type extension -o audit.cef
-0 config audit-export --format syslog --follow
+0security config audit-export --since 24h
+0security config audit-export --format cef --type extension -o audit.cef
+0security config audit-export --format syslog --follow
 ```
 
 Events print oldest first. `--since` and `--until` take a duration such as `24h` or `7d`, or a date. `--type` takes an action or a prefix, so `extension` matches `extension.install`. `--limit` keeps the newest events. `-o` writes a file only you can read. `--follow` keeps printing new events until you press Ctrl+C. Flags are in [config audit-export](/commands/#config-audit-export).
@@ -246,7 +246,7 @@ The sink sends events in batches every two seconds. It retries a failed batch fi
 audit sink https://siem.example.com: sent 120, dropped 3, last error: collector answered HTTP 503
 ```
 
-The sink starts after the newest event when the server starts. Use `0 config audit-export --since` to load earlier history. A restart can lose events written while the server was down. The log keeps the newest 50,000 events.
+The sink starts after the newest event when the server starts. Use `0security config audit-export --since` to load earlier history. A restart can lose events written while the server was down. The log keeps the newest 50,000 events.
 
 #### Event fields
 
@@ -319,9 +319,9 @@ In the browser app, choose **Team**, then enter a workspace name, your display n
 From a terminal:
 
 ```bash
-0 config set team init --config ./team.json --name "Security" --owner alex --display-name "Alex"
-0 config set team add-user --config ./team.json --user morgan --display-name "Morgan" --role editor
-0 config get team --config ./team.json
+0security config set team init --config ./team.json --name "Security" --owner alex --display-name "Alex"
+0security config set team add-user --config ./team.json --user morgan --display-name "Morgan" --role editor
+0security config get team --config ./team.json
 0 --team-config ./team.json
 ```
 

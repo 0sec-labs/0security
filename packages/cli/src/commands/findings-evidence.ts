@@ -119,13 +119,13 @@ export function fixBranches(records: EvidenceFindingRecord[], repo: string, git:
 
 export function fixesMarkdown(records: EvidenceFindingRecord[], repo: string | undefined, git: EvidenceDeps["git"]): string {
   const lines = ["# Fix branches", ""];
-  if (!repo) return `${[...lines, "No repository was given (`--repo <folder>`), so no fix branches were looked up.", "", "`0` does not store pull request links in the findings database. Branches made by `0 findings fix` are named `0/fix-<12 hex characters>`; pass the repository to list the ones that exist there."].join("\n")}\n`;
+  if (!repo) return `${[...lines, "No repository was given (`--repo <folder>`), so no fix branches were looked up.", "", "`0security` does not store pull request links in the findings database. Branches made by `0security findings fix` are named `0/fix-<12 hex characters>`; pass the repository to list the ones that exist there."].join("\n")}\n`;
   const { found, gitUsable } = fixBranches(records, repo, git);
   if (!gitUsable) return `${[...lines, "The folder given as `--repo` is not a git repository, or git is not available, so no fix branches were looked up."].join("\n")}\n`;
-  lines.push("Branches in the repository, as seen by git on this machine, that `0 findings fix` would have made for one of the findings. A branch is a record that a fix was attempted. It does not show that the fix is correct, was reviewed or was merged.", "");
+  lines.push("Branches in the repository, as seen by git on this machine, that `0security findings fix` would have made for one of the findings. A branch is a record that a fix was attempted. It does not show that the fix is correct, was reviewed or was merged.", "");
   if (!found.length) lines.push("None found. A fix branch may exist in a clone this machine does not have, or no fix was started.");
   else lines.push("| Finding | Branch | Commit | Last commit | Subject |", "| --- | --- | --- | --- | --- |", ...found.map(f => `| \`${f.finding.id}\` ${cell(f.finding.title)} | \`${f.ref}\` | \`${f.commit.slice(0, 12)}\` | ${cell(f.date)} | ${cell(f.subject)} |`));
-  lines.push("", "`0` does not store pull request links in the findings database. Look the branch up on your code host to find its pull request and its review.");
+  lines.push("", "`0security` does not store pull request links in the findings database. Look the branch up on your code host to find its pull request and its review.");
   return `${lines.join("\n")}\n`;
 }
 
@@ -161,7 +161,7 @@ function readme(args: { version: string; generatedAt: string; commit: string | n
     row("findings.sarif", "The findings as SARIF 2.1.0 for code scanning tools and auditors.", "Scan coverage. Which files and checks were never looked at is not in this file."),
     row("sbom.cdx.json", args.hasSbom ? "A CycloneDX component list read from the lockfiles in the repository." : `Not written. ${args.sbomNote}`, "What is actually deployed. It is read from lockfiles as text, so it misses vendored code, system packages and anything built outside a lockfile. Nothing was installed or run."),
     row("advisories.json", args.advisories === "checked" ? "Known advisories for the SBOM components, from the public OSV database on the date above." : "Not written (`--check-advisories` was not passed).", "Vulnerabilities published after that date, or ones no database knows. An empty result is not a clean bill of health."),
-    row("fixes.md", "Fix branches that exist in the repository for these findings.", "That a fix is correct, reviewed, merged or released. Pull request links are not stored by `0` and are not listed."),
+    row("fixes.md", "Fix branches that exist in the repository for these findings.", "That a fix is correct, reviewed, merged or released. Pull request links are not stored by `0security` and are not listed."),
     "",
     "## Checksums",
     "",
@@ -173,7 +173,7 @@ function readme(args: { version: string; generatedAt: string; commit: string | n
     "",
     "- Read it. Scanner output and model-written text can be wrong.",
     "- Obligations on manufacturers (vulnerability handling, reporting, technical documentation) are wider than this folder. Confirm the current requirements with your legal and compliance advisers.",
-    "- If something here is an actively exploited vulnerability, the reporting duty is yours. `0 findings report-draft` writes a draft; a person reviews and submits it.",
+    "- If something here is an actively exploited vulnerability, the reporting duty is yours. `0security findings report-draft` writes a draft; a person reviews and submits it.",
   ].join("\n")}\n`;
 }
 

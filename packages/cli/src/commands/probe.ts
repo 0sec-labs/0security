@@ -99,7 +99,7 @@ export async function runProbe(url: string, options: ProbeOptions, deps: ProbeDe
   if (!isReportExportFormat(format)) throw new UsageError(`--format must be one of: ${FORMATS.join(", ")}.`);
   const body = options.format === "json" ? `${JSON.stringify(report, null, 2)}\n` : (await exportReport(report, format, `0-probe-${host}`)).body;
   if (options.output) { const bytes = typeof body === "string" ? new TextEncoder().encode(body) : body; deps.writeBytes(resolve(options.output), bytes); deps.err(`Wrote ${options.output} (${bytes.byteLength} bytes)`); } else deps.out(body);
-  if (options.save && deps.save && findings.length) deps.err(`saved ${findings.length} findings as ${deps.save(url, findings).slice(0, 8)}; see \`0 findings list\``);
+  if (options.save && deps.save && findings.length) deps.err(`saved ${findings.length} findings as ${deps.save(url, findings).slice(0, 8)}; see \`0security findings list\``);
   deps.err(`${findings.length} of ${probes.length} probes got the attack through (${run.requests} requests)`);
   if (options.failOn && findings.some(finding => SEVERITIES.indexOf(finding.severity as typeof SEVERITIES[number]) <= SEVERITIES.indexOf(options.failOn as typeof SEVERITIES[number]))) return 1;
   return 0;
@@ -123,7 +123,7 @@ export function registerProbeCommand(program: Command, deps: ProbeDeps = default
     .option("--format <format>", `Report format: ${FORMATS.join(", ")}`, "md")
     .option("-o, --output <file>", "Write the report to a file instead of stdout")
     .option("--fail-on <severity>", "Exit 1 when a finding is at or above this severity")
-    .option("--save", "Also store the findings, so they show in `0 findings list`")
+    .option("--save", "Also store the findings, so they show in `0security findings list`")
     .addHelpText("after", "\nA hit means the reply shows the endpoint did what the attacker asked. Exit codes: 0 done, 1 a finding at or above --fail-on, 2 usage error or the endpoint could not be reached.\nResponses are read as JSON or plain text; streamed event responses are supported for chat completions.")
     .action(async (url: string, options: ProbeOptions) => {
       try { const code = await runProbe(url, options, deps); if (code) process.exitCode = code; }

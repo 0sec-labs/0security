@@ -149,7 +149,7 @@ try {
   assert.equal((await api('diagnostics/report', 'POST', { ...report, name: 'RangeError' })).status, 202);
   const doctorEnv = { ...env, ZERO_SENTRY_DSN: dsn };
   const doctor = spawnSync(process.execPath, [cli, 'config', 'doctor'], { cwd: workspace, env: doctorEnv, encoding: 'utf8', timeout: 30000 });
-  assert.match(doctor.stdout, /1 crash report is waiting for review: open the web console .* 0 config doctor --discard-reports/);
+  assert.match(doctor.stdout, /1 crash report is waiting for review: open the web console .* 0security config doctor --discard-reports/);
   const discard = spawnSync(process.execPath, [cli, 'config', 'doctor', '--discard-reports'], { cwd: workspace, env: doctorEnv, encoding: 'utf8', timeout: 30000 });
   assert.equal(discard.status, 0, discard.stderr);
   assert.match(discard.stdout, /Discarded 1 crash report\. Nothing was sent\./);

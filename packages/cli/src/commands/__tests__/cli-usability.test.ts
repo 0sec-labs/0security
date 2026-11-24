@@ -65,7 +65,7 @@ describe("CLI usability", () => {
 
   it("validation errors from the engine read as one line, a missing thread says where to look", () => {
     expect(readableError(JSON.stringify([{ path: ["automationIds", 0], message: "Too small" }, { message: "Bad" }]))).toBe("automationIds.0: Too small; Bad");
-    expect(readableError("Console thread was not found.")).toBe("Thread not found. List threads with `0 threads list`.");
+    expect(readableError("Console thread was not found.")).toBe("Thread not found. List threads with `0security threads list`.");
     expect(readableError("[not json")).toBe("[not json");
   });
 
@@ -75,7 +75,7 @@ describe("CLI usability", () => {
     program.configureOutput({ getOutHelpWidth: () => 100 });
     const help = program.helpInformation();
     expect(help).toMatch(/-p, --print <prompt>/);
-    expect(help).toMatch(/Examples:\n {2}0 -p /);
+    expect(help).toMatch(/Examples:\n {2}0security -p /);
   });
 });
 

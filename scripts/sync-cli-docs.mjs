@@ -8,21 +8,21 @@ const referencePath = resolve(root, "docs/src/content/docs/commands.md");
 
 // These are reviewed corrections to registered help, not generated prose.
 const optionDescriptions = new Map([
-  ["0 scan web|--dry-run", "For --emit pr only: print proposed git/gh emission commands. The scan itself still executes."],
-  ["0 scan source|--dry-run", "For --emit pr only: print proposed git/gh emission commands. The source review itself still executes."],
-  ["0 scan web|--cost-ceiling", "Soft estimated-model-cost ceiling; partial findings are retained when enforcement trips. In-flight work may overshoot. Overrides ZERO_COST_CEILING_USD."],
-  ["0 scan package|--cost-ceiling", "Soft estimated-model-cost ceiling; partial findings are retained when enforcement trips. In-flight work may overshoot. Overrides ZERO_COST_CEILING_USD."],
-  ["0 scan source|--cost-ceiling", "Soft estimated-model-cost ceiling; partial findings are retained when enforcement trips. In-flight work may overshoot. Overrides ZERO_COST_CEILING_USD."],
-  ["0 scan deep|--cost-ceiling", "Shared estimated-model-cost ceiling for planner and finder work. Checks can stop further work after recorded usage reaches the threshold; in-flight calls can overshoot."],
-  ["0 scan source|--target", "Alias for --profile; accepts the supported review profiles, with app normalized to default."],
-  ["0 api|--method", "GET, POST, PATCH, PUT, DELETE or HEAD. Mutations require an explicit method and remain subject to engine authorization and approvals."],
-  ["0 api|--engine", "Select an operator-registered HTTP engine; cannot be combined with --engine-url."],
-  ["0 api|--engine-url", "Attach directly to a trusted HTTP engine; requires --engine-token-env and cannot be combined with registered-engine options."],
-  ["0 api|--engine-token-env", "Name of the environment variable holding the engine bearer credential, not the credential itself. Required with --engine-url."],
+  ["0security scan web|--dry-run", "For --emit pr only: print proposed git/gh emission commands. The scan itself still executes."],
+  ["0security scan source|--dry-run", "For --emit pr only: print proposed git/gh emission commands. The source review itself still executes."],
+  ["0security scan web|--cost-ceiling", "Soft estimated-model-cost ceiling; partial findings are retained when enforcement trips. In-flight work may overshoot. Overrides ZERO_COST_CEILING_USD."],
+  ["0security scan package|--cost-ceiling", "Soft estimated-model-cost ceiling; partial findings are retained when enforcement trips. In-flight work may overshoot. Overrides ZERO_COST_CEILING_USD."],
+  ["0security scan source|--cost-ceiling", "Soft estimated-model-cost ceiling; partial findings are retained when enforcement trips. In-flight work may overshoot. Overrides ZERO_COST_CEILING_USD."],
+  ["0security scan deep|--cost-ceiling", "Shared estimated-model-cost ceiling for planner and finder work. Checks can stop further work after recorded usage reaches the threshold; in-flight calls can overshoot."],
+  ["0security scan source|--target", "Alias for --profile; accepts the supported review profiles, with app normalized to default."],
+  ["0security api|--method", "GET, POST, PATCH, PUT, DELETE or HEAD. Mutations require an explicit method and remain subject to engine authorization and approvals."],
+  ["0security api|--engine", "Select an operator-registered HTTP engine; cannot be combined with --engine-url."],
+  ["0security api|--engine-url", "Attach directly to a trusted HTTP engine; requires --engine-token-env and cannot be combined with registered-engine options."],
+  ["0security api|--engine-token-env", "Name of the environment variable holding the engine bearer credential, not the credential itself. Required with --engine-url."],
 ]);
 
 const argumentDescriptions = new Map([
-  ["0 api|path", "Admitted /api/ route; defaults to /api/backend/handshake."],
+  ["0security api|path", "Admitted /api/ route; defaults to /api/backend/handshake."],
 ]);
 
 const escapeTable = (value) => String(value ?? "")
@@ -75,7 +75,7 @@ function updateTable(section, heading, replacement, additions) {
 /** Update mechanical contracts only; preserve descriptions, guides, and safety notes. */
 export function syncReference(text, program) {
   const commands = collect(program);
-  const byHeading = new Map(commands.map((command) => [commandPath(command).replace(/^0 /, ""), command]));
+  const byHeading = new Map(commands.map((command) => [commandPath(command).replace(/^0security /, ""), command]));
   const seen = new Set();
   const errors = [];
   // Each heading owns its body only. Human-written nested sections stay untouched.
@@ -85,7 +85,7 @@ export function syncReference(text, program) {
     if (!heading) return part;
     const command = byHeading.get(heading);
     if (!command) {
-      if (/^```text\n0 /m.test(part)) errors.push(`Removed or renamed command section: ${heading}`);
+      if (/^```text\n0security /m.test(part)) errors.push(`Removed or renamed command section: ${heading}`);
       return part;
     }
     if (seen.has(heading)) errors.push(`Duplicate command section: ${heading}`);
@@ -94,18 +94,18 @@ export function syncReference(text, program) {
       const name = arg.name() + (arg.variadic ? "..." : "");
       return arg.required ? `<${name}>` : `[${name}]`;
     });
-    const usage = [commandPath(command).replace(/^0(?= |$)/, "0"), ...(command.options.some((option) => !isRenamedAlias(option)) ? ["[options]"] : []), ...args].join(" ");
-    if (!/^```text\n0 [^\n]*\n```/m.test(part)) {
+    const usage = [commandPath(command), ...(command.options.some((option) => !isRenamedAlias(option)) ? ["[options]"] : []), ...args].join(" ");
+    if (!/^```text\n0security [^\n]*\n```/m.test(part)) {
       errors.push(`Missing usage block: ${heading}`);
       return part;
     }
-    let section = part.replace(/^```text\n0 [^\n]*\n```/m, () => `\`\`\`text\n${usage}\n\`\`\``);
+    let section = part.replace(/^```text\n0security [^\n]*\n```/m, () => `\`\`\`text\n${usage}\n\`\`\``);
     const additions = [];
     section = updateTable(section, "Argument", argumentTable(command), additions);
     section = updateTable(section, "Option", optionTable(command), additions);
     const aliases = command.aliases().length ? `Aliases: ${command.aliases().map((alias) => `\`${alias}\``).join(", ")}.\n` : "";
     const children = command.commands.length ? `Subcommands: ${command.commands.map((child) => {
-      const path = commandPath(child).replace(/^0 /, "");
+      const path = commandPath(child).replace(/^0security /, "");
       return `[${child.name()}](#${path.replaceAll(" ", "-")})`;
     }).join(" · ")}.\n` : "";
     for (const [label, value] of [["Aliases", aliases], ["Subcommands", children]]) {
@@ -131,7 +131,9 @@ async function main() {
   const requireCli = createRequire(resolve(root, "packages/cli/package.json"));
   const { Command } = requireCli("commander");
   const registrations = await import("../packages/cli/dist/commands/index.js");
-  const program = new Command().name("0");
+  // The docs name the command `0security`; `0` is only its short alias.
+  process.env["ZERO_PROGRAM_NAME"] ??= "0security";
+  const program = new Command().name("0security");
   registrations.registerCommandTree(program);
   if (!program.commands.length) throw new Error("CLI registration produced no commands");
   const current = readFileSync(referencePath, "utf8");

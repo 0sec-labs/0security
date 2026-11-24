@@ -32,7 +32,7 @@ function operatorOnly(io: CommandIo, options: OutputOptions, what: string): bool
 function ensureImported(svc: ExtensionService, io: CommandIo, options: OutputOptions): void {
   const r = svc.importer.run();
   if (r.ok && !r.value.alreadyDone && (r.value.migrated.length || r.value.notMigrated.length) && !options.json) {
-    io.err(`Imported ${r.value.migrated.length} item(s) from your earlier setup; ${r.value.notMigrated.length} could not be migrated. See \`0 skills extensions import --report\`.`);
+    io.err(`Imported ${r.value.migrated.length} item(s) from your earlier setup; ${r.value.notMigrated.length} could not be migrated. See \`0security skills extensions import --report\`.`);
   }
 }
 
@@ -60,7 +60,7 @@ async function reviewAndCommit(svc: ExtensionService, io: CommandIo, options: Op
   if (options.yes !== true && canAskOperator(options) && (pinnedInput || p.snapshot.source.type !== "git")) {
     showPrompt(io, options, p, "");
     if (!await confirmAtTerminal()) { io.err("Not installed."); io.setExitCode(EXIT_USAGE); return; }
-  } else if (options.yes !== true) { showPrompt(io, options, p, p.snapshot.source.type === "git" && !pinnedInput ? `Re-run with \`0 skills add ${source}@${p.prompt.revision} --yes\` to install this exact revision.` : `Re-run with --yes to install this exact revision (${p.prompt.revision}).`); io.setExitCode(EXIT_USAGE); return; }
+  } else if (options.yes !== true) { showPrompt(io, options, p, p.snapshot.source.type === "git" && !pinnedInput ? `Re-run with \`0security skills add ${source}@${p.prompt.revision} --yes\` to install this exact revision.` : `Re-run with --yes to install this exact revision (${p.prompt.revision}).`); io.setExitCode(EXIT_USAGE); return; }
   const isSkill = p.prompt.format === "skill-folder";
   if (!operatorOnly(io, options, isSkill ? "install a skill" : "install an extension")) return;
   if (!pinnedInput && p.snapshot.source.type === "git") return fail(io, options, `Refusing to install an unpinned commit with --yes. Pin it: ${source}@${p.prompt.revision}`, EXIT_USAGE);
@@ -76,12 +76,12 @@ async function reviewAndCommit(svc: ExtensionService, io: CommandIo, options: Op
       `Installed skill ${installed.name} at ${installed.revision.slice(0, 12)}${enableOption ? " and enabled it" : ""}.`,
       `Id: ${skillId}`,
       `Files: ${p.prompt.files.length}${scripts.length ? `; scripts: ${scripts.join(", ")}` : ""}`,
-      `The text of its SKILL.md is instructions the model follows when you run \`0 scan . --skill ${installed.name}\`. Read it first.`,
+      `The text of its SKILL.md is instructions the model follows when you run \`0security scan . --skill ${installed.name}\`. Read it first.`,
       "Bundled scripts do not run when the skill loads. The model can run one only after you approve it.",
     ].join("\n"));
     return;
   }
-  emit(io, options, { installed: true, name: installed.name, revision: installed.revision, enabled: Boolean(enableOption) }, () => `Installed extension ${installed.name} at ${installed.revision.slice(0, 12)}.${options.enable ? "" : ` Not enabled: \`0 skills extensions enable ${installed.name}\`.`}`);
+  emit(io, options, { installed: true, name: installed.name, revision: installed.revision, enabled: Boolean(enableOption) }, () => `Installed extension ${installed.name} at ${installed.revision.slice(0, 12)}.${options.enable ? "" : ` Not enabled: \`0security skills extensions enable ${installed.name}\`.`}`);
 }
 
 /** Returns "not-extension" (and prints nothing) when a bare owner/repo has no extension or skill layout, so the caller can try the catalog flow. */
@@ -96,9 +96,9 @@ export async function addExtension(io: CommandIo, source: string, options: Optio
 }
 
 export function registerExtensionCommands(skills: Command, io: CommandIo): void {
-  const ext = skills.command("extensions").description("Extensions that connect 0 to your tools and services: list, info, enable, disable, update, remove (install with `0 skills add`)");
+  const ext = skills.command("extensions").description("Extensions that connect 0 to your tools and services: list, info, enable, disable, update, remove (install with `0security skills add`)");
 
-  consoleOptions(ext.command("add <source>").description("Add an extension (a connection, MCP server or rules): <url|owner/repo|folder>@<full sha>; same as `0 skills add`").option("--preview", "Only show the install prompt").option("--yes", "Install the exact revision shown").option("--enable", "Also enable it").option("--project <dir>", "With --enable: enable for this folder only"))
+  consoleOptions(ext.command("add <source>").description("Add an extension (a connection, MCP server or rules): <url|owner/repo|folder>@<full sha>; same as `0security skills add`").option("--preview", "Only show the install prompt").option("--yes", "Install the exact revision shown").option("--enable", "Also enable it").option("--project <dir>", "With --enable: enable for this folder only"))
     .action(async (source: string, options: Options) => { await addExtension(io, source, options); });
 
   consoleOptions(ext.command("mcp <name> [command...]").description("Add one MCP server as a local extension: `mcp docs --url https://host/mcp` or `mcp docs -- npx -y some-mcp`; shows the same prompt first").option("--url <https-url>", "A remote server instead of a command").option("--preview", "Only show the install prompt").option("--yes", "Install the exact revision shown").option("--enable", "Also enable it").option("--project <dir>", "With --enable, enable for this folder only"))

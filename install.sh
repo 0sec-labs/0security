@@ -178,10 +178,10 @@ if [ "${INSTALL_FOXGUARD:-1}" != "0" ]; then
         fg_binary=""
         printf '%s\n' "Installed verified FoxGuard to ${INSTALL_DIR}/foxguard" >&2
       else
-        printf '%s\n' "0 installer: FoxGuard checksum mismatch; keeping 0 installed without the companion" >&2
+        printf '%s\n' "0 installer: FoxGuard checksum mismatch; keeping 0security installed without the companion" >&2
       fi
     else
-      printf '%s\n' "0 installer: FoxGuard download failed; keeping 0 installed without the companion" >&2
+      printf '%s\n' "0 installer: FoxGuard download failed; keeping 0security installed without the companion" >&2
     fi
   fi
 fi
@@ -194,9 +194,9 @@ add_path() {
   profile="$1"
   if ! grep -Fqx "$path_line" "$profile" 2>/dev/null; then
     if printf '\n# 0.security CLI\n%s\n' "$path_line" >> "$profile"; then
-      printf '%s\n' "Added 0 to PATH in ${profile}" >&2
+      printf '%s\n' "Added 0security to PATH in ${profile}" >&2
     else
-      printf '%s\n' "Could not update ${profile}; add 0 to PATH manually" >&2
+      printf '%s\n' "Could not update ${profile}; add 0security to PATH manually" >&2
     fi
   fi
 }
@@ -212,5 +212,5 @@ case "${SHELL:-/bin/bash}" in
 esac
 case ":${PATH}:" in
   *":${INSTALL_DIR}:"*) ;;
-  *) printf '\n%s\n%s\n' "To use 0 in this terminal, run:" "$path_line" >&2 ;;
+  *) printf '\n%s\n%s\n' "To use 0security in this terminal, run:" "$path_line" >&2 ;;
 esac

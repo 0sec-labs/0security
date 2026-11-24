@@ -8,9 +8,9 @@ There are three surfaces. The CLI and CI are the engine and the open-source surf
 
 | Job | CLI and CI | Chat (a thread) | Platform |
 | --- | --- | --- | --- |
-| Run a scan, a diff scan, a policy check | Yes: `0 scan`, the Action | Start one with `/scan` | Not the place to start one |
-| Import other tools' findings | Yes: `0 findings import`, `--known` | Ask about one finding | Not the place |
-| Fix a finding and open a pull request | Yes: `0 findings fix` | Steer one fix | Not the place |
+| Run a scan, a diff scan, a policy check | Yes: `0security scan`, the Action | Start one with `/scan` | Not the place to start one |
+| Import other tools' findings | Yes: `0security findings import`, `--known` | Ask about one finding | Not the place |
+| Fix a finding and open a pull request | Yes: `0security findings fix` | Steer one fix | Not the place |
 | Evidence, SBOM, reports | Yes | Ask for a different cut of one scan | Show them |
 | Investigate one scan: why, is it real, what next | Prints the report | Yes | Link to the thread |
 | Steer one scan: what to weigh, what to skip | Flags and `--context` | Yes | No |
@@ -39,6 +39,6 @@ The platform does not run a scan on its own terms and does not become the only w
 
 ## Tiers as an example
 
-The tier map decides how much a repository is scanned. Today it is an operator-owned file read by `0 scan --tiers`. That is the CLI-first form: it works in CI, and the file comes from the base branch, not from the change under review. A platform that manages tiers for an organisation would write and version that same file; it would not add a second source of truth.
+The tier map decides how much a repository is scanned. Today it is an operator-owned file read by `0security scan --tiers`. That is the CLI-first form: it works in CI, and the file comes from the base branch, not from the change under review. A platform that manages tiers for an organisation would write and version that same file; it would not add a second source of truth.
 
 The platform pages for policy, tier and ownership management are not built. This note is the direction, not a description of shipped behavior.

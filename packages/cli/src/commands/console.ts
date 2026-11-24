@@ -107,13 +107,13 @@ export function registerConsoleCommand(program: Command): void {
     .description(
       "Run one prompt headless and print only the answer. Exit codes: 0 answered, 1 the turn failed, 2 usage error.",
     )
-    .configureHelp({ commandUsage: () => '0 -p "<prompt>" [options]' })
+    .configureHelp({ commandUsage: () => '0security -p "<prompt>" [options]' })
     .addHelpText("after", `
 Examples:
-  0 -p "Review ./app for injection bugs"
-  git diff | 0 -p "Review this diff"
-  0 -p "List the open findings" --format json
-  0 -c -p "Now fix the first one"
+  0security -p "Review ./app for injection bugs"
+  git diff | 0security -p "Review this diff"
+  0security -p "List the open findings" --format json
+  0security -c -p "Now fix the first one"
 `)
     .option("--engine-url <url>", "Attach directly to a running trusted engine")
     .option("--engine-token-env <name>", "Environment variable holding the engine token")
@@ -134,7 +134,7 @@ Examples:
     .option("--max-tool-calls <n>", "Optional tool-call round limit per message (unlimited by default)")
     .option("-r, --resume [id]", "With a headless prompt, reopen a saved chat by id or unique prefix; use browser history for a picker.")
     .option("-c, --continue", "With a headless prompt, continue the most recent saved console chat.")
-    .option("-p, --print [prompt]", "Non-interactive: run ONE prompt through the engine, print the result, and exit. Reads the prompt from the argument or piped stdin. Combine with --continue/--resume to query a saved session. Also reachable as `0 -p <prompt>`.")
+    .option("-p, --print [prompt]", "Non-interactive: run ONE prompt through the engine, print the result, and exit. Reads the prompt from the argument or piped stdin. Combine with --continue/--resume to query a saved session. Also reachable as `0security -p <prompt>`.")
     .action(async (opts: ConsoleOptions) => {
       if (opts.json && opts.format === "text") opts.format = "json";
       if (opts.folder !== undefined) {
@@ -157,7 +157,7 @@ Examples:
         return;
       }
       if (opts.print === undefined) {
-        console.error("Headless use needs a prompt: 0 -p \"<prompt>\" (add -c to continue the last thread, or --resume <id>). To open the console, run 0 (no account required).");
+        console.error("Headless use needs a prompt: 0security -p \"<prompt>\" (add -c to continue the last thread, or --resume <id>). To open the console, run 0security (no account required).");
         process.exitCode = 2;
         return;
       }
@@ -239,14 +239,14 @@ Examples:
             stored = recent ? loadSession(recent.id) : null;
           }
           if (!stored) {
-            console.error(chalk.red(idArg ? `No saved thread matches '${idArg}'.` : "No saved thread to continue. Start one with 0 -p \"<prompt>\"."));
+            console.error(chalk.red(idArg ? `No saved thread matches '${idArg}'.` : "No saved thread to continue. Start one with 0security -p \"<prompt>\"."));
             process.exitCode = 1;
             return;
           }
           resumeMessages = stored.messages;
           resumedModel = stored.model;
         } else {
-          console.error("--resume needs a thread id: 0 --resume <id> -p \"<prompt>\". Run 0 to browse saved threads.");
+          console.error("--resume needs a thread id: 0security --resume <id> -p \"<prompt>\". Run 0security to browse saved threads.");
           process.exitCode = 2;
           return;
         }
@@ -283,7 +283,7 @@ Examples:
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           console.error(chalk.red(/No provider credential found/i.test(message)
-            ? "No model is connected. Run `0 models connect` to see providers, or export ANTHROPIC_API_KEY (or another provider key)."
+            ? "No model is connected. Run `0security models connect` to see providers, or export ANTHROPIC_API_KEY (or another provider key)."
             : message));
           process.exitCode = 2;
           return;

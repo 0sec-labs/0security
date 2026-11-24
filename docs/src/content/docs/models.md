@@ -7,7 +7,7 @@ description: Connect a model provider, choose models per role and control how 0 
 
 ## Connect in the browser
 
-1. Run `0` and open **Settings → Models**.
+1. Run `0security` and open **Settings → Models**.
 2. Pick a provider. Paste an API key or follow its sign-in flow.
 3. Pick a **Default model**, or keep the one 0 chooses for a new connection.
 
@@ -19,7 +19,7 @@ Export a provider key, then run any command:
 
 ```bash
 export ANTHROPIC_API_KEY="sk-ant-..."
-0 -p "Review ./your-repo for injection bugs"
+0security -p "Review ./your-repo for injection bugs"
 ```
 
 | Provider | Environment |
@@ -41,7 +41,7 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 Check what 0 found:
 
 ```bash
-0 config doctor
+0security config doctor
 ```
 
 It prints the CLI version, runtime and Node.js check, then the status of each API provider: `configured`, `bad` (found but unusable, with the reason) or `missing`. It also lists any `claude`, `codex` and `gemini` CLIs on your `PATH`. A provider marked configured has a key, but 0 does not test it until the first request.
@@ -114,7 +114,7 @@ export OPENAI_API_KEY="your-litellm-key"
 export ZERO_SELECTED_PROVIDER="openai"
 export ZERO_MODEL="claude-bedrock"
 export ZERO_NO_TELEMETRY=1
-0 -p "Review ./authorized-repo"
+0security -p "Review ./authorized-repo"
 ```
 
 - Set `ZERO_MODEL` to the proxy's `model_name`, not the Bedrock ID.
@@ -198,7 +198,7 @@ Together model IDs look like other providers' IDs (`Qwen/...`, `deepseek-ai/...`
 env ZERO_SELECTED_PROVIDER=together ZERO_MODEL=openai/gpt-oss-120b \
   0 -p "Review ./authorized-repo"
 # or, with no provider pin:
-0 -p "Review ./authorized-repo" --model together/openai/gpt-oss-120b
+0security -p "Review ./authorized-repo" --model together/openai/gpt-oss-120b
 ```
 
 0 removes the `together/` prefix before the request. The default model is `openai/gpt-oss-120b`. The picker lists chat models with published prices. Set `TOGETHER_MODEL_LIST=all` to list every chat model your key can see. Unlisted IDs, including dedicated endpoints, still work with `--model`.
@@ -319,11 +319,11 @@ Setting a provider's variables alone does not send all traffic there, because am
 These commands do what **Settings → Connections** and **Models** do. Keys come from an environment variable or stdin, never from an argument.
 
 ```bash
-0 models connect openai --key-env MY_OPENAI_KEY
-0 models connect openai --test
-0 models list --provider openai
-0 models set --provider openai gpt-5.4-mini
-0 models connect openai --remove --yes
+0security models connect openai --key-env MY_OPENAI_KEY
+0security models connect openai --test
+0security models list --provider openai
+0security models set --provider openai gpt-5.4-mini
+0security models connect openai --remove --yes
 ```
 
 ## Where credentials live

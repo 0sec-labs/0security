@@ -75,7 +75,7 @@ export function readInsightFindings(text: string): InsightFinding[] {
   }
   let document: unknown;
   try { document = JSON.parse(text); } catch { throw new Error("The file is not valid JSON."); }
-  if (!isObject(document) || !Array.isArray(document.findings)) throw new Error("Expected `0 scan --format json` output or a SARIF 2.1.0 file.");
+  if (!isObject(document) || !Array.isArray(document.findings)) throw new Error("Expected `0security scan --format json` output or a SARIF 2.1.0 file.");
   return document.findings.filter(isObject).map(raw => {
     const location = isObject(raw.location) ? raw.location : {};
     const evidence = isObject(raw.evidence) ? raw.evidence : {};

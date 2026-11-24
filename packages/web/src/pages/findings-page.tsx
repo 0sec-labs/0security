@@ -213,7 +213,7 @@ function FindingsWorkspace({ dashboard }: { dashboard: DashboardResponse }) {
       />
       <div className="relative flex min-h-0 flex-1 flex-col">
         {groups.length === 0 ? (
-          <EmptyState variant="fill" title={<>No findings yet. Start a thread with <code className="font-mono">0 threads start</code>.</>} />
+          <EmptyState variant="fill" title={<>No findings yet. Start a thread with <code className="font-mono">0security threads start</code>.</>} />
         ) : visible.length === 0 ? (
           <EmptyState variant="fill" title="Nothing matches" body={hasFilters ? "No findings match the current search or filters." : "Nothing needs attention here right now."} action={hasFilters ? <Button size="sm" variant="outline" onClick={clearAll}>Clear filters</Button> : undefined} />
         ) : display.layout === "board" ? (

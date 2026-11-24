@@ -1,7 +1,7 @@
-### 0
-Usage: 0 [options] [command]
+### 0security
+Usage: 0security [options] [command]
 
-Security sentinels for your repositories. Run 0 to open the console.
+Security sentinels for your repositories. Run 0security to open the console.
 
 Options:
   -h, --help                       display help for command
@@ -28,16 +28,16 @@ Setup:
   computers                        Remote computers that run 0
   config                           Settings, API keys, team and setup checks (config doctor)
 
-Run `0 <command>` to list its subcommands; `0 <command> <subcommand> --help` for flags.
+Run `0security <command>` to list its subcommands; `0security <command> <subcommand> --help` for flags.
 
 Examples:
-  0 -p "Review ./app for injection bugs"
-  0 threads start "Map the login flow" --wait
-  0 findings list --severity high --format json
-  0 sentinels list --presets
+  0security -p "Review ./app for injection bugs"
+  0security threads start "Map the login flow" --wait
+  0security findings list --severity high --format json
+  0security sentinels list --presets
 
-### 0 api (hidden)
-Usage: 0 api [options] [path]
+### 0security api (hidden)
+Usage: 0security api [options] [path]
 
 Call a trusted engine API with deterministic JSON output (defaults to its handshake)
 
@@ -50,8 +50,8 @@ Options:
   --engines-config <path>    Operator engine registry JSON file
   -h, --help                 display help for command
 
-### 0 automation (hidden)
-Usage: 0 automation [options] [command]
+### 0security automation (hidden)
+Usage: 0security automation [options] [command]
 
 Discover templates and inspect saved automations
 
@@ -69,13 +69,13 @@ Commands:
   delete [options] <id>     Delete a saved automation
   help [command]            display help for command
 
-### 0 automation create
-Usage: 0 automation create [options]
+### 0security automation create
+Usage: 0security automation create [options]
 
 Create an automation from a template or a JSON definition
 
 Options:
-  --template <id>    Start from a template (see `0 sentinels list --automation --templates`)
+  --template <id>    Start from a template (see `0security sentinels list --automation --templates`)
   --file <path>      Definition JSON object
   --name <name>      Name for the new automation
   --target <target>  Target the automation runs against
@@ -83,8 +83,8 @@ Options:
   --db-path <path>   Control database (default: the user database)
   -h, --help         display help for command
 
-### 0 automation delete
-Usage: 0 automation delete [options] <id>
+### 0security automation delete
+Usage: 0security automation delete [options] <id>
 
 Delete a saved automation
 
@@ -95,8 +95,8 @@ Options:
   --db-path <path>  Control database (default: the user database)
   -h, --help        display help for command
 
-### 0 automation duplicate
-Usage: 0 automation duplicate [options] <id>
+### 0security automation duplicate
+Usage: 0security automation duplicate [options] <id>
 
 Save a copy of an automation
 
@@ -106,8 +106,8 @@ Options:
   --db-path <path>  Control database (default: the user database)
   -h, --help        display help for command
 
-### 0 automation edit
-Usage: 0 automation edit [options] <id>
+### 0security automation edit
+Usage: 0security automation edit [options] <id>
 
 Replace an automation's definition from a JSON file
 
@@ -118,8 +118,8 @@ Options:
   --db-path <path>  Control database (default: the user database)
   -h, --help        display help for command
 
-### 0 automation list
-Usage: 0 automation list [options]
+### 0security automation list
+Usage: 0security automation list [options]
 
 List saved automations and available templates
 
@@ -134,19 +134,19 @@ Options:
   --format <format>          Output format: json or text (default: "json")
   -h, --help                 display help for command
 
-### 0 automation rollback
-Usage: 0 automation rollback [options] <id>
+### 0security automation rollback
+Usage: 0security automation rollback [options] <id>
 
 Restore an earlier revision as a new revision
 
 Options:
-  --revision <n>    Revision to restore (see `0 sentinels set --automation versions`)
+  --revision <n>    Revision to restore (see `0security sentinels set --automation versions`)
   --json            Print machine-readable JSON
   --db-path <path>  Control database (default: the user database)
   -h, --help        display help for command
 
-### 0 automation show
-Usage: 0 automation show [options] [id]
+### 0security automation show
+Usage: 0security automation show [options] [id]
 
 Show a saved automation or template
 
@@ -161,8 +161,8 @@ Options:
   --format <format>          Output format: json or text (default: "json")
   -h, --help                 display help for command
 
-### 0 automation versions
-Usage: 0 automation versions [options] <id>
+### 0security automation versions
+Usage: 0security automation versions [options] <id>
 
 List saved revisions of an automation
 
@@ -171,8 +171,8 @@ Options:
   --db-path <path>  Control database (default: the user database)
   -h, --help        display help for command
 
-### 0 computers
-Usage: 0 computers [options] [command]
+### 0security computers
+Usage: 0security computers [options] [command]
 
 Remote computers that run 0
 
@@ -187,8 +187,8 @@ Commands:
                         registration
   help [command]        display help for command
 
-### 0 computers add
-Usage: 0 computers add|deploy [options]
+### 0security computers add
+Usage: 0security computers add|deploy [options]
 
 Add a remote computer: deploy 0 onto a Linux server (Lima VM or any SSH host) and register it
 
@@ -207,16 +207,16 @@ Options:
   --engines-config <path>  Engine registry path
   -h, --help               display help for command
 
-### 0 computers hosts (hidden)
-Usage: 0 computers hosts [options]
+### 0security computers hosts (hidden)
+Usage: 0security computers hosts [options]
 
 List SSH hosts discovered from ~/.ssh/config as deploy candidates
 
 Options:
   -h, --help  display help for command
 
-### 0 computers list
-Usage: 0 computers list [options]
+### 0security computers list
+Usage: 0security computers list [options]
 
 List registered remote computers
 
@@ -225,8 +225,8 @@ Options:
   --format <format>        Output: text or json (choices: "text", "json")
   -h, --help               display help for command
 
-### 0 computers remove (hidden)
-Usage: 0 computers remove [options] <id>
+### 0security computers remove (hidden)
+Usage: 0security computers remove [options] <id>
 
 Remove a remote computer from this machine: closes the tunnel and forgets its saved connection
 (files on the remote computer stay)
@@ -235,24 +235,24 @@ Options:
   --engines-config <path>  Engine registry path
   -h, --help               display help for command
 
-### 0 computers repair (hidden)
-Usage: 0 computers repair|reconnect [options] <id>
+### 0security computers repair (hidden)
+Usage: 0security computers repair|reconnect [options] <id>
 
 Reconnect a managed remote computer's tunnel and start its retained engine when needed
 
 Options:
   -h, --help  display help for command
 
-### 0 computers stop
-Usage: 0 computers stop [options] <id>
+### 0security computers stop
+Usage: 0security computers stop [options] <id>
 
 Stop a managed remote computer and its owned tunnel; retain remote files and registration
 
 Options:
   -h, --help  display help for command
 
-### 0 config
-Usage: 0 config [options] [command]
+### 0security config
+Usage: 0security config [options] [command]
 
 Settings, API keys, team and setup checks (config doctor)
 
@@ -266,8 +266,8 @@ Commands:
   doctor [options] [checks...]  Check this machine and the engine, then suggest the next command
   help [command]                display help for command
 
-### 0 config audit-export (hidden)
-Usage: 0 config audit-export [options]
+### 0security config audit-export (hidden)
+Usage: 0security config audit-export [options]
 
 Write the audit log as NDJSON, CEF or syslog lines for a SIEM
 
@@ -282,8 +282,8 @@ Options:
   --follow             Keep running and print new events as they are written (Ctrl+C stops)
   -h, --help           display help for command
 
-### 0 config audit-log (hidden)
-Usage: 0 config audit-log [options]
+### 0security config audit-log (hidden)
+Usage: 0security config audit-log [options]
 
 Show the local log of privileged actions (connections, settings, extensions)
 
@@ -294,8 +294,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 config db (hidden)
-Usage: 0 config db [options] [command]
+### 0security config db (hidden)
+Usage: 0security config db [options] [command]
 
 Manage the local 0 database
 
@@ -305,8 +305,8 @@ Options:
 Commands:
   help [command]  display help for command
 
-### 0 config db repair (hidden)
-Usage: 0 config db repair [options]
+### 0security config db repair (hidden)
+Usage: 0security config db repair [options]
 
 Back up a malformed local SQLite database and recreate a clean one
 
@@ -314,8 +314,8 @@ Options:
   --db-path <path>  Path to SQLite database
   -h, --help        display help for command
 
-### 0 config db reset (hidden)
-Usage: 0 config db reset [options]
+### 0security config db reset (hidden)
+Usage: 0security config db reset [options]
 
 Delete the local SQLite database and optionally reseed the verification workbench
 
@@ -324,8 +324,8 @@ Options:
   --seed <preset>   Seed preset to load after reset (default: "verification")
   -h, --help        display help for command
 
-### 0 config doctor
-Usage: 0 config doctor [options] [checks...]
+### 0security config doctor
+Usage: 0security config doctor [options] [checks...]
 
 Check this machine and the engine, then suggest the next command
 
@@ -334,8 +334,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 config export (hidden)
-Usage: 0 config export [options] [file]
+### 0security config export (hidden)
+Usage: 0security config export [options] [file]
 
 Write the effective (or --global) config as shareable JSON (stdout if no file)
 
@@ -343,8 +343,8 @@ Options:
   --global    Export only the global layer instead of the effective config
   -h, --help  display help for command
 
-### 0 config get
-Usage: 0 config get [options] [key]
+### 0security config get
+Usage: 0security config get [options] [key]
 
 Print the effective value of one setting, or every setting with no key
 
@@ -352,8 +352,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 config github (hidden)
-Usage: 0 config github [options] [command]
+### 0security config github (hidden)
+Usage: 0security config github [options] [command]
 
 Check or connect the GitHub account used to publish fixes
 
@@ -363,8 +363,8 @@ Options:
 Commands:
   help [command]  display help for command
 
-### 0 config github connect (hidden)
-Usage: 0 config github connect [options]
+### 0security config github connect (hidden)
+Usage: 0security config github connect [options]
 
 Sign in with a personal access token (from an env var or stdin)
 
@@ -374,8 +374,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 config github repos (hidden)
-Usage: 0 config github repos [options]
+### 0security config github repos (hidden)
+Usage: 0security config github repos [options]
 
 List repositories the signed-in account can reach
 
@@ -385,8 +385,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 config github status (hidden)
-Usage: 0 config github status [options]
+### 0security config github status (hidden)
+Usage: 0security config github status [options]
 
 Show whether GitHub is signed in
 
@@ -394,8 +394,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 config import (hidden)
-Usage: 0 config import [options] <file>
+### 0security config import (hidden)
+Usage: 0security config import [options] <file>
 
 Merge a shared config into the global (default) or --project layer
 
@@ -405,8 +405,8 @@ Options:
   --yes       Accept changes to security-sensitive settings (required to flip them)
   -h, --help  display help for command
 
-### 0 config list (hidden)
-Usage: 0 config list [options]
+### 0security config list (hidden)
+Usage: 0security config list [options]
 
 Alias of show
 
@@ -414,8 +414,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 config reset (hidden)
-Usage: 0 config reset [options] [keys...]
+### 0security config reset (hidden)
+Usage: 0security config reset [options] [keys...]
 
 Reset settings to defaults (all engine settings when no key is given)
 
@@ -424,8 +424,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 config set
-Usage: 0 config set [options] <key> <value>
+### 0security config set
+Usage: 0security config set [options] <key> <value>
 
 Change one setting (global by default, --project for this folder)
 
@@ -435,8 +435,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 config show (hidden)
-Usage: 0 config show [options]
+### 0security config show (hidden)
+Usage: 0security config show [options]
 
 Show the effective config with the source layer (default/global/project) per key
 
@@ -444,8 +444,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 config team (hidden)
-Usage: 0 config team [options] [command]
+### 0security config team (hidden)
+Usage: 0security config team [options] [command]
 
 Provision opt-in local team workspace accounts
 
@@ -455,8 +455,8 @@ Options:
 Commands:
   help [command]  display help for command
 
-### 0 config team add-user (hidden)
-Usage: 0 config team add-user [options]
+### 0security config team add-user (hidden)
+Usage: 0security config team add-user [options]
 
 Add a password account to an existing private configuration
 
@@ -467,8 +467,8 @@ Options:
   --role <role>          owner, editor or viewer
   -h, --help             display help for command
 
-### 0 config team init (hidden)
-Usage: 0 config team init [options]
+### 0security config team init (hidden)
+Usage: 0security config team init [options]
 
 Create a private team configuration; does not enable it on a running engine
 
@@ -479,8 +479,8 @@ Options:
   --display-name <name>  Owner display name
   -h, --help             display help for command
 
-### 0 config team list (hidden)
-Usage: 0 config team list [options]
+### 0security config team list (hidden)
+Usage: 0security config team list [options]
 
 List workspace accounts without credentials
 
@@ -488,8 +488,8 @@ Options:
   --config <path>  Team configuration
   -h, --help       display help for command
 
-### 0 doctor (hidden)
-Usage: 0 doctor [options] [command]
+### 0security doctor (hidden)
+Usage: 0security doctor [options] [command]
 
 Check local runtime prerequisites and suggest the next command
 
@@ -502,8 +502,8 @@ Commands:
   upgrade [options]  Fetch and install the latest 0 binary (re-runs install.sh)
   workbench          Set up and inspect the sandboxed execution workbench (no Docker)
 
-### 0 doctor upgrade
-Usage: 0 doctor upgrade [options]
+### 0security doctor upgrade
+Usage: 0security doctor upgrade [options]
 
 Fetch and install the latest 0 binary (re-runs install.sh)
 
@@ -513,8 +513,8 @@ Options:
                         ~/.0/bin)
   -h, --help            display help for command
 
-### 0 doctor workbench
-Usage: 0 doctor workbench [options] [command]
+### 0security doctor workbench
+Usage: 0security doctor workbench [options] [command]
 
 Set up and inspect the sandboxed execution workbench (no Docker)
 
@@ -533,8 +533,8 @@ Commands:
                        guest state
   help [command]       display help for command
 
-### 0 doctor workbench configure
-Usage: 0 doctor workbench configure [options]
+### 0security doctor workbench configure
+Usage: 0security doctor workbench configure [options]
 
 Change saved integration grants or return workspace selection to the invocation directory
 
@@ -549,36 +549,36 @@ Options:
   --clear-sandbox-images               Revoke all explicit sandbox image-reference grants
   -h, --help                           display help for command
 
-### 0 doctor workbench console-agent (hidden)
-Usage: 0 doctor workbench console-agent [options]
+### 0security doctor workbench console-agent (hidden)
+Usage: 0security doctor workbench console-agent [options]
 
 Options:
   -h, --help  display help for command
 
-### 0 doctor workbench disable
-Usage: 0 doctor workbench disable [options]
+### 0security doctor workbench disable
+Usage: 0security doctor workbench disable [options]
 
 Explicitly select host-local execution; retain the approved VM image and guest state
 
 Options:
   -h, --help  display help for command
 
-### 0 doctor workbench providers
-Usage: 0 doctor workbench providers [options]
+### 0security doctor workbench providers
+Usage: 0security doctor workbench providers [options]
 
 List explicit provider grant IDs; credentials are never displayed
 
 Options:
   -h, --help  display help for command
 
-### 0 doctor workbench run-agent (hidden)
-Usage: 0 doctor workbench run-agent [options]
+### 0security doctor workbench run-agent (hidden)
+Usage: 0security doctor workbench run-agent [options]
 
 Options:
   -h, --help  display help for command
 
-### 0 doctor workbench setup
-Usage: 0 doctor workbench setup [options]
+### 0security doctor workbench setup
+Usage: 0security doctor workbench setup [options]
 
 Verify/provision the signed native runtime, approve a local image, and select SmolVM execution
 
@@ -599,8 +599,8 @@ Options:
                                        container actions; repeat for multiple images
   -h, --help                           display help for command
 
-### 0 doctor workbench status
-Usage: 0 doctor workbench status [options]
+### 0security doctor workbench status
+Usage: 0security doctor workbench status [options]
 
 Inspect configuration, provisioned runtime, image approval and retained admission; never downloads
 
@@ -608,8 +608,8 @@ Options:
   --json      Print machine-readable status (no credential values)
   -h, --help  display help for command
 
-### 0 findings
-Usage: 0 findings [options] [command]
+### 0security findings
+Usage: 0security findings [options] [command]
 
 Browse findings and change their status
 
@@ -623,8 +623,8 @@ Options:
   --triage <triage>                 Filter by triage: new, accepted, suppressed
   --expiring <days>                 Only accepted risks that expire within this many days
   --scope <scope>                   in: findings not labelled out of scope; out: only those the
-                                    declared scope (0 scan --scope) labelled out of scope; all
-                                    (default): both, each labelled
+                                    declared scope (0security scan --scope) labelled out of scope;
+                                    all (default): both, each labelled
   --limit <n>                       Max findings/groups to show (default: "50")
   --all                             Show raw finding rows instead of grouped fingerprints (default:
                                     false)
@@ -653,8 +653,8 @@ Commands:
                                     one finding (Markdown; nothing is sent)
   help [command]                    display help for command
 
-### 0 findings accept (hidden)
-Usage: 0 findings accept [options] <id>
+### 0security findings accept (hidden)
+Usage: 0security findings accept [options] <id>
 
 Mark a finding family as accepted
 
@@ -670,8 +670,8 @@ Options:
   --approver <name>      Who approved it: a label you type, not a login
   -h, --help             display help for command
 
-### 0 findings burndown
-Usage: 0 findings burndown [options]
+### 0security findings burndown
+Usage: 0security findings burndown [options]
 
 Work through open findings in batches: one fix branch and pull request each, then a report
 
@@ -720,8 +720,8 @@ Options:
   --db-path <path>                Control database of the local engine to attach to
   -h, --help                      display help for command
 
-### 0 findings evidence
-Usage: 0 findings evidence [options] <folder>
+### 0security findings evidence
+Usage: 0security findings evidence [options] <folder>
 
 Write one folder of findings, SARIF, SBOM and fix branches, with a README that says what it does and
 does not show
@@ -738,8 +738,8 @@ Options:
   --format <format>   Output: text or json (choices: "text", "json")
   -h, --help          display help for command
 
-### 0 findings export (hidden)
-Usage: 0 findings export [options] [ids...]
+### 0security findings export (hidden)
+Usage: 0security findings export [options] [ids...]
 
 Export findings, a whole scan or, with no IDs, every finding as json, md, sarif, html or pdf
 
@@ -754,8 +754,8 @@ Options:
   --json                 Print the result of writing a file as JSON
   -h, --help             display help for command
 
-### 0 findings export-fixes
-Usage: 0 findings export-fixes [options]
+### 0security findings export-fixes
+Usage: 0security findings export-fixes [options]
 
 Report what happened to the fixes burndown proposed: counts, pull requests, checks, cost and, on
 request, merged or closed
@@ -771,8 +771,8 @@ Options:
                       "markdown")
   -h, --help          display help for command
 
-### 0 findings fix
-Usage: 0 findings fix [options] <finding>
+### 0security findings fix
+Usage: 0security findings fix [options] <finding>
 
 Fix one finding in an isolated git work tree and open a pull request for review
 
@@ -807,8 +807,8 @@ Options:
   --db-path <path>           Control database of the local engine to attach to
   -h, --help                 display help for command
 
-### 0 findings import
-Usage: 0 findings import [options] [file]
+### 0security findings import
+Usage: 0security findings import [options] [file]
 
 Import findings from another scanner's SARIF 2.1.0 file (use - for stdin) or from GitHub security
 alerts. Nothing in the file is executed.
@@ -831,8 +831,8 @@ Options:
   --format <format>      Output format: text or json (default: "text")
   -h, --help             display help for command
 
-### 0 findings issues (hidden)
-Usage: 0 findings issues [options]
+### 0security findings issues (hidden)
+Usage: 0security findings issues [options]
 
 Mirror findings into GitHub Issues, one issue per finding, kept in sync without duplicates
 
@@ -844,14 +844,14 @@ Options:
                              "25")
   --delay <ms>               Wait this long between changes to respect rate limits (default: "1000")
   --dry-run                  Print what would change and change nothing
-  --include-out-of-scope     Also open issues for findings the declared scope (0 scan --scope)
-                             labelled out of scope; they are skipped by default
+  --include-out-of-scope     Also open issues for findings the declared scope (0security scan
+                             --scope) labelled out of scope; they are skipped by default
   --db-path <path>           Path to SQLite database (default: the shared database and every scan's)
   --format <format>          Output: text or json (default: "text")
   -h, --help                 display help for command
 
-### 0 findings keys (hidden)
-Usage: 0 findings keys [options] [command]
+### 0security findings keys (hidden)
+Usage: 0security findings keys [options] [command]
 
 Manage read-only API access keys for the findings API
 
@@ -861,8 +861,8 @@ Options:
 Commands:
   help [command]  display help for command
 
-### 0 findings keys create (hidden)
-Usage: 0 findings keys create [options] <name>
+### 0security findings keys create (hidden)
+Usage: 0security findings keys create [options] <name>
 
 Create a read-only API access key; the secret is printed once
 
@@ -872,8 +872,8 @@ Options:
   --format <format>    Output: text or json (choices: "text", "json")
   -h, --help           display help for command
 
-### 0 findings keys list (hidden)
-Usage: 0 findings keys list [options]
+### 0security findings keys list (hidden)
+Usage: 0security findings keys list [options]
 
 List API access keys (secrets are never shown)
 
@@ -882,8 +882,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 findings keys revoke (hidden)
-Usage: 0 findings keys revoke [options] <id>
+### 0security findings keys revoke (hidden)
+Usage: 0security findings keys revoke [options] <id>
 
 Revoke an API access key
 
@@ -893,8 +893,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 findings list
-Usage: 0 findings list [options]
+### 0security findings list
+Usage: 0security findings list [options]
 
 List findings from the database
 
@@ -908,12 +908,13 @@ Options:
   --triage <triage>      Filter by triage: new, accepted, suppressed
   --expiring <days>      Only accepted risks that expire within this many days
   --scope <scope>        in: findings not labelled out of scope; out: only those the declared scope
-                         (0 scan --scope) labelled out of scope; all (default): both, each labelled
+                         (0security scan --scope) labelled out of scope; all (default): both, each
+                         labelled
   --limit <n>            Max findings/groups to show
   -h, --help             display help for command
 
-### 0 findings metrics
-Usage: 0 findings metrics [options]
+### 0security findings metrics
+Usage: 0security findings metrics [options]
 
 Show what scan, fix and verify runs cost and produced: cost per proposed fix and the share that
 passed their checks
@@ -924,8 +925,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 findings reopen (hidden)
-Usage: 0 findings reopen [options] <id>
+### 0security findings reopen (hidden)
+Usage: 0security findings reopen [options] <id>
 
 Reset a finding family back to new
 
@@ -937,8 +938,8 @@ Options:
   --note <text>     Optional triage note
   -h, --help        display help for command
 
-### 0 findings report-draft
-Usage: 0 findings report-draft [options] <finding>
+### 0security findings report-draft
+Usage: 0security findings report-draft [options] <finding>
 
 Write a draft early warning, notification or final report about one finding (Markdown; nothing is
 sent)
@@ -965,8 +966,8 @@ Options:
   --db-path <path>                  Path to SQLite database
   -h, --help                        display help for command
 
-### 0 findings reports (hidden)
-Usage: 0 findings reports [options] [command]
+### 0security findings reports (hidden)
+Usage: 0security findings reports [options] [command]
 
 Import retained CI reports for browser review, or export a share-safe copy of one
 
@@ -976,8 +977,8 @@ Options:
 Commands:
   help [command]  display help for command
 
-### 0 findings reports export (hidden)
-Usage: 0 findings reports export [options] <report>
+### 0security findings reports export (hidden)
+Usage: 0security findings reports export [options] <report>
 
 Write a share-safe copy of a report: an allowlist of fields, with no evidence, PoC, transcripts or
 local paths. Nothing is sent anywhere.
@@ -990,8 +991,8 @@ Options:
   --output <path>        Write the share-safe report to a file instead of stdout
   -h, --help             display help for command
 
-### 0 findings reports import (hidden)
-Usage: 0 findings reports import [options] <report>
+### 0security findings reports import (hidden)
+Usage: 0security findings reports import [options] <report>
 
 Arguments:
   report             JSON report produced by 0; importing executes no report commands
@@ -1001,8 +1002,8 @@ Options:
   --db-path <path>   Destination engine database; stop its browser engine before importing
   -h, --help         display help for command
 
-### 0 findings show
-Usage: 0 findings show [options] <id>
+### 0security findings show
+Usage: 0security findings show [options] <id>
 
 Show detailed information about a finding
 
@@ -1014,8 +1015,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 findings suppress (hidden)
-Usage: 0 findings suppress [options] <id>
+### 0security findings suppress (hidden)
+Usage: 0security findings suppress [options] <id>
 
 Suppress a finding family across duplicate occurrences
 
@@ -1028,8 +1029,8 @@ Options:
   --approver <name>  Who approved it: a label you type, not a login
   -h, --help         display help for command
 
-### 0 findings update
-Usage: 0 findings update [options] <id>
+### 0security findings update
+Usage: 0security findings update [options] <id>
 
 Change a finding's status
 
@@ -1042,14 +1043,14 @@ Options:
   --db-path <path>      Path to SQLite database
   -h, --help            display help for command
 
-### 0 findings upload (hidden)
-Usage: 0 findings upload [options] <file>
+### 0security findings upload (hidden)
+Usage: 0security findings upload [options] <file>
 
 Upload findings to GitHub code scanning (SARIF) or to Bitbucket Code Insights (scan JSON or SARIF)
 
 Arguments:
-  file                    SARIF 2.1.0 file from `0 scan --format sarif -o scan.sarif`; for Bitbucket
-                          also `0 scan --format json -o scan.json`
+  file                    SARIF 2.1.0 file from `0security scan --format sarif -o scan.sarif`; for
+                          Bitbucket also `0security scan --format json -o scan.json`
 
 Options:
   --to <target>           github (default), bitbucket-cloud or bitbucket-dc (default: "github")
@@ -1065,15 +1066,15 @@ Options:
   --ref <ref>             refs/heads/<branch> or refs/pull/<n>/merge (default: the current branch,
                           or GITHUB_REF in Actions)
   --tool <name>           Name the tool shown in GitHub
-  --include-out-of-scope  Also send findings the declared scope (0 scan --scope) labelled out of
-                          scope; they are skipped by default
+  --include-out-of-scope  Also send findings the declared scope (0security scan --scope) labelled
+                          out of scope; they are skipped by default
   --no-wait               Return when GitHub has accepted the upload instead of waiting for it to be
                           processed
   --format <format>       Output: text or json (default: "text")
   -h, --help              display help for command
 
-### 0 findings verify
-Usage: 0 findings verify [options] [finding...]
+### 0security findings verify
+Usage: 0security findings verify [options] [finding...]
 
 Experimental: re-check findings with a fresh thread each and record a verdict next to them
 
@@ -1107,8 +1108,8 @@ Options:
   --db-path <path>                Control database of the local engine to attach to
   -h, --help                      display help for command
 
-### 0 models
-Usage: 0 models [options] [command]
+### 0security models
+Usage: 0security models [options] [command]
 
 Models and provider connections
 
@@ -1121,8 +1122,8 @@ Commands:
   connect [options] [provider]  Add, list, test or remove a provider connection
   help [command]                display help for command
 
-### 0 models connect
-Usage: 0 models connect [options] [provider]
+### 0security models connect
+Usage: 0security models connect [options] [provider]
 
 Add, list, test or remove a provider connection
 
@@ -1134,8 +1135,8 @@ Options:
   --remove         Remove a connection (with --yes)
   -h, --help       display help for command
 
-### 0 models connections (hidden)
-Usage: 0 models connections [options] [command]
+### 0security models connections (hidden)
+Usage: 0security models connections [options] [command]
 
 Manage model provider connections (the web Connections page)
 
@@ -1145,8 +1146,8 @@ Options:
 Commands:
   help [command]  display help for command
 
-### 0 models connections add (hidden)
-Usage: 0 models connections add [options] <provider>
+### 0security models connections add (hidden)
+Usage: 0security models connections add [options] <provider>
 
 Save and verify an API key for a provider (key from an env var or stdin)
 
@@ -1159,8 +1160,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 models connections list (hidden)
-Usage: 0 models connections list [options]
+### 0security models connections list (hidden)
+Usage: 0security models connections list [options]
 
 List providers and their connection status
 
@@ -1168,8 +1169,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 models connections remove (hidden)
-Usage: 0 models connections remove [options] <provider>
+### 0security models connections remove (hidden)
+Usage: 0security models connections remove [options] <provider>
 
 Remove a provider's saved credentials
 
@@ -1179,8 +1180,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 models connections test (hidden)
-Usage: 0 models connections test [options] <provider>
+### 0security models connections test (hidden)
+Usage: 0security models connections test [options] <provider>
 
 Check that a connected provider answers and lists models
 
@@ -1188,8 +1189,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 models default (hidden)
-Usage: 0 models default [options] [model]
+### 0security models default (hidden)
+Usage: 0security models default [options] [model]
 
 Show the default model, or set it (requires --provider)
 
@@ -1198,8 +1199,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 models list
-Usage: 0 models list [options]
+### 0security models list
+Usage: 0security models list [options]
 
 List models offered by connected providers
 
@@ -1208,8 +1209,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 models recommended (hidden)
-Usage: 0 models recommended [options]
+### 0security models recommended (hidden)
+Usage: 0security models recommended [options]
 
 Show the recommended model per role from your connected providers
 
@@ -1217,8 +1218,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 models set
-Usage: 0 models set [options] [model]
+### 0security models set
+Usage: 0security models set [options] [model]
 
 Show or choose the default model
 
@@ -1226,8 +1227,8 @@ Options:
   --provider <provider>  Provider of the model
   -h, --help             display help for command
 
-### 0 models usage (hidden)
-Usage: 0 models usage [options]
+### 0security models usage (hidden)
+Usage: 0security models usage [options]
 
 Show spend and tokens of the open threads, by model or by thread
 
@@ -1236,8 +1237,8 @@ Options:
   --format <format>    Output: text or json (choices: "text", "json")
   -h, --help           display help for command
 
-### 0 probe
-Usage: 0 probe [options] <url>
+### 0security probe
+Usage: 0security probe [options] <url>
 
 Send adversarial messages to a live model or agent endpoint and report the ones it obeys
 
@@ -1264,11 +1265,11 @@ Options:
   --format <format>       Report format: json, md, sarif, html, pdf (default: "md")
   -o, --output <file>     Write the report to a file instead of stdout
   --fail-on <severity>    Exit 1 when a finding is at or above this severity
-  --save                  Also store the findings, so they show in `0 findings list`
+  --save                  Also store the findings, so they show in `0security findings list`
   -h, --help              display help for command
 
-### 0 sbom
-Usage: 0 sbom [options] [command]
+### 0security sbom
+Usage: 0security sbom [options] [command]
 
 Generate an SBOM from lockfiles, check one against known advisories, and scan model files
 
@@ -1287,24 +1288,24 @@ Commands:
                                             imports that can run code when loaded
   help [command]                            display help for command
 
-### 0 sbom check
-Usage: 0 sbom check [options] <file>
+### 0security sbom check
+Usage: 0security sbom check [options] <file>
 
 Look every component of an SBOM up in the public OSV database and list the advisories
 
 Arguments:
-  file                 CycloneDX SBOM (JSON), for example from `0 sbom generate`
+  file                 CycloneDX SBOM (JSON), for example from `0security sbom generate`
 
 Options:
-  --format <format>    Output: text, json or sarif (SARIF imports with `0 findings import`)
+  --format <format>    Output: text, json or sarif (SARIF imports with `0security findings import`)
                        (default: "text")
   -o, --output <file>  Write the result to a file instead of stdout
   --outdated           Also list components with a newer version (looks packages up at
                        https://api.deps.dev; information only, not a vulnerability)
   -h, --help           display help for command
 
-### 0 sbom generate
-Usage: 0 sbom generate [options] [folder]
+### 0security sbom generate
+Usage: 0security sbom generate [options] [folder]
 
 Write an SBOM (CycloneDX 1.5 or SPDX 2.3) from the lockfiles in a folder (npm, pnpm, yarn, Cargo,
 Go, Python, Ruby, PHP, .NET, Maven, Gradle, Dart, Elixir)
@@ -1335,8 +1336,8 @@ Options:
                                   and MCP servers, found by reading files as text
   -h, --help                      display help for command
 
-### 0 sbom licenses
-Usage: 0 sbom licenses [options] [sbom-file-or-folder]
+### 0security sbom licenses
+Usage: 0security sbom licenses [options] [sbom-file-or-folder]
 
 Check the licenses in an SBOM, or in a folder's lockfiles, against an allow or deny policy
 
@@ -1359,8 +1360,8 @@ Options:
   --format <format>    Output: text, json or sarif (default: "text")
   -h, --help           display help for command
 
-### 0 sbom scan-models
-Usage: 0 sbom scan-models [options] <path>
+### 0security sbom scan-models
+Usage: 0security sbom scan-models [options] <path>
 
 Scan model files (pickle, PyTorch, joblib, numpy) for imports that can run code when loaded
 
@@ -1371,8 +1372,8 @@ Options:
   --format <format>  Output: text, json or sarif (default: "text")
   -h, --help         display help for command
 
-### 0 scan
-Usage: 0 scan [options] [target]
+### 0security scan
+Usage: 0security scan [options] [target]
 
 Scan a folder or git repository for security bugs; prints the findings as a report
 
@@ -1473,8 +1474,8 @@ Options:
   --db-path <path>           Control database of the local engine to attach to
   -h, --help                 display help for command
 
-### 0 sentinels
-Usage: 0 sentinels [options] [command]
+### 0security sentinels
+Usage: 0security sentinels [options] [command]
 
 Create, run and change Sentinels
 
@@ -1488,8 +1489,8 @@ Commands:
                       files
   help [command]      display help for command
 
-### 0 sentinels acknowledge (hidden)
-Usage: 0 sentinels acknowledge [options] <id>
+### 0security sentinels acknowledge (hidden)
+Usage: 0security sentinels acknowledge [options] <id>
 
 Mark changed model or tools as reviewed
 
@@ -1498,8 +1499,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 sentinels activations (hidden)
-Usage: 0 sentinels activations [options] <id>
+### 0security sentinels activations (hidden)
+Usage: 0security sentinels activations [options] <id>
 
 List a Sentinel's recent runs
 
@@ -1509,8 +1510,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 sentinels archive (hidden)
-Usage: 0 sentinels archive [options] <id>
+### 0security sentinels archive (hidden)
+Usage: 0security sentinels archive [options] <id>
 
 Archive a Sentinel; its history stays
 
@@ -1519,21 +1520,21 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 sentinels create (hidden)
-Usage: 0 sentinels create [options]
+### 0security sentinels create (hidden)
+Usage: 0security sentinels create [options]
 
 Create a Sentinel from a preset or a JSON definition
 
 Options:
-  --preset <id>      Start from a preset (see `0 sentinels list --presets`)
+  --preset <id>      Start from a preset (see `0security sentinels list --presets`)
   --name <name>      Name
   --file <path>      Sentinel JSON object (overrides preset fields)
   --db-path <path>   Control database (default: the user database)
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 sentinels delete (hidden)
-Usage: 0 sentinels delete [options] <id>
+### 0security sentinels delete (hidden)
+Usage: 0security sentinels delete [options] <id>
 
 Delete a Sentinel; what it owns is detached, not deleted
 
@@ -1543,8 +1544,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 sentinels export (hidden)
-Usage: 0 sentinels export [options] <id>
+### 0security sentinels export (hidden)
+Usage: 0security sentinels export [options] <id>
 
 Write a Sentinel as a YAML definition file, so a team can start from what it already has
 
@@ -1556,8 +1557,8 @@ Options:
   --db-path <path>  Database to read; stop its running console first
   -h, --help        display help for command
 
-### 0 sentinels files (hidden)
-Usage: 0 sentinels files [options] [command]
+### 0security sentinels files (hidden)
+Usage: 0security sentinels files [options] [command]
 
 Read and edit a Sentinel's instructions and notes files
 
@@ -1567,8 +1568,8 @@ Options:
 Commands:
   help [command]  display help for command
 
-### 0 sentinels files get (hidden)
-Usage: 0 sentinels files get [options] <id> <path>
+### 0security sentinels files get (hidden)
+Usage: 0security sentinels files get [options] <id> <path>
 
 Print a file's content
 
@@ -1577,8 +1578,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 sentinels files list (hidden)
-Usage: 0 sentinels files list [options] <id>
+### 0security sentinels files list (hidden)
+Usage: 0security sentinels files list [options] <id>
 
 List files
 
@@ -1587,8 +1588,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 sentinels files put (hidden)
-Usage: 0 sentinels files put [options] <id> <path>
+### 0security sentinels files put (hidden)
+Usage: 0security sentinels files put [options] <id> <path>
 
 Create or replace a file from --file or --content
 
@@ -1599,8 +1600,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 sentinels files rm (hidden)
-Usage: 0 sentinels files rm [options] <id> <path>
+### 0security sentinels files rm (hidden)
+Usage: 0security sentinels files rm [options] <id> <path>
 
 Delete a file
 
@@ -1610,8 +1611,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 sentinels list
-Usage: 0 sentinels list [options]
+### 0security sentinels list
+Usage: 0security sentinels list [options]
 
 List Sentinels
 
@@ -1621,8 +1622,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 sentinels pause (hidden)
-Usage: 0 sentinels pause [options] <id>
+### 0security sentinels pause (hidden)
+Usage: 0security sentinels pause [options] <id>
 
 Pause a Sentinel
 
@@ -1631,8 +1632,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 sentinels presets (hidden)
-Usage: 0 sentinels presets [options]
+### 0security sentinels presets (hidden)
+Usage: 0security sentinels presets [options]
 
 List Sentinel presets
 
@@ -1641,8 +1642,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 sentinels resume (hidden)
-Usage: 0 sentinels resume [options] <id>
+### 0security sentinels resume (hidden)
+Usage: 0security sentinels resume [options] <id>
 
 Resume a paused Sentinel
 
@@ -1652,8 +1653,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 sentinels run
-Usage: 0 sentinels run [options] <id>
+### 0security sentinels run
+Usage: 0security sentinels run [options] <id>
 
 Run a Sentinel now; starts a thread (needs a running engine)
 
@@ -1664,8 +1665,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 sentinels set
-Usage: 0 sentinels set [options] <id>
+### 0security sentinels set
+Usage: 0security sentinels set [options] <id>
 
 Create a Sentinel (--create), or change one: name, purpose, state, triggers, files
 
@@ -1679,8 +1680,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 sentinels show (hidden)
-Usage: 0 sentinels show [options] <id>
+### 0security sentinels show (hidden)
+Usage: 0security sentinels show [options] <id>
 
 Show a Sentinel (full or prefix ID)
 
@@ -1689,8 +1690,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 sentinels sync (hidden)
-Usage: 0 sentinels sync [options] <folder>
+### 0security sentinels sync (hidden)
+Usage: 0security sentinels sync [options] <folder>
 
 Make Sentinels match the YAML files in a folder. Shows what would change; --apply writes it.
 
@@ -1707,8 +1708,8 @@ Options:
   --format <format>  Output: text or json (default: "text")
   -h, --help         display help for command
 
-### 0 sentinels triggers (hidden)
-Usage: 0 sentinels triggers [options] [command]
+### 0security sentinels triggers (hidden)
+Usage: 0security sentinels triggers [options] [command]
 
 Control what starts a Sentinel's automations
 
@@ -1718,8 +1719,8 @@ Options:
 Commands:
   help [command]  display help for command
 
-### 0 sentinels triggers add (hidden)
-Usage: 0 sentinels triggers add [options] <id>
+### 0security sentinels triggers add (hidden)
+Usage: 0security sentinels triggers add [options] <id>
 
 Add a schedule, github-pr, release or check-completed trigger; it stays disabled unless --enable
 --yes
@@ -1747,8 +1748,8 @@ Options:
   --format <format>        Output: text or json (choices: "text", "json")
   -h, --help               display help for command
 
-### 0 sentinels triggers check (hidden)
-Usage: 0 sentinels triggers check [options] <id> <trigger-id>
+### 0security sentinels triggers check (hidden)
+Usage: 0security sentinels triggers check [options] <id> <trigger-id>
 
 Poll a pull request trigger now instead of waiting for its next poll
 
@@ -1757,8 +1758,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 sentinels triggers disable (hidden)
-Usage: 0 sentinels triggers disable [options] <id> <trigger-id>
+### 0security sentinels triggers disable (hidden)
+Usage: 0security sentinels triggers disable [options] <id> <trigger-id>
 
 Pause a trigger
 
@@ -1767,8 +1768,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 sentinels triggers enable (hidden)
-Usage: 0 sentinels triggers enable [options] <id> <trigger-id>
+### 0security sentinels triggers enable (hidden)
+Usage: 0security sentinels triggers enable [options] <id> <trigger-id>
 
 Enable a trigger after reviewing it
 
@@ -1778,8 +1779,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 sentinels triggers list (hidden)
-Usage: 0 sentinels triggers list [options] <id>
+### 0security sentinels triggers list (hidden)
+Usage: 0security sentinels triggers list [options] <id>
 
 List triggers
 
@@ -1788,8 +1789,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 sentinels triggers rm (hidden)
-Usage: 0 sentinels triggers rm [options] <id> <trigger-id>
+### 0security sentinels triggers rm (hidden)
+Usage: 0security sentinels triggers rm [options] <id> <trigger-id>
 
 Delete a trigger
 
@@ -1799,8 +1800,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 sentinels webhook (hidden)
-Usage: 0 sentinels webhook [options] [command]
+### 0security sentinels webhook (hidden)
+Usage: 0security sentinels webhook [options] [command]
 
 GitHub webhook for pull request Sentinels (server mode)
 
@@ -1810,8 +1811,8 @@ Options:
 Commands:
   help [command]  display help for command
 
-### 0 sentinels webhook secret (hidden)
-Usage: 0 sentinels webhook secret [options] [command]
+### 0security sentinels webhook secret (hidden)
+Usage: 0security sentinels webhook secret [options] [command]
 
 Manage the webhook secret
 
@@ -1821,8 +1822,8 @@ Options:
 Commands:
   help [command]  display help for command
 
-### 0 sentinels webhook secret rotate (hidden)
-Usage: 0 sentinels webhook secret rotate [options]
+### 0security sentinels webhook secret rotate (hidden)
+Usage: 0security sentinels webhook secret rotate [options]
 
 Create the secret, or replace it; the old one keeps working for 5 minutes. Printed once.
 
@@ -1832,8 +1833,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 sentinels webhook status (hidden)
-Usage: 0 sentinels webhook status [options]
+### 0security sentinels webhook status (hidden)
+Usage: 0security sentinels webhook status [options]
 
 Show whether the webhook is set up and the last deliveries
 
@@ -1842,8 +1843,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 skills
-Usage: 0 skills [options] [command]
+### 0security skills
+Usage: 0security skills [options] [command]
 
 Skills and extensions: list, add
 
@@ -1857,8 +1858,8 @@ Commands:
                           owner/repo/path; shows one prompt first
   help [command]          display help for command
 
-### 0 skills add
-Usage: 0 skills add [options] <source>
+### 0security skills add
+Usage: 0security skills add [options] <source>
 
 Add a skill (instructions) or an extension (a connection, MCP server or rules):
 <url|owner/repo|folder>@<full sha>, a catalog id or owner/repo/path; shows one prompt first
@@ -1872,8 +1873,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 skills catalog (hidden)
-Usage: 0 skills catalog [options]
+### 0security skills catalog (hidden)
+Usage: 0security skills catalog [options]
 
 Browse the skills catalog
 
@@ -1883,8 +1884,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 skills copy (hidden)
-Usage: 0 skills copy [options] <id>
+### 0security skills copy (hidden)
+Usage: 0security skills copy [options] <id>
 
 Save a workspace copy of a skill under a new name
 
@@ -1894,8 +1895,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 skills delete (hidden)
-Usage: 0 skills delete [options] <id>
+### 0security skills delete (hidden)
+Usage: 0security skills delete [options] <id>
 
 Delete a skill from the workspace library
 
@@ -1905,8 +1906,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 skills edit (hidden)
-Usage: 0 skills edit [options] <id>
+### 0security skills edit (hidden)
+Usage: 0security skills edit [options] <id>
 
 Replace a skill's SKILL.md with the contents of --file
 
@@ -1916,8 +1917,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 skills export (hidden)
-Usage: 0 skills export [options] <id>
+### 0security skills export (hidden)
+Usage: 0security skills export [options] <id>
 
 Export a skill as a bundle
 
@@ -1927,11 +1928,11 @@ Options:
   --format <format>    Output: text or json (choices: "text", "json")
   -h, --help           display help for command
 
-### 0 skills extensions (hidden)
-Usage: 0 skills extensions [options] [command]
+### 0security skills extensions (hidden)
+Usage: 0security skills extensions [options] [command]
 
 Extensions that connect 0 to your tools and services: list, info, enable, disable, update, remove
-(install with `0 skills add`)
+(install with `0security skills add`)
 
 Options:
   -h, --help      display help for command
@@ -1939,11 +1940,11 @@ Options:
 Commands:
   help [command]  display help for command
 
-### 0 skills extensions add (hidden)
-Usage: 0 skills extensions add [options] <source>
+### 0security skills extensions add (hidden)
+Usage: 0security skills extensions add [options] <source>
 
-Add an extension (a connection, MCP server or rules): <url|owner/repo|folder>@<full sha>; same as `0
-skills add`
+Add an extension (a connection, MCP server or rules): <url|owner/repo|folder>@<full sha>; same as
+`0security skills add`
 
 Options:
   --preview          Only show the install prompt
@@ -1954,8 +1955,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 skills extensions disable (hidden)
-Usage: 0 skills extensions disable [options] <name>
+### 0security skills extensions disable (hidden)
+Usage: 0security skills extensions disable [options] <name>
 
 Disable globally, or for one folder with --project
 
@@ -1966,8 +1967,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 skills extensions enable (hidden)
-Usage: 0 skills extensions enable [options] <name>
+### 0security skills extensions enable (hidden)
+Usage: 0security skills extensions enable [options] <name>
 
 Enable globally, or for one folder with --project
 
@@ -1978,8 +1979,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 skills extensions import (hidden)
-Usage: 0 skills extensions import [options]
+### 0security skills extensions import (hidden)
+Usage: 0security skills extensions import [options]
 
 Import earlier plugins, MCP servers and skills (runs once automatically); shows what could not be
 migrated
@@ -1990,8 +1991,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 skills extensions info (hidden)
-Usage: 0 skills extensions info [options] <name>
+### 0security skills extensions info (hidden)
+Usage: 0security skills extensions info [options] <name>
 
 Show the install prompt for an installed extension
 
@@ -2000,8 +2001,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 skills extensions list (hidden)
-Usage: 0 skills extensions list [options]
+### 0security skills extensions list (hidden)
+Usage: 0security skills extensions list [options]
 
 List installed extensions and built-ins
 
@@ -2011,8 +2012,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 skills extensions mcp (hidden)
-Usage: 0 skills extensions mcp [options] <name> [command...]
+### 0security skills extensions mcp (hidden)
+Usage: 0security skills extensions mcp [options] <name> [command...]
 
 Add one MCP server as a local extension: `mcp docs --url https://host/mcp` or `mcp docs -- npx -y
 some-mcp`; shows the same prompt first
@@ -2027,8 +2028,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 skills extensions remove (hidden)
-Usage: 0 skills extensions remove [options] <name>
+### 0security skills extensions remove (hidden)
+Usage: 0security skills extensions remove [options] <name>
 
 Remove an installed extension and its stored revisions
 
@@ -2038,8 +2039,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 skills extensions update (hidden)
-Usage: 0 skills extensions update [options] <name>
+### 0security skills extensions update (hidden)
+Usage: 0security skills extensions update [options] <name>
 
 Show the diff and install prompt for a newer revision; --yes --to <sha> approves it
 
@@ -2050,8 +2051,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 skills import (hidden)
-Usage: 0 skills import [options] <bundle>
+### 0security skills import (hidden)
+Usage: 0security skills import [options] <bundle>
 
 Import a skill bundle (.skill.json) or a folder with SKILL.md
 
@@ -2060,8 +2061,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 skills link (hidden)
-Usage: 0 skills link [options] <folder>
+### 0security skills link (hidden)
+Usage: 0security skills link [options] <folder>
 
 Link a folder of skills; they stay where they are
 
@@ -2070,8 +2071,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 skills list
-Usage: 0 skills list [options]
+### 0security skills list
+Usage: 0security skills list [options]
 
 List installed skills and linked folders
 
@@ -2080,8 +2081,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 skills new (hidden)
-Usage: 0 skills new [options] <file>
+### 0security skills new (hidden)
+Usage: 0security skills new [options] <file>
 
 Create a skill from a SKILL.md file
 
@@ -2090,8 +2091,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 skills remove (hidden)
-Usage: 0 skills remove [options] <name>
+### 0security skills remove (hidden)
+Usage: 0security skills remove [options] <name>
 
 Remove a skill that was added from GitHub or the catalog
 
@@ -2101,8 +2102,8 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 skills show (hidden)
-Usage: 0 skills show [options] <id-or-name>
+### 0security skills show (hidden)
+Usage: 0security skills show [options] <id-or-name>
 
 Show a skill's SKILL.md and files
 
@@ -2111,18 +2112,18 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 skills unlink (hidden)
-Usage: 0 skills unlink [options] <id>
+### 0security skills unlink (hidden)
+Usage: 0security skills unlink [options] <id>
 
-Unlink a folder by its link id (see `0 skills list --json`)
+Unlink a folder by its link id (see `0security skills list --json`)
 
 Options:
   --db-path <path>   Use this engine database instead of the default
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0 threads
-Usage: 0 threads [options] [command]
+### 0security threads
+Usage: 0security threads [options] [command]
 
 Start, follow and stop threads
 
@@ -2137,8 +2138,8 @@ Commands:
   stop [options] <id>         Cancel a thread's active work
   help [command]              display help for command
 
-### 0 threads archive (hidden)
-Usage: 0 threads archive [options] <id>
+### 0security threads archive (hidden)
+Usage: 0security threads archive [options] <id>
 
 Archive a thread
 
@@ -2152,8 +2153,8 @@ Options:
   --format <format>          Output: text or json (choices: "text", "json")
   -h, --help                 display help for command
 
-### 0 threads cancel (hidden)
-Usage: 0 threads cancel [options] <id>
+### 0security threads cancel (hidden)
+Usage: 0security threads cancel [options] <id>
 
 Explicitly cancel the thread's active work
 
@@ -2167,8 +2168,8 @@ Options:
   --format <format>          Output format: json or text (default: "text")
   -h, --help                 display help for command
 
-### 0 threads clear (hidden)
-Usage: 0 threads clear [options] <id>
+### 0security threads clear (hidden)
+Usage: 0security threads clear [options] <id>
 
 Erase a thread's conversation but keep the thread
 
@@ -2182,8 +2183,8 @@ Options:
   --format <format>          Output: text or json (choices: "text", "json")
   -h, --help                 display help for command
 
-### 0 threads close (hidden)
-Usage: 0 threads close [options] <id>
+### 0security threads close (hidden)
+Usage: 0security threads close [options] <id>
 
 Stop and close a live thread; its saved copy is kept
 
@@ -2196,8 +2197,8 @@ Options:
   --format <format>          Output: text or json (choices: "text", "json")
   -h, --help                 display help for command
 
-### 0 threads continue (hidden)
-Usage: 0 threads continue [options] <id> [text]
+### 0security threads continue (hidden)
+Usage: 0security threads continue [options] <id> [text]
 
 Continue a live thread
 
@@ -2214,8 +2215,8 @@ Options:
   --format <format>          Output format: json or text (default: "text")
   -h, --help                 display help for command
 
-### 0 threads create (hidden)
-Usage: 0 threads create [options]
+### 0security threads create (hidden)
+Usage: 0security threads create [options]
 
 Create a thread within the engine's admission grants
 
@@ -2230,8 +2231,8 @@ Options:
   --format <format>          Output format: json or text (default: "json")
   -h, --help                 display help for command
 
-### 0 threads decide (hidden)
-Usage: 0 threads decide [options] <id> <decision-id>
+### 0security threads decide (hidden)
+Usage: 0security threads decide [options] <id> <decision-id>
 
 Respond to a pending thread decision
 
@@ -2246,8 +2247,8 @@ Options:
   --format <format>          Output format: json or text (default: "json")
   -h, --help                 display help for command
 
-### 0 threads delete (hidden)
-Usage: 0 threads delete [options] <id>
+### 0security threads delete (hidden)
+Usage: 0security threads delete [options] <id>
 
 Permanently delete a thread
 
@@ -2262,8 +2263,8 @@ Options:
   --format <format>          Output: text or json (choices: "text", "json")
   -h, --help                 display help for command
 
-### 0 threads events (hidden)
-Usage: 0 threads events [options] <id>
+### 0security threads events (hidden)
+Usage: 0security threads events [options] <id>
 
 Read thread events after an optional cursor
 
@@ -2278,8 +2279,8 @@ Options:
   --format <format>          Output format: json or text (default: "json")
   -h, --help                 display help for command
 
-### 0 threads export (hidden)
-Usage: 0 threads export [options] <id>
+### 0security threads export (hidden)
+Usage: 0security threads export [options] <id>
 
 Export a thread transcript
 
@@ -2295,8 +2296,8 @@ Options:
   --json                     Print the engine response as JSON
   -h, --help                 display help for command
 
-### 0 threads force-stop (hidden)
-Usage: 0 threads force-stop [options] <id>
+### 0security threads force-stop (hidden)
+Usage: 0security threads force-stop [options] <id>
 
 Explicitly force stop qualified owned execution for this exact live thread
 
@@ -2310,8 +2311,8 @@ Options:
   --format <format>          Output format: json or text (default: "text")
   -h, --help                 display help for command
 
-### 0 threads list
-Usage: 0 threads list [options]
+### 0security threads list
+Usage: 0security threads list [options]
 
 List live engine threads
 
@@ -2326,8 +2327,8 @@ Options:
   --format <format>          Output format: json or text (default: "text")
   -h, --help                 display help for command
 
-### 0 threads rename (hidden)
-Usage: 0 threads rename [options] <id> [title]
+### 0security threads rename (hidden)
+Usage: 0security threads rename [options] <id> [title]
 
 Rename a thread, or regenerate its title
 
@@ -2341,8 +2342,8 @@ Options:
   --format <format>          Output: text or json (choices: "text", "json")
   -h, --help                 display help for command
 
-### 0 threads resume (hidden)
-Usage: 0 threads resume [options] <saved-id>
+### 0security threads resume (hidden)
+Usage: 0security threads resume [options] <saved-id>
 
 Restore a retained snapshot as a new thread under current admission grants
 
@@ -2356,8 +2357,8 @@ Options:
   --format <format>          Output format: json or text (default: "text")
   -h, --help                 display help for command
 
-### 0 threads retry (hidden)
-Usage: 0 threads retry [options] <id>
+### 0security threads retry (hidden)
+Usage: 0security threads retry [options] <id>
 
 Re-run the last turn of a thread
 
@@ -2370,8 +2371,8 @@ Options:
   --format <format>          Output: text or json (choices: "text", "json")
   -h, --help                 display help for command
 
-### 0 threads send
-Usage: 0 threads send [options] <id> <text>
+### 0security threads send
+Usage: 0security threads send [options] <id> <text>
 
 Send a message to a live thread
 
@@ -2388,8 +2389,8 @@ Options:
   --format <format>          Output format: json or text (default: "text")
   -h, --help                 display help for command
 
-### 0 threads set (hidden)
-Usage: 0 threads set [options] <id>
+### 0security threads set (hidden)
+Usage: 0security threads set [options] <id>
 
 Change a thread's model, effort or folder
 
@@ -2405,8 +2406,8 @@ Options:
   --format <format>          Output: text or json (choices: "text", "json")
   -h, --help                 display help for command
 
-### 0 threads show
-Usage: 0 threads show [options] <id>
+### 0security threads show
+Usage: 0security threads show [options] <id>
 
 Read a thread: its status, last reply, usage and cost
 
@@ -2423,8 +2424,8 @@ Options:
   --format <format>          Output format: json or text (default: "text")
   -h, --help                 display help for command
 
-### 0 threads start
-Usage: 0 threads start [options] <prompt>
+### 0security threads start
+Usage: 0security threads start [options] <prompt>
 
 Create a thread, send the first prompt and print its ID
 
@@ -2447,8 +2448,8 @@ Options:
   --format <format>          Output: text or json (choices: "text", "json")
   -h, --help                 display help for command
 
-### 0 threads stop
-Usage: 0 threads stop [options] <id>
+### 0security threads stop
+Usage: 0security threads stop [options] <id>
 
 Cancel a thread's active work
 
@@ -2462,8 +2463,8 @@ Options:
   --format <format>          Output: text or json (choices: "text", "json")
   -h, --help                 display help for command
 
-### 0 threat-model
-Usage: 0 threat-model [options] [folder]
+### 0security threat-model
+Usage: 0security threat-model [options] [folder]
 
 Draft the repository's threat model as a file for people to review (optionally as a pull request)
 
@@ -2480,9 +2481,10 @@ Options:
   --scan                     With --interview: run a scan of the folder first and ask about the
                              classes of vulnerability it finds. Shows the estimated cost and asks
                              before it runs
-  --from-scan <report>       With --interview: ask about the classes in this saved report (from 0
-                             scan --format json). Without --scan or --from-scan, the latest scan of
-                             the folder from the last 30 days is used when there is one
+  --from-scan <report>       With --interview: ask about the classes in this saved report (from
+                             0security scan --format json). Without --scan or --from-scan, the
+                             latest scan of the folder from the last 30 days is used when there is
+                             one
   --scan-budget <usd>        With --scan: the most the scan may spend (default: 3)
   --output <path>            Where to write the threat model, relative to the folder, a .md file
                              (default: .0/threat-model.md); for example THREAT_MODEL.md
@@ -2497,8 +2499,8 @@ Options:
   --db-path <path>           Control database of the local engine to attach to
   -h, --help                 display help for command
 
-### 0 web (hidden)
-Usage: 0 web [options]
+### 0security web (hidden)
+Usage: 0security web [options]
 
 Run the local browser console and operations workspace
 
@@ -2531,7 +2533,7 @@ Options:
   --ready-json                  Emit the bound console URL as machine-readable JSON
   --no-open                     Do not auto-open a browser
   --headless                    Serve the API only: no browser, and no web app files needed (use
-                                with `0 threads`)
+                                with `0security threads`)
   --engines-config <path>       Trusted engine connection registry JSON (default ~/.0/engines.json)
   -h, --help                    display help for command
 

@@ -31,7 +31,7 @@ export function shellQuote(value: string): string {
 
 /** The command that continues scan `scanId` of `folder`. */
 export function resumeCommand(folder: string, scanId: string): string {
-  return `0 scan ${shellQuote(folder)} --resume ${shellQuote(scanId)}`;
+  return `0security scan ${shellQuote(folder)} --resume ${shellQuote(scanId)}`;
 }
 
 function stoppedBy(stop: StopFacts, summary: CoverageSummary): string {

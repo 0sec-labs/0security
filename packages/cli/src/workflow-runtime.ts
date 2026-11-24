@@ -35,7 +35,7 @@ export async function createCliWorkflowRuntime(options: CliWorkflowRuntimeOption
     if (existing) {
       return existing;
     }
-    if (options.requireEngine) throw new Error("No console running. Start one with: 0 --headless");
+    if (options.requireEngine) throw new Error("No console running. Start one with: 0security --headless");
   }
   const ownsHost = !dependencies.host;
   const gateway = dependencies.host?.gateway ?? new ConsoleGateway({ projectPath: workspace, dbPath: options.dbPath });

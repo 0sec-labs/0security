@@ -243,7 +243,7 @@ export function createScriptRuns(options: {
       if (ext.unapprovedEnv.length) {
         return {
           ok: false,
-          error: `extension ${ext.name} declares ${ext.unapprovedEnv.join(", ")} but the approval does not cover it: approve it again with \`0 skills extensions enable ${ext.name} --yes\``,
+          error: `extension ${ext.name} declares ${ext.unapprovedEnv.join(", ")} but the approval does not cover it: approve it again with \`0security skills extensions enable ${ext.name} --yes\``,
         };
       }
 

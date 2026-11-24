@@ -12,7 +12,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const { Command, Option } = createRequire(resolve(root, "packages/cli/package.json"))("commander");
 
 function tree() {
-  const program = new Command().name("0");
+  const program = new Command().name("0security");
   const scan = program.command("scan");
   scan.command("web").requiredOption("--target <target>", "t")
     .addOption(new Option("--depth <depth>").choices(["quick", "default", "deep"]))
@@ -32,6 +32,15 @@ test("extracts fenced lines, prompts, continuations and inline spans", () => {
   const found = extractCommands(md);
   assert.deepEqual(found.map((f) => f.text), ["0 scan web --target x", "0 doctor", "0 scan web  --target x"]);
   assert.equal(found[1].line, 4);
+});
+
+test("accepts 0security as the command name and 0 as its alias, and validates both the same way", () => {
+  const md = ["Run `0security scan web --target x` or `0 doctor`.", "", "```bash", "0security doctor --json", "```"].join("\n");
+  assert.deepEqual(extractCommands(md).map((f) => f.text), ["0security scan web --target x", "0 doctor", "0security doctor --json"]);
+  assert.deepEqual(check("0security scan web --target https://x --depth deep"), []);
+  assert.match(check("0security nope")[0], /unknown command `0security nope`/);
+  assert.match(check("0security scan web --target x --runtime api")[0], /unknown option --runtime/);
+  assert.match(check("0security scan web --target x --depth extreme")[0], /choices: quick, default, deep/);
 });
 
 test("tokenizer honours quotes and stops at pipes and redirects", () => {

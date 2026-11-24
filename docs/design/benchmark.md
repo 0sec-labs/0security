@@ -6,7 +6,7 @@ A small benchmark to measure whether scans and skills help: tiny apps with known
 
 - `scripts/bench/fixtures/<name>/` is one app (under 150 lines, except `medium-app`, which has about 40 files in folders) plus `answer.json`. The answer key lists `items` (planted bugs: `id`, `path`, `startLine`, `endLine`, `category`, `description`, and optionally `alsoAt`: other places the same flaw shows, such as the helper that holds the sink and the route that reaches it; a finding at any of them finds the item) and `decoys` (code that looks risky but is safe). `skill` names the skill the fixture is meant for, or `null`. `clean: true` marks the app with no bugs at all.
 - Fixtures: `node-express` (SQL injection, command injection, path traversal, hardcoded secret), `python-flask` (SSRF, pickle, `yaml.load`, MD5), `go-http` (SQL injection, `template.HTML` XSS, hardcoded key), `llm-app` (prompt injection into a shell tool, secrets in the prompt, unescaped model output; skill `llm-app-review`), `crypto-app` (RSA, SHA-1, ECB, weak key derivation; skill `crypto-migration`) `iac-app` (a Terraform module, a Kubernetes manifest, a Dockerfile and a GitHub Actions workflow with nine planted issues, two of them across resources, and seven decoys; skill `iac-review`) and `clean-app` (the same shapes as `node-express`, written safely).
-- Fixtures: `node-express` (SQL injection, command injection, path traversal, hardcoded secret), `python-flask` (SSRF, pickle, `yaml.load`, MD5), `go-http` (SQL injection, `template.HTML` XSS, hardcoded key), `llm-app` (prompt injection into a shell tool, secrets in the prompt, unescaped model output; skill `llm-app-review`), `crypto-app` (RSA, SHA-1, ECB, weak key derivation; skill `crypto-migration`) `clean-app` (the same shapes as `node-express`, written safely) and `clean-python` (a Flask app with different safe patterns: allow-listed SSRF, `safe_load`, scrypt, a SHA-1 cache validator) and `medium-app` (about 40 files: an Express shop backend with a small Flask service and a Go webhook receiver, ten planted bugs spread over routes and helper files, four decoys; large enough that `0 scan` reviews it in batches).
+- Fixtures: `node-express` (SQL injection, command injection, path traversal, hardcoded secret), `python-flask` (SSRF, pickle, `yaml.load`, MD5), `go-http` (SQL injection, `template.HTML` XSS, hardcoded key), `llm-app` (prompt injection into a shell tool, secrets in the prompt, unescaped model output; skill `llm-app-review`), `crypto-app` (RSA, SHA-1, ECB, weak key derivation; skill `crypto-migration`) `clean-app` (the same shapes as `node-express`, written safely) and `clean-python` (a Flask app with different safe patterns: allow-listed SSRF, `safe_load`, scrypt, a SHA-1 cache validator) and `medium-app` (about 40 files: an Express shop backend with a small Flask service and a Go webhook receiver, ten planted bugs spread over routes and helper files, four decoys; large enough that `0security scan` reviews it in batches).
 - `run.mjs` copies each fixture without `answer.json` into a temporary folder, so the model cannot read the key. It runs `node packages/cli/dist/index.js scan <copy> --budget <n> --format json -o <out>` with a fresh `HOME` (and XDG directories) per run, then parses the findings.
 - Configurations: `generic` (`--prepass off`), `skill` (`--skill <id>`, only for fixtures that name one), `foxguard` (`--prepass auto --scanner foxguard`, needs foxguard installed). For the infrastructure fixture only: `checkov-prepass` (`--prepass auto --scanner checkov`) and `checkov`, which runs Checkov alone, with no model and no cost, and scores its SARIF with the same matcher. `single` (`--batches off`) and `batched` (`--batches on --batch-size <n>`) compare one thread with one thread per batch of entry points; they are meant for `medium-app`. The default is `generic,skill`.
 - Matching (`match.mjs`, pure, unit tested): a finding finds a planted item when the path agrees (suffix match), its line range is within 5 lines of the item's, and it belongs to the item's category family (from the finding's category, then title, then description). Matching is one-to-one, so a single finding never credits two items. A finding on a decoy (within 2 lines), or any finding in the clean app, is a false positive. A finding that is neither is reported as "unmatched" (a real extra issue or noise; read them) and is not counted as a false positive.
@@ -59,9 +59,9 @@ The wording change to the scan skill that this run measured (require an exploit 
 - The edit also names MD5 and SHA-1 explicitly; python-flask generic recall went 83% to 100% (the weak-hash item).
 - With 3 repeats and these fixtures, only differences larger than the min-max range mean anything. The edit was written after reading clean-app findings, so clean-app is partly tuned on; clean-python was added to give a second sample, but it too shares the unauthenticated-read shape.
 
-## Second-pass verification (`0 findings verify`)
+## Second-pass verification (`0security findings verify`)
 
-Measured with `node scripts/bench/verify-score.mjs --run --repeat 2`. For each fixture it scans a copy with a fresh home (`--budget 0.5`), runs `0 findings verify --apply` on every finding, and classifies each finding with the matcher: a planted bug, a false positive (a decoy hit, or any finding in a clean app) or neither. Six fixtures (clean-app, clean-python, python-flask, go-http, node-express, llm-app), 2 repeats, default model. Total cost of both rounds about $0.2.
+Measured with `node scripts/bench/verify-score.mjs --run --repeat 2`. For each fixture it scans a copy with a fresh home (`--budget 0.5`), runs `0security findings verify --apply` on every finding, and classifies each finding with the matcher: a planted bug, a false positive (a decoy hit, or any finding in a clean app) or neither. Six fixtures (clean-app, clean-python, python-flask, go-http, node-express, llm-app), 2 repeats, default model. Total cost of both rounds about $0.2.
 
 The number to watch is real bugs that the verifier called false-positive, and real bugs that `--apply` would have suppressed.
 
@@ -81,11 +81,11 @@ The skill was then tightened: the absence of a caller, a write or a route in the
 - Cost: about $0.001 to $0.002 per finding at the default model, in a thread of its own.
 - This is 25 real-bug findings, 4 false positives and 6 others over 12 scans. It shows the verifier did not dismiss real bugs here and was cautious. It does not show that it removes false positives, because the sample has almost none it could remove. `--apply` has no severity guard: it was not needed in the second round, and it would be added if a real high or critical finding is ever suppressed.
 
-## Fix quality (`0 findings fix`)
+## Fix quality (`0security findings fix`)
 
 Measured with `node scripts/bench/fix-score.mjs --run --repeat 2`. It uses ten small projects under `scripts/bench/fix-cases/`, each with one planted vulnerability: SQL injection, path traversal, command injection, unsafe `eval` of pasted settings, MD5 password hashing, an open redirect, a missing authorization check, a hardcoded signing key, an allowlist bypass in a URL check and prototype pollution. All ten are plain Node with `node --test` and no installs.
 
-A case has the project and its tests, a SARIF file with the finding, a note on what a correct fix must do, a hidden exploit script and a reference fix. The reference fix is used only by `--dry-run`, which proves each exploit check fails on the vulnerable code and passes on a correct fix, with the tests green both times. A run copies the project to a fresh git repository and a fresh home, imports the finding, runs `0 findings fix <id> --no-pr --budget 0.5` with the project's tests as the check, then scores the committed branch in the copy. The tests are the original files, restored before they run. A fix counts when it committed, the original tests pass and the exploit check exits 0.
+A case has the project and its tests, a SARIF file with the finding, a note on what a correct fix must do, a hidden exploit script and a reference fix. The reference fix is used only by `--dry-run`, which proves each exploit check fails on the vulnerable code and passes on a correct fix, with the tests green both times. A run copies the project to a fresh git repository and a fresh home, imports the finding, runs `0security findings fix <id> --no-pr --budget 0.5` with the project's tests as the check, then scores the committed branch in the copy. The tests are the original files, restored before they run. A fix counts when it committed, the original tests pass and the exploit check exits 0.
 
 2026-11-23, default model (gpt-6-luna), 2 repeats, `--budget 0.5` per fix, total cost $0.05:
 
@@ -96,9 +96,9 @@ A case has the project and its tests, a SARIF file with the finding, a note on w
 
 What it shows: on single-bug textbook cases the fix flow commits a working change that keeps the tests passing. What it does not show: how it behaves in a repository with many files, a build, or a vulnerability that spans modules. The exploit scripts are ours and test the cases we thought of. A fix that blocks our payloads and misses another one would pass. The cases are also small enough that the model may have seen close variants of them.
 
-## Agent triage (`0 findings verify`)
+## Agent triage (`0security findings verify`)
 
-Measured with `node scripts/bench/triage-score.mjs --run`. It scans each fixture with a fresh home, runs `0 findings verify --apply` on every finding and scores the verdicts against the answer keys. It shares the scan, verify and classification steps with `verify-score.mjs` and adds precision and recall per verdict. Pass `--scans <dir>` to verify saved scan reports (`<fixture>.json` from `0 scan --format json -o`) instead of scanning again; the run keeps its own scan reports under its output folder for that.
+Measured with `node scripts/bench/triage-score.mjs --run`. It scans each fixture with a fresh home, runs `0security findings verify --apply` on every finding and scores the verdicts against the answer keys. It shares the scan, verify and classification steps with `verify-score.mjs` and adds precision and recall per verdict. Pass `--scans <dir>` to verify saved scan reports (`<fixture>.json` from `0security scan --format json -o`) instead of scanning again; the run keeps its own scan reports under its output folder for that.
 
 The number to watch is real bugs that verify called false-positive. Real means the finding matches a planted bug. Noise means it is on a decoy or anywhere in a clean fixture. Findings that are neither are left out of the rates.
 
@@ -142,7 +142,7 @@ Rule scanners report a whole resource as one region, so the matcher credits a Ch
 
 ## Second opinion with `--known`
 
-`scripts/bench/second-opinion.mjs` measures whether `0 scan --known <sarif>` finds planted bugs that a baseline tool misses (issue 516). For each fixture with planted items it runs the baseline tool, scores that tool's own SARIF against the answer key with the same matcher, then scans the fixture with and without `--known <that SARIF>`. The generic scan is the same two runs for both tools. `--prepass off`, the default model, a fresh `HOME` per run, `--budget 0.5`.
+`scripts/bench/second-opinion.mjs` measures whether `0security scan --known <sarif>` finds planted bugs that a baseline tool misses (issue 516). For each fixture with planted items it runs the baseline tool, scores that tool's own SARIF against the answer key with the same matcher, then scans the fixture with and without `--known <that SARIF>`. The generic scan is the same two runs for both tools. `--prepass off`, the default model, a fresh `HOME` per run, `--budget 0.5`.
 
 Measured on 2026-11-22. Baselines: foxguard and Semgrep (`p/default`). 2 repeats per arm, except `medium-app` with foxguard only and 1 repeat (a scan of it takes 15 to 25 minutes). Semgrep was not run on `medium-app`. Total model cost about $0.8 as reported by the scans, plus one `medium-app` scan that was stopped and rerun.
 
@@ -180,7 +180,7 @@ Share of the reported findings that are new (not matching a known item by file, 
 
 ## Real applications
 
-The synthetic fixtures are small and textbook-shaped. This section measures `0 scan` on three public, intentionally vulnerable applications whose bugs their own projects document. Code: `scripts/bench/real-apps.mjs`, keys in `scripts/bench/real-apps/`.
+The synthetic fixtures are small and textbook-shaped. This section measures `0security scan` on three public, intentionally vulnerable applications whose bugs their own projects document. Code: `scripts/bench/real-apps.mjs`, keys in `scripts/bench/real-apps/`.
 
 The apps are untrusted. The harness clones them as text at a pinned commit, never installs or runs them, and scans a scratch copy.
 

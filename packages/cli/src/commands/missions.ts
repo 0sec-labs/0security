@@ -28,7 +28,7 @@ type Options = ConsoleTransportOptions & { json?: boolean; saved?: boolean; yes?
  * Whether commands ask first is only the global "Ask before running commands" setting, never a per-thread choice.
  */
 function autonomyFlag(flags: { approvals?: string }, json?: boolean): void {
-  if (flags.approvals !== undefined) throw new UsageError("Ask before running commands is a global setting. Change it with `0 config set approvals ask` (or `auto`).");
+  if (flags.approvals !== undefined) throw new UsageError("Ask before running commands is a global setting. Change it with `0security config set approvals ask` (or `auto`).");
   noteIgnoredAccessFlags(givenAccessOption(flags as Record<string, unknown>), { json });
 }
 const EFFORTS = ["minimal", "low", "medium", "high", "xhigh"];
@@ -85,7 +85,7 @@ export function registerMissionsCommand(program: Command, deps: MissionsDeps = d
         if (flags.folder) await client.request("PATCH", `/api/console/sessions/${missionId(id)}/configuration`, { workspacePath: flags.folder });
         await client.request("POST", `/api/console/sessions/${missionId(id)}/messages`, { text: prompt });
       } catch (error) {
-        throw new Error(`${error instanceof Error ? error.message : String(error)} (thread ${id} was created; remove it with \`0 threads list ${id} --delete --yes\`)`);
+        throw new Error(`${error instanceof Error ? error.message : String(error)} (thread ${id} was created; remove it with \`0security threads list ${id} --delete --yes\`)`);
       }
       if (!flags.wait) { print(options, { session: created }, id); return; }
       const deadline = Date.now() + Number(flags.timeout) * 1000;

@@ -49,8 +49,8 @@ A new tool therefore cannot silently bypass the hook.
 
 The `protected-paths` decider denies agent commands and file tools that touch `~/.0/extensions`, `plugins`,
 `plugin-enablement`, `executable-plugins`, `harness-trust`, `evolution-authority`, the settings, backends and
-credentials files and `0.db*`, and the approval-bearing CLI (`0 skills add|extensions enable|update|import|remove`,
-`0 plugin enable|disable`, `0 skills ... --yes`). The reason tells the agent to ask the operator.
+credentials files and `0.db*`, and the approval-bearing CLI (`0security skills add|extensions enable|update|import|remove`,
+`0security plugin enable|disable`, `0security skills ... --yes`). The reason tells the agent to ask the operator.
 Reads are denied too: the approval state and the seal key are not for agents.
 
 Covered by text analysis: absolute paths, `~`, `$HOME`, `${HOME}`, `cd`/`pushd` followed by relative paths, `..`,

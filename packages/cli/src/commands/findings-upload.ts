@@ -91,7 +91,7 @@ export async function runBitbucketUpload(file: string, options: UploadOptions, d
     const filtered = options.includeOutOfScope ? { text: deps.readText(file), dropped: 0 } : withoutOutOfScope(deps.readText(file));
     if (filtered.dropped) deps.err(`${filtered.dropped} finding(s) outside the declared scope were left out; add --include-out-of-scope to send them.`);
     findings = readInsightFindings(filtered.text);
-  } catch (error) { if (error instanceof UsageError) throw error; throw new UsageError(`${error instanceof Error ? error.message : String(error)} Make one with \`0 scan --format json -o scan.json\`.`); }
+  } catch (error) { if (error instanceof UsageError) throw error; throw new UsageError(`${error instanceof Error ? error.message : String(error)} Make one with \`0security scan --format json -o scan.json\`.`); }
   const reportId = options.reportId ?? "0-security";
   if (!REPORT_ID.test(reportId)) throw new UsageError("--report-id may hold letters, digits, dots, dashes and underscores (at most 100).");
   const payload = buildCodeInsights(findings, platform, { reportId });
@@ -134,11 +134,11 @@ export function packSarif(text: string): string {
 
 export async function runUpload(file: string, options: UploadOptions, deps: UploadDeps = defaults): Promise<{ id: string; status: string } | undefined> {
   const raw = deps.readText(file);
-  if (!looksLikeSarif(raw)) throw new UsageError("This is not a SARIF 2.1.0 file. Make one with `0 scan --format sarif -o scan.sarif`.");
+  if (!looksLikeSarif(raw)) throw new UsageError("This is not a SARIF 2.1.0 file. Make one with `0security scan --format sarif -o scan.sarif`.");
   const filtered = options.includeOutOfScope ? { text: raw, dropped: 0 } : withoutOutOfScope(raw);
   if (filtered.dropped) deps.err(`${filtered.dropped} finding(s) outside the declared scope were left out; add --include-out-of-scope to upload them.`);
   const text = filtered.text;
-  if (!looksLikeSarif(text)) throw new UsageError("This is not a SARIF 2.1.0 file. Make one with `0 scan --format sarif -o scan.sarif`.");
+  if (!looksLikeSarif(text)) throw new UsageError("This is not a SARIF 2.1.0 file. Make one with `0security scan --format sarif -o scan.sarif`.");
 
   const host = selectHost({ run: deps.gh });
   const repo = options.repo ?? await host.currentRepo();
@@ -166,7 +166,7 @@ export async function runUpload(file: string, options: UploadOptions, deps: Uplo
 export function registerFindingsUploadCommand(parent: Command, deps: UploadDeps = defaults): void {
   parent.command("upload")
     .description("Upload findings to GitHub code scanning (SARIF) or to Bitbucket Code Insights (scan JSON or SARIF)")
-    .argument("<file>", "SARIF 2.1.0 file from `0 scan --format sarif -o scan.sarif`; for Bitbucket also `0 scan --format json -o scan.json`")
+    .argument("<file>", "SARIF 2.1.0 file from `0security scan --format sarif -o scan.sarif`; for Bitbucket also `0security scan --format json -o scan.json`")
     .option("--to <target>", "github (default), bitbucket-cloud or bitbucket-dc", "github")
     .option("--url <url>", "Bitbucket Data Center base URL (default: BITBUCKET_URL)")
     .option("--report-id <id>", "Bitbucket report id or key", "0-security")
@@ -176,7 +176,7 @@ export function registerFindingsUploadCommand(parent: Command, deps: UploadDeps 
     .option("--commit <sha>", "Commit the results are for (default: HEAD, or GITHUB_SHA in Actions)")
     .option("--ref <ref>", "refs/heads/<branch> or refs/pull/<n>/merge (default: the current branch, or GITHUB_REF in Actions)")
     .option("--tool <name>", "Name the tool shown in GitHub")
-    .option("--include-out-of-scope", "Also send findings the declared scope (0 scan --scope) labelled out of scope; they are skipped by default")
+    .option("--include-out-of-scope", "Also send findings the declared scope (0security scan --scope) labelled out of scope; they are skipped by default")
     .option("--no-wait", "Return when GitHub has accepted the upload instead of waiting for it to be processed")
     .option("--format <format>", "Output: text or json", "text")
     .action(async (file: string, options: UploadOptions) => {

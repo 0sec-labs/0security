@@ -27,7 +27,7 @@ export function runUsage(options: JsonOption & { by?: string }, deps: ConsoleCom
     const models = [...new Set(rows.map(r => r.model))].map(model => ({ model, ...sum(rows.filter(r => r.model === model)) }))
       .sort((a, b) => (b.costUsd ?? 0) - (a.costUsd ?? 0) || b.tokens - a.tokens);
     if (options.json) return printJson(io, { by, totals, ...(by === "model" ? { models } : { missions: rows }), source: client.mode === "attached" ? "running engine" : "none" });
-    if (client.mode !== "attached") io.out("No running engine: open threads are only tracked by a running 0 engine (`0 --headless`).");
+    if (client.mode !== "attached") io.out("No running engine: open threads are only tracked by a running 0 engine (`0security --headless`).");
     else if (!rows.length) io.out("No threads have used tokens yet.");
     else {
       io.out(by === "model"

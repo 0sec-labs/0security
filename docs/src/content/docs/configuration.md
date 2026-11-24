@@ -8,10 +8,10 @@ description: Settings, environment variables, telemetry, updates and the securit
 ## Quick start
 
 ```bash
-0 config get                              # effective settings, each labelled default, global or project
-0 config get --export ./settings.json     # write the effective settings as JSON
-0 config set --from-file ./settings.json  # merge into the global layer
-0 config doctor upgrade                   # install the latest release
+0security config get                              # effective settings, each labelled default, global or project
+0security config get --export ./settings.json     # write the effective settings as JSON
+0security config set --from-file ./settings.json  # merge into the global layer
+0security config doctor upgrade                   # install the latest release
 ```
 
 0 resolves each setting in this order, highest first: command-line flag, environment variable, project settings, global settings, built-in default.
@@ -28,8 +28,8 @@ description: Settings, environment variables, telemetry, updates and the securit
 Set up the workbench, then start the app:
 
 ```bash
-0 config doctor workbench setup --image /absolute/path/0-workbench-linux-arm64.tar --provider chatgpt-codex
-0 config doctor workbench status --json
+0security config doctor workbench setup --image /absolute/path/0-workbench-linux-arm64.tar --provider chatgpt-codex
+0security config doctor workbench status --json
 0
 ```
 
@@ -40,7 +40,7 @@ Setup downloads the pinned VM runtime and approves a local image archive by its 
 | `--image <archive>` | saved approved image | Local OCI or Docker archive to approve (limit 8 GiB). |
 | `--state <directory>` | `~/.0/workbench` | VM state, image approval and guest data. |
 | `--workspace <directory>` | current directory per launch | Host folder mounted at `/workspace` in the guest. |
-| `--provider <id>` | none | Grant a host provider account to the guest. Repeat to grant several. `0 config doctor workbench providers` lists the IDs. |
+| `--provider <id>` | none | Grant a host provider account to the guest. Repeat to grant several. `0security config doctor workbench providers` lists the IDs. |
 | `--no-github` | | Revoke the GitHub token grant. 0 refuses to forward a GitHub token. |
 | `--cpus`, `--memory <MiB>`, `--storage <GiB>` | `2`, `4096`, `20` | Guest resources. |
 | `--sandbox-image <reference=archive>` | none | Approve a `repository@sha256:<64 hex>` image for isolated container actions. Repeat for more. |
@@ -48,18 +48,18 @@ Setup downloads the pinned VM runtime and approves a local image archive by its 
 Change the setup later:
 
 ```bash
-0 config doctor workbench configure --provider openai,anthropic --no-github   # replace grants
-0 config doctor workbench configure --provider none                           # revoke provider grants
-0 config doctor workbench configure --current-workspace                       # drop a fixed workspace
-0 config doctor workbench configure --clear-sandbox-images
-0 config doctor workbench disable                                             # return to local; keeps image and state
+0security config doctor workbench configure --provider openai,anthropic --no-github   # replace grants
+0security config doctor workbench configure --provider none                           # revoke provider grants
+0security config doctor workbench configure --current-workspace                       # drop a fixed workspace
+0security config doctor workbench configure --clear-sandbox-images
+0security config doctor workbench disable                                             # return to local; keeps image and state
 ```
 
 - Your choices live in `~/.0/workbench.json`, readable only by you. It holds no credential values.
 - The guest sees only the providers you grant. Your home folder, SSH keys, Docker sockets and other environment variables are not forwarded.
 - If the runtime, image or admission check fails, 0 refuses to launch. It never falls back to the host.
 - Project settings cannot change the profile. A change applies at the next launch.
-- `0 config doctor workbench status` is read-only and downloads nothing.
+- `0security config doctor workbench status` is read-only and downloads nothing.
 
 ## State directory
 
@@ -84,7 +84,7 @@ Project settings live in `<project>/.0/tui-settings.json`.
 
 Set the database file with `--db-path` or `ZERO_DB_PATH`. `--db-path` wins. Moving one path does not move the others.
 
-A running console is tied to one folder and owns its database. If you run `0 skills list` or `0 threads list` from another folder, it stops with `This console is for <folder>. Run the command there, or add --db-path <path>.`
+A running console is tied to one folder and owns its database. If you run `0security skills list` or `0security threads list` from another folder, it stops with `This console is for <folder>. Run the command there, or add --db-path <path>.`
 
 Thread transcripts hold target hostnames, findings and raw request and response bodies, including any cookies or tokens a tool echoed. 0 does not scrub or encrypt them. File permissions (`0600` files, `0700` directory) are the only protection.
 
@@ -102,28 +102,28 @@ Scan, fix and verify can each have a default budget in USD and a default model. 
 }
 ```
 
-The budget becomes the default for `--budget` and the model the default for `--model` of `0 scan`, `0 findings fix` and `0 findings verify`. A flag you pass always wins. For verify, the budget is the total for the run.
+The budget becomes the default for `--budget` and the model the default for `--model` of `0security scan`, `0security findings fix` and `0security findings verify`. A flag you pass always wins. For verify, the budget is the total for the run.
 
-Only this file sets the defaults. A project settings file cannot, so a repository you open cannot pick your model or your spend. An invalid entry is ignored. `0 findings burndown` does not read these defaults: use its own `--budget`, `--per-fix` and `--model`.
+Only this file sets the defaults. A project settings file cannot, so a repository you open cannot pick your model or your spend. An invalid entry is ignored. `0security findings burndown` does not read these defaults: use its own `--budget`, `--per-fix` and `--model`.
 
-## The `0 config` command
+## The `0security config` command
 
-`0 config` reads and writes computer settings. Set appearance in the browser app under Settings.
+`0security config` reads and writes computer settings. Set appearance in the browser app under Settings.
 
 ```bash
-0 config get
-0 config get <key>
-0 config set <key> <value> [--project] [--yes]
-0 config set --reset [keys...] --yes
-0 config get --export [file] [--global]
-0 config set --from-file <file> [--global | --project] [--yes]
+0security config get
+0security config get <key>
+0security config set <key> <value> [--project] [--yes]
+0security config set --reset [keys...] --yes
+0security config get --export [file] [--global]
+0security config set --from-file <file> [--global | --project] [--yes]
 ```
 
 Settings resolve in layers, highest first: project, global, default. When settings load, 0 drops unknown keys and resets invalid values to the default.
 
 A project cannot change these settings: `analyticsLevel`, `diagnosticReporting`, `updatePolicy`, onboarding state, development source updates, `executionProfile` and `approvals`.
 
-`0 config set --from-file <file>` refuses to change these security-sensitive settings unless you pass `--yes`: `executionProfile`, `allowModelSelfExtension`, `allowDevSourceUpdates`, `allowSubagentPeerMessaging` and `allowSubagentOperatorMessaging`. It prints each rejected change.
+`0security config set --from-file <file>` refuses to change these security-sensitive settings unless you pass `--yes`: `executionProfile`, `allowModelSelfExtension`, `allowDevSourceUpdates`, `allowSubagentPeerMessaging` and `allowSubagentOperatorMessaging`. It prints each rejected change.
 
 Two conversation settings are worth knowing:
 
@@ -136,7 +136,7 @@ Two conversation settings are worth knowing:
 
 The same applies inside helpers. A subagent or a persistent worker that a thread starts also asks before each command or file change, so approving the spawn does not approve what the helper runs. An unattended Sentinel under `ask` waits for a decision on each call, and several workers at once queue several prompts. Use `auto` for runs nobody watches.
 
-Set it with **Ask before running commands** under **Settings → Helpers**. To override it for one run, pass `--approvals ask|auto` to `0 -p`. Threads and Sentinels follow this one setting. Reset all leaves it alone.
+Set it with **Ask before running commands** under **Settings → Helpers**. To override it for one run, pass `--approvals ask|auto` to `0security -p`. Threads and Sentinels follow this one setting. Reset all leaves it alone.
 
 ### Development source updates
 
@@ -154,7 +154,7 @@ Set them inline, for example `env ZERO_LOG_FORMAT=json 0`.
 | --- | --- |
 | `ZERO_LOG_FORMAT=json` | Write operational records as NDJSON on stderr. They hold lifecycle and cost metadata only, and are not uploaded. |
 | `ZERO_DB_PATH` | Database file. |
-| `ZERO_SANDBOX_DIR` | Folder where `0 findings fix --sandbox docker` copies the work tree. It must be shared with the Docker VM. |
+| `ZERO_SANDBOX_DIR` | Folder where `0security findings fix --sandbox docker` copies the work tree. It must be shared with the Docker VM. |
 | `ZERO_SUPPRESS_PROVIDER_STARTUP_LOG=1` | Hide the `Provider:` startup line. |
 | `ZERO_RUNTIME_TRACE=1` | Print the runtime, provider and model to stderr. |
 
@@ -203,7 +203,7 @@ A gate does not supply the credentials or tools its feature needs.
 
 ### Dashboard
 
-Set this on the process that runs `0`.
+Set this on the process that runs `0security`.
 
 | Variable | Default | Effect |
 | --- | --- | --- |
@@ -228,11 +228,11 @@ In official release builds, 0security sends anonymous usage counts and crash rep
 | **Problem reports** (`diagnosticReporting`) | `automatic` | `off`, `ask`, `automatic` |
 | **Updates** (`updatePolicy`) | `automatic` | `off`, `notify`, `automatic` |
 
-Each setting is global to your computer, and project settings cannot change it. 0 keeps a saved `off`, `ask` or `automatic`. An install with no recorded choice uses `automatic`. To choose `ask`, run `0 config set diagnosticReporting ask` or use the browser app under Settings, Privacy.
+Each setting is global to your computer, and project settings cannot change it. 0 keeps a saved `off`, `ask` or `automatic`. An install with no recorded choice uses `automatic`. To choose `ask`, run `0security config set diagnosticReporting ask` or use the browser app under Settings, Privacy.
 
 ### First-run notice
 
-The first time you run the CLI or `0`, 0security prints one notice to stderr. It says that 0security sends anonymous usage counts and crash reports and checks GitHub for updates, links here and shows how to opt out. 0 prints it once per install, and only when stderr is a terminal. It never prints in CI, with `--format json`, `--json` or other machine formats, with `ZERO_LOG_FORMAT=json`, or when telemetry is already off. The browser app shows the same disclosure under Settings, Privacy.
+The first time you run the CLI or the console, 0security prints one notice to stderr. It says that 0security sends anonymous usage counts and crash reports and checks GitHub for updates, links here and shows how to opt out. 0 prints it once per install, and only when stderr is a terminal. It never prints in CI, with `--format json`, `--json` or other machine formats, with `ZERO_LOG_FORMAT=json`, or when telemetry is already off. The browser app shows the same disclosure under Settings, Privacy.
 
 ### Usage metrics
 
@@ -245,7 +245,7 @@ When `analyticsLevel` is `usage`, a release build sends anonymous counts directl
 | `finding_severity_counts` | Findings by severity (`critical`, `high`, `medium`, `low`, `info`, `unknown`, `other`). |
 | `turn_count`, `duration_ms`, `cost_usd` | Agent turns, time spent, and model spend in USD when known. |
 | `version`, `channel` | 0security version and release channel (`beta` or `dev`). |
-| `surface` | `web` for `0`, otherwise `cli`. |
+| `surface` | `web` for the console, otherwise `cli`. |
 | `os`, `arch`, `runtime` | Operating system, CPU architecture, and `node` or `bun`. |
 | `$lib`, `$geoip_disable`, `$process_person_profile`, `$ip` | Fixed values (`0security`, `true`, `false`, `null`) that turn off IP lookup and person profiles. |
 
@@ -278,7 +278,7 @@ Your `diagnosticReporting` choice decides what happens to a report:
 
 A report contains the error class (for example `TypeError`), the 0security version and release channel, Node version, operating system, CPU architecture, the surface, and the name of the running command from the built-in list, never its arguments. It also holds scrubbed locations inside 0security's own code. It never contains error messages, command output, file paths, targets, hostnames, findings, source code or credentials.
 
-`0 config doctor` prints one line when reports are waiting. `0 config doctor --discard-reports` deletes them without sending anything.
+`0security config doctor` prints one line when reports are waiting. `0security config doctor --discard-reports` deletes them without sending anything.
 
 ### Opt out of telemetry
 
@@ -288,14 +288,14 @@ Any one of these turns telemetry off. Environment variables beat every saved set
 | --- | --- |
 | `ZERO_NO_TELEMETRY=1`, `DO_NOT_TRACK=1` or `ZERO_OFFLINE=1` | Turns off usage metrics and crash reports. Any value except empty, `0`, `false` or `no` counts. An organization can set one for every operator, and it overrides each person's settings. |
 | `ZERO_ENTERPRISE=1` | No-egress mode. Does everything the row above does, and also turns off update checks, model catalog and price lookups, web search, remote extension sources and the other third-party calls. Only the model endpoint you configured, and destinations you name yourself, stay. Project settings cannot change it. See [Data flow and no-egress mode](/data-flow/). |
-| `0 config set analyticsLevel off` | Turns off usage metrics. `ZERO_ANALYTICS_LEVEL=off` does the same for one process. |
-| `0 config set diagnosticReporting off` | Turns off crash reports. Use `ask` to review each one first. |
+| `0security config set analyticsLevel off` | Turns off usage metrics. `ZERO_ANALYTICS_LEVEL=off` does the same for one process. |
+| `0security config set diagnosticReporting off` | Turns off crash reports. Use `ask` to review each one first. |
 | Browser app, Settings, Privacy | The same two switches. |
 
 ```bash
 export ZERO_NO_TELEMETRY=1
-0 config set analyticsLevel off
-0 config set diagnosticReporting off
+0security config set analyticsLevel off
+0security config set diagnosticReporting off
 ```
 
 ### Send telemetry to your own projects
@@ -314,8 +314,8 @@ At startup, 0 checks GitHub for a newer release, at most once every 24 hours. Wh
 
 | Policy | Behavior |
 | --- | --- |
-| `automatic` | Default. Runs the installer before starting, then tells you to restart. This can delay startup by a few seconds. A running `0` also updates in the background ([see below](#update-a-running-console)). |
-| `notify` | Prints `Update available: <old> → <new>. Run 0 config doctor upgrade.` In the console, the update card waits for your click. |
+| `automatic` | Default. Runs the installer before starting, then tells you to restart. This can delay startup by a few seconds. A running console also updates in the background ([see below](#update-a-running-console)). |
+| `notify` | Prints `Update available: <old> → <new>. Run 0security config doctor upgrade.` In the console, the update card waits for your click. |
 | `off` | Makes no request. |
 
 Only an explicit global choice moves the setting off `automatic`.
@@ -323,8 +323,8 @@ Only an explicit global choice moves the setting off `automatic`.
 The check runs only in an interactive terminal. It is skipped when `CI`, `ZERO_NO_UPDATE_CHECK` or `ZERO_OFFLINE` is set to a non-empty value other than `0` or `false`. Project settings cannot change the policy. Windows has no automatic installation, so download a release instead. A Windows install has a single `0.exe`, with no `0security` alias.
 
 ```bash
-0 config doctor upgrade                    # install the latest release now
-0 config doctor upgrade --version v0.10.0  # pin a release
+0security config doctor upgrade                    # install the latest release now
+0security config doctor upgrade --version v0.10.0  # pin a release
 env ZERO_NO_UPDATE_CHECK=1 0               # skip the check for one run
 ```
 
@@ -336,10 +336,10 @@ To point the check and the installer at a mirror, set `ZERO_UPDATE_ORIGIN`. The 
 
 ### Update a running console
 
-`0` can run for days, so it does not wait for the next start. This applies to a standalone `0` binary in a writable folder (a managed install).
+The console can run for days, so it does not wait for the next start. This applies to a standalone binary in a writable folder (a managed install).
 
 - Every six hours, with up to ten percent random spread, the console asks for the newest release and caches the answer in `last-update-check`. With **Automatic**, it installs the verified release in the background only while no thread is running. Then it shows **Restart to finish updating**.
-- The **Update available** card has **Update and restart**. It runs the same installer as `0 config doctor upgrade`, with a checksum check and an atomic swap. Then it restarts the same command with the same port, `--db-path` and `--asset-dir`. The page shows **Updating…**, reconnects on its own and reports **Updated to <version>**. If threads are running, it asks first, because the restart stops them.
+- The **Update available** card has **Update and restart**. It runs the same installer as `0security config doctor upgrade`, with a checksum check and an atomic swap. Then it restarts the same command with the same port, `--db-path` and `--asset-dir`. The page shows **Updating…**, reconnects on its own and reports **Updated to <version>**. If threads are running, it asks first, because the restart stops them.
 - With **Automatic**, server mode off and no service manager, the console also restarts by itself after 10 minutes of inactivity. In [server mode](/server-mode/) it never restarts itself and shows the card instead.
 - Under launchd, systemd or pm2, the console exits with code 0 after installing and expects the service manager to start it again. 0 detects these from the environment. You can set `ZERO_SUPERVISED=1` or `0` to override. Use `KeepAlive` (launchd), `Restart=always` (systemd) or pm2's default.
 
@@ -350,7 +350,7 @@ The card offers a button only when it can work:
 - Docker images are replaced, not changed in place. Run `docker pull ghcr.io/0sec-labs/0security:latest`, then recreate the container.
 - A source checkout updates with `git pull` and a rebuild.
 - An npm install must move to the standalone binary.
-- A binary in a read-only folder, or on Windows, shows `0 config doctor upgrade`.
+- A binary in a read-only folder, or on Windows, shows `0security config doctor upgrade`.
 
 ## Execution boundary
 

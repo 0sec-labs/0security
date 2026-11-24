@@ -100,7 +100,7 @@ export function buildFindingConsoleCommand(
   intent: FindingChatIntent = "investigate",
 ): string {
   const args = [
-    "0 -p 'Continue'",
+    "0security -p 'Continue'",
     "--finding",
     shellQuote(finding.id),
     "--finding-intent",

@@ -330,7 +330,7 @@ The install script does the same for you. When `gh` is installed and logged in i
 To audit the dependencies of a release, run the SBOM through the advisory check:
 
 ```bash
-0 sbom check 0-sbom.cdx.json
+0security sbom check 0-sbom.cdx.json
 ```
 
 Reproducibility: builds run on GitHub-hosted runners with pinned tool versions and a frozen lockfile, but the binaries are not bit-for-bit reproducible, so the attestation, not a local rebuild, is the evidence of origin. The SBOM lists lockfile dependencies of the tagged source and does not enumerate the bundled runtime.

@@ -325,7 +325,7 @@ const defaults: ReportDraftDeps = {
       } finally { db.close(); }
     }
     if (hits.length > 1) throw new UsageError(`Finding '${id}' is in more than one database; pass --db-path.`);
-    if (!hits[0]) throw new UsageError(`Finding '${id}' was not found. Use an id or fingerprint from \`0 findings list\`, or pass --db-path.`);
+    if (!hits[0]) throw new UsageError(`Finding '${id}' was not found. Use an id or fingerprint from \`0security findings list\`, or pass --db-path.`);
     const focus = loadFindingFocus(hits[0].id, { dbPath: hits[0].path });
     return { finding: focus.finding, ...(focus.target ? { target: focus.target } : {}) };
   },

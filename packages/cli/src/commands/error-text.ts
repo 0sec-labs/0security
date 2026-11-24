@@ -12,5 +12,5 @@ export function readableError(message: string): string {
       }
     } catch { /* not JSON: show as is */ }
   }
-  return /^Console thread was not found\.?$/.test(text) ? "Thread not found. List threads with `0 threads list`." : message;
+  return /^Console thread was not found\.?$/.test(text) ? "Thread not found. List threads with `0security threads list`." : message;
 }

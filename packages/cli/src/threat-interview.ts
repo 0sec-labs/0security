@@ -324,7 +324,7 @@ export function upsertScopeDecisions(text: string, notes: readonly InterviewNote
     else lines.splice(close, 0, ...bullets);
     return lines.join(eol);
   }
-  const body = [SECTION, "", "<!-- human -->", `Answered by a person with 0 threat-model --interview on ${date}.${linkTarget ? ` The declared scope is in [SECURITY.md#scope](${linkTarget}).` : ""}`, "", ...bullets, "<!-- /human -->", ""];
+  const body = [SECTION, "", "<!-- human -->", `Answered by a person with 0security threat-model --interview on ${date}.${linkTarget ? ` The declared scope is in [SECURITY.md#scope](${linkTarget}).` : ""}`, "", ...bullets, "<!-- /human -->", ""];
   const tail = text.endsWith("\n") || text.endsWith("\r") ? "" : eol;
   return `${text}${tail}${eol}${body.join(eol)}`;
 }

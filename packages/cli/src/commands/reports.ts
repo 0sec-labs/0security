@@ -46,7 +46,7 @@ export function registerReportsCommand(program: Command): void {
       const parsed: unknown = JSON.parse(readArtifact(report, 20 * 1024 * 1024));
       const candidate = parsed as Partial<ScanReport> | null;
       if (!candidate || typeof candidate !== "object" || !Array.isArray(candidate.findings) || !candidate.summary || typeof candidate.target !== "string") {
-        throw new Error("Not a 0 scan report: expected target, summary and findings.");
+        throw new Error("Not a 0security scan report: expected target, summary and findings.");
       }
       const text = JSON.stringify(toShareSafeReport(candidate as ScanReport, { includeDescription: options.includeDescription === true }), null, 2);
       if (options.output) writeFileSync(resolve(options.output), `${text}\n`, { mode: 0o600 });

@@ -64,7 +64,7 @@ export async function waitUntilSettled(read: () => Promise<Json>, sleep: () => P
   for (;;) {
     const snapshot = await read();
     if (isSettled(asJson(snapshot.session))) return snapshot;
-    if (Date.now() > deadline) throw new Error(`Timed out after ${timeoutSeconds}s; thread ${id} is still ${String(asJson(snapshot.session).status)}. Read it later with \`0 threads show ${id}\`.`);
+    if (Date.now() > deadline) throw new Error(`Timed out after ${timeoutSeconds}s; thread ${id} is still ${String(asJson(snapshot.session).status)}. Read it later with \`0security threads show ${id}\`.`);
     await sleep();
   }
 }

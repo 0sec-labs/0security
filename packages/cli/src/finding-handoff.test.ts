@@ -38,7 +38,7 @@ describe("finding handoff", () => {
     expect(
       buildFindingConsoleCommand({ id: "F'42" }, "/tmp/0 db's.sqlite", "draft_fix"),
     ).toBe(
-      "0 -p 'Continue' --finding 'F'\\''42' --finding-intent draft_fix --db-path '/tmp/0 db'\\''s.sqlite'",
+      "0security -p 'Continue' --finding 'F'\\''42' --finding-intent draft_fix --db-path '/tmp/0 db'\\''s.sqlite'",
     );
   });
 
@@ -140,7 +140,7 @@ describe("finding handoff", () => {
     try {
       expect(loadFindingFocus("fp:7bbb53", { dbPath }).finding.id).toBe("F-77");
       expect(loadFindingFocus("F-7BBB53", { dbPath }).finding.id).toBe("F-77");
-      expect(() => loadFindingFocus("deadbeef", { dbPath })).toThrow(/0 findings.*state\.db/s);
+      expect(() => loadFindingFocus("deadbeef", { dbPath })).toThrow(/0security findings.*state\.db/s);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

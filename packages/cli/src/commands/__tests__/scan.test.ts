@@ -126,7 +126,7 @@ describe("runScan", () => {
     const stop = vi.fn();
     deps.startConsole = vi.fn(async () => stop);
     let attempts = 0;
-    deps.open = vi.fn(async () => { if (++attempts < 3) throw new Error("No console running. Start one with: 0 --headless"); return client as never; });
+    deps.open = vi.fn(async () => { if (++attempts < 3) throw new Error("No console running. Start one with: 0security --headless"); return client as never; });
     await runScan(folder(), options(), deps);
     expect(deps.startConsole).toHaveBeenCalledTimes(1);
     expect(attempts).toBe(3);

@@ -117,7 +117,7 @@ describe("batched scan", () => {
     expect(process.exitCode).toBe(3);
     const stderr = h.err.join("\n");
     expect(stderr).toMatch(/Stopped by the \$5 budget; 8 of 20 entry points not reached\./);
-    expect(stderr).toMatch(/Continue with: 0 scan \S+ --resume scan-\S+/);
+    expect(stderr).toMatch(/Continue with: 0security scan \S+ --resume scan-\S+/);
     expect(stderr).toContain(`Continue with: ${json.coverage.resume}`);
     expect(json.coverage.stoppedBy).toBe("the $5 budget");
   });
@@ -219,7 +219,7 @@ describe("batched scan", () => {
     expect(process.exitCode).toBeUndefined();
     expect(json.status).toBe("partial");
     expect(json.coverage).toMatchObject({ complete: false, entryPoints: { pending: 8 } });
-    expect(json.coverage.resume).toMatch(/^0 scan \S+ --resume scan-/);
+    expect(json.coverage.resume).toMatch(/^0security scan \S+ --resume scan-/);
     expect(h.err.join("\n")).toMatch(/8 of 20 entry points not reached/);
     process.exitCode = undefined;
     const strict = harness(db, n => (n === 2 ? "ceiling" : "ok"));
@@ -234,7 +234,7 @@ describe("batched scan", () => {
     h.deps.loadReport = vi.fn(async () => storedReport([]) as never);
     await runScan(dir, opts(db, { format: "md" }), h.deps);
     expect(h.err.join("\n")).toMatch(/Stopped by a failed batch/);
-    expect(h.out.join("")).toMatch(/Continue with: 0 scan \S+ --resume scan-/);
+    expect(h.out.join("")).toMatch(/Continue with: 0security scan \S+ --resume scan-/);
     expect(process.exitCode).toBe(3);
   });
 
@@ -245,7 +245,7 @@ describe("batched scan", () => {
     const db = join(temp(), "db.sqlite");
     const h = harness(db, n => (n === 2 ? "ceiling" : "ok"));
     await runScan(dir, opts(db), h.deps);
-    expect(report(h).coverage.resume).toMatch(/^0 scan '.*my app' --resume scan-/);
+    expect(report(h).coverage.resume).toMatch(/^0security scan '.*my app' --resume scan-/);
   });
 
   it("--plan lists the folder and starts nothing", async () => {

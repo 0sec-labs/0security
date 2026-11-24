@@ -10,7 +10,7 @@ export function runModelsList(options: JsonOption & { provider?: string }, deps:
     const data = expectOk(await client.request("GET", query(options.provider)));
     const models = data.models as ModelRow[];
     if (options.json) return printJson(io, { models, diagnostics: data.diagnostics });
-    if (!models.length) io.out("No models. Connect a provider with `0 models connect <provider>`.");
+    if (!models.length) io.out("No models. Connect a provider with `0security models connect <provider>`.");
     else io.out(renderTable(["PROVIDER", "MODEL", "ENABLED", "PRICE", "CONTEXT"], models.map(m => [m.provider, m.id, m.enabled ? "yes" : "no", m.price, m.contextWindowTokens ? String(m.contextWindowTokens) : "-"])));
   });
 }
@@ -23,7 +23,7 @@ export function runModelsDefault(model: string | undefined, options: JsonOption 
       if (options.json) return printJson(io, { preference: pref ?? null });
       return io.out(pref ? `${pref.providerId}/${pref.model}` : "No default model set.");
     }
-    if (!options.provider) throw new UsageError("Say which provider serves it: 0 models set <model> --provider <id>. See `0 models list` for both.");
+    if (!options.provider) throw new UsageError("Say which provider serves it: 0security models set <model> --provider <id>. See `0security models list` for both.");
     const data = expectOk(await client.request("PATCH", "/api/console/models/preference", { providerId: options.provider, model }));
     if (options.json) printJson(io, { preference: data.preference });
     else io.out(`Default model: ${options.provider}/${model}`);

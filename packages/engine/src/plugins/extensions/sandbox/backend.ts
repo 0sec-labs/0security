@@ -146,7 +146,7 @@ export function planSandbox(req: SandboxRequest, options: PlanOptions = {}): San
   if (!req.decl && m.mode === "auto") return { kind: "unsandboxed", status: `sandbox: not applied (${req.label} declares no sandbox block; set ZERO_SANDBOX=require to sandbox it with the strict defaults)` };
   const detected = options.status ?? detectSandbox(undefined, env);
   if (!detected.backend) {
-    if (m.mode === "require") return { kind: "refused", error: `ZERO_SANDBOX=require but no sandbox is available (${detected.reason}). Run \`0 doctor\` to see what is missing, or set ZERO_SANDBOX=auto to run without one.` };
+    if (m.mode === "require") return { kind: "refused", error: `ZERO_SANDBOX=require but no sandbox is available (${detected.reason}). Run \`0security doctor\` to see what is missing, or set ZERO_SANDBOX=auto to run without one.` };
     return { kind: "unsandboxed", status: `sandbox: not available (${detected.reason}); ran without it` };
   }
   const decl = req.decl ?? DEFAULT_DECL;

@@ -94,7 +94,7 @@ export class ExtensionInstaller implements Installer {
       if (entry.legacy || !entry.active) return err("legacy", `${name} cannot be enabled: ${entry.legacy?.reason ?? "no installed revision"}.`);
       const record = entry.revisions[entry.active]!;
       if (!record.approvedAt) {
-        if (!options.approve) return err("needs_approval", `${name}@${entry.active.slice(0, 12)} has not been approved. Run \`0 skills extensions info ${name}\`, then enable with --yes.`);
+        if (!options.approve) return err("needs_approval", `${name}@${entry.active.slice(0, 12)} has not been approved. Run \`0security skills extensions info ${name}\`, then enable with --yes.`);
         const files = readVerified(this.deps.store, entry, entry.active); if (!files.ok) return files;
         const manifest = parseManifest(files.value, { fallbackName: name }); if (!manifest.ok) return manifest;
         const caps = capabilitiesOf(manifest.value);

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Verifies that every `0 ...` command shown in the docs and README matches the
+// Verifies that every `0security ...` command (or its short alias `0 ...`) shown in the docs and README matches the
 // real command tree: path, flags, enumerated choices and required options.
 // Also checks internal links/anchors, ZERO_* environment variables and config
 // file names mentioned in docs. Needs `pnpm --filter '@0/cli...' build` first.
@@ -53,7 +53,7 @@ export function tokenize(line) {
   return tokens;
 }
 
-/** Extract { line, text } command invocations that begin with `0 `. */
+/** Extract { line, text } command invocations that begin with `0security ` or its alias `0 `. */
 export function extractCommands(markdown) {
   const found = [];
   const lines = markdown.split("\n");
@@ -68,7 +68,7 @@ export function extractCommands(markdown) {
     }
     if (fence) {
       if (!SHELL_FENCES.has(fence.lang)) continue;
-      const m = /^\s*(?:\$\s+)?(0\s.*)$/.exec(raw);
+      const m = /^\s*(?:\$\s+)?((?:0security|0)\s.*)$/.exec(raw);
       if (!m || /\S {3,}\S/.test(m[1])) continue; // aligned help output, not an invocation
       let text = m[1];
       const start = i + 1;
@@ -78,7 +78,7 @@ export function extractCommands(markdown) {
     }
     for (const span of raw.matchAll(/(?<!`)`([^`\n]+)`(?!`)/g)) {
       const body = span[1].trim().replace(/^\$\s+/, "");
-      if (/^0\s+\S/.test(body) && !body.includes("\\|")) found.push({ line: i + 1, text: body });
+      if (/^(?:0security|0)\s+\S/.test(body) && !body.includes("\\|")) found.push({ line: i + 1, text: body });
     }
   }
   return found;
@@ -102,7 +102,7 @@ function findOption(chain, flag) {
  */
 export function checkInvocation(program, text, rewrite = () => undefined) {
   const tokens = tokenize(text);
-  if (tokens[0] !== "0") return [];
+  if (tokens[0] !== "0security" && tokens[0] !== "0") return [];
   const problems = [];
   let args = tokens.slice(1);
   if (!args.length || args[0].startsWith("-")) return problems;
@@ -150,7 +150,7 @@ export function checkInvocation(program, text, rewrite = () => undefined) {
     if (!positionals.length) {
       const sub = command.commands.find((c) => c.name() === token || c.aliases().includes(token));
       if (sub) { command = sub; chain.push(sub); continue; }
-      // `0 scan <target> ...` is smart-routed to the right module (see rewriteScanArgs), so the target and
+      // `0security scan <target> ...` is smart-routed to the right module (see rewriteScanArgs), so the target and
       // the flags after it belong to a module chosen at run time: accept and stop validating this example.
       if (command.name() === "scan" && command.parent === program && !isPlaceholder(token) && !token.startsWith("-")) break;
       if (command.commands.length && command !== program && !isPlaceholder(token)
@@ -159,13 +159,13 @@ export function checkInvocation(program, text, rewrite = () => undefined) {
         continue;
       }
       if (command === program && !isPlaceholder(token)) {
-        problems.push(`unknown command \`0 ${token}\``);
+        problems.push(`unknown command \`0security ${token}\``);
         break;
       }
     }
     positionals.push(token);
   }
-  // A bare mention such as `0 lab research hunt` names a command; only complete-looking examples need required options.
+  // A bare mention such as `0security lab research hunt` names a command; only complete-looking examples need required options.
   const completeLooking = used.length > 0 || positionals.length > 0;
   if (!command.commands.length && !placeholderLine && completeLooking && !args.every((a) => IMPLICIT_FLAGS.has(a) || chain.some((c) => c.name() === a))) {
     const missing = chain.flatMap((c) => c.options)
@@ -188,7 +188,8 @@ async function loadProgram() {
   const requireCli = createRequire(resolve(root, "packages/cli/package.json"));
   const { Command } = requireCli("commander");
   const registrations = await import(pathToFileURL(resolve(root, "packages/cli/dist/commands/index.js")));
-  const program = new Command().name("0");
+  process.env["ZERO_PROGRAM_NAME"] ??= "0security";
+  const program = new Command().name("0security");
   registrations.registerCommandTree(program);
   let rewrite = () => undefined;
   try {

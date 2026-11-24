@@ -13,7 +13,7 @@ Sentinels run on the engine behind the browser app. With no server running, noth
 
 ## Create a Sentinel
 
-1. Run `0` and click **+** next to **Sentinels** in the sidebar. The Sentinels page, the command palette and the **Create a sentinel** chip on the home screen open the same dialog.
+1. Run `0security` and click **+** next to **Sentinels** in the sidebar. The Sentinels page, the command palette and the **Create a sentinel** chip on the home screen open the same dialog.
 2. Optionally pick a **Start from** preset. It fills the name, avatar and instructions. The default is **Blank**. Click the avatar to change its glyph or colour.
 3. Type a name. Check the **Folder** it works on, the **Computer** it runs on and its **Model**. The model is the current default unless you pick one.
 4. Click **Create sentinel**.
@@ -90,8 +90,8 @@ The run gets the pull request's diff through `gh pr diff`, as untrusted data. 0 
 Add the trigger from the CLI:
 
 ```bash
-0 sentinels set <sentinel> --trigger add --automation <automation> --kind github-pr --repo owner/name --comment --include-forks
-0 sentinels set <sentinel> --trigger check <trigger>
+0security sentinels set <sentinel> --trigger add --automation <automation> --kind github-pr --repo owner/name --comment --include-forks
+0security sentinels set <sentinel> --trigger check <trigger>
 ```
 
 `--trigger check` polls now instead of waiting. The app offers the same options under **Triggers**.
@@ -125,7 +125,7 @@ To pass more variables through, set `ZERO_BASH_ENV_ALLOW` to a comma-separated l
 
 #### Faster with a GitHub webhook (server mode)
 
-Polling needs nothing. If you run `0 --server-mode` behind a public HTTPS address (see [Server mode](/server-mode/)), a webhook makes pull request Sentinels react right after a push.
+Polling needs nothing. If you run `0security --server-mode` behind a public HTTPS address (see [Server mode](/server-mode/)), a webhook makes pull request Sentinels react right after a push.
 
 A delivery only asks the trigger to check GitHub now, exactly as a poll would. Forks, drafts, comments and the one-review-per-commit rule behave the same. If the webhook is off or unreachable, polling keeps working.
 
@@ -138,7 +138,7 @@ The trigger must exist and be on for that repository and base branch. Deliveries
 Rotate the secret from the card or the CLI:
 
 ```bash
-0 sentinels webhook secret rotate --yes
+0security sentinels webhook secret rotate --yes
 ```
 
 The old secret works for 5 minutes, so you can update GitHub without losing deliveries.
@@ -208,7 +208,7 @@ An automation is a saved prompt plus a trigger: a schedule, a manual run or a Gi
 
 ## Create a Sentinel with a schedule from the terminal
 
-`0 sentinels set --create` makes a Sentinel with no automation, so it has nothing a trigger can start. To create one with a schedule from the terminal, write it as a file and sync it. Save this as `.0/sentinels/nightly.yaml`:
+`0security sentinels set --create` makes a Sentinel with no automation, so it has nothing a trigger can start. To create one with a schedule from the terminal, write it as a file and sync it. Save this as `.0/sentinels/nightly.yaml`:
 
 ```yaml
 name: Nightly dependency check
@@ -226,15 +226,15 @@ automations:
 Then apply it:
 
 ```bash
-0 sentinels sync .0/sentinels --apply
+0security sentinels sync .0/sentinels --apply
 ```
 
 The Sentinel is paused and the trigger is off. Review both, then turn them on:
 
 ```bash
-0 sentinels set SENTINEL_ID --trigger list
-0 sentinels set SENTINEL_ID --trigger enable TRIGGER_ID --yes
-0 sentinels set SENTINEL_ID --state active --acknowledge
+0security sentinels set SENTINEL_ID --trigger list
+0security sentinels set SENTINEL_ID --trigger enable TRIGGER_ID --yes
+0security sentinels set SENTINEL_ID --state active --acknowledge
 ```
 
 A schedule uses UTC unless you set `timezone` (`--timezone` on the command line) to an IANA name such as `Europe/Zurich`. The `time` or `--at` value is a time of day in that timezone. The trigger list shows each schedule with its timezone.
@@ -242,7 +242,7 @@ A schedule uses UTC unless you set `timezone` (`--timezone` on the command line)
 To add another trigger to a Sentinel that already has an automation, pass the automation's full ID from the trigger list:
 
 ```bash
-0 sentinels set SENTINEL_ID --trigger add --automation AUTOMATION_ID --kind schedule --frequency weekly --weekday mon --at 08:30 --timezone Europe/Zurich
+0security sentinels set SENTINEL_ID --trigger add --automation AUTOMATION_ID --kind schedule --frequency weekly --weekday mon --at 08:30 --timezone Europe/Zurich
 ```
 
 ## Sentinels as files
@@ -281,9 +281,9 @@ A trigger takes the settings for its kind: `schedule`, `github` (pull requests),
 Preview the changes, apply them, or start from an existing Sentinel:
 
 ```bash
-0 sentinels sync .0/sentinels            # show what would change
-0 sentinels sync .0/sentinels --apply --commit "$(git rev-parse HEAD)"
-0 sentinels export "PR reviewer" --out .0/sentinels   # start from an existing Sentinel
+0security sentinels sync .0/sentinels            # show what would change
+0security sentinels sync .0/sentinels --apply --commit "$(git rev-parse HEAD)"
+0security sentinels export "PR reviewer" --out .0/sentinels   # start from an existing Sentinel
 ```
 
 The file is plain YAML, with no anchors or custom tags. Unknown fields are refused.
@@ -296,17 +296,17 @@ Stop a console that uses the same database before you sync. In CI, `--check` exi
 
 ## Manage Sentinels from the CLI
 
-Everything on the Sentinels page works from `0 sentinels`. Commands attach to a running engine. Without one, reads and edits work against the control database directly. `sentinels run` sends a message into the Sentinel's thread, so it needs the engine. Add `--format json` for machine output.
+Everything on the Sentinels page works from `0security sentinels`. Commands attach to a running engine. Without one, reads and edits work against the control database directly. `sentinels run` sends a message into the Sentinel's thread, so it needs the engine. Add `--format json` for machine output.
 
 ```bash
-0 sentinels list --presets
-0 sentinels set --create --preset dependency-watcher --name "Nightly check"
-0 sentinels set SENTINEL_ID --purpose "Watch the lockfile"
-0 sentinels set SENTINEL_ID --files put reports/notes.md --file ./notes.md
-0 sentinels set SENTINEL_ID --state active --acknowledge
-0 sentinels run SENTINEL_ID --task "Re-test the login flow" --yes
-0 sentinels run SENTINEL_ID --history
-0 sentinels set SENTINEL_ID --state deleted --yes
+0security sentinels list --presets
+0security sentinels set --create --preset dependency-watcher --name "Nightly check"
+0security sentinels set SENTINEL_ID --purpose "Watch the lockfile"
+0security sentinels set SENTINEL_ID --files put reports/notes.md --file ./notes.md
+0security sentinels set SENTINEL_ID --state active --acknowledge
+0security sentinels run SENTINEL_ID --task "Re-test the login flow" --yes
+0security sentinels run SENTINEL_ID --history
+0security sentinels set SENTINEL_ID --state deleted --yes
 ```
 
 Deleting, running and enabling a trigger need `--yes`, because the CLI never prompts. An ID can be a unique prefix.

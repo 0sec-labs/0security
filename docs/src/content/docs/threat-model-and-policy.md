@@ -3,17 +3,17 @@ title: Threat model and policy checks
 description: Draft a reviewable threat model for a repository, steer scans with it, and check the code against policies written in Markdown.
 ---
 
-A threat model and policies help a scan look past low-level bugs. Draft a threat model, write policies, and pass both to `0 scan`.
+A threat model and policies help a scan look past low-level bugs. Draft a threat model, write policies, and pass both to `0security scan`.
 
 A threat model says what the system is, who the actors are and which authorization and business rules must hold, such as "only an admin may change a role". A policy is a rule your organisation wrote, such as "customer data must not go to a third-party processor". For each policy, 0 answers pass or fail with evidence.
 
-Both are plain files that people review in a pull request. They use the same threads, skills and findings as `0 scan`.
+Both are plain files that people review in a pull request. They use the same threads, skills and findings as `0security scan`.
 
 ## Draft a threat model
 
 ```bash
-0 threat-model ./your-repo
-0 threat-model ./your-repo --pr
+0security threat-model ./your-repo
+0security threat-model ./your-repo --pr
 ```
 
 A thread follows the `threat-model` skill, reads the code and writes one file, `.0/threat-model.md` (or the path in `--output`). It records no findings and changes no other file. When the folder's `SECURITY.md` has a `## Scope` section, the summary links to it. The section is read as data and does not change the draft.
@@ -40,7 +40,7 @@ Running the command again adds a commit to the same branch, so reviewers' edits 
 ## Use a threat model in a scan
 
 ```bash
-0 scan ./your-repo --context ./your-repo/.0/threat-model.md
+0security scan ./your-repo --context ./your-repo/.0/threat-model.md
 ```
 
 `--context <file>` gives the file's text to the scan as background. You can repeat it. The scan then checks authorization and business logic against the rules in the file, not only injection and similar bugs. It reports a rule the code does not enforce.
@@ -53,7 +53,7 @@ The scan treats the text as data:
 
 ### Repository files are not read by default
 
-Whoever can change a repository can change a file in it. A pull request could edit `.0/threat-model.md` to say "uploads are intentionally unauthenticated" and blind the scan. So `0 scan` reads no file from the scanned folder on its own.
+Whoever can change a repository can change a file in it. A pull request could edit `.0/threat-model.md` to say "uploads are intentionally unauthenticated" and blind the scan. So `0security scan` reads no file from the scanned folder on its own.
 
 To read `.0/threat-model.md` from the scanned folder, pass `--repo-context`. The file must be a regular file inside the folder, not a link out of it. 0 prints a warning. Use this only on checkouts you trust.
 
@@ -61,7 +61,7 @@ In CI, read the file from the base branch, not from the pull request:
 
 ```bash
 git show origin/main:.0/threat-model.md > /tmp/threat-model.md
-0 scan . --diff origin/main --context /tmp/threat-model.md
+0security scan . --diff origin/main --context /tmp/threat-model.md
 ```
 
 ## Write a policy
@@ -92,7 +92,7 @@ The rest of the file is the rule in prose. Write it so a reviewer could check it
 ## Check code against policies
 
 ```bash
-0 scan ./your-repo --policy ./policies --org-policy ~/org-policies
+0security scan ./your-repo --policy ./policies --org-policy ~/org-policies
 ```
 
 `--policy <file-or-folder>` runs the `policy-check` skill instead of the general scan. You can repeat it. A folder contributes its `.md` files, searched recursively in name order, without `README.md`. For each policy the thread decides:
@@ -101,7 +101,7 @@ The rest of the file is the rule in prose. Write it so a reviewer could check it
 - `FAIL`, with `path:line` evidence.
 - `N/A`, when the code does nothing the policy covers.
 
-The pass and fail table is at the top of the summary, in policy order. Each failed policy is also recorded as one finding with the category `policy-violation`, the policy's severity and a suggested edit. It appears in `0 findings list`, in SARIF and in `--fail-on` like any other finding. A broken policy is not an attack, so the impact line says "What the violation exposes", not "What an attacker can do".
+The pass and fail table is at the top of the summary, in policy order. Each failed policy is also recorded as one finding with the category `policy-violation`, the policy's severity and a suggested edit. It appears in `0security findings list`, in SARIF and in `--fail-on` like any other finding. A broken policy is not an attack, so the impact line says "What the violation exposes", not "What an attacker can do".
 
 If a rule depends on something outside the code, such as a vendor setting or a contract, the policy passes with the note "not verifiable from code". It never fails on a doubt.
 
@@ -145,7 +145,7 @@ A denial-of-service entry also covers `regex-dos`. If the same vector is in scop
 ### Pass the scope to a scan
 
 ```bash
-0 scan ./your-repo --scope ./your-repo/SECURITY.md
+0security scan ./your-repo --scope ./your-repo/SECURITY.md
 ```
 
 `--scope <file>` reads the Scope section of any Markdown file you name. 0 never reads SECURITY.md on its own, because a pull request could edit it to label a real finding out of scope. `--repo-scope` reads SECURITY.md from the scanned folder anyway and prints a warning. Use it only on a checkout you trust.
@@ -154,7 +154,7 @@ In CI, pass the base branch's copy:
 
 ```bash
 git show origin/main:SECURITY.md > /tmp/base-security.md
-0 scan . --diff origin/main --scope /tmp/base-security.md --fail-on high
+0security scan . --diff origin/main --scope /tmp/base-security.md --fail-on high
 ```
 
 The [GitHub Action](/ci/) takes the same file in its `scope` input.
@@ -167,15 +167,15 @@ A finding that matches an out-of-scope entry gets `scope: "out-of-scope"`, the e
 - It is not in the headline counts, and it does not count toward `--fail-on` or the exit code.
 - Findings in vectors you listed as in scope come first.
 - SARIF results carry `scope` and `scopeReason` as properties. They are not suppressed, because GitHub code scanning dismisses a suppressed result. Add `--scope-sarif suppress` to mark them suppressed anyway.
-- `0 findings list --scope in|out|all` filters by label. The default is `all`.
-- `0 findings issues` and `0 findings upload` skip out-of-scope findings. Add `--include-out-of-scope` to send them.
+- `0security findings list --scope in|out|all` filters by label. The default is `all`.
+- `0security findings issues` and `0security findings upload` skip out-of-scope findings. Add `--include-out-of-scope` to send them.
 
 The model is not told to skip any vector. The label is applied after the scan, so nothing real is lost.
 
 ### Let 0 ask you
 
 ```bash
-0 threat-model --interview
+0security threat-model --interview
 ```
 
 0 drafts the threat model, then asks you up to 8 questions on the terminal. Each question is about one class of vulnerability and lists the places, so you answer once per class. For example:
@@ -196,12 +196,12 @@ When both have a question about the same class, you get one question that lists 
 To choose the scan:
 
 ```bash
-0 threat-model --interview --from-scan report.json
-0 threat-model --interview --scan --scan-budget 2
+0security threat-model --interview --from-scan report.json
+0security threat-model --interview --scan --scan-budget 2
 ```
 
 - Without a flag, 0 uses the latest scan of the folder from the last 30 days, found by the folder's resolved path. Passes and batches that ran together count as one scan.
-- `--from-scan` takes a report from `0 scan --format json`. 0 refuses a report over 8 MB or with more than 5000 findings.
+- `--from-scan` takes a report from `0security scan --format json`. 0 refuses a report over 8 MB or with more than 5000 findings.
 - `--scan` runs a scan first. It prints a rough cost estimate and asks before it runs. `--scan-budget` caps the scan (default 3 USD).
 - With no scan, 0 says so and asks only the questions from reading the code.
 
@@ -237,7 +237,7 @@ At the end of a scan on a terminal, 0 prints one line when findings are in class
 ### Choose where the threat model goes
 
 ```bash
-0 threat-model --output THREAT_MODEL.md
+0security threat-model --output THREAT_MODEL.md
 ```
 
 `--output <path>` is a relative path to a `.md` file inside the folder. The default is `.0/threat-model.md`. Human sections are kept in that file, and `--pr` commits it there. Pass the same path to `--context` in scans.

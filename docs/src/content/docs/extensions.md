@@ -12,10 +12,10 @@ An extension has no runtime of its own. Its MCP servers and scripts are ordinary
 ## Add one
 
 ```sh
-0 skills add owner/repo@<full 40-character commit>
-0 skills extensions add ./my-extension
-0 skills extensions mcp docs --url https://example.com/mcp
-0 skills extensions mcp docs -- npx some-mcp-server@1.2.3
+0security skills add owner/repo@<full 40-character commit>
+0security skills extensions add ./my-extension
+0security skills extensions mcp docs --url https://example.com/mcp
+0security skills extensions mcp docs -- npx some-mcp-server@1.2.3
 ```
 
 Each command first shows a prompt with the repository at the full commit, the licence, the files, hidden-Unicode flags, and what the extension can do. That covers the service it connects to, the MCP servers it starts, the rules it adds, and any skills it adds. Nothing installs without `--yes` from your own terminal, and a flag alone never approves. `--yes` is refused without a pinned commit.
@@ -25,12 +25,12 @@ In the browser app, **Add extension** on **Extensions** takes a git source. **Ad
 ## Manage extensions
 
 ```sh
-0 skills extensions list
-0 skills extensions info <name>
-0 skills extensions enable <name>
-0 skills extensions disable <name>
-0 skills extensions update <name>
-0 skills extensions remove <name> --yes
+0security skills extensions list
+0security skills extensions info <name>
+0security skills extensions enable <name>
+0security skills extensions disable <name>
+0security skills extensions update <name>
+0security skills extensions remove <name> --yes
 ```
 
 An extension installs disabled. Enabling asks you to approve the exact revision once. `update` shows the folder diff and what the extension can now do, then asks again. Any change re-prompts, even one new script. Built-in extensions such as `github` update with the 0 binary.
@@ -48,11 +48,11 @@ In the browser app, open **Extensions**, press **Add**, then choose **MCP server
 From the command line:
 
 ```sh
-0 skills extensions mcp docs --url https://example.com/mcp
-0 skills extensions mcp docs -- npx some-mcp-server@1.2.3        # shows the review; add --yes to approve it
-0 skills extensions info docs
-0 skills extensions enable docs
-0 skills extensions remove docs --yes
+0security skills extensions mcp docs --url https://example.com/mcp
+0security skills extensions mcp docs -- npx some-mcp-server@1.2.3        # shows the review; add --yes to approve it
+0security skills extensions info docs
+0security skills extensions enable docs
+0security skills extensions remove docs --yes
 ```
 
 Do not type secrets on the command line. An extension declares the variable names it needs, and the review lists them. Add `--format json` for JSON output.
@@ -120,7 +120,7 @@ env ZERO_SANDBOX=require 0
 - `require` sandboxes every extension script and server. An extension without a block gets the defaults above, with no network. If no sandbox works on this computer, 0 refuses to run it.
 - `off` never uses the sandbox.
 
-Every script run starts its output with a line such as `[sandbox: applied (seatbelt, network off, ...)]` or `[sandbox: not applied (...)]`. A server's load result carries the same line. Run `0 doctor` to see what this computer offers.
+Every script run starts its output with a line such as `[sandbox: applied (seatbelt, network off, ...)]` or `[sandbox: not applied (...)]`. A server's load result carries the same line. Run `0security doctor` to see what this computer offers.
 
 When a sandboxed run fails because it needs something it did not declare, the error is the operating system's, for example `Operation not permitted`. Add the missing permission to the `sandbox` block, or set `ZERO_SANDBOX=off` to run without it.
 
@@ -154,7 +154,7 @@ A connection links 0 to a service such as GitHub. Connections belong to extensio
 
 ### Connect GitHub
 
-1. Run `0` and open **Extensions**. GitHub is the first row.
+1. Run `0security` and open **Extensions**. GitHub is the first row.
 2. Press **Connect** and pick one way:
    - **Sign in with GitHub** shows a one-time code to enter at github.com/login/device.
    - **Use a token** links to GitHub's token page with the permissions pull requests need. Paste the token.
@@ -165,7 +165,7 @@ GitHub stores the credential in `gh`'s own store. 0 never reads it, and no scrip
 
 ### Connect another service
 
-Install the connector extension with `0 skills add <source>` or **Add** in the browser app. The install prompt shows the connector's declared read and write list, the hosts it can reach and the variable its token fills. After you approve, its card appears on **Extensions** with one **Connect** button.
+Install the connector extension with `0security skills add <source>` or **Add** in the browser app. The install prompt shows the connector's declared read and write list, the hosts it can reach and the variable its token fills. After you approve, its card appears on **Extensions** with one **Connect** button.
 
 Paste the token. If the connector declares a health URL, 0 checks the token against it. 0 stores the token on this computer in `~/.0/extensions/connections.json`, readable only by you. **Disconnect** deletes it.
 

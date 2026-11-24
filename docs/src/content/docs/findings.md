@@ -25,12 +25,12 @@ Each finding has a stable link at `/findings/<fingerprint>`.
 ## List and inspect findings
 
 ```bash
-0 findings
-0 findings --severity high --triage new
-0 findings show 3f2a
+0security findings
+0security findings --severity high --triage new
+0security findings show 3f2a
 ```
 
-`0 findings` is the same as `0 findings list`. It reads the local findings database and groups duplicates. Add `--all` for raw rows. An ID can be a unique prefix.
+`0security findings` is the same as `0security findings list`. It reads the local findings database and groups duplicates. Add `--all` for raw rows. An ID can be a unique prefix.
 
 | Filter | Values |
 |---|---|
@@ -71,12 +71,12 @@ The model picks a category when it records a finding. If it picks a catch-all (`
 
 A report merges findings that two passes or batches filed for one flaw. It merges when the file and the category (or a shared CWE) agree and the cited lines overlap. Findings in different files or categories are never merged. The merged finding keeps the highest severity and lists the ids it absorbed.
 
-`0 findings show` prints the title, what an attacker can do (when the scan assessed it), severity, CVSS when present, status, triage state, evidence and related occurrences.
+`0security findings show` prints the title, what an attacker can do (when the scan assessed it), severity, CVSS when present, status, triage state, evidence and related occurrences.
 
 To read another database, add `--db-path`:
 
 ```bash
-0 findings show 3f2a --db-path ./engagement.db
+0security findings show 3f2a --db-path ./engagement.db
 ```
 
 ## Triage a finding
@@ -86,8 +86,8 @@ Status and triage are separate. Status is what the automation established: `disc
 Accepting a finding does not verify it, and suppressing it does not make it false.
 
 ```bash
-0 findings update 3f2a --status suppressed --note "Test-only endpoint"
-0 findings update 3f2a --status open
+0security findings update 3f2a --status suppressed --note "Test-only endpoint"
+0security findings update 3f2a --status open
 ```
 
 `--status open` resets the finding.
@@ -97,25 +97,25 @@ Accepting a finding does not verify it, and suppressing it does not make it fals
 Accepting a risk records that you know about a finding and will live with it for a set time. It needs a reason and an expiry. Name the approver if your process needs one.
 
 ```bash
-0 findings update 3f2a --status accepted --reason "Fix scheduled for the next release, ticket SEC-142" --expires 90d --approver "security lead"
+0security findings update 3f2a --status accepted --reason "Fix scheduled for the next release, ticket SEC-142" --expires 90d --approver "security lead"
 ```
 
 `--expires` takes a date such as `2026-12-31` or a number of days such as `90d`. When the date passes, the finding is open again in lists, in exports and in the next scan. See the ones that end soon:
 
 ```bash
-0 findings list --expiring 30
+0security findings list --expiring 30
 ```
 
-`0 findings list` shows `accepted until <date>` next to an accepted risk. The approver is a label you type. 0 does not check it against a login, so treat it as a note for your records, not as proof of who approved. Every change is also written to the audit log (`0 config get audit`).
+`0security findings list` shows `accepted until <date>` next to an accepted risk. The approver is a label you type. 0 does not check it against a login, so treat it as a note for your records, not as proof of who approved. Every change is also written to the audit log (`0security config get audit`).
 
-JSON, Markdown and `0 findings evidence` carry the reason, expiry and approver. SARIF exports add a `suppressions` entry with `kind` external, status accepted and your reason as the justification, so code scanning tools hide the result while the acceptance lasts.
+JSON, Markdown and `0security findings evidence` carry the reason, expiry and approver. SARIF exports add a `suppressions` entry with `kind` external, status accepted and your reason as the justification, so code scanning tools hide the result while the acceptance lasts.
 
 ### Mark a false positive
 
 A false positive is suppressed with your reason, and it stays suppressed across scans of the same code.
 
 ```bash
-0 findings update 3f2a --status false-positive --reason "Echo endpoint only exists in test fixtures"
+0security findings update 3f2a --status false-positive --reason "Echo endpoint only exists in test fixtures"
 ```
 
 To give every thread standing context, such as "the public API allows CORS on purpose", write it in your operator instructions: `~/.0/AGENTS.md`, or the per-workspace file.
@@ -135,7 +135,7 @@ Without Docker or podman the result is Not verified. A model's own judgment that
 A skill can declare the check. This command runs zizmor with the repository's own configuration, then actionlint:
 
 ```bash
-0 threads start "Harden the workflows" --folder . --skill workflow-hardening --wait
+0security threads start "Harden the workflows" --folder . --skill workflow-hardening --wait
 ```
 
 A planted unpinned action must be flagged first, so a configuration that turns the detector off reads as Not verified.
@@ -143,12 +143,12 @@ A planted unpinned action must be flagged first, so a configuration that turns t
 ## Scan a folder
 
 ```bash
-0 scan ./your-repo
-0 scan https://github.com/acme/app --budget 2 --format json -o scan.json
-0 scan ./your-repo --format sarif -o scan.sarif --fail-on high
+0security scan ./your-repo
+0security scan https://github.com/acme/app --budget 2 --format json -o scan.json
+0security scan ./your-repo --format sarif -o scan.sarif --fail-on high
 ```
 
-A scan is a thread that follows the `scan` skill. It lists every entry point, checks each one and records what it can show from the code. The thread appears in `0 threads` and its findings in `0 findings`.
+A scan is a thread that follows the `scan` skill. It lists every entry point, checks each one and records what it can show from the code. The thread appears in `0security threads` and its findings in `0security findings`.
 
 The target is a folder or a git URL, which 0 clones shallow and removes afterwards. Package names and container images are not scanned. A scan must not edit the code it reads. If it changes a file in a git work tree, the scan is reported as failed and names the files.
 
@@ -174,13 +174,13 @@ To make a scan weigh business logic and authorization, give it a reviewed threat
 
 Exit codes: `0` done, `1` a finding at or above `--fail-on` or the scan failed, `2` usage error, `3` not finished: stopped at the budget or the time limit, or entry points were not reached (the report is partial; this is not a failure). `--allow-partial` makes a partial scan exit 0, or 1 with `--fail-on`.
 
-`0 scan` uses the console that is running, or the engine named by `--engine-url` or `--computer`. With none running it starts one and stops it afterwards.
+`0security scan` uses the console that is running, or the engine named by `--engine-url` or `--computer`. With none running it starts one and stops it afterwards.
 
 The scan needs a model with working tool calls. In one test, a small model sent most `finding` calls without their title and evidence. Results also vary between runs, so a clean scan is not proof that nothing is there.
 
 ### Large repositories
 
-One thread cannot review every entry point of a big repository, and it cannot tell you what it skipped. With more than 8 entry points, or more than 150 source files, `0 scan` splits the work:
+One thread cannot review every entry point of a big repository, and it cannot tell you what it skipped. With more than 8 entry points, or more than 150 source files, `0security scan` splits the work:
 
 1. It lists the entry points without calling a model: routes and handlers (Express, Fastify, Koa, Next, Flask, FastAPI, Django, Go, Spring, Rails, PHP), webhooks, queue and cron consumers, program mains, and the places that deserialize data, accept uploads or run commands. It skips what `.gitignore` ignores and vendored or build folders, and runs nothing from the folder.
 2. Source files no pattern matches are grouped by folder, so every source file belongs to a group. Entry points are reviewed first.
@@ -203,20 +203,20 @@ When a scan stops early, it prints what stopped it, how much is left and the exa
 
 ```text
 Stopped by the $5 budget; 16 of 57 entry points not reached.
-Continue with: 0 scan /home/you/code/app --resume scan-1f3a9c
+Continue with: 0security scan /home/you/code/app --resume scan-1f3a9c
 ```
 
 Run that command, or use `latest` for the newest scan of the folder. Read the ledger with `--coverage`:
 
 ```bash
-0 scan ./your-repo --resume latest
-0 scan ./your-repo --coverage
+0security scan ./your-repo --resume latest
+0security scan ./your-repo --coverage
 ```
 
 To see the size of a scan before you run it, use `--plan`. It lists the entry points by kind, the batches `--batch-size` would make, whether `--batches auto` would batch the folder and a rough cost range. It calls no model and no scanner, and writes nothing. `--format json` prints the same as JSON.
 
 ```bash
-0 scan ./your-repo --plan
+0security scan ./your-repo --plan
 ```
 
 The cost is a guess. It scales one measurement: about $0.035 per batch on a 40-file test app. Cost for large repositories is not measured. It varies 2 to 3 times with the code and the model, and larger files cost more, so treat the range as an order of magnitude and set `--budget` to what you accept to spend.
@@ -245,13 +245,13 @@ A finding's `fingerprint` is a hash of its file and first line, so the same plac
 Get the same report later, in any format:
 
 ```bash
-0 findings export --scan <thread id>
+0security findings export --scan <thread id>
 ```
 
 ### Label findings by declared scope
 
 ```bash
-0 scan . --scope SECURITY.md --fail-on high --format json
+0security scan . --scope SECURITY.md --fail-on high --format json
 ```
 
 A finding that matches a vector the `## Scope` section of SECURITY.md lists as out of scope gets `scope: "out-of-scope"`, `scopeReason` and `scopeSource`. In the JSON report, `counts` covers the findings that are not labelled, `outOfScopeCounts` counts the labelled ones, and `scope` names the file and the vectors. Labelled findings stay in `findings`, after the others. They do not count toward `--fail-on`. When findings are in classes you have not declared, a scan on a terminal ends with one line that points to `0security threat-model --interview`. See [Declare what is in and out of scope](/threat-model-and-policy/#declare-what-is-in-and-out-of-scope).
@@ -261,7 +261,7 @@ A finding that matches a vector the `## Scope` section of SECURITY.md lists as o
 `--skill crypto-migration` lists every cryptographic use: algorithm, key size, library, call site and what the output feeds. It separates quantum-vulnerable public-key crypto (RSA, ECDH, ECDSA, EdDSA) from weak classical crypto (SHA-1, MD5, DES, ECB, static IVs, hardcoded keys). It records one finding per site with a minimal `suggestedFix`.
 
 ```bash
-0 scan ./your-repo --skill crypto-migration --format json -o crypto.json
+0security scan ./your-repo --skill crypto-migration --format json -o crypto.json
 ```
 
 The closing `summary` holds a migration plan: rollout order, key and data migration, versioned formats, hybrid mode (for example X25519 with ML-KEM-768) and tests. The skill does not install a post-quantum library or invent function names. Where it could not check a library's API in your code, the finding says so.
@@ -270,7 +270,7 @@ Fix one site at a time, each as a pull request (see [Fix a finding](#fix-a-findi
 
 ### Scan a built artifact
 
-`0 scan` reads a folder. Unpack the artifact into a new empty folder first, without running anything from it:
+`0security scan` reads a folder. Unpack the artifact into a new empty folder first, without running anything from it:
 
 ```bash
 mkdir /tmp/artifact && cd /tmp/artifact
@@ -280,7 +280,7 @@ unzip -q app.jar -d unpacked                                                    
 docker save acme/app:1.0 -o image.tar && mkdir image && tar -xf image.tar -C image             # image layers and config
 mkdir rootfs && docker create --name tmp-export acme/app:1.0 && docker export tmp-export | tar -x -C rootfs   # image filesystem
 docker rm tmp-export
-0 scan /tmp/artifact/package --skill artifact-scan --budget 1   # the unpacked folder
+0security scan /tmp/artifact/package --skill artifact-scan --budget 1   # the unpacked folder
 ```
 
 Before you unpack an archive, list it with `tar -tzf file.tgz | head` or `unzip -l file.whl`. Look for absolute paths or `..` components. Recent GNU tar and Info-ZIP refuse them, but older versions may not. Do not extract with `sudo`, and use a disk with room for the contents.
@@ -297,13 +297,13 @@ The skill checks:
 - debug leftovers
 - shipped dependencies against the manifest
 
-It runs `0 sbom generate` and `0 sbom check` on the folder, and `syft`, `trivy`, `file`, `strings`, `readelf` and `jq` if they are installed. It never executes anything from the artifact.
+It runs `0security sbom generate` and `0security sbom check` on the folder, and `syft`, `trivy`, `file`, `strings`, `readelf` and `jq` if they are installed. It never executes anything from the artifact.
 
 In a test on a planted npm package, the skill found all four planted problems in one run and three in another. A general scan found two. A clean result is not proof. Read what the summary says it could not check.
 
 ### Scan in CI
 
-`0 scan` needs no sign-in and no desktop. In a CI job it starts its own console, scans, writes the report and stops the console. It needs a model connection: on a runner, an API key in the environment. `OPENAI_API_KEY` works with the default model. See [Models](/models/) for other providers.
+`0security scan` needs no sign-in and no desktop. In a CI job it starts its own console, scans, writes the report and stops the console. It needs a model connection: on a runner, an API key in the environment. `OPENAI_API_KEY` works with the default model. See [Models](/models/) for other providers.
 
 ```yaml
 name: scan
@@ -346,8 +346,8 @@ Plan for these:
 Import a SARIF 2.1.0 file, or read a repository's alerts from GitHub. Nothing in the file is executed.
 
 ```bash
-0 findings import ./other-scanner.sarif --tool "Other scanner"
-0 findings import --github acme/app --types code-scanning,dependabot
+0security findings import ./other-scanner.sarif --tool "Other scanner"
+0security findings import --github acme/app --types code-scanning,dependabot
 ```
 
 Each result becomes a finding that keeps the scanner's name, rule, severity, CWE, file and line. Importing the same file again changes nothing. Imported findings are marked discovered and unverified.
@@ -361,9 +361,9 @@ Stop a running console on the same database before you import. See [findings imp
 Check the packages your project uses against known advisories, import the results as findings, and fix them with a version bump.
 
 ```bash
-0 sbom generate . -o sbom.cdx.json
-0 sbom check sbom.cdx.json --format sarif -o deps.sarif
-0 findings import deps.sarif
+0security sbom generate . -o sbom.cdx.json
+0security sbom check sbom.cdx.json --format sarif -o deps.sarif
+0security findings import deps.sarif
 ```
 
 Each finding is one package and one advisory. It shows the severity, the fixed version and the lockfile it came from. A malicious package is a critical finding.
@@ -371,7 +371,7 @@ Each finding is one package and one advisory. It shows the severity, the fixed v
 To bump a package, fix the finding:
 
 ```bash
-0 findings fix 3f2a --test "npm test"
+0security findings fix 3f2a --test "npm test"
 ```
 
 The fix raises the package to the lowest fixed version in the manifest, and refreshes the lockfile with your project's own package manager when it is installed. It changes nothing else.
@@ -379,56 +379,56 @@ The fix raises the package to the lowest fixed version in the manifest, and refr
 For a Maven or Gradle project, add `--resolve` to get the transitive packages and the versions your build picks. This runs your `mvn` or `gradle`, so it asks first. See [sbom generate](/commands/#resolve-maven-and-gradle-dependencies).
 
 ```bash
-0 sbom generate . --resolve --allow-build-tools -o sbom.cdx.json
+0security sbom generate . --resolve --allow-build-tools -o sbom.cdx.json
 ```
 
 For a Maven fix, 0 changes the version where it is set: the pom, a property, or a `dependencyManagement` entry. For Gradle it changes the version catalog or build script, or adds a constraint for a transitive package. It uses the lowest fixed version from the finding and never invents one. Check the result with your own build:
 
 ```bash
-0 findings fix 3f2a --test "mvn -q test"
+0security findings fix 3f2a --test "mvn -q test"
 ```
 
-To estimate whether your code calls the vulnerable part, run the experimental `dependency-reachability` skill. Give it the advisories as context. This is two commands, because the scan needs a model and `0 sbom check` does not:
+To estimate whether your code calls the vulnerable part, run the experimental `dependency-reachability` skill. Give it the advisories as context. This is two commands, because the scan needs a model and `0security sbom check` does not:
 
 ```bash
-0 sbom check sbom.cdx.json --format json -o advisories.json
-0 scan . --skill dependency-reachability --context advisories.json
+0security sbom check sbom.cdx.json --format json -o advisories.json
+0security scan . --skill dependency-reachability --context advisories.json
 ```
 
 Each advisory gets a verdict: reachable, not-reached or cannot-tell, with the file and line it rests on. The verdict is a model's reading of the code, not a proof. It can be wrong in both directions, and not-reached does not mean safe. See [scan a folder](#scan-a-folder) for the scan options.
 
 On one planted Node app (an old lodash with one vulnerable function called, and an old package imported but never used), seven advisories got six correct verdicts and one cautious cannot-tell in the second run. The first run recorded only five of the seven. That is one small fixture and two runs, so it says nothing about accuracy on your code.
 
-Add `--outdated` to `0 sbom check` to list newer versions. These are notes, not findings.
+Add `--outdated` to `0security sbom check` to list newer versions. These are notes, not findings.
 
 ## Check findings for false positives
 
-`0 findings verify` is experimental. It re-checks findings with a fresh thread for each one. The thread gets only the finding's own text, reads the code itself, and tries to build a concrete attack. It stores a verdict next to the finding: true-positive, false-positive, fixed, uncertain or duplicate.
+`0security findings verify` is experimental. It re-checks findings with a fresh thread for each one. The thread gets only the finding's own text, reads the code itself, and tries to build a concrete attack. It stores a verdict next to the finding: true-positive, false-positive, fixed, uncertain or duplicate.
 
 Pass the folder that was scanned, so the threads can read the code:
 
 ```bash
-0 findings verify --severity high,medium --folder ~/code/app
+0security findings verify --severity high,medium --folder ~/code/app
 ```
 
-`0 findings list` and `0 findings show` then print a line such as `verified: likely false positive`. The verdict is advice. The finding's severity and status do not change, and the thread's own severity is stored apart as an advisory severity. A thread that returns no verdict is recorded as uncertain.
+`0security findings list` and `0security findings show` then print a line such as `verified: likely false positive`. The verdict is advice. The finding's severity and status do not change, and the thread's own severity is stored apart as an advisory severity. A thread that returns no verdict is recorded as uncertain.
 
 To suppress what the threads call false positives, add `--apply`:
 
 ```bash
-0 findings verify --apply --folder ~/code/app
+0security findings verify --apply --folder ~/code/app
 ```
 
-With `--apply`, critical and high findings are never suppressed: a person decides those. A finding of lower severity is suppressed only when the verdict is false-positive and it cites a control at `path:line` that exists in the folder. The suppression note starts with `False positive (model-verified):`. Undo it with `0 findings reopen`. Without `--apply`, no status ever changes.
+With `--apply`, critical and high findings are never suppressed: a person decides those. A finding of lower severity is suppressed only when the verdict is false-positive and it cites a control at `path:line` that exists in the folder. The suppression note starts with `False positive (model-verified):`. Undo it with `0security findings reopen`. Without `--apply`, no status ever changes.
 
-A re-run skips findings that already have a verdict. Add `--force` to check them again. The model can be wrong in both directions, so read the reasoning in `0 findings show` before you rely on a verdict. See [findings verify](/commands/#findings-verify) for budgets and stop rules.
+A re-run skips findings that already have a verdict. Add `--force` to check them again. The model can be wrong in both directions, so read the reasoning in `0security findings show` before you rely on a verdict. See [findings verify](/commands/#findings-verify) for budgets and stop rules.
 
 ## Fix a finding
 
 0 fixes a finding in a separate git work tree, so your checkout is never touched. It runs your checks, commits on a branch named `0/fix-<id>` and opens a pull request. The pull request is a draft when a check fails or when you gave no `--test`. Add `--ready` to open it ready for review without checks.
 
 ```bash
-0 findings fix 3f2a --test "npm test"
+0security findings fix 3f2a --test "npm test"
 ```
 
 Nothing is pushed to the base branch and nothing is merged. Running the command again updates the same pull request. It edits files on this machine, so it needs the local console.
@@ -436,7 +436,7 @@ Nothing is pushed to the base branch and nothing is merged. Running the command 
 To work through many findings, batch them. Each gets its own branch and pull request, and you get a report:
 
 ```bash
-0 findings burndown --severity high,critical --test "npm test" --dry-run
+0security findings burndown --severity high,critical --test "npm test" --dry-run
 ```
 
 Drop `--dry-run` to start. A re-run skips findings that already have a pull request. See [findings fix](/commands/#findings-fix) and [findings burndown](/commands/#findings-burndown) for the policy file, budgets and stop rules.
@@ -451,7 +451,7 @@ Set a title template, branch prefix, labels, reviewers, a draft rule and a foote
 After a burndown, write a report of the outcomes:
 
 ```bash
-0 findings export-fixes --check-merged -o ./fix-report
+0security findings export-fixes --check-merged -o ./fix-report
 ```
 
 It lists each fix with its pull request and checks, and counts how many were merged. See [findings export-fixes](/commands/#findings-export-fixes).
@@ -461,7 +461,7 @@ It lists each fix with its pull request and checks, and counts how many were mer
 A verified fix is a fix whose checks ran in a container with no network. The pull request says so only when every check passed there.
 
 ```bash
-0 findings fix 3f2a --test "mvn -q test" --sandbox docker --sandbox-image maven:3-eclipse-temurin-21
+0security findings fix 3f2a --test "mvn -q test" --sandbox docker --sandbox-image maven:3-eclipse-temurin-21
 ```
 
 Without `--sandbox`, your `--test` commands run on your machine with your privileges. They can read your files and use your network. With `--sandbox docker`, 0 copies the fix work tree into a folder without its git data and runs each command in a container from the image you name. The container has:
@@ -486,7 +486,7 @@ Limits:
 - Disk use inside the container is not limited.
 - The checks run in a copy, so files they write (such as build output) are not in the commit.
 - Only the `docker` mode exists. Private-repository credentials are not passed into the container.
-- `0 findings burndown` does not take `--sandbox`.
+- `0security findings burndown` does not take `--sandbox`.
 - The mechanism was tested with a real container (an Alpine Node image, no network). The Maven image was not run for real in this build, only through a fake `docker`.
 
 ## See what runs cost
@@ -494,7 +494,7 @@ Limits:
 Each scan, fix and verify run records its cost, duration and counts on your machine. Read the summary with:
 
 ```bash
-0 findings metrics --since 7d
+0security findings metrics --since 7d
 ```
 
 It shows cost per proposed fix and the share of proposed fixes whose checks passed. Add `--command fix` to look at one command, or `--format json` to export. See [findings metrics](/commands/#findings-metrics).
@@ -506,35 +506,35 @@ To give a command a default budget and model, set them per workflow in your [set
 Export saved findings as JSON, Markdown or SARIF:
 
 ```bash
-0 findings list 3f2a 91bc --format sarif -o findings.sarif
-0 findings list --format md -o report.md
+0security findings list 3f2a 91bc --format sarif -o findings.sarif
+0security findings list --format md -o report.md
 ```
 
-Without `-o` the report goes to stdout. `0 findings export` also writes HTML and PDF. The app exports all five formats.
+Without `-o` the report goes to stdout. `0security findings export` also writes HTML and PDF. The app exports all five formats.
 
 A full report carries evidence, proof-of-concept steps and descriptions that can quote source code or secrets. Check it before you share it.
 
-To bring a report into the app, use `0 findings list --import ./report.json --db-path <db>`. Imported findings are marked discovered and unverified.
+To bring a report into the app, use `0security findings list --import ./report.json --db-path <db>`. Imported findings are marked discovered and unverified.
 
 ## Send findings to GitHub
 
 Mirror findings into a repository's issues, so the team triages them next to the code:
 
 ```bash
-0 findings issues --repo acme/app --dry-run     # print the plan, change nothing
-0 findings issues --repo acme/app               # create and sync issues (needs `gh` signed in)
+0security findings issues --repo acme/app --dry-run     # print the plan, change nothing
+0security findings issues --repo acme/app               # create and sync issues (needs `gh` signed in)
 ```
 
 Each finding gets one issue, matched on later runs by a hidden marker in its body, so a re-run updates and never duplicates. Accepted, suppressed and fixed findings close their issue with a comment. A finding that comes back reopens it.
 
 `--min-severity` (default `medium`), `--max` (default 25 changes per run) and `--delay` keep it inside rate limits. Findings labelled out of scope by a declared scope get no issue; `--include-out-of-scope` opens issues for them too.
 
-An issue holds only the title, severity, category, location, the attacker-impact sentence and the status. Evidence, requests, responses and proof-of-concept steps are never copied, because they can quote code or secrets. Read them locally with `0 findings show <id>`. Report text is neutralised, so a finding cannot mention a person or reference another issue.
+An issue holds only the title, severity, category, location, the attacker-impact sentence and the status. Evidence, requests, responses and proof-of-concept steps are never copied, because they can quote code or secrets. Read them locally with `0security findings show <id>`. Report text is neutralised, so a finding cannot mention a person or reference another issue.
 
 To show findings in the Security tab instead, upload a SARIF file:
 
 ```bash
-0 findings upload scan.sarif --repo acme/app
+0security findings upload scan.sarif --repo acme/app
 ```
 
 Results labelled out of scope are left out of the upload. Add `--include-out-of-scope` to send them.
@@ -544,13 +544,13 @@ Results labelled out of scope are left out of the upload. Add `--include-out-of-
 Write findings with triage state, SARIF, an SBOM and fix branches into one folder. The folder has a README that says what it does not show.
 
 ```bash
-0 findings evidence ./evidence --repo .
+0security findings evidence ./evidence --repo .
 ```
 
 To draft a report about an actively exploited vulnerability for a person to review and submit:
 
 ```bash
-0 findings report-draft 3f2a --stage early-warning
+0security findings report-draft 3f2a --stage early-warning
 ```
 
 Stages are `early-warning`, `notification` and `final`. Neither command claims compliance. See [Collect evidence and draft vulnerability reports](/ci/#collect-evidence-and-draft-vulnerability-reports).

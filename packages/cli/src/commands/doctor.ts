@@ -28,7 +28,7 @@ export function registerDoctorCommand(program: Command): void {
       const sandbox = detectSandbox();
       const sandboxSetting = sandboxMode();
       if (options.json) {
-        const problem = !hasSupportedNode ? "Upgrade to Node 24+." : apiRuntime.configured && !apiRuntime.valid ? (apiRuntime.error ?? "The configured provider is unusable.") : !hasApiKey ? "No model is connected. Run `0 models connect`." : undefined;
+        const problem = !hasSupportedNode ? "Upgrade to Node 24+." : apiRuntime.configured && !apiRuntime.valid ? (apiRuntime.error ?? "The configured provider is unusable.") : !hasApiKey ? "No model is connected. Run `0security models connect`." : undefined;
         console.log(JSON.stringify({
           version: runtime.cliVersion, channel: runtime.releaseChannel, runtime: `${runtime.engine} ${runtime.engineVersion}`, platform: runtime.platform, arch: runtime.arch,
           node: { ok: hasSupportedNode, version: process.version },
@@ -64,7 +64,7 @@ export function registerDoctorCommand(program: Command): void {
         console.log("");
       }
       if (waiting > 0) {
-        console.log(`  ${waiting} crash report${waiting === 1 ? " is" : "s are"} waiting for review: open the web console (0) → Settings → Feedback, or discard with 0 config doctor --discard-reports`);
+        console.log(`  ${waiting} crash report${waiting === 1 ? " is" : "s are"} waiting for review: open the web console (0security) → Settings → Feedback, or discard with 0security config doctor --discard-reports`);
         console.log("");
       }
 
@@ -75,9 +75,9 @@ export function registerDoctorCommand(program: Command): void {
         console.log(chalk.gray(`  ${apiRuntime.error.split("\n").join("\n  ")}`));
       } else if (hasApiKey) {
         console.log(chalk.yellow("  Ready. The first request verifies credentials."));
-        console.log(chalk.gray("  Open the console with: 0     Run one prompt with: 0 -p \"<prompt>\""));
+        console.log(chalk.gray("  Open the console with: 0security     Run one prompt with: 0security -p \"<prompt>\""));
       } else {
-        console.log(chalk.yellow("  No model is connected. Run `0 models connect` to see providers, then `0 models connect <provider> --key-env <VAR>`."));
+        console.log(chalk.yellow("  No model is connected. Run `0security models connect` to see providers, then `0security models connect <provider> --key-env <VAR>`."));
       }
       console.log("");
     });

@@ -66,7 +66,7 @@ export function parseImageSource(value: string): ImageSource {
     const path = resolve(value);
     let layout = false;
     try { layout = statSync(join(path, "oci-layout")).isFile(); } catch { /* not an OCI layout */ }
-    if (!layout) throw new GeneratorFailedError(`'${value}' is a folder but not an OCI image layout (it has no oci-layout file). To list the packages of a folder, run 0 sbom generate ${value} without --image.`);
+    if (!layout) throw new GeneratorFailedError(`'${value}' is a folder but not an OCI image layout (it has no oci-layout file). To list the packages of a folder, run 0security sbom generate ${value} without --image.`);
     return { kind: "oci-layout", value: path };
   }
   if (value.startsWith(".") || value.startsWith("/") || value.startsWith("~")) throw new GeneratorFailedError(`--image ${value}: no such file or folder.`);

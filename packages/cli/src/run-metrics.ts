@@ -130,7 +130,7 @@ export function summarizeMetrics(records: RunMetric[], filter: { since?: number;
 }
 
 export function renderMetrics(summary: MetricsSummary): string {
-  if (!summary.runs) return "No runs recorded yet. Metrics are written by 0 scan, 0 findings fix and 0 findings verify.";
+  if (!summary.runs) return "No runs recorded yet. Metrics are written by 0security scan, 0security findings fix and 0security findings verify.";
   const usd = (n: number | null) => n === null ? "n/a" : `$${n.toFixed(4)}`;
   const lines = [
     "command  runs  cost        avg time  attempted  proposed  checks passed  failed",

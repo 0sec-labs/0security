@@ -15,16 +15,16 @@ afterEach(() => { process.exitCode = 0; });
 describe("workflow CLI", () => {
   it("thread commands need a running console: no private in-process fallback, one clear message, non-zero exit", async () => {
     const { deps } = setup();
-    vi.mocked(deps.createRuntime).mockRejectedValue(new Error("No console running. Start one with: 0 --headless"));
+    vi.mocked(deps.createRuntime).mockRejectedValue(new Error("No console running. Start one with: 0security --headless"));
     const program = new Command(); registerWorkflowCommand(program, deps);
     process.exitCode = 0;
     await program.parseAsync(["threads", "list"], { from: "user" });
     expect(deps.createRuntime).toHaveBeenCalledWith(expect.objectContaining({ requireEngine: true }));
-    expect(vi.mocked(deps.err).mock.calls[0]![0]).toBe("No console running. Start one with: 0 --headless");
+    expect(vi.mocked(deps.err).mock.calls[0]![0]).toBe("No console running. Start one with: 0security --headless");
     expect(vi.mocked(deps.out)).not.toHaveBeenCalled();
     expect(process.exitCode).toBe(1); process.exitCode = 0;
     await program.parseAsync(["threads", "list", "--format", "json"], { from: "user" });
-    expect(JSON.parse(vi.mocked(deps.err).mock.calls[1]![0])).toEqual({ error: "No console running. Start one with: 0 --headless" });
+    expect(JSON.parse(vi.mocked(deps.err).mock.calls[1]![0])).toEqual({ error: "No console running. Start one with: 0security --headless" });
   });
   it("renders sessions and automation definitions as readable text without changing JSON defaults", async () => {
     const { runtime, deps } = setup();
@@ -140,7 +140,7 @@ describe("threads read and wait", () => {
     runtime.getSession = vi.fn(() => snapshot("working"));
     const program = new Command(); registerWorkflowCommand(program, deps);
     await program.parseAsync(["threads", "show", "t1", "--wait", "--timeout", "0.001"], { from: "user" });
-    expect(vi.mocked(deps.err).mock.calls[0]![0]).toContain("0 threads show t1");
+    expect(vi.mocked(deps.err).mock.calls[0]![0]).toContain("0security threads show t1");
     expect(process.exitCode).toBe(1);
   });
 });

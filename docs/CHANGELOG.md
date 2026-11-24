@@ -12,6 +12,10 @@ on the GitHub Release tag.
 
 ## [Unreleased]
 
+### Changed
+
+- the docs, help examples, hints and error messages name the command `0security`; `0` stays as its short alias. Set `ZERO_PROGRAM_NAME=0security` or `0` to force the name that help shows (tests and docs generation).
+
 ## [0.44.0] - 2026-11-23
 
 ### Added

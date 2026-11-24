@@ -61,7 +61,7 @@ export function findingsFromReport(text: string, folder: string): ScanFinding[] 
   let data: unknown;
   try { data = JSON.parse(text); } catch { throw new Error("the file is not JSON"); }
   const list = typeof data === "object" && data !== null ? (data as { findings?: unknown }).findings : undefined;
-  if (!Array.isArray(list)) throw new Error("the file has no findings list; give a report from 0 scan --format json");
+  if (!Array.isArray(list)) throw new Error("the file has no findings list; give a report from 0security scan --format json");
   if (list.length > MAX_REPORT_FINDINGS) throw new Error(`the report has more than ${MAX_REPORT_FINDINGS} findings`);
   const out: ScanFinding[] = [];
   for (const raw of list) {

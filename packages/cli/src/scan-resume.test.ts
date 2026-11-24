@@ -11,7 +11,7 @@ describe("shellQuote and resumeCommand", () => {
     expect(shellQuote("/home/me/app")).toBe("/home/me/app");
     expect(shellQuote("/home/me/my app")).toBe("'/home/me/my app'");
     expect(shellQuote("/tmp/it's")).toBe("'/tmp/it'\\''s'");
-    expect(resumeCommand("/home/me/my app", "scan-1")).toBe("0 scan '/home/me/my app' --resume scan-1");
+    expect(resumeCommand("/home/me/my app", "scan-1")).toBe("0security scan '/home/me/my app' --resume scan-1");
   });
 });
 
@@ -22,8 +22,8 @@ describe("resumeHint", () => {
     const hint = resumeHint("/code/app", summary(), { ...stop, budgetHit: true, budgetUsd: 0.1 })!;
     expect(hint.left).toBe("16 of 57 entry points not reached");
     expect(hint.stoppedBy).toBe("the $0.1 budget");
-    expect(hint.command).toBe("0 scan /code/app --resume scan-abc123");
-    expect(hint.text).toBe("Stopped by the $0.1 budget; 16 of 57 entry points not reached.\nContinue with: 0 scan /code/app --resume scan-abc123\nAdd --budget <usd> to allow more spend.");
+    expect(hint.command).toBe("0security scan /code/app --resume scan-abc123");
+    expect(hint.text).toBe("Stopped by the $0.1 budget; 16 of 57 entry points not reached.\nContinue with: 0security scan /code/app --resume scan-abc123\nAdd --budget <usd> to allow more spend.");
   });
 
   it("names the time limit", () => expect(resumeHint("/a", summary(), { ...stop, timedOut: true, timeoutSeconds: 600 })!.stoppedBy).toBe("the 600s time limit"));

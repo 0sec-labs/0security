@@ -18,7 +18,7 @@ export function runComputersList(options: JsonOption & { enginesConfig?: string 
       return { id: row.id, name: row.name, host, managed };
     });
     if (options.json) printJson(io, { computers: rows });
-    else io.out(rows.length ? renderTable(["ID", "NAME", "HOST", "MANAGED"], rows.map(r => [r.id, r.name, r.host, r.managed ? "yes" : "no"])) : "No remote computers. Add one with `0 computers add --ssh user@host`.");
+    else io.out(rows.length ? renderTable(["ID", "NAME", "HOST", "MANAGED"], rows.map(r => [r.id, r.name, r.host, r.managed ? "yes" : "no"])) : "No remote computers. Add one with `0security computers add --ssh user@host`.");
     io.exit(0);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not read the computer registry.";
@@ -89,7 +89,7 @@ export function registerWorkerCommand(program: Command): void {
       try {
         new BackendConnectionRegistry(opts.enginesConfig ? { configPath: opts.enginesConfig } : {}).remove(backendId);
       } catch (error) {
-        throw new Error(error instanceof Error && /not registered/.test(error.message) ? `No computer with ID ${backendId}. Run \`0 computers list\` to see the IDs.` : error instanceof Error ? error.message : "Could not remove the computer.");
+        throw new Error(error instanceof Error && /not registered/.test(error.message) ? `No computer with ID ${backendId}. Run \`0security computers list\` to see the IDs.` : error instanceof Error ? error.message : "Could not remove the computer.");
       }
       process.stdout.write(JSON.stringify({ removed: true, backendId, remoteFilesRemoved: false }) + "\n");
     });
@@ -105,7 +105,7 @@ export function registerWorkerCommand(program: Command): void {
         ...(entry.hostname ? { hostname: entry.hostname } : {}),
         ...(entry.user ? { user: entry.user } : {}),
         ...(entry.port ? { port: entry.port } : {}),
-        deploy: `0 computers add --ssh ${entry.alias}`,
+        deploy: `0security computers add --ssh ${entry.alias}`,
       })), null, 2) + "\n");
     });
 }

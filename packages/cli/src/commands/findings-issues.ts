@@ -85,7 +85,7 @@ export function buildIssue(finding: TrackedFinding): IssueDraft {
     `| Severity | Category | Where | Status |\n| --- | --- | --- | --- |\n| ${severity} | ${neutralise(finding.category, 60)} | ${where} | ${status} |`,
     ...(finding.impact ? ["", `**${finding.category === "policy-violation" ? "What the violation exposes" : "What an attacker gets"}:** ${neutralise(finding.impact, 700)}`] : []),
     "",
-    `Mirrored by \`0 findings issues\`. Evidence and proof-of-concept details are not copied here; on the machine that ran the scan, open them with \`0 findings show ${shortFindingId(finding.id).replace(/[^A-Za-z0-9-]/g, "")}\`.`,
+    `Mirrored by \`0security findings issues\`. Evidence and proof-of-concept details are not copied here; on the machine that ran the scan, open them with \`0security findings show ${shortFindingId(finding.id).replace(/[^A-Za-z0-9-]/g, "")}\`.`,
     "This issue is kept in sync automatically: edits to the title and body are overwritten, and it closes when the finding is fixed, accepted or suppressed.",
   ].join("\n");
   return { title: `[${severity}] ${neutralisePlain(finding.title, 160)}`, body, labels: labelsFor(severity) };
@@ -239,7 +239,7 @@ export function registerFindingsIssuesCommand(parent: Command, deps: IssuesDeps 
     .option("--max <n>", "Most issues to create, update, close or reopen in one run", "25")
     .option("--delay <ms>", "Wait this long between changes to respect rate limits", "1000")
     .option("--dry-run", "Print what would change and change nothing")
-    .option("--include-out-of-scope", "Also open issues for findings the declared scope (0 scan --scope) labelled out of scope; they are skipped by default")
+    .option("--include-out-of-scope", "Also open issues for findings the declared scope (0security scan --scope) labelled out of scope; they are skipped by default")
     .option("--db-path <path>", "Path to SQLite database (default: the shared database and every scan's)")
     .option("--format <format>", "Output: text or json", "text")
     .action(async (options: IssuesOptions) => {

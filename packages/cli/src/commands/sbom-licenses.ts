@@ -73,7 +73,7 @@ function loadSource(input: string, deps: SbomDeps): Source {
   if (!info.isDirectory()) {
     let bom: { bomFormat?: unknown; components?: unknown };
     try { bom = JSON.parse(deps.read(target)); } catch (error) { if (error instanceof UsageError) throw error; throw new UsageError(`'${input}' is not a JSON SBOM.`); }
-    if (!bom || typeof bom !== "object" || bom.bomFormat !== "CycloneDX") throw new UsageError(`'${input}' is not a CycloneDX SBOM (JSON with "bomFormat": "CycloneDX"). Generate one with '0 sbom generate'.`);
+    if (!bom || typeof bom !== "object" || bom.bomFormat !== "CycloneDX") throw new UsageError(`'${input}' is not a CycloneDX SBOM (JSON with "bomFormat": "CycloneDX"). Generate one with '0security sbom generate'.`);
     return { bom, locate: () => displayPath(target), label: displayPath(target) };
   }
   const result = generateSbom(target, { toolVersion: VERSION });

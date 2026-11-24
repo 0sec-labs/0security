@@ -7,13 +7,13 @@ A computer is a machine that runs 0 and owns its Threads, workspace paths and ex
 
 ## Deploy a worker
 
-`0 computers add` installs 0 on a Linux host, starts a computer, opens a tunnel and registers it.
+`0security computers add` installs 0 on a Linux host, starts a computer, opens a tunnel and registers it.
 
 ```bash
-0 computers list                       # registered computers
-0 computers hosts                      # SSH hosts from ~/.ssh/config
-0 computers add --ssh user@host        # any SSH host with key auth
-0 computers add --lima zero-worker     # a Lima VM (default name zero-worker)
+0security computers list                       # registered computers
+0security computers hosts                      # SSH hosts from ~/.ssh/config
+0security computers add --ssh user@host        # any SSH host with key auth
+0security computers add --lima zero-worker     # a Lima VM (default name zero-worker)
 ```
 
 | Option | Meaning |
@@ -30,9 +30,9 @@ A computer is a machine that runs 0 and owns its Threads, workspace paths and ex
 Manage a deployed worker by its computer ID:
 
 ```bash
-0 computers repair <id>   # reconnect the tunnel and restart the engine if needed
-0 computers stop <id>     # stop the engine and tunnel; keeps remote files and registration
-0 computers remove <id>   # forget the computer on this machine; remote files stay
+0security computers repair <id>   # reconnect the tunnel and restart the engine if needed
+0security computers stop <id>     # stop the engine and tunnel; keeps remote files and registration
+0security computers remove <id>   # forget the computer on this machine; remote files stay
 ```
 
 The target must be Linux with `sudo`. The first deploy uses it to install Node 24 and a C compiler.
@@ -48,7 +48,7 @@ Install 0 on the server and give it its own model connection (see [Models](/mode
 Set a secret of 32 to 4096 non-whitespace characters in an environment variable on the server and on the machine that connects. This page uses `ZERO_REMOTE_ENGINE_TOKEN`, but any name works. It is separate from the browser control token. Then start a computer admitted to one repository:
 
 ```bash
-0 --host 127.0.0.1 --port 48123 --no-open \
+0security --host 127.0.0.1 --port 48123 --no-open \
   --engine-token-env ZERO_REMOTE_ENGINE_TOKEN \
   --engine-workspace /srv/repos/app
 ```
@@ -111,14 +111,14 @@ Only `chatgpt-codex` works, with the remote computer's host-local execution prof
 Select a registered computer with `--engine`. The CLI never uses your laptop's provider, filesystem or database for a remote target, and it rejects `--workspace`, `--db-path` and `--model` on remote calls.
 
 ```bash
-0 threads list --engine staging --engines-config /abs/engines.json --format json
+0security threads list --engine staging --engines-config /abs/engines.json --format json
 ```
 
-To call a computer's API directly, use `0 api`:
+To call a computer's API directly, use `0security api`:
 
 ```bash
-0 api                                   # engine handshake
-0 api <path> --method POST --data @body.json --engine-url http://127.0.0.1:48124 --engine-token-env ZERO_REMOTE_ENGINE_TOKEN
+0security api                                   # engine handshake
+0security api <path> --method POST --data @body.json --engine-url http://127.0.0.1:48124 --engine-token-env ZERO_REMOTE_ENGINE_TOKEN
 ```
 
 `--data` takes JSON or `@file`, up to 1 MB.
@@ -126,8 +126,8 @@ To call a computer's API directly, use `0 api`:
 ### Continue the same work
 
 ```bash
-0 threads list --engine staging --format json
-0 threads send <session-id> "Summarize the retained evidence" --engine staging
+0security threads list --engine staging --format json
+0security threads send <session-id> "Summarize the retained evidence" --engine staging
 ```
 
 Sending attaches to a live Thread. It does not restore an archived one. The Thread keeps its model and permissions, and 0 rejects local overrides. A pending decision returns exit status 2 and stays pending in the browser.

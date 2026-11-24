@@ -113,13 +113,13 @@ function start(installed, env = {}) {
     servers.push(() => output);
     child.stdout.on('data', chunk => { output += chunk; });
     child.stderr.on('data', chunk => { output += chunk; });
-    child.once('exit', code => fail(new Error(`0 web exited early (${code}): ${output.slice(-600)}`)));
+    child.once('exit', code => fail(new Error(`0security web exited early (${code}): ${output.slice(-600)}`)));
     const deadline = Date.now() + 60_000;
     while (Date.now() < deadline) {
       try { if ((await fetch(`http://127.0.0.1:${port}/healthz`)).ok || (await fetch(`http://127.0.0.1:${port}/`)).ok) { child.removeAllListeners('exit'); return done({ child, port, url: `http://127.0.0.1:${port}`, output: () => output }); } } catch { /* not up yet */ }
       await wait(250);
     }
-    fail(new Error(`0 web did not start: ${output.slice(-600)}`));
+    fail(new Error(`0security web did not start: ${output.slice(-600)}`));
   });
 }
 

@@ -59,7 +59,7 @@ export async function planBatchedScan(input: PlanInput): Promise<BatchedSetup | 
     try {
       const wanted = input.resume!.trim();
       const scan = wanted === "latest" || wanted === "" ? ledger.latestScan(input.folder) : ledger.getScan(wanted);
-      if (!scan) throw new UsageError(wanted === "latest" || wanted === "" ? `No batched scan of ${input.folder} to resume. Run \`0 scan\` on it first.` : `No scan ${wanted} in the findings database. List what a folder has with \`0 scan <folder> --coverage\`.`);
+      if (!scan) throw new UsageError(wanted === "latest" || wanted === "" ? `No batched scan of ${input.folder} to resume. Run \`0security scan\` on it first.` : `No scan ${wanted} in the findings database. List what a folder has with \`0security scan <folder> --coverage\`.`);
       if (scan.folder !== input.folder) throw new UsageError(`Scan ${scan.id} was of ${scan.folder}, not ${input.folder}.`);
       if ((scan.gitHead ?? undefined) !== head) {
         if (!input.force) throw new UsageError(`The git HEAD of ${input.folder} changed since scan ${scan.id} began (${short(scan.gitHead)}, now ${short(head)}), so its unit ids may not match the code. Run a new scan, or pass --force to continue anyway.`);
@@ -91,7 +91,7 @@ export function coverageText(scan: LedgerScan, units: readonly LedgerUnit[]): st
   const rows = [...units].sort((a, b) => order[a.status] - order[b.status] || a.batch - b.batch || (a.path < b.path ? -1 : a.path > b.path ? 1 : (a.startLine ?? 0) - (b.startLine ?? 0)));
   return [
     `Scan ${scan.id} of ${scan.folder} (${scan.gitHead ? `git ${short(scan.gitHead)}` : "not a git work tree"}), started ${scan.createdAt}, spent $${scan.spentUsd.toFixed(4)} of $${scan.budgetUsd}`,
-    `${coverageSentence(summary)}${summary.complete ? "" : " (resume with `0 scan <folder> --resume " + scan.id + "`)"}`,
+    `${coverageSentence(summary)}${summary.complete ? "" : " (resume with `0security scan <folder> --resume " + scan.id + "`)"}`,
     "",
     ...rows.map(unit => `${unit.status.padEnd(8)} ${unit.kind.padEnd(15)} ${where(unit)}${unit.name ? ` ${unit.name}` : ""}${unit.files ? ` [${unit.files.length} files]` : ""}${unit.reason ? `  (${unit.reason})` : ""}`),
   ].join("\n");

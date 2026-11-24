@@ -57,6 +57,6 @@ describe("reports export command", () => {
   });
   it("rejects files that are not scan reports", async () => {
     const report = join(directory, "report.json"); writeFileSync(report, '{"findings":[]}');
-    await expect(program().parseAsync(["reports", "export", report], { from: "user" })).rejects.toThrow("Not a 0 scan report");
+    await expect(program().parseAsync(["reports", "export", report], { from: "user" })).rejects.toThrow("Not a 0security scan report");
   });
 });

@@ -29,7 +29,7 @@ export function registerUpgradeCommand(program: Command): void {
     .action(async (opts: UpgradeOptions) => {
       if (process.platform === "win32") {
         console.log("");
-        console.log(`  ${chalk.bold("0 config doctor upgrade")} doesn't support Windows yet.`);
+        console.log(`  ${chalk.bold("0security config doctor upgrade")} doesn't support Windows yet.`);
         console.log("");
         console.log(`  Download the latest ${chalk.cyan("0-windows-x64.exe")} from:`);
         console.log(`    ${chalk.cyan(RELEASES_URL)}`);
@@ -43,14 +43,14 @@ export function registerUpgradeCommand(program: Command): void {
         console.log(chalk.yellow(`  ${NPM_MIGRATION_HINT}`));
       }
       console.log("");
-      console.log(`  ${chalk.bold("0 config doctor upgrade")} — fetching the latest binary\u2026`);
+      console.log(`  ${chalk.bold("0security config doctor upgrade")} — fetching the latest binary\u2026`);
       if (opts.version) console.log(`    ${chalk.dim(`tag=${opts.version}`)}`);
       if (opts.installDir) console.log(`    ${chalk.dim(`install_dir=${opts.installDir}`)}`);
       const result = await performAutoUpdate({ version: opts.version, installDir: opts.installDir });
       if (result.signal) { process.kill(process.pid, result.signal); return; }
       if (result.success) {
         console.log("");
-        console.log(`  ${chalk.green("\u2713")} ${chalk.bold("upgraded.")} run ${chalk.cyan("0 --version")} to confirm.`);
+        console.log(`  ${chalk.green("\u2713")} ${chalk.bold("upgraded.")} run ${chalk.cyan("0security --version")} to confirm.`);
         console.log("");
         process.exit(0);
       }

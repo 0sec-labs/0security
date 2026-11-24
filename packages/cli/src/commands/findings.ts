@@ -128,7 +128,7 @@ function withFindingsListOptions(command: Command, options: { defaultLimit?: str
     .option("--status <status>", "Filter by status: discovered, verified, confirmed, scored, reported, fixed, false-positive")
     .option("--triage <triage>", "Filter by triage: new, accepted, suppressed")
     .option("--expiring <days>", "Only accepted risks that expire within this many days")
-    .option("--scope <scope>", "in: findings not labelled out of scope; out: only those the declared scope (0 scan --scope) labelled out of scope; all (default): both, each labelled");
+    .option("--scope <scope>", "in: findings not labelled out of scope; out: only those the declared scope (0security scan --scope) labelled out of scope; all (default): both, each labelled");
   return options.defaultLimit
     ? withFilters.option("--limit <n>", "Max findings/groups to show", options.defaultLimit)
     : withFilters.option("--limit <n>", "Max findings/groups to show");
@@ -376,7 +376,7 @@ export function registerFindingsCommand(program: Command): void {
         if (verification) {
           console.log(`  ${chalk.gray("Verification:")} ${verification.verdict}${verification.advisorySeverity ? `, advisory severity ${verification.advisorySeverity}` : ""} (${verification.model ?? "model"}, ${verification.verifiedAt.slice(0, 10)}; advice only, severity and status are unchanged)`);
           console.log(`  ${chalk.dim(verification.reasoning)}`);
-          if (verification.applied) console.log(`  ${chalk.gray("Suppressed by 0 findings verify --apply.")}`);
+          if (verification.applied) console.log(`  ${chalk.gray("Suppressed by 0security findings verify --apply.")}`);
         }
         console.log("");
         console.log(`  ${chalk.gray("Description:")}`);
