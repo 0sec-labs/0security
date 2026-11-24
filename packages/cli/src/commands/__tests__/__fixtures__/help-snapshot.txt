@@ -19,6 +19,8 @@ Work:
   sbom                             Generate an SBOM from lockfiles, check one against known
                                    advisories, and scan model files
   findings [options]               Browse findings and change their status
+  evidence                         Check that an evidence folder was signed with your key and is
+                                   unchanged
   threads                          Start, follow and stop threads
   sentinels                        Create, run and change Sentinels
 
@@ -618,10 +620,10 @@ Options:
   --json      Print machine-readable status (no credential values)
   -h, --help  display help for command
 
-### 0security evidence (hidden)
+### 0security evidence
 Usage: 0security evidence [options] [command]
 
-Check evidence folders signed with 0security findings evidence --sign
+Check that an evidence folder was signed with your key and is unchanged
 
 Options:
   -h, --help                 display help for command
@@ -638,9 +640,9 @@ Check offline that evidence.dsse.json is signed by this key and no file was chan
 removed
 
 Options:
-  --pub <file>  Public key (PEM) that matches the signing key (required)
-  --json        Print the result as JSON
-  -h, --help    display help for command
+  --pub <file>       Public key (PEM) that matches the signing key (required)
+  --format <format>  Output: text or json (choices: "text", "json")
+  -h, --help         display help for command
 
 ### 0security findings
 Usage: 0security findings [options] [command]

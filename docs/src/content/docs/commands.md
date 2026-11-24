@@ -19,9 +19,9 @@ New to 0? Read the [Quickstart](/) first. Settings and environment variables are
 | Automate | [sentinels](#sentinels) · [api](#api) | [Sentinels](/sentinels/) |
 | Set up and extend | [config](#config) · [config doctor](#config-doctor) · [models](#models) · [models connect](#models-connect) · [skills](#skills) · [computers](#computers) | [Models](/models/), [Extensions](/extensions/), [Computers](/computers/) |
 
-## The eleven commands
+## The twelve commands
 
-`0security` with no arguments opens the web console. `0` is a short alias for it. Everything else is one of eleven commands.
+`0security` with no arguments opens the web console. `0` is a short alias for it. Everything else is one of twelve commands.
 
 | Command | What it does | Subcommands |
 | --- | --- | --- |
@@ -30,6 +30,7 @@ New to 0? Read the [Quickstart](/) first. Settings and environment variables are
 | `0security probe` | Send adversarial messages to a live model or agent endpoint and report the ones it obeys. | none |
 | `0security sbom` | Generate an SBOM from lockfiles, check one against known advisories, and check its licenses against a policy. | `generate`, `check`, `licenses` |
 | `0security findings` | Browse findings and change their status. `--format` exports, `--import` loads a report. | `list`, `show`, `update`, `import`, `fix` |
+| `0security evidence` | Check that an evidence folder was signed with your key and is unchanged. | `verify` |
 | `0security threads` | Start, follow and stop threads. | `list`, `show`, `send`, `start`, `stop` |
 | `0security sentinels` | Create, run and change Sentinels. | `list`, `run`, `set` |
 | `0security skills` | Skills and extensions: list, add. | `list`, `add` |
@@ -1617,6 +1618,7 @@ The command exits 0 when the signature and every file match, 1 when something do
 | --- | --- | --- |
 | `--pub <file>` | — | Public key (PEM) that matches the signing key (required) |
 | `--json` | — | Print the result as JSON |
+| `--format <format>` | — | Output: text or json Choices: text, json. |
 
 ### findings
 
