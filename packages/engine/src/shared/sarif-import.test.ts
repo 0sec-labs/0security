@@ -210,6 +210,10 @@ describe("dynamic scanner output", () => {
         all(JSON.stringify(found));
         expect(found.endpoint).toBe("http://h.test/x?token=REDACTED&z=1");
       });
+      it("removes a secret query value from a route joined to the Strix target", () => {
+        const parsed = parseSarif(log([{ ruleId: "r", message: { text: "m" }, properties: { strix: { target: "http://h.test", endpoint: `/api/x?token=${bearer}&page=2` } } }]));
+        expect(parsed.findings[0]!.endpoint).toBe("http://h.test/api/x?token=REDACTED&page=2");
+      });
       it("keeps harmless query values and short ids", () => {
         expect(redactEvidence("GET http://h.test/a?page=2&sort=name&id=17")).toBe("GET http://h.test/a?page=2&sort=name&id=17");
       });

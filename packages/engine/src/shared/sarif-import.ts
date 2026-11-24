@@ -159,7 +159,7 @@ function endpointOf(value: unknown, origin?: unknown): string | undefined {
   if (!route.startsWith("/") || route.startsWith("//") || route.includes("..")) return undefined;
   if (route.includes("?")) { const redacted = new URL(redactUrl(new URL(route, "http://route.invalid").href)); if (!safeUrl(origin)) return `${redacted.pathname}${redacted.search}`; }
   const base = safeUrl(origin);
-  if (base) { try { return new URL(route, base).href.slice(0, 2048); } catch { /* use the route alone */ } }
+  if (base) { try { return redactUrl(new URL(route, base).href).slice(0, 2048); } catch { /* use the route alone */ } }
   return route;
 }
 
