@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 
-import { ALLOWED_BRIDGES, checkEnterpriseBoundary, moduleSpecifiers } from "./check-enterprise-boundary.mjs";
+import { ALLOWED_BRIDGES, checkEnterpriseBoundary, moduleSpecifiers, xmldomLines } from "./check-enterprise-boundary.mjs";
 
 const HEADER = "// Licensed under the 0security Enterprise License. See enterprise/LICENSE.\n";
 
@@ -111,4 +111,23 @@ test("the license code may read only ZERO_LICENSE and ZERO_LICENSE_FILE", () => 
 test("tests and fixtures may name such variables", () => {
   const root = fixture({ "packages/cli/src/a.test.ts": "process.env.ZERO_LICENSE_TEST_PUBLIC_KEYS;\n" });
   assert.deepEqual(checkEnterpriseBoundary(root, []), []);
+});
+
+const lockWith = (...versions) => versions.map(v => `  '@xmldom/xmldom@${v}':\n    resolution: {integrity: x}\n`).join("\n") + versions.map(v => `      '@xmldom/xmldom': ${v}\n`).join("");
+
+test("xmldomLines reads package keys and dependency lines", () => {
+  assert.deepEqual(xmldomLines(lockWith("0.8.15")), ["0.8"]);
+  assert.deepEqual(xmldomLines(lockWith("0.8.15", "0.9.12")), ["0.8", "0.9"]);
+  assert.deepEqual(xmldomLines("nothing here"), []);
+});
+
+test("one xmldom line in the lockfile passes", () => {
+  assert.deepEqual(checkEnterpriseBoundary(fixture({ "pnpm-lock.yaml": lockWith("0.8.15") }), []), []);
+  assert.deepEqual(checkEnterpriseBoundary(fixture({ "pnpm-lock.yaml": lockWith("0.8.15", "0.8.16") }), []), []);
+});
+
+test("two xmldom lines in the lockfile fail, so the SAML guard and verifier cannot split", () => {
+  const errors = checkEnterpriseBoundary(fixture({ "pnpm-lock.yaml": lockWith("0.8.15", "0.9.12") }), []);
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /@xmldom\/xmldom resolves to more than one line \(0\.8, 0\.9\)/);
 });
