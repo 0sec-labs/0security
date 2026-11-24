@@ -44,6 +44,10 @@ const SEVERITY_BAR: Record<string, string> = {
   critical: "bg-destructive", high: "bg-warning-foreground", medium: "bg-warning-foreground/45", low: "bg-muted-foreground-1", info: "bg-muted-foreground-2",
 };
 
+const SEVERITY_FILL: Record<string, string> = {
+  critical: "fill-destructive", high: "fill-warning-foreground", medium: "fill-warning-foreground/45", low: "fill-muted-foreground-1", info: "fill-muted-foreground-2",
+};
+
 function Tile({ label, value, hint }: { label: string; value: number; hint?: string }) {
   return (
     <div className="min-w-0 rounded-[var(--radius-panel,12px)] border-[0.5px] border-border-1 bg-card px-4 py-3">
@@ -60,9 +64,17 @@ function SeverityBar({ bySeverity }: { bySeverity: Record<string, number> }) {
   return (
     <div className="min-w-0 rounded-[var(--radius-panel,12px)] border-[0.5px] border-border-1 bg-card px-4 py-3 sm:col-span-2">
       <div className="text-xs text-muted-foreground-1">By severity</div>
-      <div role="img" aria-label={shares.map(item => `${item.count} ${item.label}`).join(", ")} className="mt-2 flex h-2 overflow-hidden rounded-full bg-secondary">
-        {total === 0 ? null : shares.filter(item => item.count > 0).map(item => <span key={item.severity} className={SEVERITY_BAR[item.severity]} style={{ width: `${(item.count / total) * 100}%` }} />)}
-      </div>
+      <svg role="img" aria-label={shares.map(item => `${item.count} ${item.label}`).join(", ")} viewBox="0 0 100 2" preserveAspectRatio="none" className="mt-2 block h-2 w-full overflow-hidden rounded-full bg-secondary">
+        {(() => {
+          let offset = 0;
+          return total === 0 ? null : shares.filter(item => item.count > 0).map(item => {
+            const width = (item.count / total) * 100;
+            const rect = <rect key={item.severity} x={offset} y="0" width={width} height="2" className={SEVERITY_FILL[item.severity]} />;
+            offset += width;
+            return rect;
+          });
+        })()}
+      </svg>
       <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground-1">
         {shares.map(item => <li key={item.severity} className="flex items-center gap-1.5"><span aria-hidden="true" className={cn("size-2 rounded-full", SEVERITY_BAR[item.severity])} />{item.label} <span className="tabular-nums text-foreground">{item.count}</span></li>)}
       </ul>
