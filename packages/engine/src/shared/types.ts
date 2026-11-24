@@ -755,6 +755,12 @@ export interface Finding {
    * dep needed for callers that only *read* the field).
    */
   verification_result?: VerificationResult;
+  /**
+   * Proof by local reproduction. `proof` is a recipe the model proposed (never
+   * run); `result` is written only by the reproduction harness. Additive: absent
+   * on findings that never had either.
+   */
+  reproduction?: import("./reproduction.js").FindingReproduction;
   /** Target-neutral research receipts attached by the shared adapter plane. */
   researchEvidence?: ResearchEvidenceEnvelope[];
   /**

@@ -5,7 +5,8 @@ import type { Finding, FindingTriageStatus } from "../../shared/index.js";
 import * as schema from "../schema.js";
 import { findingStatuses, type FindingStatusDB } from "../schema.js";
 import { iterateLatestFindingMetadata, getFindingFamilyMetadata, selectFindingFamiliesBySeverity, selectFindingsBySeverity, type RankedFindingOptions } from "../finding-priority.js";
-import { buildFindingFingerprint, type PersistedFindingReviewFields, type FindingModelVerification, parseFindingModelVerification, serializeFindingModelVerification, serializeFindingSourceVerification, serializeFindingVerificationResult, serializeFindingReviewAnnotation, restoreFindingReviewFields, deriveEvidenceFromPocSteps, normalizeWorkflowStatus, type WorkflowStatus } from "../finding-helpers.js";
+import { parseFindingReproduction, parseReproductionResult, type FindingReproduction } from "../../shared/reproduction.js";
+import { buildFindingFingerprint, type PersistedFindingReviewFields, type FindingModelVerification, parseFindingModelVerification, serializeFindingModelVerification, serializeFindingReproduction, serializeFindingSourceVerification, serializeFindingVerificationResult, serializeFindingReviewAnnotation, restoreFindingReviewFields, deriveEvidenceFromPocSteps, normalizeWorkflowStatus, type WorkflowStatus } from "../finding-helpers.js";
 import { effectiveTriageStatus } from "../../shared/triage-expiry.js";
 import { Repository } from "./base.js";
 
@@ -200,6 +201,25 @@ export class FindingRepository extends Repository {
     const result = this.db.update(schema.findings)
       .set({ modelVerification: serializeFindingModelVerification(verification) })
       .where(eq(schema.findings.id, findingId)).run();
+    if (result.changes === 0) throw new Error(`Finding ${findingId} not found`);
+  }
+
+
+  /** The stored reproduction record (proposed proof and harness result), or undefined. */
+  getFindingReproduction(findingId: string): FindingReproduction | undefined {
+    return parseFindingReproduction(this.owner.getFinding(findingId)?.reproduction);
+  }
+
+
+  /**
+   * Store a proposed proof and/or a harness result next to the finding, merged with what is there. Touches no other
+   * column. A result that is not a complete harness record is refused: "reproduced" cannot be stored without one.
+   */
+  setFindingReproduction(findingId: string, patch: FindingReproduction): void {
+    if (patch.result && !parseReproductionResult(patch.result)) throw new Error("Not a complete harness result; refusing to store it.");
+    const current = this.getFindingReproduction(findingId);
+    const merged = serializeFindingReproduction({ proof: patch.proof ?? current?.proof, result: patch.result ?? current?.result });
+    const result = this.db.update(schema.findings).set({ reproduction: merged }).where(eq(schema.findings.id, findingId)).run();
     if (result.changes === 0) throw new Error(`Finding ${findingId} not found`);
   }
 

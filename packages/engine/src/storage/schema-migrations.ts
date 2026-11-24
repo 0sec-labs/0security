@@ -79,6 +79,7 @@ CREATE TABLE IF NOT EXISTS findings (
   reviewAnnotation TEXT,
   sourceVerification TEXT,
   modelVerification TEXT,
+  reproduction TEXT,
   tool TEXT,
   repo TEXT,
   source TEXT,
@@ -445,6 +446,10 @@ export function migrateLegacySchema(sqlite: ShimmedDatabase): void {
   // Second-pass model verification (`0 findings verify`). Additive and nullable.
   if (!colNames.has("modelVerification")) {
     sqlite.exec("ALTER TABLE findings ADD COLUMN modelVerification TEXT");
+  }
+  // Proof by local reproduction (proposed recipe and harness result). Additive and nullable.
+  if (!colNames.has("reproduction")) {
+    sqlite.exec("ALTER TABLE findings ADD COLUMN reproduction TEXT");
   }
   // Accepted-risk expiry and approver. Additive and nullable.
   if (!colNames.has("triageExpiresAt")) {
