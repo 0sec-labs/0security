@@ -57,8 +57,23 @@ shim_dir="${COREPACK_SHIM_DIR:-$HOME/.corepack-bin}"
 mkdir -p "$shim_dir"
 
 echo "::group::corepack enable (writable shim dir: $shim_dir)"
+# The package registry sometimes times out from the runners; a short retry with
+# backoff turns that into a delay instead of a failed run.
+retry() {
+  local attempt=1 max="${RETRY_ATTEMPTS:-5}" delay=5
+  until "$@"; do
+    if [ "$attempt" -ge "$max" ]; then
+      echo "::error::'$*' failed after ${max} attempts"
+      return 1
+    fi
+    echo "::warning::'$*' failed (attempt ${attempt}/${max}); retrying in ${delay}s"
+    sleep "$delay"
+    attempt=$((attempt + 1))
+    delay=$((delay * 2))
+  done
+}
 corepack enable --install-directory "$shim_dir" pnpm
-corepack prepare pnpm@9 --activate
+retry corepack prepare pnpm@9 --activate
 export PATH="$shim_dir:$PATH"
 if [ -n "${GITHUB_PATH:-}" ]; then
   echo "$shim_dir" >> "$GITHUB_PATH"
