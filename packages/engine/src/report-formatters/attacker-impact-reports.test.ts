@@ -31,4 +31,28 @@ describe("reports say what an attacker can do, and rank by severity", () => {
     expect(results[0].level).toBe("error");
     expect(JSON.stringify(results)).not.toMatch(/businessPriority/);
   });
+
+  it("strips unsafe URL schemes from deployment source links in HTML reports while preserving https links", () => {
+    const withSources = {
+      ...finding("SourceCheck", "high"),
+      presentation: {
+        title: "Source check",
+        summary: "Summary",
+        deployment: {
+          label: "Active",
+          note: "Observed in deployment",
+          sources: [
+            { label: "Malicious", url: "javascript:alert(document.domain)" },
+            { label: "Data", url: "data:text/html,<script>alert(1)</script>" },
+            { label: "Docs", url: "https://docs.example.com/deployment" },
+          ],
+        },
+      },
+    } as unknown as Finding;
+    const rep = { ...report(), findings: [withSources] };
+    const html = formatHtml(rep);
+    expect(html).not.toMatch(/href\s*=\s*"\s*javascript:/i);
+    expect(html).not.toMatch(/href\s*=\s*"\s*data:/i);
+    expect(html).toContain('href="https://docs.example.com/deployment"');
+  });
 });
