@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { Option, type Command } from "commander";
-import { assertEgressAllowed } from "@0/engine";
+import { assertEgressAllowed, bumpJavaDependency, parseDependencyFinding } from "@0/engine";
 import { fixPrompt, type FixPolicy, type FixPromptFinding } from "@0/engine/shared";
 import { loadFixPolicyFile, type FixPolicyOptions, type LoadedFixPolicy } from "./fix-policy.js";
 import { osecDB, resolveOsecDbPath } from "@0/engine/storage";
@@ -137,7 +137,7 @@ export function sandboxVerifiedLine(checks: CheckResult[]): string | undefined {
   return labels.length === 1 ? `Verified in a sandbox: ${cell(labels[0]!)}.` : undefined;
 }
 
-export function pullRequestBody(finding: FindingToFix, summary: string | undefined, checks: CheckResult[], footer?: string, draftUnchecked = false, layout?: { template: string; ticket?: string }): string {
+export function pullRequestBody(finding: FindingToFix, summary: string | undefined, checks: CheckResult[], footer?: string, draftUnchecked = false, layout?: { template: string; ticket?: string }, direct = false): string {
   const where = finding.path ? `\`${finding.path.replace(/`/g, "'")}${finding.startLine ? `:${finding.startLine}` : ""}\`` : "not given";
   const rows = checks.length ? checks.map(check => `| \`${escapeHtml(check.command.replace(/`/g, "'").replace(/\s+/g, " ")).replace(/\|/g, "\\|")}\` | ${check.code === 0 ? "passed" : `failed (exit ${check.code})`} |`).join("\n") : "| none were run | |";
   const failed = checks.filter(check => check.code !== 0);
@@ -154,7 +154,7 @@ export function pullRequestBody(finding: FindingToFix, summary: string | undefin
     ].join("\n"),
     summary: [
       "### What changed",
-      layout ? "Summary written by the model (not verified). The Checks section is what 0 ran." : "Summary written by the model (not verified). The Checks table above is what 0 ran.",
+      direct ? "Written by 0 from the edit it made. The Checks section is what 0 ran." : layout ? "Summary written by the model (not verified). The Checks section is what 0 ran." : "Summary written by the model (not verified). The Checks table above is what 0 ran.",
       "",
       inert(modelText || "The change is in the diff."),
       "",
@@ -262,8 +262,6 @@ async function runFixFlow(id: string, options: FixOptions, deps: FixDeps): Promi
     madeBranch = { repo, branch, existed: branchExisted };
     deps.err(`fixing ${finding.title} on branch ${branch} (isolated work tree, base ${base.name})`);
 
-    const { client, stop } = await connect(options, deps);
-    stopConsole = stop;
     const policy = loaded?.policy;
     if (loaded) {
       const libs = loaded.policy.approvedLibraries?.length ?? 0;
@@ -273,9 +271,21 @@ async function runFixFlow(id: string, options: FixOptions, deps: FixDeps): Promi
       if (conventions) deps.err("applying pull request conventions from the policy");
     }
     const outcomeBase = { finding: finding.id, branch };
-    const thread = await runThread(client, deps, tree, finding, options, budget, policy, Boolean(sandbox));
+    // A Maven or Gradle dependency finding with a fixed version is a version edit: make it directly, with no model call, and
+    // leave the cases it cannot decide (a parent or BOM outside the repository, a variable, a range) to the model.
+    const direct = directJavaBump(tree, finding);
+    let thread: ThreadOutcome;
+    if (direct.applied) {
+      deps.err(direct.log);
+      thread = { reply: direct.summary, failed: false, timedOut: false, budgetExhausted: false };
+    } else {
+      if (direct.reason) deps.err(`not changed directly (${direct.reason}); asking the model`);
+      const { client, stop } = await connect(options, deps);
+      stopConsole = stop;
+      thread = await runThread(client, deps, tree, finding, options, budget, policy, Boolean(sandbox));
+    }
     const status = (await deps.git(tree, ["status", "--porcelain", "--untracked-files=all"])).trim();
-    const common = { ...outcomeBase, threadId: thread.id, ...(thread.costUsd !== undefined ? { costUsd: thread.costUsd } : {}), ...(thread.tokens !== undefined ? { tokens: thread.tokens } : {}), ...(thread.budgetExhausted ? { budgetExhausted: true } : {}), ...(thread.timedOut ? { timedOut: true } : {}), ...(thread.reply ? { summary: thread.reply } : {}) };
+    const common = { ...outcomeBase, ...(thread.id ? { threadId: thread.id } : {}), ...(thread.costUsd !== undefined ? { costUsd: thread.costUsd } : {}), ...(thread.tokens !== undefined ? { tokens: thread.tokens } : {}), ...(thread.budgetExhausted ? { budgetExhausted: true } : {}), ...(thread.timedOut ? { timedOut: true } : {}), ...(thread.reply ? { summary: thread.reply } : {}) };
     if (!status) {
       deps.err(thread.error ?? "The thread made no change; no pull request was opened.");
       const unchanged: FixOutcome = { ...common, changed: false, committed: false, checks: [], verified: false };
@@ -301,7 +311,7 @@ async function runFixFlow(id: string, options: FixOptions, deps: FixDeps): Promi
     await host.pushBranch(branch);
     const bodyFile = join(temp, "body.md");
     const draft = isDraft(verified, conventions, !checks.length && !options.ready);
-    deps.writeFile(bodyFile, pullRequestBody(finding, thread.reply, checks, footerText(conventions), draft && verified && !checks.length, conventions?.bodyTemplate ? { template: conventions.bodyTemplate, ...(ticket ? { ticket } : {}) } : undefined));
+    deps.writeFile(bodyFile, pullRequestBody(finding, thread.reply, checks, footerText(conventions), draft && verified && !checks.length, conventions?.bodyTemplate ? { template: conventions.bodyTemplate, ...(ticket ? { ticket } : {}) } : undefined, direct.applied));
     const existing = await host.findOpenPullRequest(branch);
     let url: string; let created = false;
     if (existing) {
@@ -367,12 +377,29 @@ async function decoratePullRequest(host: Host, url: string, conventions: PullReq
   }
 }
 
+/** A dependency finding that points at a Maven or Gradle build file. */
+export function isJavaDependencyFinding(finding: Pick<FindingToFix, "title" | "description" | "path">): boolean {
+  return /(?:^|\/)(?:pom\.xml|build\.gradle(?:\.kts)?|libs\.versions\.toml)$/.test(finding.path ?? "") && parseDependencyFinding(`${finding.title}\n${finding.description}`) !== undefined;
+}
+
+type ThreadOutcome = { id?: string; reply?: string; error?: string; failed: boolean; tokens?: number; timedOut: boolean; budgetExhausted: boolean; costUsd?: number };
+
+/** Edit the version of a Maven or Gradle dependency named by a dependency finding. `reason` is empty when the finding is not one. */
+export function directJavaBump(tree: string, finding: Pick<FindingToFix, "title" | "description">): { applied: true; log: string; summary: string } | { applied: false; reason: string } {
+  const parsed = parseDependencyFinding(`${finding.title}\n${finding.description}`);
+  if (!parsed) return { applied: false, reason: "" };
+  const result = bumpJavaDependency(tree, { name: parsed.name, fixedVersion: parsed.fixedVersion, currentVersion: parsed.currentVersion });
+  if (!result.applied) return { applied: false, reason: result.reason };
+  const lines = result.edits.map(edit => `${edit.path}:${edit.line} ${edit.where}: ${edit.was} to ${edit.now}`);
+  return { applied: true, log: `changed ${parsed.name} to ${parsed.fixedVersion} directly (no model call): ${lines.join("; ")}`, summary: `0 changed the version of ${parsed.name} from ${parsed.currentVersion} to the lowest fixed version, ${parsed.fixedVersion}, where the repository sets it. No model was used.\n\n${lines.map(line => `- ${line}`).join("\n")}` };
+}
+
 async function runThread(client: ConsoleClient, deps: FixDeps, folder: string, finding: FindingToFix, options: FixOptions, budget: number, policy?: FixPolicy, sandboxed = false) {
   const created = asJson(asJson(await client.request("POST", "/api/console/sessions", { runtime: { model: options.model ?? DEFAULT_SCAN_MODEL }, title: `Fix: ${finding.title}`.slice(0, 120), costCeilingUsd: budget })).session);
   const id = String(created.id);
   const path = `/api/console/sessions/${encodeURIComponent(id)}`;
   await client.request("PATCH", `${path}/configuration`, { workspacePath: folder });
-  await client.request("POST", `${path}/messages`, { text: fixPrompt(finding, { tests: options.test ?? [], policy, sandboxed }) });
+  await client.request("POST", `${path}/messages`, { text: fixPrompt(finding, { tests: options.test ?? [], policy, sandboxed, ...(isJavaDependencyFinding(finding) ? { skill: "java-dependency-fix" } : {}) }) });
   deps.err(`working in thread ${id} (budget $${Number(budget.toFixed(4))})`);
   const { snapshot, timedOut } = await waitForThread(client, deps, id, Date.now() + Number(options.timeout) * 1000);
   const done = finishedThread(snapshot);

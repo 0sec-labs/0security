@@ -45,7 +45,7 @@ export const SKILL_FAMILIES: readonly Family[] = [
   { icon: "FileText", ids: ["advisory-disclosure"], words: ["report", "disclosure", "advisory", "evidence", "writeup", "cve"] },
   { icon: "Siren", ids: ["incident-triage"], words: ["incident", "triage", "alert", "oncall", "response"] },
   { icon: "ListChecks", ids: ["policy-check"], words: ["policy", "compliance", "checklist", "standard", "audit"] },
-  { icon: "Wrench", ids: ["fix-finding"], words: ["fix", "patch", "remediation", "remediate"] },
+  { icon: "Wrench", ids: ["fix-finding", "java-dependency-fix"], words: ["fix", "patch", "remediation", "remediate"] },
   { icon: "BadgeCheck", ids: ["verify-finding"], words: ["verify", "validate", "confirm", "reproduce"] },
   { icon: "Workflow", ids: ["workflow-hardening"], words: ["workflow", "pipeline", "actions", "ci", "cd"] },
   { icon: "GitCompareArrows", ids: ["pr-diff-review"], words: ["diff", "pull request", "pr", "commit", "merge"] },

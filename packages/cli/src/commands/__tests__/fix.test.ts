@@ -1,3 +1,5 @@
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
@@ -97,6 +99,41 @@ describe("0 findings fix", () => {
     expect(h.calls.some(call => call.startsWith("gh pr create"))).toBe(false);
     expect(h.calls).toContain(`gh pr edit 7 --body-file ${join("/tmp/x", "body.md")}`);
     expect(h.calls).toContain("gh pr ready 7");
+  });
+
+  describe("a Maven dependency finding", () => {
+    const pom = (version: string) => `<project><dependencies><dependency><groupId>org.apache.commons</groupId><artifactId>commons-text</artifactId><version>${version}</version></dependency></dependencies></project>`;
+    const withTree = (text: string) => {
+      const temp = mkdtempSync(join(tmpdir(), "0-fixdirect-"));
+      mkdirSync(join(temp, "tree"));
+      writeFileSync(join(temp, "tree", "pom.xml"), text);
+      return temp;
+    };
+    const dependencyFinding: FindingToFix = { ...finding, category: "dependency", title: "org.apache.commons/commons-text 1.9 has GHSA-599f-7c49-w659", description: "org.apache.commons/commons-text 1.9 has GHSA-599f-7c49-w659: Arbitrary code execution. Fixed in 1.10.0.", path: "pom.xml", startLine: 1 };
+    it("bumps the version itself, without a model, and says so in the pull request", async () => {
+      const temp = withTree(pom("1.9"));
+      const h = harness();
+      h.deps.makeTemp = () => temp;
+      h.deps.loadFinding = () => dependencyFinding;
+      const outcome = await runFix("f-1", options({ test: ["mvn -q test"] }), h.deps);
+      expect(readFileSync(join(temp, "tree", "pom.xml"), "utf8")).toContain("<version>1.10.0</version>");
+      expect(h.requests).toEqual([]); // no console, no thread
+      expect(outcome).toMatchObject({ changed: true, verified: true });
+      expect(outcome?.threadId).toBeUndefined();
+      expect(h.bodies.join("\n")).toContain("No model was used.");
+      expect(h.bodies.join("\n")).toContain("Written by 0 from the edit it made.");
+    });
+    it("asks the model when the version is set outside the repository", async () => {
+      const temp = withTree(pom("${external.version}"));
+      const h = harness();
+      h.deps.makeTemp = () => temp;
+      h.deps.loadFinding = () => dependencyFinding;
+      await runFix("f-1", options(), h.deps);
+      expect(h.requests.some(([, path]) => path.endsWith("/messages"))).toBe(true);
+      expect(readFileSync(join(temp, "tree", "pom.xml"), "utf8")).toContain("${external.version}");
+      const message = h.requests.find(([, path]) => path.endsWith("/messages"))![2] as { text: string };
+      expect(message.text).toContain("java-dependency-fix");
+    });
   });
 
   it("opens nothing when the thread changed nothing", async () => {
