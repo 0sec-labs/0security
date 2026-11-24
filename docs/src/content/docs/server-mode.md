@@ -440,4 +440,4 @@ This is a single server with one SQLite database. Every signed-in user sees ever
 
 A team workspace shares one computer between members. It is not multi-tenant. Sessions are held in memory, so members sign in again after a restart. Results from several computers are not merged.
 
-Enterprise is arranged with us, not self-served. We can help you run 0 on your own infrastructure, or operate a dedicated deployment for you, one customer per deployment, by contract. We publish no Helm chart or Terraform module and offer no shared multi-tenant cloud. [Book a demo](https://0.security/enterprise/).
+Enterprise is arranged with us, not self-served. We can help you run 0 on your own infrastructure, or operate a dedicated deployment for you, one customer per deployment, by contract. There is a [Helm chart and EKS Terraform example](/self-hosting/#run-on-kubernetes-with-helm) for a single replica. There is no shared multi-tenant cloud. [Book a demo](https://0.security/enterprise/).

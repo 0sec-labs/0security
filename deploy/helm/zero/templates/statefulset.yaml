@@ -1,0 +1,178 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "zero.fullname" . }}
+  labels:
+    {{- include "zero.labels" . | nindent 4 }}
+spec:
+  # Exactly one replica: a single process owns the SQLite database on the volume.
+  replicas: 1
+  serviceName: {{ include "zero.fullname" . }}
+  podManagementPolicy: OrderedReady
+  updateStrategy:
+    type: RollingUpdate
+  {{- if .Values.persistence.retain }}
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Retain
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "zero.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "zero.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      annotations:
+        {{- if .Values.team.config }}
+        checksum/team-config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- end }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "zero.serviceAccountName" . }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: zero
+          image: {{ include "zero.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["--host", "0.0.0.0", "--server-mode"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          ports:
+            - name: http
+              containerPort: 48123
+              protocol: TCP
+          env:
+            - name: ZERO_ALLOWED_HOSTS
+              value: {{ include "zero.allowedHosts" . | quote }}
+            {{- with (include "zero.publicUrl" .) }}
+            - name: ZERO_PUBLIC_URL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.trustedProxy }}
+            - name: ZERO_TRUSTED_PROXY
+              value: {{ . | quote }}
+            {{- end }}
+            {{- if .Values.enterprise }}
+            - name: ZERO_ENTERPRISE
+              value: "1"
+            {{- end }}
+            {{- with .Values.model.provider }}
+            - name: ZERO_SELECTED_PROVIDER
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.model.name }}
+            - name: ZERO_MODEL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- if .Values.model.baseUrl }}
+            {{- if eq .Values.model.provider "bedrock" }}
+            - name: BEDROCK_BASE_URL
+            {{- else }}
+            - name: AZURE_OPENAI_BASE_URL
+            {{- end }}
+              value: {{ .Values.model.baseUrl | quote }}
+            {{- end }}
+            {{- if .Values.model.azureEntra }}
+            - name: AZURE_OPENAI_AUTH
+              value: entra
+            {{- end }}
+            {{- with .Values.model.awsRegion }}
+            - name: AWS_REGION
+              value: {{ . | quote }}
+            {{- end }}
+            {{- if .Values.team.config }}
+            - name: ZERO_TEAM_CONFIG
+              value: /etc/zero/team.json
+            {{- end }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- if or (include "zero.secretName" .) .Values.extraEnvFrom }}
+          envFrom:
+            {{- with (include "zero.secretName" .) }}
+            - secretRef:
+                name: {{ . }}
+            {{- end }}
+            {{- with .Values.extraEnvFrom }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- end }}
+          # exec probes run on 127.0.0.1, which the console always accepts as a host name.
+          startupProbe:
+            exec:
+              command: ["curl", "-fsS", "http://127.0.0.1:48123/healthz"]
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            exec:
+              command: ["curl", "-fsS", "http://127.0.0.1:48123/readyz"]
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            exec:
+              command: ["curl", "-fsS", "http://127.0.0.1:48123/healthz"]
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            {{- if .Values.team.config }}
+            - name: team-config
+              mountPath: /etc/zero
+              readOnly: true
+            {{- end }}
+      {{- if .Values.team.config }}
+      volumes:
+        - name: team-config
+          configMap:
+            name: {{ include "zero.fullname" . }}-team
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "zero.selectorLabels" . | nindent 10 }}
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- with .Values.persistence.storageClassName }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.persistence.size }}

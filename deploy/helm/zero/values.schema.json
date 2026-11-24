@@ -1,0 +1,26 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "replicaCount": { "not": {}, "description": "The console runs as exactly one replica." },
+    "persistence": {
+      "type": "object",
+      "properties": {
+        "size": { "type": "string", "minLength": 1 },
+        "retain": { "type": "boolean" }
+      }
+    },
+    "service": {
+      "type": "object",
+      "properties": { "type": { "enum": ["ClusterIP", "NodePort", "LoadBalancer"] } }
+    },
+    "networkPolicy": {
+      "type": "object",
+      "properties": {
+        "egressCIDRs": { "type": "array", "items": { "type": "string" } },
+        "egressPorts": { "type": "array", "items": { "type": "integer", "minimum": 1, "maximum": 65535 } }
+      }
+    },
+    "team": { "type": "object", "properties": { "config": { "type": "object" } } }
+  }
+}

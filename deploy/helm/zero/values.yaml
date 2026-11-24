@@ -1,0 +1,114 @@
+# The 0 web console, single node. One replica owns one SQLite volume.
+# The replica count is fixed at 1 and cannot be set: two pods on one volume corrupt the database.
+
+image:
+  repository: ghcr.io/0sec-labs/0security
+  # Defaults to v<appVersion>. Pin a version tag or a digest in production.
+  tag: ""
+  digest: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+# Host names the console answers to, and its public address. Both come from ingress.host
+# when it is set. Set them here when something else fronts the service.
+allowedHosts: ""
+publicUrl: ""
+# Proxy addresses whose X-Forwarded-* headers are trusted: the ingress controller's
+# addresses or the pod CIDR. Empty trusts none.
+trustedProxy: ""
+
+secrets:
+  # Name of a Secret you create. Every key becomes an environment variable.
+  # Put ZERO_ACCESS_TOKEN (32+ characters), model keys and ZERO_TEAM_OIDC_SECRET here.
+  existingSecret: ""
+  # Or let the chart create a Secret holding the access token. Prefer existingSecret:
+  # values stay in the Helm release history.
+  accessToken: ""
+
+# Model endpoint. Credentials come from the environment or the pod identity, never from this file.
+model:
+  provider: ""        # ZERO_SELECTED_PROVIDER, for example azure or bedrock
+  name: ""            # ZERO_MODEL: a deployment name or a Bedrock model ID
+  baseUrl: ""         # Azure: AZURE_OPENAI_BASE_URL. Bedrock: BEDROCK_BASE_URL (a VPC endpoint).
+  azureEntra: false   # AZURE_OPENAI_AUTH=entra, with workload identity on the service account
+  awsRegion: ""       # AWS_REGION, for Bedrock
+
+# Team sign-in. The object is written to a file that ZERO_TEAM_CONFIG points at.
+# Put the OIDC client secret in the Secret as ZERO_TEAM_OIDC_SECRET and name it in clientSecretEnv.
+team:
+  config: {}
+  # config:
+  #   workspace: { id: security, name: Security }
+  #   users:
+  #     - { id: alex, name: Alex, role: owner, oidcSub: provider-subject-id }
+  #   oidc:
+  #     issuer: https://identity.example.com
+  #     clientId: your-client-id
+  #     clientSecretEnv: ZERO_TEAM_OIDC_SECRET
+  #     redirectUri: https://0.example.com/api/team/auth/callback
+
+# ZERO_ENTERPRISE=1 turns off everything except the model endpoint you configured.
+enterprise: true
+
+extraEnv: []        # list of name/value or valueFrom entries
+extraEnvFrom: []    # list of configMapRef or secretRef entries
+
+persistence:
+  size: 20Gi
+  storageClassName: ""   # empty uses the cluster default
+  # Keep the volume when the release is deleted or scaled down.
+  retain: true
+
+serviceAccount:
+  create: true
+  name: ""
+  # IRSA on EKS: eks.amazonaws.com/role-arn. Azure workload identity: azure.workload.identity/client-id.
+  annotations: {}
+# Azure workload identity also needs the pod label azure.workload.identity/use: "true".
+podLabels: {}
+podAnnotations: {}
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: false
+  className: ""
+  host: ""
+  annotations: {}
+  # Name of a TLS Secret. The console carries sign-in credentials, so the chart refuses
+  # an ingress with neither this nor tlsTerminatedUpstream.
+  tlsSecretName: ""
+  # Set to true only when a load balancer in front terminates TLS and blocks plain HTTP.
+  tlsTerminatedUpstream: false
+
+networkPolicy:
+  enabled: true
+  # Who may reach the console. Default: pods in the ingress-nginx namespace.
+  ingressFrom:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: ingress-nginx
+  # Where the console may connect on the ports below. Narrow this to the CIDRs of your
+  # VPC endpoints for the model, and for GitHub if you use pull request reviews.
+  egressCIDRs:
+    - 0.0.0.0/0
+  egressPorts:
+    - 443
+  # Allow DNS to the cluster DNS pods.
+  allowDNS: true
+
+resources:
+  requests:
+    cpu: "2"
+    memory: 4Gi
+  limits:
+    memory: 8Gi
+
+# The drain deadline is 20 seconds. Add margin.
+terminationGracePeriodSeconds: 40
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
