@@ -1353,9 +1353,30 @@ Options:
                                   run its build
   --resolve-offline               With --resolve, run the tool offline (mvn -o, gradle --offline):
                                   only cached artifacts resolve
+  --resolve-from <file>           Maven and Gradle: read the output of mvn dependency:tree (text) or
+                                  gradle dependencies that you already ran; repeat for more files.
+                                  Nothing runs or downloads, so it works offline and under
+                                  ZERO_ENTERPRISE (default: [])
+  --maven-settings <file>         With --resolve, pass this settings.xml to mvn (-s): your mirror,
+                                  proxy and credentials
+  --gradle-init-script <file>     With --resolve, pass this init script to gradle (-I): your mirror
+                                  and proxy
   --ai                            Also list the AI in the folder: models, datasets, hosted model ids
                                   and MCP servers, found by reading files as text
   -h, --help                      display help for command
+
+### 0security sbom java-usage (hidden)
+Usage: 0security sbom java-usage [options] <file> [folder]
+
+List which Maven components of an SBOM your Java, Kotlin, Scala or Groovy source imports
+
+Arguments:
+  file               CycloneDX SBOM (JSON), for example from `0security sbom generate`
+  folder             Source folder to read (default: .)
+
+Options:
+  --format <format>  Output: text or json (default: "text")
+  -h, --help         display help for command
 
 ### 0security sbom licenses
 Usage: 0security sbom licenses [options] [sbom-file-or-folder]

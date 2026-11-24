@@ -10,4 +10,5 @@ export { advisoriesToSarif, advisoriesToText, componentLabel, fixAdvice, sortAdv
 export { checkOutdated, outdatedToText, OUTDATED_CAP, type OutdatedNote, type OutdatedResult } from "./outdated.js";
 export { analyzeMaven, parseXml, type Unresolved } from "./maven.js";
 export { parseCatalog, parseGradleBuild, parseVersionCatalog } from "./gradle.js";
-export { buildToolEnv, mergeComponents, parseGradleTree, parseMavenTree, ResolveFailedError, resolveJvmDependencies, RESOLVE_TIMEOUT_MS, type ResolveOptions, type ResolveResult } from "./resolve.js";
+export { buildToolEnv, mergeComponents, parseDependencyReport, parseGradleTree, parseMavenTree, ResolveFailedError, resolveJvmDependencies, RESOLVE_TIMEOUT_MS, type ResolveOptions, type ResolveResult } from "./resolve.js";
+export { javaUsageToText, parseImports, scanJavaUsage, type JavaImport, type JavaUsage, type JavaUsageReport, type JavaUsageVerdict } from "./java-usage.js";

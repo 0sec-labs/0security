@@ -8,7 +8,7 @@ import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { relative, resolve, sep } from "node:path";
 import { createInterface } from "node:readline/promises";
 import type { Command } from "commander";
-import { assertEgressAllowed, EXTERNAL_GENERATORS, generateSbom, ResolveFailedError, resolveJvmDependencies, GeneratorNotInstalledError, IMAGE_GENERATORS, parseImageSource, LOCKFILES, modelScanToSarif, runExternalGenerator, scanModelPath, toSpdx, type Component, type ExternalGenerator, type ImageSource, type ModelFileResult } from "@0/engine";
+import { assertEgressAllowed, EXTERNAL_GENERATORS, generateSbom, ResolveFailedError, resolveJvmDependencies, parseDependencyReport, mergeComponents, scanJavaUsage, javaUsageToText, GeneratorNotInstalledError, IMAGE_GENERATORS, parseImageSource, LOCKFILES, modelScanToSarif, runExternalGenerator, scanModelPath, toSpdx, type Component, type ExternalGenerator, type ImageSource, type ModelFileResult } from "@0/engine";
 import { VERSION } from "@0/engine/shared";
 import { finishWithError, UsageError } from "./output.js";
 import { registerSbomLicenses } from "./sbom-licenses.js";
@@ -43,7 +43,30 @@ const defaults: SbomDeps = {
   },
 };
 
-export interface GenerateOptions { output?: string; name?: string; ai?: boolean; generator?: string; format?: string; image?: string; resolve?: boolean; allowBuildTools?: boolean; resolveOffline?: boolean }
+export interface GenerateOptions { output?: string; name?: string; ai?: boolean; generator?: string; format?: string; image?: string; resolve?: boolean; allowBuildTools?: boolean; resolveOffline?: boolean; resolveFrom?: string[]; mavenSettings?: string; gradleInitScript?: string }
+
+/** `--resolve-from`: read dependency reports somebody else produced with the build tool. Nothing runs and nothing is downloaded. */
+function resolveFromReports(files: string[], deps: SbomDeps): Component[] {
+  const lists: Component[][] = [];
+  for (const file of files) {
+    let text: string;
+    try { text = deps.read(resolve(file)); } catch (error) { if (error instanceof UsageError) throw error; throw new UsageError(`Cannot read '${file}'.`); }
+    const report = parseDependencyReport(text);
+    if (report.tool === "unknown" || !report.components.length) throw new UsageError(`'${file}' is not a Maven dependency:tree text file or a Gradle dependencies report.`);
+    deps.err(`read ${report.components.length} components from ${file} (${report.tool === "mvn" ? "Maven" : "Gradle"} report)`);
+    lists.push(report.components);
+  }
+  return mergeComponents(lists);
+}
+
+/** An operator-named file that must exist: a settings or init script is never found in the project. */
+function requireFile(path: string, flag: string): string {
+  const target = resolve(path);
+  let ok = false;
+  try { ok = statSync(target).isFile(); } catch { /* reported below */ }
+  if (!ok) throw new UsageError(`${flag}: '${path}' is not a file.`);
+  return target;
+}
 
 export const RESOLVE_WARNING = "--resolve runs the project's own build tool (mvn or gradle from your PATH) in this folder. That evaluates the project's build files, which can run arbitrary code, and it downloads from the repositories the project names. Run it only on a project you trust.";
 
@@ -56,7 +79,7 @@ async function resolveWithConsent(folder: string, options: GenerateOptions, deps
     if (!agreed) throw new UsageError("Not run. Pass --allow-build-tools to confirm that 0 may run this project's build tool.");
   }
   try {
-    const result = await resolveJvmDependencies(requireFolder(folder), { ...(deps.env ? { env: deps.env } : {}), ...(options.resolveOffline ? { offline: true } : {}) });
+    const result = await resolveJvmDependencies(requireFolder(folder), { ...(deps.env ? { env: deps.env } : {}), ...(options.resolveOffline ? { offline: true } : {}), ...(options.mavenSettings ? { mavenSettings: requireFile(options.mavenSettings, "--maven-settings") } : {}), ...(options.gradleInitScript ? { gradleInitScript: requireFile(options.gradleInitScript, "--gradle-init-script") } : {}) });
     for (const warning of result.warnings) deps.err(`warning: ${warning}`);
     deps.err(`resolved ${result.components.length} Maven/Gradle components with ${result.tools.join(", ")}`);
     return result;
@@ -77,7 +100,8 @@ export async function runGenerateWith(folder: string | undefined, options: Gener
   const format = options.format ?? "cyclonedx";
   if (generator !== "builtin" && !(EXTERNAL_GENERATORS as readonly string[]).includes(generator)) throw new UsageError(`Unknown generator '${generator}'. Use builtin, ${EXTERNAL_GENERATORS.join(", ")}.`);
   if (format !== "cyclonedx" && format !== "spdx") throw new UsageError(`Unknown format '${format}'. Use cyclonedx or spdx.`);
-  if ((options.allowBuildTools || options.resolveOffline) && !options.resolve) throw new UsageError("--allow-build-tools and --resolve-offline only apply with --resolve.");
+  if ((options.allowBuildTools || options.resolveOffline || options.mavenSettings || options.gradleInitScript) && !options.resolve) throw new UsageError("--allow-build-tools, --resolve-offline, --maven-settings and --gradle-init-script only apply with --resolve.");
+  if (options.resolveFrom?.length && (options.resolve || generator !== "builtin" || options.image !== undefined)) throw new UsageError("--resolve-from reads report files with the builtin generator; it cannot be combined with --resolve, --generator or --image.");
   if (options.resolve && generator !== "builtin") throw new UsageError("--resolve works with the builtin generator only.");
   if (options.resolve && options.image !== undefined) throw new UsageError("--resolve reads a project folder; it cannot be used with --image.");
   if (options.image !== undefined) {
@@ -87,8 +111,8 @@ export async function runGenerateWith(folder: string | undefined, options: Gener
   }
   if (generator === "builtin") {
     if (format === "spdx" && options.ai) throw new UsageError("--ai is only available with --format cyclonedx: SPDX 2.3 has no type for models, datasets or MCP servers.");
-    const resolved = options.resolve ? await resolveWithConsent(folder ?? ".", options, deps) : undefined;
-    return runGenerate(folder ?? ".", options, deps, resolved?.components);
+    const resolved = options.resolve ? (await resolveWithConsent(folder ?? ".", options, deps)).components : options.resolveFrom?.length ? resolveFromReports(options.resolveFrom, deps) : undefined;
+    return runGenerate(folder ?? ".", options, deps, resolved);
   }
   if (format !== "cyclonedx") throw new UsageError(`--format ${format} is only available with the builtin generator; ${generator} is run for its CycloneDX output.`);
   if (options.ai) throw new UsageError("--ai is only available with the builtin generator.");
@@ -162,6 +186,23 @@ export function runScanModels(path: string, options: { format?: string }, deps: 
   return dangerous.length ? 1 : 0;
 }
 
+/** `0 sbom java-usage <sbom> [folder]`: where the application's own source imports each Maven component. */
+export function runJavaUsage(file: string, folder: string, options: { format?: string }, deps: SbomDeps): void {
+  const format = options.format ?? "text";
+  if (format !== "text" && format !== "json") throw new UsageError("--format must be text or json.");
+  let bom: { components?: unknown };
+  try { bom = JSON.parse(deps.read(resolve(file))) as { components?: unknown }; } catch (error) { if (error instanceof UsageError) throw error; throw new UsageError(`'${file}' is not a JSON SBOM.`); }
+  const components: Array<{ name: string; version: string; purl: string }> = [];
+  for (const entry of Array.isArray(bom.components) ? bom.components : []) {
+    const purl = (entry as { purl?: unknown } | null)?.purl;
+    const match = typeof purl === "string" ? /^pkg:maven\/([^/@]+)\/([^/@?#]+)@([^?#]+)/.exec(purl) : null;
+    if (match) components.push({ name: `${decodeURIComponent(match[1]!)}/${decodeURIComponent(match[2]!)}`, version: decodeURIComponent(match[3]!), purl: purl as string });
+  }
+  if (!components.length) throw new UsageError(`'${file}' lists no Maven components (pkg:maven/...).`);
+  const report = scanJavaUsage(requireFolder(folder), components);
+  if (format === "json") deps.out(`${JSON.stringify(report, null, 2)}\n`); else deps.out(javaUsageToText(report));
+}
+
 export function registerSbomCommand(program: Command, deps: SbomDeps = defaults): void {
   const sbom = program.command("sbom").description("Generate an SBOM from lockfiles, check one against known advisories, and scan model files");
   sbom.command("generate")
@@ -175,6 +216,9 @@ export function registerSbomCommand(program: Command, deps: SbomDeps = defaults)
     .option("--resolve", "Maven and Gradle: run the project's own mvn or gradle to resolve the full dependency tree (runs build scripts, downloads from the network; needs --allow-build-tools or a yes at the prompt)")
     .option("--allow-build-tools", "Confirm --resolve without the prompt: you trust this project to run its build")
     .option("--resolve-offline", "With --resolve, run the tool offline (mvn -o, gradle --offline): only cached artifacts resolve")
+    .option("--resolve-from <file>", "Maven and Gradle: read the output of mvn dependency:tree (text) or gradle dependencies that you already ran; repeat for more files. Nothing runs or downloads, so it works offline and under ZERO_ENTERPRISE", (value: string, previous: string[]) => [...previous, value], [] as string[])
+    .option("--maven-settings <file>", "With --resolve, pass this settings.xml to mvn (-s): your mirror, proxy and credentials")
+    .option("--gradle-init-script <file>", "With --resolve, pass this init script to gradle (-I): your mirror and proxy")
     .option("--ai", "Also list the AI in the folder: models, datasets, hosted model ids and MCP servers, found by reading files as text")
     .addHelpText("after", "\nWith the builtin generator nothing is installed or run; lockfiles are read as text. --resolve is the exception: it runs mvn or gradle from your PATH (never a wrapper script from the project) with a restricted environment and a ten minute limit, and is refused when ZERO_ENTERPRISE is set. Exit 2 when the folder has no supported lockfile, or the chosen external tool is not installed.")
     .action(async (folder: string, options: GenerateOptions) => {
@@ -199,6 +243,15 @@ export function registerSbomCommand(program: Command, deps: SbomDeps = defaults)
     .action(async (file: string, options: CheckOptions) => {
       try { const code = await runCheck(file, options, deps); if (code) process.exitCode = code; }
       catch (error) { finishWithError(error, { err: deps.err }, options.format === "json"); }
+    });
+  sbom.command("java-usage")
+    .description("List which Maven components of an SBOM your Java, Kotlin, Scala or Groovy source imports")
+    .argument("<file>", "CycloneDX SBOM (JSON), for example from `0security sbom generate`")
+    .argument("[folder]", "Source folder to read (default: .)")
+    .option("--format <format>", "Output: text or json", "text")
+    .addHelpText("after", "\nSource files are read as text; nothing runs and nothing is sent anywhere. An import shows where a package is named, not that a vulnerable method is called, so this is evidence and not a reachability verdict. A transitive dependency has no import of its own. Imports are matched to a component by its Maven group and artifact (and a small table of well-known libraries), so a library that uses an unrelated package name shows no import.")
+    .action((file: string, folder: string | undefined, options: { format?: string }) => {
+      try { runJavaUsage(file, folder ?? ".", options, deps); } catch (error) { finishWithError(error, { err: deps.err }, options.format === "json"); }
     });
   registerSbomLicenses(sbom, deps);
 }
