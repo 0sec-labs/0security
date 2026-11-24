@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { buildInventory, inventorySummaryText, isIgnored, parseGitignore, planBatches } from "./index.js";
+import { buildInventory, inventorySummaryText, isIgnored, javaModuleResolver, javaPackageOf, parseGitignore, planBatches } from "./index.js";
 
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
@@ -160,5 +160,47 @@ describe("planBatches", () => {
   it("describes the inventory briefly", () => {
     const { summary } = buildInventory(tree({ "a.js": "app.get('/a', h);\n", "lib/b.js": "export {}\n" }));
     expect(inventorySummaryText(summary)).toMatch(/2 source files; 1 entry points/);
+  });
+});
+
+describe("planBatches by module", () => {
+  const route = (path: string, i: number) => ({ id: `${path}:${i}`, kind: "http-route" as const, path, startLine: i });
+  const moduleOf = (unit: { path: string }) => unit.path.split("/")[0];
+  it("never puts two modules in one batch, in module order, and labels each batch", () => {
+    const units = [...[0, 1, 2].map(i => route(`web/A${i}.java`, 1)), ...[0, 1].map(i => route(`core/B${i}.java`, 1)), { id: "o", kind: "other" as const, path: "core/util", files: ["core/util/X.java"] }];
+    const batches = planBatches(units, 8, { shardOf: moduleOf });
+    expect(batches.map(batch => [batch.module, batch.units.length])).toEqual([["core", 2], ["core", 1], ["web", 3]]);
+    expect(batches.map(batch => batch.index)).toEqual([0, 1, 2]);
+  });
+  it("splits a big module at the batch size and keeps every unit exactly once", () => {
+    const units = Array.from({ length: 20 }, (_, i) => route(`m${i % 2}/F${String(i).padStart(2, "0")}.java`, 1));
+    const batches = planBatches(units, 4, { shardOf: moduleOf });
+    expect(batches.every(batch => batch.units.length <= 4 && new Set(batch.units.map(unit => unit.path.split("/")[0])).size === 1)).toBe(true);
+    expect(batches.flatMap(batch => batch.units.map(unit => unit.id)).sort()).toEqual(units.map(unit => unit.id).sort());
+  });
+  it("plans exactly as before when there is one shard or none", () => {
+    const units = Array.from({ length: 19 }, (_, i) => route(`f${i}.java`, 1));
+    expect(planBatches(units, 8, { shardOf: () => undefined })).toEqual(planBatches(units, 8));
+    expect(planBatches(units, 8, { shardOf: () => "." }).map(batch => batch.module)).toEqual([undefined, undefined, undefined]);
+    expect(planBatches(units, 8, { shardOf: () => "core" }).map(batch => batch.module)).toEqual(["core", "core", "core"]);
+  });
+});
+
+describe("javaModuleResolver", () => {
+  it("finds the nearest Maven or Gradle module from file names alone", () => {
+    const root = tree({ "pom.xml": "<project/>", "core/pom.xml": "x", "core/src/main/java/a/A.java": "class A {}", "svc/build.gradle.kts": "x", "svc/src/B.java": "class B {}", "docs/readme.md": "x" });
+    const moduleOf = javaModuleResolver(root);
+    expect(moduleOf("core/src/main/java/a/A.java")).toEqual({ root: "core", kind: "maven" });
+    expect(moduleOf("svc/src/B.java")).toEqual({ root: "svc", kind: "gradle" });
+    expect(moduleOf("docs/readme.md")).toEqual({ root: ".", kind: "maven" });
+    expect(moduleOf("core/src/main/java/a", true)).toEqual({ root: "core", kind: "maven" });
+  });
+  it("returns nothing when no ancestor has a build file", () => {
+    expect(javaModuleResolver(tree({ "src/A.java": "class A {}" }))("src/A.java")).toBeUndefined();
+  });
+  it("names the Java package of a source path", () => {
+    expect(javaPackageOf("core/src/main/java/org/example/web/Ctl.java")).toBe("org.example.web");
+    expect(javaPackageOf("src/test/java/T.java")).toBe("(default package)");
+    expect(javaPackageOf("app.py")).toBeUndefined();
   });
 });

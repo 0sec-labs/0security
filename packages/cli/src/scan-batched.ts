@@ -2,7 +2,7 @@
  * The planning side of a batched scan: decide whether a folder is split, make or find its coverage ledger, and print a ledger.
  * The thread running stays in `commands/scan.ts`; the orchestration is in `scan-batches.ts`.
  */
-import { buildInventory, inventorySummaryText, planBatches, type Batch, type Inventory } from "@0/engine";
+import { buildInventory, inventorySummaryText, javaModuleResolver, planBatches, type Batch, type Inventory, type InventoryUnit } from "@0/engine";
 import { coverageSentence, summarizeCoverage, type CoverageLedger, type LedgerScan, type LedgerUnit } from "@0/engine/storage";
 import { UsageError } from "./commands/output.js";
 import { unitFromLedger } from "./scan-batches.js";
@@ -10,6 +10,15 @@ import { unitFromLedger } from "./scan-batches.js";
 export const DEFAULT_BATCH_SIZE = 8;
 /** `--batches auto` splits a folder with more source files than this even when few entry points are found. */
 export const AUTO_BATCH_FILES = 150;
+
+/**
+ * Puts each unit in the build module (Maven or Gradle) that holds it, so a batch never mixes two modules. Folders without
+ * build files, and files outside every module, share one shard and are planned as before.
+ */
+export function moduleShardOf(folder: string): (unit: InventoryUnit) => string | undefined {
+  const moduleOf = javaModuleResolver(folder);
+  return unit => moduleOf(unit.path, unit.kind === "other")?.root;
+}
 
 export interface BatchedSetup {
   ledger: CoverageLedger;
@@ -66,13 +75,13 @@ export async function planBatchedScan(input: PlanInput): Promise<BatchedSetup | 
         input.err(`warning: continuing scan ${scan.id} although the git HEAD changed (${short(scan.gitHead)}, now ${short(head)}); some units may no longer match the code`);
       }
       const pending = ledger.units(scan.id, "pending");
-      return { ledger, scan, inventory, summaryText, resumed: true, batches: planBatches(pending.map(unitFromLedger), scan.batchSize) };
+      return { ledger, scan, inventory, summaryText, resumed: true, batches: planBatches(pending.map(unitFromLedger), scan.batchSize, { shardOf: moduleShardOf(input.folder) }) };
     } catch (error) { ledger.close(); throw error; }
   }
 
   if (input.mode === "auto" && !shouldBatch(inventory, input.batchSize)) return undefined;
   if (!inventory.units.length) return undefined;
-  const batches = planBatches(inventory.units, input.batchSize);
+  const batches = planBatches(inventory.units, input.batchSize, { shardOf: moduleShardOf(input.folder) });
   const batchOf = new Map<string, number>();
   for (const batch of batches) for (const unit of batch.units) batchOf.set(unit.id, batch.index);
   const ledger = input.openLedger(input.dbPath);

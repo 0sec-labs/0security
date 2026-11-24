@@ -22,7 +22,7 @@ import { applyScope, markKnown, mergePasses, scanExitCode, scanJson, toScanRepor
 import { followUpText, reviewDepth, reviewScopeFiles, shallowReviewWarning, toolCallText, unopenedFiles } from "../scan-review.js";
 import { coverageReport, DEFAULT_RETRIES, runBatches, type BatchOutcome, type RunBatchesResult } from "../scan-batches.js";
 import { classifyFailure, type FailureCause, type ScanFailure } from "../scan-failure.js";
-import { coverageJson, coverageText, DEFAULT_BATCH_SIZE, planBatchedScan, type BatchedSetup } from "../scan-batched.js";
+import { coverageJson, coverageText, DEFAULT_BATCH_SIZE, moduleShardOf, planBatchedScan, type BatchedSetup } from "../scan-batched.js";
 import { planScan, planText } from "../scan-plan.js";
 import { interactiveScopeHint } from "../threat-interview-findings.js";
 import { resumeHint, type ResumeHint } from "../scan-resume.js";
@@ -516,7 +516,7 @@ async function printPlan(resolved: ResolvedTarget, options: ScanOptions, deps: S
     catch { throw new UsageError(`'${options.diff}' is not a git ref in ${resolved.label}, or the folder is not a git work tree.`); }
   }
   const inventory = buildInventory(resolved.folder, scope ? { only: new Set(scope) } : {});
-  const plan = planScan(inventory, { folder: resolved.label, batchSize: Number(options.batchSize ?? DEFAULT_BATCH_SIZE), batchesMode: options.batches ?? "auto", budgetUsd: Number(options.budget), ...(tier ? { tier: tierInfo(tier) } : {}) });
+  const plan = planScan(inventory, { folder: resolved.label, shardOf: moduleShardOf(resolved.folder), batchSize: Number(options.batchSize ?? DEFAULT_BATCH_SIZE), batchesMode: options.batches ?? "auto", budgetUsd: Number(options.budget), ...(tier ? { tier: tierInfo(tier) } : {}) });
   deps.out(options.format === "json" ? `${JSON.stringify(plan, null, 2)}\n` : `${planText(plan)}\n`);
 }
 
@@ -575,7 +575,7 @@ async function runBatchedScan(ctx: PassContext, setup: BatchedSetup, before: Set
       const files = new Set(batch.units.flatMap(unit => unit.files ?? [unit.path]));
       const leads = ctx.prePass?.leads.filter(lead => lead.path !== undefined && files.has(lead.path)) ?? [];
       const prePass = ctx.prePass && leads.length ? { ...ctx.prePass, leads, total: leads.length } : undefined;
-      const info: BatchPromptInfo = { index: batch.index, total: count, units: batch.units, summary: setup.summaryText };
+      const info: BatchPromptInfo = { index: batch.index, total: count, units: batch.units, summary: setup.summaryText, ...(batch.module ? { module: batch.module } : {}) };
       const inScope = new Set(ctx.scopeFiles);
       const pass = await runPass(ctx, batch.index, { batch: info, budget: batchBudget, prePass, files: [...files].filter(file => inScope.has(file)).sort(), ...(ctx.known ? { known: knownIn(ctx.known, files) } : {}) });
       ran.set(pass.threadId, pass);

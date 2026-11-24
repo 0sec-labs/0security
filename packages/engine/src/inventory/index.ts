@@ -14,6 +14,7 @@ import { isEntryPointKind, LINE_MATCHERS, PATH_MATCHERS, SOURCE_EXTENSIONS, UNIT
 
 export { isEntryPointKind, UNIT_KINDS, type UnitKind } from "./matchers.js";
 export { parseGitignore, isIgnored } from "./gitignore.js";
+export { javaModuleResolver, javaPackageOf, type BuildModule, type ModuleKind } from "./modules.js";
 
 export interface InventoryUnit {
   /** A hash of the kind, path, line and name: the same code gives the same id. */
@@ -205,13 +206,43 @@ export function buildInventory(root: string, options: InventoryOptions = {}): In
   return { units: [...entries, ...others], summary };
 }
 
-export interface Batch { index: number; units: InventoryUnit[] }
+export interface Batch {
+  index: number;
+  units: InventoryUnit[];
+  /** The build module (a directory relative to the folder) every unit of this batch sits in, when the plan was made by module. */
+  module?: string;
+}
+
+export interface PlanBatchOptions {
+  /** Says which shard (for Java, a build module) a unit belongs to. A batch never mixes shards. */
+  shardOf?: (unit: InventoryUnit) => string | undefined;
+}
+
+type RawBatch = { units: InventoryUnit[]; module?: string };
+const numbered = (batches: RawBatch[]): Batch[] => batches.map((batch, index) => ({ index, ...batch }));
 
 /**
  * Split units into batches: entry points first, files kept together, at most `size` entry-point units in a batch. `other`
- * units follow, grouped so a batch covers at most `size` of them and about 40 files.
+ * units follow, grouped so a batch covers at most `size` of them and about 40 files. With `shardOf`, each shard is planned on
+ * its own, in shard order, so a batch stays inside one shard; with one shard or none the result is the plain plan.
  */
-export function planBatches(units: readonly InventoryUnit[], size = 8): Batch[] {
+export function planBatches(units: readonly InventoryUnit[], size = 8, options: PlanBatchOptions = {}): Batch[] {
+  const shardOf = options.shardOf;
+  if (!shardOf) return numbered(planGroup(units, size).map(group => ({ units: group })));
+  const shards = new Map<string, InventoryUnit[]>();
+  for (const unit of units) {
+    const key = shardOf(unit) ?? "";
+    const list = shards.get(key);
+    if (list) list.push(unit); else shards.set(key, [unit]);
+  }
+  const out: RawBatch[] = [];
+  for (const key of [...shards.keys()].sort()) {
+    for (const group of planGroup(shards.get(key)!, size)) out.push({ units: group, ...(key && (shards.size > 1 || key !== ".") ? { module: key } : {}) });
+  }
+  return numbered(out);
+}
+
+function planGroup(units: readonly InventoryUnit[], size: number): InventoryUnit[][] {
   const limit = Math.max(1, Math.floor(size));
   const batches: InventoryUnit[][] = [];
   let current: InventoryUnit[] = [];
@@ -233,7 +264,7 @@ export function planBatches(units: readonly InventoryUnit[], size = 8): Batch[] 
     files += count;
   }
   if (current.length) batches.push(current);
-  return batches.map((batchUnits, index) => ({ index, units: batchUnits }));
+  return batches;
 }
 
 /** A short text for a batch prompt: counts by kind and the biggest directories. */

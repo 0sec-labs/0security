@@ -189,6 +189,22 @@ One thread cannot review every entry point of a big repository, and it cannot te
 5. A batch that fails because the connection dropped or the provider timed out, was rate limited or returned a server error runs again, up to 2 times (`--retries`). The failed attempt's findings are kept and its cost counts against the budget. A batch that runs past 900 seconds (`--batch-timeout`) is cancelled and stays pending with the reason `timeout`. The next batch still runs.
 6. A batch counts as reviewed for the units whose files its thread opened. If the thread skipped files, 0 asks it in the same thread to open them once (`--coverage-rounds`). A unit whose files stay unopened stays pending with the reason `not opened`, and `--resume` runs it again.
 
+### Large Java projects
+
+In a Maven or Gradle project, each batch stays inside one build module. A module is a directory with a `pom.xml`, `build.gradle`, `build.gradle.kts` or `settings.gradle` file. A file belongs to its nearest such directory. 0 checks only that these files exist. It does not read them.
+
+Batches run module by module, in alphabetical order of the module path. Inside a module, entry points are batched in path order, so files of one package sit together. Each batch prompt names its module.
+
+Run `--plan` to see the module map, with the files, entry points and batches of each module:
+
+```bash
+0security scan ./my-project --plan
+```
+
+`--resume` plans the units still pending by module again, so a later run continues module by module. It needs the same git HEAD, as for any resumed scan.
+
+Limits: a module is not split by package, only ordered by it. 0 does not read `CODEOWNERS` or the module list in a `pom.xml`. Directories with no build file above them form one group of their own.
+
 The report says plainly how much was reviewed:
 
 ```text
