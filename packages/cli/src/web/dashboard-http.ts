@@ -232,7 +232,7 @@ export function readJson(req: IncomingMessage, maxBytes = 1_000_000): Promise<un
 }
 
 /** Read a small application/x-www-form-urlencoded body (the SAML sign-in post). Repeated or oversized fields are refused. */
-export async function readForm(req: IncomingMessage, maxBytes = 800_000): Promise<Record<string, string>> {
+export async function readForm(req: IncomingMessage, maxBytes = 800_000, maxFields = 8): Promise<Record<string, string>> {
   if (!/^application\/x-www-form-urlencoded(?:\s*;|$)/i.test(String(req.headers["content-type"] ?? ""))) throw new WebRequestError("Expected a form post.", 415);
   const chunks: Buffer[] = []; let bytes = 0;
   for await (const chunk of req) {
@@ -241,10 +241,13 @@ export async function readForm(req: IncomingMessage, maxBytes = 800_000): Promis
     if (bytes > maxBytes) { req.resume(); throw new WebRequestError("Request body too large.", 413); }
     chunks.push(data);
   }
+  const raw = Buffer.concat(chunks).toString("utf8");
+  // Count fields before parsing, so a body of many tiny fields is refused without building a large map.
+  if (raw.split("&", maxFields + 1).length > maxFields) throw new WebRequestError("Too many form fields.", 400);
   const out: Record<string, string> = Object.create(null) as Record<string, string>;
-  for (const [key, value] of new URLSearchParams(Buffer.concat(chunks).toString("utf8"))) {
+  for (const [key, value] of new URLSearchParams(raw)) {
     if (Object.hasOwn(out, key)) throw new WebRequestError("Repeated form field.", 400);
-    out[key] = value;
+    if (key.length <= 64) out[key] = value; // only short, named fields are kept
   }
   return out;
 }

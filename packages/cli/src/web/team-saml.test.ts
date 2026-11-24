@@ -226,6 +226,9 @@ describe("routes and request guards", () => {
     await expect(readForm(post("a=1&a=2"))).rejects.toMatchObject({ statusCode: 400 });
     await expect(readForm(post("{}", "application/json"))).rejects.toMatchObject({ statusCode: 415 });
     await expect(readForm(post("a=" + "x".repeat(50)), 10)).rejects.toMatchObject({ statusCode: 413 });
+    await expect(readForm(post(Array.from({ length: 9 }, (_, i) => `f${i}=1`).join("&")))).rejects.toMatchObject({ statusCode: 400, message: "Too many form fields." });
+    await expect(readForm(post("&".repeat(700_000)))).rejects.toMatchObject({ statusCode: 400 });
+    expect(await readForm(post(`${"k".repeat(65)}=1&RelayState=r`))).toEqual({ RelayState: "r" });
   });
 });
 
