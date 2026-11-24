@@ -60,4 +60,11 @@ describe("addScopeEntries", () => {
     expect(scopeBullet({ vector: "csrf", reason: "", paths: [] })).toBe("- csrf: not given");
     expect(scopeBullet({ vector: "<b>csrf</b>", reason: "a\u0007<script>x</script>b", paths: [] })).not.toMatch(/[<>\u0007]/);
   });
+  it("keeps route-group parentheses in paths and never writes a path-less entry when every path is rejected", () => {
+    const original = "# Security\n";
+    const kept = addScopeEntries(original, [entry("out", "broken-access-control", "public login", { paths: ["app/(auth)/login.ts"] })]);
+    expect(parseScope(kept).entries[0]?.paths).toEqual(["app/(auth)/login.ts"]);
+    const dropped = addScopeEntries(original, [entry("out", "broken-access-control", "bad", { paths: ["src/a,b.ts", "../x.ts"] })]);
+    expect(dropped).toBe(original);
+  });
 });

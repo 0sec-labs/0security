@@ -293,14 +293,17 @@ export function orderByScope<T extends { scope?: string | null }>(findings: read
 function sanitizeEntryPaths(paths: readonly string[]): string[] {
   return paths
     .map(p => cleanGlob(p).replace(/\\/g, "/").replace(/^\.\//, ""))
-    .filter(p => Boolean(p) && !/[,[\]\s()]/.test(p) && !p.startsWith("/") && !p.split("/").includes(".."))
+    .filter(p => Boolean(p) && !/[,[\]\s]/.test(p) && !p.startsWith("/") && !p.split("/").includes(".."))
     .slice(0, MAX_SCOPE_PATHS);
 }
+
+/** Fail closed: an entry whose paths were all rejected would render without paths, which means the whole repository. */
+const keepsItsPaths = (entry: Pick<ScopeEntry, "paths">): boolean => entry.paths.length === 0 || sanitizeEntryPaths(entry.paths).length > 0;
 
 /** The Markdown of a Scope section for these entries, in the format `parseScope` reads. */
 export function renderScopeSection(entries: readonly Pick<ScopeEntry, "kind" | "vector" | "reason" | "until" | "paths">[]): string {
   const part = (title: string, kind: ScopeKind) => {
-    const items = entries.filter(entry => entry.kind === kind);
+    const items = entries.filter(entry => entry.kind === kind && keepsItsPaths(entry));
     return [`### ${title}`, "", ...(items.length ? items.map(scopeBullet) : ["_Nothing declared._"]), ""];
   };
   return ["## Scope", "", ...part("In scope", "in"), ...part("Out of scope", "out")].join("\n");
@@ -322,7 +325,7 @@ export function addScopeEntries(text: string, entries: readonly Pick<ScopeEntry,
   const existing = parseScope(text);
   const same = (a: Pick<ScopeEntry, "kind" | "vector" | "paths">, b: Pick<ScopeEntry, "kind" | "vector" | "paths">) =>
     a.kind === b.kind && (categoryFromLabel(a.vector) ?? a.vector.toLowerCase()) === (categoryFromLabel(b.vector) ?? b.vector.toLowerCase()) && pathKey(a.paths) === pathKey(b.paths);
-  const fresh = entries.filter((entry, index) => !existing.entries.some(old => same(old, entry)) && !entries.slice(0, index).some(earlier => same(earlier, entry)));
+  const fresh = entries.filter((entry, index) => keepsItsPaths(entry) && !existing.entries.some(old => same(old, entry)) && !entries.slice(0, index).some(earlier => same(earlier, entry)));
   if (!fresh.length) return text;
   if (!existing.found) return replaceScopeSection(text, renderScopeSection(fresh));
   const eol = dominantEol(text);
