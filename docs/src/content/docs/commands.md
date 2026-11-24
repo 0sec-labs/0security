@@ -286,7 +286,7 @@ To test a running app with Nuclei, pass the target and say what you may test. 0 
 
 When you give a name, 0 resolves it once, checks every address, and starts Nuclei on that address with the name in the Host header. Findings then show the address.
 
-Nuclei runs at 10 requests per second and 5 templates at once. Change them with `--rate-limit` and `--concurrency`. Templates tagged `intrusive`, `dos` or `fuzz` are skipped, and out-of-band callbacks and update checks are off. Nuclei must be on your path, or set `ZERO_NUCLEI_PATH`. 0 never downloads Nuclei or its templates: run `nuclei -update-templates` yourself, or pass `--templates <file-or-folder>`.
+Nuclei runs at 10 requests per second and 5 templates at once. Change them with `--rate-limit` and `--concurrency`. Only http templates run, and those tagged `intrusive`, `dos` or `fuzz` are skipped. Out-of-band callbacks and update checks are off. Nuclei must be on your path, or set `ZERO_NUCLEI_PATH`. A template is code you chose: 0 checks the target, not what a template sends, so run only templates you trust. 0 never downloads Nuclei or its templates: run `nuclei -update-templates` yourself, or pass `--templates <file-or-folder>`.
 
 The report says what authorised the run. The findings are saved for triage as unverified, and no model reviews them. See [Use Nuclei, ZAP or Strix](/use-dynamic-scanners/).
 

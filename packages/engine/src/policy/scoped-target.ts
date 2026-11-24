@@ -46,7 +46,25 @@ for (const [address, prefix] of [["10.0.0.0", 8], ["172.16.0.0", 12], ["192.168.
 privateNet.addSubnet("fc00::", 7, "ipv6");
 
 /** The IPv4 inside an IPv4-mapped IPv6 address (`::ffff:a.b.c.d` or `::ffff:7f00:1`), or the address itself. */
+function expandV6(address: string): number[] | undefined {
+  let text = address.toLowerCase().split("%")[0]!;
+  const dotted = /(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(text);
+  if (dotted) { const [a, b, c, d] = dotted.slice(1).map(Number) as [number, number, number, number]; text = text.replace(dotted[0], `${((a << 8) | b).toString(16)}:${((c << 8) | d).toString(16)}`); }
+  const halves = text.split("::");
+  if (halves.length > 2) return undefined;
+  const head = halves[0] ? halves[0].split(":") : [];
+  const tail = halves.length === 2 && halves[1] ? halves[1].split(":") : [];
+  const fill = halves.length === 2 ? 8 - head.length - tail.length : 0;
+  const groups = [...head, ...Array<string>(Math.max(fill, 0)).fill("0"), ...tail].map(group => parseInt(group, 16));
+  return groups.length === 8 && groups.every(group => Number.isInteger(group) && group >= 0 && group <= 0xffff) ? groups : undefined;
+}
+
 function unmap(address: string): string {
+  // IPv4-mapped (::ffff:0:0/96), IPv4-compatible and NAT64 (64:ff9b::/96) addresses, in any spelling, are judged by the IPv4 inside.
+  if (isIP(address) === 6) {
+    const g = expandV6(address);
+    if (g && ((g.slice(0, 5).every(x => x === 0) && g[5] === 0xffff) || (g.slice(0, 6).every(x => x === 0) && (g[6]! > 0 || g[7]! > 1)) || (g[0] === 0x64 && g[1] === 0xff9b && g.slice(2, 6).every(x => x === 0)))) return `${g[6]! >> 8}.${g[6]! & 255}.${g[7]! >> 8}.${g[7]! & 255}`;
+  }
   const lower = address.toLowerCase();
   const dotted = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(lower);
   if (dotted) return dotted[1]!;
