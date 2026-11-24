@@ -59,7 +59,7 @@ export interface TeamMember { userId: string; displayName: string; role: string;
 /** A role change made by an administrator or by the identity provider's group mapping. */
 export interface TeamRoleChange { userId: string; old: string; new: string; source: "admin" | "oidc-group" | "scim-group" }
 export { TeamAuthError };
-const fileRow = (user: { id: string; name: string; role: string; passwordHash?: string | undefined; oidcSub?: string | undefined }): TeamUserRow => ({ id: user.id, name: user.name, role: user.role, roleSource: "admin", scopeJson: null, active: true, deleted: false, userName: null, externalId: null, email: null, passwordHash: user.passwordHash ?? null, oidcSub: user.oidcSub ?? null, source: "file", createdAt: "", updatedAt: "" });
+const fileRow = (user: { id: string; name: string; role: string; passwordHash?: string | undefined; oidcSub?: string | undefined }): TeamUserRow => ({ id: user.id, name: user.name, role: user.role, roleSource: "admin", scopeJson: null, active: true, deleted: false, userName: null, externalId: null, email: null, oidcIssuer: null, passwordHash: user.passwordHash ?? null, oidcSub: user.oidcSub ?? null, source: "file", createdAt: "", updatedAt: "" });
 function opaque(): string { return randomBytes(32).toString("base64url"); }
 export function parseCookies(header: string | undefined): Record<string, string> {
   const cookies: Record<string, string> = Object.create(null) as Record<string, string>;
@@ -255,7 +255,7 @@ export class TeamAuth {
     if (this.atMemberLimit()) throw new TeamAuthError("Workspace member limit reached", 409);
     const taken = [...this.users.values()].some(user => !user.deleted && user.source === "scim" && user.userName?.toLowerCase() === input.userName.toLowerCase());
     if (taken) throw new TeamAuthError("userName is already in use", 409);
-    return this.store({ id: `scim-${randomBytes(10).toString("hex")}`, name: input.name, role: this.config?.scim?.defaultRole ?? "viewer", roleSource: "group", scopeJson: null, active: input.active, deleted: false, userName: input.userName, externalId: input.externalId, email: input.email, passwordHash: null, oidcSub: null, source: "scim", createdAt: "", updatedAt: "" });
+    return this.store({ id: `scim-${randomBytes(10).toString("hex")}`, name: input.name, role: this.config?.scim?.defaultRole ?? "viewer", roleSource: "group", scopeJson: null, active: input.active, deleted: false, userName: input.userName, externalId: input.externalId, email: input.email, oidcIssuer: null, passwordHash: null, oidcSub: null, source: "scim", createdAt: "", updatedAt: "" });
   }
   /** Change the profile of a SCIM account. Ending the sessions of a disabled account is the caller's step. */
   scimUpdate(id: string, change: { name?: string; active?: boolean; deleted?: boolean; userName?: string; externalId?: string | null; email?: string | null }): TeamUserRow {
@@ -279,11 +279,20 @@ export class TeamAuth {
   applyScimGroupRoles(): TeamRoleChange[] {
     const groups = this.scimTable?.listGroups() ?? [];
     const mapping = Object.entries(this.config?.scim?.groupRoles ?? {});
-    const changes: TeamRoleChange[] = [];
+    const planned: Array<{ user: TeamUserRow; wanted: string }> = [];
     for (const user of this.scimAccounts()) {
       if (user.roleSource !== "group") continue;
       const wanted = mapping.find(([name]) => groups.some(group => group.displayName === name && group.memberIds.includes(user.id)))?.[1] ?? this.config?.scim?.defaultRole ?? "viewer";
-      if (wanted === user.role) continue;
+      if (wanted !== user.role) planned.push({ user, wanted });
+    }
+    // A group change may never leave the workspace without an account that can manage users.
+    const manages = (user: TeamUserRow, role: string) => user.active && !user.deleted && Boolean(this.roles.get(role)?.permissions.includes("users.manage"));
+    const demoted = new Map(planned.map(({ user, wanted }) => [user.id, wanted]));
+    const hadManager = [...this.users.values()].some(user => manages(user, user.role));
+    const keepsManager = [...this.users.values()].some(user => manages(user, demoted.get(user.id) ?? user.role));
+    if (hadManager && !keepsManager) throw new TeamAuthError("This change would leave nobody able to manage users, so it was refused", 409);
+    const changes: TeamRoleChange[] = [];
+    for (const { user, wanted } of planned) {
       this.table?.updateAccess(user.id, { role: wanted });
       this.users.set(user.id, { ...user, role: wanted });
       changes.push({ userId: user.id, old: user.role, new: wanted, source: "scim-group" });
@@ -368,22 +377,31 @@ export class TeamAuth {
     for (const [key, value] of Object.entries({ response_type: "code", scope: "openid profile", client_id: oidc.clientId, redirect_uri: oidc.redirectUri, state, nonce, code_challenge: createHash("sha256").update(verifier).digest("base64url"), code_challenge_method: "S256" })) url.searchParams.set(key, value);
     return { url: url.href, setCookie: this.cookie(SSO_COOKIE, browser, SSO_MS / 1000) };
   }
-  private linkScimAccount(claims: Record<string, unknown>): TeamUserRow | undefined {
-    if (claims.email_verified === false) return undefined;
-    const names = [claims.email, claims.preferred_username].filter((value): value is string => typeof value === "string" && value !== "").map(value => value.toLowerCase());
-    const found = [...this.users.values()].find(row => row.source === "scim" && !row.deleted && !row.oidcSub && [row.userName, row.email].some(value => value && names.includes(value.toLowerCase())));
-    if (!found || typeof claims.sub !== "string") return undefined;
-    const next = this.table?.updateProfile(found.id, { oidcSub: claims.sub }) ?? { ...found, oidcSub: claims.sub };
-    this.users.set(found.id, next);
-    return next;
+  /**
+   * An account SCIM created has no OIDC subject yet. The first sign-in links it, but only on proof: the ID token must say the
+   * email is verified (email_verified is exactly true), the email must match the account's userName or email, and exactly
+   * one unlinked account may match. Nothing else links: not an unverified email, not preferred_username, and never an
+   * account that already belongs to another subject. After the link, only the subject and issuer match.
+   */
+  private linkScimAccount(issuer: string, claims: Record<string, unknown>): TeamUserRow | undefined {
+    if (claims.email_verified !== true || typeof claims.email !== "string" || claims.email.trim() === "" || typeof claims.sub !== "string" || claims.sub === "") return undefined;
+    const email = claims.email.trim().toLowerCase();
+    const candidates = [...this.users.values()].filter(row => row.source === "scim" && row.active && !row.deleted && !row.oidcSub && [row.userName, row.email].some(value => value?.toLowerCase() === email));
+    if (candidates.length !== 1) return undefined;
+    const found = candidates[0]!;
+    try {
+      const next = this.table?.updateProfile(found.id, { oidcSub: claims.sub, oidcIssuer: issuer }) ?? { ...found, oidcSub: claims.sub, oidcIssuer: issuer };
+      this.users.set(found.id, next);
+      return next;
+    } catch { return undefined; } // the subject already belongs to another account
   }
   /** Create the account for a verified OIDC subject. The ID is derived from the subject, so it cannot collide with a local account ID. */
-  private provisionOidcUser(claims: { sub?: string; name?: unknown; preferred_username?: unknown; email?: unknown }, role: string, roleSource: "admin" | "group"): TeamUserRow {
+  private provisionOidcUser(issuer: string, claims: { sub?: string; name?: unknown; preferred_username?: unknown; email?: unknown }, role: string, roleSource: "admin" | "group"): TeamUserRow {
     const sub = claims.sub!;
     const id = sub.length <= 120 ? `oidc:${sub}` : `oidc:${createHash("sha256").update(sub).digest("hex").slice(0, 48)}`;
     const label = [claims.name, claims.preferred_username, claims.email].find((value): value is string => typeof value === "string" && value.trim() !== "");
     const name = (label ?? sub).replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 160) || "SSO user";
-    return this.store({ id, name, role, roleSource, scopeJson: null, active: true, deleted: false, userName: null, externalId: null, email: null, passwordHash: null, oidcSub: sub, source: "oidc", createdAt: "", updatedAt: "" });
+    return this.store({ id, name, role, roleSource, scopeJson: null, active: true, deleted: false, userName: null, externalId: null, email: null, oidcIssuer: issuer, passwordHash: null, oidcSub: sub, source: "oidc", createdAt: "", updatedAt: "" });
   }
   async callback(params: URLSearchParams, req: Pick<IncomingMessage, "headers">) {
     const state = params.get("state") ?? ""; const pending = this.pending.get(state);
@@ -401,9 +419,9 @@ export class TeamAuth {
     try { ({ payload } = await jwtVerify(tokens.id_token, this.keys!, { issuer: oidc.issuer, audience: oidc.clientId, algorithms: ["RS256", "ES256"], requiredClaims: ["exp", "iat", "sub", "nonce"], currentDate: new Date(this.now()), maxTokenAge: "10 minutes" })); }
     catch { throw new TeamAuthError("SSO identity verification failed"); }
     if (payload.nonce !== pending.nonce || (Array.isArray(payload.aud) && payload.aud.length > 1 && payload.azp !== oidc.clientId)) throw new TeamAuthError("SSO identity verification failed");
-    let user = [...this.users.values()].find(row => row.oidcSub === payload.sub);
+    let user = [...this.users.values()].find(row => row.oidcSub === payload.sub && (!row.oidcIssuer || row.oidcIssuer === oidc.issuer));
     // An account SCIM created has no OIDC subject yet. The first sign-in links it when the verified email or username matches.
-    if (!user && hasFeature("scim")) user = this.linkScimAccount(payload as Record<string, unknown>);
+    if (!user && hasFeature("scim")) user = this.linkScimAccount(oidc.issuer, payload as Record<string, unknown>);
     if (user && (!user.active || user.deleted)) throw new TeamAuthError("This account has been disabled by your administrator", 403);
     let provisioned = false;
     // Group mapping is a paid feature. The role comes from the first mapped group the user is in.
@@ -414,7 +432,7 @@ export class TeamAuth {
       // Account creation on first sign-in is a paid feature. Without the license the sign-in stays "not a member".
       if (!hasFeature("rbac")) throw new TeamAuthError(`This SSO account is not a workspace member. Automatic account creation is set up, but ${NEEDS_LICENSE}`, 403);
       if (this.atMemberLimit()) throw new TeamAuthError("Workspace member limit reached", 409);
-      user = this.provisionOidcUser(payload, mappedRole ?? oidc.jit.role, groupRoles ? "group" : "admin"); provisioned = true;
+      user = this.provisionOidcUser(oidc.issuer, payload, mappedRole ?? oidc.jit.role, groupRoles ? "group" : "admin"); provisioned = true;
     }
     // An account whose role came from the groups follows the groups at every sign-in. An account an administrator set stays as set.
     if (user && !provisioned && groupRoles && user.roleSource === "group") {

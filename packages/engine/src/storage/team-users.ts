@@ -25,18 +25,20 @@ export interface TeamUserRow {
   scopeJson: string | null;
   passwordHash: string | null;
   oidcSub: string | null;
+  /** The issuer the OIDC subject belongs to. Null for an account linked before issuers were stored. */
+  oidcIssuer: string | null;
   source: TeamUserSource;
   createdAt: string;
   updatedAt: string;
 }
 
-export type TeamUserInput = Omit<TeamUserRow, "createdAt" | "updatedAt" | "roleSource" | "scopeJson" | "active" | "deleted" | "userName" | "externalId" | "email"> & { roleSource?: TeamRoleSource; scopeJson?: string | null; active?: boolean; deleted?: boolean; userName?: string | null; externalId?: string | null; email?: string | null; createdAt?: string; updatedAt?: string };
+export type TeamUserInput = Omit<TeamUserRow, "createdAt" | "updatedAt" | "roleSource" | "scopeJson" | "oidcIssuer" | "active" | "deleted" | "userName" | "externalId" | "email"> & { oidcIssuer?: string | null; roleSource?: TeamRoleSource; scopeJson?: string | null; active?: boolean; deleted?: boolean; userName?: string | null; externalId?: string | null; email?: string | null; createdAt?: string; updatedAt?: string };
 
 export class TeamUserConflictError extends Error {
   constructor(readonly field: "id" | "oidcSub") { super(field === "id" ? "That account ID already exists" : "That OIDC subject is already linked to an account"); this.name = "TeamUserConflictError"; }
 }
 
-const COLUMNS = "id, name, role, role_source, scope_json, active, deleted, user_name, external_id, email, password_hash, oidc_sub, source, created_at, updated_at";
+const COLUMNS = "id, name, role, role_source, scope_json, active, deleted, user_name, external_id, email, password_hash, oidc_sub, oidc_issuer, source, created_at, updated_at";
 
 function toRow(raw: Record<string, unknown>): TeamUserRow {
   return {
@@ -48,6 +50,7 @@ function toRow(raw: Record<string, unknown>): TeamUserRow {
     roleSource: raw.role_source === "group" ? "group" : "admin", scopeJson: raw.scope_json === null || raw.scope_json === undefined ? null : String(raw.scope_json),
     passwordHash: raw.password_hash === null ? null : String(raw.password_hash),
     oidcSub: raw.oidc_sub === null ? null : String(raw.oidc_sub),
+    oidcIssuer: raw.oidc_issuer === null || raw.oidc_issuer === undefined ? null : String(raw.oidc_issuer),
     source: raw.source as TeamUserSource, createdAt: String(raw.created_at), updatedAt: String(raw.updated_at),
   };
 }
@@ -75,7 +78,7 @@ export class TeamUserTable {
     if (!have.has("scope_json")) this.db.exec("ALTER TABLE team_users ADD COLUMN scope_json TEXT");
     if (!have.has("active")) this.db.exec("ALTER TABLE team_users ADD COLUMN active INTEGER NOT NULL DEFAULT 1");
     if (!have.has("deleted")) this.db.exec("ALTER TABLE team_users ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0");
-    for (const column of ["user_name", "external_id", "email"]) if (!have.has(column)) this.db.exec(`ALTER TABLE team_users ADD COLUMN ${column} TEXT`);
+    for (const column of ["user_name", "external_id", "email", "oidc_issuer"]) if (!have.has(column)) this.db.exec(`ALTER TABLE team_users ADD COLUMN ${column} TEXT`);
   }
   count(): number { return Number((this.db.prepare("SELECT COUNT(*) AS n FROM team_users").get() as { n: number }).n); }
   list(): TeamUserRow[] { return (this.db.prepare(`SELECT ${COLUMNS} FROM team_users ORDER BY created_at, id`).all() as Array<Record<string, unknown>>).map(toRow); }
@@ -92,9 +95,9 @@ export class TeamUserTable {
     if (this.get(input.id)) throw new TeamUserConflictError("id");
     if (input.oidcSub && this.getByOidcSub(input.oidcSub)) throw new TeamUserConflictError("oidcSub");
     const now = new Date().toISOString();
-    const row: TeamUserRow = { ...input, roleSource: input.roleSource ?? "admin", scopeJson: input.scopeJson ?? null, active: input.active ?? true, deleted: input.deleted ?? false, userName: input.userName ?? null, externalId: input.externalId ?? null, email: input.email ?? null, createdAt: input.createdAt ?? now, updatedAt: input.updatedAt ?? now };
-    this.db.prepare(`INSERT INTO team_users (${COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(row.id, row.name, row.role, row.roleSource, row.scopeJson, row.active ? 1 : 0, row.deleted ? 1 : 0, row.userName, row.externalId, row.email, row.passwordHash, row.oidcSub, row.source, row.createdAt, row.updatedAt);
+    const row: TeamUserRow = { ...input, roleSource: input.roleSource ?? "admin", scopeJson: input.scopeJson ?? null, oidcIssuer: input.oidcIssuer ?? null, active: input.active ?? true, deleted: input.deleted ?? false, userName: input.userName ?? null, externalId: input.externalId ?? null, email: input.email ?? null, createdAt: input.createdAt ?? now, updatedAt: input.updatedAt ?? now };
+    this.db.prepare(`INSERT INTO team_users (${COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(row.id, row.name, row.role, row.roleSource, row.scopeJson, row.active ? 1 : 0, row.deleted ? 1 : 0, row.userName, row.externalId, row.email, row.passwordHash, row.oidcSub, row.oidcIssuer, row.source, row.createdAt, row.updatedAt);
     return row;
   }
   /** Change the role, who set it, or the scope of one account. Returns the new row, or null when there is no such account. */
@@ -122,17 +125,18 @@ export class TeamUserTable {
     return added;
   }
   /** Change the SCIM-managed fields of one account. Returns the new row, or null when there is no such account. */
-  updateProfile(id: string, change: { name?: string; active?: boolean; deleted?: boolean; userName?: string | null; externalId?: string | null; email?: string | null; oidcSub?: string | null }): TeamUserRow | null {
+  updateProfile(id: string, change: { name?: string; active?: boolean; deleted?: boolean; userName?: string | null; externalId?: string | null; email?: string | null; oidcSub?: string | null; oidcIssuer?: string | null }): TeamUserRow | null {
     const current = this.get(id);
     if (!current) return null;
     const next = {
       name: change.name ?? current.name, active: change.active ?? current.active, deleted: change.deleted ?? current.deleted,
       userName: change.userName === undefined ? current.userName : change.userName, externalId: change.externalId === undefined ? current.externalId : change.externalId,
       email: change.email === undefined ? current.email : change.email, oidcSub: change.oidcSub === undefined ? current.oidcSub : change.oidcSub,
+      oidcIssuer: change.oidcIssuer === undefined ? current.oidcIssuer : change.oidcIssuer,
     };
     const updatedAt = new Date().toISOString();
-    this.db.prepare("UPDATE team_users SET name = ?, active = ?, deleted = ?, user_name = ?, external_id = ?, email = ?, oidc_sub = ?, updated_at = ? WHERE id = ?")
-      .run(next.name, next.active ? 1 : 0, next.deleted ? 1 : 0, next.userName, next.externalId, next.email, next.oidcSub, updatedAt, id);
+    this.db.prepare("UPDATE team_users SET name = ?, active = ?, deleted = ?, user_name = ?, external_id = ?, email = ?, oidc_sub = ?, oidc_issuer = ?, updated_at = ? WHERE id = ?")
+      .run(next.name, next.active ? 1 : 0, next.deleted ? 1 : 0, next.userName, next.externalId, next.email, next.oidcSub, next.oidcIssuer, updatedAt, id);
     return { ...current, ...next, updatedAt };
   }
   /** The file the table lives in, so a related table can open its own connection to it. */

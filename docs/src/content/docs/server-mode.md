@@ -522,7 +522,7 @@ curl -X POST "$URL/api/team/scim-tokens" -H "x-0-control-token: $TOKEN" -H "cont
 
 Give the provider the base URL `https://your-host/scim/v2` and the token as a bearer token. List tokens with `GET /api/team/scim-tokens` and revoke one with `DELETE /api/team/scim-tokens/<id>`.
 
-SCIM manages the accounts it creates and nothing else. Accounts from the team file or added by an owner are not listed, read or changed through SCIM. A new account has no password. It signs in through OIDC. The first OIDC sign-in links the account when the verified `email` or `preferred_username` claim matches its `userName` or email.
+SCIM manages the accounts it creates and nothing else. Accounts from the team file or added by an owner are not listed, read or changed through SCIM. A new account has no password. It signs in through OIDC. The first OIDC sign-in links the account only when the ID token has `email_verified` set to true and its `email` matches the account's `userName` or email, ignoring letter case, and only one unlinked account matches. Nothing else links an account: not an unverified email, not `preferred_username`, not an account that already belongs to another subject. After the link, 0 matches the account by the subject and issuer only. A change of group in SCIM that would leave nobody able to manage users is refused with a 409 and nothing changes.
 
 Set roles from SCIM groups in the team file:
 

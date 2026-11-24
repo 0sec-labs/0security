@@ -215,31 +215,142 @@ describe("SCIM with the scim license", () => {
     expect(RFC7643_8_4_GROUP.members).toHaveLength(2);
   });
 
-  it("links an account to its first OIDC sign-in by verified email, and refuses a disabled account", async () => {
-    const { call, auth } = await fixture();
-    const id = (await call("POST", "/Users", user("sso"))).json.id as string;
+  /** A mock identity provider whose next ID token carries the claims in `next`. */
+  async function oidc(f: Awaited<ReturnType<typeof fixture>>, issuerOverride?: { value: string }) {
     const { privateKey, publicKey } = await generateKeyPair("RS256");
     const jwk = { ...await exportJWK(publicKey), kid: "k", alg: "RS256", use: "sig" };
-    let issuer = ""; let nonce = ""; let email = "sso@example.com";
+    const state = { issuer: "", nonce: "", sub: "idp-subject-1", claims: {} as Record<string, unknown> };
     const idp = createServer(async (req, res) => {
       res.setHeader("Content-Type", "application/json");
-      if (req.url === "/.well-known/openid-configuration") return res.end(JSON.stringify({ issuer, authorization_endpoint: `${issuer}/a`, token_endpoint: `${issuer}/t`, jwks_uri: `${issuer}/k` }));
+      if (req.url === "/.well-known/openid-configuration") return res.end(JSON.stringify({ issuer: state.issuer, authorization_endpoint: `${state.issuer}/a`, token_endpoint: `${state.issuer}/t`, jwks_uri: `${state.issuer}/k` }));
       if (req.url === "/k") return res.end(JSON.stringify({ keys: [jwk] }));
-      if (req.url === "/t") { for await (const part of req) void part; return res.end(JSON.stringify({ id_token: await new SignJWT({ nonce, email }).setProtectedHeader({ alg: "RS256", kid: "k" }).setIssuer(issuer).setAudience("client").setSubject("idp-subject-1").setIssuedAt().setExpirationTime("5m").sign(privateKey) })); }
+      if (req.url === "/t") { for await (const part of req) void part; return res.end(JSON.stringify({ id_token: await new SignJWT({ nonce: state.nonce, ...state.claims }).setProtectedHeader({ alg: "RS256", kid: "k" }).setIssuer(state.issuer).setAudience("client").setSubject(state.sub).setIssuedAt().setExpirationTime("5m").sign(privateKey) })); }
       res.statusCode = 404; res.end("{}");
     });
     servers.push(idp);
-    await new Promise<void>(resolve => idp.listen(0, "127.0.0.1", resolve)); issuer = `http://127.0.0.1:${(idp.address() as AddressInfo).port}`;
-    const configured = new TeamAuth({ origin, config: { ...auth.snapshotConfig(), oidc: { issuer, clientId: "client", redirectUri: `${origin}/api/team/auth/callback` } } }); opened.push(configured);
+    await new Promise<void>(resolve => idp.listen(0, "127.0.0.1", resolve)); state.issuer = `http://127.0.0.1:${(idp.address() as AddressInfo).port}`;
+    void issuerOverride;
+    const configured = new TeamAuth({ origin, config: { ...f.auth.snapshotConfig(), oidc: { issuer: state.issuer, clientId: "client", redirectUri: `${origin}/api/team/auth/callback` } } }); opened.push(configured);
     configured.attachStore(new TeamUserTable(dbPath));
-    const signIn = async () => { const begin = await configured.beginSSO(); const u = new URL(begin.url); nonce = u.searchParams.get("nonce")!; return configured.callback(new URLSearchParams({ state: u.searchParams.get("state")!, code: "c" }), { headers: { cookie: begin.setCookie.split(";")[0]! } }); };
-    const first = await signIn();
+    const signIn = async (sub: string, claims: Record<string, unknown>) => {
+      state.sub = sub; state.claims = claims;
+      const begin = await configured.beginSSO(); const u = new URL(begin.url); state.nonce = u.searchParams.get("nonce")!;
+      return configured.callback(new URLSearchParams({ state: u.searchParams.get("state")!, code: "c" }), { headers: { cookie: begin.setCookie.split(";")[0]! } });
+    };
+    return { configured, signIn, state, reload: () => { configured.attachStore(new TeamUserTable(dbPath)); } };
+  }
+  const refused = { statusCode: 403, message: expect.stringContaining("not a workspace member") };
+
+  it("links an account to its first OIDC sign-in by verified email (any letter case), then matches only by subject", async () => {
+    const f = await fixture();
+    const id = (await f.call("POST", "/Users", user("sso"))).json.id as string;
+    const o = await oidc(f);
+    const first = await o.signIn("idp-subject-1", { email: "SSO@Example.COM", email_verified: true });
     expect(first.user.userId).toBe(id);
-    expect((await signIn()).user.userId).toBe(id); // now matched by subject
-    await call("PATCH", `/Users/${id}`, OKTA.deactivateUser);
-    configured.attachStore(new TeamUserTable(dbPath));
-    await expect(signIn()).rejects.toMatchObject({ statusCode: 403, message: expect.stringContaining("disabled") });
-    email = "someone-else@example.com";
+    expect(o.configured.scimAccount(id)).toMatchObject({ oidcSub: "idp-subject-1", oidcIssuer: o.state.issuer });
+    // Now matched by subject alone: the email claim no longer matters.
+    expect((await o.signIn("idp-subject-1", { email: "changed@example.com", email_verified: false })).user.userId).toBe(id);
+    // A different subject with the same verified email does not take over a linked account.
+    await expect(o.signIn("idp-subject-2", { email: "sso@example.com", email_verified: true })).rejects.toMatchObject(refused);
+    expect(o.configured.scimAccount(id)?.oidcSub).toBe("idp-subject-1");
+  });
+
+  it("does not link on an email that is not verified: missing, false, the text 'false', the text 'true', null", async () => {
+    const f = await fixture();
+    const id = (await f.call("POST", "/Users", user("victim"))).json.id as string;
+    const o = await oidc(f);
+    for (const verified of [undefined, false, "false", "true", "True", null, 1]) {
+      const claims: Record<string, unknown> = { email: "victim@example.com" };
+      if (verified !== undefined) claims.email_verified = verified;
+      await expect(o.signIn("attacker-subject", claims), String(verified)).rejects.toMatchObject(refused);
+      expect(o.configured.scimAccount(id)?.oidcSub, String(verified)).toBeNull();
+    }
+  });
+
+  it("does not link on preferred_username, a missing email, or an inactive account", async () => {
+    const f = await fixture();
+    const id = (await f.call("POST", "/Users", user("pat"))).json.id as string;
+    const o = await oidc(f);
+    await expect(o.signIn("s1", { preferred_username: "pat@example.com", email_verified: true })).rejects.toMatchObject(refused);
+    await expect(o.signIn("s1", { preferred_username: "pat", email_verified: true })).rejects.toMatchObject(refused);
+    await expect(o.signIn("s1", { email_verified: true })).rejects.toMatchObject(refused);
+    expect(o.configured.scimAccount(id)?.oidcSub).toBeNull();
+    await f.call("PATCH", `/Users/${id}`, OKTA.deactivateUser);
+    o.reload();
+    await expect(o.signIn("s1", { email: "pat@example.com", email_verified: true })).rejects.toMatchObject(refused);
+  });
+
+  it("refuses to guess when the email matches two accounts, including ones that differ only in letter case", async () => {
+    const f = await fixture();
+    await f.call("POST", "/Users", user("a@example.com", { emails: [{ value: "shared@example.com", primary: true }] }));
+    await f.call("POST", "/Users", user("b@example.com", { emails: [{ value: "SHARED@example.com", primary: true }] }));
+    const o = await oidc(f);
+    await expect(o.signIn("s1", { email: "shared@example.com", email_verified: true })).rejects.toMatchObject(refused);
+    expect(o.configured.scimAccounts().every(account => account.oidcSub === null)).toBe(true);
+  });
+
+  it("does not link an account to a subject that already belongs to another account", async () => {
+    const f = await fixture();
+    const a = (await f.call("POST", "/Users", user("alice"))).json.id as string;
+    const b = (await f.call("POST", "/Users", user("bob"))).json.id as string;
+    const o = await oidc(f);
+    expect((await o.signIn("s-alice", { email: "alice@example.com", email_verified: true })).user.userId).toBe(a);
+    // The same subject presents Bob's verified email. It stays Alice's account; Bob's is not linked to it.
+    expect((await o.signIn("s-alice", { email: "bob@example.com", email_verified: true })).user.userId).toBe(a);
+    expect(o.configured.scimAccount(b)?.oidcSub).toBeNull();
+  });
+
+  it("matches a linked subject only for the issuer it was linked with", async () => {
+    const f = await fixture();
+    const id = (await f.call("POST", "/Users", user("movers"))).json.id as string;
+    const one = await oidc(f);
+    await one.signIn("shared-sub", { email: "movers@example.com", email_verified: true });
+    const two = await oidc(f); // another identity provider that hands out the same subject value
+    await expect(two.signIn("shared-sub", { email: "other@example.com", email_verified: false })).rejects.toMatchObject(refused);
+    expect(two.configured.scimAccount(id)?.oidcIssuer).toBe(one.state.issuer);
+  });
+
+  it("refuses a disabled account at sign-in", async () => {
+    const f = await fixture();
+    const id = (await f.call("POST", "/Users", user("gone"))).json.id as string;
+    const o = await oidc(f);
+    await o.signIn("s-gone", { email: "gone@example.com", email_verified: true });
+    await f.call("PATCH", `/Users/${id}`, OKTA.deactivateUser);
+    o.reload();
+    await expect(o.signIn("s-gone", { email: "gone@example.com", email_verified: true })).rejects.toMatchObject({ statusCode: 403, message: expect.stringContaining("disabled") });
+  });
+
+  describe("group changes never leave nobody able to manage users", () => {
+    async function sole() {
+      const f = await fixture({ scim: { groupRoles: { "sec-admins": "owner" } } });
+      const boss = (await f.call("POST", "/Users", user("boss"))).json.id as string;
+      const gid = (await f.call("POST", "/Groups", { displayName: "sec-admins", members: [{ value: boss }] })).json.id as string;
+      expect(f.auth.lookupUser(boss)?.roleName).toBe("owner");
+      f.auth.setAccess("owner", { role: "viewer" }); // the group now holds the only manager
+      return { ...f, boss, gid };
+    }
+
+    it("refuses to take the only manager out of the group, by PATCH, PUT and DELETE, and puts everything back", async () => {
+      const f = await sole();
+      const stays = () => { expect(f.auth.lookupUser(f.boss)?.roleName).toBe("owner"); };
+      for (const reply of [
+        await f.call("PATCH", `/Groups/${f.gid}`, { Operations: [{ op: "Remove", path: "members", value: [{ value: f.boss }] }] }),
+        await f.call("PATCH", `/Groups/${f.gid}`, { Operations: [{ op: "remove", path: `members[value eq "${f.boss}"]` }] }),
+        await f.call("PATCH", `/Groups/${f.gid}`, { Operations: [{ op: "replace", path: "displayName", value: "renamed" }] }),
+        await f.call("PUT", `/Groups/${f.gid}`, { displayName: "sec-admins", members: [] }),
+        await f.call("DELETE", `/Groups/${f.gid}`),
+      ]) { expect(reply.status).toBe(409); expect(reply.json.detail).toContain("manage users"); stays(); }
+      const group = (await f.call("GET", `/Groups/${f.gid}`)).json;
+      expect(group).toMatchObject({ displayName: "sec-admins", members: [{ value: f.boss }] });
+      expect(f.auth.scim!.getGroup(f.gid)?.memberIds).toEqual([f.boss]);
+    });
+
+    it("allows it when another account can still manage users", async () => {
+      const f = await sole();
+      f.auth.setAccess("owner", { role: "owner" });
+      expect((await f.call("PATCH", `/Groups/${f.gid}`, { Operations: [{ op: "Remove", path: "members", value: [{ value: f.boss }] }] })).status).toBe(200);
+      expect(f.auth.lookupUser(f.boss)?.roleName).toBe("viewer");
+    });
   });
 });
 

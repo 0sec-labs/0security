@@ -106,6 +106,19 @@ function listQuery(url: URL, resources: Json[], includeMembers = true) {
   return includeMembers ? page : { ...page, Resources: page.Resources.map(resource => { const { members: _members, ...rest } = resource; return rest; }) };
 }
 
+/** Run a group change, then recompute roles. If that would leave nobody able to manage users, put the group back and refuse. */
+function changeGroup<T>(ctx: ScimContext, actor: string, previous: ScimGroupRecord | null, created: { id: string } | null, change: () => T): T {
+  const store = ctx.auth.scim!;
+  const result = change();
+  try { recordRoleChanges(ctx, actor); }
+  catch (error) {
+    if (created) store.deleteGroup(created.id);
+    else if (previous) store.saveGroup({ id: previous.id, displayName: previous.displayName, externalId: previous.externalId, memberIds: previous.memberIds });
+    throw error;
+  }
+  return result;
+}
+
 function recordRoleChanges(ctx: ScimContext, actor: string): void {
   for (const change of ctx.auth.applyScimGroupRoles()) audit({ actor, action: "user.role_changed", subject: change.userId, detail: { id: change.userId, old: change.old, new: change.new, source: change.source } });
 }
@@ -176,7 +189,7 @@ async function groups(ctx: ScimContext, req: IncomingMessage, url: URL, id: stri
       if (store.groupNameTaken(input.displayName)) throw new ScimError(409, "uniqueness", "displayName is already in use");
       checkMembers(ctx, input.memberIds);
       const group = store.saveGroup(input);
-      recordRoleChanges(ctx, actor);
+      changeGroup(ctx, actor, null, group, () => undefined);
       audit({ actor, action: "scim.group.created", subject: group.displayName, detail: { id: group.id, name: group.displayName, count: group.memberIds.length, source: "scim" } });
       return { status: 201, body: view(group), headers: { Location: `${ctx.baseUrl}${SCIM_BASE}/Groups/${group.id}` } };
     }
@@ -187,7 +200,7 @@ async function groups(ctx: ScimContext, req: IncomingMessage, url: URL, id: stri
   if (method === "GET") { needRead(mode); return { status: 200, body: view(group) }; }
   needFull(mode);
   if (method === "DELETE") {
-    store.deleteGroup(id); recordRoleChanges(ctx, actor);
+    changeGroup(ctx, actor, group, null, () => store.deleteGroup(id));
     audit({ actor, action: "scim.group.deleted", subject: group.displayName, detail: { id, name: group.displayName, source: "scim" } });
     return { status: 204 };
   }
@@ -196,8 +209,7 @@ async function groups(ctx: ScimContext, req: IncomingMessage, url: URL, id: stri
   const input = readGroup(method === "PATCH" ? applyPatch(groupResource(ctx, group, true), incoming) : incoming);
   if (store.groupNameTaken(input.displayName, id)) throw new ScimError(409, "uniqueness", "displayName is already in use");
   checkMembers(ctx, input.memberIds);
-  const saved = store.saveGroup({ id, ...input });
-  recordRoleChanges(ctx, actor);
+  const saved = changeGroup(ctx, actor, group, null, () => store.saveGroup({ id, ...input }));
   audit({ actor, action: "scim.group.updated", subject: saved.displayName, detail: { id, name: saved.displayName, count: saved.memberIds.length, source: "scim" } });
   // Okta and Entra accept the updated group or no body. The updated group is the safer answer.
   return { status: 200, body: view(saved) };

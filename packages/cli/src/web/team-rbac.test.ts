@@ -140,6 +140,12 @@ describe("licensed roles", () => {
       cases: [{ target: "https://github.com/acme/pay-api" }, { target: "https://github.com/acme/web" }],
       groups: [{ latest: { scanId: "a" } }, { latest: { scanId: "b" } }, { latest: {} }], workers: [1, 2],
     }, filter);
+    // A family that also occurs in a scan outside the scope is hidden: its counts and scan ids would reveal that scan.
+    const mixed = scopeDashboardBody({
+      scans: [{ id: "a", target: "https://github.com/acme/pay-api" }, { id: "b", target: "https://github.com/acme/web" }], cases: [],
+      groups: [{ latest: { scanId: "a" }, sourceScanIds: ["a"] }, { latest: { scanId: "a" }, sourceScanIds: ["a", "b"] }, { latest: { scanId: "a" }, sourceScanIds: ["a", "older-unknown"] }], workers: [],
+    }, filter);
+    expect(mixed.groups).toHaveLength(1);
     expect(body.scans.map(scan => scan.id)).toEqual(["a"]); expect(body.cases).toHaveLength(1); expect(body.groups).toHaveLength(1); expect(body.workers).toEqual([]);
   });
 
