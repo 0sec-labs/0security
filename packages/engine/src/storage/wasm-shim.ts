@@ -137,7 +137,13 @@ interface RawDatabase {
 }
 
 class StatementShim {
-  constructor(private readonly stmt: RawStatement, private readonly rawMode = false) {}
+  private readonly stmt: RawStatement;
+  private readonly rawMode: boolean;
+
+  constructor(stmt: RawStatement, rawMode = false) {
+    this.stmt = stmt;
+    this.rawMode = rawMode;
+  }
 
   run(...args: unknown[]): RunResult {
     const bind = normalizeBindArgs(args);
@@ -187,7 +193,11 @@ class StatementShim {
  * `BetterSQLiteSession` actually call.
  */
 export class ShimmedDatabase {
-  constructor(private readonly engine: RawDatabase) {}
+  private readonly engine: RawDatabase;
+
+  constructor(engine: RawDatabase) {
+    this.engine = engine;
+  }
 
   prepare(sql: string): StatementShim {
     return new StatementShim(this.engine.prepare(sql));
