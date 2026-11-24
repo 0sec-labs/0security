@@ -10,7 +10,7 @@ test("accepted queued text and images remain visible while the current response 
   const temporary = await mkdtemp(join(tmpdir(), "0-queue-ui-"));
   try {
     const output = join(temporary, "queue.cjs");
-    await build({ stdin: { contents: 'import {createElement} from "react"; import {renderToStaticMarkup} from "react-dom/server"; import {QueuedMessages} from "./src/console/queued-messages"; export const render = props => renderToStaticMarkup(createElement(QueuedMessages, {...props, inline:true}));', resolveDir: resolve("packages/web"), loader: "tsx" }, outfile: output, bundle: true, platform: "node", format: "cjs", logLevel: "silent", alias: { "@": resolve("packages/web/src") }, plugins: [{name:"queue-test-boundaries",setup(build){
+    await build({ stdin: { contents: 'import {createElement} from "react"; import {renderToStaticMarkup} from "react-dom/server"; import {QueuedMessages} from "./src/console/queued-messages"; export const render = props => renderToStaticMarkup(createElement(QueuedMessages, {...props, dock:true}));', resolveDir: resolve("packages/web"), loader: "tsx" }, outfile: output, bundle: true, platform: "node", format: "cjs", logLevel: "silent", alias: { "@": resolve("packages/web/src") }, plugins: [{name:"queue-test-boundaries",setup(build){
       build.onResolve({filter:/^@\/api$/},()=>({path:"api",namespace:"stub"}));
       build.onResolve({filter:/^\.\/inline-image$/},()=>({path:"image",namespace:"stub"}));
       build.onLoad({filter:/.*/,namespace:"stub"},args=>({contents:args.path==="api"?'export const useBackendApi=()=>({removeConsoleQueuedMessage:async()=>({ok:true})});':'import {createElement} from "react"; export const InlineImage=props=>createElement("img",props);',loader:"js",resolveDir:process.cwd()}));
@@ -25,6 +25,7 @@ test("accepted queued text and images remain visible while the current response 
     assert.match(html,/Remove queued message 2/);
     assert.match(html,/Send now/);
     assert.match(html,/Interrupt the current response and send this message now/);
+    assert.match(render({...props,snapshot:{...props.snapshot,session:{id:"chat",status:"ready"},queuePausedReason:"stopped"}}),/Paused because you stopped the turn/);
     assert.match(render({...props,workspace:{...props.workspace,busy:true,queuedSendingId:"queued-1"}}),/Sending…/);
     assert.equal(render({...props,snapshot:{...props.snapshot,queuedMessages:[]}}), "", "consumed queue cards disappear when the server starts their turns");
   } finally {await rm(temporary,{recursive:true,force:true});}
