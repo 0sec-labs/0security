@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { fixBranchName, pullRequestBody, runFix, type FindingToFix, type FixDeps, type FixOptions } from "../fix.js";
 import { parseFixPolicyDocument, type LoadedFixPolicy } from "../fix-policy.js";
+import { codeownersFor, reviewersFromCodeowners } from "../fix-codeowners.js";
 import {
+  needsTicket, parseTicket, renderBodyTemplate, resolveBranchPrefix,
   commitSubject, footerText, isDraft, isReviewerName, MAX_RENDERED_CHARS, parsePullRequestConventions, pullRequestTitle, renderTemplate,
   type PullRequestConventions,
 } from "../fix-conventions.js";
@@ -74,7 +76,7 @@ describe("pull request conventions: rendering", () => {
   });
 });
 
-function harness(conventions: PullRequestConventions | undefined, extra: { fromRepo?: boolean; failReviewers?: boolean; labelsInRepo?: string } = {}) {
+function harness(conventions: PullRequestConventions | undefined, extra: { fromRepo?: boolean; failReviewers?: boolean; labelsInRepo?: string; codeowners?: string } = {}) {
   const calls: string[] = [];
   const warnings: string[] = [];
   const bodies: string[] = [];
@@ -90,6 +92,7 @@ function harness(conventions: PullRequestConventions | undefined, extra: { fromR
       if (args[0] === "rev-parse" && args[1] === "--show-toplevel") return "/repo\n";
       if (args[0] === "symbolic-ref") return "origin/main\n";
       if (args[0] === "status") return " M src/db.ts\n";
+      if (args[0] === "show") { if (extra.codeowners !== undefined && args[1] === "origin/main:.github/CODEOWNERS") return extra.codeowners; throw new Error("fatal: path does not exist"); }
       return "";
     },
     gh: async (_cwd, args) => {
@@ -163,5 +166,94 @@ describe("0 findings fix with conventions", () => {
     expect(outcome).toMatchObject({ committed: true, branch: fixBranchName(finding.fingerprint, "sec/fix-") });
     expect(h.calls.some(c => c.startsWith("git push") || c.startsWith("gh "))).toBe(false);
     expect(h.calls.find(c => c.startsWith("git") && c.includes(" commit "))).toContain("SEC-9 fix f-123456");
+  });
+});
+
+describe("pull request conventions: ticket key, body template and CODEOWNERS reviewers", () => {
+  const options = (extra: Partial<FixOptions> = {}): FixOptions => ({ budget: "3", timeout: "60", pr: true, test: ["t"], ...extra });
+
+  it("accepts the new settings and rejects bad ones", () => {
+    expect(parsePullRequestConventions({ branchPrefix: "sec/{ticket}/", titleTemplate: "{ticket} {title}", bodyTemplate: "## Why\n{finding}\n{checks}", reviewersFromCodeowners: true }))
+      .toMatchObject({ branchPrefix: "sec/{ticket}/", reviewersFromCodeowners: true });
+    expect(() => parsePullRequestConventions({ bodyTemplate: "{nope}" })).toThrow("{nope}");
+    expect(() => parsePullRequestConventions({ bodyTemplate: "{summary" })).toThrow("stray brace");
+    expect(() => parsePullRequestConventions({ reviewersFromCodeowners: "yes" })).toThrow("true or false");
+    expect(() => parsePullRequestConventions({ branchPrefix: "{ticket}{ticket}{ticket}{ticket}/" })).toThrow("branchPrefix");
+  });
+
+  it("checks the ticket key and knows when a setting needs one", () => {
+    expect(parseTicket("sec-123")).toBe("SEC-123");
+    expect(parseTicket(undefined)).toBeUndefined();
+    expect(() => parseTicket("123")).toThrow("--ticket");
+    expect(() => parseTicket("SEC-1; rm")).toThrow("--ticket");
+    expect(needsTicket({ titleTemplate: "{ticket}: {title}" })).toBe(true);
+    expect(needsTicket({ bodyTemplate: "{ticket}" })).toBe(true);
+    expect(needsTicket({ labels: ["a"] })).toBe(false);
+    expect(resolveBranchPrefix("sec/{ticket}/", "SEC-1")).toBe("sec/SEC-1/");
+  });
+
+  it("puts the ticket key in the branch, title and commit, and stops before any work without it", async () => {
+    const conventions: PullRequestConventions = { branchPrefix: "sec/{ticket}/", titleTemplate: "{ticket} {title}", commitMessageTemplate: "{ticket}: fix {id}" };
+    const h = harness(conventions);
+    const outcome = await runFix("f-1", options({ ticket: "sec-77" }), h.deps);
+    expect(outcome?.branch).toBe(fixBranchName(finding.fingerprint, "sec/SEC-77/"));
+    expect(h.calls.find(c => c.startsWith("gh pr create"))).toContain("--title SEC-77 SQL injection in search");
+    expect(h.calls.find(c => c.startsWith("git") && c.includes(" commit "))).toContain("SEC-77: fix f-123456");
+    const missing = harness(conventions);
+    await expect(runFix("f-1", options(), missing.deps)).rejects.toThrow("--ticket");
+    expect(missing.calls.some(c => c.includes("worktree add"))).toBe(false);
+  });
+
+  it("lays the body out from the template and keeps the footer", () => {
+    const body = pullRequestBody(finding, "Used a bound parameter.", [{ command: "t", code: 0, output: "" }], "Tracked in SEC-9", false,
+      { template: "<!-- ticket -->\nTicket: {ticket}\n\n{checks}\n\n## Notes @team #12\n{summary}", ticket: "SEC-9" });
+    expect(body).toContain("Ticket: SEC-9");
+    expect(body.indexOf("### Checks")).toBeLessThan(body.indexOf("## Notes"));
+    expect(body).not.toContain("Fixes finding");
+    expect(body).toContain("&lt;!-- ticket --&gt;");
+    expect(body).not.toMatch(/@team(?!​)/);
+    expect(body).toContain("Tracked in SEC-9");
+    expect(pullRequestBody(finding, "x", [], undefined)).toContain("Fixes finding");
+  });
+
+  it("neutralises values and drops parts the template leaves out", () => {
+    const text = renderBodyTemplate("{title} {details}", { ...finding, title: "x @bob <b>", ticket: "SEC-1" }, { finding: "F", details: "D", checks: "C", summary: "S" });
+    expect(text).toBe("x @​bob &lt;b&gt; D");
+  });
+
+  it("finds the owners of the last matching rule", () => {
+    const file = ["# owners", "* @everyone", "/src/ @acme/backend @dba", "*.sql @sql-people", "/src/legacy/** @old-team", "docs/* @writers", "[Section]", "/ops/ ops@example.com"].join("\n");
+    expect(codeownersFor(file, "README.md")).toEqual(["@everyone"]);
+    expect(codeownersFor(file, "src/db.ts")).toEqual(["@acme/backend", "@dba"]);
+    expect(codeownersFor(file, "src/queries/a.sql")).toEqual(["@sql-people"]);
+    expect(codeownersFor(file, "src/legacy/deep/x.ts")).toEqual(["@old-team"]);
+    expect(codeownersFor(file, "docs/a.md")).toEqual(["@writers"]);
+    expect(codeownersFor(file, "docs/sub/a.md")).toEqual(["@everyone"]);
+    expect(reviewersFromCodeowners("/ops/ ops@example.com @ok -x\n", "ops/a")).toEqual(["ok"]);
+    expect(reviewersFromCodeowners("* @a/b @c\n", "x")).toEqual(["a/b", "c"]);
+  });
+
+  it("asks the CODEOWNERS owners for review next to the named reviewers, reading the base branch", async () => {
+    const h = harness({ reviewers: ["alice"], reviewersFromCodeowners: true }, { codeowners: "/src/ @acme/backend @dba @alice\n" });
+    await runFix("f-1", options(), h.deps);
+    expect(h.calls).toContain("git show origin/main:.github/CODEOWNERS");
+    expect(h.calls).toContain("gh pr edit 7 --add-reviewer=alice --add-reviewer=acme/backend --add-reviewer=dba");
+  });
+
+  it("says so when there is no CODEOWNERS file or entry, and still opens the pull request", async () => {
+    const none = harness({ reviewersFromCodeowners: true });
+    const outcome = await runFix("f-1", options(), none.deps);
+    expect(outcome?.pullRequest?.url).toBe("https://github.com/o/r/pull/7");
+    expect(none.warnings.join("\n")).toContain("no CODEOWNERS file");
+    expect(none.calls.some(c => c.includes("--add-reviewer"))).toBe(false);
+    const uncovered = harness({ reviewersFromCodeowners: true }, { codeowners: "/other/ @x\n" });
+    await runFix("f-1", options(), uncovered.deps);
+    expect(uncovered.warnings.join("\n")).toContain("no CODEOWNERS entry covers src/db.ts");
+  });
+
+  it("does not read CODEOWNERS unless the policy asks", async () => {
+    const h = harness({ reviewers: ["alice"] }, { codeowners: "* @x\n" });
+    await runFix("f-1", options(), h.deps);
+    expect(h.calls.some(c => c.startsWith("git show"))).toBe(false);
   });
 });
