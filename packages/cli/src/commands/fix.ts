@@ -20,7 +20,8 @@ import { consoleTransportOptions, type ConsoleClient, type ConsoleTransportOptio
 import { connect, DEFAULT_SCAN_MODEL, defaultScanDeps, waitForThread, type ScanDeps } from "./scan.js";
 import { resolveFindingId, shortFindingId } from "../finding-id.js";
 import { selectHost, type Host } from "../host/index.js";
-import { commitSubject, footerText, isDraft, pullRequestTitle, type PullRequestConventions } from "./fix-conventions.js";
+import { MAX_REVIEWERS, commitSubject, footerText, isDraft, needsTicket, parseTicket, pullRequestTitle, renderBodyTemplate, resolveBranchPrefix, type PullRequestConventions } from "./fix-conventions.js";
+import { CODEOWNERS_PATHS, reviewersFromCodeowners } from "./fix-codeowners.js";
 import { finishWithError, UsageError } from "./output.js";
 import { runInSandbox, sandboxLabel, validateSandboxImage, type SandboxSpec } from "./fix-sandbox.js";
 import { appendRunMetric, type RunMetric } from "../run-metrics.js";
@@ -136,35 +137,39 @@ export function sandboxVerifiedLine(checks: CheckResult[]): string | undefined {
   return labels.length === 1 ? `Verified in a sandbox: ${cell(labels[0]!)}.` : undefined;
 }
 
-export function pullRequestBody(finding: FindingToFix, summary: string | undefined, checks: CheckResult[], footer?: string, draftUnchecked = false): string {
+export function pullRequestBody(finding: FindingToFix, summary: string | undefined, checks: CheckResult[], footer?: string, draftUnchecked = false, layout?: { template: string; ticket?: string }): string {
   const where = finding.path ? `\`${finding.path.replace(/`/g, "'")}${finding.startLine ? `:${finding.startLine}` : ""}\`` : "not given";
   const rows = checks.length ? checks.map(check => `| \`${escapeHtml(check.command.replace(/`/g, "'").replace(/\s+/g, " ")).replace(/\|/g, "\\|")}\` | ${check.code === 0 ? "passed" : `failed (exit ${check.code})`} |`).join("\n") : "| none were run | |";
   const failed = checks.filter(check => check.code !== 0);
   const tails = failed.map(check => `<details><summary>${inert(escapeHtml(check.command.replace(/\s+/g, " ")))}</summary>\n\n\`\`\`\n${check.output.slice(-2000).replace(/```/g, "'''")}\n\`\`\`\n</details>`).join("\n");
   const modelText = withoutCheckHeadings((summary ?? "").slice(0, 5000));
-  return [
-    `Fixes finding ${shortFindingId(finding.id)}: ${inert(finding.title)}`,
-    "",
-    `| Severity | Category | Reported by | Where |\n| --- | --- | --- | --- |\n| ${cell(finding.severity)} | ${cell(finding.category)} | ${cell(finding.tool ?? "0")} | ${where} |`,
-    "",
-    "### Checks",
-    `| Command | Result |\n| --- | --- |\n${rows}`,
-    ...(sandboxVerifiedLine(checks) ? ["", sandboxVerifiedLine(checks)!] : checks.some(check => check.sandbox) ? ["", "Not verified in a sandbox: a sandboxed check failed."] : checks.length ? ["", "These checks ran on the machine that ran 0, not in a sandbox."] : []),
-    ...(tails ? ["", tails] : []),
-    "",
-    "### What changed",
-    "Summary written by the model (not verified). The Checks table above is what 0 ran.",
-    "",
-    inert(modelText || "The change is in the diff."),
-    "",
-    ...(!checks.length ? ["No checks were run."] : []),
-    failed.length ? "Opened as a draft because a check failed. Review it before it is marked ready." : draftUnchecked ? "Opened as a draft because no check ran. Review it before it is marked ready." : "A person should review this before merging; 0 does not merge.",
-    ...(footer ? ["", footer] : []),
-  ].join("\n");
+  const blocks = {
+    finding: `Fixes finding ${shortFindingId(finding.id)}: ${inert(finding.title)}`,
+    details: `| Severity | Category | Reported by | Where |\n| --- | --- | --- | --- |\n| ${cell(finding.severity)} | ${cell(finding.category)} | ${cell(finding.tool ?? "0")} | ${where} |`,
+    checks: [
+      "### Checks",
+      `| Command | Result |\n| --- | --- |\n${rows}`,
+      ...(sandboxVerifiedLine(checks) ? ["", sandboxVerifiedLine(checks)!] : checks.some(check => check.sandbox) ? ["", "Not verified in a sandbox: a sandboxed check failed."] : checks.length ? ["", "These checks ran on the machine that ran 0, not in a sandbox."] : []),
+      ...(tails ? ["", tails] : []),
+    ].join("\n"),
+    summary: [
+      "### What changed",
+      layout ? "Summary written by the model (not verified). The Checks section is what 0 ran." : "Summary written by the model (not verified). The Checks table above is what 0 ran.",
+      "",
+      inert(modelText || "The change is in the diff."),
+      "",
+      ...(!checks.length ? ["No checks were run."] : []),
+      failed.length ? "Opened as a draft because a check failed. Review it before it is marked ready." : draftUnchecked ? "Opened as a draft because no check ran. Review it before it is marked ready." : "A person should review this before merging; 0 does not merge.",
+    ].join("\n"),
+  };
+  const text = layout
+    ? renderBodyTemplate(layout.template, { id: finding.id, title: finding.title, severity: finding.severity, category: finding.category, ...(finding.path ? { path: finding.path } : {}), ...(layout.ticket ? { ticket: layout.ticket } : {}) }, blocks)
+    : [blocks.finding, "", blocks.details, "", blocks.checks, "", blocks.summary].join("\n");
+  return [text, ...(footer ? ["", footer] : [])].join("\n");
 }
 
 export interface FixOptions extends ConsoleTransportOptions {
-  repo?: string; base?: string; test?: string[]; ready?: boolean; budget: string; model?: string; timeout: string; pr: boolean; format?: string; policy?: string; repoPolicy?: boolean; sandbox?: string; sandboxImage?: string; sandboxNetwork?: boolean;
+  repo?: string; base?: string; test?: string[]; ready?: boolean; budget: string; model?: string; timeout: string; pr: boolean; format?: string; policy?: string; repoPolicy?: boolean; sandbox?: string; sandboxImage?: string; sandboxNetwork?: boolean; ticket?: string;
 }
 
 export interface FixOutcome {
@@ -243,7 +248,10 @@ async function runFixFlow(id: string, options: FixOptions, deps: FixDeps): Promi
     // The policy is read before anything is created: a bad pull request setting stops the run first.
     const loaded = deps.loadPolicy(repo, options);
     const conventions: PullRequestConventions | undefined = loaded && !loaded.fromRepo ? loaded.conventions : undefined;
-    const prefix = conventions?.branchPrefix ?? BRANCH_PREFIX;
+    const ticket = parseTicket(options.ticket);
+    if (needsTicket(conventions) && !ticket) throw new UsageError("The pull request settings in your policy use {ticket}. Pass --ticket with a key such as SEC-123.");
+    const prefix = resolveBranchPrefix(conventions?.branchPrefix ?? BRANCH_PREFIX, ticket);
+    const named = { ...finding, ...(ticket ? { ticket } : {}) };
     const branch = fixBranchName(finding.fingerprint, prefix);
     if (branch === base.name || !branch.startsWith(prefix)) throw new Error("Refusing to work on the base branch.");
 
@@ -283,7 +291,7 @@ async function runFixFlow(id: string, options: FixOptions, deps: FixDeps): Promi
     // A clean machine or an Actions runner has no git identity; use a neutral one rather than fail the commit.
     const configured = (await deps.git(tree, ["config", "user.email"]).catch(() => "")).trim();
     const identity = configured ? [] : ["-c", "user.name=0", "-c", "user.email=noreply@0.security"];
-    await deps.git(tree, [...identity, "commit", "--quiet", "-m", `${commitSubject(finding, conventions)}\n\nFinding ${finding.id}`]);
+    await deps.git(tree, [...identity, "commit", "--quiet", "-m", `${commitSubject(named, conventions)}\n\nFinding ${finding.id}`]);
     committedBranch = true;
     const outcome: FixOutcome = { ...common, changed: true, committed: true, checks, verified };
     if (!options.pr) { deps.err(`committed on ${branch}; not pushed (--no-pr).`); await remember(outcome); return outcome; }
@@ -293,7 +301,7 @@ async function runFixFlow(id: string, options: FixOptions, deps: FixDeps): Promi
     await host.pushBranch(branch);
     const bodyFile = join(temp, "body.md");
     const draft = isDraft(verified, conventions, !checks.length && !options.ready);
-    deps.writeFile(bodyFile, pullRequestBody(finding, thread.reply, checks, footerText(conventions), draft && verified && !checks.length));
+    deps.writeFile(bodyFile, pullRequestBody(finding, thread.reply, checks, footerText(conventions), draft && verified && !checks.length, conventions?.bodyTemplate ? { template: conventions.bodyTemplate, ...(ticket ? { ticket } : {}) } : undefined));
     const existing = await host.findOpenPullRequest(branch);
     let url: string; let created = false;
     if (existing) {
@@ -303,9 +311,12 @@ async function runFixFlow(id: string, options: FixOptions, deps: FixDeps): Promi
       if (!existing.isDraft && draft) await host.setPullRequestReady(existing.number, false);
     } else {
       created = true;
-      url = await host.createPullRequest({ base: base.name, head: branch, title: pullRequestTitle(finding, conventions), bodyFile, draft });
+      url = await host.createPullRequest({ base: base.name, head: branch, title: pullRequestTitle(named, conventions), bodyFile, draft });
     }
-    if (conventions?.labels?.length || conventions?.reviewers?.length) await decoratePullRequest(host, url, conventions, deps.err);
+    if (conventions) {
+      const reviewers = await chooseReviewers(deps, repo, base.ref, conventions, finding.path);
+      if (conventions.labels?.length || reviewers.length) await decoratePullRequest(host, url, { ...conventions, reviewers }, deps.err);
+    }
     const opened: FixOutcome = { ...outcome, pullRequest: { url, created, draft } };
     await remember(opened);
     return opened;
@@ -316,6 +327,21 @@ async function runFixFlow(id: string, options: FixOptions, deps: FixDeps): Promi
     if (madeBranch && !madeBranch.existed && !committedBranch) await deps.git(madeBranch.repo, ["branch", "-D", madeBranch.branch]).catch(() => undefined);
     if (temp) deps.removeTemp(temp);
   }
+}
+
+/** The reviewers named in the policy plus, when it asks, the CODEOWNERS owners of the file. The file is read from the base branch as committed. */
+async function chooseReviewers(deps: FixDeps, repo: string, baseRef: string, conventions: PullRequestConventions, path: string | undefined): Promise<string[]> {
+  const named = conventions.reviewers ?? [];
+  if (!conventions.reviewersFromCodeowners || !path) return named;
+  for (const file of CODEOWNERS_PATHS) {
+    const text = await deps.git(repo, ["show", `${baseRef}:${file}`]).catch(() => undefined);
+    if (text === undefined) continue;
+    const owners = reviewersFromCodeowners(text, path);
+    if (!owners.length) deps.err(`no CODEOWNERS entry covers ${path.slice(0, 80)}; no reviewer was added from it`);
+    return [...new Set([...named, ...owners])].slice(0, MAX_REVIEWERS);
+  }
+  deps.err("reviewersFromCodeowners is on but the base branch has no CODEOWNERS file");
+  return named;
 }
 
 /** Labels that exist (or can be made) and reviewers go on the pull request. A refusal is a warning: the pull request is already open. */
@@ -367,6 +393,7 @@ export function registerFixCommand(program: Command, deps: FixDeps = defaults): 
     .option("--sandbox-image <image>", "Image for --sandbox docker, for example maven:3-eclipse-temurin-21. It must hold the tools and dependencies the tests need")
     .option("--sandbox-network", "Give the sandbox network access (to download dependencies). Off by default")
     .option("--policy <file>", "Policy file (.json or .yaml) of approved libraries and fix rules; any path you name, relative to the current directory. Default: ~/.0/fix-policy.json|yaml|yml")
+    .option("--ticket <key>", "Ticket key such as SEC-123 for the {ticket} placeholder in your policy's pull request settings")
     .option("--repo-policy", "Also read fix-policy.* or .zero/fix-policy.* from the repository being fixed (untrusted content; off by default)")
     .option("--no-pr", "Commit on the fix branch but do not push or open a pull request")
     .option("--budget <usd>", "Stop when the estimated spend reaches this many USD", String(DEFAULT_BUDGET_USD))

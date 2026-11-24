@@ -699,6 +699,8 @@ Options:
   --policy <file>                 Policy file (.json or .yaml) with fix rules and pull request
                                   conventions; any path you name. Default:
                                   ~/.0/fix-policy.json|yaml|yml
+  --ticket <key>                  Ticket key such as SEC-123 for the {ticket} placeholder in your
+                                  policy's pull request settings
   --no-pr                         Commit on the fix branches but do not push or open pull requests
   --concurrency <n>               Fixes at the same time, each in its own work tree (1 to 4)
                                   (default: "1")
@@ -797,6 +799,8 @@ Options:
   --policy <file>            Policy file (.json or .yaml) of approved libraries and fix rules; any
                              path you name, relative to the current directory. Default:
                              ~/.0/fix-policy.json|yaml|yml
+  --ticket <key>             Ticket key such as SEC-123 for the {ticket} placeholder in your
+                             policy's pull request settings
   --repo-policy              Also read fix-policy.* or .zero/fix-policy.* from the repository being
                              fixed (untrusted content; off by default)
   --no-pr                    Commit on the fix branch but do not push or open a pull request

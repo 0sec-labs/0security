@@ -1731,6 +1731,7 @@ A policy file inside the repository being fixed is not read unless you pass `--r
 | `--sandbox-image <image>` | — | Image for --sandbox docker, for example maven:3-eclipse-temurin-21. It must hold the tools and dependencies the tests need |
 | `--sandbox-network` | — | Give the sandbox network access (to download dependencies). Off by default |
 | `--policy <file>` | — | Policy file (.json or .yaml) of approved libraries and fix rules; any path you name, relative to the current directory. Default: ~/.0/fix-policy.json\|yaml\|yml |
+| `--ticket <key>` | — | Ticket key such as SEC-123 for the {ticket} placeholder in your policy's pull request settings |
 | `--repo-policy` | — | Also read fix-policy.* or .zero/fix-policy.* from the repository being fixed (untrusted content; off by default) |
 | `--no-pr` | — | Commit on the fix branch but do not push or open a pull request |
 | `--budget <usd>` | `3` | Stop when the estimated spend reaches this many USD |
@@ -1763,7 +1764,29 @@ Your policy file can set how fix pull requests look. Add a `pullRequest` object 
 }
 ```
 
-Templates take the placeholders `{id}`, `{title}`, `{severity}`, `{category}` and `{path}`. Nothing else is evaluated, and an unknown placeholder is an error. Each value is flattened to one line, stripped of mentions, issue references and markup, and the result is cut to 200 characters.
+Templates take the placeholders `{id}`, `{title}`, `{severity}`, `{category}`, `{path}` and `{ticket}`. Nothing else is evaluated, and an unknown placeholder is an error. Each value is flattened to one line, stripped of mentions, issue references and markup, and the result is cut to 200 characters.
+
+To put a ticket key in the branch, title or commit, use `{ticket}` and pass the key with `--ticket`. A key looks like `SEC-123`.
+
+```json
+{ "pullRequest": { "branchPrefix": "sec/{ticket}/", "titleTemplate": "{ticket} {title}" } }
+```
+
+```bash
+0security findings fix 3f2a --ticket SEC-123
+```
+
+The same key gives the same branch, so a second run updates the same pull request. If a setting uses `{ticket}` and you pass no `--ticket`, the run stops before it changes anything. `findings burndown` takes `--ticket` too and uses one key for every fix in the run.
+
+To lay out the pull request body, set `bodyTemplate`. It is Markdown with these parts that 0 fills in: `{finding}`, `{details}`, `{checks}` and `{summary}`. It also takes the placeholders above. A part you leave out is left out of the body. Your own text is kept line by line, with HTML escaped and mentions and issue numbers defused. `bodyFooter` is still added at the end.
+
+```json
+{ "pullRequest": { "bodyTemplate": "Ticket: {ticket}\n\n{finding}\n\n{checks}\n\n## Review checklist\n- [ ] Tests cover the change\n- [ ] No new dependency\n\n{summary}" } }
+```
+
+0 does not read the pull request template of the repository, because that file comes from the repository you fix.
+
+To ask the code owners for review, set `reviewersFromCodeowners` to `true`. 0 reads `.github/CODEOWNERS`, `CODEOWNERS` or `docs/CODEOWNERS` from the base branch as committed, finds the last rule that matches the finding's file, and requests those owners next to `reviewers`. Only `@user` and `@org/team` owners count. E-mail addresses are skipped, and at most 10 reviewers are requested. If no file or rule applies, 0 says so and opens the pull request without them. A section header, a negated pattern and a pattern with brackets are not supported and are skipped.
 
 `draft` is `always`, `on-failure` (the default) or `never`. With `never`, a pull request is ready for review even when a check fails or none ran. `branchPrefix` is followed by a short hash of the finding, so a second run still updates the same pull request. Reviewers are users or `org/team`.
 
@@ -1958,6 +1981,7 @@ Exit codes:
 | `--test <command>` | — | Check to run after each change; repeat for several. A failing check makes the pull request a draft |
 | `--ready` | — | Open pull requests ready for review even when no --test ran. Without it, a pull request with no checks is a draft |
 | `--policy <file>` | — | Policy file (.json or .yaml) with fix rules and pull request conventions; any path you name. Default: ~/.0/fix-policy.json\|yaml\|yml |
+| `--ticket <key>` | — | Ticket key such as SEC-123 for the {ticket} placeholder in your policy's pull request settings |
 | `--no-pr` | — | Commit on the fix branches but do not push or open pull requests |
 | `--concurrency <n>` | `1` | Fixes at the same time, each in its own work tree (1 to 4) |
 | `--budget <usd>` | `10` | Total spend for this run in USD; no new fix starts once it is used |
