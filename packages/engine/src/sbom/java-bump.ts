@@ -163,8 +163,8 @@ function bumpGradle(folder: string, request: BumpRequest): BumpResult {
         } else {
           const short = /^"[^":]+:[^":]+:([^"]+)"$/.exec(body);
           if (short) {
-            const at = library.index! + library[0]!.indexOf(body) + 1 + short[1]!.length + 1;
-            target = { was: short[2]!, index: at, where: "version" };
+            const was = short[1]!;
+            target = { was, index: library.index! + library[0]!.indexOf(body) + body.lastIndexOf(was), where: "version" };
           }
         }
       }

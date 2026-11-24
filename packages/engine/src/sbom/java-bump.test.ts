@@ -80,6 +80,11 @@ describe("bumpJavaDependency: Gradle", () => {
     expect(bumpJavaDependency(literal, CT)).toMatchObject({ applied: true });
     expect(text(literal, "gradle/libs.versions.toml")).toContain('version = "1.10.0"');
   });
+  it("changes the version in a short-notation catalog entry", () => {
+    const dir = project({ "gradle/libs.versions.toml": '[libraries]\nshort = "org.apache.commons:commons-text:1.9"\n' });
+    expect(bumpJavaDependency(dir, CT)).toMatchObject({ applied: true, edits: [{ was: "1.9", now: "1.10.0", where: "version" }] });
+    expect(text(dir, "gradle/libs.versions.toml")).toBe('[libraries]\nshort = "org.apache.commons:commons-text:1.10.0"\n');
+  });
   it("changes a catalog entry whether name or group comes first", () => {
     const nameFirst = project({
       "gradle/libs.versions.toml": '[libraries]\ncommons-text = { name = "commons-text", group = "org.apache.commons", version = "1.9" }\n'
