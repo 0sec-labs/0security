@@ -1,0 +1,46 @@
+{
+  "fixture": "java-servlet",
+  "skill": null,
+  "items": [
+    {
+      "id": "jv-sqli",
+      "path": "src/main/java/bench/web/AccountServlet.java",
+      "startLine": 24,
+      "endLine": 24,
+      "category": "sqli",
+      "description": "name request parameter concatenated into a SQL statement"
+    },
+    {
+      "id": "jv-cmdi",
+      "path": "src/main/java/bench/web/ToolsServlet.java",
+      "startLine": 20,
+      "endLine": 20,
+      "category": "command-injection",
+      "description": "host parameter concatenated into a command string passed to Runtime.exec"
+    },
+    {
+      "id": "jv-path",
+      "path": "src/main/java/bench/web/ToolsServlet.java",
+      "startLine": 24,
+      "endLine": 25,
+      "category": "path-traversal",
+      "description": "file parameter joined to the report directory with no normalisation or containment check"
+    }
+  ],
+  "decoys": [
+    {
+      "id": "jv-decoy-ps",
+      "path": "src/main/java/bench/web/AccountServlet.java",
+      "startLine": 37,
+      "endLine": 39,
+      "description": "prepared statement with a bound integer"
+    },
+    {
+      "id": "jv-decoy-allow",
+      "path": "src/main/java/bench/web/ToolsServlet.java",
+      "startLine": 28,
+      "endLine": 32,
+      "description": "host checked against an allow-list, ProcessBuilder with separate arguments"
+    }
+  ]
+}

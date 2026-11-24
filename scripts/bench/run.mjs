@@ -16,7 +16,7 @@ export const CONFIGS = ["generic", "skill", "foxguard", "checkov", "checkov-prep
 const DEFAULT_CONFIGS = ["generic", "skill"];
 
 export function parseArgs(argv) {
-  const o = { run: false, dryRun: false, repeat: 1, budget: 0.2, configs: DEFAULT_CONFIGS, fixtures: undefined, model: undefined, out: join(here, "results"), cli: join(repoRoot, "packages/cli/dist/index.js"), timeout: 900, batchSize: 8, concurrency: 1 };
+  const o = { run: false, dryRun: false, repeat: 1, budget: 0.2, configs: DEFAULT_CONFIGS, fixtures: undefined, model: undefined, out: join(here, "results"), cli: join(repoRoot, "packages/cli/dist/index.js"), timeout: 900, batchSize: 8, concurrency: 1, fixturesDir: FIXTURES };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const next = () => { if (i + 1 >= argv.length) throw new Error(`${a} needs a value`); return argv[++i]; };
@@ -32,6 +32,7 @@ export function parseArgs(argv) {
     else if (a === "--timeout") o.timeout = Number(next());
     else if (a === "--batch-size") o.batchSize = Number(next());
     else if (a === "--concurrency") o.concurrency = Number(next());
+    else if (a === "--fixtures-dir") o.fixturesDir = resolve(next());
     else throw new Error(`unknown option ${a}`);
   }
   if (o.run === o.dryRun) throw new Error("pass exactly one of --run (spends model money) or --dry-run (free)");
@@ -41,12 +42,12 @@ export function parseArgs(argv) {
   return o;
 }
 
-export function loadFixtures(only) {
-  const names = readdirSync(FIXTURES, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name).sort();
+export function loadFixtures(only, root = FIXTURES) {
+  const names = readdirSync(root, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name).sort();
   const picked = only ?? names;
   for (const n of picked) if (!names.includes(n)) throw new Error(`unknown fixture ${n} (known: ${names.join(", ")})`);
   return picked.map((name) => {
-    const dir = join(FIXTURES, name);
+    const dir = join(root, name);
     const answer = JSON.parse(readFileSync(join(dir, "answer.json"), "utf8"));
     return { name, dir, answer };
   });
@@ -205,7 +206,7 @@ export function renderMarkdown(rows, meta) {
 }
 
 function dryRun(o) {
-  const fixtures = loadFixtures(o.fixtures);
+  const fixtures = loadFixtures(o.fixtures, o.fixturesDir);
   let bad = 0;
   const runs = [];
   for (const fx of fixtures) {
@@ -240,7 +241,7 @@ const relative = (args) => ["packages/cli/dist/index.js", ...args].join(" ");
 const categoryLabel = (family) => ({ sqli: "sql-injection", secret: "information-disclosure", "weak-crypto": "weak-crypto", deserialization: "unsafe-deserialization", "output-handling": "output-manipulation", "iac-network": "network exposure: security group", "iac-iam": "iam privilege escalation", "iac-privilege": "privileged container", "iac-supply": "unpinned install script", "ci-injection": "workflow script injection" })[family] ?? family;
 
 function realRun(o) {
-  const fixtures = loadFixtures(o.fixtures);
+  const fixtures = loadFixtures(o.fixtures, o.fixturesDir);
   const problems = fixtures.flatMap((fx) => validateAnswer(fx.answer, { fileLines: fileLines(fx.dir) }));
   if (problems.length) throw new Error(`fixtures are invalid, run --dry-run:\n${problems.join("\n")}`);
   if (!existsSync(o.cli)) throw new Error(`${o.cli} not found: build it with pnpm --filter @0/engine build && pnpm --filter @0/cli build`);
@@ -261,7 +262,7 @@ function realRun(o) {
 
 if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href) {
   let o;
-  try { o = parseArgs(process.argv.slice(2)); } catch (e) { console.error(`${e.message}\nusage: node scripts/bench/run.mjs (--run | --dry-run) [--repeat N] [--budget USD] [--configs generic,skill,foxguard,checkov,checkov-prepass] [--fixtures a,b] [--model id] [--out dir]`); process.exit(2); }
+  try { o = parseArgs(process.argv.slice(2)); } catch (e) { console.error(`${e.message}\nusage: node scripts/bench/run.mjs (--run | --dry-run) [--repeat N] [--budget USD] [--configs generic,skill,foxguard,checkov,checkov-prepass] [--fixtures a,b] [--fixtures-dir dir] [--model id] [--out dir]`); process.exit(2); }
   try {
     const runs = o.dryRun ? dryRun(o) : realRun(o);
     const rows = summarize(runs);

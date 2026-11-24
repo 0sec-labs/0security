@@ -1,0 +1,47 @@
+{
+  "fixture": "java-spring",
+  "skill": null,
+  "items": [
+    {
+      "id": "jv-idor",
+      "path": "src/main/java/bench/app/NotesController.java",
+      "startLine": 23,
+      "endLine": 26,
+      "category": "authz",
+      "description": "any caller reads any note by id, no ownership check"
+    },
+    {
+      "id": "jv-xxe",
+      "path": "src/main/java/bench/app/NotesController.java",
+      "startLine": 39,
+      "endLine": 40,
+      "category": "xxe",
+      "description": "XML parsed with default DocumentBuilderFactory, external entities not disabled"
+    },
+    {
+      "id": "jv-deser",
+      "path": "src/main/java/bench/app/NotesController.java",
+      "startLine": 45,
+      "endLine": 46,
+      "category": "deserialization",
+      "description": "request body passed to ObjectInputStream.readObject"
+    },
+    {
+      "id": "jv-secret",
+      "path": "src/main/java/bench/app/NotesController.java",
+      "startLine": 16,
+      "endLine": 16,
+      "category": "secret",
+      "description": "API token constant in source"
+    }
+  ],
+  "decoys": [
+    {
+      "id": "jv-decoy-owner",
+      "path": "src/main/java/bench/app/NotesController.java",
+      "startLine": 29,
+      "endLine": 35,
+      "description": "read checks the note owner against the principal"
+    }
+  ]
+}
