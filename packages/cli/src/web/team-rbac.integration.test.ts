@@ -125,7 +125,7 @@ describe("real server, licensed", () => {
   });
 
   it("shows a scoped account only the findings of its repositories", async () => {
-    const scoped = await server.as("scoped"); const owner = await server.as("owner");
+    const scoped = await server.as("scoped"); const owner = await server.as("owner"); const auditor = await server.as("auditor");
     const all = (await owner("/api/dashboard")).json() as { scans: Array<{ target: string }>; groups: unknown[] };
     expect(all.scans.map(scan => scan.target).sort()).toEqual(["https://github.com/acme/pay-api", "https://github.com/acme/web"]);
     const mine = (await scoped("/api/dashboard")).json() as { scans: Array<{ id: string; target: string }>; groups: unknown[]; workers: unknown[] };
@@ -141,6 +141,11 @@ describe("real server, licensed", () => {
     expect((await scoped("/api/work")).status).toBe(403);
     // The event stream is not filtered by repository, so a scoped account never gets it.
     expect((await scoped("/api/v1/presentation/events")).status).toBe(403);
+    // Rewriting /api/backends/local/proxy/... to a local route must not bypass RBAC or repository scope checks.
+    expect((await scoped("/api/backends/local/proxy/api/findings/export")).status).toBe(403);
+    expect((await scoped("/api/backends/local/proxy/api/work")).status).toBe(403);
+    expect((await scoped("/api/backends/local/proxy/api/v1/presentation/events")).status).toBe(403);
+    expect((await auditor("/api/backends/local/proxy/api/work")).status).toBe(403);
   });
 });
 
@@ -166,5 +171,7 @@ describe("real server, no license", () => {
     const scoped = await server.as("scoped");
     const mine = (await scoped("/api/dashboard")).json() as { scans: Array<{ target: string }> };
     expect(mine.scans.map(scan => scan.target)).toEqual(["https://github.com/acme/pay-api"]);
+    expect((await scoped("/api/findings/export")).status).toBe(403);
+    expect((await scoped("/api/backends/local/proxy/api/findings/export")).status).toBe(403);
   });
 });
