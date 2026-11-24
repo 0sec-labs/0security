@@ -3637,7 +3637,7 @@ Create, inspect and control Sentinels.
 0security sentinels
 ```
 
-Subcommands: [list](#sentinels-list) · [run](#sentinels-run) · [set](#sentinels-set) · [sync](#sentinels-sync) · [export](#sentinels-export) · [show](#sentinels-show) · [presets](#sentinels-presets) · [create](#sentinels-create) · [pause](#sentinels-pause) · [resume](#sentinels-resume) · [acknowledge](#sentinels-acknowledge) · [archive](#sentinels-archive) · [delete](#sentinels-delete) · [activations](#sentinels-activations) · [files](#sentinels-files) · [triggers](#sentinels-triggers) · [webhook](#sentinels-webhook).
+Subcommands: [list](#sentinels-list) · [run](#sentinels-run) · [set](#sentinels-set) · [sync](#sentinels-sync) · [export](#sentinels-export) · [bitbucket](#sentinels-bitbucket) · [show](#sentinels-show) · [presets](#sentinels-presets) · [create](#sentinels-create) · [pause](#sentinels-pause) · [resume](#sentinels-resume) · [acknowledge](#sentinels-acknowledge) · [archive](#sentinels-archive) · [delete](#sentinels-delete) · [activations](#sentinels-activations) · [files](#sentinels-files) · [triggers](#sentinels-triggers) · [webhook](#sentinels-webhook).
 
 #### sentinels sync
 
@@ -3672,6 +3672,88 @@ Stop a running console on the same database first.
 | `--enable` | — | Enable the triggers this sync creates (only for a change that was already reviewed) |
 | `--db-path <path>` | — | Database to change; stop its running console first |
 | `--format <format>` | `text` | Output: text or json |
+
+#### sentinels bitbucket
+
+Review Bitbucket pull requests from this machine (Cloud and Data Center).
+
+```text
+0security sentinels bitbucket
+```
+
+Subcommands: [review](#sentinels-bitbucket-review) · [watch](#sentinels-bitbucket-watch).
+
+Both commands scan what a pull request changes, publish a Code Insights report and keep one summary comment up to date. See [Review Bitbucket pull requests on your own machine](/ci/#review-bitbucket-pull-requests-on-your-own-machine).
+
+#### sentinels bitbucket review
+
+Review one pull request now.
+
+```text
+0security sentinels bitbucket review [options]
+```
+
+```bash
+export BITBUCKET_TOKEN=...
+0security sentinels bitbucket review --platform cloud --repo acme/app --checkout ~/code/app --pr 42
+0security sentinels bitbucket review --platform dc --repo PROJ/app --checkout ~/code/app --pr 42 --url https://bitbucket.example.com
+```
+
+The command fetches the pull request's commit into a temporary worktree of your clone, runs `0security scan --diff` there, and prints the outcome as JSON. A pull request that is closed, a draft or from a fork is skipped. A commit that was already reviewed is skipped.
+
+| Option | Registered default | Description |
+| --- | --- | --- |
+| `--pr <number>` **required** | — | Pull request number |
+| `--platform <platform>` **required** | — | cloud or dc (Data Center) |
+| `--repo <repo>` **required** | — | workspace/repo on Cloud, PROJECT/repo on Data Center |
+| `--checkout <folder>` **required** | — | A local clone of the repository; its origin must be the Bitbucket repository |
+| `--url <url>` | — | Data Center base URL (default: BITBUCKET_URL) |
+| `--allow-insecure-http` | — | Send the token to an http:// URL that is not on this machine (default: refuse) |
+| `--budget <usd>` | `2` | Spend limit for one pull request scan |
+| `--model <model>` | — | Model for the scan thread |
+| `--max-files <n>` | `50` | Skip a pull request that changes more files than this |
+| `--max-inline <n>` | `10` | Most inline comments per pull request |
+| `--report-id <id>` | `0-security` | Code Insights report id |
+| `--state <file>` | — | File that remembers which commit of each pull request was reviewed (default: ~/.0/bitbucket-review.json) |
+| `--no-comments` | — | Publish the Code Insights report only; post no comments |
+| `--no-insights` | — | Post comments only; publish no Code Insights report |
+
+#### sentinels bitbucket watch
+
+Review pull requests as they open or change: poll, a signed webhook, or both.
+
+```text
+0security sentinels bitbucket watch [options]
+```
+
+```bash
+export BITBUCKET_TOKEN=...
+0security sentinels bitbucket watch --platform cloud --repo acme/app --checkout ~/code/app
+export BITBUCKET_WEBHOOK_SECRET=...
+0security sentinels bitbucket watch --platform dc --repo PROJ/app --checkout ~/code/app --url https://bitbucket.example.com --listen 127.0.0.1:7777
+```
+
+The command polls the open pull requests every `--interval` seconds. With `--listen` it also accepts webhook deliveries signed with `BITBUCKET_WEBHOOK_SECRET`. Reviews run one at a time. Use `--once` to poll once and exit, for a scheduled job.
+
+| Option | Registered default | Description |
+| --- | --- | --- |
+| `--platform <platform>` **required** | — | cloud or dc (Data Center) |
+| `--repo <repo>` **required** | — | workspace/repo on Cloud, PROJECT/repo on Data Center |
+| `--checkout <folder>` **required** | — | A local clone of the repository; its origin must be the Bitbucket repository |
+| `--url <url>` | — | Data Center base URL (default: BITBUCKET_URL) |
+| `--allow-insecure-http` | — | Send the token to an http:// URL that is not on this machine (default: refuse) |
+| `--budget <usd>` | `2` | Spend limit for one pull request scan |
+| `--model <model>` | — | Model for the scan thread |
+| `--max-files <n>` | `50` | Skip a pull request that changes more files than this |
+| `--max-inline <n>` | `10` | Most inline comments per pull request |
+| `--report-id <id>` | `0-security` | Code Insights report id |
+| `--state <file>` | — | File that remembers which commit of each pull request was reviewed (default: ~/.0/bitbucket-review.json) |
+| `--no-comments` | — | Publish the Code Insights report only; post no comments |
+| `--no-insights` | — | Post comments only; publish no Code Insights report |
+| `--interval <seconds>` | `120` | Poll every this many seconds (at least 30) |
+| `--listen <host:port>` | — | Also accept webhooks here; set BITBUCKET_WEBHOOK_SECRET to the webhook's secret |
+| `--once` | — | Poll once, finish the reviews, and exit |
+| `--max-reviews <n>` | `5` | Most pull requests one poll queues |
 
 #### sentinels export
 

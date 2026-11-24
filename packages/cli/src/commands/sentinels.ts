@@ -3,6 +3,7 @@ import { Option, type Command } from "commander";
 import { SENTINEL_STATUSES, SCHEDULE_FREQUENCIES } from "@0/engine/shared";
 import { givenAccessOption, noteIgnoredAccessFlags } from "../ignored-access-flags.js";
 import type { ConsoleClient } from "../console-embed-client.js";
+import { registerSentinelsBitbucketCommands } from "./sentinels-bitbucket.js";
 import { registerSentinelsSyncCommands } from "./sentinels-sync.js";
 import { consoleDefaults, consoleFlags, enc, readJsonObject, renderFields, renderTable, requireYes, resolveId, UsageError, withConsole, type ConsoleCommandDeps, type ConsoleFlags } from "./console-command.js";
 
@@ -57,6 +58,7 @@ const triggerTable = (rows: Trigger[]) => renderTable(rows, [
 export function registerSentinelsCommand(program: Command, deps: ConsoleCommandDeps = consoleDefaults): void {
   const group = program.command("sentinels").description("Create, inspect and control Sentinels");
   registerSentinelsSyncCommands(group);
+  registerSentinelsBitbucketCommands(group);
 
   consoleFlags(group.command("list").description("List Sentinels").option("--status <status>", `Only ${SENTINEL_STATUSES.join(", ")}`))
     .action((options: ConsoleFlags & { status?: string }) => withConsole(options, deps, async client => {

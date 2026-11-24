@@ -1541,6 +1541,71 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
+### 0security sentinels bitbucket (hidden)
+Usage: 0security sentinels bitbucket [options] [command]
+
+Review Bitbucket pull requests from this machine (Cloud and Data Center)
+
+Options:
+  -h, --help      display help for command
+
+Commands:
+  help [command]  display help for command
+
+### 0security sentinels bitbucket review (hidden)
+Usage: 0security sentinels bitbucket review [options]
+
+Review one pull request now
+
+Options:
+  --pr <number>          Pull request number
+  --platform <platform>  cloud or dc (Data Center)
+  --repo <repo>          workspace/repo on Cloud, PROJECT/repo on Data Center
+  --checkout <folder>    A local clone of the repository; its origin must be the Bitbucket
+                         repository
+  --url <url>            Data Center base URL (default: BITBUCKET_URL)
+  --allow-insecure-http  Send the token to an http:// URL that is not on this machine (default:
+                         refuse)
+  --budget <usd>         Spend limit for one pull request scan (default: "2")
+  --model <model>        Model for the scan thread
+  --max-files <n>        Skip a pull request that changes more files than this (default: "50")
+  --max-inline <n>       Most inline comments per pull request (default: "10")
+  --report-id <id>       Code Insights report id (default: "0-security")
+  --state <file>         File that remembers which commit of each pull request was reviewed
+                         (default: ~/.0/bitbucket-review.json)
+  --no-comments          Publish the Code Insights report only; post no comments
+  --no-insights          Post comments only; publish no Code Insights report
+  -h, --help             display help for command
+
+### 0security sentinels bitbucket watch (hidden)
+Usage: 0security sentinels bitbucket watch [options]
+
+Review pull requests as they open or change: poll, a signed webhook, or both
+
+Options:
+  --platform <platform>  cloud or dc (Data Center)
+  --repo <repo>          workspace/repo on Cloud, PROJECT/repo on Data Center
+  --checkout <folder>    A local clone of the repository; its origin must be the Bitbucket
+                         repository
+  --url <url>            Data Center base URL (default: BITBUCKET_URL)
+  --allow-insecure-http  Send the token to an http:// URL that is not on this machine (default:
+                         refuse)
+  --budget <usd>         Spend limit for one pull request scan (default: "2")
+  --model <model>        Model for the scan thread
+  --max-files <n>        Skip a pull request that changes more files than this (default: "50")
+  --max-inline <n>       Most inline comments per pull request (default: "10")
+  --report-id <id>       Code Insights report id (default: "0-security")
+  --state <file>         File that remembers which commit of each pull request was reviewed
+                         (default: ~/.0/bitbucket-review.json)
+  --no-comments          Publish the Code Insights report only; post no comments
+  --no-insights          Post comments only; publish no Code Insights report
+  --interval <seconds>   Poll every this many seconds (at least 30) (default: "120")
+  --listen <host:port>   Also accept webhooks here; set BITBUCKET_WEBHOOK_SECRET to the webhook's
+                         secret
+  --once                 Poll once, finish the reviews, and exit
+  --max-reviews <n>      Most pull requests one poll queues (default: "5")
+  -h, --help             display help for command
+
 ### 0security sentinels create (hidden)
 Usage: 0security sentinels create [options]
 

@@ -40,7 +40,7 @@ export function suggestionKey(finding: SuggestionFinding): string {
   return createHash("sha256").update(`${finding.path}\n${finding.startLine}\n${finding.endLine ?? ""}\n${finding.title}`).digest("hex").slice(0, 12);
 }
 
-const oneLine = (text: string, max: number) => text.replace(/[a-z][a-z0-9+.-]*:\/\/\S+/gi, "(link removed)").replace(/[\r\n\t]+/g, " ").replace(/[<>`\[\]]/g, "").replace(/@/g, "@​").slice(0, max).trim();
+export const oneLine = (text: string, max: number) => text.replace(/[a-z][a-z0-9+.-]*:\/\/\S+/gi, "(link removed)").replace(/[\r\n\t]+/g, " ").replace(/[<>`\[\]]/g, "").replace(/@/g, "@​").slice(0, max).trim();
 const safePath = (path: string) => /^[\w./@+-]{1,200}$/.test(path) && !path.startsWith("/") && !path.split("/").includes("..");
 
 export function suggestionBody(sentinelId: string, finding: SuggestionFinding): string {
