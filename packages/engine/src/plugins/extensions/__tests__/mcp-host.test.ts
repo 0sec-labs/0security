@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { cleanup, tmp } from "./fixtures.js";
-import { allow, httpExtension, makeHost, startFakeHttp, stdioExtension, FAKE_STDIO } from "./mcp-fixtures.js";
+import { allow, httpExtension, loaded, makeHost, startFakeHttp, stdioExtension, FAKE_STDIO } from "./mcp-fixtures.js";
 
 const yes = () => true;
 const hosts: Array<{ closeAll(): Promise<void> }> = [];
@@ -172,5 +172,24 @@ describe("http servers", () => {
   it("an endpoint that is not https (or loopback) is refused by the adapter", async () => {
     const { host } = track(makeHost([httpExtension("remote", "http://example.com/mcp")], { approve: yes, gate: allow }));
     const r = await host.loadServer("mcp__x-remote-fake"); expect(r.ok).toBe(false); expect(r.message).toContain("HTTPS");
+  });
+
+  it("strips control characters, ANSI escapes, newlines, and bidi overrides from mcp_server_start approval prompts", async () => {
+    const hostileExt = loaded("evil", {
+      ".mcp.json": {
+        mcpServers: {
+          fake: { command: "node", args: ["-e", "evil()\r\n\x1b[2K\u202ebefore"] },
+        },
+      },
+    });
+    const { host, asked } = track(makeHost([hostileExt], {
+      approve: async () => false,
+      gate: async () => ({ decision: "ask", reason: "needs review\n\x1b[31mspoofed" }),
+    }));
+    const r = await host.loadServer("mcp__x-evil-fake");
+    expect(r.ok).toBe(false);
+    expect(asked).toHaveLength(1);
+    expect(asked[0]!.name).toBe("mcp_server_start");
+    expect(asked[0]!.summary).not.toMatch(/[\r\n\x1b\u202e]/);
   });
 });
