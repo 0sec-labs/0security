@@ -9,8 +9,10 @@
  *    local copy of the app in an isolated container. Only the harness writes it,
  *    and the words "reproduced" and "not reproduced" may only come from it.
  *
- * "Not reproduced" never means "safe". It means this one recipe did not work on
- * this one commit under these conditions.
+ * What a result says, precisely: "the app as run returned the canary for this
+ * request". It does not say the vulnerability exists in the code, and an app that
+ * lies about its responses can forge a hit. "Not reproduced" never means "safe":
+ * it means this one recipe did not work on this one commit under these conditions.
  */
 import type { PocStep } from "./types.js";
 
@@ -51,11 +53,14 @@ export interface ReproductionResult {
   commit?: string;
   /** Digest of the pinned image the run used (`sha256:` and 64 hex digits). */
   imageDigest?: string;
-  isolation?: "container";
+  /** "container" for a run in the isolated runner. "unisolated" marks a host or stand-in run, which can never be reproduced. */
+  isolation?: "container" | "unisolated";
   network?: "none" | "loopback";
   canary?: { token: string; observed: boolean };
   /** SHA-256 of the exact recipe that ran, so the result names what it proves. */
   recipeSha256?: string;
+  /** SHA-256 over the paths and contents of the app files the run used. */
+  appSha256?: string;
   startedAt: string;
   finishedAt: string;
   /** Last 2 KB of output, secrets redacted. */
@@ -101,6 +106,7 @@ export function parseReproductionResult(value: unknown): ReproductionResult | un
     if (r.isolation !== "container") return undefined;
     if (r.network !== "none" && r.network !== "loopback") return undefined;
     if (typeof r.recipeSha256 !== "string" || !HEX64.test(r.recipeSha256)) return undefined;
+    if (typeof r.appSha256 !== "string" || !HEX64.test(r.appSha256)) return undefined;
     if (!canary || typeof canary.token !== "string" || canary.token.length < 8 || typeof canary.observed !== "boolean") return undefined;
     // The status must agree with what the canary showed.
     if ((status === "reproduced") !== canary.observed) return undefined;
@@ -112,9 +118,10 @@ export function parseReproductionResult(value: unknown): ReproductionResult | un
   };
   if (typeof r.commit === "string" && COMMIT.test(r.commit)) out.commit = r.commit;
   if (typeof r.imageDigest === "string" && SHA256_DIGEST.test(r.imageDigest)) out.imageDigest = r.imageDigest;
-  if (r.isolation === "container") out.isolation = "container";
+  if (r.isolation === "container" || r.isolation === "unisolated") out.isolation = r.isolation;
   if (r.network === "none" || r.network === "loopback") out.network = r.network;
   if (typeof r.recipeSha256 === "string" && HEX64.test(r.recipeSha256)) out.recipeSha256 = r.recipeSha256;
+  if (typeof r.appSha256 === "string" && HEX64.test(r.appSha256)) out.appSha256 = r.appSha256;
   const canary = r.canary as { token?: unknown; observed?: unknown } | undefined;
   if (canary && typeof canary.token === "string" && typeof canary.observed === "boolean") out.canary = { token: canary.token, observed: canary.observed };
   return out;
@@ -214,9 +221,9 @@ export function reproductionLine(result: ReproductionResult | undefined): string
   if (!r) return "No reproduction has been run";
   const where = r.commit && r.imageDigest ? `on commit ${r.commit.slice(0, 12)} in an isolated container (image ${short(r.imageDigest)})` : "";
   switch (r.status) {
-    case "reproduced": return `Reproduced ${where}`;
-    case "not-reproduced": return `Not reproduced by this recipe ${where}. This does not mean the issue is absent`;
-    case "inconclusive": return `Inconclusive: the recipe could not show a result (${r.reason.replace(/-/g, " ")}). This does not mean the issue is absent`;
+    case "reproduced": return `Reproduced: the app as run returned the canary for this request, ${where}. This is an observation of the running app, not a statement about the code`;
+    case "not-reproduced": return `Not reproduced: the app as run did not return the canary for this request, ${where}. This does not mean the issue is absent or the code is safe`;
+    case "inconclusive": return `Inconclusive: the recipe could not show a result (${r.reason.replace(/-/g, " ")})${r.isolation === "unisolated" ? ". The run was not isolated, so it cannot count as reproduced" : ""}. This does not mean the issue is absent`;
     default: return `Reproduction did not run: ${r.reason.replace(/-/g, " ")}`;
   }
 }

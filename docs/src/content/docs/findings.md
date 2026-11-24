@@ -146,7 +146,7 @@ A finding can carry a proof: steps that show the problem. The proof has two part
 
 Proposed steps come from the model's own reasoning. The app, `0security findings show`, reports and SARIF label them "Proposed steps, not run". Nothing has checked them.
 
-A reproduction result exists only when a harness ran a recipe against a local copy of the app in a container. The result records the commit, the digest-pinned image, a canary, the times and a redacted log tail. The app shows it as "Reproduced on commit X in an isolated container". The model cannot set it, and neither can a finding import. Stored text that lacks the full record is ignored.
+A reproduction result exists only when a harness ran a recipe against a local copy of the app in a container. The result records the commit, the digest-pinned image, a hash of the app files, a canary, the times and a redacted log tail. The app shows it as "the app as run returned the canary for this request, on commit X in an isolated container". That is an observation of the running app. It does not say the vulnerability exists in the code, and an app built to lie can fake it. A run outside the container is marked unisolated and can never be reproduced. The model cannot set it, and neither can a finding import. Stored text that lacks the full record is ignored.
 
 A result has one of four states:
 

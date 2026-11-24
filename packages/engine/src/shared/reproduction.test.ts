@@ -8,7 +8,7 @@ import type { PocStep } from "./types.js";
 const harnessRecord = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
   schemaVersion: 1, harness: REPRODUCTION_HARNESS, status: "reproduced", reason: "canary-observed",
   commit: "0123456789abcdef0123456789abcdef01234567", imageDigest: `sha256:${"a".repeat(64)}`, isolation: "container", network: "loopback",
-  canary: { token: "canary-abcdef12", observed: true }, recipeSha256: "b".repeat(64),
+  canary: { token: "canary-abcdef12", observed: true }, recipeSha256: "b".repeat(64), appSha256: "d".repeat(64),
   startedAt: "2026-11-24T10:00:00.000Z", finishedAt: "2026-11-24T10:00:03.000Z", logTail: "ok", ...over,
 });
 
@@ -29,6 +29,8 @@ describe("reproduction result: only a complete harness record counts", () => {
     ["no canary", { canary: undefined }],
     ["canary not observed but status reproduced", { canary: { token: "canary-abcdef12", observed: false } }],
     ["no recipe hash", { recipeSha256: undefined }],
+    ["no app file hash", { appSha256: undefined }],
+    ["an unisolated run", { isolation: "unisolated" }],
     ["no timestamps", { startedAt: undefined }],
     ["finished before started", { finishedAt: "2026-11-24T09:00:00.000Z" }],
     ["no log tail", { logTail: undefined }],
@@ -43,6 +45,13 @@ describe("reproduction result: only a complete harness record counts", () => {
     expect(parseReproductionResult(harnessRecord({ status: "not-reproduced" }))).toBeUndefined();
     expect(parseReproductionResult(harnessRecord({ status: "not-reproduced", canary: { token: "canary-abcdef12", observed: false }, commit: undefined }))).toBeUndefined();
     expect(parseReproductionResult(harnessRecord({ status: "not-reproduced", canary: { token: "canary-abcdef12", observed: false } }))?.status).toBe("not-reproduced");
+  });
+
+  it("keeps an unisolated run to inconclusive, with the reason in the wording", () => {
+    const unisolated = parseReproductionResult({ ...harnessRecord({ status: "inconclusive", reason: "unisolated-run-canary-observed", isolation: "unisolated" }) });
+    expect(unisolated?.isolation).toBe("unisolated");
+    expect(reproductionLine(unisolated)).toMatch(/not isolated, so it cannot count as reproduced/);
+    expect(isReproduced(unisolated)).toBe(false);
   });
 
   it("lets inconclusive and error carry a reason without a commit or image", () => {
@@ -60,13 +69,14 @@ describe("reproduction result: only a complete harness record counts", () => {
 describe("wording", () => {
   it("says Reproduced only for a complete harness record, naming commit and image", () => {
     const line = reproductionLine(parseReproductionResult(harnessRecord()));
-    expect(line).toMatch(/^Reproduced on commit 0123456789ab in an isolated container \(image a{12}\)/);
+    expect(line).toMatch(/^Reproduced: the app as run returned the canary for this request, on commit 0123456789ab in an isolated container \(image a{12}\)/);
+    expect(line).toMatch(/not a statement about the code/);
   });
   it("never lets 'not reproduced' read as safe", () => {
     const line = reproductionLine(parseReproductionResult(harnessRecord({ status: "not-reproduced", canary: { token: "canary-abcdef12", observed: false } })));
-    expect(line).toMatch(/Not reproduced by this recipe/);
-    expect(line).toMatch(/does not mean the issue is absent/);
-    expect(line).not.toMatch(/\bsafe\b|\bfixed\b/i);
+    expect(line).toMatch(/^Not reproduced: the app as run did not return the canary for this request/);
+    expect(line).toMatch(/does not mean the issue is absent or the code is safe/);
+    expect(line).not.toMatch(/\bfixed\b/i);
     expect(reproductionLine(parseReproductionResult({ ...harnessRecord(), status: "inconclusive", canary: undefined, commit: undefined, imageDigest: undefined }))).toMatch(/does not mean the issue is absent/);
   });
   it("labels a proposed proof as not run", () => {

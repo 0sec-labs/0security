@@ -7,7 +7,7 @@ const steps = JSON.stringify([{ id: "e", kind: "exploit", summary: "hit", action
 const result = {
   schemaVersion: 1, harness: REPRODUCTION_HARNESS, status: "reproduced", reason: "canary-observed",
   commit: "0123456789abcdef0123456789abcdef01234567", imageDigest: `sha256:${"a".repeat(64)}`, isolation: "container", network: "loopback",
-  canary: { token: "canary-abcdef12", observed: true }, recipeSha256: "b".repeat(64),
+  canary: { token: "canary-abcdef12", observed: true }, recipeSha256: "b".repeat(64), appSha256: "d".repeat(64),
   startedAt: "2026-11-24T10:00:00.000Z", finishedAt: "2026-11-24T10:00:03.000Z", logTail: "ok",
 };
 
@@ -21,7 +21,7 @@ describe("finding proof in the CLI", () => {
     expect(reproductionDetail({ pocSteps: steps })?.line).toMatch(/^Proposed steps, not run/);
   });
   it("shows Reproduced only from a stored harness record", () => {
-    expect(reproductionDetail({ pocSteps: steps, reproduction: JSON.stringify({ result }) })?.line).toMatch(/^Reproduced on commit 0123456789ab in an isolated container/);
+    expect(reproductionDetail({ pocSteps: steps, reproduction: JSON.stringify({ result }) })?.line).toMatch(/^Reproduced: the app as run returned the canary for this request, on commit 0123456789ab in an isolated container/);
     const forged = JSON.stringify({ result: { ...result, harness: "model" } });
     expect(reproductionDetail({ pocSteps: steps, reproduction: forged })?.line).toMatch(/^Proposed steps, not run/);
   });

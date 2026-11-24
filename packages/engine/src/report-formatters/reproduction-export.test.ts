@@ -6,7 +6,7 @@ import { formatMarkdown } from "./markdown.js";
 const result = {
   schemaVersion: 1 as const, harness: REPRODUCTION_HARNESS, status: "not-reproduced" as const, reason: "canary-absent",
   commit: "0123456789abcdef0123456789abcdef01234567", imageDigest: `sha256:${"a".repeat(64)}`, isolation: "container" as const, network: "loopback" as const,
-  canary: { token: "canary-abcdef12", observed: false }, recipeSha256: "b".repeat(64),
+  canary: { token: "canary-abcdef12", observed: false }, recipeSha256: "b".repeat(64), appSha256: "d".repeat(64),
   startedAt: "2026-11-24T10:00:00.000Z", finishedAt: "2026-11-24T10:00:03.000Z", logTail: "",
 };
 
@@ -39,7 +39,7 @@ describe("reproduction in exports", () => {
     const props = JSON.parse(formatSarif(r)).runs[0].results[0].properties.reproduction;
     expect(props.result.status).toBe("not-reproduced");
     expect(props.resultLabel).toMatch(/does not mean the issue is absent/);
-    expect(formatMarkdown(r)).toMatch(/\*\*Proof:\*\* Not reproduced by this recipe on commit 0123456789ab/);
+    expect(formatMarkdown(r)).toMatch(/\*\*Proof:\*\* Not reproduced: the app as run did not return the canary for this request, on commit 0123456789ab/);
   });
 
   it("adds nothing to a finding without steps or a record", () => {
