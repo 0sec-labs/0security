@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { PROBES, extractReply, probeFindings, runProbes, selectProbes } from "./index.js";
 
+const pub = (host: string) => ({ acknowledge: host, resolve: async () => ["203.0.113.9"] });
 const reply = (text: string) => new Response(JSON.stringify({ choices: [{ message: { content: text } }] }));
 const last = (init?: RequestInit) => JSON.parse(String(init?.body)).messages.at(-1).content as string;
 const canaryOf = (prompt: string) => /ZX[0-9A-F]{8}/.exec(prompt)?.[0] ?? "";
@@ -19,7 +20,7 @@ const refusing = (async () => reply("I can't help with that.")) as typeof fetch;
 
 describe("probes", () => {
   it("every probe is caught on an obedient model, with the canary or the secret in the evidence", async () => {
-    const { results, requests } = await runProbes({ url: "https://llm.test/chat", fetch: obedient, repeat: 1, secret: "sk-live-1234567890abcdef" });
+    const { results, requests } = await runProbes({ url: "https://llm.test/chat", ...pub("llm.test"), fetch: obedient, repeat: 1, secret: "sk-live-1234567890abcdef" });
     expect(requests).toBe(PROBES.length);
     expect(results.filter(result => result.hits === 0).map(result => result.probe.id)).toEqual([]);
     const findings = probeFindings("https://llm.test/chat", results, 1);
@@ -32,28 +33,28 @@ describe("probes", () => {
     expect(new Set(findings.map(finding => finding.id)).size).toBe(findings.length);
   });
   it("finds nothing on a model that refuses, and does not mistake an echo of the question for a hit", async () => {
-    const { results } = await runProbes({ url: "https://llm.test/chat", fetch: refusing, repeat: 2 });
+    const { results } = await runProbes({ url: "https://llm.test/chat", ...pub("llm.test"), fetch: refusing, repeat: 2 });
     expect(results.every(result => result.hits === 0 && result.attempts.length === 2)).toBe(true);
     expect(probeFindings("https://llm.test/chat", results)).toEqual([]);
   });
   it("a probe that needs a command's output is not met by repeating the command", async () => {
     const echo = (async (_u: unknown, init?: RequestInit) => reply(last(init))) as typeof fetch;
-    const { results } = await runProbes({ url: "https://llm.test/chat", fetch: echo, repeat: 1, probes: selectProbes(["tool-execution", "markdown-exfiltration"]) });
+    const { results } = await runProbes({ url: "https://llm.test/chat", ...pub("llm.test"), fetch: echo, repeat: 1, probes: selectProbes(["tool-execution", "markdown-exfiltration"]) });
     expect(results.find(result => result.probe.id === "tool-execution")!.hits).toBe(0);
   });
   it("uses the body template and the response path it was given, and sends a fresh canary each time", async () => {
     const bodies: string[] = [];
     const custom = (async (_u: unknown, init?: RequestInit) => { bodies.push(String(init?.body)); return new Response(JSON.stringify({ data: { answer: canaryOf(String(init?.body)) } })); }) as typeof fetch;
-    const { results } = await runProbes({ url: "https://llm.test/ask", fetch: custom, repeat: 2, bodyTemplate: '{"model":"m","input":"{{prompt}}"}', responsePath: "data.answer", probes: selectProbes(["direct-override"]) });
+    const { results } = await runProbes({ url: "https://llm.test/ask", ...pub("llm.test"), fetch: custom, repeat: 2, bodyTemplate: '{"model":"m","input":"{{prompt}}"}', responsePath: "data.answer", probes: selectProbes(["direct-override"]) });
     expect(results[0]!.hits).toBe(2);
     expect(JSON.parse(bodies[0]!).model).toBe("m");
     expect(canaryOf(bodies[0]!)).not.toBe(canaryOf(bodies[1]!));
   });
   it("records an error instead of a hit, honours the request limit, and checks its inputs up front", async () => {
     const down = (async () => new Response("boom", { status: 500 })) as typeof fetch;
-    const { results } = await runProbes({ url: "https://llm.test/chat", fetch: down, repeat: 1, probes: selectProbes(["direct-override"]) });
+    const { results } = await runProbes({ url: "https://llm.test/chat", ...pub("llm.test"), fetch: down, repeat: 1, probes: selectProbes(["direct-override"]) });
     expect(results[0]!.attempts[0]).toMatchObject({ hit: false, error: expect.stringContaining("HTTP 500") });
-    expect((await runProbes({ url: "https://llm.test/chat", fetch: obedient, repeat: 5, maxRequests: 3 })).requests).toBe(3);
+    expect((await runProbes({ url: "https://llm.test/chat", ...pub("llm.test"), fetch: obedient, repeat: 5, maxRequests: 3 })).requests).toBe(3);
     await expect(runProbes({ url: "ftp://x" })).rejects.toThrow("http or https");
     await expect(runProbes({ url: "not a url" })).rejects.toThrow("not a URL");
     await expect(runProbes({ url: "https://x.test", bodyTemplate: '{"a":1}' })).rejects.toThrow("{{prompt}}");

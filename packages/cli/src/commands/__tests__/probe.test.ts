@@ -6,7 +6,7 @@ const prompt = (init?: RequestInit) => JSON.parse(String(init?.body)).message as
 const options = (extra: Partial<ProbeOptions> = {}): ProbeOptions => ({ repeat: "1", delay: "0", timeout: "5", maxRequests: "50", format: "json", ...extra });
 const harness = (fetchImpl: typeof fetch, extra: Partial<ProbeDeps> = {}) => {
   const out: string[] = []; const err: string[] = []; const saved: unknown[] = [];
-  const deps: ProbeDeps = { out: bytes => out.push(String(bytes)), err: text => err.push(text), writeBytes: () => {}, readText: () => "", env: { KEY: "secret-token" }, fetch: fetchImpl, save: (_target, findings) => { saved.push(findings); return "scanid12345"; }, ...extra };
+  const deps: ProbeDeps = { out: bytes => out.push(String(bytes)), err: text => err.push(text), writeBytes: () => {}, readText: () => "", env: { KEY: "secret-token" }, fetch: fetchImpl, resolve: async () => ["10.0.0.5"], save: (_target, findings) => { saved.push(findings); return "scanid12345"; }, ...extra };
   return { deps, out, err, saved };
 };
 // Obeys any "reply with only <token>" style instruction and nothing else.
@@ -31,6 +31,18 @@ describe("0 probe", () => {
     expect(await runProbe("https://api.test/v1/chat", options({ model: "m-1", failOn: "low" }), h.deps)).toBe(0);
     expect(JSON.parse(bodies[0]!)).toMatchObject({ model: "m-1", messages: [{ role: "user" }] });
     expect(JSON.parse(h.out.join("")).findings).toEqual([]);
+  });
+  it("refuses a public host without --i-own-this, accepts it with the exact host, and records the scope", async () => {
+    const never = vi.fn() as unknown as typeof fetch;
+    const publicDns = { resolve: async () => ["203.0.113.9"] };
+    await expect(runProbe("https://chat.test/api", options(), harness(never, publicDns).deps)).rejects.toThrow("--i-own-this chat.test");
+    await expect(runProbe("https://chat.test/api", options({ iOwnThis: "other.test" }), harness(never, publicDns).deps)).rejects.toThrow("exact host");
+    expect(never).not.toHaveBeenCalled();
+    const refuse = (async () => reply("No.")) as typeof fetch;
+    const h = harness(refuse, publicDns);
+    expect(await runProbe("https://chat.test/api", options({ iOwnThis: "chat.test" }), h.deps)).toBe(0);
+    expect(JSON.parse(h.out.join("")).probeScope).toMatchObject({ host: "chat.test", network: "public", addresses: ["203.0.113.9"], acknowledgedHost: "chat.test" });
+    expect(h.err.join("\n")).toContain("acknowledged with --i-own-this chat.test");
   });
   it("reads a header value from the environment, and refuses a bad header or a missing variable", () => {
     expect(parseHeaders(["Authorization: Bearer $KEY", "X-A: b"], { KEY: "k" })).toEqual({ Authorization: "Bearer k", "X-A": "b" });
