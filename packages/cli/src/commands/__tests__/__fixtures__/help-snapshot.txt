@@ -282,6 +282,8 @@ Options:
                        comma separated)
   -o, --output <file>  Write to this file with owner-only permissions instead of stdout
   --follow             Keep running and print new events as they are written (Ctrl+C stops)
+  --with-proof         Write NDJSON rows with their chain hashes and a trailer, checkable with
+                       audit-verify --file (needs an enterprise license)
   -h, --help           display help for command
 
 ### 0security config audit-log (hidden)
@@ -296,12 +298,25 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
+### 0security config audit-prune (hidden)
+Usage: 0security config audit-prune [options]
+
+Archive audit events older than a date to a file, then remove them (retention)
+
+Options:
+  --older-than <time>  Events older than this: a duration (365d) or a date
+  --archive <file>     New file that receives the old events before they are removed
+  --yes                Do it. Without it the command only reports what it would remove
+  -h, --help           display help for command
+
 ### 0security config audit-verify (hidden)
 Usage: 0security config audit-verify [options]
 
 Check offline that the audit log was not edited, reordered or cut (hash chain)
 
 Options:
+  --file <file>      Check an export made with --with-proof, or a retention archive, instead of the
+                     live log
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 

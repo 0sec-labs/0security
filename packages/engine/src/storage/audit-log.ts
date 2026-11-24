@@ -218,3 +218,56 @@ export function verifyAuditLog(target?: AuditTarget): AuditChainReport {
   const seq = db.prepare("SELECT seq FROM sqlite_sequence WHERE name = 'audit_events'").get() as { seq?: number } | undefined;
   return checkAuditChain({ rows, checkpoints, highestIdEver: seq?.seq === undefined ? null : Number(seq.seq) });
 }
+
+const rowToChainRow = (row: Record<string, unknown>): AuditChainRow => ({
+  id: Number(row.id), ts: String(row.ts), actor: String(row.actor), action: String(row.action), subject: String(row.subject), outcome: String(row.outcome), detailJson: String(row.detail_json),
+  prevHash: row.prev_hash === null || row.prev_hash === undefined ? null : String(row.prev_hash), hash: row.hash === null || row.hash === undefined ? null : String(row.hash),
+});
+
+/** Rows with their hashes, oldest first, for an export with proof. Time bounds as in queryAuditEvents. Throws when the log cannot be read. */
+export function queryAuditChainRows(query: { since?: string; until?: string; limit?: number } = {}, target?: AuditTarget): AuditChainRow[] {
+  const { db } = open(resolvePath(target));
+  const where: string[] = []; const args: unknown[] = [];
+  if (query.since) { where.push("ts >= ?"); args.push(query.since); }
+  if (query.until) { where.push("ts < ?"); args.push(query.until); }
+  const limit = query.limit !== undefined && Number.isSafeInteger(query.limit) && query.limit > 0 ? query.limit : undefined;
+  const sql = `SELECT id, ts, actor, action, subject, outcome, detail_json, prev_hash, hash FROM audit_events ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY id ${limit !== undefined ? "DESC LIMIT ?" : "ASC"}`;
+  const rows = (db.prepare(sql).all(...args, ...(limit !== undefined ? [limit] : [])) as Array<Record<string, unknown>>).map(rowToChainRow);
+  return limit !== undefined ? rows.reverse() : rows;
+}
+
+/** The oldest rows older than `before` (ISO time), as one run from the start of the log. At least the newest row is always kept. */
+export function planAuditPrune(before: string, target?: AuditTarget): AuditChainRow[] {
+  const { db } = open(resolvePath(target));
+  const newest = latestAuditId(target);
+  const rows = (db.prepare("SELECT id, ts, actor, action, subject, outcome, detail_json, prev_hash, hash FROM audit_events WHERE id < ? ORDER BY id ASC").all(newest) as Array<Record<string, unknown>>).map(rowToChainRow);
+  // Rotation removes a run from the oldest row, so stop at the first row that is not older than the cutoff.
+  const end = rows.findIndex(row => !(row.ts < before));
+  return end === -1 ? rows : rows.slice(0, end);
+}
+
+export interface AuditPruneResult { pruned: number; throughId: number | null; throughHash: string | null }
+
+/**
+ * Removes the rows older than `before` and records a rotation checkpoint, so the log still verifies. `archive` receives
+ * the rows first and must store them durably; when it throws nothing is removed. Runs in one write transaction.
+ */
+export function pruneAuditLog(before: string, archive: (rows: AuditChainRow[]) => void, target?: AuditTarget): AuditPruneResult {
+  const { db } = open(resolvePath(target));
+  return db.transaction((): AuditPruneResult => {
+    const rows = planAuditPrune(before, target);
+    if (!rows.length) return { pruned: 0, throughId: null, throughHash: null };
+    archive(rows);
+    const last = rows.at(-1)!;
+    rotate(db, last.id);
+    return { pruned: rows.length, throughId: last.id, throughHash: last.hash };
+  }).immediate();
+}
+
+/** The hash of the last row that rotation or retention removed, by row id; null when no checkpoint covers it. */
+export function auditCheckpointHashAt(throughId: number, target?: AuditTarget): string | null {
+  try {
+    const row = open(resolvePath(target)).db.prepare("SELECT through_hash FROM audit_checkpoints WHERE through_id = ?").get(throughId) as { through_hash?: string } | undefined;
+    return row?.through_hash ?? null;
+  } catch { return null; }
+}

@@ -1,5 +1,5 @@
 // The only file in packages/cli that imports the key-gated enterprise package (see scripts/check-enterprise-boundary.mjs).
-import { EvidenceKeyError, SamlError, SamlServiceProvider, formatLicenseStatus, hasFeature as licenseHasFeature, licenseStatus, parseIdpMetadata, requireFeature, signEvidenceStatement, type DsseEnvelope, type EnterpriseFeature, type LicenseStatus, type SamlIdentity } from "@0/enterprise";
+import { EvidenceKeyError, SamlError, SamlServiceProvider, featureMode, formatLicenseStatus, hasFeature as licenseHasFeature, licenseStatus, parseIdpMetadata, requireFeature, signEvidenceStatement, type DsseEnvelope, type EnterpriseFeature, type LicenseStatus, type SamlIdentity } from "@0/enterprise";
 
 export { SamlError, SamlServiceProvider, parseIdpMetadata };
 export type { SamlIdentity };
@@ -61,3 +61,14 @@ export function samlLicenseDenial(): string | null {
 // Role-based access control. These are pure functions of their input; the license is checked at the call site with hasFeature("rbac").
 export { BUILT_IN_ROLES, PERMISSIONS, ROUTE_RULES, decideRoute, nearestBuiltInRole, parseScope, repoOfTarget, resolveRoles, roleFromGroups, routePermission, scopePatterns, targetFilter } from "@0/enterprise";
 export type { Permission, RoleDefinition, RoleScope, RouteDecision } from "@0/enterprise";
+
+/** Audit export with chain proof (paid). It is a read, so it keeps working after the license expires. Null when allowed. */
+export function auditProofRefusal(): string | null {
+  return featureMode("audit-chain") === "none" ? (requireFeature("audit-chain") ?? "The tamper-evident audit log needs an enterprise license.") : null;
+}
+
+/** Retention: archive, then remove old audit events (paid write). Null when allowed. */
+export function auditPruneRefusal(): string | null {
+  if (!hasFeature("retention")) return requireFeature("retention") ?? "Retention policies need an enterprise license.";
+  return null;
+}

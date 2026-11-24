@@ -666,7 +666,7 @@ Inspect, export, and import the two-level console configuration
 0security config
 ```
 
-Subcommands: [get](#config-get) · [set](#config-set) · [doctor](#config-doctor) · [show](#config-show) · [list](#config-list) · [reset](#config-reset) · [export](#config-export) · [import](#config-import) · [audit-log](#config-audit-log) · [audit-export](#config-audit-export) · [audit-verify](#config-audit-verify) · [team](#config-team) · [db](#config-db) · [github](#config-github).
+Subcommands: [get](#config-get) · [set](#config-set) · [doctor](#config-doctor) · [show](#config-show) · [list](#config-list) · [reset](#config-reset) · [export](#config-export) · [import](#config-import) · [audit-log](#config-audit-log) · [audit-export](#config-audit-export) · [audit-verify](#config-audit-verify) · [audit-prune](#config-audit-prune) · [team](#config-team) · [db](#config-db) · [github](#config-github).
 
 #### config show
 
@@ -1051,8 +1051,27 @@ Check that the audit log was not edited, reordered or cut. Each event stores a h
 
 | Option | Registered default | Description |
 | --- | --- | --- |
+| `--file <file>` | — | Check an export made with --with-proof, or a retention archive, instead of the live log |
 | `--json` | — | Print JSON |
 | `--format <format>` | — | Output: text or json Choices: text, json. |
+
+### config audit-prune
+
+Write audit events older than a time to a new archive file, then remove them from the log. A rotation checkpoint keeps the rest of the log verifiable. This is retention, an enterprise feature (`retention`). Without `--yes` the command only reports what it would do. See [Keep the audit log for a set time](/server-mode/#keep-the-audit-log-for-a-set-time).
+
+```text
+0security config audit-prune [options]
+```
+
+```bash
+0security config audit-prune --older-than 365d --archive audit-2025.ndjson --yes
+```
+
+| Option | Registered default | Description |
+| --- | --- | --- |
+| `--older-than <time>` | — | Events older than this: a duration (365d) or a date |
+| `--archive <file>` | — | New file that receives the old events before they are removed |
+| `--yes` | — | Do it. Without it the command only reports what it would remove |
 
 ### config audit-export
 
@@ -1075,6 +1094,7 @@ Write the audit log as NDJSON, CEF or syslog lines for a SIEM, oldest first. Eac
 | `--type <action...>` | — | Only these actions or action prefixes, for example extension (repeatable, or comma separated) |
 | `-o, --output <file>` | — | Write to this file with owner-only permissions instead of stdout |
 | `--follow` | — | Keep running and print new events as they are written (Ctrl+C stops) |
+| `--with-proof` | — | Write NDJSON rows with their chain hashes and a trailer, checkable with audit-verify --file (needs an enterprise license) |
 
 ### doctor workbench
 

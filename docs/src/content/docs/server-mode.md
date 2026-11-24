@@ -287,6 +287,36 @@ When the log reaches 50,000 events, the oldest are removed. A rotation checkpoin
 
 The check proves the log is consistent. It does not prove the log is honest: someone who can rewrite the whole database can rewrite the chain too. Copy the head hash that the command prints, or send the log to a SIEM, to keep a record they cannot reach. Removing the newest events with no new event after them is caught only when the database still records that they existed.
 
+
+### Keep the audit log for a set time
+
+Retention and exports with proof are enterprise features (`retention` and `audit-chain`). They build on the free [hash chain check](#check-the-audit-log-for-tampering).
+
+Archive the events older than a year, then remove them from the log:
+
+```bash
+0security config audit-prune --older-than 365d --archive audit-2025.ndjson
+0security config audit-prune --older-than 365d --archive audit-2025.ndjson --yes
+```
+
+The first command lists what it would do. The second writes the archive, checks it, and only then removes the events. It never overwrites an archive. A rotation checkpoint keeps the remaining log verifiable. Keep the archive: it is the only copy of those events. Run the command from a schedule, such as cron, to keep a fixed window.
+
+Export a range with its chain proof:
+
+```bash
+0security config audit-export --since 90d --with-proof -o audit-proof.ndjson
+```
+
+Anyone can check an export or an archive offline, without a license and without your database:
+
+```bash
+0security config audit-verify --file audit-proof.ndjson
+```
+
+The check finds an edited, removed or reordered event and a file cut short. It does not prove that nothing was cut off the end: keep the head hash that the command prints somewhere the log's operator cannot change.
+
+After a license expires, reading and exporting with proof and every check keep working. Pruning stops until you renew.
+
 ### Not supported
 
 - High availability, failover, or more than one replica.
