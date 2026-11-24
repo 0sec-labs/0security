@@ -329,11 +329,11 @@ export function registerBurndownCommand(program: Command, fixDeps: FixDeps = def
         }
         // One console for the whole run, not one per fix.
         let stop: (() => void) | undefined;
-        let shared: FixDeps = fixDeps;
+        let shared: FixDeps = { ...fixDeps, record: undefined };
         if (!options.dryRun) {
           const connection = await connect(options, fixDeps);
           stop = connection.stop;
-          shared = { ...fixDeps, open: async () => connection.client, startConsole: async () => () => {}, err: json ? err : fixDeps.err };
+          shared = { ...fixDeps, record: undefined, open: async () => connection.client, startConsole: async () => () => {}, err: json ? err : fixDeps.err };
         }
         try {
           const report = await runBurndown(options, { listCandidates: listOpenCandidates, repoRoot: gitRoot, fix: (id, fixOptions) => runFix(id, fixOptions, shared), store, now: Date.now, err });
@@ -342,4 +342,22 @@ export function registerBurndownCommand(program: Command, fixDeps: FixDeps = def
         } finally { stop?.(); }
       } catch (error) { finishWithError(error, { err }, json); }
     });
+}
+
+/**
+ * Remembers what a standalone `findings fix` did in the same state file burndown uses, under the same key, so
+ * `findings export-fixes` covers both. A run that changed nothing never replaces a record that has a pull request.
+ */
+export function recordStandaloneFix(repo: string, fingerprint: string, outcome: FixOutcome, store: StateStore = fileStore(), now: () => Date = () => new Date()): void {
+  const state = store.load();
+  const key = recordKey(repo, fingerprint);
+  const result: ItemResult = outcome.pullRequest ? (outcome.pullRequest.created ? "pr-opened" : "pr-updated") : outcome.committed ? "committed" : "no-change";
+  if (result === "no-change" && state.findings[key]?.pullRequestUrl) return;
+  state.findings[key] = {
+    finding: outcome.finding, result, runId: "fix", updatedAt: now().toISOString(), branch: outcome.branch,
+    ...(outcome.pullRequest ? { pullRequestUrl: outcome.pullRequest.url, draft: outcome.pullRequest.draft } : {}),
+    ...(outcome.checks.length ? { checksPassing: outcome.verified } : {}),
+    ...(outcome.costUsd !== undefined ? { costUsd: outcome.costUsd } : {}),
+  };
+  store.save(state);
 }

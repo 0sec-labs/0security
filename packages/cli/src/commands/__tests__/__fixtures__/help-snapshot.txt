@@ -650,8 +650,9 @@ Commands:
                                     age and owner, from export files and findings databases
   evidence [options] <folder>       Write one folder of findings, SARIF, SBOM and fix branches, with
                                     a README that says what it does and does not show
-  export-fixes [options]            Report what happened to the fixes burndown proposed: counts,
-                                    pull requests, checks, cost and, on request, merged or closed
+  export-fixes [options]            Report what happened to the fixes 0 proposed, per repository:
+                                    counts, pull requests, checks, cost and, on request, merged or
+                                    closed
   report-draft [options] <finding>  Write a draft early warning, notification or final report about
                                     one finding (Markdown; nothing is sent)
   help [command]                    display help for command
@@ -760,8 +761,8 @@ Options:
 ### 0security findings export-fixes
 Usage: 0security findings export-fixes [options]
 
-Report what happened to the fixes burndown proposed: counts, pull requests, checks, cost and, on
-request, merged or closed
+Report what happened to the fixes 0 proposed, per repository: counts, pull requests, checks, cost
+and, on request, merged or closed
 
 Options:
   --repo <dir>        Only fixes recorded for this git repository (default: all)

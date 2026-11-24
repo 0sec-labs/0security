@@ -1797,7 +1797,7 @@ The settings are read only from your own policy file. A policy file inside the r
 
 #### findings export-fixes
 
-Report what happened to the fixes burndown proposed: counts, pull requests, checks, cost and, on request, merged or closed
+Report what happened to the fixes 0 proposed: counts, pull requests, checks, cost and, on request, merged or closed
 
 ```text
 0security findings export-fixes [options]
@@ -1807,7 +1807,7 @@ Report what happened to the fixes burndown proposed: counts, pull requests, chec
 0security findings export-fixes --check-merged -o ./fix-report
 ```
 
-The report reads `~/.0/burndown.json`, so it covers fixes made with `0security findings burndown`. A single `0security findings fix` run is not recorded there.
+The report reads `~/.0/burndown.json`. Both `0security findings burndown` and `0security findings fix` record each fix there, on the machine that ran them. A fix made before this release is not in the file.
 
 It writes `fix-outcomes.md` and `fix-outcomes.json` to the folder you pass with `-o`, or prints one to the terminal. Each fix lists the finding id, title, severity, branch, pull request link, whether the checks passed, cost and when it was recorded. The summary counts fixes attempted, proposed, pull requests opened, drafts, checks passed and failed.
 
@@ -1815,7 +1815,17 @@ Without `--check-merged` nothing leaves your machine, and merged, closed and edi
 
 Evidence and proof-of-concept text are never included. Titles are flattened and stripped of mentions, issue references and markup in the Markdown.
 
-The JSON has the schema `0.fix-outcomes.v1`: `generatedAt`, `since`, `repo`, `checkedMerged`, `summary` and `fixes`. A field the run could not know is `null`.
+A repository is the workspace. The report gives the summary once for everything and once per repository, so you can send each team its own figures. In the summary, accepted means merged and rejected means closed without merging.
+
+The JSON has the schema `0.fix-outcomes.v1`. A field the run could not know is `null`.
+
+| Field | Meaning |
+| --- | --- |
+| `generatedAt`, `since`, `repo`, `checkedMerged` | When the report was made, the filters you passed, and whether the code host was asked |
+| `summary` | `attempted`, `proposed`, `pullRequestsOpened`, `draft`, `checksPassed`, `checksFailed`, `costUsd`, `merged`, `closedWithoutMerge`, `stillOpen`, `edited`, `unknown`, `acceptanceRate` |
+| `workspaces` | One entry per repository: `repo` and the same `summary` |
+| `fixes` | One entry per fix: `finding`, `title`, `severity`, `category`, `repo`, `branch`, `pullRequestUrl`, `result`, `draft`, `checksPassing`, `costUsd`, `recordedAt`, `pullRequest` |
+| `fixes[].pullRequest` | With `--check-merged`: `state` (merged, closed, open or unknown), `draft`, `commits`, `editedAfterOpening` |
 
 | Option | Registered default | Description |
 | --- | --- | --- |

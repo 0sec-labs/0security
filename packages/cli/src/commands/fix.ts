@@ -51,6 +51,8 @@ export interface FixDeps extends Pick<ScanDeps, "open" | "err" | "sleep" | "star
   writeFile(path: string, text: string): void;
   /** Record one run in the metrics file (counts and ids only). Absent in tests, so they write nothing. */
   metrics?(record: Omit<RunMetric, "version" | "ci">): void;
+  /** Remember what a standalone fix did, so `findings export-fixes` can report it. Not set for burndown, which keeps its own record. */
+  record?(entry: { repo: string; fingerprint: string; outcome: FixOutcome }): void | Promise<void>;
 }
 
 function resolveRow(rows: Array<Record<string, unknown>>, id: string): Record<string, unknown> {
@@ -100,6 +102,7 @@ const defaults: FixDeps = {
   removeTemp: path => rmSync(path, { recursive: true, force: true }),
   writeFile: (path, text) => writeFileSync(path, text, { mode: 0o600 }),
   metrics: record => appendRunMetric(record),
+  async record(entry) { const { recordStandaloneFix } = await import("./burndown.js"); recordStandaloneFix(entry.repo, entry.fingerprint, entry.outcome); },
 };
 
 export const defaultFixDeps: FixDeps = defaults;
@@ -231,6 +234,9 @@ async function runFixFlow(id: string, options: FixOptions, deps: FixDeps): Promi
     const sandbox = sandboxSpec(options);
     if (options.computer || options.engineUrl) throw new UsageError("0security fix edits files on this machine; run it against the local console.");
     const finding = deps.loadFinding(id, options.dbPath);
+    const remember = async (outcome: FixOutcome): Promise<void> => {
+      try { await deps.record?.({ repo, fingerprint: finding.fingerprint, outcome }); } catch (error) { deps.err(`warning: could not record this fix for export-fixes (${error instanceof Error ? error.message.split("\n")[0]!.slice(0, 120) : "unknown error"})`); }
+    };
     try { repo = (await deps.git(resolve(options.repo ?? process.cwd()), ["rev-parse", "--show-toplevel"])).trim(); }
     catch { throw new UsageError("Run this inside the git repository the finding is in, or pass --repo."); }
     const base = await defaultBase(deps, repo, options.base);
@@ -264,7 +270,9 @@ async function runFixFlow(id: string, options: FixOptions, deps: FixDeps): Promi
     const common = { ...outcomeBase, threadId: thread.id, ...(thread.costUsd !== undefined ? { costUsd: thread.costUsd } : {}), ...(thread.tokens !== undefined ? { tokens: thread.tokens } : {}), ...(thread.budgetExhausted ? { budgetExhausted: true } : {}), ...(thread.timedOut ? { timedOut: true } : {}), ...(thread.reply ? { summary: thread.reply } : {}) };
     if (!status) {
       deps.err(thread.error ?? "The thread made no change; no pull request was opened.");
-      return { ...common, changed: false, committed: false, checks: [], verified: false };
+      const unchanged: FixOutcome = { ...common, changed: false, committed: false, checks: [], verified: false };
+      await remember(unchanged);
+      return unchanged;
     }
 
     const checks: CheckResult[] = [];
@@ -278,7 +286,7 @@ async function runFixFlow(id: string, options: FixOptions, deps: FixDeps): Promi
     await deps.git(tree, [...identity, "commit", "--quiet", "-m", `${commitSubject(finding, conventions)}\n\nFinding ${finding.id}`]);
     committedBranch = true;
     const outcome: FixOutcome = { ...common, changed: true, committed: true, checks, verified };
-    if (!options.pr) { deps.err(`committed on ${branch}; not pushed (--no-pr).`); return outcome; }
+    if (!options.pr) { deps.err(`committed on ${branch}; not pushed (--no-pr).`); await remember(outcome); return outcome; }
 
     // The branch is ours and only ours: never the base, always with a lease so a person's later push is not overwritten.
     const host = selectHost({ run: (args, input) => deps.gh(tree, args, input), git: args => deps.git(tree, args) });
@@ -298,7 +306,9 @@ async function runFixFlow(id: string, options: FixOptions, deps: FixDeps): Promi
       url = await host.createPullRequest({ base: base.name, head: branch, title: pullRequestTitle(finding, conventions), bodyFile, draft });
     }
     if (conventions?.labels?.length || conventions?.reviewers?.length) await decoratePullRequest(host, url, conventions, deps.err);
-    return { ...outcome, pullRequest: { url, created, draft } };
+    const opened: FixOutcome = { ...outcome, pullRequest: { url, created, draft } };
+    await remember(opened);
+    return opened;
   } finally {
     stopConsole?.();
     if (tree && repo) await deps.git(repo, ["worktree", "remove", "--force", tree]).catch(() => undefined);

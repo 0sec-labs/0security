@@ -37,7 +37,10 @@ export interface FixOutcomeSummary {
   acceptanceRate: number | null;
 }
 export interface FixOutcomeReport {
-  schema: typeof FIX_REPORT_SCHEMA; generatedAt: string; since: string | null; repo: string | null; checkedMerged: boolean; summary: FixOutcomeSummary; fixes: FixOutcomeRow[];
+  schema: typeof FIX_REPORT_SCHEMA; generatedAt: string; since: string | null; repo: string | null; checkedMerged: boolean; summary: FixOutcomeSummary;
+  /** The same summary for each repository, so one export gives per-workspace figures. */
+  workspaces: Array<{ repo: string; summary: FixOutcomeSummary }>;
+  fixes: FixOutcomeRow[];
 }
 
 export interface FixLookup { title: string; severity: string; category: string }
@@ -118,7 +121,7 @@ export async function buildFixReport(options: ExportFixesOptions, deps: ExportFi
   }
   return {
     schema: FIX_REPORT_SCHEMA, generatedAt: deps.now().toISOString(), since: options.since ?? null, repo: repo ?? null, checkedMerged: Boolean(options.checkMerged),
-    summary: summarise(rows, Boolean(options.checkMerged)), fixes: rows,
+    summary: summarise(rows, Boolean(options.checkMerged)), workspaces: [...new Set(rows.map(r => r.repo))].sort().map(name => ({ repo: name, summary: summarise(rows.filter(r => r.repo === name), Boolean(options.checkMerged)) })), fixes: rows,
   };
 }
 
@@ -134,9 +137,13 @@ export function renderFixReportMarkdown(report: FixOutcomeReport): string {
     ...(report.checkedMerged
       ? [`- Merged: ${s.merged}`, `- Closed without merging: ${s.closedWithoutMerge}`, `- Still open: ${s.stillOpen}`, `- Edited after opening (more than one commit): ${s.edited}`, `- Could not be read: ${s.unknown}`, `- Acceptance rate (merged of merged and closed): ${pct(s.acceptanceRate)}`]
       : ["- Merged, closed and edited: not measured. Run again with --check-merged to ask the code host."]),
+    ...(report.workspaces.length > 1
+      ? ["", "## By repository", "", "| Repository | Attempted | Proposed | Pull requests | Merged | Closed without merging | Edited | Acceptance rate |", "| --- | --- | --- | --- | --- | --- | --- | --- |",
+        ...report.workspaces.map(w => `| ${cell(w.repo)} | ${w.summary.attempted} | ${w.summary.proposed} | ${w.summary.pullRequestsOpened} | ${w.summary.merged ?? "-"} | ${w.summary.closedWithoutMerge ?? "-"} | ${w.summary.edited ?? "-"} | ${pct(w.summary.acceptanceRate)} |`)]
+      : []),
     "", "## Fixes", "",
   ];
-  if (!report.fixes.length) return `${out.join("\n")}No fix outcomes are recorded yet. Run 0security findings burndown first.\n`;
+  if (!report.fixes.length) return `${out.join("\n")}No fix outcomes are recorded yet. Run 0security findings fix or 0security findings burndown first.\n`;
   out.push("| Finding | Severity | Title | Result | Pull request | Draft | Checks | Cost | State | Recorded |", "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |");
   for (const r of report.fixes) {
     out.push(`| ${cell(shortFindingId(r.finding))} | ${cell(r.severity)} | ${cell(r.title)} | ${cell(r.result)} | ${cell(r.pullRequestUrl ?? r.branch)} | ${r.draft === null ? "-" : r.draft ? "yes" : "no"} | ${r.checksPassing === null ? "-" : r.checksPassing ? "passed" : "failed"} | ${r.costUsd === null ? "-" : `$${r.costUsd.toFixed(4)}`} | ${cell(r.pullRequest ? `${r.pullRequest.state}${r.pullRequest.editedAfterOpening ? ", edited" : ""}` : report.checkedMerged ? "-" : "not checked")} | ${cell(r.recordedAt.slice(0, 19))} |`);
@@ -186,13 +193,13 @@ export async function runExportFixes(options: ExportFixesOptions, deps: ExportFi
 
 export function registerFindingsExportFixesCommand(parent: Command, deps: ExportFixesDeps = defaults): void {
   parent.command("export-fixes")
-    .description("Report what happened to the fixes burndown proposed: counts, pull requests, checks, cost and, on request, merged or closed")
+    .description("Report what happened to the fixes 0 proposed, per repository: counts, pull requests, checks, cost and, on request, merged or closed")
     .option("--repo <dir>", "Only fixes recorded for this git repository (default: all)")
     .option("--since <date>", "Only fixes recorded on or after this date, like 2026-01-31")
     .option("--check-merged", "Ask the code host whether each pull request was merged, closed or edited (one request each)")
     .option("-o, --output <dir>", "Write fix-outcomes.md and fix-outcomes.json into this folder instead of printing")
     .addOption(new Option("--format <format>", "Printed output: markdown or json").choices(["markdown", "json"]).default("markdown"))
-    .addHelpText("after", "\nIt reads ~/.0/burndown.json, so it covers fixes made by 0security findings burndown. Finding evidence is never included.")
+    .addHelpText("after", "\nIt reads ~/.0/burndown.json, so it covers fixes made by 0security findings burndown and 0security findings fix. Finding evidence is never included.")
     .action(async (options: ExportFixesOptions) => {
       try { await runExportFixes(options, deps); }
       catch (error) { finishWithError(error, deps, options.format === "json"); }
