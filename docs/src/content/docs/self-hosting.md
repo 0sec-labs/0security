@@ -175,6 +175,63 @@ Use ECS to avoid managing host operating systems.
 
 ---
 
+### Run on Kubernetes with Helm
+
+The Helm chart in `deploy/helm/zero` runs the console as one StatefulSet replica with one persistent volume. It adds probes, a network policy, an optional ingress and a service account for your cloud identity. The replica count is fixed at 1 and the chart rejects any other value.
+
+Create a Secret with the access token first. Every key in it becomes an environment variable:
+
+```bash
+kubectl create namespace zero
+kubectl -n zero create secret generic zero-secrets \
+  --from-literal=ZERO_ACCESS_TOKEN="$(openssl rand -base64 32)"
+```
+
+Install the chart. This example uses Amazon Bedrock through a pod role:
+
+```bash
+helm install zero deploy/helm/zero -n zero \
+  --set secrets.existingSecret=zero-secrets \
+  --set model.provider=bedrock \
+  --set model.name=global.anthropic.claude-sonnet-4-5-20250929-v1:0 \
+  --set model.awsRegion=eu-central-1 \
+  --set ingress.enabled=true --set ingress.className=nginx --set ingress.host=0.example.com
+helm test zero -n zero
+```
+
+`helm test` starts a pod that calls `/readyz` through the service. Without an ingress, reach the console with `kubectl port-forward svc/zero-zero 48123:80 -n zero`.
+
+Set these values for your environment:
+
+- `trustedProxy`: the addresses of your ingress controller, so `X-Forwarded-*` headers are trusted.
+- `networkPolicy.ingressFrom`: the namespace or pods of your ingress controller. The default is the `ingress-nginx` namespace.
+- `networkPolicy.egressCIDRs`: where the console may connect on port 443. Narrow it to your VPC endpoints for the model.
+- `team.config`: [OIDC sign-in](/server-mode/#oidc-sign-in). Put the client secret in the Secret as `ZERO_TEAM_OIDC_SECRET`.
+- `serviceAccount.annotations`: the IRSA role ARN on EKS, or the client ID for Azure workload identity. For Azure OpenAI without a key, set `model.azureEntra=true`. See [Models](/models/).
+
+`ZERO_ENTERPRISE` is on by default, so only the model endpoint you configured is contacted. Set `enterprise: false` to allow pull request reviews that call GitHub.
+
+Upgrade with `helm upgrade` after a [backup](#scheduled-backups-and-restore) and set `image.tag`. The pod restarts and migrations run on start. To roll back, restore the backup and pin the older tag.
+
+The chart does not set a read-only root file system. The volume is retained when you delete the release. Delete the volume claim yourself to remove the data.
+
+### Create the cluster on EKS with Terraform
+
+`deploy/terraform/eks` creates a VPC, an EKS cluster with the EBS CSI driver and network policy enforcement, an encrypted gp3 storage class, an IAM role for the console service account, and a Helm release of the chart. Create the access token Secret in the namespace first, then apply:
+
+```bash
+cd deploy/terraform/eks
+terraform init
+terraform plan -var region=eu-central-1 -var access_token_secret_name=zero-secrets \
+  -var 'bedrock_model_arns=["arn:aws:bedrock:*::foundation-model/*"]'
+```
+
+Read the plan, then run `terraform apply` with the same variables. Narrow the Bedrock ARNs to the models you use. Set `cluster_endpoint_public_access_cidrs` to your own ranges to open the Kubernetes API. Pass model and OIDC settings through `chart_values`.
+
+What is checked: `terraform validate`, `terraform fmt`, `helm lint`, and the rendered manifests against Kubernetes schemas. Nobody has applied the Terraform to a real AWS account or run the chart on a real cluster. Treat both as untested starting points, like the other AWS sections.
+
+---
+
 ## Azure
 
 ### Run on a VM with Docker Compose

@@ -1,0 +1,10 @@
+apiVersion: v2
+name: zero
+description: The 0 web console on Kubernetes. One replica, one volume.
+type: application
+version: 0.1.0
+appVersion: "0.44.0"
+kubeVersion: ">=1.27.0-0"
+home: https://github.com/0sec-labs/0security
+sources:
+  - https://github.com/0sec-labs/0security
