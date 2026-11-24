@@ -494,7 +494,11 @@ async function writeReport(outcome: ScanOutcome, merged: ReturnType<typeof merge
     const bytes = typeof body === "string" ? new TextEncoder().encode(body) : body;
     deps.writeBytes(options.output, bytes);
     deps.err(`Wrote ${options.output} (${bytes.byteLength} bytes)`);
-  } else deps.out(options.format === "md" && typeof body === "string" && deps.interactive?.() ? renderMarkdownForTerminal(body, { color: !process.env.NO_COLOR }) : body);
+  } else {
+    // The markdown export is bytes; decode it so a terminal gets the readable rendering.
+    const readable = options.format === "md" && deps.interactive?.();
+    deps.out(readable ? renderMarkdownForTerminal(typeof body === "string" ? body : new TextDecoder().decode(body), { color: !process.env.NO_COLOR }) : body);
+  }
   const hint = deps.scopeHint?.(merged, outcome.scope?.entries ?? [], outcome.roots?.[0], options.format === "json" && !options.output);
   if (hint) deps.err(hint);
 }
