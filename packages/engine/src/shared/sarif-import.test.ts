@@ -214,6 +214,11 @@ describe("dynamic scanner output", () => {
         const parsed = parseSarif(log([{ ruleId: "r", message: { text: "m" }, properties: { strix: { target: "http://h.test", endpoint: `/api/x?token=${bearer}&page=2` } } }]));
         expect(parsed.findings[0]!.endpoint).toBe("http://h.test/api/x?token=REDACTED&page=2");
       });
+      it("removes pass, passwd and user_pass values", () => {
+        const text = redactEvidence(`http://h.test/a?pass=${pw}&passwd=${pw}&user_pass=${pw}&page=2`);
+        expect(text).not.toContain(pw);
+        expect(text).toContain("page=2");
+      });
       it("keeps harmless query values and short ids", () => {
         expect(redactEvidence("GET http://h.test/a?page=2&sort=name&id=17")).toBe("GET http://h.test/a?page=2&sort=name&id=17");
       });

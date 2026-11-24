@@ -106,7 +106,7 @@ function repoUriBase(uri: unknown): string {
   try { const decoded = decodeURIComponent(value); return decoded.startsWith("/") || /^[a-z]:[\\/]/i.test(decoded) ? decoded : ""; } catch { return ""; }
 }
 
-const SENSITIVE_PARAM = /token|key|secret|passw|pwd|auth|signature|sig$|session|sid$|cookie|credential|bearer|jwt|otp/i;
+const SENSITIVE_PARAM = /token|key|secret|pass|pwd|auth|signature|sig$|session|sid$|cookie|credential|bearer|jwt|otp/i;
 const SENSITIVE_HEADER = "authorization|proxy-authorization|cookie|set-cookie|x-api-key|api-key|x-auth-token|x-access-token|x-csrf-token|x-amz-security-token";
 /** A long run of URL-safe characters that mixes letters and digits looks like a key or token, whatever the parameter is called. */
 const looksLikeSecret = (value: string): boolean => value.length >= 24 && /^[A-Za-z0-9_\-+/=.]+$/.test(value) && /\d/.test(value) && /[A-Za-z]/.test(value);
