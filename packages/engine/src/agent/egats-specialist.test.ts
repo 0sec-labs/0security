@@ -232,4 +232,60 @@ describe("native-loop specialist skill preload", () => {
     });
     expect(systems[0]).toBe("BASE PROMPT");
   });
+
+  it("allows executing tools in headless egats loops when approvals is omitted", async () => {
+    const { mkdtempSync, realpathSync, readFileSync, rmSync, writeFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const { tmpdir } = await import("node:os");
+    const { getToolsForRole } = await import("./tools.js");
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "egats-no-approvals-")));
+    const targetFile = join(dir, "app.ts");
+    writeFileSync(targetFile, "const v = 1;\n");
+    let turn = 0;
+    try {
+      const state = await runNativeAgentLoop({
+        config: {
+          role: "attack",
+          systemPrompt: "BASE PROMPT",
+          tools: getToolsForRole({ webSearchEnabled: false }),
+          maxTurns: 3,
+          target: "http://target.test",
+          scanId: "egats-no-approvals",
+          scopePath: dir,
+          workspaceRoot: dir,
+          retryCount: 0,
+        },
+        runtime: {
+          type: "api",
+          isAvailable: async () => true,
+          async executeNative() {
+            turn++;
+            return turn === 1
+              ? {
+                  content: [
+                    {
+                      type: "tool_use",
+                      id: "egats-edit-1",
+                      name: "str_replace",
+                      input: { path: "app.ts", old_string: "const v = 1;", new_string: "const v = 2;" },
+                    },
+                  ],
+                  stopReason: "tool_use",
+                  durationMs: 1,
+                }
+              : {
+                  content: [{ type: "text", text: "Done." }],
+                  stopReason: "end_turn",
+                  durationMs: 1,
+                };
+          },
+        },
+        db: null,
+      });
+      expect(state.turnCount).toBe(2);
+      expect(readFileSync(targetFile, "utf8")).toBe("const v = 2;\n");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

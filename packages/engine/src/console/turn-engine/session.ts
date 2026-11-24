@@ -158,6 +158,7 @@ export function createConsoleSession(config: ConsoleSessionConfig): ConsoleSessi
     webSearchEnabled,
     // The executor re-reads this per call, so an approvals change takes effect without rebuilding anything.
     approvals,
+    approveTool: config.approveTool,
     // Information-gathering only — grants no authority (see ConsoleSessionConfig).
     askOperator: config.askOperator,
     agentMessaging: config.agentMessaging,
@@ -565,10 +566,10 @@ export function createConsoleSession(config: ConsoleSessionConfig): ConsoleSessi
     }
     const mcpLoad = await loadMcpServers(config.mcpHost, call);
     if (mcpLoad) {
-      const other = mcpLoad.rest.length ? await executor.execute({ ...call, arguments: { ...call.arguments, names: mcpLoad.rest } }, { signal, assertAuthority }) : null;
+      const other = mcpLoad.rest.length ? await executor.execute({ ...call, arguments: { ...call.arguments, names: mcpLoad.rest } }, { signal, assertAuthority, preapproved: true }) : null;
       return mcpLoadResult(mcpLoad.messages, other);
     }
-    return executor.execute(call, { signal, assertAuthority });
+    return executor.execute(call, { signal, assertAuthority, preapproved: true });
   }
 
   let turnInProgress = false;

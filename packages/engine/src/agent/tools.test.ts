@@ -76,6 +76,7 @@ describe("ToolExecutor", () => {
       targetInfo: {},
       // The tokenised command path and the scoped source-audit allow-list belong to the ask-first policy.
       approvals: "ask",
+      approveTool: async () => true,
     };
     executor = new ToolExecutor(ctx, null);
   });

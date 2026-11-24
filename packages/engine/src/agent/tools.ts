@@ -30,6 +30,7 @@ import type { ToolDefinition, ToolCall, ToolResult, ToolResultMeta, ToolContext 
 import type { NativeRuntime } from "../runtime/types.js";
 import { runBeforeCommand } from "./before-command.js";
 import { hookInputForTool } from "./command-hook.js";
+import { classifyToolRisk } from "./destructive-classifier.js";
 import { fetchScoped } from "../http.js";
 import { buildAuthHeaders } from "./prompts.js";
 import { formatTruncated } from "./output-truncation.js";
@@ -295,7 +296,7 @@ export class ToolExecutor {
    * call persists. Restored (not just cleared) on exit so a nested dispatch
    * can't strand a stale id.
    */
-  async execute(call: ToolCall, opts?: { correlationId?: string; signal?: AbortSignal; assertAuthority?: () => void }): Promise<ToolResult> {
+  async execute(call: ToolCall, opts?: { correlationId?: string; signal?: AbortSignal; assertAuthority?: () => void; preapproved?: boolean }): Promise<ToolResult> {
     const inherited = this._executionContext.getStore();
     const signal = opts?.signal ?? inherited?.signal;
     const ownAuthority = opts?.assertAuthority;
@@ -316,7 +317,7 @@ export class ToolExecutor {
       signal?.throwIfAborted();
       assertAuthority?.();
 
-      const gated = await this._beforeCommandGate(call);
+      const gated = await this._beforeCommandGate(call, opts?.preapproved);
       if (gated) return gated;
 
       if (call.name === "bash" || call.name === "str_replace") this._workerTree.recordLocalEffect(this.ctx.scanId, call.name);
@@ -331,17 +332,42 @@ export class ToolExecutor {
   /**
    * The single `beforeCommand` decision point for the engine path. Every executing tool (see agent/command-hook.ts)
    * passes through here before its handler runs, including repository acquisition (a bash command) and tools that a
-   * delegated agent calls. Only a deny matters here; an ask is answered by the console session before dispatch.
+   * delegated agent calls. Enforces both `deny` decisions and `ask` decisions unless the caller already cleared the
+   * console session approval gate (`preapproved`).
    */
-  private async _beforeCommandGate(call: ToolCall): Promise<ToolResult | null> {
+  private async _beforeCommandGate(call: ToolCall, preapproved = false): Promise<ToolResult | null> {
     const input = hookInputForTool(call.name, (call.arguments ?? {}) as Record<string, unknown>, {
       cwd: this.ctx.scopePath ?? this.ctx.workspaceRoot ?? process.cwd(),
-      thread: {},
+      thread: {
+        id: this.ctx.scanId,
+        ...(this.ctx.approvals !== undefined ? { approvals: this.ctx.approvals } : {}),
+      },
     });
     if (!input) return null;
     const outcome = await runBeforeCommand(input);
-    if (outcome.decision !== "deny") return null;
-    return { success: false, output: null, error: `${call.name} refused: ${outcome.reason}` };
+    if (outcome.decision === "deny") {
+      return { success: false, output: null, error: `${call.name} refused: ${outcome.reason}` };
+    }
+    if (outcome.decision === "ask" && !preapproved) {
+      const approveTool = this.ctx.approveTool;
+      if (!approveTool) {
+        return {
+          success: false,
+          output: null,
+          error: `${call.name} refused: ${outcome.reason} and no operator approval channel is configured`,
+        };
+      }
+      const risk = classifyToolRisk(call);
+      const approved = await approveTool(call, risk);
+      if (!approved) {
+        return {
+          success: false,
+          output: null,
+          error: `${call.name} refused: not approved by the operator (${outcome.reason})`,
+        };
+      }
+    }
+    return null;
   }
 
   private async _dispatch(call: ToolCall): Promise<ToolResult> {
@@ -2130,6 +2156,7 @@ export class ToolExecutor {
           scopePath: this._workspaceIdentity?.scopePath ?? this.ctx.scopePath,
           workspaceIdentity: this._workspaceIdentity,
           approvals: this.ctx.approvals,
+          approveTool: this.ctx.approveTool,
           consoleSession: this.ctx.consoleSession,
           workerPolicy,
           webSearchEnabled: this.ctx.webSearchEnabled,
@@ -2293,6 +2320,7 @@ export class ToolExecutor {
         scopePath: this._workspaceIdentity?.scopePath ?? this.ctx.scopePath,
         workspaceIdentity: this._workspaceIdentity,
         approvals: this.ctx.approvals,
+        approveTool: this.ctx.approveTool,
         consoleSession: this.ctx.consoleSession,
         workerPolicy,
         webSearchEnabled: this.ctx.webSearchEnabled,

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -1744,5 +1744,409 @@ describe("console planner reconnect", () => {
       expect(result.error).toContain("Usage for the disconnected planner request is unknown");
       expect(runtime.calls).toHaveLength(1);
     } finally { await session.cleanup(); }
+  });
+
+  it("enforces approvals: ask and invokes approveTool for effectful tool calls inside spawned subagents", async () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "turn-subagent-approvals-")));
+    const targetFile = join(dir, "target.txt");
+    writeFileSync(targetFile, "ORIGINAL\n");
+    const childRuntime = new ScriptedRuntime([
+      {
+        content: [
+          {
+            type: "tool_use",
+            id: "sub-edit-1",
+            name: "str_replace",
+            input: { path: "target.txt", old_string: "ORIGINAL", new_string: "BYPASSED" },
+          },
+        ],
+        stopReason: "tool_use",
+        durationMs: 1,
+      },
+      endTurn("Child finished."),
+    ]);
+    let parentTurn = 0;
+    const runtime: NativeRuntime = {
+      type: "api",
+      isAvailable: async () => true,
+      forkForSubagent: async () => childRuntime,
+      executeNative: async () => {
+        parentTurn++;
+        return parentTurn === 1
+          ? {
+              content: [
+                {
+                  type: "tool_use",
+                  id: "spawn-1",
+                  name: "spawn_agent",
+                  input: { task: "Edit target.txt", max_turns: 3 },
+                },
+              ],
+              stopReason: "tool_use",
+              durationMs: 1,
+            }
+          : endTurn("Parent finished.");
+      },
+    };
+    const seenCalls: string[] = [];
+    const session = createConsoleSession({
+      runtime,
+      approvals: "ask",
+      refineObjective: false,
+      approveTool: async (call) => {
+        seenCalls.push(call.name);
+        return call.name === "spawn_agent";
+      },
+    });
+    session.configureWorkspace(dir);
+    try {
+      await session.send("Delegate edit");
+      expect(seenCalls).toEqual(["spawn_agent", "str_replace"]);
+      expect(readFileSync(targetFile, "utf8")).toBe("ORIGINAL\n");
+    } finally {
+      await session.cleanup();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("enforces approvals: ask inside read_only subagents after setApprovals('ask') mid-session", async () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "turn-subagent-ro-ask-")));
+    const targetFile = join(dir, "secret.txt");
+    writeFileSync(targetFile, "SAFE\n");
+    const childRuntime = new ScriptedRuntime([
+      {
+        content: [
+          {
+            type: "tool_use",
+            id: "sub-edit-ro",
+            name: "str_replace",
+            input: { path: "secret.txt", old_string: "SAFE", new_string: "TAMPERED" },
+          },
+        ],
+        stopReason: "tool_use",
+        durationMs: 1,
+      },
+      endTurn("Child done."),
+    ]);
+    let parentTurn = 0;
+    const runtime: NativeRuntime = {
+      type: "api",
+      isAvailable: async () => true,
+      forkForSubagent: async () => childRuntime,
+      executeNative: async () => {
+        parentTurn++;
+        return parentTurn === 1
+          ? {
+              content: [
+                {
+                  type: "tool_use",
+                  id: "spawn-ro",
+                  name: "spawn_agent",
+                  input: { task: "Inspect", read_only: true, max_turns: 3 },
+                },
+              ],
+              stopReason: "tool_use",
+              durationMs: 1,
+            }
+          : endTurn("Done.");
+      },
+    };
+    const seenCalls: string[] = [];
+    const session = createConsoleSession({
+      runtime,
+      approvals: "auto",
+      refineObjective: false,
+      approveTool: async (call) => {
+        seenCalls.push(call.name);
+        return call.name === "spawn_agent";
+      },
+    });
+    session.configureWorkspace(dir);
+    session.setApprovals("ask");
+    try {
+      await session.send("Inspect read-only");
+      expect(seenCalls).toEqual(["spawn_agent", "str_replace"]);
+      expect(readFileSync(targetFile, "utf8")).toBe("SAFE\n");
+    } finally {
+      await session.cleanup();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("fails closed inside subagents under approvals: ask when no approveTool handler is wired", async () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "turn-subagent-no-handler-")));
+    const targetFile = join(dir, "guard.txt");
+    writeFileSync(targetFile, "INTACT\n");
+    const { ToolExecutor } = await import("../agent/tools.js");
+    const executor = new ToolExecutor({
+      target: "http://example.invalid",
+      scanId: "child-no-approve",
+      findings: [],
+      attackResults: [],
+      targetInfo: {},
+      scopePath: dir,
+      workspaceRoot: dir,
+      approvals: "ask",
+    });
+    try {
+      const res = await executor.execute({
+        name: "str_replace",
+        arguments: { path: "guard.txt", old_string: "INTACT", new_string: "MODIFIED" },
+      });
+      expect(res.success).toBe(false);
+      expect(res.error).toContain("refused");
+      expect(readFileSync(targetFile, "utf8")).toBe("INTACT\n");
+
+      const approvedExecutor = new ToolExecutor({
+        target: "http://example.invalid",
+        scanId: "child-with-approve",
+        findings: [],
+        attackResults: [],
+        targetInfo: {},
+        scopePath: dir,
+        workspaceRoot: dir,
+        approvals: "ask",
+        approveTool: async () => true,
+      });
+      try {
+        const okRes = await approvedExecutor.execute({
+          name: "str_replace",
+          arguments: { path: "guard.txt", old_string: "INTACT", new_string: "APPROVED" },
+        });
+        expect(okRes.success).toBe(true);
+        expect(readFileSync(targetFile, "utf8")).toBe("APPROVED\n");
+      } finally {
+        await approvedExecutor.cleanup();
+      }
+    } finally {
+      await executor.cleanup();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("enforces approvals: ask across nested subagents (parent -> child -> grandchild)", async () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "turn-nested-subagent-ask-")));
+    const targetFile = join(dir, "nested.txt");
+    writeFileSync(targetFile, "ORIGINAL\n");
+    const grandchildRuntime = new ScriptedRuntime([
+      {
+        content: [
+          {
+            type: "tool_use",
+            id: "grandchild-edit",
+            name: "str_replace",
+            input: { path: "nested.txt", old_string: "ORIGINAL", new_string: "NESTED_BYPASS" },
+          },
+        ],
+        stopReason: "tool_use",
+        durationMs: 1,
+      },
+      endTurn("Grandchild done."),
+    ]);
+    let childForks = 0;
+    const childRuntime: NativeRuntime = {
+      type: "api",
+      isAvailable: async () => true,
+      forkForSubagent: async () => {
+        childForks++;
+        return grandchildRuntime;
+      },
+      executeNative: async (_sys, messages) => {
+        const hasToolResult = messages.some((m) => Array.isArray(m.content) && m.content.some((b) => b.type === "tool_result"));
+        return hasToolResult
+          ? endTurn("Child done.")
+          : {
+              content: [{ type: "tool_use", id: "spawn-grandchild", name: "spawn_agent", input: { task: "Grandchild edit", max_turns: 3 } }],
+              stopReason: "tool_use",
+              durationMs: 1,
+            };
+      },
+    };
+    let parentTurn = 0;
+    const runtime: NativeRuntime = {
+      type: "api",
+      isAvailable: async () => true,
+      forkForSubagent: async () => childRuntime,
+      executeNative: async () => {
+        parentTurn++;
+        return parentTurn === 1
+          ? {
+              content: [{ type: "tool_use", id: "spawn-child", name: "spawn_agent", input: { task: "Spawn grandchild", max_turns: 4 } }],
+              stopReason: "tool_use",
+              durationMs: 1,
+            }
+          : endTurn("Parent done.");
+      },
+    };
+    const seenCalls: string[] = [];
+    const session = createConsoleSession({
+      runtime,
+      approvals: "ask",
+      refineObjective: false,
+      approveTool: async (call) => {
+        seenCalls.push(call.name);
+        return call.name === "spawn_agent";
+      },
+    });
+    session.configureWorkspace(dir);
+    try {
+      await session.send("Run nested subagents");
+      expect(childForks).toBe(1);
+      expect(seenCalls).toEqual(["spawn_agent", "str_replace"]);
+      expect(readFileSync(targetFile, "utf8")).toBe("ORIGINAL\n");
+    } finally {
+      await session.cleanup();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("enforces approvals: ask on persistent workers (initial run + revive) and after checkpoint resume", async () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "turn-persistent-ask-")));
+    const home = realpathSync(mkdtempSync(join(tmpdir(), "turn-persistent-home-")));
+    const targetFile = join(dir, "worker.txt");
+    writeFileSync(targetFile, "INITIAL\n");
+
+    let workerCalls = 0;
+    const persistentChild: NativeRuntime = {
+      type: "api",
+      isAvailable: async () => true,
+      executeNative: async (_sys, messages) => {
+        const last = messages.at(-1);
+        const alreadyRanTool = Array.isArray(last?.content) && last.content.some((b) => b.type === "tool_result");
+        if (alreadyRanTool) return endTurn("Worker step done.");
+        workerCalls++;
+        return {
+          content: [
+            {
+              type: "tool_use",
+              id: `pw-edit-${workerCalls}`,
+              name: "str_replace",
+              input: { path: "worker.txt", old_string: "INITIAL", new_string: `BYPASS_${workerCalls}` },
+            },
+          ],
+          stopReason: "tool_use",
+          durationMs: 1,
+        };
+      },
+    };
+
+    let spawnedAgentId = "";
+    let parentStep = 0;
+    const parentRuntime: NativeRuntime = {
+      type: "api",
+      isAvailable: async () => true,
+      forkForSubagent: async () => persistentChild,
+      executeNative: async (_sys, messages) => {
+        parentStep++;
+        if (parentStep === 1) {
+          return {
+            content: [{ type: "tool_use", id: "pw-spawn", name: "spawn_agent", input: { task: "Edit in background", wait: false, max_turns: 3 } }],
+            stopReason: "tool_use",
+            durationMs: 1,
+          };
+        }
+        if (parentStep === 2) {
+          for (const msg of messages) {
+            if (Array.isArray(msg.content)) {
+              for (const b of msg.content) {
+                if (b.type === "tool_result" && typeof b.content === "string" && b.content.includes("agent_id")) {
+                  const parsed = JSON.parse(b.content) as { agent_id?: string };
+                  if (parsed.agent_id) spawnedAgentId = parsed.agent_id;
+                }
+              }
+            }
+          }
+          return endTurn("Spawned persistent worker.");
+        }
+        if (parentStep === 3) {
+          // Turn 2: revive the parked persistent worker with a follow-up task.
+          return {
+            content: [{ type: "tool_use", id: "pw-revive", name: "spawn_agent", input: { agent_id: spawnedAgentId, task: "Try editing again" } }],
+            stopReason: "tool_use",
+            durationMs: 1,
+          };
+        }
+        return endTurn("Parent finished persistent test.");
+      },
+    };
+
+    const seenCalls: string[] = [];
+    const session = createConsoleSession({
+      runtime: parentRuntime,
+      approvals: "ask",
+      refineObjective: false,
+      agentMessaging: {
+        selfId: "parent-console",
+        selfRole: "parent",
+        operatorId: "operator",
+        siblingPrefix: "peer",
+        siblingChannelEnabled: true,
+        operatorChannelEnabled: true,
+        projectPath: dir,
+        homeDir: home,
+      },
+      approveTool: async (call) => {
+        seenCalls.push(call.name);
+        return call.name === "spawn_agent";
+      },
+    });
+    session.configureWorkspace(dir);
+
+    let checkpoint: ReturnType<typeof session.exportCheckpoint>;
+    try {
+      await session.ready;
+      await session.send("Spawn persistent worker");
+      await vi.waitFor(() => expect(seenCalls.filter((n) => n === "str_replace")).toHaveLength(1), { timeout: 5_000 });
+      await session.send("Revive persistent worker");
+      await vi.waitFor(() => expect(seenCalls.filter((n) => n === "str_replace")).toHaveLength(2), { timeout: 5_000 });
+      expect(readFileSync(targetFile, "utf8")).toBe("INITIAL\n");
+      await session.stopPersistentAgents();
+      checkpoint = session.exportCheckpoint();
+    } finally {
+      await session.cleanup();
+    }
+
+    // Resume from checkpoint under approvals: "ask" and verify delegated edits still require approval.
+    const resumedChild = new ScriptedRuntime([
+      {
+        content: [{ type: "tool_use", id: "resumed-edit", name: "str_replace", input: { path: "worker.txt", old_string: "INITIAL", new_string: "RESUMED_BYPASS" } }],
+        stopReason: "tool_use",
+        durationMs: 1,
+      },
+      endTurn("Resumed child done."),
+    ]);
+    let resumedTurn = 0;
+    const resumedRuntime: NativeRuntime = {
+      type: "api",
+      isAvailable: async () => true,
+      forkForSubagent: async () => resumedChild,
+      executeNative: async () => {
+        resumedTurn++;
+        return resumedTurn === 1
+          ? { content: [{ type: "tool_use", id: "resumed-spawn", name: "spawn_agent", input: { task: "Edit after resume", max_turns: 3 } }], stopReason: "tool_use", durationMs: 1 }
+          : endTurn("Resumed parent done.");
+      },
+    };
+    const resumedCalls: string[] = [];
+    const resumedSession = createConsoleSession({
+      runtime: resumedRuntime,
+      initialCheckpoint: checkpoint!,
+      approvals: "ask",
+      refineObjective: false,
+      approveTool: async (call) => {
+        resumedCalls.push(call.name);
+        return call.name === "spawn_agent";
+      },
+    });
+    try {
+      await resumedSession.ready;
+      await resumedSession.send("Run after resume");
+      expect(resumedCalls).toEqual(["spawn_agent", "str_replace"]);
+      expect(readFileSync(targetFile, "utf8")).toBe("INITIAL\n");
+    } finally {
+      await resumedSession.cleanup();
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 });

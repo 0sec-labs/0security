@@ -434,6 +434,8 @@ export interface ToolContext {
   consoleSession?: boolean;
   /** The "Ask before running commands" setting; `ask` gates effectful tools through approvals. */
   approvals?: ApprovalsChoice;
+  /** Per-action operator approval callback, inherited by delegated subagents. */
+  approveTool?: (call: ToolCall, risk?: ToolRisk) => Promise<boolean>;
   /**
    * Operator question channel for the `ask_operator` tool.
    *
