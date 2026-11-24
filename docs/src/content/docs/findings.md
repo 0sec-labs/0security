@@ -398,7 +398,9 @@ For a Maven or Gradle project, add `--resolve` to get the transitive packages an
 0security sbom generate . --resolve --allow-build-tools -o sbom.cdx.json
 ```
 
-For a Maven fix, 0 changes the version where it is set: the pom, a property, or a `dependencyManagement` entry. For Gradle it changes the version catalog or build script, or adds a constraint for a transitive package. It uses the lowest fixed version from the finding and never invents one. Check the result with your own build:
+For a Maven fix, 0 changes the version where it is set: the pom, a property, or a `dependencyManagement` entry. For Gradle it changes the version catalog or a literal in the build script. It uses the lowest fixed version from the finding and never invents one. It never lowers a version.
+
+When the repository sets the version itself, 0 makes this edit without a model call, and the pull request says so. When the version comes from a parent POM or BOM outside the repository, a variable, a range or a transitive package, a model makes the change with the `java-dependency-fix` skill. Check the result with your own build:
 
 ```bash
 0security findings fix 3f2a --test "mvn -q test"

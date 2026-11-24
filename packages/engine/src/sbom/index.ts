@@ -9,6 +9,7 @@ export { checkBomLicenses, judgeComponent, leafText, licensesToSarif, mergePolic
 export { advisoriesToSarif, advisoriesToText, componentLabel, fixAdvice, sortAdvisories } from "./check-report.js";
 export { checkOutdated, outdatedToText, OUTDATED_CAP, type OutdatedNote, type OutdatedResult } from "./outdated.js";
 export { analyzeMaven, parseXml, type Unresolved } from "./maven.js";
+export { bumpJavaDependency, parseDependencyFinding, type BumpEdit, type BumpRequest, type BumpResult } from "./java-bump.js";
 export { parseCatalog, parseGradleBuild, parseVersionCatalog } from "./gradle.js";
 export { buildToolEnv, mergeComponents, parseDependencyReport, parseGradleTree, parseMavenTree, ResolveFailedError, resolveJvmDependencies, RESOLVE_TIMEOUT_MS, type ResolveOptions, type ResolveResult } from "./resolve.js";
 export { javaUsageToText, parseImports, scanJavaUsage, type JavaImport, type JavaUsage, type JavaUsageReport, type JavaUsageVerdict } from "./java-usage.js";
