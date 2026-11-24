@@ -25,6 +25,7 @@ export const GROUP_DESCRIPTIONS: Readonly<Record<string, string>> = {
   probe: "Send adversarial messages to a live model or agent endpoint and report the ones it obeys",
   sbom: "Generate an SBOM from lockfiles, check one against known advisories, and scan model files",
   findings: "Browse findings and change their status",
+  evidence: "Check that an evidence folder was signed with your key and is unchanged",
   threads: "Start, follow and stop threads",
   sentinels: "Create, run and change Sentinels",
   skills: "Skills and extensions: list, add",
@@ -36,6 +37,7 @@ export const GROUP_DESCRIPTIONS: Readonly<Record<string, string>> = {
 /** The only subcommands `--help` shows for each visible command. Everything else stays registered but hidden (see command-grammar.ts). */
 export const VISIBLE_SUBCOMMANDS: Readonly<Record<string, readonly string[]>> = {
   sbom: ["generate", "check", "licenses", "scan-models"],
+  evidence: ["verify"],
   findings: ["list", "show", "update", "import", "fix", "burndown", "verify", "metrics", "rollup", "evidence", "export-fixes", "report-draft"],
   threads: ["list", "show", "send", "start", "stop"],
   sentinels: ["list", "run", "set"],
@@ -51,6 +53,7 @@ export const TOP_LEVEL_COMMANDS: readonly TopLevelCommand[] = [
   { name: "probe", aliases: [], description: GROUP_DESCRIPTIONS["probe"]!, options: true, arguments: "<url>" },
   { name: "sbom", aliases: [], description: GROUP_DESCRIPTIONS["sbom"]! },
   { name: "findings", aliases: [], description: GROUP_DESCRIPTIONS["findings"]!, options: true },
+  { name: "evidence", aliases: [], description: GROUP_DESCRIPTIONS["evidence"]! },
   { name: "threads", aliases: [], description: GROUP_DESCRIPTIONS["threads"]! },
   { name: "sentinels", aliases: [], description: GROUP_DESCRIPTIONS["sentinels"]! },
   { name: "skills", aliases: [], description: GROUP_DESCRIPTIONS["skills"]! },

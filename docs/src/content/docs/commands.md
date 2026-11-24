@@ -19,9 +19,9 @@ New to 0? Read the [Quickstart](/) first. Settings and environment variables are
 | Automate | [sentinels](#sentinels) · [api](#api) | [Sentinels](/sentinels/) |
 | Set up and extend | [config](#config) · [config doctor](#config-doctor) · [models](#models) · [models connect](#models-connect) · [skills](#skills) · [computers](#computers) | [Models](/models/), [Extensions](/extensions/), [Computers](/computers/) |
 
-## The eleven commands
+## The twelve commands
 
-`0security` with no arguments opens the web console. `0` is a short alias for it. Everything else is one of eleven commands.
+`0security` with no arguments opens the web console. `0` is a short alias for it. Everything else is one of twelve commands.
 
 | Command | What it does | Subcommands |
 | --- | --- | --- |
@@ -30,6 +30,7 @@ New to 0? Read the [Quickstart](/) first. Settings and environment variables are
 | `0security probe` | Send adversarial messages to a live model or agent endpoint and report the ones it obeys. | none |
 | `0security sbom` | Generate an SBOM from lockfiles, check one against known advisories, and check its licenses against a policy. | `generate`, `check`, `licenses` |
 | `0security findings` | Browse findings and change their status. `--format` exports, `--import` loads a report. | `list`, `show`, `update`, `import`, `fix` |
+| `0security evidence` | Check that an evidence folder was signed with your key and is unchanged. | `verify` |
 | `0security threads` | Start, follow and stop threads. | `list`, `show`, `send`, `start`, `stop` |
 | `0security sentinels` | Create, run and change Sentinels. | `list`, `run`, `set` |
 | `0security skills` | Skills and extensions: list, add. | `list`, `add` |
@@ -1585,6 +1586,40 @@ Each component is `imported`, `imported (matched by group only)` or has no impor
 | --- | --- | --- |
 | `--format <format>` | `text` | Output: text or json |
 
+### evidence
+
+Check evidence folders that were signed with `0security findings evidence --sign`. See [Sign an evidence folder](/ci/#sign-an-evidence-folder).
+
+```text
+0security evidence
+```
+
+Subcommands: [verify](#evidence-verify).
+
+#### evidence verify
+
+Check offline that a folder is signed by your key and that no file was changed, added or removed. It needs the public key and no license, and it never uses the network.
+
+```text
+0security evidence verify [options] <folder>
+```
+
+```bash
+0security evidence verify ./evidence --pub evidence-key.pub.pem
+```
+
+The command exits 0 when the signature and every file match, 1 when something does not, and 2 for a usage error. A valid result shows the files are unchanged since the holder of the key signed them. It does not show the findings are right.
+
+| Argument | Required | Description |
+| --- | --- | --- |
+| `folder` | Yes |  |
+
+| Option | Registered default | Description |
+| --- | --- | --- |
+| `--pub <file>` | — | Public key (PEM) that matches the signing key (required) |
+| `--json` | — | Print the result as JSON |
+| `--format <format>` | — | Output: text or json Choices: text, json. |
+
 ### findings
 
 Browse and manage persisted findings
@@ -2038,8 +2073,9 @@ The folder holds:
 - `sbom.cdx.json`, from the lockfiles in `--repo`
 - `fixes.md`: the fix branches that exist in `--repo`
 - `advisories.json` from the public OSV database, only with `--check-advisories`
+- `evidence.dsse.json`, only with `--sign`: your signature over the SHA-256 of every other file
 
-That lookup is the only network use. Evidence and proof-of-concept bodies are left out unless you pass `--include-evidence`. With it, the folder can hold working exploit details.
+`--sign <key>` signs the folder with your own Ed25519 private key (PEM). It needs an enterprise license with `evidence-signing`. See [Sign an evidence folder](/ci/#sign-an-evidence-folder). That lookup is the only network use. Evidence and proof-of-concept bodies are left out unless you pass `--include-evidence`. With it, the folder can hold working exploit details.
 
 The command writes only those file names. It refuses a folder that holds other files, a symbolic link, or a folder inside the repository, and it removes a file of its own from an earlier run that it did not write this time.
 
@@ -2054,6 +2090,7 @@ The README makes no claim of compliance. The folder is evidence for your own rec
 | `--repo <folder>` | — | Repository the findings are about: adds the SBOM, the commit and the fix branches |
 | `--check-advisories` | — | Look the SBOM components up in the public OSV database (the only network use) |
 | `--include-evidence` | — | Also write evidence and proof-of-concept bodies (can contain working exploit details) |
+| `--sign <key>` | — | Sign the folder with your Ed25519 private key (PEM file). Needs an enterprise license |
 | `--scan <id>` | — | Only the findings of this scan |
 | `--name <name>` | — | Name of the application the SBOM describes (default: the repository folder's name) |
 | `--db-path <path>` | — | Path to SQLite database |

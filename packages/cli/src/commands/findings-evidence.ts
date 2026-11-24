@@ -10,7 +10,7 @@
  */
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, unlinkSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, unlinkSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 import type { Command } from "commander";
 import { checkBomAgainstOsv, exportReport, generateSbom, type Advisory, type Bom } from "@0/engine";
@@ -18,11 +18,13 @@ import { attackerImpactSentence, VERSION, type Finding, type ScanReport } from "
 import { osecDB } from "@0/engine/storage";
 import { findingDatabasePaths, loadFindingFocus } from "../finding-focus.js";
 import { mergeFindingSnapshots, emptyFindingSnapshot } from "../web/report-artifacts.js";
+import { evidenceSigningRefusal, signEvidence } from "../enterprise-bridge.js";
+import { buildEvidenceStatement, EVIDENCE_SIGNATURE_FILE } from "./evidence-signature.js";
 import { BRANCH_PREFIX, fixBranchName } from "./fix.js";
 import { finishWithError, UsageError } from "./output.js";
 
 /** The only files this command writes. */
-export const EVIDENCE_FILES = ["README.md", "manifest.json", "findings.json", "findings.md", "findings.sarif", "sbom.cdx.json", "advisories.json", "fixes.md"] as const;
+export const EVIDENCE_FILES = ["README.md", "manifest.json", "findings.json", "findings.md", "findings.sarif", "sbom.cdx.json", "advisories.json", "fixes.md", EVIDENCE_SIGNATURE_FILE] as const;
 
 export interface EvidenceFindingRecord {
   id: string; fingerprint: string | null; title: string; severity: string; category: string; status: string;
@@ -47,10 +49,14 @@ export interface EvidenceDeps {
   fetch?: typeof fetch;
   now(): Date;
   version(): string;
+  /** Signed bundles (paid). Defaults to the license-gated enterprise code. */
+  signing?: { refusal(): string | null; sign(statementJson: string, privateKeyPem: string): unknown };
 }
 
 export interface EvidenceOptions {
   repo?: string; checkAdvisories?: boolean; includeEvidence?: boolean; dbPath?: string; scan?: string; name?: string;
+  /** Path of the customer's Ed25519 private key (PEM). Signs the folder. Needs the evidence-signing license. */
+  sign?: string;
 }
 
 const iso = (ms: number): string | null => (Number.isFinite(ms) && ms > 0 ? new Date(ms).toISOString() : null);
@@ -133,9 +139,20 @@ const sha256 = (text: string): string => createHash("sha256").update(text).diges
 
 interface Produced { name: (typeof EVIDENCE_FILES)[number]; text: string }
 
-export interface EvidenceResult { folder: string; files: Array<{ name: string; bytes: number; sha256: string }>; findings: number; warnings: string[] }
+const MAX_KEY_BYTES = 16 * 1024;
 
-function readme(args: { version: string; generatedAt: string; commit: string | null; dirty: boolean; repo: string | undefined; models: string[]; counts: { findings: number; components: number | null }; hasSbom: boolean; sbomNote: string; advisories: "checked" | "not-requested"; includeEvidence: boolean; unreadable: string[]; files: Array<{ name: string; sha256: string }> }): string {
+/** Reads the operator-named private key file. Never echoes its content. */
+function readKeyFile(path: string, warnings: string[]): string {
+  let info;
+  try { info = statSync(path); } catch { throw new UsageError(`--sign key file '${path}' was not found.`); }
+  if (!info.isFile() || info.size > MAX_KEY_BYTES) throw new UsageError(`--sign '${path}' is not a key file. Give the path of an Ed25519 private key in PEM format.`);
+  if (process.platform !== "win32" && (info.mode & 0o077) !== 0) warnings.push(`The key file '${path}' can be read by other users. Restrict it with: chmod 600 ${path}`);
+  try { return readFileSync(path, "utf8"); } catch { throw new UsageError(`--sign key file '${path}' cannot be read.`); }
+}
+
+export interface EvidenceResult { folder: string; files: Array<{ name: string; bytes: number; sha256: string }>; findings: number; signed: boolean; warnings: string[] }
+
+function readme(args: { version: string; generatedAt: string; commit: string | null; dirty: boolean; repo: string | undefined; models: string[]; counts: { findings: number; components: number | null }; hasSbom: boolean; signed: boolean; sbomNote: string; advisories: "checked" | "not-requested"; includeEvidence: boolean; unreadable: string[]; files: Array<{ name: string; sha256: string }> }): string {
   const row = (file: string, shows: string, notShows: string) => `| \`${file}\` | ${shows} | ${notShows} |`;
   return `${[
     "# Security evidence",
@@ -161,6 +178,7 @@ function readme(args: { version: string; generatedAt: string; commit: string | n
     row("findings.sarif", "The findings as SARIF 2.1.0 for code scanning tools and auditors.", "Scan coverage. Which files and checks were never looked at is not in this file."),
     row("sbom.cdx.json", args.hasSbom ? "A CycloneDX component list read from the lockfiles in the repository." : `Not written. ${args.sbomNote}`, "What is actually deployed. It is read from lockfiles as text, so it misses vendored code, system packages and anything built outside a lockfile. Nothing was installed or run."),
     row("advisories.json", args.advisories === "checked" ? "Known advisories for the SBOM components, from the public OSV database on the date above." : "Not written (`--check-advisories` was not passed).", "Vulnerabilities published after that date, or ones no database knows. An empty result is not a clean bill of health."),
+    ...(args.signed ? [row(EVIDENCE_SIGNATURE_FILE, "A signature, made with a key the customer holds, over the SHA-256 of every other file in this folder (DSSE envelope around an in-toto statement). `0security evidence verify <folder> --pub <public key>` checks it offline.", "Who the key holder is, or that the findings are right. A signature shows these files are unchanged since the key holder signed them.")] : []),
     row("fixes.md", "Fix branches that exist in the repository for these findings.", "That a fix is correct, reviewed, merged or released. Pull request links are not stored by `0security` and are not listed."),
     "",
     "## Checksums",
@@ -205,6 +223,16 @@ function write(target: string, name: string, text: string): void {
 
 export async function buildEvidence(folder: string, options: EvidenceOptions, deps: EvidenceDeps): Promise<EvidenceResult> {
   const target = prepareFolder(folder);
+  const signing = deps.signing ?? { refusal: evidenceSigningRefusal, sign: signEvidence };
+  let keyPem: string | undefined;
+  const warnings: string[] = [];
+  if (options.sign) {
+    // Everything that can refuse runs before anything is written: license, then the key.
+    const refusal = signing.refusal();
+    if (refusal) throw new UsageError(refusal);
+    keyPem = readKeyFile(options.sign, warnings);
+    try { signing.sign("{}", keyPem); } catch (error) { throw new UsageError(error instanceof Error ? error.message : "The key file cannot sign."); }
+  }
   let repo: string | undefined;
   if (options.repo) {
     repo = resolve(options.repo);
@@ -223,7 +251,6 @@ export async function buildEvidence(folder: string, options: EvidenceOptions, de
   const entries = [...input.findings].sort((a, b) => (SEVERITY_ORDER.indexOf(a.finding.severity) - SEVERITY_ORDER.indexOf(b.finding.severity)) || a.finding.id.localeCompare(b.finding.id));
   const sorted: EvidenceInput = { findings: entries, unreadable: input.unreadable };
   const records = entries.map(entry => recordOf(entry, Boolean(options.includeEvidence)));
-  const warnings: string[] = [];
 
   let bom: Bom | undefined;
   let sbomNote = "No repository was given (`--repo <folder>`).";
@@ -255,23 +282,30 @@ export async function buildEvidence(folder: string, options: EvidenceOptions, de
     ...(advisories ? [{ name: "advisories.json" as const, text: `${JSON.stringify({ source: "OSV (https://api.osv.dev)", checkedAt: generatedAt, components: advisories.checked, advisoryCount: advisories.advisories.length, ...(advisories.withoutDetails ? { listedByIdOnly: advisories.withoutDetails } : {}), advisories: advisories.advisories }, null, 2)}\n` }] : []),
     { name: "fixes.md", text: fixesMarkdown(records, repo, deps.git) },
   ];
+  const scanIds = [...new Set(entries.map(entry => entry.scanId).filter((id): id is string => Boolean(id)))].sort();
   const hashes = produced.map(file => ({ name: file.name, sha256: sha256(file.text) }));
   const manifest = {
-    generatedAt, tool: { name: "0", version: deps.version() }, models, includeEvidence: Boolean(options.includeEvidence),
+    generatedAt, tool: { name: "0", version: deps.version() }, models, scanIds, includeEvidence: Boolean(options.includeEvidence),
     repository: repo ? { name: repo.split(sep).pop() ?? "", commit, uncommittedChanges: dirty } : null,
     counts: { findings: records.length, sbomComponents: bom ? bom.components.length : null, advisories: advisories ? advisories.advisories.length : null },
     files: hashes,
   };
   const manifestText = `${JSON.stringify(manifest, null, 2)}\n`;
-  const readmeText = readme({ version: deps.version(), generatedAt, commit, dirty, repo, models, counts: { findings: records.length, components: bom ? bom.components.length : null }, hasSbom: Boolean(bom), sbomNote, advisories: advisories ? "checked" : "not-requested", includeEvidence: Boolean(options.includeEvidence), unreadable: input.unreadable, files: [{ name: "manifest.json", sha256: sha256(manifestText) }, ...hashes] });
+  const readmeText = readme({ version: deps.version(), generatedAt, commit, dirty, repo, models, counts: { findings: records.length, components: bom ? bom.components.length : null }, hasSbom: Boolean(bom), signed: Boolean(keyPem), sbomNote, advisories: advisories ? "checked" : "not-requested", includeEvidence: Boolean(options.includeEvidence), unreadable: input.unreadable, files: [{ name: "manifest.json", sha256: sha256(manifestText) }, ...hashes] });
 
   mkdirSync(target, { recursive: true });
   const all: Produced[] = [{ name: "README.md", text: readmeText }, { name: "manifest.json", text: manifestText }, ...produced];
+  if (keyPem) {
+    const statement = buildEvidenceStatement(all.map(file => ({ name: file.name, sha256: sha256(file.text) })), {
+      signedAt: deps.now().toISOString(), generatedAt, tool: manifest.tool, models, scanIds, repository: manifest.repository, counts: manifest.counts,
+    });
+    all.push({ name: EVIDENCE_SIGNATURE_FILE, text: `${JSON.stringify(signing.sign(statement, keyPem), null, 2)}\n` });
+  }
   for (const file of all) write(target, file.name, file.text);
   // A file left by an earlier run that this run did not produce would contradict the README.
   for (const name of EVIDENCE_FILES) if (!all.some(file => file.name === name)) { try { if (lstatSync(join(target, name)).isFile()) unlinkSync(join(target, name)); } catch { /* not there */ } }
   if (options.includeEvidence) warnings.push("Evidence and proof-of-concept bodies are included. They can contain working exploit details: do not publish or share the folder without reading them.");
-  return { folder: target, files: all.map(file => ({ name: file.name, bytes: Buffer.byteLength(file.text), sha256: sha256(file.text) })), findings: records.length, warnings };
+  return { folder: target, files: all.map(file => ({ name: file.name, bytes: Buffer.byteLength(file.text), sha256: sha256(file.text) })), findings: records.length, signed: Boolean(keyPem), warnings };
 }
 
 const defaults: EvidenceDeps = {
@@ -312,6 +346,7 @@ export function registerFindingsEvidenceCommand(parent: Command, deps: EvidenceD
     .option("--repo <folder>", "Repository the findings are about: adds the SBOM, the commit and the fix branches")
     .option("--check-advisories", "Look the SBOM components up in the public OSV database (the only network use)")
     .option("--include-evidence", "Also write evidence and proof-of-concept bodies (can contain working exploit details)")
+    .option("--sign <key>", "Sign the folder with your Ed25519 private key (PEM file). Needs an enterprise license")
     .option("--scan <id>", "Only the findings of this scan")
     .option("--name <name>", "Name of the application the SBOM describes (default: the repository folder's name)")
     .option("--db-path <path>", "Path to SQLite database")
@@ -323,7 +358,7 @@ export function registerFindingsEvidenceCommand(parent: Command, deps: EvidenceD
         const result = await buildEvidence(folder, { ...options, dbPath: options.dbPath ?? merged.dbPath, scan: options.scan ?? merged.scan }, deps);
         for (const warning of result.warnings) deps.err(`warning: ${warning}`);
         if (options.json) process.stdout.write(`${JSON.stringify({ ok: true, ...result }, null, 2)}\n`);
-        else deps.err(`Wrote ${result.files.length} files for ${result.findings} finding${result.findings === 1 ? "" : "s"} to ${result.folder}. This is evidence, not a compliance claim.`);
+        else deps.err(`Wrote ${result.files.length} files for ${result.findings} finding${result.findings === 1 ? "" : "s"} to ${result.folder}${result.signed ? `, signed (${EVIDENCE_SIGNATURE_FILE})` : ""}. This is evidence, not a compliance claim.`);
       } catch (error) { finishWithError(error, deps, options.json); }
     });
 }

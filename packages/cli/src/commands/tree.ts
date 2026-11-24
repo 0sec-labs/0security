@@ -49,6 +49,7 @@ import { registerAuditLogCommand } from "./audit-log.js";
 import { registerScanCommand } from "./scan.js";
 import { registerThreatModelCommand } from "./threat-model.js";
 import { registerSbomCommand } from "./sbom.js";
+import { registerEvidenceCommand } from "./evidence.js";
 import { registerProbeCommand } from "./probe.js";
 
 export function registerCommandTree(program: Command): void {
@@ -59,6 +60,7 @@ export function registerCommandTree(program: Command): void {
   // Evidence.
   registerReportsCommand(program);
   registerFindingsCommand(program);
+  registerEvidenceCommand(program);
   nest(program, "findings", [registerFindingsExportCommand, registerFindingsKeysCommand, registerFindingsImportCommand, (parent) => registerFixCommand(parent), (parent) => registerBurndownCommand(parent), (parent) => registerVerifyCommand(parent), (parent) => registerFindingsUploadCommand(parent), (parent) => registerFindingsIssuesCommand(parent), (parent) => registerFindingsReportDraftCommand(parent), (parent) => registerFindingsEvidenceCommand(parent), (parent) => registerFindingsExportFixesCommand(parent), (parent) => registerFindingsMetricsCommand(parent), (parent) => registerFindingsRollupCommand(parent)]);
   registerWorkflowCommand(program); // also registers `chats` and `automation`
   registerMissionsCommand(program);

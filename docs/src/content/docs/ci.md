@@ -749,6 +749,34 @@ To keep a record for each release, run the command in a job and upload the folde
 
 The folder shows what was found, how it was triaged and which components are listed. It does not show that the code has no other weaknesses, that a fix is correct or released, what is deployed, or that any obligation is met. 0 does not store pull request links, so `fixes.md` lists branches only.
 
+### Sign an evidence folder
+
+A signature shows the files are unchanged since you signed them. Signing is an enterprise feature (`evidence-signing`) and uses a key you hold. 0 never sees it. Create an Ed25519 key pair once:
+
+```bash
+openssl genpkey -algorithm ed25519 -out evidence-key.pem
+openssl pkey -in evidence-key.pem -pubout -out evidence-key.pub.pem
+chmod 600 evidence-key.pem
+```
+
+Sign the folder:
+
+```bash
+0security findings evidence ./evidence --repo . --sign evidence-key.pem
+```
+
+The command adds `evidence.dsse.json`. It is a [DSSE](https://github.com/secure-systems-lab/dsse) envelope around an in-toto statement. The statement lists every file with its SHA-256, and records the signing time, the 0 version, the models, the scan ids and the git commit. DSSE is a published format that other tools can read, so an auditor does not need 0 to check it.
+
+Check the folder with the public key. This is free, works offline and needs no license, also after your license has expired:
+
+```bash
+0security evidence verify ./evidence --pub evidence-key.pub.pem
+```
+
+The check fails when a file was changed, added or removed, when the signature was removed, or when the folder was signed with another key. Keep the private key out of the repository and out of the evidence folder.
+
+A signature does not say the findings are right or complete. Anyone who holds your private key can sign for you. Store the public key where the auditor can get it from you directly, not from the folder.
+
 ### Draft a report
 
 For an actively exploited vulnerability, write the draft text for one stage:
