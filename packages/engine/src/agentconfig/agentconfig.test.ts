@@ -180,3 +180,19 @@ describe("sbom generate --ai finds launchers in more places", () => {
     expect(risk("mcp:opencode.json:o")).toBeDefined();
   });
 });
+
+describe("printed text is safe", () => {
+  it("does not echo credentials in commands or URLs", () => {
+    const token = fakeGithubToken(), opaque = fakeOpaqueToken();
+    const dir = repo({ ".mcp.json": json({ mcpServers: { a: { command: "node", args: ["s.js", `--token=${token}`] }, b: { url: `https://user:${opaque}@mcp.example.com/mcp?access_token=${opaque}` }, c: { command: "npx", args: ["-y", `https://x:${opaque}@host.example.com/pkg.tgz`] } } }) });
+    const report = scanAgentConfig(dir);
+    const everything = JSON.stringify(report) + agentConfigToText(report);
+    expect(everything).not.toContain(token);
+    expect(everything).not.toContain(opaque);
+  });
+  it("shows control characters in a path as spaces in the text report", () => {
+    const report = scanAgentConfig(repo({ [`.claude/commands/x\u001b[2Jy.md`]: `a${cp(0x200b)}\n` }));
+    expect(report.findings.length).toBeGreaterThan(0);
+    expect(agentConfigToText(report)).not.toContain("\u001b");
+  });
+});

@@ -2,7 +2,7 @@
  * Reads the files AI coding tools take instructions and configuration from, as text, and reports what could steer or endanger an agent.
  * Nothing is executed, imported or downloaded, there is no model call and no network use, and the walk stays inside the folder.
  */
-import { closeSync, fstatSync, lstatSync, openSync, readSync, realpathSync, readdirSync } from "node:fs";
+import { opendirSync, closeSync, fstatSync, lstatSync, openSync, readSync, realpathSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { scanInjection } from "./injection.js";
 import { extractMcpServers, scanMcp } from "./mcp.js";
@@ -105,9 +105,15 @@ export function scanAgentConfig(path: string, options: ScanOptions = {}): AgentC
   const walk = (dir: string, depth: number): void => {
     if (report.truncated) return;
     let names: string[];
-    try { names = readdirSync(dir).sort(); } catch { return; }
+    // Read entries one at a time so a folder with millions of files cannot be loaded whole.
+    names = [];
+    try {
+      const handle = opendirSync(dir);
+      try { for (let entry = handle.readSync(); entry; entry = handle.readSync()) { if (++entries > MAX_ENTRIES) { report.truncated = true; break; } names.push(entry.name); } } finally { handle.closeSync(); }
+    } catch { return; }
+    names.sort();
     for (const name of names) {
-      if (++entries > MAX_ENTRIES || report.filesScanned.length + report.skipped.length >= MAX_FILES) { report.truncated = true; return; }
+      if (report.filesScanned.length + report.skipped.length >= MAX_FILES) { report.truncated = true; return; }
       const full = join(dir, name);
       const rel = relative(root, full).split(sep).join("/");
       let info;

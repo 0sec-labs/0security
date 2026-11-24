@@ -1,3 +1,4 @@
+import { scrub } from "./secrets.js";
 import { ruleOf, type AgentConfigFinding, type AgentConfigSeverity } from "./rules.js";
 
 /** Makes text safe to print and to send to GitHub: no control characters, no HTML, no mentions, bounded length. */
@@ -11,7 +12,7 @@ export function finding(ruleId: string, file: string, line: number, snippet: str
   const rule = ruleOf(ruleId);
   return {
     ruleId, severity: options.severity ?? rule.severity, heuristic: rule.heuristic, file, line: Math.max(1, line),
-    ...(options.column ? { column: options.column } : {}), snippet: neutralize(snippet), message: neutralize(message, 400), cwe: rule.cwe, explanation: rule.explanation, fix: rule.fix,
+    ...(options.column ? { column: options.column } : {}), snippet: neutralize(scrub(snippet)), message: neutralize(scrub(message), 400), cwe: rule.cwe, explanation: rule.explanation, fix: rule.fix,
   };
 }
 

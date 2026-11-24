@@ -203,7 +203,7 @@ export function runAgentConfig(path: string, options: AgentConfigOptions, deps: 
     : format === "sarif" ? `${JSON.stringify(agentConfigToSarif(report.findings, { toolVersion: VERSION, uri: toCwd }), null, 2)}\n` : agentConfigToText(report);
   if (options.output) { deps.write(resolve(options.output), body); deps.err(`Wrote ${options.output}`); } else deps.out(body);
   const names: Record<string, string> = { "too-large": "larger than 1 MB", "symlink-outside": "a symbolic link that leaves the folder", "not-a-regular-file": "not a regular file", unreadable: "could not be read", "not-valid-json": "not valid JSON" };
-  for (const item of report.skipped.slice(0, 20)) deps.err(`not scanned: ${item.file} (${names[item.reason]})`);
+  for (const item of report.skipped.slice(0, 20)) deps.err(`not scanned: ${item.file.replace(/[^\x20-\x7e]/g, "?")} (${names[item.reason]})`);
   if (report.skipped.length > 20) deps.err(`and ${report.skipped.length - 20} more files not scanned.`);
   if (report.truncated) deps.err("The folder was too large to walk completely; some files were not looked at.");
   if (format !== "text" || options.output) deps.err(`${report.findings.length} finding${report.findings.length === 1 ? "" : "s"} in ${report.filesScanned.length} agent configuration file${report.filesScanned.length === 1 ? "" : "s"}.`);

@@ -1,11 +1,12 @@
 import type { AgentConfigFinding } from "./rules.js";
+import { neutralize } from "./util.js";
 import type { AgentConfigReport } from "./scan.js";
 
 /** The report as plain text: one block per finding, then a summary line. */
 export function agentConfigToText(report: AgentConfigReport): string {
   const lines: string[] = [];
   for (const item of report.findings) {
-    lines.push(`${item.file}:${item.line}${item.column ? `:${item.column}` : ""}  ${item.severity}${item.heuristic ? " (heuristic)" : ""}  ${item.ruleId}`);
+    lines.push(`${neutralize(item.file, 300)}:${item.line}${item.column ? `:${item.column}` : ""}  ${item.severity}${item.heuristic ? " (heuristic)" : ""}  ${item.ruleId}`);
     lines.push(`    ${item.message}`);
     if (item.snippet) lines.push(`    > ${item.snippet}`);
     lines.push(`    fix: ${item.fix}`);

@@ -50,3 +50,17 @@ export function looksLikeSecret(raw: string): SecretMatch | undefined {
   if (value.length >= 20 && /^[A-Za-z0-9+/=_.~-]+$/.test(value) && /\d/.test(value) && /[A-Za-z]/.test(value) && entropy(value) >= 3.5) return { kind: "high-entropy value", redacted: redact(value) };
   return undefined;
 }
+
+/** Text that is safe to print: URL credentials and query values, provider-shaped keys and high-entropy words are replaced by a redacted form. */
+export function scrub(text: string): string {
+  return text
+    .replace(/\b([a-z][a-z0-9+.-]*:\/\/)[^\s/@]*@/gi, "$1***@")
+    .replace(/(\bhttps?:\/\/[^\s?#"']*)\?[^\s#"']*/gi, "$1?...")
+    .split(/(\s+)/)
+    .map(part => {
+      const bare = part.replace(/^[^=]*=/, "");
+      const secret = part.length >= 8 ? looksLikeSecret(bare) : undefined;
+      return secret ? `${part.slice(0, part.length - bare.length)}${secret.redacted}` : part;
+    })
+    .join("");
+}
