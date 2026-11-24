@@ -3,8 +3,10 @@
 # Usage: cli-demo-setup.sh <empty-directory>
 set -euo pipefail
 dir="${1:?usage: cli-demo-setup.sh <empty-directory>}"
-mkdir -p "$dir"
-cd "$dir"
+[[ ! -L "$dir" ]] || { echo "refusing a symlink: $dir" >&2; exit 1; }
+mkdir -p -- "$dir"
+[[ -z "$(ls -A -- "$dir")" ]] || { echo "not empty: $dir" >&2; exit 1; }
+cd -- "$dir"
 
 cat > package.json <<'JSON'
 {
