@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LlmApiRuntime } from "../llm-api.js";
-import { azureEntraEnabled, azureEntraSource, createAzureEntraTokenProvider } from "./azure-entra.js";
+import { assertAzureEntraEndpoint, azureEntraEnabled, azureEntraSource, createAzureEntraTokenProvider } from "./azure-entra.js";
 import { detectProvider } from "./provider-detect.js";
 
 // Response bodies follow the documented shapes:
@@ -133,6 +133,27 @@ describe("azure openai with entra id through the runtime", () => {
   it("detects azure with no key when entra is on", () => {
     const detected = detectProvider(undefined, "gpt-deploy", env, "azure");
     expect(detected.provider).toBe("azure");
+  });
+
+  it("never falls back to OPENAI_BASE_URL or the public OpenAI endpoint", () => {
+    const { AZURE_OPENAI_BASE_URL: _drop, ...rest } = env;
+    expect(() => detectProvider(undefined, "gpt-deploy", { ...rest, OPENAI_BASE_URL: "https://gateway.example.test/v1" }, "azure")).toThrow(/no configured credentials/);
+    expect(() => detectProvider(undefined, "gpt-deploy", rest, "azure")).toThrow(/no configured credentials/);
+    expect(detectProvider(undefined, "gpt-deploy", { ...rest, ZERO_SELECTED_PROVIDER: undefined, OPENAI_BASE_URL: "https://gateway.example.test/v1" }).baseUrl).not.toContain("gateway.example.test");
+  });
+
+  it("sends the token only to an Azure endpoint over https", async () => {
+    expect(() => assertAzureEntraEndpoint("https://tenant-resource.openai.azure.com/openai/v1")).not.toThrow();
+    expect(() => assertAzureEntraEndpoint("https://eu.cognitiveservices.azure.com/openai/v1")).not.toThrow();
+    for (const bad of ["https://api.openai.com/v1", "http://tenant-resource.openai.azure.com/openai/v1", "https://openai.azure.com.evil.test/v1", "", "not a url"]) {
+      expect(() => assertAzureEntraEndpoint(bad)).toThrow(/Entra ID sign-in/);
+    }
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(Response.json(ENTRA_BODY));
+    vi.stubGlobal("fetch", fetchMock);
+    const rt = new LlmApiRuntime({ type: "api", timeout: 1000, provider: "azure", model: "gpt-deploy", env: { ...env, AZURE_OPENAI_BASE_URL: "https://api.openai.com/v1" } });
+    const result = await rt.executeNative("sys", [{ role: "user" as const, content: [{ type: "text" as const, text: "hi" }] }], []);
+    expect(result.error).toMatch(/only to an Azure OpenAI endpoint/);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("sends the bearer token and no api-key header, and reuses the token", async () => {

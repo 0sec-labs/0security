@@ -18,7 +18,7 @@ import { CODEX_API_ENDPOINT, CODEX_PROTOCOL_HEADERS, FREE_OPENROUTER_MODEL, PROC
 import { getFallbackChain, resolveFailoverProvider, type ApiProviderConnection, type FallbackEntry } from "./fallback.js";
 import { readChatGptCodexAuthFile, readChatGptCodexEnv, refreshChatGptCodexAuthState, resolveChatGptCodexAuthState, type ChatGptCodexAuthState } from "./codex-auth.js";
 import { parseCodexAzureConfig } from "./provider-config.js";
-import { azureEntraEnabled, createAzureEntraTokenProvider, type AzureEntraTokenProvider } from "./azure-entra.js";
+import { assertAzureEntraEndpoint, azureEntraEnabled, createAzureEntraTokenProvider, type AzureEntraTokenProvider } from "./azure-entra.js";
 import { AUTO_MODEL_SENTINEL, DEFAULT_PROVIDER_MODELS, detectProvider, providerForModel, type ApiRuntimeDiagnostics } from "./provider-detect.js";
 
 let googleFunctionCallSequence = 0;
@@ -923,6 +923,7 @@ export class LlmApiRuntime implements Runtime, NativeRuntime {
       return siwcHeaders(this.siwcConnection, signal);
     }
     if (this.provider === "azure" && azureEntraEnabled(this.env)) {
+      assertAzureEntraEndpoint(this.baseUrl);
       this.entraTokens ??= createAzureEntraTokenProvider({ env: this.env });
       delete base["api-key"];
       base["Authorization"] = `Bearer ${await this.entraTokens.getToken(signal)}`;

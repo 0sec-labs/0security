@@ -24,6 +24,12 @@ export interface ApiRuntimeDiagnostics {
  * picking one provider for the whole process. Returns undefined → fall back to
  * the env-priority chain (existing behaviour).
  */
+/** With Entra ID there is no key to leak, but a token must never reach the public OpenAI default or an unrelated OPENAI_BASE_URL. */
+function azureBaseUrl(env: Readonly<NodeJS.ProcessEnv>, key: string, codexBaseUrl: string | undefined): string {
+  if (key === AZURE_ENTRA_PLACEHOLDER) return env.AZURE_OPENAI_BASE_URL ?? codexBaseUrl ?? "";
+  return env.AZURE_OPENAI_BASE_URL ?? env.OPENAI_BASE_URL ?? codexBaseUrl ?? "https://api.openai.com/v1";
+}
+
 export function providerForModel(model: string | undefined, env: Readonly<NodeJS.ProcessEnv>): ApiProvider | undefined {
   if (!model) return undefined;
   const m = model.toLowerCase();
@@ -231,11 +237,7 @@ export function detectProvider(configApiKey: string | undefined, preferredModel:
       return {
         provider: "azure",
         apiKey: azureKey,
-        baseUrl:
-          env.AZURE_OPENAI_BASE_URL ??
-          env.OPENAI_BASE_URL ??
-          azureConfig.baseUrl ??
-          "https://api.openai.com/v1",
+        baseUrl: azureBaseUrl(env, azureKey, azureConfig.baseUrl),
         defaultModel:
           preferredModel ??
           env.AZURE_OPENAI_MODEL ??
@@ -356,7 +358,7 @@ export function detectProvider(configApiKey: string | undefined, preferredModel:
     return {
       provider: "azure",
       apiKey: azureKey,
-      baseUrl: env.AZURE_OPENAI_BASE_URL ?? env.OPENAI_BASE_URL ?? azureConfig.baseUrl ?? "https://api.openai.com/v1",
+      baseUrl: azureBaseUrl(env, azureKey, azureConfig.baseUrl),
       defaultModel: env.AZURE_OPENAI_MODEL ?? azureConfig.model ?? DEFAULT_OPENAI_MODEL,
       wireApi: openAICompatibleWireApi(env, "AZURE_OPENAI_WIRE_API", azureConfig.wireApi),
       reasoningEffort: azureConfig.reasoningEffort,

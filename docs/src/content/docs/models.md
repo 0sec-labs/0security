@@ -182,6 +182,8 @@ env ZERO_SELECTED_PROVIDER=azure ZERO_MODEL="your-deployment-id" \
 2. A managed identity endpoint your host injects (`IDENTITY_ENDPOINT` and `IDENTITY_HEADER`).
 3. The instance metadata service of an Azure VM. Set `AZURE_CLIENT_ID` to pick a user-assigned identity.
 
+Set `AZURE_OPENAI_BASE_URL` to your Azure OpenAI endpoint. 0 sends the token only to an `https` Azure endpoint, and never uses `OPENAI_BASE_URL` for it.
+
 Grant the identity the Cognitive Services OpenAI User role on the resource. 0 keeps the token in memory, refreshes it before it expires and sends it as a bearer token. It never writes the token to disk or a log.
 
 With `ZERO_ENTERPRISE` set, 0 refuses the public sign-in authority unless `AZURE_AUTHORITY_HOST` names yours. The metadata addresses are local to the host and stay allowed. The region probe is skipped because it needs a key.

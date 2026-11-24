@@ -90,7 +90,7 @@ export function resolveFailoverProvider(
       const key = apiKey ?? (env.AZURE_OPENAI_API_KEY || (azureEntraEnabled(env) ? AZURE_ENTRA_PLACEHOLDER : undefined));
       if (!key) return undefined;
       const azureConfig = parseCodexAzureConfig(env);
-      const url = env.AZURE_OPENAI_BASE_URL ?? env.OPENAI_BASE_URL ?? azureConfig.baseUrl;
+      const url = env.AZURE_OPENAI_BASE_URL ?? (key === AZURE_ENTRA_PLACEHOLDER ? undefined : env.OPENAI_BASE_URL) ?? azureConfig.baseUrl;
       if (!url) return undefined;
       return { apiKey: key, baseUrl: url, wireApi: openAICompatibleWireApi(env, "AZURE_OPENAI_WIRE_API", azureConfig.wireApi) };
     }

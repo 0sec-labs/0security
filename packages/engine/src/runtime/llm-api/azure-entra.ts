@@ -26,6 +26,26 @@ const REQUEST_TIMEOUT_MS = 5000;
 const EXPIRY_SKEW_MS = 5 * 60 * 1000;
 const FALLBACK_LIFETIME_MS = 30 * 60 * 1000;
 
+const AZURE_ENDPOINT_SUFFIXES = [
+  ".openai.azure.com", ".services.ai.azure.com", ".cognitiveservices.azure.com",
+  ".openai.azure.us", ".openai.azure.cn", ".cognitiveservices.azure.us", ".cognitiveservices.azure.cn",
+];
+
+/**
+ * The Entra token is valid for Azure OpenAI. Send it only to an Azure endpoint over https,
+ * never to the public OpenAI API or another host that a base URL variable names.
+ */
+export function assertAzureEntraEndpoint(baseUrl: string): void {
+  let url: URL;
+  try { url = new URL(baseUrl); } catch {
+    throw new Error("Entra ID sign-in needs AZURE_OPENAI_BASE_URL set to your Azure OpenAI endpoint.");
+  }
+  const host = url.hostname.toLowerCase();
+  if (url.protocol !== "https:" || !AZURE_ENDPOINT_SUFFIXES.some((suffix) => host.endsWith(suffix))) {
+    throw new Error("Entra ID sign-in sends its token only to an Azure OpenAI endpoint. Set AZURE_OPENAI_BASE_URL to https://<resource>.openai.azure.com/openai/v1 or use an API key.");
+  }
+}
+
 export type AzureEntraSource = "workload-identity" | "managed-identity-endpoint" | "instance-metadata";
 
 export function azureEntraEnabled(env: Readonly<NodeJS.ProcessEnv>): boolean {
