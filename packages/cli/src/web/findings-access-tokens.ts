@@ -99,6 +99,15 @@ export class FindingsAccessTokenStore {
     return redact(record);
     });
   }
+  /** Revoke every API key a person created. Returns how many were still active. */
+  revokeCreatedBy(userId: string): number {
+    return this.#mutate(() => {
+      const records = this.#read(); let count = 0;
+      for (const record of records) if (record.createdBy === userId && !record.revokedAt) { record.revokedAt = new Date(this.#now()).toISOString(); count++; }
+      if (count > 0) this.#write(records);
+      return count;
+    });
+  }
   /** Returns null for other transports; a valid findings bearer never bypasses its read-only path scope. */
   authenticate(req: Pick<IncomingMessage, "headers" | "method">, url: URL): FindingsAccessToken | null {
     const header = req.headers.authorization;

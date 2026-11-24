@@ -510,6 +510,49 @@ Map groups from the ID token to roles. 0 uses the first entry in the list that t
 
 During the 30 days of grace, nothing changes. After that, a role that is not owner, editor or viewer counts as the nearest of those and never as owner. An auditor or a triager becomes a viewer. A custom role that can run threads becomes an editor. The permission table stops, and the three-role rules apply again.
 
+### Provision accounts with SCIM
+
+With an enterprise license that includes `scim`, your identity provider can create, update and disable accounts through SCIM 2.0. SCIM needs server mode and a team workspace. The endpoint is `/scim/v2` on your public address.
+
+An owner makes one token for each identity provider. The token is shown once.
+
+```bash
+curl -X POST "$URL/api/team/scim-tokens" -H "x-0-control-token: $TOKEN" -H "content-type: application/json" -d '{"name":"okta"}'
+```
+
+Give the provider the base URL `https://your-host/scim/v2` and the token as a bearer token. List tokens with `GET /api/team/scim-tokens` and revoke one with `DELETE /api/team/scim-tokens/<id>`.
+
+SCIM manages the accounts it creates and nothing else. Accounts from the team file or added by an owner are not listed, read or changed through SCIM. A new account has no password. It signs in through OIDC. The first OIDC sign-in links the account only when the ID token has `email_verified` set to true and its `email` matches the account's `userName` or email, ignoring letter case, and only one unlinked account matches. Nothing else links an account: not an unverified email, not `preferred_username`, not an account that already belongs to another subject. After the link, 0 matches the account by the subject and issuer only. A change of group in SCIM that would leave nobody able to manage users is refused with a 409 and nothing changes.
+
+Set roles from SCIM groups in the team file:
+
+```json
+"scim": { "defaultRole": "viewer", "groupRoles": { "sec-triage": "triager", "sec-admins": "owner" } }
+```
+
+0 uses the first group in the list that holds the account, and `defaultRole` when none does. An account whose role an owner set by hand keeps it.
+
+When the provider sets `active` to false, or deletes the account, 0 disables it, ends its sessions and revokes the findings API keys it created. A deleted account is hidden from SCIM and cannot sign in. 0 refuses to disable the last account that can manage users. Each change is written to the audit log with the token name as the actor.
+
+Disabling a person always works. If the license has expired past its 30 days of grace, or has no `scim`, 0 still accepts a bearer token that disables or deletes an account, ends its sessions and revokes its API keys. Reading keeps working until the grace period ends and after it for an expired license. Creating accounts, changing profiles or groups, and turning an account back on are refused until you renew. Listing and revoking tokens also keeps working.
+
+Supported: `Users` and `Groups` with create, read, replace, `PATCH` and delete, `filter` (`eq`, `ne`, `co`, `sw`, `ew`, `pr`, `and`, `or`, `not`), `startIndex` and `count` (at most 200 per page), `/ServiceProviderConfig`, `/ResourceTypes` and `/Schemas`. Not supported: bulk, sort, ETags, password changes.
+
+#### Okta and Entra ID
+
+These behaviours come from the providers' own documentation, [Okta](https://developer.okta.com/docs/api/openapi/okta-scim/guides/scim-20/) and [Microsoft Entra ID](https://learn.microsoft.com/en-us/entra/identity/app-provisioning/use-scim-to-provision-users-and-groups).
+
+- Okta looks up a user with `filter=userName eq "..."` and imports with `startIndex` and `count`. An empty list means the user does not exist.
+- Okta deactivates a user with a `replace` that has no path and the value `{"active": false}`. 0 accepts this.
+- Okta removes and adds group members in one request: a `remove` with the path `members[value eq "..."]`, then an `add` on `members`.
+- Entra ID sends `Add`, `Replace` and `Remove` with a capital first letter. 0 does not care about the case of `op`.
+- Entra ID looks users up by `externalId` or `userName`, and groups by `displayName`, and may ask for a group with `excludedAttributes=members`.
+- Entra ID sets `active` and may send it as the text `True` or `False`. 0 accepts both. This text form is not in the Entra documentation I used, so treat it as tolerated, not specified.
+- Entra ID expects a disabled user to still be returned. 0 does so until the provider deletes it.
+- Both providers accept a changed resource as the answer to a `PATCH`. 0 sends it.
+
+Not tested against a live Okta or Entra tenant. The tests use the examples in RFC 7643 and RFC 7644 and the request shapes in those two documents.
+
 ## Teams and enterprise
 
 0 is open source under MIT OR Apache-2.0. The CLI, engine, browser app and team workspace are all in the [`0sec-labs/0security`](https://github.com/0sec-labs/0security) repository. None of them needs an account, a license key or a 0security-hosted service. Model calls go to the provider you choose with your own key. Findings stay on your computer, CI runner or servers. The only automatic upload is the anonymous telemetry described in [Configuration](/configuration/#telemetry).

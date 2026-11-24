@@ -25,13 +25,15 @@ export function scopedRouteDenied(pathname: string): boolean {
 }
 
 /** Keep only the parts of the dashboard summary that belong to in-scope scans. Anything not tied to a scan is dropped. */
-export function scopeDashboardBody<T extends { scans: Array<{ id: string; target: string }>; cases: Array<{ target: string }>; groups: Array<{ latest: { scanId?: string } }>; workers: unknown[] }>(body: T, scope: TargetFilter): T {
+export function scopeDashboardBody<T extends { scans: Array<{ id: string; target: string }>; cases: Array<{ target: string }>; groups: Array<{ latest: { scanId?: string }; sourceScanIds?: string[] }>; workers: unknown[] }>(body: T, scope: TargetFilter): T {
   const scans = body.scans.filter(scan => scope(scan.target));
   const allowed = new Set(scans.map(scan => scan.id));
   return {
     ...body, scans,
     cases: body.cases.filter(item => scope(item.target)),
-    groups: body.groups.filter(group => group.latest.scanId !== undefined && allowed.has(group.latest.scanId)),
+    // A family is shown only when every scan that holds it is in scope, as on the detail route. Its counts and scan ids
+    // span all its scans, so a family that also occurs elsewhere would reveal that other place.
+    groups: body.groups.filter(group => group.latest.scanId !== undefined && allowed.has(group.latest.scanId) && (group.sourceScanIds ?? []).every(id => allowed.has(id))),
     workers: [],
   };
 }

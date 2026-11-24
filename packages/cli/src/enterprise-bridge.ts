@@ -1,5 +1,5 @@
 // The only file in packages/cli that imports the key-gated enterprise package (see scripts/check-enterprise-boundary.mjs).
-import { EvidenceKeyError, SamlError, SamlServiceProvider, featureMode, formatLicenseStatus, hasFeature as licenseHasFeature, licenseStatus, parseIdpMetadata, requireFeature, signEvidenceStatement, type DsseEnvelope, type EnterpriseFeature, type LicenseStatus, type SamlIdentity } from "@0/enterprise";
+import { EvidenceKeyError, SamlError, SamlServiceProvider, formatLicenseStatus, featureMode as licenseFeatureMode, hasFeature as licenseHasFeature, licenseStatus, parseIdpMetadata, requireFeature, signEvidenceStatement, type DsseEnvelope, type EnterpriseFeature, type FeatureMode, type LicenseStatus, type SamlIdentity } from "@0/enterprise";
 
 export { SamlError, SamlServiceProvider, parseIdpMetadata };
 export type { SamlIdentity };
@@ -25,6 +25,11 @@ export function hasFeature(name: EnterpriseFeature): boolean {
 }
 
 export { requireFeature };
+
+/** `full`, `read-only` (licensed but past the grace period) or `none`. Not memoised: callers use it for security decisions. */
+export function featureMode(name: EnterpriseFeature): FeatureMode {
+  return licenseFeatureMode(name, process.env, new Date());
+}
 
 /** License status read from the process environment. Contains no secret. */
 export function readLicenseStatus(): LicenseStatus {
@@ -59,6 +64,7 @@ export function samlLicenseDenial(): string | null {
   return requireFeature("saml");
 }
 // Role-based access control. These are pure functions of their input; the license is checked at the call site with hasFeature("rbac").
+export { scimFixtures, ScimError, applyPatch, errorFrom, matchesFilter, paginate, parseFilter, resourceTypes, schemaDocuments, serviceProviderConfig, SCHEMA_GROUP, SCHEMA_USER } from "@0/enterprise";
 export { BUILT_IN_ROLES, PERMISSIONS, ROUTE_RULES, decideRoute, nearestBuiltInRole, parseScope, repoOfTarget, resolveRoles, roleFromGroups, routePermission, scopePatterns, targetFilter } from "@0/enterprise";
 export type { Permission, RoleDefinition, RoleScope, RouteDecision } from "@0/enterprise";
 
