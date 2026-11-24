@@ -201,6 +201,7 @@ export function generateSbom(folder: string, options: { name?: string; toolVersi
 
       let matchedSource: string | undefined;
       let before: { component: Component; source: string } | undefined;
+      let sameVersion = true;
 
       if (exactSources.size === 1) {
         matchedSource = exact[0]!.source;
@@ -208,10 +209,12 @@ export function generateSbom(folder: string, options: { name?: string; toolVersi
       } else if (exact.length === 0 && allSources.size === 1) {
         matchedSource = decls[0]!.source;
         before = carried.get(decls[0]!.purl) ?? decls[0];
+        sameVersion = false;
       }
 
       add({ ...component, resolved: true }, matchedSource ?? top);
-      if (before) mergeFacts(byPurl.get(purl)!.component, { ...before.component, dependsOn: undefined });
+      // Hashes belong to one exact version; never carry them onto a resolved component of another version.
+      if (before) mergeFacts(byPurl.get(purl)!.component, { ...before.component, dependsOn: undefined, ...(sameVersion ? {} : { hashes: undefined }) });
     }
   }
   const seenUnresolved = new Set<string>();

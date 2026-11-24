@@ -319,7 +319,7 @@ describe("generateSbom with resolved components", () => {
     const source = bar && "properties" in bar ? bar.properties?.find(p => p.name === "0:source")?.value : undefined;
     expect(source).toBe("pom.xml");
   });
-  it("preserves eligible declared metadata (licenses, hashes) when resolved version differs (Test D)", () => {
+  it("keeps the declared license but not the version-specific hash when the resolved version differs (Test D)", () => {
     const gradleLock = LOCKFILES.find(candidate => candidate.file === "gradle.lockfile");
     expect(gradleLock).toBeDefined();
     const originalParse = gradleLock!.parse;
@@ -343,7 +343,8 @@ describe("generateSbom with resolved components", () => {
       const source = lib && "properties" in lib ? lib.properties?.find(p => p.name === "0:source")?.value : undefined;
       expect(source).toBe("gradle.lockfile");
       expect(lib?.licenses).toEqual([{ license: { id: "Apache-2.0" } }]);
-      expect(lib?.hashes).toEqual([{ alg: "SHA-256", content: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" }]);
+      // A hash belongs to 1.0.0 only, so it must not be attached to the resolved 2.0.0.
+      expect(lib?.hashes).toBeUndefined();
     } finally {
       (gradleLock as any).parse = originalParse;
     }
