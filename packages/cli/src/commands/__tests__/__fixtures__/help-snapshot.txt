@@ -623,6 +623,8 @@ Options:
                                     reported, fixed, false-positive
   --triage <triage>                 Filter by triage: new, accepted, suppressed
   --expiring <days>                 Only accepted risks that expire within this many days
+  --context <file>                  Business context file (JSON): order findings by what matters to
+                                    you, with the reason shown. See the docs
   --scope <scope>                   in: findings not labelled out of scope; out: only those the
                                     declared scope (0security scan --scope) labelled out of scope;
                                     all (default): both, each labelled
@@ -915,6 +917,8 @@ Options:
                          false-positive
   --triage <triage>      Filter by triage: new, accepted, suppressed
   --expiring <days>      Only accepted risks that expire within this many days
+  --context <file>       Business context file (JSON): order findings by what matters to you, with
+                         the reason shown. See the docs
   --scope <scope>        in: findings not labelled out of scope; out: only those the declared scope
                          (0security scan --scope) labelled out of scope; all (default): both, each
                          labelled
