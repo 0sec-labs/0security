@@ -159,6 +159,22 @@ Not reproduced does not mean safe. It means this recipe did not work on this com
 
 The proof never changes a finding's severity, status or triage. It is stored next to the finding. Findings saved before this existed have none.
 
+### Reproduce a path traversal locally
+
+`0security findings reproduce` is experimental. It runs a finding's proposed request against a copy of your app in a container, then records the result. It needs Docker or podman and a Node app that starts with `node server.js`, or with the command you pass.
+
+Pin the image by digest. This runs the committed tree of the folder:
+
+```bash
+0security findings reproduce 3f2a --image node:24-bookworm-slim@sha256:<64 hex digits> --folder ~/code/app
+```
+
+Use `--start "node app.js"` when your app starts another way. The command comes from you. 0 never reads start commands from the repository.
+
+The harness plants a canary file outside the folder the app serves and replays the finding's request against it. If the canary comes back, the result is reproduced. Run it again after a fix and the result should change to not reproduced. Not reproduced does not prove the fix: it means this request found nothing.
+
+Only path traversal on an HTTP GET route is supported. The request goes to the loopback inside the container, never to a live address. The container step is untested against a real runtime. Tests start the fixture app on the host with a stand-in for the container.
+
 ## Scan a folder
 
 ```bash
