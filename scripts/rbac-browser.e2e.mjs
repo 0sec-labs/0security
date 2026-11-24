@@ -21,7 +21,6 @@ const base = await mkdtemp(join(tmpdir(), 'zero-rbac-browser-'));
 const home = join(base, 'home');
 await mkdir(home, { recursive: true });
 const PASSWORD = 'browser-test-password';
-const port = 48990 + Math.floor(Math.random() * 500);
 const wait = ms => new Promise(done => setTimeout(done, ms));
 
 // A license signed with a key that exists only for this run.
@@ -68,7 +67,7 @@ let child, browser, output = '';
 const results = [];
 const ok = name => { results.push(name); console.log(`ok  ${name}`); };
 try {
-  child = spawn(process.execPath, ['--import', join(base, 'shim/register.mjs'), join(root, 'packages/cli/dist/index.js'), 'web', '--host', '127.0.0.1', '--port', String(port), '--no-open', '--ready-json', '--team-config', teamConfig, '--db-path', dbPath, '--asset-dir', join(root, 'packages/web/dist')],
+  child = spawn(process.execPath, ['--import', join(base, 'shim/register.mjs'), join(root, 'packages/cli/dist/index.js'), 'web', '--host', '127.0.0.1', '--port', '0', '--no-open', '--ready-json', '--team-config', teamConfig, '--db-path', dbPath, '--asset-dir', join(root, 'packages/web/dist')],
     { cwd: base, env: { PATH: process.env.PATH, HOME: home, NO_COLOR: '1', ZERO_NO_TELEMETRY: '1', ZERO_SKIP_UPDATE_CHECK: '1', ZERO_LICENSE: license }, stdio: ['ignore', 'pipe', 'pipe'] });
   child.stdout.on('data', data => { output = (output + data).slice(-32000); });
   child.stderr.on('data', data => { output = (output + data).slice(-32000); });
