@@ -464,7 +464,7 @@ Add `roles` and `businessUnits` to the team file. A role can be limited to some 
 
 Set `scope` on one account with the same request and `{"scope":{"repos":["acme/web"]}}`. An account scope replaces the scope of its role. Send `{"scope":null}` to clear it. Each change is written to the audit log as `user.scope_changed`.
 
-A scope limits findings: the dashboard, scans, finding details and triage, and recent events. It matches scans whose target is a GitHub URL or `owner/name`. A scan of a local path matches no scope. Routes that return findings without a filter (reports, exports, work history) are refused to a scoped account. A scope does not limit threads, so give a scoped role no `workspace.read`. A scope stays in force if the license lapses.
+A scope limits findings: the dashboard, scans, finding details and triage, and recent events. It matches scans whose target is a GitHub URL or `owner/name`. A scan of a local path matches no scope. Routes that return findings without a filter (reports, exports, work history) are refused to a scoped account. A scope does not limit threads, so give a scoped role no `workspace.read`. A scope limits sign-in sessions only. Findings API keys are workspace-wide credentials that an owner creates, and a scope does not narrow them. A scope stays in force if the license lapses.
 
 #### Roles from your identity provider
 

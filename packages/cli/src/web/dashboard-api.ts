@@ -364,6 +364,8 @@ export async function handleApiRequest(
   if (req.method !== "GET" && req.method !== "HEAD") invalidateReadCache();
 
   if (isPresentationEventsStreamPath(pathname)) {
+    // The stream carries events of every scan and is not filtered. A scoped account never gets it (the server also refuses it earlier).
+    if (scope) { json(res, 403, { code: "scope_restricted", error: "Your role is limited to some repositories and cannot use this route." }); return true; }
     if (req.method !== "GET") {
       json(res, 405, { error: "Method not allowed" });
       return true;

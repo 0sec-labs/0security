@@ -136,6 +136,8 @@ describe("real server, licensed", () => {
     expect((await scoped(`/api/scans/${encodeURIComponent(other.id)}/findings`)).status).toBe(404);
     expect((await scoped("/api/findings/export")).status).toBe(403);
     expect((await scoped("/api/work")).status).toBe(403);
+    // The event stream is not filtered by repository, so a scoped account never gets it.
+    expect((await scoped("/api/v1/presentation/events")).status).toBe(403);
   });
 });
 
