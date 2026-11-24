@@ -448,7 +448,7 @@ Set a title template, branch prefix, labels, reviewers, a draft rule and a foote
 
 ### Show how many fixes were accepted
 
-After a burndown, write a report of the outcomes:
+After a fix or a burndown, write a report of the outcomes:
 
 ```bash
 0security findings export-fixes --check-merged -o ./fix-report

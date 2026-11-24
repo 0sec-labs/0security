@@ -262,3 +262,21 @@ rules:
     expect(() => parseFixPolicy("\"string\"", "str.json")).toThrow("must be an object");
   });
 });
+
+describe("0 findings fix records its outcome for export-fixes", () => {
+  it("hands the repository, fingerprint and outcome to the recorder, and survives a recorder that fails", async () => {
+    const h = harness();
+    const seen: Array<{ repo: string; fingerprint: string; url?: string }> = [];
+    const outcome = await runFix("f-1", options({ test: ["pnpm test"] }), { ...h.deps, record: e => { seen.push({ repo: e.repo, fingerprint: e.fingerprint, url: e.outcome.pullRequest?.url }); } });
+    expect(seen).toEqual([{ repo: "/repo", fingerprint: "sarif-x:abc", url: "https://github.com/o/r/pull/7" }]);
+    expect(outcome?.pullRequest?.url).toBe("https://github.com/o/r/pull/7");
+    const failing = await runFix("f-1", options(), { ...harness().deps, record: () => { throw new Error("disk full"); } });
+    expect(failing?.pullRequest?.url).toBe("https://github.com/o/r/pull/7");
+  });
+  it("records a run that changed nothing, and a committed run without a pull request", async () => {
+    const seen: string[] = [];
+    await runFix("f-1", options(), { ...harness({ status: "" }).deps, record: e => { seen.push(`${e.outcome.changed}/${e.outcome.committed}`); } });
+    await runFix("f-1", options({ pr: false }), { ...harness().deps, record: e => { seen.push(`${e.outcome.changed}/${e.outcome.committed}`); } });
+    expect(seen).toEqual(["false/false", "true/true"]);
+  });
+});

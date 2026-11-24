@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildFixReport, renderFixReportMarkdown, runExportFixes, type ExportFixesDeps } from "../findings-export-fixes.js";
-import type { BurndownState } from "../burndown.js";
+import { recordStandaloneFix, type BurndownState } from "../burndown.js";
 import type { Host, PullRequestState } from "../../host/index.js";
 
 const key = (repo: string, fp: string) => `${repo}\u0000${fp}`;
@@ -92,6 +92,24 @@ describe("0 findings export-fixes", () => {
     const out: string[] = [];
     await runExportFixes({ format: "json" }, deps({ out }));
     expect(JSON.parse(out[0]!).schema).toBe("0.fix-outcomes.v1");
+  });
+
+  it("gives the same summary for each repository", async () => {
+    const report = await buildFixReport({}, deps());
+    expect(report.workspaces.map(w => [w.repo, w.summary.attempted])).toEqual([["/other", 1], ["/repo", 5]]);
+    expect(renderFixReportMarkdown(report)).toContain("## By repository");
+  });
+
+  it("reads a standalone fix recorded through the same state file", async () => {
+    let saved: BurndownState = { version: 1, findings: {}, runs: [] };
+    const store = { load: () => structuredClone(saved), save: (s: BurndownState) => { saved = structuredClone(s); } };
+    const outcome = { finding: "f-aaaaaaaaaaaa", branch: "0/fix-aaa", changed: true, committed: true, checks: [{ command: "t", code: 0, output: "" }], verified: true, costUsd: 0.3, pullRequest: { url: "https://github.com/o/r/pull/5", created: true, draft: false } };
+    recordStandaloneFix("/repo", "fp-a", outcome, store, () => new Date("2026-05-01T00:00:00.000Z"));
+    // A later run that changed nothing does not erase the pull request.
+    recordStandaloneFix("/repo", "fp-a", { ...outcome, changed: false, committed: false, checks: [], verified: false, pullRequest: undefined }, store);
+    const report = await buildFixReport({}, { ...deps(), store });
+    expect(report.fixes).toHaveLength(1);
+    expect(report.fixes[0]).toMatchObject({ finding: "f-aaaaaaaaaaaa", result: "pr-opened", pullRequestUrl: "https://github.com/o/r/pull/5", checksPassing: true, costUsd: 0.3, repo: "/repo" });
   });
 
   it("says so when nothing is recorded", async () => {
