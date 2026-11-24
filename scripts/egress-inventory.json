@@ -330,6 +330,20 @@
       "disable": "Do not configure OIDC."
     },
     {
+      "id": "team-sign-in-saml",
+      "class": "feature",
+      "enterprise": "blocked",
+      "destinations": [
+        "the SAML identity provider metadata URL you configured"
+      ],
+      "files": [
+        "packages/cli/src/web/saml-metadata.ts"
+      ],
+      "when": "Team sign-in with SAML (enterprise license), only when the team config names a metadataUrl. Fetched on first use and again every 12 hours.",
+      "sent": "One GET for the identity provider's public metadata. No cookie, no credential, no user data. Redirects are refused.",
+      "disable": "Name a metadataFile instead of a metadataUrl; ZERO_ENTERPRISE refuses the fetch."
+    },
+    {
       "id": "remote-engines",
       "class": "operator",
       "enterprise": "allowed",

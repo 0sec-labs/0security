@@ -55,6 +55,7 @@ For a stronger guarantee than a test, also block egress at the network: run 0 in
 | `sbom-outdated-lookup` | `api.deps.dev` | `0security sbom check --outdated`. | Package names from the SBOM (at most 200). | Do not pass the flag. |
 | `sbom-licenses-resolve` | `api.deps.dev` | `0security sbom licenses --resolve`. | Package names and versions of components with no stated license. | Do not pass the flag. |
 | `sbom-resolve-build-tools` | The repositories the project's build files name (Maven Central by default) | `0security sbom generate --resolve`, after you confirm. | Whatever the project's own `mvn` or `gradle` sends. It also runs the project's build scripts. | Do not pass the flag. |
+| `team-sign-in-saml` | The SAML metadata address you configured | Team sign-in with SAML, only with a `metadataUrl`. | A GET of the provider's public metadata. Use `metadataFile` to avoid it. |
 | `extension-git-source` | `github.com` or the https git host you give | Installing or updating an extension from a remote source. | A shallow fetch of one pinned commit. | Install from a local folder. |
 | `extension-connector-health` | Hosts an installed connector declares | The console shows connector status. | A GET carrying the connector token. | Do not install connectors. |
 | `smolvm-provision` | `github.com` | Explicit setup of the macOS sandbox runtime. | A GET of a pinned archive, checked against a fixed hash. | Preinstall the runtime. |

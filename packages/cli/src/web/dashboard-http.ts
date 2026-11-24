@@ -9,6 +9,7 @@ import { isIP } from "node:net";
 import { z } from "zod";
 import { TeamAuth } from "./team-auth.js";
 import { htmlSecurityHeaders } from "./dashboard-csp.js";
+import { isCrossSiteSignInReturn, isSamlAcsPost } from "./team-sso-routes.js";
 
 export class WebRequestError extends Error {
   constructor(message: string, readonly statusCode: number) { super(message); }
@@ -32,13 +33,14 @@ export function authorizeWebRequest(req: IncomingMessage, origin: string): void 
   const requestOrigin = new URL(`http://${authority}`);
   if ((requestOrigin.hostname !== serverUrl.hostname && !WEB_HOST_ALIASES[requestOrigin.hostname]) ||
       requestOrigin.port !== serverUrl.port) throw new WebRequestError("Use the bound loopback host and port.", 403);
-  if (req.headers.origin !== undefined && req.headers.origin !== requestOrigin.origin) {
+  // The SAML identity provider's browser posts the sign-in response from the provider's origin. The response is
+  // signed and tied to a one-use request; nothing else about that POST is trusted.
+  if (req.headers.origin !== undefined && req.headers.origin !== requestOrigin.origin && !isSamlAcsPost(req.method, req.url)) {
     throw new WebRequestError("Cross-origin web application requests are not allowed.", 403);
   }
   // An OIDC provider returns through a top-level cross-site GET. Its one-use
   // state and browser cookie are checked by TeamAuth before issuing a session.
-  const ssoCallback = req.method === "GET" && /^\/api\/team\/auth\/callback(?:\?|$)/.test(req.url ?? "");
-  if (req.url?.startsWith("/api/") && req.headers["sec-fetch-site"] === "cross-site" && !ssoCallback) {
+  if (req.url?.startsWith("/api/") && req.headers["sec-fetch-site"] === "cross-site" && !isCrossSiteSignInReturn(req.method, req.url)) {
     throw new WebRequestError("Cross-site control requests are not allowed.", 403);
   }
   if (!req.url?.startsWith("/") || req.url.startsWith("//")) throw new WebRequestError("Invalid request target.", 400);
@@ -227,6 +229,27 @@ export function readJson(req: IncomingMessage, maxBytes = 1_000_000): Promise<un
     if (!settled) { settled = true; reject(error); }
   });
   return promise;
+}
+
+/** Read a small application/x-www-form-urlencoded body (the SAML sign-in post). Repeated or oversized fields are refused. */
+export async function readForm(req: IncomingMessage, maxBytes = 800_000, maxFields = 8): Promise<Record<string, string>> {
+  if (!/^application\/x-www-form-urlencoded(?:\s*;|$)/i.test(String(req.headers["content-type"] ?? ""))) throw new WebRequestError("Expected a form post.", 415);
+  const chunks: Buffer[] = []; let bytes = 0;
+  for await (const chunk of req) {
+    const data = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string);
+    bytes += data.length;
+    if (bytes > maxBytes) { req.resume(); throw new WebRequestError("Request body too large.", 413); }
+    chunks.push(data);
+  }
+  const raw = Buffer.concat(chunks).toString("utf8");
+  // Count fields before parsing, so a body of many tiny fields is refused without building a large map.
+  if (raw.split("&", maxFields + 1).length > maxFields) throw new WebRequestError("Too many form fields.", 400);
+  const out: Record<string, string> = Object.create(null) as Record<string, string>;
+  for (const [key, value] of new URLSearchParams(raw)) {
+    if (Object.hasOwn(out, key)) throw new WebRequestError("Repeated form field.", 400);
+    if (key.length <= 64) out[key] = value; // only short, named fields are kept
+  }
+  return out;
 }
 
 /** Read a JSON request body that must be an object; null, arrays and scalars are client errors. */

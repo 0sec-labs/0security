@@ -4,6 +4,8 @@ import type { IncomingMessage } from "node:http";
 import { promisify } from "node:util";
 import { z } from "zod";
 import { createRemoteJWKSet, jwtVerify } from "jose";
+import { TeamAuthError } from "./team-auth-error.js";
+import { TeamSaml, samlConfigSchema, validateSamlConfig } from "./team-saml.js";
 
 const scrypt = promisify(scryptCallback);
 const COOKIE = "zero_team_session";
@@ -12,17 +14,18 @@ const SESSION_MS = 8 * 60 * 60 * 1000;
 const SSO_MS = 10 * 60 * 1000;
 const userSchema = z.object({
   id: z.string().min(1).max(160), name: z.string().min(1).max(160),
-  role: z.enum(["owner", "editor", "viewer"]), passwordHash: z.string().optional(), oidcSub: z.string().min(1).optional(),
+  role: z.enum(["owner", "editor", "viewer"]), passwordHash: z.string().optional(), oidcSub: z.string().min(1).optional(), samlNameId: z.string().min(1).max(512).optional(),
 }).strict();
 const configSchema = z.object({
   workspace: z.object({ id: z.string().min(1).max(160), name: z.string().min(1).max(160) }).strict(),
   users: z.array(userSchema).min(1).max(1000),
   oidc: z.object({ issuer: z.string().url(), clientId: z.string().min(1), clientSecretEnv: z.string().min(1).optional(), redirectUri: z.string().url() }).strict().optional(),
+  saml: samlConfigSchema.optional(),
 }).strict();
 export type TeamConfig = z.infer<typeof configSchema>;
 export function parseTeamConfig(input: unknown): TeamConfig { return configSchema.parse(input); }
 export interface TeamIdentity { workspaceId: string; userId: string; displayName: string; role: "owner" | "editor" | "viewer" }
-export class TeamAuthError extends Error { constructor(message: string, public readonly statusCode = 401) { super(message); } }
+export { TeamAuthError };
 function opaque(): string { return randomBytes(32).toString("base64url"); }
 export function parseCookies(header: string | undefined): Record<string, string> {
   const cookies: Record<string, string> = Object.create(null) as Record<string, string>;
@@ -54,7 +57,8 @@ export class TeamAuth {
   private readonly config?: TeamConfig;
   private readonly origin: string;
   private readonly now: () => number;
-  private readonly sessions = new Map<string, { userId: string; expires: number }>();
+  private readonly sessions = new Map<string, { userId: string; expires: number; role?: TeamIdentity["role"] }>();
+  private readonly saml?: TeamSaml;
   private readonly pending = new Map<string, { nonce: string; verifier: string; browser: string; expires: number }>();
   private readonly attempts = new Map<string, { count: number; expires: number }>();
   private discovery?: Discovery;
@@ -68,12 +72,18 @@ export class TeamAuth {
       if (new Set(this.config.users.map(user => user.id)).size !== this.config.users.length) throw new Error("Team user IDs must be unique");
       const subjects = this.config.users.flatMap(user => user.oidcSub ? [user.oidcSub] : []);
       if (new Set(subjects).size !== subjects.length) throw new Error("OIDC subjects must be unique");
+      const samlIds = this.config.users.flatMap(user => user.samlNameId ? [user.samlNameId] : []);
+      if (new Set(samlIds).size !== samlIds.length) throw new Error("SAML NameIDs must be unique");
       for (const user of this.config.users) if (user.passwordHash && !validHash(user.passwordHash)) throw new Error("Invalid team password hash; use hashTeamPassword");
       if (this.config.oidc) {
         this.requireProviderURL(this.config.oidc.issuer);
         if (new URL(this.config.oidc.redirectUri).origin !== this.origin) throw new Error("OIDC redirect URI must use this engine origin");
         if (new URL(this.config.oidc.redirectUri).pathname !== "/api/team/auth/callback") throw new Error("OIDC redirect URI must use /api/team/auth/callback");
         if (this.config.oidc.clientSecretEnv && !process.env[this.config.oidc.clientSecretEnv]) throw new Error("Configured OIDC client secret environment variable is missing");
+      }
+      if (this.config.saml) {
+        validateSamlConfig(this.config.saml, this.origin);
+        this.saml = new TeamSaml(this.config.saml, { now: this.now, cookie: (name, value, seconds) => this.cookie(name, value, seconds), findMember: nameId => this.config!.users.find(user => user.samlNameId === nameId) });
       }
     }
     this.dummyHash = hashTeamPassword(opaque());
@@ -84,9 +94,9 @@ export class TeamAuth {
   private cookie(name: string, value: string, seconds: number): string {
     return `${name}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${seconds}${this.origin.startsWith("https:") ? "; Secure" : ""}`;
   }
-  lookupUser(id: string): TeamIdentity | null {
+  lookupUser(id: string, role?: TeamIdentity["role"]): TeamIdentity | null {
     const user = this.config?.users.find(row => row.id === id);
-    return user ? { workspaceId: this.config!.workspace.id, userId: user.id, displayName: user.name, role: user.role } : null;
+    return user ? { workspaceId: this.config!.workspace.id, userId: user.id, displayName: user.name, role: role ?? user.role } : null;
   }
   /** Trusted server configuration only; never serialize this through a browser API. */
   snapshotConfig(): TeamConfig {
@@ -111,17 +121,17 @@ export class TeamAuth {
     if (!id) return null;
     const session = this.sessions.get(id);
     if (!session || session.expires <= this.now()) { this.sessions.delete(id); return null; }
-    return this.lookupUser(session.userId);
+    return this.lookupUser(session.userId, session.role);
   }
   resolveSession(req: Pick<IncomingMessage, "headers">): TeamIdentity | null { return this.resolveSessionId(getSessionId(req)); }
   status(req: Pick<IncomingMessage, "headers">) {
-    return { enabled: this.enabled, ...(this.config ? { workspace: this.config.workspace } : {}), user: this.resolveSession(req), sso: !!this.config?.oidc };
+    return { enabled: this.enabled, ...(this.config ? { workspace: this.config.workspace } : {}), user: this.resolveSession(req), sso: !!this.config?.oidc, ...(this.saml ? { saml: true } : {}) };
   }
-  private issueSession(userId: string) {
+  private issueSession(userId: string, role?: TeamIdentity["role"]) {
     for (const [id, session] of this.sessions) if (session.expires <= this.now()) this.sessions.delete(id);
     if (this.sessions.size >= 10000) throw new TeamAuthError("Session capacity reached", 503);
-    const sessionId = opaque(); this.sessions.set(sessionId, { userId, expires: this.now() + SESSION_MS });
-    return { sessionId, user: this.lookupUser(userId)!, setCookie: this.cookie(COOKIE, sessionId, SESSION_MS / 1000) };
+    const sessionId = opaque(); this.sessions.set(sessionId, { userId, expires: this.now() + SESSION_MS, ...(role ? { role } : {}) });
+    return { sessionId, user: this.lookupUser(userId, role)!, setCookie: this.cookie(COOKIE, sessionId, SESSION_MS / 1000) };
   }
   async login(input: unknown, rateKey = "local") {
     if (!this.config) throw new TeamAuthError("Team sign-in is not configured", 404);
@@ -187,5 +197,15 @@ export class TeamAuth {
     if (!user) throw new TeamAuthError("This SSO account is not a workspace member", 403);
     const session = this.issueSession(user.id);
     return { ...session, setCookies: [session.setCookie, this.cookie(SSO_COOKIE, "", 0)], redirect: "/" };
+  }
+  // SAML sign-in (enterprise license). The checks live in team-saml.ts and the enterprise package.
+  private requireSaml(): TeamSaml { if (!this.saml) throw new TeamAuthError("SAML sign-in is not configured", 404); return this.saml; }
+  beginSAML(client = "") { return this.requireSaml().begin(client); }
+  samlAcs(form: { SAMLResponse?: unknown; RelayState?: unknown }) { return this.requireSaml().acs(form); }
+  samlMetadata() { return this.requireSaml().metadata(); }
+  samlComplete(ticket: string | null, req: Pick<IncomingMessage, "headers">) {
+    const done = this.requireSaml().complete(ticket, req);
+    const session = this.issueSession(done.userId, done.role);
+    return { ...session, setCookies: [session.setCookie, done.clearCookie], redirect: "/" };
   }
 }

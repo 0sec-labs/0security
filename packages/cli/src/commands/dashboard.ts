@@ -35,6 +35,7 @@ import { findTeamConfigPath, handleTeamSetupRequest, TeamSetupService } from "..
 import { TeamAuth, TeamAuthError } from "../web/team-auth.js";
 import { CollaborationService } from "../web/collaboration.js";
 import { authorizeTeamApi, handleTeamRequest, assertTeamConsoleMutation } from "../web/team-web.js";
+import { isTeamSsoRoute } from "../web/team-sso-routes.js";
 import { handleTeamPresenceStream } from "../web/team-presence-stream.js";
 import { homeStateDir, VERSION } from "@0/engine/shared";
 import { getSettings } from "../state/settings-store.js";
@@ -43,7 +44,7 @@ import { restartCommand, spawnRestart } from "../web/self-restart.js";
 import { assertLocalEngineAvailable, registerLocalEngine } from "../local-engine.js";
 import { loadManagedWorker, validateWorkerOptions, type WorkerDeployResult } from "../worker-deploy.js";
 import { discoverSshHosts } from "../worker-hosts.js";
-import { WebRequestError, errorStatusCode, authorizeWebRequest, json, text, sendFile, readJson, requireControlToken, isLoopbackDashboardHost } from "../web/dashboard-http.js";
+import { WebRequestError, errorStatusCode, authorizeWebRequest, json, text, sendFile, readJson, readForm, requireControlToken, isLoopbackDashboardHost } from "../web/dashboard-http.js";
 import { resolveDashboardAssetDir, resolveAssetPath } from "../web/dashboard-assets.js";
 import { resolveCliEntrypoint } from "../web/dashboard-daemon.js";
 import { handleWebConsoleApiRequest, handleApiRequest } from "../web/dashboard-api.js";
@@ -335,7 +336,7 @@ export function registerDashboardCommand(program: Command): void {
               const hasBearer = typeof req.headers.authorization === "string" && req.headers.authorization.startsWith("Bearer ");
               if (!serverGuard.isAuthenticated(req, teamAuth)) {
                 const api = requestUrl.pathname.startsWith("/api/");
-                const sso = req.method === "GET" && (requestUrl.pathname === "/api/team/auth/sso" || requestUrl.pathname === "/api/team/auth/callback");
+                const sso = isTeamSsoRoute(req.method, requestUrl.pathname);
                 if (api && !sso && !hasBearer) { serverGuard.denyAnonymous(req, res, serverContext); return; }
                 if (!api) {
                   if (req.method !== "GET" && req.method !== "HEAD") { serverGuard.denyAnonymous(req, res, serverContext); return; }
@@ -360,8 +361,8 @@ export function registerDashboardCommand(program: Command): void {
                 if (!reply) throw new FindingsAccessError("Findings API route was not found.", 404);
                 json(res, reply.status, reply.data); return;
               }
-              const ssoNavigation = requestUrl.pathname === "/api/team/auth/sso" || requestUrl.pathname === "/api/team/auth/callback";
-              if (!(ssoNavigation && req.method === "GET") && !requireControlToken(req, res, controlToken, engineBearer)) return;
+              const ssoNavigation = isTeamSsoRoute(req.method, requestUrl.pathname);
+              if (!ssoNavigation && !requireControlToken(req, res, controlToken, engineBearer)) return;
               const bearer = req.headers.authorization;
               const engineRequest = Boolean(engineBearer && typeof bearer === "string" && bearer.startsWith("Bearer ") && Buffer.byteLength(bearer.slice(7)) === Buffer.byteLength(engineBearer) && timingSafeEqual(Buffer.from(bearer.slice(7)), Buffer.from(engineBearer)));
               // Default-deny for the engine bearer on every mutating /api route (team setup/auth included) before any handler runs.
@@ -379,10 +380,11 @@ export function registerDashboardCommand(program: Command): void {
                 if (kind === "report") { engagements.get(id); return; }
                 const definition = await workflows.handle(`/api/console/workflow-definitions/${encodeURIComponent(id)}`, "GET", undefined, new URLSearchParams());
                 if (!definition || definition.status !== 200) throw new WebRequestError("Workflow was not found.", 404);
-              });
+              }, () => readForm(req));
               if (teamReply) {
                 for (const [name, value] of Object.entries(teamReply.headers ?? {})) res.setHeader(name, value);
-                if (teamReply.redirect) { res.writeHead(teamReply.status, { Location: teamReply.redirect, "Cache-Control": "no-store" }); res.end(); }
+                if (teamReply.xml !== undefined) text(res, teamReply.status, teamReply.xml, "application/samlmetadata+xml; charset=utf-8");
+                else if (teamReply.redirect) { res.writeHead(teamReply.status, { Location: teamReply.redirect, "Cache-Control": "no-store" }); res.end(); }
                 else json(res, teamReply.status, teamReply.data);
                 return;
               }

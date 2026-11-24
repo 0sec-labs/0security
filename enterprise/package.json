@@ -19,6 +19,11 @@
   },
   "devDependencies": {
     "typescript": "^5.7.2",
-    "vitest": "^5.1.1"
+    "vitest": "^5.1.1",
+    "xml-crypto": "6.4.0"
+  },
+  "dependencies": {
+    "@node-saml/node-saml": "5.2.0",
+    "@xmldom/xmldom": "0.8.15"
   }
 }
