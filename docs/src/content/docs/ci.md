@@ -176,6 +176,16 @@ Give the scan what another tool already found. It looks for other classes of bug
 
 Advisories only warn unless `fail-on` is set, and then any advisory fails the job. A license the `licenses-preset` does not allow always fails the job. In this mode only `target`, `upload`, `fail-on`, `licenses-preset` and `github-token` apply. The package names in the SBOM go to `api.osv.dev` for the lookup.
 
+## Check agent files
+
+A pull request can change the files AI coding tools read: rules, MCP configuration and settings. `0security sbom agent-config` checks them with no model key and no network. Run it in a step of its own. The Action has no mode for it.
+
+```yaml
+      - run: 0security sbom agent-config . --format sarif -o agent-config.sarif --fail-on high
+```
+
+Run it after you install `0security` and before any step that uses an AI tool. Upload the SARIF file with `0security findings upload agent-config.sarif`, or import it with `0security findings import agent-config.sarif`. See [Check agent files in a repository](/extensions/#check-agent-files-in-a-repository) for the rules.
+
 ## Examples
 
 Each example pins the action by release. For a stricter pin, replace the tag with the release's full commit SHA and keep the tag in a comment. The permissions are the least each job needs. The model key goes in a repository secret, passed as `env` on the action step.

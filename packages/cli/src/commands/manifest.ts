@@ -23,7 +23,7 @@ export const GROUP_DESCRIPTIONS: Readonly<Record<string, string>> = {
   scan: "Scan a folder or git repository for security bugs; prints the findings as a report",
   "threat-model": "Draft the repository's threat model as a file for people to review (optionally as a pull request)",
   probe: "Send adversarial messages to a live model or agent endpoint and report the ones it obeys",
-  sbom: "Generate an SBOM from lockfiles, check one against known advisories, and scan model files",
+  sbom: "Generate an SBOM from lockfiles, check one against known advisories, and scan model files and agent configuration",
   findings: "Browse findings and change their status",
   evidence: "Check that an evidence folder was signed with your key and is unchanged",
   threads: "Start, follow and stop threads",
@@ -36,7 +36,7 @@ export const GROUP_DESCRIPTIONS: Readonly<Record<string, string>> = {
 
 /** The only subcommands `--help` shows for each visible command. Everything else stays registered but hidden (see command-grammar.ts). */
 export const VISIBLE_SUBCOMMANDS: Readonly<Record<string, readonly string[]>> = {
-  sbom: ["generate", "check", "licenses", "scan-models"],
+  sbom: ["generate", "check", "licenses", "scan-models", "agent-config"],
   evidence: ["verify"],
   findings: ["list", "show", "update", "import", "fix", "burndown", "verify", "metrics", "rollup", "evidence", "export-fixes", "report-draft"],
   threads: ["list", "show", "send", "start", "stop"],
