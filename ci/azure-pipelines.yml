@@ -6,7 +6,7 @@ pr:
     include: [main]
 
 variables:
-  VERSION: 0.44.0 # Pin the CLI
+  VERSION: 0.45.0 # Pin the CLI
 
 pool:
   vmImage: ubuntu-latest

@@ -23,9 +23,9 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: 0sec-labs/0security@v0.44.0
+      - uses: 0sec-labs/0security@v0.45.0
         with:
-          version: 0.44.0 # Pin the CLI
+          version: 0.45.0 # Pin the CLI
           fail-on: high
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -101,9 +101,9 @@ Pass Semgrep rules you already write with `rules`. Rules, tier maps, context, po
         with:
           repository: your-org/security-rules
           path: security-rules
-      - uses: 0sec-labs/0security@v0.44.0
+      - uses: 0sec-labs/0security@v0.45.0
         with:
-          version: 0.44.0 # Pin the CLI
+          version: 0.45.0 # Pin the CLI
           scanner: semgrep
           rules: security-rules/semgrep
 ```
@@ -124,9 +124,9 @@ Use the base branch's copy, never the pull request's. A change could otherwise e
           ref: ${{ github.base_ref }}
           path: base
       - uses: actions/checkout@v4
-      - uses: 0sec-labs/0security@v0.44.0
+      - uses: 0sec-labs/0security@v0.45.0
         with:
-          version: 0.44.0 # Pin the CLI
+          version: 0.45.0 # Pin the CLI
           scope: base/SECURITY.md
           fail-on: high
 ```
@@ -142,9 +142,9 @@ A tier map decides how much a repository gets scanned, or whether it is skipped.
         with:
           repository: your-org/security-config
           path: security-config
-      - uses: 0sec-labs/0security@v0.44.0
+      - uses: 0sec-labs/0security@v0.45.0
         with:
-          version: 0.44.0 # Pin the CLI
+          version: 0.45.0 # Pin the CLI
           tiers: security-config/scan-tiers.yaml
 ```
 
@@ -166,9 +166,9 @@ Give the scan what another tool already found. It looks for other classes of bug
 `mode: sbom` generates a CycloneDX SBOM from the lockfiles in `target`, checks every component against the public OSV database and uploads the advisories to code scanning as `0 sbom`. It also uploads the SBOM as the `0-sbom` artifact. It needs no model key.
 
 ```yaml
-      - uses: 0sec-labs/0security@v0.44.0
+      - uses: 0sec-labs/0security@v0.45.0
         with:
-          version: 0.44.0 # Pin the CLI
+          version: 0.45.0 # Pin the CLI
           mode: sbom
           licenses-preset: no-copyleft
           fail-on: high
@@ -201,9 +201,9 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: 0sec-labs/0security@v0.44.0 # pin to the release's commit SHA for a stricter pin
+      - uses: 0sec-labs/0security@v0.45.0 # pin to the release's commit SHA for a stricter pin
         with:
-          version: 0.44.0 # Pin the CLI
+          version: 0.45.0 # Pin the CLI
           fail-on: high
           budget: "3"
         env:
@@ -234,9 +234,9 @@ jobs:
         with:
           persist-credentials: false
       - id: zero
-        uses: 0sec-labs/0security@v0.44.0 # pin to the release's commit SHA for a stricter pin
+        uses: 0sec-labs/0security@v0.45.0 # pin to the release's commit SHA for a stricter pin
         with:
-          version: 0.44.0 # Pin the CLI
+          version: 0.45.0 # Pin the CLI
           budget: "20"
           fail-on: critical
           allow-partial: true
@@ -268,9 +268,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: 0sec-labs/0security@v0.44.0 # pin to the release's commit SHA for a stricter pin
+      - uses: 0sec-labs/0security@v0.45.0 # pin to the release's commit SHA for a stricter pin
         with:
-          version: 0.44.0 # Pin the CLI
+          version: 0.45.0 # Pin the CLI
           mode: sbom
           licenses-preset: no-copyleft
           fail-on: high
@@ -297,9 +297,9 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       # Your existing Semgrep or CodeQL step runs here and writes results/other-tool.sarif.
-      - uses: 0sec-labs/0security@v0.44.0 # pin to the release's commit SHA for a stricter pin
+      - uses: 0sec-labs/0security@v0.45.0 # pin to the release's commit SHA for a stricter pin
         with:
-          version: 0.44.0 # Pin the CLI
+          version: 0.45.0 # Pin the CLI
           known-sarif: results/other-tool.sarif
           only-new: true
           fail-on: high
@@ -332,9 +332,9 @@ jobs:
           repository: your-org/security-config
           path: security-config
           persist-credentials: false
-      - uses: 0sec-labs/0security@v0.44.0 # pin to the release's commit SHA for a stricter pin
+      - uses: 0sec-labs/0security@v0.45.0 # pin to the release's commit SHA for a stricter pin
         with:
-          version: 0.44.0 # Pin the CLI
+          version: 0.45.0 # Pin the CLI
           tiers: security-config/scan-tiers.yaml
           fail-on: high
         env:
@@ -355,7 +355,7 @@ jobs:
     runs-on: [self-hosted, linux, 0-scan]
     steps:
       - uses: actions/checkout@v4
-      - uses: 0sec-labs/0security@v0.44.0
+      - uses: 0sec-labs/0security@v0.45.0
         with:
           version: 0.44.0
           fail-on: high
@@ -439,7 +439,7 @@ image: node:22
 definitions:
   scripts:
     - &install |
-      VERSION=0.44.0 # Pin the CLI
+      VERSION=0.45.0 # Pin the CLI
       RAW="https://raw.githubusercontent.com/0sec-labs/0security/v${VERSION}"
       tools="$(mktemp -d)" && export INSTALL_DIR="$tools" PATH="$tools:$PATH"
       curl -fsSL -o "$tools/install.sh" "$RAW/install.sh"
@@ -480,7 +480,7 @@ The scan records the pull request's own commit. When Jenkins checks out the merg
 pipeline {
   agent any
   environment {
-    VERSION = '0.44.0' // Pin the CLI
+    VERSION = '0.45.0' // Pin the CLI
     BITBUCKET_URL = 'https://bitbucket.example.com' // Data Center server
     ZEROCI_REPO = 'PROJECT/repo'
   }
@@ -536,7 +536,7 @@ pr:
     include: [main]
 
 variables:
-  VERSION: 0.44.0 # Pin the CLI
+  VERSION: 0.45.0 # Pin the CLI
 
 pool:
   vmImage: ubuntu-latest
@@ -596,7 +596,7 @@ zero-security:
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
   variables:
-    VERSION: 0.44.0 # Pin the CLI
+    VERSION: 0.45.0 # Pin the CLI
     GIT_DEPTH: "0"
     ZEROCI_FAIL_ON: high
   script:
@@ -706,7 +706,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install 0
         run: |
-          VERSION=0.44.0 # Pin the CLI
+          VERSION=0.45.0 # Pin the CLI
           RELEASE_BASE_URL="https://github.com/0sec-labs/0security/releases/download/v${VERSION}" INSTALL_DIR="$RUNNER_TEMP/0" sh <(curl -fsSL "https://raw.githubusercontent.com/0sec-labs/0security/v${VERSION}/install.sh")
           echo "$RUNNER_TEMP/0" >> "$GITHUB_PATH"
       - run: 0security sbom generate . -o sbom.cdx.json
