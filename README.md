@@ -69,8 +69,6 @@ Windows, Docker and source installs are in the [docs](https://docs.0.security/).
 | **Web console** | Threads, findings and fixes in a browser, on your machine | `0security` |
 | **GitHub Action** | Scan each pull request and show the findings in GitHub's Security tab | [Pull request checks](https://docs.0.security/ci/) |
 
-All three run the same engine.
-
 ## What it does
 
 - **Reviews code.** A fast scanner pass, then a model reads the code. Large repositories are reviewed in batches you can resume.
