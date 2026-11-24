@@ -61,6 +61,16 @@ That scans the folder, prints a report and stops at a $5 budget. Any model provi
 
 Windows, Docker and source installs are in the [docs](https://docs.0.security/). Only scan code you own or are authorized to test.
 
+## Where you use it
+
+| | For | Start |
+|---|---|---|
+| **CLI** | Scan, fix, SBOM and evidence from a terminal or a script | `0security scan .` |
+| **Web console** | Threads, findings and fixes in a browser, on your machine | `0security` |
+| **GitHub Action** | Scan each pull request and show the findings in GitHub's Security tab | [Pull request checks](https://docs.0.security/ci/) |
+
+All three run the same engine.
+
 ## What it does
 
 - **Reviews code.** A fast scanner pass, then a model reads the code. Large repositories are reviewed in batches you can resume.
