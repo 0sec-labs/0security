@@ -235,7 +235,7 @@ Each setting is global to your computer, and project settings cannot change it. 
 
 ### First-run notice
 
-The first time you run the CLI or the console, 0security prints one notice to stderr. It says that 0security sends anonymous usage counts and crash reports and checks GitHub for updates, links here and shows how to opt out. 0 prints it once per install, and only when stderr is a terminal. It never prints in CI, with `--format json`, `--json` or other machine formats, with `ZERO_LOG_FORMAT=json`, or when telemetry is already off. The browser app shows the same disclosure under Settings, Privacy.
+The first time you run the CLI or the console, 0security prints one notice to stderr. It is one line. It says that usage counts, crash reports and update checks are on, that they never include code or findings, and that `ZERO_OFFLINE=1` turns them off. It links here for the other switches. 0 prints it once per install, and only when stderr is a terminal. It never prints in CI, with `--format json`, `--json` or other machine formats, with `ZERO_LOG_FORMAT=json`, or when telemetry is already off. The browser app shows the same disclosure under Settings, Privacy.
 
 ### Usage metrics
 

@@ -32,11 +32,10 @@ describe("first-run telemetry notice", () => {
     const h = home();
     const first = run(h);
     expect(first.printed).toBe(true);
-    expect(first.text).toContain("anonymous usage counts and crash reports");
-    expect(first.text).toContain("no targets, findings or code");
+    expect(first.text).toContain("usage counts, crash reports and update checks");
+    expect(first.text).toContain("never code or findings");
     expect(first.text).toContain(TELEMETRY_DOCS_URL);
-    expect(first.text).toContain("ZERO_NO_TELEMETRY=1");
-    expect(first.text).toContain("0security config set analyticsLevel off");
+    expect(first.text).toContain("ZERO_OFFLINE=1");
     expect(existsSync(join(h, ".0", TELEMETRY_NOTICE_FILENAME))).toBe(true);
     expect(run(h).printed).toBe(false);
     expect(run(h, { args: ["web"] }).printed).toBe(false);
