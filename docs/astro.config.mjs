@@ -206,6 +206,7 @@ export default defineConfig({
             { label: "Sentinels", slug: "sentinels" },
             { label: "Skills", slug: "skills" },
             { label: "Extensions", slug: "extensions" },
+            { label: "Browsers and 0security", slug: "browsers" },
             { label: "Findings", slug: "findings" },
             { label: "Threat model and policies", slug: "threat-model-and-policy" },
             { label: "Pull request checks", slug: "ci" },

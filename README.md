@@ -91,6 +91,15 @@ Report bugs in [issues](https://github.com/0sec-labs/0security/issues), improve 
   <img src="https://contrib.rocks/image?repo=0sec-labs/0security" alt="Contributors to 0sec-labs/0security" />
 </a>
 
+## What is open and what is not
+
+| Part | License | What you can do |
+| --- | --- | --- |
+| Core: CLI, engine, web console, GitHub Action, SBOM, evidence, the verifiers `audit-verify` and `evidence verify`, OIDC | MIT OR Apache-2.0 | Use, change and redistribute, in production too. |
+| The `enterprise/` folder: license key, shared findings server, roles (RBAC), SCIM, SAML, signed evidence, audit chain retention | 0security Enterprise License (source-available) | Read and modify it. Run it for development and testing. Production use needs a license key. |
+
+The `enterprise/` folder is source-available, not open source. Features already in the open core will not move into `enterprise/`.
+
 ## License
 
 [MIT](LICENSE-MIT) OR [Apache-2.0](LICENSE-APACHE), except the `enterprise/` directory, which has its own license and needs a key in production. See [LICENSING.md](LICENSING.md).

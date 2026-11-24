@@ -555,7 +555,7 @@ Not tested against a live Okta or Entra tenant. The tests use the examples in RF
 
 ## Teams and enterprise
 
-0 is open source under MIT OR Apache-2.0. The CLI, engine, browser app and team workspace are all in the [`0sec-labs/0security`](https://github.com/0sec-labs/0security) repository. None of them needs an account, a license key or a 0security-hosted service. Model calls go to the provider you choose with your own key. Findings stay on your computer, CI runner or servers. The only automatic upload is the anonymous telemetry described in [Configuration](/configuration/#telemetry).
+The core is open source under MIT OR Apache-2.0: the CLI, engine, browser app, GitHub Action, SBOM, evidence, OIDC and the verifiers `audit-verify` and `evidence verify`. It lives in the [`0sec-labs/0security`](https://github.com/0sec-labs/0security) repository. None of it needs an account, a license key or a 0security-hosted service. Model calls go to the provider you choose with your own key. Findings stay on your computer, CI runner or servers. The only automatic upload is the anonymous telemetry described in [Configuration](/configuration/#telemetry).
 
 ### Free and paid
 
@@ -567,7 +567,7 @@ The `enterprise/` folder in the same repository holds the paid features:
 - Finer roles, SCIM provisioning and SAML sign-in.
 - Signed compliance evidence bundles, a tamper-evident audit log and retention policies.
 
-You can read that code. Running it in production needs a license key. Development and testing need none. See [LICENSING.md](https://github.com/0sec-labs/0security/blob/main/LICENSING.md).
+That code is source-available under the 0security Enterprise License, not open source. You can read and modify it. Running it in production needs a license key. Development and testing need none. Features already in the open core will not move into `enterprise/`. See [LICENSING.md](https://github.com/0sec-labs/0security/blob/main/LICENSING.md).
 
 A key is a signed string. 0 checks it on your machine and never contacts a server. Set it in the environment of the process that runs 0:
 

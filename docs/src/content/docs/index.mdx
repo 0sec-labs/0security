@@ -95,6 +95,12 @@ export OPENAI_API_KEY=...
 
 To export findings, add `--format sarif` or `--format json` to `0security findings list`. To scan only what a branch changed, see [Pull request checks](/ci/). The [CLI reference](/commands/) lists every command.
 
+## What 0 does and does not do
+
+0 reads your code and runs your tests. It does not attack running applications. It does not scan live web apps or APIs for you.
+
+The one command that sends traffic to a live target is `0security probe`. It tests model and agent endpoints, not websites. See [probe](/commands/#probe).
+
 ## The words 0 uses
 
 | Term | Meaning |
