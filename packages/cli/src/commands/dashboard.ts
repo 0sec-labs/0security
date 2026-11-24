@@ -397,11 +397,15 @@ export function registerDashboardCommand(program: Command): void {
                 else json(res, teamReply.status, teamReply.data);
                 return;
               }
-              if (!engineRequest) authorizeTeamApi(teamAuth, req, requestUrl.pathname);
-              const privilegedDenial = privilegedRouteDenial(requestUrl.pathname, req.method ?? "GET", { engineRequest, teamEnabled: teamAuth.enabled, role: teamAuth.resolveSession(req)?.role });
-              if (privilegedDenial) { auditDenial(req, requestUrl.pathname, privilegedDenial.data.code, engineRequest ? "engine" : "browser"); json(res, privilegedDenial.status, privilegedDenial.data); return; }
               const memberScope = engineRequest ? undefined : scopeFilterFor(teamAuth.resolveSession(req));
-              if (memberScope && scopedRouteDenied(requestUrl.pathname)) { auditDenial(req, requestUrl.pathname, "scope_restricted", "browser"); json(res, 403, { code: "scope_restricted", error: "Your role is limited to some repositories and cannot use this route." }); return; }
+              const enforceRouteAccess = (pathname: string, method: string): boolean => {
+                if (!engineRequest) authorizeTeamApi(teamAuth, req, pathname);
+                const privilegedDenial = privilegedRouteDenial(pathname, method, { engineRequest, teamEnabled: teamAuth.enabled, role: teamAuth.resolveSession(req)?.role });
+                if (privilegedDenial) { auditDenial(req, pathname, privilegedDenial.data.code, engineRequest ? "engine" : "browser"); json(res, privilegedDenial.status, privilegedDenial.data); return false; }
+                if (memberScope && scopedRouteDenied(pathname)) { auditDenial(req, pathname, "scope_restricted", "browser"); json(res, 403, { code: "scope_restricted", error: "Your role is limited to some repositories and cannot use this route." }); return false; }
+                return true;
+              };
+              if (!enforceRouteAccess(requestUrl.pathname, req.method ?? "GET")) return;
               res.setHeader("X-0-Engine-ID", localHandshake.engineId);
               const expectedEngineId = req.headers["x-0-expected-engine-id"];
               if (expectedEngineId !== undefined && expectedEngineId !== localHandshake.engineId) throw new WebRequestError("Request belongs to a different engine identity.", 409);
@@ -433,7 +437,10 @@ export function registerDashboardCommand(program: Command): void {
               }
               const backendRoute = await handleBackendConnectionRequest(req, res, requestUrl, backends, (backendId, sessionId) => localProviderSessions.release(backendId, sessionId, engineRequest ? "engine" : teamAuth.resolveSession(req)?.userId ?? "local"));
               if (backendRoute.handled) { modelBackends.reload(); return; }
-              if (backendRoute.localPath) requestUrl = new URL(backendRoute.localPath, origin);
+              if (backendRoute.localPath) {
+                requestUrl = new URL(backendRoute.localPath, origin);
+                if (!enforceRouteAccess(requestUrl.pathname, req.method ?? "GET")) return;
+              }
               const skillsRoute = requestUrl.pathname.match(/^\/api\/skills(?:\/(.*))?$/);
               if (skillsRoute) {
                 const member = teamAuth.resolveSession(req);
