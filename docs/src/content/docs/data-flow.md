@@ -48,7 +48,7 @@ For a stronger guarantee than a test, also block egress at the network: run 0 in
 | `update-check` | `api.github.com`, `github.com`, `raw.githubusercontent.com` | Interactive start-up, console update status, `0security doctor upgrade`. | A GET for the latest release tag; the installer on upgrade. | `updatePolicy off`, `ZERO_NO_UPDATE_CHECK`, `ZERO_OFFLINE`. |
 | `model-catalog-sync` | `models.dev` | Console model picker refresh. | A GET of a public list. | `ZERO_NO_TELEMETRY`, `DO_NOT_TRACK`, `ZERO_OFFLINE`. |
 | `pricing-discovery` | `openrouter.ai` | A model has no built-in price. | A GET of a public list. | The same. |
-| `web-search-tool` | `mcp.parallel.ai`, `html.duckduckgo.com` | The agent calls `web_search`. | The search query the model wrote. | `ZERO_FEATURE_WEB_SEARCH=0`. |
+| `web-search-tool` | `mcp.parallel.ai`, `html.duckduckgo.com`, `api.keenable.ai` | The agent calls `web_search`. `api.keenable.ai` replaces `mcp.parallel.ai` only when `ZERO_WEB_SEARCH_PROVIDER=keenable`. | The search query the model wrote, and `KEENABLE_API_KEY` if you set it. | `ZERO_FEATURE_WEB_SEARCH=0`. |
 | `osv-advisory-lookup` | `api.osv.dev` | `0security sbom check` and evidence bundles with advisories. | Package URLs from the SBOM. | Skip the check. |
 | `sbom-outdated-lookup` | `api.deps.dev` | `0security sbom check --outdated`. | Package names from the SBOM (at most 200). | Do not pass the flag. |
 | `sbom-licenses-resolve` | `api.deps.dev` | `0security sbom licenses --resolve`. | Package names and versions of components with no stated license. | Do not pass the flag. |

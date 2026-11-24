@@ -198,6 +198,8 @@ Three of these limits are also settings: `subagentConcurrency` (1-128, default 3
 | --- | --- |
 | `ZERO_FEATURE_MULTIMODAL` | Turn multimodal input on or off. |
 | `ZERO_FEATURE_WEB_SEARCH` | Turn the `web_search` tool on or off. |
+| `ZERO_WEB_SEARCH_PROVIDER` | Choose the search backend: `parallel` (default) or `keenable`. Any other value makes `web_search` refuse. |
+| `KEENABLE_API_KEY` | Optional key for the Keenable backend. It raises the rate limit and is read only from the environment. |
 
 A gate does not supply the credentials or tools its feature needs.
 

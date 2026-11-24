@@ -60,3 +60,35 @@ describe("one search tool with bounded provider failover", () => {
     } finally { await executor.cleanup(); }
   });
 });
+describe("optional Keenable backend", () => {
+  const keenable = '{"results":[{"title":"K","url":"https://k.test/","snippet":"hit"}]}';
+  afterEach(() => { delete process.env["ZERO_WEB_SEARCH_PROVIDER"]; });
+  it("uses Keenable and never Parallel when selected", async () => {
+    process.env["ZERO_WEB_SEARCH_PROVIDER"] = "keenable";
+    mocks.http.mockImplementation(async () => new Response(keenable));
+    const executor = new ToolExecutor(context());
+    try {
+      const result = await executor.execute(query);
+      expect(result).toMatchObject({ success: true, output: { provider: "Keenable" } });
+      expect(mocks.parallel).not.toHaveBeenCalled();
+      expect(String(mocks.http.mock.calls[0]![0])).toBe("https://api.keenable.ai/v1/search/public");
+    } finally { await executor.cleanup(); }
+  });
+  it("falls back to DuckDuckGo when Keenable fails", async () => {
+    process.env["ZERO_WEB_SEARCH_PROVIDER"] = "keenable";
+    mocks.http.mockImplementation(async (url: string) => url.includes("keenable") ? new Response("x", { status: 500 }) : new Response(html));
+    const executor = new ToolExecutor(context());
+    try {
+      expect(await executor.execute(query)).toMatchObject({ success: true, output: { provider: "DuckDuckGo" } });
+    } finally { await executor.cleanup(); }
+  });
+  it("refuses an unknown provider and contacts nothing", async () => {
+    process.env["ZERO_WEB_SEARCH_PROVIDER"] = "bing";
+    const executor = new ToolExecutor(context());
+    try {
+      expect((await executor.execute(query)).success).toBe(false);
+      expect(mocks.http).not.toHaveBeenCalled();
+      expect(mocks.parallel).not.toHaveBeenCalled();
+    } finally { await executor.cleanup(); }
+  });
+});
