@@ -56,12 +56,14 @@ A license key unlocks these features. Set `ZERO_LICENSE` or `ZERO_LICENSE_FILE`,
 - The docs, help examples, hints and error messages name the command `0security`, and the GitHub Action calls `0security`. `0` stays as its short alias. Set `ZERO_PROGRAM_NAME=0security` or `0` to force the name that help shows.
 - Every skill on the Skills page has a topic icon. Your own skills get an icon when their name matches a topic.
 - The messages for `--chat` no longer point at a command that does not exist.
+- The first-run telemetry notice is one line.
 - The web console and the docs site render Mermaid diagrams with Mermaid 12.
 
 ### Fixed
 
 - Opening a thread in the web console could show only part of the conversation until you refreshed. It now re-reads the messages when a turn starts or ends.
 - Saved threads in the web console's Threads list show their folder under the title.
+- Queued messages in the web console sit above the message box and say why they are paused (stopped, error, or thread reopened).
 - SBOM source attribution no longer credits a dependency declared in a submodule to the root `pom.xml` when the declared and resolved versions differ. A dependency declared in several files is not attributed to one at random.
 - The protected-paths hook closes six bypasses: ANSI-C `$'...'` quoting, the `>|` redirection, flags before the directory in `cd` and `pushd`, case differences on case-insensitive file systems, and several state files that were not protected.
 - Sentinel release, tag and check triggers reject git refs with dot segments or path traversal, so they cannot reach other GitHub API paths.
