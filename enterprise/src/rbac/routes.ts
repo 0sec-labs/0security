@@ -51,6 +51,9 @@ export const ROUTE_RULES: readonly Rule[] = [
   rule("write", /^\/api\/(?:control|workflow-engine|workers|work|backends|backend|findings-access|v1)(?:\/|$)/, "settings.write"),
   rule("write", new RegExp(`^/api/console/(?:${alt(CONSOLE_ADMIN_AREAS)})(?:/|$)`), "settings.write"),
 
+  // The app shell asks which engine it is talking to before it shows anything, so every signed-in role needs these.
+  rule("read", /^\/api\/(?:backends|backends\/local\/handshake|backend\/handshake)$/, "session"),
+
   // Everything else that can be read.
   rule("read", /^\/api\/(?:work|skills|engagements|backends|backend|findings-access|workers|workflow-engine|control|v1)(?:\/|$)/, "workspace.read"),
   rule("read", new RegExp(`^/api/console/(?:${alt(CONSOLE_READ_AREAS)})(?:/|$)`), "workspace.read"),
