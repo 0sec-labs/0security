@@ -1523,7 +1523,7 @@ Browse and manage persisted findings
 
 Triage (`new`, `accepted`, `suppressed`) and verification are separate states. Accepting a finding records your decision; reproduction and fix verification are separate steps.
 
-Subcommands: [list](#findings-list) · [show](#findings-show) · [update](#findings-update) · [import](#findings-import) · [fix](#findings-fix) · [burndown](#findings-burndown) · [verify](#findings-verify) · [metrics](#findings-metrics) · [evidence](#findings-evidence) · [export-fixes](#findings-export-fixes) · [report-draft](#findings-report-draft) · [accept](#findings-accept) · [suppress](#findings-suppress) · [reopen](#findings-reopen) · [export](#findings-export) · [keys](#findings-keys) · [upload](#findings-upload) · [issues](#findings-issues) · [reports](#findings-reports).
+Subcommands: [list](#findings-list) · [show](#findings-show) · [update](#findings-update) · [import](#findings-import) · [fix](#findings-fix) · [burndown](#findings-burndown) · [verify](#findings-verify) · [metrics](#findings-metrics) · [rollup](#findings-rollup) · [evidence](#findings-evidence) · [export-fixes](#findings-export-fixes) · [report-draft](#findings-report-draft) · [accept](#findings-accept) · [suppress](#findings-suppress) · [reopen](#findings-reopen) · [export](#findings-export) · [keys](#findings-keys) · [upload](#findings-upload) · [issues](#findings-issues) · [reports](#findings-reports).
 
 | Option | Registered default | Description |
 | --- | --- | --- |
@@ -1986,6 +1986,51 @@ The summary lists runs, cost, average time and counts per command. A proposed fi
 | `--since <when>` | — | Only runs since then: 36h, 7d, 2w or a date such as 2026-11-01 |
 | `--command <name>` | — | Only this command: scan, fix, verify |
 | `--format <format>` | — | Output: text or json Choices: text, json. |
+
+#### findings rollup
+
+Count open findings across repositories by severity, category, age and owner, from export files and findings databases
+
+```text
+0security findings rollup [options] [inputs...]
+```
+
+```bash
+0security findings rollup --export api.json --repository api
+0security findings rollup api.json web.json --format html -o rollup.html
+```
+
+Run it once per repository with `--export` to write a rollup export. Put the files in one place, then run it again with the files as inputs. An input is an export file or a findings database. With no input, it reads the databases on this machine. It reads local files only and sends nothing.
+
+How it counts:
+
+- A flaw counts once per repository. Rows with the same repository and fingerprint merge, even across files. The newest row sets its state and the oldest sets its age. The same fingerprint in two repositories counts twice.
+- The open count leaves out findings that are fixed, marked false positive, accepted or suppressed. An acceptance past its expiry counts as open. The output shows how many were left out and why.
+- Age is the time since the finding was first seen: under 7 days, 7 to 30, 30 to 90, over 90.
+- The owner is the finding's assignee. If it has none, the owner comes from the `--owners` file. Otherwise it counts as unassigned. 0 does not read CODEOWNERS, because that file comes from the repository you scan.
+- The repository name is the folder name of the scan target, or the name you pass with `--repository`. An export never contains your directory paths or finding evidence.
+
+The `--owners` file is a JSON object that maps a repository name to an owner or team:
+
+```json
+{ "api": "payments", "web": "growth" }
+```
+
+An export has the schema `0.findings-rollup.v1`: `schema`, `exportedAt` and `findings`. Each finding has `repository`, `fingerprint`, `title`, `severity`, `category`, `status`, `triage` (new, accepted or suppressed), `owner` (a string or null), `firstSeen` and `lastSeen` (ISO times). To bring in another scanner's results first, use [findings import](#findings-import).
+
+The rollup does not keep history, so it shows no trend. Keep the JSON output of each run to compare them.
+
+| Argument | Required | Description |
+| --- | --- | --- |
+| `inputs` | No |  |
+
+| Option | Registered default | Description |
+| --- | --- | --- |
+| `--export <file>` | — | Also write these findings as a rollup export file that another rollup can read |
+| `--owners <file>` | — | JSON file mapping repository names to owners, used when a finding has no assignee |
+| `--repository <name>` | — | Repository name for findings read from a database (default: the scan target's folder name) |
+| `--format <format>` | — | Output: text, json or html Choices: text, json, html. |
+| `-o, --output <file>` | — | Write the rollup to a file instead of stdout |
 
 #### findings verify
 

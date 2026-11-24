@@ -12,6 +12,7 @@ on the GitHub Release tag.
 
 ## [Unreleased]
 
+- `0security findings rollup` counts open findings across repositories by severity, category, age and owner, in text, JSON or HTML. It reads rollup export files (`--export` writes one) and findings databases, and sends nothing. Fixed, false-positive, accepted and suppressed findings are left out of the open count.
 - The first line of `0security --help` now describes the product as a security agent (scan, fix, SBOM and evidence) instead of "security sentinels". The messages for `--chat` no longer point at a `0 chats` command that does not exist. The GitHub Action calls `0security`.
 ### Changed
 

@@ -456,6 +456,17 @@ After a burndown, write a report of the outcomes:
 
 It lists each fix with its pull request and checks, and counts how many were merged. See [findings export-fixes](/commands/#findings-export-fixes).
 
+### Count findings across repositories
+
+Write one export per repository, then roll them up:
+
+```bash
+0security findings rollup --export api.json --repository api
+0security findings rollup api.json web.json --format html -o rollup.html
+```
+
+The result counts open findings by severity, category, age and owner. See [findings rollup](/commands/#findings-rollup) for the export format and the counting rules.
+
 ## Verified fixes
 
 A verified fix is a fix whose checks ran in a container with no network. The pull request says so only when every check passed there.

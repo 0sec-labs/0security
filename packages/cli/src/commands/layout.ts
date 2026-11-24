@@ -101,6 +101,7 @@ const EXAMPLES: Readonly<Record<string, readonly string[]>> = {
   "findings issues": ["0security findings issues --repo acme/app --dry-run", "0security findings issues --repo acme/app --min-severity high --max 10"],
   "findings update": ['0security findings update 3f2a --status accepted --reason "fix scheduled" --expires 90d --approver "security lead"', '0security findings update 3f2a --status false-positive --reason "test fixture"'],
   "findings verify": ["0security findings verify --severity high,medium --folder ~/code/app", "0security findings verify 3f2a --folder ~/code/app", "0security findings verify --apply --budget 1 --folder ~/code/app"],
+  "findings rollup": ["0security findings rollup", "0security findings rollup api.json web.json --format html -o rollup.html", "0security findings rollup --export api.json --repository api"],
   "findings metrics": ["0security findings metrics", "0security findings metrics --since 7d --command fix", "0security findings metrics --format json"],
   "findings burndown": ["0security findings burndown --severity high --limit 10 --test \"pnpm test\"", "0security findings burndown --dry-run", "0security findings burndown --history --format json"],
   threads: ['0security threads start "Map the login flow" --folder ~/code/app --wait', "0security threads list", "0security threads show <id>", '0security threads send <id> "Now the logout path" --wait', "0security threads stop <id>"],
