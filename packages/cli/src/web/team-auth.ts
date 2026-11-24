@@ -7,13 +7,19 @@ import { createRemoteJWKSet, jwtVerify } from "jose";
 import { TeamAuthError } from "./team-auth-error.js";
 import { TeamSaml, samlConfigSchema, validateSamlConfig } from "./team-saml.js";
 import { ScimTable, TeamUserConflictError, type TeamUserRow, type TeamUserTable } from "@0/engine/storage";
-import { BUILT_IN_ROLES, hasFeature, nearestBuiltInRole, parseScope, resolveRoles, roleFromGroups, scopePatterns, type Permission, type RoleDefinition, type RoleScope } from "../enterprise-bridge.js";
+import { BUILT_IN_ROLES, hasFeature, nearestBuiltInRole, parseScope, resolveRoles, roleFromGroups, scopePatterns, targetFilter, type Permission, type RoleDefinition, type RoleScope } from "../enterprise-bridge.js";
 
 const scrypt = promisify(scryptCallback);
 const COOKIE = "zero_team_session";
 const SSO_COOKIE = "zero_team_sso";
 const SESSION_MS = 8 * 60 * 60 * 1000;
 const SSO_MS = 10 * 60 * 1000;
+function scopeWithin(candidate: readonly string[] | null, allowed: readonly string[]): boolean {
+  if (candidate === null) return false;
+  const exact = new Set(allowed.map(pattern => pattern.toLowerCase()));
+  const match = targetFilter(allowed);
+  return candidate.every(pattern => exact.has(pattern.toLowerCase()) || (!pattern.includes("*") && Boolean(match?.(pattern))));
+}
 const userSchema = z.object({
   id: z.string().min(1).max(160), name: z.string().min(1).max(160),
   role: z.string().min(1).max(64), passwordHash: z.string().optional(), oidcSub: z.string().min(1).optional(), samlNameId: z.string().min(1).max(512).optional(),
@@ -205,7 +211,7 @@ export class TeamAuth {
    * Change the role or the scope of one account. The caller has checked the license and the permission.
    * Returns what changed, for the audit log. Never leaves the workspace without an account that can manage users.
    */
-  setAccess(userId: string, change: { role?: string; scope?: unknown }): { before: { role: string; scope: RoleScope | null }; after: { role: string; scope: RoleScope | null } } {
+  setAccess(userId: string, change: { role?: string; scope?: unknown }, actor?: TeamIdentity): { before: { role: string; scope: RoleScope | null }; after: { role: string; scope: RoleScope | null } } {
     const user = this.users.get(userId);
     if (!user) throw new TeamAuthError("No such account", 404);
     if (change.role !== undefined && !this.roles.has(change.role)) throw new TeamAuthError("Unknown role", 400);
@@ -221,14 +227,32 @@ export class TeamAuth {
       }
     }
     const nextRole = change.role ?? user.role;
+    const next = { ...user, role: nextRole, roleSource: "admin" as const, scopeJson: scopeJson === undefined ? user.scopeJson : scopeJson };
+    if (actor && actor.roleName !== "owner") {
+      if (user.role === "owner") throw new TeamAuthError("Only a workspace owner can modify an owner account.", 403);
+      if (change.role === "owner") throw new TeamAuthError("Only a workspace owner can assign the owner role.", 403);
+      const actorPerms = new Set(actor.permissions);
+      const currentPerms = this.roles.get(user.role)?.permissions ?? [];
+      if (currentPerms.some(permission => !actorPerms.has(permission))) throw new TeamAuthError("You cannot modify an account with permissions your role does not hold.", 403);
+      const nextPerms = this.roles.get(nextRole)?.permissions ?? [];
+      if (nextPerms.some(permission => !actorPerms.has(permission))) throw new TeamAuthError("You cannot assign a role with permissions your role does not hold.", 403);
+      if (actor.scope !== null) {
+        const currentScope = this.scopeOf(user, this.roles.get(user.role) ?? BUILT_IN_ROLES.viewer!);
+        const nextScope = this.scopeOf(next, this.roles.get(nextRole) ?? BUILT_IN_ROLES.viewer!);
+        if (!scopeWithin(currentScope, actor.scope)) throw new TeamAuthError("You cannot modify an account outside your repository scope.", 403);
+        if (!scopeWithin(nextScope, actor.scope)) throw new TeamAuthError("You cannot grant repository access outside your own scope.", 403);
+      }
+    }
     if (nextRole !== user.role && this.roles.get(user.role)?.permissions.includes("users.manage") && !this.roles.get(nextRole)?.permissions.includes("users.manage")) {
-      const others = [...this.users.values()].filter(row => row.id !== user.id && this.roles.get(row.role)?.permissions.includes("users.manage"));
+      const others = [...this.users.values()].filter(row => row.id !== user.id && row.active && !row.deleted && this.roles.get(row.role)?.permissions.includes("users.manage"));
       if (others.length === 0) throw new TeamAuthError("Keep at least one account that can manage users", 409);
     }
     const before = { role: user.role, scope: user.scopeJson ? parseScope(JSON.parse(user.scopeJson)) ?? null : null };
-    const next = { ...user, role: nextRole, roleSource: "admin" as const, scopeJson: scopeJson === undefined ? user.scopeJson : scopeJson };
     this.table?.updateAccess(userId, { role: next.role, roleSource: "admin", scopeJson: next.scopeJson });
     this.users.set(userId, next);
+    if (nextRole !== user.role) {
+      for (const session of this.sessions.values()) if (session.userId === userId) session.role = undefined;
+    }
     return { before, after: { role: next.role, scope: next.scopeJson ? parseScope(JSON.parse(next.scopeJson)) ?? null : null } };
   }
   memberCount(): number { return [...this.users.values()].filter(user => !user.deleted).length; }
