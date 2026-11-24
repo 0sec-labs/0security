@@ -9,7 +9,7 @@ import {chromium} from 'playwright';
 import {webCss} from './dashboard-web-css.mjs';
 const root=fileURLToPath(new URL('../',import.meta.url));
 // The real FindingsBoard and drop rules, driven with real pointer, touch and keyboard input (no synthetic drag events).
-const harness=`import React,{useState}from'react';import{createRoot}from'react-dom/client';
+const harness=`import React,{useState}from'react';import{createRoot}from'react-dom/client';import{MemoryRouter}from'react-router-dom';
 import{FindingsBoard}from'./src/components/findings/findings-board';import{resolveDrop,findingStatus}from'./src/components/findings/findings-model';
 const mk=(id,status,severity='high',triage='new')=>({fingerprint:id,count:1,latest:{id,title:'Finding '+id,severity,status:'discovered',category:'xss',triageStatus:triage,timestamp:Date.now()},workflow:{status,persistedStatus:status,recommendedStatus:status,phase:status,assignee:null}});
 window.log=[];
@@ -17,7 +17,7 @@ function App(){const[groups,setGroups]=useState([mk('a','backlog','critical'),mk
  const move=(fp,target)=>{const g=groups.find(x=>x.fingerprint===fp);const d=resolveDrop(findingStatus(g),target);window.log.push({fp,target,ok:d.ok,reason:d.ok?null:d.reason});if(!d.ok)return;
   setGroups(list=>list.map(x=>x.fingerprint!==fp?x:d.kind==='triage'?{...x,latest:{...x.latest,triageStatus:'accepted'}}:{...x,workflow:{...x.workflow,status:d.status}}));};
  return <div style={{height:600,display:'flex',flexDirection:'column'}}><FindingsBoard groups={groups} orderBy="severity" direction="desc" activeFingerprint={null} cursorFingerprint={null} selected={new Set()} pendingFingerprint={null} fixPrs={new Map()} onOpen={fp=>window.log.push({open:fp})} onToggleSelect={()=>{}} onMove={move}/></div>};
-createRoot(document.getElementById('root')).render(<App/>);`;
+createRoot(document.getElementById('root')).render(<MemoryRouter><App/></MemoryRouter>);`;
 test('findings board drops cards by pointer, touch and keyboard and refuses invalid moves visibly',async()=>{
  const web=resolve(root,'packages/web'),dir=await mkdtemp(resolve(web,'.findings-dnd-'));let server,browser;
  try{

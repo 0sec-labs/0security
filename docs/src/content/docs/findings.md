@@ -10,9 +10,9 @@ A finding is a security issue that a thread or Sentinel recorded, with its evide
 
 ## Review findings in the app
 
-Open **Findings** in the sidebar. The page has these views: **All**, **Needs review**, **Fix ready** and **Closed**. Search, or filter by severity and status.
+Open **Findings** in the sidebar. The page has these views: **All**, **Needs review** and **Closed**, as a list or a board. Search, or filter by severity and status.
 
-Select a finding to open its detail panel. It shows the evidence (request, response, analysis and artifacts), severity, triage state and any fix pull request.
+Select a finding to open its detail panel. It shows the evidence (request, response, analysis and artifacts), severity, triage state and the thread it came from.
 
 - Set the work state to **Backlog**, **Todo**, **In progress**, **Blocked**, **Done** or **Cancelled**. 0 sets **Needs your review** and **Agent review**. Until you confirm a finding that needs review, you can only move it to **Done**, **Cancelled** or **Accepted**.
 - Choose **Accept** or **Dismiss**, with an optional note. **Undo** resets the finding to not reviewed.

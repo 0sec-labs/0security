@@ -11,7 +11,7 @@ import { FindingsList } from "@/components/findings/findings-list";
 import { FindingsOrg, FindingsViewTabs } from "@/components/findings/findings-org";
 import { FindingsToolbar, FindingsTopActions } from "@/components/findings/findings-toolbar";
 import {
-  findingCode, findingStatus, mergeView, resolveDrop, STATUS_LABEL, missionKey, stepCursor,
+  findingCode, findingPath, findingStatus, mergeView, resolveDrop, STATUS_LABEL, missionKey, stepCursor,
   type FindingFilters, type FindingPreset, type FindingStatus,
 } from "@/components/findings/findings-model";
 import { listMemory, useFindingsView } from "@/components/findings/use-findings-view";
@@ -30,7 +30,7 @@ const isInteractive = (target: EventTarget | null) => Boolean((target as HTMLEle
 const inOverlay = (target: EventTarget | null) => Boolean((target as HTMLElement | null)?.closest?.("[role='menu'], [role='dialog'], [role='listbox'][data-popup]"));
 const isTyping = (event: KeyboardEvent) => event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || event.isComposing || isEditable(event.target) || inOverlay(event.target);
 
-const pagePath = (fingerprint: string) => `/findings/${encodeURIComponent(fingerprint)}`;
+const pagePath = findingPath;
 
 async function copyText(text: string) {
   try { await navigator.clipboard?.writeText(text); } catch { /* Clipboard may be unavailable; nothing else to do. */ }
