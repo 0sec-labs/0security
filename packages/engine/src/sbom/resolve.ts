@@ -36,6 +36,10 @@ export interface ResolveOptions {
   env?: NodeJS.ProcessEnv;
   /** Pass `-o` to Maven and `--offline` to Gradle: nothing is downloaded, so only what is cached resolves. */
   offline?: boolean;
+  /** A Maven settings file (mirrors, proxies, credentials) passed as `mvn -s <file>`. The operator names it; the project cannot. */
+  mavenSettings?: string;
+  /** A Gradle init script (mirrors, proxies) passed as `gradle -I <file>`. The operator names it; the project cannot. */
+  gradleInitScript?: string;
 }
 export interface ResolveResult {
   components: Component[];
@@ -127,6 +131,18 @@ export function parseGradleTree(text: string): Component[] {
   return [...nodes.values()];
 }
 
+/**
+ * Read the output of the build tool's own dependency report, run by someone else (`mvn dependency:tree -DoutputFile=...`,
+ * `gradle dependencies`). Nothing runs and nothing is downloaded. The lines tell the shape: Maven prints `+- ` and
+ * `\- `, Gradle prints `+--- ` and `\--- `. Text of neither shape gives no components.
+ */
+export function parseDependencyReport(text: string): { tool: "mvn" | "gradle" | "unknown"; components: Component[] } {
+  const mark = (components: Component[]): Component[] => components.map(component => ({ ...component, resolved: true }));
+  if (/^(?:[| ]{5})*[+\\]--- \S/m.test(text)) return { tool: "gradle", components: mark(parseGradleTree(text)) };
+  if (/^(?:\[INFO\] ?)?(?:[| ]{3})*[+\\]- \S/m.test(text)) return { tool: "mvn", components: mark(parseMavenTree(text)) };
+  return { tool: "unknown", components: [] };
+}
+
 /** Union what several trees say about one package: edges are joined, development-only holds only if every tree says so. */
 export function mergeComponents(lists: Component[][]): Component[] {
   const byKey = new Map<string, Component>();
@@ -188,7 +204,7 @@ export async function resolveJvmDependencies(folder: string, options: ResolveOpt
     const scratch = await mkdtemp(join(tmpdir(), "0-sbom-mvn-"));
     try {
       const file = join(scratch, "tree.txt");
-      const args = ["-B", "-ntp", ...(options.offline ? ["-o"] : []), "dependency:tree", "-DoutputType=text", `-DoutputFile=${file}`, "-DappendOutput=true"];
+      const args = ["-B", "-ntp", ...(options.offline ? ["-o"] : []), ...(options.mavenSettings ? ["-s", options.mavenSettings] : []), "dependency:tree", "-DoutputType=text", `-DoutputFile=${file}`, "-DappendOutput=true"];
       await runTool("mvn", args, folder, options);
       const text = await readFile(file, "utf8").catch(() => "");
       const components = parseMavenTree(text);
@@ -201,7 +217,7 @@ export async function resolveJvmDependencies(folder: string, options: ResolveOpt
   for (const project of projects) {
     const label = relative(folder, project) || ".";
     try {
-      const { stdout } = await runTool("gradle", ["--no-daemon", "--console=plain", "-q", ...(options.offline ? ["--offline"] : []), "-p", project, "dependencies", "--configuration", "runtimeClasspath"], folder, options);
+      const { stdout } = await runTool("gradle", ["--no-daemon", "--console=plain", "-q", ...(options.offline ? ["--offline"] : []), ...(options.gradleInitScript ? ["-I", options.gradleInitScript] : []), "-p", project, "dependencies", "--configuration", "runtimeClasspath"], folder, options);
       lists.push(parseGradleTree(stdout));
       tools.push(`gradle (${label})`);
     } catch (error) {

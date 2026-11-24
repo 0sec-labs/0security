@@ -1232,7 +1232,7 @@ Generate an SBOM from lockfiles, check one against known advisories, and scan mo
 0security sbom
 ```
 
-Subcommands: [generate](#sbom-generate) · [check](#sbom-check) · [licenses](#sbom-licenses) · [scan-models](#sbom-scan-models).
+Subcommands: [generate](#sbom-generate) · [check](#sbom-check) · [licenses](#sbom-licenses) · [scan-models](#sbom-scan-models) · [java-usage](#sbom-java-usage).
 
 #### sbom generate
 
@@ -1273,6 +1273,9 @@ Without `--resolve` this is a declaration reader, not a build. It does not resol
 | `--resolve` | — | Maven and Gradle: run the project's own mvn or gradle to resolve the full dependency tree (runs build scripts, downloads from the network; needs --allow-build-tools or a yes at the prompt) |
 | `--allow-build-tools` | — | Confirm --resolve without the prompt: you trust this project to run its build |
 | `--resolve-offline` | — | With --resolve, run the tool offline (mvn -o, gradle --offline): only cached artifacts resolve |
+| `--resolve-from <file>` | `[]` | Maven and Gradle: read the output of mvn dependency:tree (text) or gradle dependencies that you already ran; repeat for more files. Nothing runs or downloads, so it works offline and under ZERO_ENTERPRISE |
+| `--maven-settings <file>` | — | With --resolve, pass this settings.xml to mvn (-s): your mirror, proxy and credentials |
+| `--gradle-init-script <file>` | — | With --resolve, pass this init script to gradle (-I): your mirror and proxy |
 | `--ai` | — | Also list the AI in the folder: models, datasets, hosted model ids and MCP servers, found by reading files as text |
 
 ##### Resolve Maven and Gradle dependencies
@@ -1291,7 +1294,32 @@ This runs the project's build, so it is off by default. The build tool evaluates
 
 If a tool is missing or the build fails, 0 exits with 2 and prints the tool's error lines. Gradle test dependencies are not listed, because only the runtime classpath is read. Maven test and provided scopes are marked `excluded`.
 
-The resolve step is tested with fake `mvn` and `gradle` programs for the output shapes, and by hand with real Maven 3.9 and Gradle 9 on small projects with network access. Parent POMs and BOMs outside the repository resolve only as far as your Maven or Gradle settings let them. Private-registry mirrors work through your own `settings.xml` and Gradle configuration, which 0 does not read.
+Parent POMs and BOMs outside the repository resolve only as far as your Maven or Gradle settings let them.
+
+##### Use a private mirror
+
+Your own `~/.m2/settings.xml` and Gradle configuration apply by default. To use a different file, name it. Both files are yours: 0 never reads one from the project.
+
+```bash
+0security sbom generate . --resolve --allow-build-tools --maven-settings ~/mirror/settings.xml --gradle-init-script ~/mirror/init.gradle
+```
+
+0 passes the Maven file as `mvn -s` and the Gradle file as `gradle -I`. It does not read either file itself.
+
+##### Read a report you already ran
+
+If you cannot run a build tool here, run it elsewhere and give 0 the output. Nothing runs, nothing is downloaded, and `ZERO_ENTERPRISE` allows it.
+
+```bash
+mvn dependency:tree -DoutputType=text -DoutputFile=tree.txt
+0security sbom generate . --resolve-from tree.txt
+```
+
+For Gradle, save the output of `gradle dependencies --configuration runtimeClasspath`. Repeat `--resolve-from` for several files. Components from a report are marked `0:resolved` like the ones from `--resolve`.
+
+To see where your source imports each package, use [sbom java-usage](#sbom-java-usage).
+
+Tested against the real output of Maven 3.9 and Gradle 9 on small projects (saved in the repository), and with fake `mvn` and `gradle` programs for the options. A mirror was not tested against a real Nexus or Artifactory server.
 
 Beyond name and version, the SBOM carries the following, only where the lockfile states it. Nothing is looked up or guessed.
 
@@ -1514,6 +1542,31 @@ Each file is listed with its format, a verdict (`DANGEROUS`, unrecognised import
 | Option | Registered default | Description |
 | --- | --- | --- |
 | `--format <format>` | `text` | Output: text, json or sarif |
+
+#### sbom java-usage
+
+List which Maven components of an SBOM your Java, Kotlin, Scala or Groovy source imports
+
+```text
+0security sbom java-usage [options] <file> [folder]
+```
+
+```bash
+0security sbom java-usage sbom.cdx.json .
+```
+
+This reads your `.java`, `.kt`, `.scala` and `.groovy` files as text and lists where each Maven component of the SBOM is imported. Nothing runs and nothing is sent anywhere.
+
+Each component is `imported`, `imported (matched by group only)` or has no import. Imports in test code are marked. An import shows where a package is named, not that a vulnerable method runs, so this is evidence and not a reachability verdict. A transitive dependency has no import of its own. A library whose classes use an unrelated package name shows no import. Add `--format json` for the full list.
+
+| Argument | Required | Description |
+| --- | --- | --- |
+| `file` | Yes | CycloneDX SBOM (JSON), for example from `0security sbom generate` |
+| `folder` | No | Source folder to read (default: .) |
+
+| Option | Registered default | Description |
+| --- | --- | --- |
+| `--format <format>` | `text` | Output: text or json |
 
 ### findings
 

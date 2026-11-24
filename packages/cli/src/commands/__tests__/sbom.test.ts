@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { UsageError } from "../output.js";
-import { runCheck, runGenerate, runGenerateWith, runScanModels, type SbomDeps } from "../sbom.js";
+import { runCheck, runGenerate, runGenerateWith, runJavaUsage, runScanModels, type SbomDeps } from "../sbom.js";
 
 const dirs: string[] = [];
 afterEach(() => dirs.splice(0).forEach(dir => rmSync(dir, { recursive: true, force: true })));
@@ -236,6 +236,40 @@ describe("0 sbom scan-models", () => {
     expect(() => runScanModels(join(dir, "nope"), {}, deps().deps)).toThrow("does not exist");
     expect(() => runScanModels(dir, { format: "xml" }, deps().deps)).toThrow("--format");
     expect(runScanModels(join(dir, "payload.dat"), {}, deps().deps)).toBe(0); // content is not a recognised pickle container for .dat
+  });
+});
+
+describe("0 sbom generate --resolve-from and java-usage", () => {
+  const tree = "demo:app:jar:1.0\n+- org.apache.logging.log4j:log4j-core:jar:2.14.1:compile\n|  \\- org.apache.logging.log4j:log4j-api:jar:2.14.1:compile\n\\- junit:junit:jar:4.13.2:test\n";
+  const pom = "<project><modelVersion>4.0.0</modelVersion><groupId>g</groupId><artifactId>app</artifactId><version>1</version></project>";
+  const file = (text: string) => join(project({ "report.txt": text }), "report.txt");
+  const real = (extra: Partial<SbomDeps> = {}) => deps({ read: (p: string) => readFileSync(p, "utf8"), ...extra });
+
+  it("reads a dependency report without running anything, even under ZERO_ENTERPRISE", async () => {
+    const io = real({ env: { ZERO_ENTERPRISE: "1", PATH: "/nonexistent" } });
+    await runGenerateWith(project({ "pom.xml": pom }), { resolveFrom: [file(tree)] }, io.deps);
+    const bom = JSON.parse(io.out.join(""));
+    expect(bom.components.map((c: { purl: string }) => c.purl)).toContain("pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1");
+    expect(bom.components.find((c: { name: string }) => c.name.endsWith("log4j-api")).properties).toContainEqual({ name: "0:resolved", value: "true" });
+  });
+  it("rejects a file that is not a report, and flags that do not fit", async () => {
+    await expect(runGenerateWith(project({ "pom.xml": pom }), { resolveFrom: [file("hello")] }, real().deps)).rejects.toThrow(/not a Maven dependency:tree/);
+    await expect(runGenerateWith(project({ "pom.xml": pom }), { resolveFrom: [file(tree)], resolve: true }, real().deps)).rejects.toThrow(/cannot be combined/);
+    await expect(runGenerateWith(project({ "pom.xml": pom }), { mavenSettings: "/x" }, real().deps)).rejects.toThrow(/only apply with --resolve/);
+    await expect(runGenerateWith(project({ "pom.xml": pom }), { resolve: true, allowBuildTools: true, mavenSettings: "/no/such/settings.xml" }, real().deps)).rejects.toThrow(/is not a file/);
+  });
+  it("java-usage lists the imports of the source for the Maven components of an SBOM", () => {
+    const sbom = JSON.stringify({ components: [{ purl: "pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1" }, { purl: "pkg:maven/junit/junit@4.13.2" }, { purl: "pkg:npm/lodash@4.17.21" }] });
+    const dir = project({ "sbom.json": sbom, "src/main/java/A.java": "import org.apache.logging.log4j.LogManager;\nclass A {}\n" });
+    const io = real();
+    runJavaUsage(join(dir, "sbom.json"), dir, {}, io.deps);
+    const text = io.out.join("");
+    expect(text).toContain("org.apache.logging.log4j/log4j-core 2.14.1  imported");
+    expect(text).toContain("src/main/java/A.java:1");
+    expect(text).toContain("1 of 2 Maven components");
+    expect(() => runJavaUsage(join(dir, "sbom.json"), dir, { format: "xml" }, io.deps)).toThrow("--format");
+    const none = project({ "sbom.json": JSON.stringify({ components: [{ purl: "pkg:npm/a@1" }] }) });
+    expect(() => runJavaUsage(join(none, "sbom.json"), none, {}, real().deps)).toThrow(/no Maven components/);
   });
 });
 
