@@ -1,0 +1,47 @@
+{
+  "fixture": "java-crypto",
+  "skill": null,
+  "items": [
+    {
+      "id": "jv-md5",
+      "path": "src/main/java/bench/vault/Vault.java",
+      "startLine": 15,
+      "endLine": 16,
+      "category": "weak-crypto",
+      "description": "password hashed with unsalted MD5"
+    },
+    {
+      "id": "jv-ecb",
+      "path": "src/main/java/bench/vault/Vault.java",
+      "startLine": 20,
+      "endLine": 21,
+      "category": "weak-crypto",
+      "description": "AES in ECB mode"
+    },
+    {
+      "id": "jv-key",
+      "path": "src/main/java/bench/vault/Vault.java",
+      "startLine": 12,
+      "endLine": 12,
+      "category": "secret",
+      "description": "hardcoded AES key"
+    },
+    {
+      "id": "jv-rand",
+      "path": "src/main/java/bench/vault/Vault.java",
+      "startLine": 26,
+      "endLine": 26,
+      "category": "weak-crypto",
+      "description": "security token from java.util.Random"
+    }
+  ],
+  "decoys": [
+    {
+      "id": "jv-decoy-gcm",
+      "path": "src/main/java/bench/vault/Vault.java",
+      "startLine": 29,
+      "endLine": 34,
+      "description": "AES-GCM with a random IV from SecureRandom"
+    }
+  ]
+}

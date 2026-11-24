@@ -1,0 +1,22 @@
+{
+  "fixture": "java-clean",
+  "skill": null,
+  "clean": true,
+  "items": [],
+  "decoys": [
+    {
+      "id": "jc-allow",
+      "path": "src/main/java/bench/safe/SafeServlet.java",
+      "startLine": 23,
+      "endLine": 31,
+      "description": "report name checked against an allow-list"
+    },
+    {
+      "id": "jc-sql",
+      "path": "src/main/java/bench/safe/SafeServlet.java",
+      "startLine": 34,
+      "endLine": 41,
+      "description": "prepared statement and escaped output"
+    }
+  ]
+}

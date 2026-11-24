@@ -1,0 +1,250 @@
+{
+  "meta": {
+    "date": "2026-11-24",
+    "model": "default (gpt-6-luna)",
+    "repeat": 1,
+    "budget": 0.2,
+    "synthetic": false
+  },
+  "rows": [
+    {
+      "fixture": "java-clean",
+      "config": "generic",
+      "repeats": 1,
+      "planted": 0,
+      "recallMean": null,
+      "recallSpread": null,
+      "foundMean": 0,
+      "falsePositivesMean": 0,
+      "falsePositivesSpread": [
+        0,
+        0
+      ],
+      "unmatchedMean": 0,
+      "findingsMean": 0,
+      "costMean": 0.002499765,
+      "costSpread": [
+        0.002499765,
+        0.002499765
+      ],
+      "costTotal": 0.002499765,
+      "secondsMean": 40.506,
+      "secondsSpread": [
+        40.506,
+        40.506
+      ],
+      "failed": [],
+      "coverage": null,
+      "threadsMean": 1
+    },
+    {
+      "fixture": "java-crypto",
+      "config": "generic",
+      "repeats": 1,
+      "planted": 4,
+      "recallMean": 1,
+      "recallSpread": [
+        1,
+        1
+      ],
+      "foundMean": 4,
+      "falsePositivesMean": 0,
+      "falsePositivesSpread": [
+        0,
+        0
+      ],
+      "unmatchedMean": 0,
+      "findingsMean": 4,
+      "costMean": 0.00568314,
+      "costSpread": [
+        0.00568314,
+        0.00568314
+      ],
+      "costTotal": 0.00568314,
+      "secondsMean": 82.43,
+      "secondsSpread": [
+        82.43,
+        82.43
+      ],
+      "failed": [],
+      "coverage": null,
+      "threadsMean": 1
+    },
+    {
+      "fixture": "java-servlet",
+      "config": "generic",
+      "repeats": 1,
+      "planted": 3,
+      "recallMean": 1,
+      "recallSpread": [
+        1,
+        1
+      ],
+      "foundMean": 3,
+      "falsePositivesMean": 1,
+      "falsePositivesSpread": [
+        1,
+        1
+      ],
+      "unmatchedMean": 0,
+      "findingsMean": 4,
+      "costMean": 0.006446219999999999,
+      "costSpread": [
+        0.006446219999999999,
+        0.006446219999999999
+      ],
+      "costTotal": 0.006446219999999999,
+      "secondsMean": 92.329,
+      "secondsSpread": [
+        92.329,
+        92.329
+      ],
+      "failed": [],
+      "coverage": null,
+      "threadsMean": 1
+    },
+    {
+      "fixture": "java-spring",
+      "config": "generic",
+      "repeats": 1,
+      "planted": 4,
+      "recallMean": 0.75,
+      "recallSpread": [
+        0.75,
+        0.75
+      ],
+      "foundMean": 3,
+      "falsePositivesMean": 0,
+      "falsePositivesSpread": [
+        0,
+        0
+      ],
+      "unmatchedMean": 0,
+      "findingsMean": 3,
+      "costMean": 0.004933235,
+      "costSpread": [
+        0.004933235,
+        0.004933235
+      ],
+      "costTotal": 0.004933235,
+      "secondsMean": 69.676,
+      "secondsSpread": [
+        69.676,
+        69.676
+      ],
+      "failed": [],
+      "coverage": null,
+      "threadsMean": 1
+    }
+  ],
+  "runs": [
+    {
+      "fixture": "java-clean",
+      "config": "generic",
+      "repeat": 1,
+      "seconds": 40.506,
+      "costUsd": 0.002499765,
+      "status": "complete",
+      "coverage": null,
+      "threads": 1,
+      "score": {
+        "planted": 0,
+        "found": 0,
+        "foundIds": [],
+        "missedIds": [],
+        "recall": null,
+        "findings": 0,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [],
+        "nearMisses": []
+      }
+    },
+    {
+      "fixture": "java-crypto",
+      "config": "generic",
+      "repeat": 1,
+      "seconds": 82.43,
+      "costUsd": 0.00568314,
+      "status": "complete",
+      "coverage": null,
+      "threads": 1,
+      "score": {
+        "planted": 4,
+        "found": 4,
+        "foundIds": [
+          "jv-md5",
+          "jv-ecb",
+          "jv-key",
+          "jv-rand"
+        ],
+        "missedIds": [],
+        "recall": 1,
+        "findings": 4,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [],
+        "nearMisses": []
+      }
+    },
+    {
+      "fixture": "java-servlet",
+      "config": "generic",
+      "repeat": 1,
+      "seconds": 92.329,
+      "costUsd": 0.006446219999999999,
+      "status": "complete",
+      "coverage": null,
+      "threads": 1,
+      "score": {
+        "planted": 3,
+        "found": 3,
+        "foundIds": [
+          "jv-sqli",
+          "jv-cmdi",
+          "jv-path"
+        ],
+        "missedIds": [],
+        "recall": 1,
+        "findings": 4,
+        "falsePositives": 1,
+        "decoyHits": [
+          {
+            "finding": "6835e105-9951-401d-8da7-734d7c1c3761",
+            "decoy": "jv-decoy-ps"
+          }
+        ],
+        "unmatched": [],
+        "nearMisses": []
+      }
+    },
+    {
+      "fixture": "java-spring",
+      "config": "generic",
+      "repeat": 1,
+      "seconds": 69.676,
+      "costUsd": 0.004933235,
+      "status": "complete",
+      "coverage": null,
+      "threads": 1,
+      "score": {
+        "planted": 4,
+        "found": 3,
+        "foundIds": [
+          "jv-idor",
+          "jv-xxe",
+          "jv-deser"
+        ],
+        "missedIds": [
+          "jv-secret"
+        ],
+        "recall": 0.75,
+        "findings": 3,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [],
+        "nearMisses": []
+      }
+    }
+  ]
+}
