@@ -1536,6 +1536,7 @@ Subcommands: [list](#findings-list) · [show](#findings-show) · [update](#findi
 | `--status <status>` | — | Filter by status: discovered, verified, confirmed, scored, reported, fixed, false-positive |
 | `--triage <triage>` | — | Filter by triage: new, accepted, suppressed |
 | `--expiring <days>` | — | Only accepted risks that expire within this many days |
+| `--context <file>` | — | Business context file (JSON): order findings by what matters to you, with the reason shown. See the docs |
 | `--scope <scope>` | — | in: findings not labelled out of scope; out: only those the declared scope (0security scan --scope) labelled out of scope; all (default): both, each labelled |
 | `--limit <n>` | `50` | Max findings/groups to show |
 | `--all` | `false` | Show raw finding rows instead of grouped fingerprints |
@@ -1564,6 +1565,58 @@ An accepted risk shows `accepted until <date>`. Once that date passes, the findi
 | `--status <status>` | — | Filter by status: discovered, verified, confirmed, scored, reported, fixed, false-positive |
 | `--triage <triage>` | — | Filter by triage: new, accepted, suppressed |
 | `--expiring <days>` | — | Only accepted risks that expire within this many days |
+| `--context <file>` | — | Business context file (JSON): order findings by what matters to you, with the reason shown. See the docs |
+| `--scope <scope>` | — | in: findings not labelled out of scope; out: only those the declared scope (0security scan --scope) labelled out of scope; all (default): both, each labelled |
+| `--limit <n>` | — | Max findings/groups to show |
+
+##### Business context
+
+A scan cannot know what your business depends on. Tell 0 in a small JSON file, and `--context` uses it to order the list:
+
+```bash
+0security findings list --context context.json
+```
+
+```json
+{
+  "entries": [
+    { "match": "src/payments/**", "tags": ["payments", "personal-data"], "note": "card checkout" },
+    { "match": "services/admin/**", "tags": ["internal-only"] },
+    { "match": "examples/**", "tags": ["non-production"] }
+  ]
+}
+```
+
+Each entry has a `match` and a list of `tags`. The `match` is a path or glob, such as `src/payments/**` or `services/billing`, tested against the file the finding points at. An entry with no `match` applies to every finding. A finding with no file only gets entries with no `match`. `note` is optional text that is shown with the finding.
+
+A tag moves a finding up or down in the order, in steps of severity. The tags and their default steps are:
+
+| Tag | Steps |
+| --- | --- |
+| `internet-facing` | +1 |
+| `payments` | +1 |
+| `personal-data` | +1 |
+| `operationally-critical` | +1 |
+| `internal-only` | -1 |
+| `non-production` | -2 |
+
+Steps add up, and the total is held to between -2 and +2. A medium finding in `src/payments/**` with `payments` and `personal-data` ranks with the critical ones. Set `weights` in the file to change a tag, for example `"weights": { "payments": 2 }`. A weight is a whole number from -2 to 2.
+
+Each finding that matched shows a line such as `Business context: ranked higher (+2): payments, personal-data. card checkout`. The order changes and nothing else does: a finding keeps its severity, none is hidden, and verification and fixes are unaffected. 0 reads the file only from the path you pass, never from a repository you scan. The file is limited to 64 KB. Without `--context` the order is by severity as before.
+
+The context applies to `findings list`. Scans, `findings burndown` and exports do not use it yet.
+
+| Option | Registered default | Description |
+| --- | --- | --- |
+| `--all` | — | Show raw finding rows instead of grouped fingerprints |
+| `--db-path <path>` | — | Path to SQLite database |
+| `--scan <scanId>` | — | Filter by scan ID |
+| `--severity <severity>` | — | Filter by severity: critical, high, medium, low, info |
+| `--category <category>` | — | Filter by attack category |
+| `--status <status>` | — | Filter by status: discovered, verified, confirmed, scored, reported, fixed, false-positive |
+| `--triage <triage>` | — | Filter by triage: new, accepted, suppressed |
+| `--expiring <days>` | — | Only accepted risks that expire within this many days |
+| `--context <file>` | — | Business context file (JSON): order findings by what matters to you, with the reason shown. See the docs |
 | `--scope <scope>` | — | in: findings not labelled out of scope; out: only those the declared scope (0security scan --scope) labelled out of scope; all (default): both, each labelled |
 | `--limit <n>` | — | Max findings/groups to show |
 

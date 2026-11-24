@@ -16,6 +16,7 @@ import { rowVerification, verificationPhrase } from "../finding-verification.js"
 import { auditTriage, buildTriageRequest, triageLabel, type TriageFlags } from "./findings-triage.js";
 import { UsageError } from "./output.js";
 import { foldSimilarGroups } from "./findings-dedupe.js";
+import { adjustmentFor, contextScore, describeAdjustment, findingPath, loadBusinessContext, type BusinessContext } from "../business-context.js";
 
 type FindingsListOptions = {
   dbPath?: string;
@@ -26,6 +27,7 @@ type FindingsListOptions = {
   triage?: string;
   expiring?: string;
   scope?: string;
+  context?: string;
   limit?: string;
   all?: boolean;
 };
@@ -128,6 +130,7 @@ function withFindingsListOptions(command: Command, options: { defaultLimit?: str
     .option("--status <status>", "Filter by status: discovered, verified, confirmed, scored, reported, fixed, false-positive")
     .option("--triage <triage>", "Filter by triage: new, accepted, suppressed")
     .option("--expiring <days>", "Only accepted risks that expire within this many days")
+    .option("--context <file>", "Business context file (JSON): order findings by what matters to you, with the reason shown. See the docs")
     .option("--scope <scope>", "in: findings not labelled out of scope; out: only those the declared scope (0security scan --scope) labelled out of scope; all (default): both, each labelled");
   return options.defaultLimit
     ? withFilters.option("--limit <n>", "Max findings/groups to show", options.defaultLimit)
@@ -186,8 +189,15 @@ function renderVerification(row: FindingRow): void {
   const phrase = verificationPhrase(rowVerification(row));
   if (phrase) console.log(`  ${chalk.gray(phrase)}`);
 }
-function renderPriority(row: FindingRow): void {
+/** Orders by severity moved by your business context, then as without it. Severity itself is never changed. */
+function contextComparer(context: BusinessContext): (a: FindingRow, b: FindingRow) => number {
+  const score = (row: FindingRow) => contextScore(row.severity, adjustmentFor(context, findingPath((row as { reviewAnnotation?: unknown }).reviewAnnotation)));
+  return (a, b) => score(b) - score(a) || compareRows(a, b);
+}
+function renderPriority(row: FindingRow, context?: BusinessContext): void {
   console.log(`  ${chalk.white.bold(row.title)}${row.scope === "out-of-scope" ? chalk.yellow("  [out of scope]") : ""}`);
+  const why = context ? describeAdjustment(adjustmentFor(context, findingPath((row as { reviewAnnotation?: unknown }).reviewAnnotation))) : "";
+  if (why) console.log(`  ${chalk.gray("Business context:")} ${why}`);
   if (row.scope === "out-of-scope") console.log(`  ${chalk.gray("Outside declared scope:")} ${row.scopeReason ?? "no reason given"}${row.scopeSource ? chalk.gray(` (${row.scopeSource})`) : ""}`);
   const attacker = describeAttackerImpact(priorityFinding(row));
   if (attacker) console.log(`  ${chalk.gray(`${attacker.label ?? "What an attacker can do"}:`)} ${attacker.can}`);
@@ -206,6 +216,8 @@ async function renderFindingsList(opts: FindingsListOptions): Promise<void> {
 
   const limit = Number(opts.limit ?? "50");
   if (!Number.isSafeInteger(limit) || limit < 0 || limit > 5000) throw new Error("Finding limit must be an integer between 0 and 5000.");
+  // Read the context before any database is opened: a bad file changes nothing.
+  const context = opts.context ? loadBusinessContext(opts.context) : undefined;
   const choice = (name: string, value: string | undefined, allowed: readonly string[]): void => { if (value !== undefined && !allowed.includes(value)) throw new Error(`Unknown ${name} "${value}". Use one of: ${allowed.join(", ")}.`); };
   choice("severity", opts.severity, ["critical", "high", "medium", "low", "info"]);
   choice("status", opts.status, ["discovered", "verified", "confirmed", "scored", "reported", "fixed", "false-positive"]);
@@ -222,7 +234,7 @@ async function renderFindingsList(opts: FindingsListOptions): Promise<void> {
   const wanted = (row: FindingRow): boolean => scopeWanted(row) && (!opts.triage || effectiveTriageStatus(row) === opts.triage) && (expiringDays === undefined || acceptanceExpiresWithin(row, expiringDays));
   const filterLater = opts.triage === "new" || expiringDays !== undefined || opts.scope === "in" || opts.scope === "out";
   const filters = { scanId: opts.scan, severity: opts.severity, category: opts.category, status: opts.status, triageStatus: filterLater ? undefined : opts.triage };
-  const queryLimit = filterLater ? 5000 : limit;
+  const queryLimit = filterLater || context ? 5000 : limit;
   const rows: FindingRow[] = [];
   const groups: Array<{ fingerprint: string; latest: FindingRow; count: number; scans: number; similar?: number }> = [];
   if (!opts.all && !opts.scan && !selectedDbPath && dbPaths.length > 1) {
@@ -230,7 +242,7 @@ async function renderFindingsList(opts: FindingsListOptions): Promise<void> {
     const merged = await new FindingsService({ sharedDbPath: resolveOsecDbPath(), listPaths: listOsecRunDatabasePaths }).list();
     const selected = merged.families.filter(({ latest }) =>
       (!opts.severity || latest.severity === opts.severity) && (!opts.category || latest.category === opts.category)
-      && (!opts.status || latest.status === opts.status) && wanted(latest as FindingRow)).slice(0, limit);
+      && (!opts.status || latest.status === opts.status) && wanted(latest as FindingRow)).slice(0, context ? undefined : limit);
     for (const family of selected) groups.push({ fingerprint: family.key, latest: family.latest as FindingRow, count: family.count, scans: family.scanCount });
   } else {
     for (const dbPath of dbPaths) {
@@ -241,8 +253,9 @@ async function renderFindingsList(opts: FindingsListOptions): Promise<void> {
       } finally { db.close(); }
     }
   }
-  rows.sort(compareRows);
-  groups.sort((a, b) => compareRows(a.latest, b.latest));
+  const order = context ? contextComparer(context) : compareRows;
+  rows.sort(order);
+  groups.sort((a, b) => order(a.latest as FindingRow, b.latest as FindingRow));
   // One line per flaw: groups that cite the same place under the same category are one (see findings-dedupe.ts).
   groups.splice(0, groups.length, ...foldSimilarGroups(groups));
   if (!(opts.all ? rows.length : groups.length)) {
@@ -254,7 +267,7 @@ async function renderFindingsList(opts: FindingsListOptions): Promise<void> {
   console.log("");
   if (opts.all) {
     for (const f of rows.slice(0, limit)) {
-      renderPriority(f);
+      renderPriority(f, context);
       renderVerification(f);
       console.log(`  ${chalk.gray(shortFindingId(f.id))}  ${chalk.gray(f.category)}  ${chalk.gray(`scan:${f.scanId.slice(0, 8)}`)}  ${chalk.gray(`fp:${shortFingerprint(f.fingerprint ?? f.id)}`)}`);
       console.log("");
@@ -263,7 +276,7 @@ async function renderFindingsList(opts: FindingsListOptions): Promise<void> {
   }
   for (const group of groups.slice(0, limit)) {
     const f = group.latest;
-    renderPriority(f);
+    renderPriority(f, context);
     renderVerification(f);
     console.log(`  ${chalk.gray(`fp:${shortFingerprint(group.fingerprint)}`)}  ${chalk.gray(f.category)}  ${chalk.gray(`${group.count} hits / ${group.scans} scans${group.similar ? `, ${group.similar} similar merged` : ""}`)}  ${chalk.gray(`latest:${f.scanId.slice(0, 8)}`)}`);
     if (f.triageNote) console.log(`  ${chalk.gray("note:")} ${chalk.dim(f.triageNote)}${f.triageApprover && effectiveTriageStatus(f) === "accepted" ? chalk.gray(` (approver: ${f.triageApprover})`) : ""}`);

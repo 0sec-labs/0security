@@ -12,6 +12,7 @@ on the GitHub Release tag.
 
 ## [Unreleased]
 
+- `0security findings list --context <file>` orders findings by what matters to your business. A small JSON file tags paths as `payments`, `personal-data`, `internet-facing`, `operationally-critical`, `internal-only` or `non-production`, and each tag moves matching findings up or down by severity steps (at most two). The list shows why. Severity, verification and fixes are not changed.
 - `0security findings fix` now records its pull request in the same file as burndown, so `0security findings export-fixes` covers single fixes too. The report also gives the summary for each repository (`workspaces` in the JSON, a table in the Markdown), and the schema is documented.
 - `0security findings rollup` counts open findings across repositories by severity, category, age and owner, in text, JSON or HTML. It reads rollup export files (`--export` writes one) and findings databases, and sends nothing. Fixed, false-positive, accepted and suppressed findings are left out of the open count.
 - The web console and the docs site both render Mermaid diagrams with Mermaid 12. A leftover override had pinned both to version 11.
