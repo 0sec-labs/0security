@@ -311,6 +311,10 @@ describe("metadata", () => {
     expect(() => parseIdpMetadata("<md:EntityDescriptor")).toThrow(/well-formed/);
     expect(() => parseIdpMetadata(idp.metadataXml().replace("MIIC", "@@@@"))).toThrow(SamlError);
   });
+  it("accepts certificate text that carries line-break character references", () => {
+    const meta = parseIdpMetadata(idp.metadataXml().replace(/(<ds:X509Certificate>)(.{64})/, "$1$2&#13;\n"));
+    expect(meta.certificates).toEqual([idp.key.pem]);
+  });
   it("describes this service for the identity provider", () => {
     const xml = provider().metadataXml();
     expect(xml).toContain(`entityID="${idp.sp.entityId}"`);

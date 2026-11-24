@@ -4,9 +4,10 @@
 // https address is named by the operator and is trusted as the pin for the signing certificate.
 // The metadata's own signature is not checked.
 import { X509Certificate } from "node:crypto";
-import { DOMParser } from "@xmldom/xmldom";
+import type { Element } from "@xmldom/xmldom";
 import { SamlError } from "./errors.js";
 import { assertNoDtd } from "./xml-guard.js";
+import { parseStrictXml } from "./xml-parse.js";
 
 const NS_MD = "urn:oasis:names:tc:SAML:2.0:metadata";
 const NS_DS = "http://www.w3.org/2000/09/xmldsig#";
@@ -49,9 +50,7 @@ function secureUrl(value: string): string {
 
 export function parseIdpMetadata(xml: string): IdpMetadata {
   assertNoDtd(xml);
-  const failures: string[] = [];
-  const doc = new DOMParser({ errorHandler: { warning: (m: string) => failures.push(String(m)), error: (m: string) => failures.push(String(m)), fatalError: (m: string) => failures.push(String(m)) } }).parseFromString(xml, "text/xml");
-  if (failures.length || !doc?.documentElement) throw new SamlError("metadata", "The identity provider metadata is not well-formed XML.", 400);
+  const doc = parseStrictXml(xml, "metadata", "The identity provider metadata is not well-formed XML.");
   let entity = doc.documentElement as El;
   if (entity.namespaceURI === NS_MD && entity.localName === "EntitiesDescriptor") {
     const inner = children(entity, NS_MD, "EntityDescriptor");

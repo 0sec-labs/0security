@@ -2,8 +2,9 @@
 //
 // Refuses XML that SAML never needs and attackers like. Checked on the raw text before any parser or
 // signature library sees it, so a parser difference cannot hide anything from these rules.
-import { DOMParser } from "@xmldom/xmldom";
+import type { Element, Node } from "@xmldom/xmldom";
 import { SamlError } from "./errors.js";
+import { parseStrictXml } from "./xml-parse.js";
 
 /** Largest decoded SAML response or metadata document accepted. Real responses are a few kilobytes. */
 export const MAX_SAML_XML_BYTES = 512 * 1024;
@@ -66,20 +67,24 @@ const ALLOWED: Record<string, Set<string>> = { SignatureMethod: SIGNATURE_METHOD
 
 /**
  * Refuse any signature, digest, canonicalisation or transform algorithm that is not on the allow-list.
- * Reads the decoded attribute values from the parsed document, with the same XML parser the signature
- * library uses, so character references, entity forms and case tricks cannot hide a weak algorithm.
+ * Reads the decoded attribute values from the parsed document, so character references, entity forms and
+ * case tricks cannot hide a weak algorithm.
+ *
+ * The signature library parses with its own copy of xmldom (0.8), this guard with ours (0.9). To keep a
+ * decoding difference between the two from mattering, an Algorithm attribute that contains `&` at all is
+ * refused before parsing: no real response writes an algorithm URI with a reference in it.
  */
 export function assertStrongSignatureAlgorithms(xml: string): void {
-  const failures: string[] = [];
-  const doc = new DOMParser({ errorHandler: { warning: (m: string) => failures.push(String(m)), error: (m: string) => failures.push(String(m)), fatalError: (m: string) => failures.push(String(m)) } }).parseFromString(xml, "text/xml");
-  if (failures.length || !doc?.documentElement) throw new SamlError("xml-unsafe", "The SAML message is not well-formed XML.", 400);
+  if (/\bAlgorithm\s*=\s*(?:"[^"]*&[^"]*"|'[^']*&[^']*')/.test(xml)) throw new SamlError("weak-algorithm", "The SAML signature names an algorithm with an XML reference, which is not allowed.", 400);
+  const doc = parseStrictXml(xml, "xml-unsafe", "The SAML message is not well-formed XML.");
   const visit = (node: Node): void => {
     for (let n: Node | null = node.firstChild; n; n = n.nextSibling) {
       if (n.nodeType !== 1) continue;
       const el = n as Element;
-      if (el.namespaceURI === NS_DS && Object.hasOwn(ALLOWED, el.localName)) {
+      const name = el.localName ?? "";
+      if (el.namespaceURI === NS_DS && Object.hasOwn(ALLOWED, name)) {
         const algorithm = el.getAttribute("Algorithm");
-        if (algorithm === null || !ALLOWED[el.localName]!.has(algorithm)) throw new SamlError("weak-algorithm", "The SAML signature uses an algorithm that is not allowed.", 400);
+        if (algorithm === null || !ALLOWED[name]!.has(algorithm)) throw new SamlError("weak-algorithm", "The SAML signature uses an algorithm that is not allowed.", 400);
       }
       visit(el);
     }
