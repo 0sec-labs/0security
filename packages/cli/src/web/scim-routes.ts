@@ -5,8 +5,18 @@ import { audit } from "./audit.js";
 import { WebRequestError, readJson } from "./dashboard-http.js";
 import { TeamAuth, TeamAuthError } from "./team-auth.js";
 import type { ScimGroupRecord } from "@0/engine/storage";
-import { SCHEMA_GROUP, SCHEMA_USER, ScimError, applyPatch, errorFrom, hasFeature, matchesFilter, paginate, parseFilter, requireFeature, resourceTypes, schemaDocuments, serviceProviderConfig } from "../enterprise-bridge.js";
+import { SCHEMA_GROUP, SCHEMA_USER, ScimError, applyPatch, errorFrom, featureMode, matchesFilter, paginate, parseFilter, requireFeature, resourceTypes, schemaDocuments, serviceProviderConfig } from "../enterprise-bridge.js";
 import type { TeamUserRow } from "@0/engine/storage";
+
+/**
+ * What the license allows. `full`: everything. `read-only` (past the grace period): reads and deprovisioning only.
+ * `none` (no license, or a license without scim): deprovisioning only. Disabling a person is never blocked by a
+ * license, because blocking it would leave access open. Creating or changing access is always refused unless `full`.
+ */
+type Mode = "full" | "read-only" | "none";
+const refuse = (): never => { throw new ScimError(403, undefined, requireFeature("scim") ?? "SCIM needs an enterprise license that includes scim."); };
+const needFull = (mode: Mode): void => { if (mode !== "full") refuse(); };
+const needRead = (mode: Mode): void => { if (mode === "none") refuse(); };
 
 export const SCIM_BASE = "/scim/v2";
 const MAX_BODY = 1_048_576;
@@ -109,13 +119,14 @@ function deprovision(ctx: ScimContext, actor: string, row: TeamUserRow, reason: 
   return next;
 }
 
-async function users(ctx: ScimContext, req: IncomingMessage, url: URL, id: string | undefined, actor: string): Promise<{ status: number; body?: unknown; headers?: Record<string, string> }> {
+async function users(ctx: ScimContext, req: IncomingMessage, url: URL, id: string | undefined, actor: string, mode: Mode): Promise<{ status: number; body?: unknown; headers?: Record<string, string> }> {
   const method = req.method ?? "GET";
   const groups = ctx.auth.scim!.listGroups();
   const view = (row: TeamUserRow) => userResource(ctx, row, groups);
   if (!id) {
-    if (method === "GET") return { status: 200, body: listQuery(url, ctx.auth.scimAccounts().map(view)) };
+    if (method === "GET") { needRead(mode); return { status: 200, body: listQuery(url, ctx.auth.scimAccounts().map(view)) }; }
     if (method === "POST") {
+      needFull(mode);
       const input = readUser(await body(req));
       const row = ctx.auth.scimCreate({ userName: input.userName, name: input.name, externalId: input.externalId, email: input.email, active: input.active ?? true });
       recordRoleChanges(ctx, actor);
@@ -127,13 +138,19 @@ async function users(ctx: ScimContext, req: IncomingMessage, url: URL, id: strin
   }
   const row = ctx.auth.scimAccount(id);
   if (!row) throw new ScimError(404, undefined, "User not found");
-  if (method === "GET") return { status: 200, body: view(row) };
+  if (method === "GET") { needRead(mode); return { status: 200, body: view(row) }; }
   if (method === "DELETE") { deprovision(ctx, actor, row, "deleted"); return { status: 204 }; }
   if (method !== "PUT" && method !== "PATCH") throw new ScimError(405, undefined, "Use GET, PUT, PATCH or DELETE");
   const incoming = await body(req);
   const next = method === "PATCH" ? applyPatch(view(row), incoming, { booleanAttributes: ["active"] }) : incoming;
   const input = readUser(method === "PATCH" ? next : { ...next, active: next.active ?? row.active });
   const wantActive = input.active ?? row.active;
+  if (mode !== "full") {
+    // Without a full license the only change SCIM can make is to disable the account.
+    if (wantActive !== false) refuse();
+    const done = row.active ? deprovision(ctx, actor, row, "inactive") : row;
+    return { status: 200, body: view(done) };
+  }
   let updated = ctx.auth.scimUpdate(row.id, { name: input.name, userName: input.userName, externalId: input.externalId, email: input.email });
   if (row.active && !wantActive) updated = deprovision(ctx, actor, updated, "inactive");
   else if (!row.active && wantActive) { updated = ctx.auth.scimUpdate(row.id, { active: true }); audit({ actor, action: "user.reactivated", subject: row.id, detail: { id: row.id, source: "scim" } }); }
@@ -145,14 +162,16 @@ function checkMembers(ctx: ScimContext, ids: readonly string[]): void {
   for (const id of ids) if (!ctx.auth.scimAccount(id)) throw new ScimError(400, "invalidValue", `Member ${id.slice(0, 60)} is not a user managed by SCIM`);
 }
 
-async function groups(ctx: ScimContext, req: IncomingMessage, url: URL, id: string | undefined, actor: string): Promise<{ status: number; body?: unknown; headers?: Record<string, string> }> {
+async function groups(ctx: ScimContext, req: IncomingMessage, url: URL, id: string | undefined, actor: string, mode: Mode): Promise<{ status: number; body?: unknown; headers?: Record<string, string> }> {
   const method = req.method ?? "GET";
   const store = ctx.auth.scim!;
   const members = url.searchParams.get("excludedAttributes")?.split(",").map(name => name.trim().toLowerCase()).includes("members") ? false : true;
   const view = (group: ScimGroupRecord) => groupResource(ctx, group, members);
   if (!id) {
+    if (method === "GET") needRead(mode);
     if (method === "GET") return { status: 200, body: listQuery(url, store.listGroups().map(group => groupResource(ctx, group, true)), members) };
     if (method === "POST") {
+      needFull(mode);
       const input = readGroup(await body(req));
       if (store.groupNameTaken(input.displayName)) throw new ScimError(409, "uniqueness", "displayName is already in use");
       checkMembers(ctx, input.memberIds);
@@ -165,7 +184,8 @@ async function groups(ctx: ScimContext, req: IncomingMessage, url: URL, id: stri
   }
   const group = store.getGroup(id);
   if (!group) throw new ScimError(404, undefined, "Group not found");
-  if (method === "GET") return { status: 200, body: view(group) };
+  if (method === "GET") { needRead(mode); return { status: 200, body: view(group) }; }
+  needFull(mode);
   if (method === "DELETE") {
     store.deleteGroup(id); recordRoleChanges(ctx, actor);
     audit({ actor, action: "scim.group.deleted", subject: group.displayName, detail: { id, name: group.displayName, source: "scim" } });
@@ -192,8 +212,6 @@ function bearer(req: IncomingMessage): string | undefined {
 export async function handleScimRequest(req: IncomingMessage, res: ServerResponse, url: URL, ctx: ScimContext): Promise<void> {
   try {
     if (!ctx.auth.enabled || !ctx.auth.scim) throw new ScimError(404, undefined, "SCIM needs a team workspace");
-    const unavailable = hasFeature("scim") ? null : requireFeature("scim");
-    if (unavailable) throw new ScimError(403, undefined, unavailable);
     const now = Date.now();
     let failures = failureBooks.get(ctx.auth);
     if (!failures) { failures = new Map(); failureBooks.set(ctx.auth, failures); }
@@ -210,17 +228,19 @@ export async function handleScimRequest(req: IncomingMessage, res: ServerRespons
       return;
     }
     failures.delete(ctx.clientIp);
+    const mode = featureMode("scim");
     const actor = `scim:${token.name}`;
     const path = url.pathname.slice(SCIM_BASE.length).replace(/\/+$/, "");
     const method = req.method ?? "GET";
     const base = `${ctx.baseUrl}${SCIM_BASE}`;
-    if (method === "GET" && path === "/ServiceProviderConfig") return send(res, 200, serviceProviderConfig());
-    if (method === "GET" && path === "/ResourceTypes") return send(res, 200, paginate(resourceTypes(base), {}));
-    if (method === "GET" && path === "/Schemas") return send(res, 200, paginate(schemaDocuments(base), {}));
+    if (method === "GET" && ["/ServiceProviderConfig", "/ResourceTypes", "/Schemas"].includes(path)) {
+      needRead(mode);
+      return send(res, 200, path === "/ServiceProviderConfig" ? serviceProviderConfig() : path === "/ResourceTypes" ? paginate(resourceTypes(base), {}) : paginate(schemaDocuments(base), {}));
+    }
     const m = /^\/(Users|Groups)(?:\/([^/]+))?$/.exec(path);
     if (!m) throw new ScimError(404, undefined, "No such SCIM endpoint");
     const id = m[2] === undefined ? undefined : decodeURIComponent(m[2]);
-    const result = m[1] === "Users" ? await users(ctx, req, url, id, actor) : await groups(ctx, req, url, id, actor);
+    const result = m[1] === "Users" ? await users(ctx, req, url, id, actor, mode) : await groups(ctx, req, url, id, actor, mode);
     send(res, result.status, result.body, result.headers);
   } catch (error) {
     if (error instanceof TeamAuthError) { const status = error.statusCode; send(res, status, errorFrom(new ScimError(status, status === 409 && /in use/.test(error.message) ? "uniqueness" : undefined, error.message)).body); return; }

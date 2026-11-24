@@ -9,11 +9,12 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { hashTeamPassword } from "./team-auth.js";
-import { makeTestLicense } from "./__fixtures__/test-license.js";
+import { makeTestLicense, writeLicenseShim } from "./__fixtures__/test-license.js";
 
 vi.setConfig({ testTimeout: 60_000 });
 const entry = fileURLToPath(new URL("../index.ts", import.meta.url));
 const cwd = fileURLToPath(new URL("../..", import.meta.url));
+const enterpriseEntry = fileURLToPath(new URL("../../../../enterprise/dist/index.js", import.meta.url));
 const PASSWORD = "scim-integration-password";
 
 interface Reply { status: number; text: string; headers: Record<string, string | string[] | undefined>; json: () => any }
@@ -31,15 +32,17 @@ function call(port: number, path: string, init: { method?: string; headers?: Rec
 const children: ChildProcess[] = [];
 afterAll(() => { for (const child of children) child.kill("SIGKILL"); });
 
-async function startServer(port: number, env: Record<string, string>) {
+async function startServer(port: number, license: ReturnType<typeof makeTestLicense>) {
   const home = mkdtempSync(join(tmpdir(), "zero-scim-http-"));
   const assets = join(home, "assets"); mkdirSync(assets);
   writeFileSync(join(assets, "index.html"), "<!doctype html><html><head><title>t</title></head><body>app</body></html>");
   const teamConfig = join(home, "team.json");
   writeFileSync(teamConfig, JSON.stringify({ workspace: { id: `scim-http-${port}`, name: "SCIM HTTP" }, users: [{ id: "owner", name: "Owner", role: "owner", passwordHash: await hashTeamPassword(PASSWORD) }], scim: { groupRoles: { "sec-triage": "triager" } } }), { mode: 0o600 });
   let output = "";
-  const child = spawn(process.execPath, ["--import", "tsx", entry, "web", "--port", String(port), "--host", "127.0.0.1", "--server-mode", "--asset-dir", assets, "--no-open", "--team-config", teamConfig, "--db-path", join(home, "data.db")],
-    { cwd, env: { ...process.env, HOME: home, ZERO_NO_TELEMETRY: "1", ZERO_ALLOWED_HOSTS: "localhost", ZERO_LICENSE: "", ZERO_LICENSE_FILE: "", ...env } });
+  // The child trusts the throwaway key through a loader hook in this test's own temp folder, never through the environment.
+  const shim = writeLicenseShim(join(home, "shim"), license.publicKeys, enterpriseEntry);
+  const child = spawn(process.execPath, ["--import", "tsx", ...shim, entry, "web", "--port", String(port), "--host", "127.0.0.1", "--server-mode", "--asset-dir", assets, "--no-open", "--team-config", teamConfig, "--db-path", join(home, "data.db")],
+    { cwd, env: { ...process.env, HOME: home, ZERO_NO_TELEMETRY: "1", ZERO_ALLOWED_HOSTS: "localhost", ZERO_LICENSE: "", ZERO_LICENSE_FILE: "", ...license.env } });
   children.push(child);
   child.stdout!.on("data", d => { output += String(d); }); child.stderr!.on("data", d => { output += String(d); });
   const deadline = Date.now() + 90_000;
@@ -59,7 +62,7 @@ async function startServer(port: number, env: Record<string, string>) {
 
 describe("real server, scim license", () => {
   let server: Awaited<ReturnType<typeof startServer>>; const port = 48981;
-  beforeAll(async () => { server = await startServer(port, makeTestLicense(["rbac", "scim"]).env); }, 120_000);
+  beforeAll(async () => { server = await startServer(port, makeTestLicense(["rbac", "scim"])); }, 120_000);
 
   it("answers an identity provider with its own token, in front of the sign-in gate", async () => {
     // No token: a SCIM error, not the login page and not a redirect.
@@ -97,12 +100,13 @@ describe("real server, scim license", () => {
 
 describe("real server, no scim license", () => {
   let server: Awaited<ReturnType<typeof startServer>>; const port = 48982;
-  beforeAll(async () => { server = await startServer(port, makeTestLicense(["rbac"]).env); }, 120_000);
+  beforeAll(async () => { server = await startServer(port, makeTestLicense(["rbac"])); }, 120_000);
 
   it("refuses SCIM and token creation with a message that says what is needed", async () => {
     const made = await server.owner("/api/team/scim-tokens", { method: "POST", body: { name: "okta" } });
     expect(made.status).toBe(403); expect(made.text).toContain("does not include");
+    // A caller still has to present a valid token before the license is even mentioned.
     const denied = await call(port, "/scim/v2/Users", { headers: { Authorization: "Bearer scim_anything" } });
-    expect(denied.status).toBe(403); expect(denied.json().detail).toContain("does not include");
+    expect(denied.status).toBe(401);
   });
 });

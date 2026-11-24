@@ -534,6 +534,8 @@ Set roles from SCIM groups in the team file:
 
 When the provider sets `active` to false, or deletes the account, 0 disables it, ends its sessions and revokes the findings API keys it created. A deleted account is hidden from SCIM and cannot sign in. 0 refuses to disable the last account that can manage users. Each change is written to the audit log with the token name as the actor.
 
+Disabling a person always works. If the license has expired past its 30 days of grace, or has no `scim`, 0 still accepts a bearer token that disables or deletes an account, ends its sessions and revokes its API keys. Reading keeps working until the grace period ends and after it for an expired license. Creating accounts, changing profiles or groups, and turning an account back on are refused until you renew. Listing and revoking tokens also keeps working.
+
 Supported: `Users` and `Groups` with create, read, replace, `PATCH` and delete, `filter` (`eq`, `ne`, `co`, `sw`, `ew`, `pr`, `and`, `or`, `not`), `startIndex` and `count` (at most 200 per page), `/ServiceProviderConfig`, `/ResourceTypes` and `/Schemas`. Not supported: bulk, sort, ETags, password changes.
 
 #### Okta and Entra ID

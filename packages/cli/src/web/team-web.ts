@@ -100,8 +100,8 @@ export async function handleTeamRequest(req: IncomingMessage, url: URL, auth: Te
   const tokenRoute = /^scim-tokens(?:\/([^/]+))?$/.exec(path);
   if (tokenRoute) {
     const actor = auth.resolveSession(req)!;
-    const unavailable = requireFeature("scim");
-    if (unavailable) throw new TeamAuthError(unavailable, 403);
+    // Making a token is a paid feature. Listing and revoking tokens always work, so a lapsed license never keeps one alive.
+    if (method === "POST") { const unavailable = requireFeature("scim"); if (unavailable) throw new TeamAuthError(unavailable, 403); }
     if (!actor.permissions.includes("users.manage")) throw new TeamAuthError("Your role does not include the users.manage permission.", 403);
     const store = auth.scim;
     if (!store) throw new TeamAuthError("SCIM needs the account database.", 409);

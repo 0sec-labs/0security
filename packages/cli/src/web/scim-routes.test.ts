@@ -243,12 +243,138 @@ describe("SCIM with the scim license", () => {
   });
 });
 
-describe("SCIM without the license", () => {
-  it("is refused with a message that says what is needed, and token routes too", async () => {
-    const { call } = await fixture();
-    const denied = await call("GET", "/Users");
-    expect(denied.status).toBe(403); expect(denied.json.detail).toContain("enterprise license");
-    restore = applyTestLicense(["rbac"]);
-    expect((await call("GET", "/Users")).json.detail).toContain("does not include");
+const DAY = 86_400_000;
+const iso = (ms: number) => new Date(ms).toISOString().replace(/\.\d+Z$/, "Z");
+
+/** A person with a session and an API key, set up while the license is valid. */
+async function leaver(f: Awaited<ReturnType<typeof fixture>>, name = "leaver") {
+  const id = (await f.call("POST", "/Users", user(name))).json.id as string;
+  const session = (f.auth as unknown as { issueSession(id: string): { sessionId: string } }).issueSession(id);
+  f.keys.create({ name: `${name} key` }, id);
+  return { id, session: session.sessionId };
+}
+const disable = { schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"], Operations: [{ op: "Replace", path: "active", value: false }] };
+
+describe("SCIM past the license grace period", () => {
+  async function expired() {
+    restore = applyTestLicense(["scim"]);
+    const f = await fixture();
+    const people = [await leaver(f, "one"), await leaver(f, "two"), await leaver(f, "three")];
+    const group = (await f.call("POST", "/Groups", { displayName: "sec-triage", members: [{ value: people[0]!.id }] })).json.id as string;
+    restore();
+    restore = applyTestLicense(["scim"], { issuedAt: iso(Date.now() - 100 * DAY), expires: iso(Date.now() - 40 * DAY) });
+    return { ...f, people, group };
+  }
+
+  it("keeps reading working", async () => {
+    const f = await expired();
+    expect((await f.call("GET", "/Users")).json.totalResults).toBe(3);
+    expect((await f.call("GET", `/Users/${f.people[0]!.id}`)).status).toBe(200);
+    expect((await f.call("GET", "/Groups")).status).toBe(200);
+    expect((await f.call("GET", "/ServiceProviderConfig")).status).toBe(200);
+  });
+
+  it("refuses new access and changes to access", async () => {
+    const f = await expired();
+    const refused = async (r: Promise<Reply>) => { const reply = await r; expect(reply.status).toBe(403); expect(reply.json.detail).toContain("expired"); };
+    await refused(f.call("POST", "/Users", user("newcomer")));
+    await refused(f.call("PUT", `/Users/${f.people[0]!.id}`, user("one", { displayName: "Renamed" })));
+    await refused(f.call("PATCH", `/Users/${f.people[0]!.id}`, { Operations: [{ op: "replace", path: "displayName", value: "Renamed" }] }));
+    await refused(f.call("POST", "/Groups", { displayName: "another" }));
+    await refused(f.call("PATCH", `/Groups/${f.group}`, { Operations: [{ op: "Add", path: "members", value: [{ value: f.people[1]!.id }] }] }));
+    await refused(f.call("DELETE", `/Groups/${f.group}`));
+    expect(f.auth.scimAccounts()).toHaveLength(3);
+    expect(f.auth.lookupUser(f.people[0]!.id)?.displayName).toBe("Test one");
+  });
+
+  it("does not turn a disabled account back on", async () => {
+    const f = await expired();
+    await f.call("PATCH", `/Users/${f.people[1]!.id}`, disable);
+    const reply = await f.call("PATCH", `/Users/${f.people[1]!.id}`, { Operations: [{ op: "Replace", path: "active", value: true }] });
+    expect(reply.status).toBe(403);
+    expect(f.auth.lookupUser(f.people[1]!.id)).toBeNull();
+  });
+
+  it("still disables: PATCH, PUT and DELETE end the account, its sessions and its API keys", async () => {
+    const f = await expired();
+    const [a, b, c] = f.people as [typeof f.people[0], typeof f.people[0], typeof f.people[0]];
+    const patched = await f.call("PATCH", `/Users/${a.id}`, OKTA.deactivateUser);
+    expect(patched.status).toBe(200); expect(patched.json.active).toBe(false);
+    const put = await f.call("PUT", `/Users/${b.id}`, user("two", { active: false }));
+    expect(put.status).toBe(200); expect(put.json.active).toBe(false);
+    expect((await f.call("DELETE", `/Users/${c.id}`)).status).toBe(204);
+    for (const person of [a, b, c]) {
+      expect(f.auth.resolveSessionId(person.session), person.id).toBeNull();
+      expect(f.auth.lookupUser(person.id)).toBeNull();
+    }
+    expect(f.keys.list().filter(key => key.revokedAt)).toHaveLength(3);
+    expect(listAudit({ q: "user.deprovisioned" }, { dbPath }).events).toHaveLength(3);
+    // Disabling again changes nothing and still answers.
+    expect((await f.call("PATCH", `/Users/${a.id}`, disable)).status).toBe(200);
+  });
+
+  it("lets an owner list and revoke tokens through the API but not make one", async () => {
+    const f = await expired();
+    const { handleTeamRequest } = await import("./team-web.js");
+    const login = await f.auth.login({ userId: "owner", password: "owner-password" }, "owner");
+    const cookie = login.setCookie.split(";")[0]!;
+    const call = (method: string, path: string, body?: unknown) => handleTeamRequest({ method, headers: { cookie }, socket: { remoteAddress: "127.0.0.1" } } as never, new URL(`/api/team/${path}`, origin), f.auth, {} as never, {} as never, async () => body);
+    expect(((await call("GET", "scim-tokens"))!.data as { tokens: unknown[] }).tokens).toHaveLength(1);
+    await expect(call("POST", "scim-tokens", { name: "new" })).rejects.toMatchObject({ statusCode: 403, message: expect.stringContaining("expired") });
+    const id = f.auth.scim!.listTokens()[0]!.id;
+    expect((await call("DELETE", `scim-tokens/${id}`))!.status).toBe(200);
+    expect((await f.call("GET", "/Users")).status).toBe(401);
+  });
+});
+
+describe("SCIM without a license for scim", () => {
+  async function unlicensed(license?: string[], tag = "") {
+    restore = applyTestLicense(["scim"]);
+    const f = await fixture();
+    const people = [await leaver(f, `one${tag}`), await leaver(f, `two${tag}`)];
+    restore();
+    restore = license ? applyTestLicense(license) : undefined;
+    return { ...f, people };
+  }
+
+  it("still disables people, for no license and for a license without scim", async () => {
+    for (const license of [undefined, ["rbac"]]) {
+      const f = await unlicensed(license, String(license?.length ?? 0));
+      // A fresh folder per round: the first round must not leave accounts behind for the second.
+      expect((await f.call("PATCH", `/Users/${f.people[0]!.id}`, ENTRA.disableUserWithStringBoolean)).json.active).toBe(false);
+      expect((await f.call("DELETE", `/Users/${f.people[1]!.id}`)).status).toBe(204);
+      for (const person of f.people) { expect(f.auth.resolveSessionId(person.session)).toBeNull(); expect(f.auth.lookupUser(person.id)).toBeNull(); }
+      expect(f.keys.list().every(key => key.revokedAt)).toBe(true);
+      f.auth.closeStore();
+    }
+  });
+
+  it("refuses everything else with a message that says what is needed", async () => {
+    const f = await unlicensed();
+    for (const [method, path, body] of [["GET", "/Users", undefined], ["GET", `/Users/${f.people[0]!.id}`, undefined], ["GET", "/ServiceProviderConfig", undefined], ["GET", "/Groups", undefined], ["POST", "/Users", user("x")], ["POST", "/Groups", { displayName: "g" }], ["PATCH", `/Users/${f.people[0]!.id}`, { Operations: [{ op: "replace", path: "displayName", value: "x" }] }]] as const) {
+      const reply = await f.call(method, path, body);
+      expect(reply.status, `${method} ${path}`).toBe(403); expect(reply.json.detail).toContain("enterprise license");
+    }
+    expect(f.auth.lookupUser(f.people[0]!.id)).not.toBeNull();
+  });
+
+  it("still asks for a valid token first", async () => {
+    const f = await unlicensed();
+    expect((await f.call("PATCH", `/Users/${f.people[0]!.id}`, disable, "scim_wrong")).status).toBe(401);
+    expect((await f.call("DELETE", `/Users/${f.people[0]!.id}`, undefined, null)).status).toBe(401);
+    expect(f.auth.lookupUser(f.people[0]!.id)).not.toBeNull();
+  });
+
+  it("does not disable the last account that can manage users, even without a license", async () => {
+    restore = applyTestLicense(["scim"]);
+    const f = await fixture({ scim: { groupRoles: { "sec-admins": "owner" } } });
+    const boss = await leaver(f, "boss");
+    // Make the SCIM account the only manager: the file owner is demoted by an owner action first.
+    f.auth.setAccess(boss.id, { role: "owner" });
+    f.auth.setAccess("owner", { role: "viewer" });
+    restore(); restore = undefined;
+    const reply = await f.call("PATCH", `/Users/${boss.id}`, disable);
+    expect(reply.status).toBe(409);
+    expect(f.auth.lookupUser(boss.id)).not.toBeNull();
   });
 });
