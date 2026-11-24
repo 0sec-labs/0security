@@ -40,3 +40,15 @@ export function targetLabel(target: string): string {
   const name = review?.replace(/-\d{8}T\d+Z$/i, "") || (parts.at(-1) === "source" ? parts.at(-2) : parts.at(-1)) || target;
   return name.charAt(0).toUpperCase() + name.slice(1);
 }
+/** Allow only explicit http: or https: URLs in HTML report links so javascript:/data: payloads cannot execute. */
+export function safeHttpUrl(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  const trimmed = url.trim();
+  if (!trimmed) return undefined;
+  try {
+    const parsed = new URL(trimmed);
+    return parsed.protocol === "http:" || parsed.protocol === "https:" ? trimmed : undefined;
+  } catch {
+    return undefined;
+  }
+}
