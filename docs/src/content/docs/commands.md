@@ -697,6 +697,8 @@ Same as `config show`. Add `--json` for each key's value and source layer.
 
 Print one setting's effective value. `--json` adds the layer it comes from.
 
+`0security config get license` shows the state of your enterprise license: customer, seats, features, expiry and grace period. It never prints the key. See [Free and paid](/server-mode/#free-and-paid).
+
 ```text
 0security config get [options] [key]
 ```

@@ -1,2 +1,7 @@
 0
 Copyright 2026 0 Labs
+
+This repository is available under MIT OR Apache-2.0, except the contents of the
+enterprise/ directory, which is licensed under the 0security Enterprise License
+in enterprise/LICENSE. See LICENSING.md. Third-party components keep their own
+licenses.

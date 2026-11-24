@@ -13,6 +13,10 @@ on the GitHub Release tag.
 ## [Unreleased]
 
 - The first line of `0security --help` now describes the product as a security agent (scan, fix, SBOM and evidence) instead of "security sentinels". The messages for `--chat` no longer point at a `0 chats` command that does not exist. The GitHub Action calls `0security`.
+### Added
+
+- A key-gated `enterprise/` folder in the repository, under its own license (`enterprise/LICENSE`); the rest stays MIT OR Apache-2.0 (see `LICENSING.md`). It holds an offline license check (no network, no phone home), the list of paid features and tools to issue keys. Set `ZERO_LICENSE` or `ZERO_LICENSE_FILE`, then run `0security config get license` to see the customer, seats, features and expiry. Expired keys get 30 days of grace, then paid writes stop while reading, export and verification keep working. No paid feature ships in this change.
+
 ### Changed
 
 - The scan report is shown as readable text in a terminal (no `**`, backticks or `<details>` tags); files, pipes and `--output` still get markdown.
