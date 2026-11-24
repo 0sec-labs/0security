@@ -6,6 +6,8 @@ import { z } from "zod";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import { TeamAuthError } from "./team-auth-error.js";
 import { TeamSaml, samlConfigSchema, validateSamlConfig } from "./team-saml.js";
+import { TeamUserConflictError, type TeamUserRow, type TeamUserTable } from "@0/engine/storage";
+import { hasFeature } from "../enterprise-bridge.js";
 
 const scrypt = promisify(scryptCallback);
 const COOKIE = "zero_team_session";
@@ -19,13 +21,21 @@ const userSchema = z.object({
 const configSchema = z.object({
   workspace: z.object({ id: z.string().min(1).max(160), name: z.string().min(1).max(160) }).strict(),
   users: z.array(userSchema).min(1).max(1000),
-  oidc: z.object({ issuer: z.string().url(), clientId: z.string().min(1), clientSecretEnv: z.string().min(1).optional(), redirectUri: z.string().url() }).strict().optional(),
+  oidc: z.object({
+    issuer: z.string().url(), clientId: z.string().min(1), clientSecretEnv: z.string().min(1).optional(), redirectUri: z.string().url(),
+    /** Create an account the first time an OIDC user signs in. Needs the rbac license feature. */
+    jit: z.object({ role: z.enum(["editor", "viewer"]) }).strict().optional(),
+  }).strict().optional(),
   saml: samlConfigSchema.optional(),
 }).strict();
 export type TeamConfig = z.infer<typeof configSchema>;
+/** Accounts the free tier can hold. A server with the rbac license feature has no limit. */
+export const FREE_MEMBER_LIMIT = 1000;
+const NEEDS_LICENSE = "This needs an enterprise license that includes role-based access control.";
 export function parseTeamConfig(input: unknown): TeamConfig { return configSchema.parse(input); }
 export interface TeamIdentity { workspaceId: string; userId: string; displayName: string; role: "owner" | "editor" | "viewer" }
 export { TeamAuthError };
+const fileRow = (user: { id: string; name: string; role: string; passwordHash?: string | undefined; oidcSub?: string | undefined }): TeamUserRow => ({ id: user.id, name: user.name, role: user.role, passwordHash: user.passwordHash ?? null, oidcSub: user.oidcSub ?? null, source: "file", createdAt: "", updatedAt: "" });
 function opaque(): string { return randomBytes(32).toString("base64url"); }
 export function parseCookies(header: string | undefined): Record<string, string> {
   const cookies: Record<string, string> = Object.create(null) as Record<string, string>;
@@ -57,6 +67,9 @@ export class TeamAuth {
   private readonly config?: TeamConfig;
   private readonly origin: string;
   private readonly now: () => number;
+  /** Live accounts. The server database is the source of truth once a store is attached; until then the file users. */
+  private readonly users = new Map<string, TeamUserRow>();
+  private table?: TeamUserTable;
   private readonly sessions = new Map<string, { userId: string; expires: number; role?: TeamIdentity["role"] }>();
   private readonly saml?: TeamSaml;
   private readonly pending = new Map<string, { nonce: string; verifier: string; browser: string; expires: number }>();
@@ -75,6 +88,7 @@ export class TeamAuth {
       const samlIds = this.config.users.flatMap(user => user.samlNameId ? [user.samlNameId] : []);
       if (new Set(samlIds).size !== samlIds.length) throw new Error("SAML NameIDs must be unique");
       for (const user of this.config.users) if (user.passwordHash && !validHash(user.passwordHash)) throw new Error("Invalid team password hash; use hashTeamPassword");
+      for (const user of this.config.users) this.users.set(user.id, fileRow(user));
       if (this.config.oidc) {
         this.requireProviderURL(this.config.oidc.issuer);
         if (new URL(this.config.oidc.redirectUri).origin !== this.origin) throw new Error("OIDC redirect URI must use this engine origin");
@@ -95,9 +109,25 @@ export class TeamAuth {
     return `${name}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${seconds}${this.origin.startsWith("https:") ? "; Secure" : ""}`;
   }
   lookupUser(id: string, role?: TeamIdentity["role"]): TeamIdentity | null {
-    const user = this.config?.users.find(row => row.id === id);
-    return user ? { workspaceId: this.config!.workspace.id, userId: user.id, displayName: user.name, role: role ?? user.role } : null;
+    const user = this.users.get(id);
+    return user ? { workspaceId: this.config!.workspace.id, userId: user.id, displayName: user.name, role: role ?? user.role as TeamIdentity["role"] } : null;
   }
+  /**
+   * Move the accounts into the server database. Accounts in the configuration file that the database does
+   * not know yet are added; accounts already in the database are never changed by the file. After this call
+   * the database is the source of truth and every change is stored as it happens.
+   */
+  attachStore(table: TeamUserTable): { imported: number; total: number } {
+    if (!this.config) throw new TeamAuthError("Team sign-in is not configured", 404);
+    const added = table.importMissing(this.config.users.map(user => ({ id: user.id, name: user.name, role: user.role, passwordHash: user.passwordHash ?? null, oidcSub: user.oidcSub ?? null, source: "file" as const })));
+    this.table = table; this.users.clear();
+    const rows = table.list();
+    for (const row of rows) this.users.set(row.id, row);
+    for (const [id, session] of this.sessions) if (!this.users.has(session.userId)) this.sessions.delete(id);
+    return { imported: added.length, total: rows.length };
+  }
+  /** Close the database connection, if a store is attached. */
+  closeStore(): void { this.table?.close(); this.table = undefined; }
   /** Trusted server configuration only; never serialize this through a browser API. */
   snapshotConfig(): TeamConfig {
     if (!this.config) throw new TeamAuthError("Team sign-in is not configured", 404);
@@ -105,15 +135,27 @@ export class TeamAuth {
   }
   configurationDigest(): string { return createHash("sha256").update(JSON.stringify(this.snapshotConfig())).digest("hex"); }
   members(): Array<Pick<TeamIdentity, "userId" | "displayName" | "role">> {
-    return (this.config?.users ?? []).map(user => ({ userId: user.id, displayName: user.name, role: user.role }));
+    return [...this.users.values()].map(user => ({ userId: user.id, displayName: user.name, role: user.role as TeamIdentity["role"] }));
+  }
+  memberCount(): number { return this.users.size; }
+  /** The free tier stops at FREE_MEMBER_LIMIT accounts; the rbac license feature lifts that. */
+  atMemberLimit(): boolean { return this.users.size >= FREE_MEMBER_LIMIT && !hasFeature("rbac"); }
+  private store(input: TeamUserRow): TeamUserRow {
+    const stamp = new Date(this.now()).toISOString();
+    const row = { ...input, createdAt: input.createdAt || stamp, updatedAt: input.updatedAt || stamp };
+    try { this.table?.insert(row); }
+    catch (error) { if (error instanceof TeamUserConflictError) throw new TeamAuthError(error.message, 409); throw error; }
+    this.users.set(row.id, row); return row;
   }
   /** Called only after an owner-authorized member has been durably persisted. */
   addMember(input: { id: string; name: string; role: "editor" | "viewer"; passwordHash: string }): TeamIdentity {
     if (!this.config) throw new TeamAuthError("Team sign-in is not configured", 404);
     const member = userSchema.extend({ role: z.enum(["editor", "viewer"]), passwordHash: z.string() }).parse(input);
     if (!validHash(member.passwordHash)) throw new TeamAuthError("Invalid password hash", 400);
-    if (this.config.users.some(user => user.id === member.id)) throw new TeamAuthError("That account ID already exists", 409);
-    if (this.config.users.length >= 1000) throw new TeamAuthError("Workspace member limit reached", 409);
+    if (this.users.has(member.id)) throw new TeamAuthError("That account ID already exists", 409);
+    if (this.atMemberLimit()) throw new TeamAuthError("Workspace member limit reached", 409);
+    // The file snapshot follows the file (it backs the compare-and-swap digest); the database holds the account.
+    this.store({ ...fileRow(member), source: "local" });
     this.config.users.push(member);
     return this.lookupUser(member.id)!;
   }
@@ -143,7 +185,7 @@ export class TeamAuth {
     const attempt = this.attempts.get(key) ?? { count: 0, expires: this.now() + 60_000 };
     if (attempt.count >= 10 || this.attempts.size >= 10000) throw new TeamAuthError("Too many sign-in attempts; try again shortly", 429);
     attempt.count++; this.attempts.set(key, attempt);
-    const user = this.config.users.find(row => row.id === parsed.data.userId);
+    const user = this.users.get(parsed.data.userId);
     const matches = await passwordMatches(parsed.data.password, user?.passwordHash ?? await this.dummyHash);
     if (!user?.passwordHash || !matches) throw new TeamAuthError("Invalid user ID or password");
     return this.issueSession(user.id);
@@ -177,6 +219,14 @@ export class TeamAuth {
     for (const [key, value] of Object.entries({ response_type: "code", scope: "openid profile", client_id: oidc.clientId, redirect_uri: oidc.redirectUri, state, nonce, code_challenge: createHash("sha256").update(verifier).digest("base64url"), code_challenge_method: "S256" })) url.searchParams.set(key, value);
     return { url: url.href, setCookie: this.cookie(SSO_COOKIE, browser, SSO_MS / 1000) };
   }
+  /** Create the account for a verified OIDC subject. The ID is derived from the subject, so it cannot collide with a local account ID. */
+  private provisionOidcUser(claims: { sub?: string; name?: unknown; preferred_username?: unknown; email?: unknown }, role: "editor" | "viewer"): TeamUserRow {
+    const sub = claims.sub!;
+    const id = sub.length <= 120 ? `oidc:${sub}` : `oidc:${createHash("sha256").update(sub).digest("hex").slice(0, 48)}`;
+    const label = [claims.name, claims.preferred_username, claims.email].find((value): value is string => typeof value === "string" && value.trim() !== "");
+    const name = (label ?? sub).replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 160) || "SSO user";
+    return this.store({ id, name, role, passwordHash: null, oidcSub: sub, source: "oidc", createdAt: "", updatedAt: "" });
+  }
   async callback(params: URLSearchParams, req: Pick<IncomingMessage, "headers">) {
     const state = params.get("state") ?? ""; const pending = this.pending.get(state);
     const browser = parseCookies(req.headers.cookie)[SSO_COOKIE];
@@ -193,10 +243,17 @@ export class TeamAuth {
     try { ({ payload } = await jwtVerify(tokens.id_token, this.keys!, { issuer: oidc.issuer, audience: oidc.clientId, algorithms: ["RS256", "ES256"], requiredClaims: ["exp", "iat", "sub", "nonce"], currentDate: new Date(this.now()), maxTokenAge: "10 minutes" })); }
     catch { throw new TeamAuthError("SSO identity verification failed"); }
     if (payload.nonce !== pending.nonce || (Array.isArray(payload.aud) && payload.aud.length > 1 && payload.azp !== oidc.clientId)) throw new TeamAuthError("SSO identity verification failed");
-    const user = this.config!.users.find(row => row.oidcSub === payload.sub);
+    let user = [...this.users.values()].find(row => row.oidcSub === payload.sub);
+    let provisioned = false;
+    if (!user && oidc.jit) {
+      // Account creation on first sign-in is a paid feature. Without the license the sign-in stays "not a member".
+      if (!hasFeature("rbac")) throw new TeamAuthError(`This SSO account is not a workspace member. Automatic account creation is set up, but ${NEEDS_LICENSE}`, 403);
+      if (this.atMemberLimit()) throw new TeamAuthError("Workspace member limit reached", 409);
+      user = this.provisionOidcUser(payload, oidc.jit.role); provisioned = true;
+    }
     if (!user) throw new TeamAuthError("This SSO account is not a workspace member", 403);
     const session = this.issueSession(user.id);
-    return { ...session, setCookies: [session.setCookie, this.cookie(SSO_COOKIE, "", 0)], redirect: "/" };
+    return { ...session, provisioned, setCookies: [session.setCookie, this.cookie(SSO_COOKIE, "", 0)], redirect: "/" };
   }
   // SAML sign-in (enterprise license). The checks live in team-saml.ts and the enterprise package.
   private requireSaml(): TeamSaml { if (!this.saml) throw new TeamAuthError("SAML sign-in is not configured", 404); return this.saml; }

@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import { dirname, join, resolve } from "node:path";
 import { homeStateDir } from "@0/engine/shared";
+import { TeamUserTable } from "@0/engine/storage";
 import { z } from "zod";
 import { TeamAuth, TeamAuthError, hashTeamPassword, parseTeamConfig, type TeamConfig } from "./team-auth.js";
 
@@ -70,7 +71,7 @@ export class TeamSetupService {
     if (!parsed.success) throw new TeamAuthError("Account ID, display name, password and editor or viewer role are required", 400);
     const data = parsed.data;
     if (auth.members().some(user => user.userId === data.userId)) throw new TeamAuthError("That account ID already exists", 409);
-    if (auth.members().length >= 1000) throw new TeamAuthError("Workspace member limit reached", 409);
+    if (auth.atMemberLimit()) throw new TeamAuthError("Workspace member limit reached", 409);
     this.busy = true;
     const lockPath = `${this.configPath}.lock`; const tempPath = `${this.configPath}.${randomUUID()}.tmp`;
     let lockFD: number | undefined; let temporaryFD: number | undefined;
@@ -127,6 +128,7 @@ export class TeamSetupService {
       reserved = true;
       writeFileSync(fd, `${JSON.stringify(config, null, 2)}\n`, "utf8"); fsyncSync(fd); closeSync(fd); fd = undefined;
       mkdirSync(paths.stateDir, { recursive: true, mode: 0o700 });
+      auth.attachStore(new TeamUserTable(paths.dbPath));
       await this.options.activate({ auth, configPath: this.configPath, ...paths, workspaceId: config.workspace.id, name: config.workspace.name });
       // The active bundle uses this exact auth object, so this owner session works immediately.
       reserved = false;

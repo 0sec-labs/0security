@@ -1,8 +1,30 @@
 // The only file in packages/cli that imports the key-gated enterprise package (see scripts/check-enterprise-boundary.mjs).
-import { EvidenceKeyError, SamlError, SamlServiceProvider, formatLicenseStatus, hasFeature, licenseStatus, parseIdpMetadata, requireFeature, signEvidenceStatement, type DsseEnvelope, type LicenseStatus, type SamlIdentity } from "@0/enterprise";
+import { EvidenceKeyError, SamlError, SamlServiceProvider, formatLicenseStatus, hasFeature as licenseHasFeature, licenseStatus, parseIdpMetadata, requireFeature, signEvidenceStatement, type DsseEnvelope, type EnterpriseFeature, type LicenseStatus, type SamlIdentity } from "@0/enterprise";
 
 export { SamlError, SamlServiceProvider, parseIdpMetadata };
 export type { SamlIdentity };
+// Licenses are checked against the public keys compiled into @0/enterprise and no others. Nothing in the
+// environment, a file or a repository can add a signing key. Tests inject throwaway keys by mocking
+// "@0/enterprise" (see src/web/__fixtures__/test-license.ts), never through this file.
+const MEMO_MS = 2_000;
+const memo = new Map<string, { at: number; value: boolean }>();
+
+/**
+ * True when the license in the process environment allows paid writes for the feature. Request handlers
+ * call this often, so the answer is kept for two seconds per feature and license.
+ */
+export function hasFeature(name: EnterpriseFeature): boolean {
+  const now = Date.now();
+  const key = JSON.stringify([name, process.env.ZERO_LICENSE, process.env.ZERO_LICENSE_FILE]);
+  const known = memo.get(key);
+  if (known && now - known.at < MEMO_MS) return known.value;
+  const value = licenseHasFeature(name, process.env, new Date(now));
+  if (memo.size > 64) memo.clear();
+  memo.set(key, { at: now, value });
+  return value;
+}
+
+export { requireFeature };
 
 /** License status read from the process environment. Contains no secret. */
 export function readLicenseStatus(): LicenseStatus {

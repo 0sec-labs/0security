@@ -7,6 +7,9 @@
 //      enterprise/LICENSE exists.
 //   4. No package manifest outside enterprise/ lists enterprise/ in "files", and no .npmignore or
 //      .npmrc rule could pull it into an npm tarball.
+//   6. No environment variable, outside tests, can add a trusted license signing key. The only variables the license
+//      code may read are ZERO_LICENSE and ZERO_LICENSE_FILE, and no source file reads a variable whose name pairs
+//      license, enterprise or trust with key, public or anchor.
 //   5. The root LICENSE-MIT and LICENSE-APACHE do not mention enterprise/ (they must stay the plain
 //      standard texts so GitHub keeps showing the Apache-2.0 license).
 //
@@ -28,8 +31,13 @@ export const LICENSE_FIELD = "SEE LICENSE IN LICENSE";
  */
 export const ALLOWED_BRIDGES = [
   "packages/cli/src/enterprise-bridge.ts", // `0security config get license`
+  "packages/cli/vitest.setup.ts", // test setup: mocks the enterprise module so tests can trust throwaway keys
+  "packages/cli/src/enterprise-bridge.test.ts", // checks the real module trusts only its compiled-in keys
   "packages/cli/src/findings-server-bridge.ts", // the shared findings server: ingest, write keys, org dashboard
 ];
+
+/** The only environment variables the license code reads, plus the unrelated no-egress switch. */
+export const ALLOWED_LICENSE_ENV = new Set(["ZERO_LICENSE", "ZERO_LICENSE_FILE", "ZERO_ENTERPRISE"]);
 
 const SKIP_DIRS = new Set(["node_modules", "dist", "dist-bin", ".git", ".astro", ".claude", ".worktrees", ".cache", "vendor"]);
 const CODE_EXT = /\.(?:[cm]?[jt]sx?)$/;
@@ -139,6 +147,25 @@ export function checkEnterpriseBoundary(root, allowedBridges = ALLOWED_BRIDGES) 
     const p = join(root, name);
     if (existsSync(p) && /enterprise/i.test(readFileSync(p, "utf8"))) {
       errors.push(`${name}: must not mention enterprise/. Put the carve-out in LICENSING.md and NOTICE so GitHub keeps detecting the license.`);
+    }
+  }
+  // 6. No environment variable adds a trust anchor.
+  for (const file of walk(root)) {
+    const rel = toPosix(relative(root, file));
+    if (SELF.has(rel) || !CODE_EXT.test(rel) || /\.test\.[cm]?[jt]sx?$/.test(rel) || rel.includes("__fixtures__/") || /(^|\/)vitest\.setup\.ts$/.test(rel)) continue;
+    const text = readFileSync(file, "utf8");
+    for (const m of text.matchAll(/(?:process\.env|\benv)\s*(?:\.\s*|\[\s*["'`])([A-Za-z0-9_]+)/g)) {
+      const name = m[1];
+      if (ALLOWED_LICENSE_ENV.has(name)) continue;
+      if (/(LICENSE|ENTERPRISE|TRUST|ANCHOR|SIGNER)/i.test(name) && /(KEY|PUBLIC|ANCHOR|CERT)/i.test(name)) {
+        errors.push(`${rel}: reads ${name}. No environment variable may add a trusted license signing key; that would be a one-line licensing bypass. Tests inject throwaway keys by mocking @0/enterprise.`);
+      }
+    }
+  }
+  const licenseSource = join(entDir, "src", "license.ts");
+  if (existsSync(licenseSource)) {
+    for (const m of readFileSync(licenseSource, "utf8").matchAll(/\benv\s*(?:\.\s*|\[\s*["'`])([A-Za-z0-9_]+)/g)) {
+      if (!ALLOWED_LICENSE_ENV.has(m[1])) errors.push(`enterprise/src/license.ts: reads ${m[1]}. The license code may read only ZERO_LICENSE and ZERO_LICENSE_FILE.`);
     }
   }
   return errors;
