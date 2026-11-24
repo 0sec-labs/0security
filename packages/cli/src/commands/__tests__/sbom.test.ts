@@ -304,6 +304,14 @@ describe("0 sbom agent-config", () => {
     expect(JSON.parse(Object.values(file.written)[0]!).findings.length).toBeGreaterThan(2);
     expect(file.out).toEqual([]);
   });
+  it("writes repository-relative paths, never an absolute local path, in SARIF", () => {
+    const dir = noisy();
+    const io = deps();
+    runAgentConfig(dir, { format: "sarif" }, io.deps);
+    const uris = JSON.parse(io.out.join("")).runs[0].results.map((item: { locations: Array<{ physicalLocation: { artifactLocation: { uri: string } } }> }) => item.locations[0]!.physicalLocation.artifactLocation.uri);
+    expect(uris.length).toBeGreaterThan(0);
+    for (const uri of uris) expect(uri.startsWith("/") || uri.includes(dir)).toBe(false);
+  });
   it("passes --allow-host to the remote server rule", () => {
     const dir = project({ ".mcp.json": JSON.stringify({ mcpServers: { r: { url: "https://other.example.org/mcp" } } }) });
     const io = deps();

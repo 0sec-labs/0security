@@ -14,7 +14,7 @@ export interface McpServer {
   disabled: boolean;
 }
 
-const strings = (value: unknown): Record<string, string> => Object.fromEntries(Object.entries(isObject(value) ? value : {}).filter(([, v]) => typeof v === "string" || typeof v === "number").map(([k, v]) => [k, String(v)]));
+const strings = (value: unknown): Record<string, string> => Object.fromEntries(Object.entries(isObject(value) ? value : {}).slice(0, 200).filter(([, v]) => typeof v === "string" || typeof v === "number").map(([k, v]) => [k, String(v)]));
 
 function entryOf(name: string, raw: unknown): McpServer | undefined {
   if (!isObject(raw)) return undefined;

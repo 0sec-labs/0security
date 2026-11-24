@@ -78,6 +78,11 @@ export const RULES: readonly AgentConfigRule[] = [
     explanation: "A server defined in a project file is started or contacted by the tool when someone opens the repository, usually after an approval prompt. Cursor shipped flaws where an approved configuration could be swapped without a new prompt (MCPoison, CVE-2025-54136) and where a message could write a configuration (CVE-2025-54135). This finding does not say the server is unsafe. It says a person must check it before approving.",
     fix: "Check the command, arguments and host of each server before you approve it. Re-check after every pull that changes the file.",
   }),
+  r({
+    id: "agent-config/symlinked-config", title: "Agent file or folder that is a symbolic link", severity: "medium", heuristic: false, cwe: ["CWE-59"],
+    explanation: "This scan never follows a symbolic link, so it cannot judge what the link points to. A tool that does follow it reads the target as instructions or settings. A link in a repository can point at a file the scan never sees, or outside the repository. Hidden settings behind a link would otherwise pass the scan.",
+    fix: "Replace the link with the real file, or scan the folder it points to as well. Remove the link if you do not know why it is there.",
+  }),
 ];
 
 const byId = new Map(RULES.map(rule => [rule.id, rule] as const));

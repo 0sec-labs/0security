@@ -29,7 +29,7 @@ export interface SecretMatch { kind: string; redacted: string }
 /** `ghp_…[40 characters]`: at most the first four characters and the length. */
 export function redact(value: string): string {
   const prefix = [...value].slice(0, Math.min(4, Math.floor(value.length / 4))).join("");
-  return `${prefix}...[${[...value].length} characters]`;
+  return `${prefix}... (${[...value].length} characters)`;
 }
 
 /** Bearer and Basic prefixes are not part of the credential. */
@@ -53,7 +53,7 @@ export function looksLikeSecret(raw: string): SecretMatch | undefined {
 
 /** Text that is safe to print: URL credentials and query values, provider-shaped keys and high-entropy words are replaced by a redacted form. */
 export function scrub(text: string): string {
-  return text
+  return text.slice(0, 20000)
     .replace(/\b([a-z][a-z0-9+.-]*:\/\/)[^\s/@]*@/gi, "$1***@")
     .replace(/(\bhttps?:\/\/[^\s?#"']*)\?[^\s#"']*/gi, "$1?...")
     .replace(/[^\s"'`,;()[\]{}<>|&\\]+/g, part => {

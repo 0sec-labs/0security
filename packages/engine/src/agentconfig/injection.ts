@@ -8,9 +8,8 @@ const PHRASES: Array<{ pattern: RegExp; label: string }> = [
   { pattern: /\bwithout\s+(?:telling|informing|notifying|alerting)\s+the\s+user\b/i, label: "tells the agent to act without telling the user" },
   { pattern: /\b(?:hide|conceal)\s+(?:this|it|the\s+\w+)\s+from\s+the\s+user\b/i, label: "tells the agent to hide something from the user" },
 ];
-const EXFIL = /\b(?:send|post|upload|exfiltrate|forward|transmit|email|curl|fetch)\b[^\n]{0,120}(?<![\w])(?:secrets?|tokens?|api[ _-]?keys?|credentials?|passwords?|ssh|\.env|environment variables?|conversation|chat history)(?![\w])[^\n]{0,120}https?:\/\/\S+|https?:\/\/\S+[^\n]{0,120}\b(?:send|post|upload|exfiltrate)\b[^\n]{0,60}(?<![\w])(?:secrets?|tokens?|api[ _-]?keys?|credentials?|\.env)(?![\w])/i;
+const EXFIL = /\b(?:send|post|upload|exfiltrate|forward|transmit|email|curl|fetch)\b[^\n]{0,80}(?<![\w])(?:secrets?|tokens?|api[ _-]?keys?|credentials?|passwords?|ssh|\.env|environment variables?|conversation|chat history)(?![\w])[^\n]{0,80}https?:\/\/\S+|https?:\/\/\S+[^\n]{0,80}\b(?:send|post|upload|exfiltrate)\b[^\n]{0,40}(?<![\w])(?:secrets?|tokens?|api[ _-]?keys?|credentials?|\.env)(?![\w])/i;
 const BASE64 = /[A-Za-z0-9+/]{200,}={0,2}/g;
-const HTML_COMMENT = /<!--[\s\S]*?-->/g;
 
 /** Files whose purpose is to instruct an agent: visible instructions in them are what the author meant, so only hidden or encoded text is reported. */
 export function isRulesFile(path: string): boolean {
@@ -29,13 +28,20 @@ export function scanInjection(file: string, text: string): AgentConfigFinding[] 
   const rules = isRulesFile(file);
   const lines = text.split(/\r\n|\r|\n/);
   const commentLines = new Set<number>();
-  for (const match of text.matchAll(HTML_COMMENT)) {
-    const start = text.slice(0, match.index).split("\n").length;
-    for (let i = 0; i <= match[0].split("\n").length - 1; i++) commentLines.add(start + i);
+  // Lines inside <!-- ... --> comments, found with indexOf so an unclosed or repeated marker cannot make the scan quadratic.
+  const lineStarts: number[] = [0];
+  for (let i = 0; i < text.length; i++) if (text.charCodeAt(i) === 10) lineStarts.push(i + 1);
+  const lineAt = (index: number): number => { let lo = 0, hi = lineStarts.length - 1; while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (lineStarts[mid]! <= index) lo = mid; else hi = mid - 1; } return lo + 1; };
+  for (let from = text.indexOf("<!--"); from >= 0; from = text.indexOf("<!--", from + 4)) {
+    const close = text.indexOf("-->", from + 4);
+    const end = close < 0 ? text.length : close;
+    for (let n = lineAt(from); n <= lineAt(end) && commentLines.size < 20000; n++) commentLines.add(n);
+    if (close < 0) break;
+    from = close;
   }
   lines.forEach((content, index) => {
     const lineNo = index + 1;
-    if (content.length > 4000) return;
+    if (content.length > 2000) return;
     if (!rules || commentLines.has(lineNo)) {
       for (const { pattern, label } of PHRASES) if (pattern.test(content)) found.push(finding("agent-config/injection-phrase", file, lineNo, content.trim(), `Heuristic: this text ${label}${rules ? " and sits in an HTML comment" : ""}.`));
       if (EXFIL.test(content)) found.push(finding("agent-config/injection-phrase", file, lineNo, content.trim(), `Heuristic: this text asks to send something sensitive to a URL${rules ? " and sits in an HTML comment" : ""}.`));

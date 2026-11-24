@@ -3,16 +3,19 @@ import { ruleOf, type AgentConfigFinding, type AgentConfigSeverity } from "./rul
 
 /** Makes text safe to print and to send to GitHub: no control characters, no HTML, no mentions, bounded length. */
 export function neutralize(text: string, max = 160): string {
-  const flat = [...text].map(ch => { const cp = ch.codePointAt(0)!; return cp < 0x20 || (cp >= 0x7f && cp < 0xa0) ? " " : ch; }).join("");
-  const clean = flat.replace(/\s+/g, " ").trim().replace(/</g, "‹").replace(/>/g, "›").replace(/@/g, "(at)").replace(/&/g, "and");
+  const flat = text.slice(0, max * 4).replace(/[\p{Cc}\p{Cf}\p{Co}\p{Cn}\u2028\u2029]/gu, " ");
+  const clean = flat.replace(/\s+/g, " ").trim().replace(/</g, "\u2039").replace(/>/g, "\u203a").replace(/@/g, "(at)").replace(/&/g, "and").replace(/`/g, "'").replace(/\[/g, "(").replace(/\]/g, ")").replace(/#(?=\d)/g, "No. ");
   return clean.length > max ? `${clean.slice(0, max - 3)}...` : clean;
 }
+
+/** A path from the repository as text for a report: control, format and bidirectional characters become a question mark. */
+export const safePath = (path: string): string => path.slice(0, 500).replace(/[\p{Cc}\p{Cf}\p{Co}\p{Cn}\u2028\u2029]/gu, "?");
 
 export function finding(ruleId: string, file: string, line: number, snippet: string, message: string, options: { severity?: AgentConfigSeverity; column?: number; heuristicOverride?: boolean } = {}): AgentConfigFinding {
   const rule = ruleOf(ruleId);
   return {
-    ruleId, severity: options.severity ?? rule.severity, heuristic: rule.heuristic, file, line: Math.max(1, line),
-    ...(options.column ? { column: options.column } : {}), snippet: neutralize(scrub(snippet)), message: neutralize(scrub(message), 400), cwe: rule.cwe, explanation: rule.explanation, fix: rule.fix,
+    ruleId, severity: options.severity ?? rule.severity, heuristic: rule.heuristic, file: safePath(file), line: Math.max(1, line),
+    ...(options.column ? { column: options.column } : {}), snippet: neutralize(scrub(snippet.slice(0, 2000))), message: neutralize(scrub(message.slice(0, 2000)), 400), cwe: rule.cwe, explanation: rule.explanation, fix: rule.fix,
   };
 }
 
@@ -33,9 +36,13 @@ export function locator(text: string): (needle: string, from?: number) => number
   };
 }
 
+const MAX_JSON_DEPTH = 64;
+
 /** Strips comments and trailing commas (JSONC) without touching strings, then parses. Returns undefined when it is not JSON. */
 export function parseJsonc(text: string): unknown {
+  if (text.length > 4 * 1024 * 1024) return undefined;
   let out = "";
+  let nesting = 0;
   let i = 0;
   const n = text.length;
   while (i < n) {
@@ -46,7 +53,7 @@ export function parseJsonc(text: string): unknown {
       out += text.slice(i, j + 1); i = j + 1;
     } else if (ch === "/" && text[i + 1] === "/") { while (i < n && text[i] !== "\n") i++; }
     else if (ch === "/" && text[i + 1] === "*") { const end = text.indexOf("*/", i + 2); i = end < 0 ? n : end + 2; }
-    else { out += ch; i++; }
+    else { if (ch === "{" || ch === "[") { if (++nesting > MAX_JSON_DEPTH) return undefined; } else if (ch === "}" || ch === "]") nesting--; out += ch; i++; }
   }
   try { return JSON.parse(out.replace(/^﻿/, "").replace(/,(\s*[}\]])/g, "$1")); } catch { return undefined; }
 }

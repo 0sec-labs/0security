@@ -1593,7 +1593,7 @@ Check the rules, MCP and settings files AI coding tools read in a repository for
 0security sbom agent-config .
 ```
 
-This reads `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `.cursor/`, `.claude/`, `.github/` instructions, prompts and agents, `.gemini/`, `.codex/`, `.windsurf/`, `.continue/`, `.clinerules`, `.vscode/mcp.json`, `.mcp.json`, `opencode.json` and `SKILL.md` files as text. It runs nothing, calls no model and makes no network request. It works with `ZERO_ENTERPRISE` set. A file over 1 MB is skipped and listed. A symbolic link that leaves the folder is not followed.
+This reads `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `.cursor/`, `.claude/`, `.github/` instructions, prompts and agents, `.gemini/`, `.codex/`, `.windsurf/`, `.continue/`, `.clinerules`, `.vscode/mcp.json`, `.mcp.json`, `opencode.json` and `SKILL.md` files as text. It runs nothing, calls no model and makes no network request. It works with `ZERO_ENTERPRISE` set. A file over 1 MB is skipped and listed. A symbolic link is never followed and is reported as a finding. A hard-linked file is not read.
 
 Each finding has a rule id, a severity, the file and line, a short snippet and a fix hint. Secrets are shown as their first characters and length, never in full. The wording rule is a heuristic and is marked as one. See [Check agent files in a repository](/extensions/#check-agent-files-in-a-repository) for the rules.
 

@@ -91,11 +91,12 @@ function dockerPinned(image: string): string | undefined {
 }
 
 /** Every launcher problem in one command (the program and its arguments joined). */
-export function launcherIssues(command: string): LauncherIssue[] {
+export function launcherIssues(command: string, depth = 0): LauncherIssue[] {
   const found: LauncherIssue[] = [];
-  const ws = words(command);
+  if (depth > 3) return found;
+  const ws = words(command.slice(0, 4000));
   for (let i = 0; i < ws.length; i++) {
-    if (ws[i]!.length > 1 && /[\s|;&]/.test(ws[i]!)) { found.push(...launcherIssues(ws[i]!)); continue; } // a quoted script, as in sh -c "..."
+    if (ws[i]!.length > 1 && /[\s|;&]/.test(ws[i]!)) { found.push(...launcherIssues(ws[i]!, depth + 1)); continue; } // a quoted script, as in sh -c "..."
     const word = base(ws[i]!).toLowerCase();
     const rest = ws.slice(i + 1);
     const issue = (launcher: string, spec: string, reason: string, severity: "medium" | "high" = "medium"): void => { found.push({ launcher, spec, reason, severity }); };

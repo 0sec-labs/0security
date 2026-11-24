@@ -62,6 +62,7 @@ The check reads files as text. It runs nothing, calls no model and uses no netwo
 | `agent-config/broad-permission` | high or medium | `Bash(*)`, `Bash(curl:*)`, `Bash(rm:*)`, a wildcard allow, `bypassPermissions`, `--dangerously-skip-permissions`, `enableAllProjectMcpServers`, `enabledMcpjsonServers`, a Cursor yolo mode, Copilot `chat.tools.autoApprove` and Codex `approval_policy = "never"`. |
 | `agent-config/hook-command` | low, medium or high | Every hook that runs a shell command. It is medium when the command uses the network and high when it pipes a download into a shell. |
 | `agent-config/mcp-remote-insecure` | medium | A remote MCP server over plain http, or on a host you did not allow with `--allow-host`. |
+| `agent-config/symlinked-config` | medium | An agent file or folder that is a symbolic link. The scan never follows links, so it reports the link instead of the target. |
 | `agent-config/mcp-project-autostart` | low | An MCP server defined in the repository. Your tool asks before it starts. Check it before you approve. |
 
 Each finding names the incident or reference behind its rule and says how to fix it. The sources include the rules file backdoor (Pillar Security), Trojan Source (CVE-2021-42574), MCPoison and CurXecute in Cursor (CVE-2025-54136, CVE-2025-54135), MCP tool poisoning, the Amazon Q Developer extension prompt injection and the Nx s1ngularity malware.

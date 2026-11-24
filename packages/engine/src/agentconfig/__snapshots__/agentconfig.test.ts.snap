@@ -181,7 +181,7 @@ exports[`output > matches the SARIF snapshot 1`] = `
                 },
                 "region": {
                   "snippet": {
-                    "text": "env.TOKEN = ghp_...[40 characters]",
+                    "text": "env.TOKEN = ghp_... (40 characters)",
                   },
                   "startLine": 10,
                 },
@@ -189,10 +189,10 @@ exports[`output > matches the SARIF snapshot 1`] = `
             },
           ],
           "message": {
-            "text": "MCP server "files" has a GitHub token in env.TOKEN: ghp_...[40 characters].",
+            "text": "MCP server "files" has a GitHub token in env.TOKEN: ghp_... (40 characters).",
           },
           "partialFingerprints": {
-            "0AgentConfig/v1": "df54e2f474badcf7f61710e6a65b32a1",
+            "0AgentConfig/v1": "9d36edceb4a93039232ab8bfccce9521",
           },
           "properties": {
             "heuristic": false,
@@ -566,6 +566,30 @@ exports[`output > matches the SARIF snapshot 1`] = `
               },
               "shortDescription": {
                 "text": "MCP server defined in the repository (requires approval in your tool; verify)",
+              },
+            },
+            {
+              "defaultConfiguration": {
+                "level": "warning",
+              },
+              "fullDescription": {
+                "text": "This scan never follows a symbolic link, so it cannot judge what the link points to. A tool that does follow it reads the target as instructions or settings. A link in a repository can point at a file the scan never sees, or outside the repository. Hidden settings behind a link would otherwise pass the scan.",
+              },
+              "help": {
+                "text": "Replace the link with the real file, or scan the folder it points to as well. Remove the link if you do not know why it is there.",
+              },
+              "id": "agent-config/symlinked-config",
+              "name": "AgentFileOrFolderThatIsASymbolicLink",
+              "properties": {
+                "heuristic": false,
+                "tags": [
+                  "security",
+                  "agent-config",
+                  "external/cwe/cwe-59",
+                ],
+              },
+              "shortDescription": {
+                "text": "Agent file or folder that is a symbolic link",
               },
             },
           ],
