@@ -13,8 +13,11 @@ import { WorkspaceChoice } from "@/components/workspace-choice";
 import { Feedback, QueryState } from "@/components/console-control/control-ui";
 import { errorText } from "@/lib/api-error";
 
-type WorkspaceMember = { userId: string; displayName: string; role: "owner" | "editor" | "viewer" };
-type NewMember = { userId: string; displayName: string; password: string; role: "editor" | "viewer" };
+type WorkspaceMember = { userId: string; displayName: string; role: string; scope?: { repos?: string[]; businessUnits?: string[] } };
+type NewMember = { userId: string; displayName: string; password: string; role: string };
+type RoleList = { licensed: boolean; roles: Array<{ name: string; assignable: boolean; permissions: string[] }> };
+const roleLabel = (name: string) => name.charAt(0).toUpperCase() + name.slice(1);
+const scopeText = (scope: WorkspaceMember["scope"]) => [...(scope?.repos ?? []), ...(scope?.businessUnits ?? []).map(unit => `unit ${unit}`)].join(", ");
 
 export function TeamSettingsPage() {
   const team = useTeamAccess();
@@ -31,6 +34,26 @@ export function TeamSettingsPage() {
       return response.json() as Promise<{ users: WorkspaceMember[] }>;
     },
   });
+  const roles = useQuery({
+    queryKey: [...queryKey, "roles"],
+    enabled: team.enabled && Boolean(team.user),
+    queryFn: async ({ signal }): Promise<RoleList> => {
+      const response = await localControlFetch("/api/team/roles", { signal });
+      if (!response.ok) throw new Error("Could not load roles.");
+      return response.json() as Promise<RoleList>;
+    },
+  });
+  const canManage = Boolean(team.user?.permissions?.includes("users.manage")) && roles.data?.licensed === true;
+  const assignable = (roles.data?.roles ?? []).filter(item => item.assignable);
+  const changeRole = async (target: string, next: string) => {
+    setError(""); setMessage("");
+    try {
+      const response = await localControlFetch(`/api/team/users/${encodeURIComponent(target)}`, { method: "PATCH", body: JSON.stringify({ role: next }) });
+      if (!response.ok) throw new Error(response.status === 409 ? "Keep at least one account that can manage users." : "Could not change this role.");
+      setMessage("Role changed.");
+      await cache.invalidateQueries({ queryKey });
+    } catch (cause) { setError(errorText(cause, "Could not change this role.")); }
+  };
   const [adding, setAdding] = useState(false);
   const [userId, setUserId] = useState("");
   const [displayName, setDisplayName] = useState("");
@@ -70,7 +93,10 @@ export function TeamSettingsPage() {
       {members.data.users.map(member => <li key={member.userId} className="flex items-center gap-3 py-4">
         <span className="grid size-9 shrink-0 place-items-center rounded-full bg-muted text-xs" aria-hidden="true">{member.displayName.trim().split(/\s+/).slice(0, 2).map(part => part[0]).join("").toUpperCase()}</span>
         <div className="min-w-0 flex-1"><p className="break-words text-sm font-medium">{member.displayName}{member.userId === team.user?.userId && <span className="font-normal text-muted-foreground"> · You</span>}</p><p className="break-words text-xs text-muted-foreground">{member.userId}</p></div>
-        <span className="text-xs capitalize text-muted-foreground">{member.role}</span>
+        {canManage
+          ? <Select aria-label={`Role of ${member.displayName}`} value={member.role} onValueChange={value => void changeRole(member.userId, value)} options={assignable.map(item => ({ value: item.name, label: roleLabel(item.name) }))} />
+          : <span className="text-xs text-muted-foreground">{roleLabel(member.role)}</span>}
+        {member.scope && <span className="text-xs text-muted-foreground">Limited to {scopeText(member.scope)}</span>}
       </li>)}
       {members.data.users.length === 0 && <li className="flex items-center gap-2 py-4 text-sm text-muted-foreground"><Users className="size-4" />No members found.</li>}
     </ul>}
@@ -82,7 +108,7 @@ export function TeamSettingsPage() {
         <label className="block space-y-2 text-sm"><span>Display name</span><Input autoComplete="off" value={displayName} onChange={event => setDisplayName(event.target.value)} maxLength={160} required disabled={busy} /></label>
       </div>
       <label className="block space-y-2 text-sm"><span>Initial password</span><Input type="password" autoComplete="new-password" value={password} onChange={event => setPassword(event.target.value)} minLength={12} maxLength={1024} required disabled={busy} /><span className="block text-xs text-muted-foreground">At least 12 characters.</span></label>
-      <label className="block space-y-2 text-sm"><span>Role</span><Select aria-label="Teammate role" value={role} onValueChange={value => setRole(value as NewMember["role"])} disabled={busy} options={[{ value: "editor", label: "Editor" }, { value: "viewer", label: "Viewer" }]} /><span className="block text-xs text-muted-foreground">Editors can run agents and edit shared work. Viewers can read.</span></label>
+      <label className="block space-y-2 text-sm"><span>Role</span><Select aria-label="Teammate role" value={role} onValueChange={value => setRole(value as NewMember["role"])} disabled={busy} options={canManage ? assignable.filter(item => item.name !== "owner").map(item => ({ value: item.name, label: roleLabel(item.name) })) : [{ value: "editor", label: "Editor" }, { value: "viewer", label: "Viewer" }]} /><span className="block text-xs text-muted-foreground">Editors can run agents and edit shared work. Viewers can read.</span></label>
       <Feedback error={error} />
       <div className="flex gap-2"><Button type="submit" disabled={busy || !userId.trim() || !displayName.trim() || password.length < 12}>{busy ? "Adding…" : "Add teammate"}</Button><Button type="button" variant="outline" disabled={busy} onClick={cancel}>Cancel</Button></div>
     </form>}

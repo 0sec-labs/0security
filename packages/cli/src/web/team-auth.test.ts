@@ -20,7 +20,7 @@ describe("optional workspace sign-in", () => {
     expect(signedIn.setCookie).toContain("HttpOnly; SameSite=Lax; Max-Age=28800");
     const req = request(cookieHeader(signedIn.setCookie));
     expect(getSessionId(req)).toBe(signedIn.sessionId);
-    expect(auth.resolveSession(req)).toEqual({ workspaceId: "team", userId: "alex", displayName: "Alex", role: "viewer" });
+    expect(auth.resolveSession(req)).toEqual({ workspaceId: "team", userId: "alex", displayName: "Alex", role: "viewer", roleName: "viewer", permissions: ["workspace.read", "findings.read"], scope: null });
     expect(auth.status(req)).not.toHaveProperty("passwordHash");
     await expect(auth.login({ userId: "alex", password: "correct horse battery", role: "owner" })).rejects.toMatchObject({ statusCode: 400 });
     expect(auth.resolveSessionId(JSON.stringify({ userId: "alex", role: "owner" }))).toBeNull();

@@ -11,6 +11,7 @@ import {
 } from "./dashboard-summaries.js";
 import { workflowTransitionRejection } from "./dashboard-api.js";
 import { hasFindingsServer, suppressionReasonError, triageHistoryAction } from "../findings-server-bridge.js";
+import type { TargetFilter } from "./findings-scope.js";
 
 type Persisted = { id: string; kind: string; title?: string; label?: string; owner?: string | null; status?: string; summary?: string | null; content?: string | null };
 
@@ -29,9 +30,14 @@ function collect(db: osecDB, fingerprint: string) {
 
 export async function handleFindingFamilyRequest(
   req: IncomingMessage, res: ServerResponse, fingerprint: string, action: "triage" | "workflow" | undefined,
-  dbPath: string | undefined, controlToken: string, engineBearer?: string, caller: AuditCaller = { engineRequest: false },
+  dbPath: string | undefined, controlToken: string, engineBearer?: string, caller: AuditCaller = { engineRequest: false }, scope?: TargetFilter,
 ): Promise<void> {
   const findings = findingsServiceFor(dbPath);
+  if (scope) {
+    // A scoped account sees a family only when every scan that holds it is inside its scope.
+    const targets = (await findings.readFamily(fingerprint, db => collect(db, fingerprint))).flatMap(part => part.scans.map(scan => scan.target));
+    if (targets.length === 0 || !targets.every(target => scope(target))) { json(res, 404, { error: "Not found" }); return; }
+  }
   if (req.method === "POST" && action === "triage") {
     if (!requireControlToken(req, res, controlToken, engineBearer)) return;
     const body = await readJsonObject<{ triageStatus?: string; triageNote?: string }>(req);

@@ -10,6 +10,7 @@ import { ConsoleGateway, ConsoleGatewayError } from "./console-gateway.js";
 import { WebOperatorServices } from "./operator-services.js";
 import { handleInstructionsRequest } from "./operator-instructions.js";
 import { handleWorkspaceHostRequest } from "./workspace-host-routes.js";
+import { scopeDashboardBody, type TargetFilter } from "./findings-scope.js";
 import { audit, auditActor, auditConsoleRequest, type AuditCaller, auditDatabaseReset, handleAuditLogRequest } from "./audit.js";
 import { WebWorkflowService } from "./workflows.js";
 import type { WebSentinelService } from "./sentinels.js";
@@ -134,7 +135,7 @@ export async function handleWebConsoleApiRequest(
     if (id && !readResume) assertTeamConsoleMutation(req, id, team.auth, team.collaboration, gateway);
   }
   try {
-    const auditLog = handleAuditLogRequest(path, method, requestUrl.searchParams, { teamEnabled: team?.auth.enabled === true, ...(member?.role ? { role: member.role } : {}) });
+    const auditLog = handleAuditLogRequest(path, method, requestUrl.searchParams, { teamEnabled: team?.auth.enabled === true, ...(member?.role ? { role: member.role, permissions: member.permissions } : {}) });
     if (auditLog) { json(res, auditLog.status, auditLog.data); return true; }
     if (skills) {
       const catalog = await handleSkillsCatalogRequest(skillsCatalogFor(skills), path, method, input, { canWrite: !team?.auth.enabled || member?.role !== "viewer" });
@@ -356,6 +357,8 @@ export async function handleApiRequest(
   engineBearer?: string,
   resolveScanDatabase?: (scanId: string) => string | undefined,
   caller?: AuditCaller,
+  /** Set for an account limited to some repositories: only findings of in-scope scans are returned. */
+  scope?: TargetFilter,
 ): Promise<boolean> {
   const { osecDB } = await import("@0/engine/storage");
   if (req.method !== "GET" && req.method !== "HEAD") invalidateReadCache();
@@ -498,13 +501,13 @@ export async function handleApiRequest(
         db.close();
       }
     });
-    json(res, 200, body, { conditional: true });
+    json(res, 200, scope ? { ...scopeDashboardBody(body, scope), queue: summarizeQueue([], []) } : body, { conditional: true });
     return true;
   }
 
   if (pathname === "/api/scans") {
     const scans = (await findingsServiceFor(dbPath).list()).scans.slice(0, 100) as DBScanRow[];
-    json(res, 200, { scans: scans.map(summarizeScan) }, { conditional: true });
+    json(res, 200, { scans: scans.filter(scan => !scope || scope(scan.target)).map(summarizeScan) }, { conditional: true });
     return true;
   }
 
@@ -515,6 +518,7 @@ export async function handleApiRequest(
     const db = await openSharedDb(dbPath);
     try {
       const events = (db.listRecentEvents(limit) as DashboardRecentEventRow[])
+        .filter(event => !scope || (typeof event.scanTarget === "string" && scope(event.scanTarget)))
         .map((event, index) => {
           const payload = parsePayload(event.payload);
           const presentation = presentationEventFromDashboardRow(event, index + 1);
@@ -551,7 +555,7 @@ export async function handleApiRequest(
     const db = await openSharedDb(scanDb);
     try {
       const scan = db.getScan(scanPath.scanId) as DBScanRow | undefined;
-      if (!scan) {
+      if (!scan || (scope && !scope(scan.target))) {
         json(res, 404, { error: "Scan not found" });
         return true;
       }
@@ -599,7 +603,7 @@ export async function handleApiRequest(
 
   const familyPath = parseFindingFamilyPath(pathname);
   if (familyPath) {
-    await handleFindingFamilyRequest(req, res, familyPath.fingerprint, familyPath.action, dbPath, controlToken, engineBearer, caller);
+    await handleFindingFamilyRequest(req, res, familyPath.fingerprint, familyPath.action, dbPath, controlToken, engineBearer, caller, scope);
     return true;
   }
 

@@ -5,6 +5,7 @@ import { dirname, join, resolve } from "node:path";
 import { homeStateDir } from "@0/engine/shared";
 import { TeamUserTable } from "@0/engine/storage";
 import { z } from "zod";
+import { audit, auditActor } from "./audit.js";
 import { TeamAuth, TeamAuthError, hashTeamPassword, parseTeamConfig, type TeamConfig } from "./team-auth.js";
 
 const HAS_POSIX_PERMISSIONS = process.platform !== "win32";
@@ -13,7 +14,7 @@ const setupSchema = z.object({
   workspaceName: z.string().trim().min(1).max(160), displayName: z.string().trim().min(1).max(160),
   userId: z.string().trim().min(1).max(160), password: z.string().min(1).max(1024),
 }).strict();
-const memberSchema = z.object({ userId: z.string().trim().min(1).max(160), displayName: z.string().trim().min(1).max(160), password: z.string().min(1).max(1024), role: z.enum(["editor", "viewer"]) }).strict();
+const memberSchema = z.object({ userId: z.string().trim().min(1).max(160), displayName: z.string().trim().min(1).max(160), password: z.string().min(1).max(1024), role: z.string().min(1).max(64) }).strict();
 function readPrivateConfig(path: string): TeamConfig {
   const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
@@ -65,12 +66,13 @@ export class TeamSetupService {
   async addMember(req: Pick<IncomingMessage, "headers">, input: unknown) {
     const auth = this.options.currentAuth(); const actor = auth.resolveSession(req);
     if (!actor) throw new TeamAuthError("Sign in to this workspace");
-    if (actor.role !== "owner") throw new TeamAuthError("Only workspace owners can add teammates", 403);
+    if (!actor.permissions.includes("users.manage")) throw new TeamAuthError("Only workspace owners can add teammates", 403);
     if (this.busy) throw new TeamAuthError("Workspace configuration is being updated", 409);
     const parsed = memberSchema.safeParse(input);
     if (!parsed.success) throw new TeamAuthError("Account ID, display name, password and editor or viewer role are required", 400);
     const data = parsed.data;
     if (auth.members().some(user => user.userId === data.userId)) throw new TeamAuthError("That account ID already exists", 409);
+    auth.assertAssignableRole(data.role);
     if (auth.atMemberLimit()) throw new TeamAuthError("Workspace member limit reached", 409);
     this.busy = true;
     const lockPath = `${this.configPath}.lock`; const tempPath = `${this.configPath}.${randomUUID()}.tmp`;
@@ -87,7 +89,9 @@ export class TeamSetupService {
       // The lock is shared with `0 config set team add-user`; CAS also catches external manual edits.
       if (auth.configurationDigest() !== baseline || configDigest(readPrivateConfig(this.configPath)) !== baseline) throw new TeamAuthError("Workspace configuration changed during this update", 409);
       renameSync(tempPath, this.configPath);
-      return { user: auth.addMember(member) };
+      const added = auth.addMember(member);
+      audit({ actor: auditActor({ engineRequest: false, teamEnabled: true, displayName: actor.displayName }), action: "user.created", subject: added.userId, detail: { id: added.userId, role: added.roleName, source: "local" } });
+      return { user: added };
     } catch (error) {
       if (error instanceof TeamAuthError) throw error;
       throw new TeamAuthError("The teammate account could not be created", 500);

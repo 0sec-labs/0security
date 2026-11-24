@@ -34,6 +34,7 @@ import { createWorkspaceServices } from "../web/workspace-services.js";
 import { findTeamConfigPath, handleTeamSetupRequest, TeamSetupService } from "../web/team-setup.js";
 import { TeamAuth, TeamAuthError } from "../web/team-auth.js";
 import { CollaborationService } from "../web/collaboration.js";
+import { scopeFilterFor, scopedRouteDenied } from "../web/findings-scope.js";
 import { authorizeTeamApi, handleTeamRequest, assertTeamConsoleMutation } from "../web/team-web.js";
 import { isTeamSsoRoute } from "../web/team-sso-routes.js";
 import { handleTeamPresenceStream } from "../web/team-presence-stream.js";
@@ -396,6 +397,8 @@ export function registerDashboardCommand(program: Command): void {
               if (!engineRequest) authorizeTeamApi(teamAuth, req, requestUrl.pathname);
               const privilegedDenial = privilegedRouteDenial(requestUrl.pathname, req.method ?? "GET", { engineRequest, teamEnabled: teamAuth.enabled, role: teamAuth.resolveSession(req)?.role });
               if (privilegedDenial) { auditDenial(req, requestUrl.pathname, privilegedDenial.data.code, engineRequest ? "engine" : "browser"); json(res, privilegedDenial.status, privilegedDenial.data); return; }
+              const memberScope = engineRequest ? undefined : scopeFilterFor(teamAuth.resolveSession(req));
+              if (memberScope && scopedRouteDenied(requestUrl.pathname)) { auditDenial(req, requestUrl.pathname, "scope_restricted", "browser"); json(res, 403, { code: "scope_restricted", error: "Your role is limited to some repositories and cannot use this route." }); return; }
               res.setHeader("X-0-Engine-ID", localHandshake.engineId);
               const expectedEngineId = req.headers["x-0-expected-engine-id"];
               if (expectedEngineId !== undefined && expectedEngineId !== localHandshake.engineId) throw new WebRequestError("Request belongs to a different engine identity.", 409);
@@ -592,7 +595,7 @@ export function registerDashboardCommand(program: Command): void {
               const handled = await handleApiRequest(req, res, requestUrl.pathname, opts.dbPath, controlToken, engineBearer, engine ? id => engine!.resolveScanDatabase(id) : undefined, (() => {
                 const member = engineRequest ? null : teamAuth.resolveSession(req);
                 return { engineRequest, teamEnabled: teamAuth.enabled, ...(member ? { displayName: member.displayName, userId: member.userId } : {}) };
-              })());
+              })(), memberScope);
               if (!handled) json(res, 404, { error: "Not found" });
               return;
             }

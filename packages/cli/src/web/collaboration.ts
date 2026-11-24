@@ -7,7 +7,7 @@ class CollaborationError extends Error {
   constructor(message: string, readonly statusCode = 400) { super(message); this.name = "CollaborationError"; }
 }
 const roleSchema = z.enum(["owner", "editor", "viewer"]);
-const identitySchema = z.object({ workspaceId: z.string().min(1).max(256), userId: z.string().min(1).max(256), displayName: z.string().min(1).max(256), role: roleSchema }).strict();
+const identitySchema = z.object({ workspaceId: z.string().min(1).max(256), userId: z.string().min(1).max(256), displayName: z.string().min(1).max(256), role: roleSchema });
 export type CollaborationIdentity = z.infer<typeof identitySchema>;
 const attributionSchema = z.object({ userId: z.string(), displayName: z.string() });
 const memberSchema = attributionSchema.extend({ role: roleSchema, joinedAt: z.number() });
