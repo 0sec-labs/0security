@@ -32,6 +32,7 @@ import { registerFindingsMetricsCommand } from "./findings-metrics.js";
 import { registerFindingsEvidenceCommand } from "./findings-evidence.js";
 import { registerFindingsExportFixesCommand } from "./findings-export-fixes.js";
 import { registerFindingsImportCommand } from "./findings-import.js";
+import { registerFindingsRollupCommand } from "./findings-rollup.js";
 import { registerFixCommand } from "./fix.js";
 import { registerBurndownCommand } from "./burndown.js";
 import { registerVerifyCommand } from "./verify.js";
@@ -58,7 +59,7 @@ export function registerCommandTree(program: Command): void {
   // Evidence.
   registerReportsCommand(program);
   registerFindingsCommand(program);
-  nest(program, "findings", [registerFindingsExportCommand, registerFindingsKeysCommand, registerFindingsImportCommand, (parent) => registerFixCommand(parent), (parent) => registerBurndownCommand(parent), (parent) => registerVerifyCommand(parent), (parent) => registerFindingsUploadCommand(parent), (parent) => registerFindingsIssuesCommand(parent), (parent) => registerFindingsReportDraftCommand(parent), (parent) => registerFindingsEvidenceCommand(parent), (parent) => registerFindingsExportFixesCommand(parent), (parent) => registerFindingsMetricsCommand(parent)]);
+  nest(program, "findings", [registerFindingsExportCommand, registerFindingsKeysCommand, registerFindingsImportCommand, (parent) => registerFixCommand(parent), (parent) => registerBurndownCommand(parent), (parent) => registerVerifyCommand(parent), (parent) => registerFindingsUploadCommand(parent), (parent) => registerFindingsIssuesCommand(parent), (parent) => registerFindingsReportDraftCommand(parent), (parent) => registerFindingsEvidenceCommand(parent), (parent) => registerFindingsExportFixesCommand(parent), (parent) => registerFindingsMetricsCommand(parent), (parent) => registerFindingsRollupCommand(parent)]);
   registerWorkflowCommand(program); // also registers `chats` and `automation`
   registerMissionsCommand(program);
   nest(program, "automation", [(parent) => registerAutomationManageCommands(parent)]);

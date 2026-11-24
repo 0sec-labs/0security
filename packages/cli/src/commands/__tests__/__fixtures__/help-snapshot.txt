@@ -645,6 +645,8 @@ Commands:
                                     record a verdict next to them
   metrics [options]                 Show what scan, fix and verify runs cost and produced: cost per
                                     proposed fix and the share that passed their checks
+  rollup [options] [inputs...]      Count open findings across repositories by severity, category,
+                                    age and owner, from export files and findings databases
   evidence [options] <folder>       Write one folder of findings, SARIF, SBOM and fix branches, with
                                     a README that says what it does and does not show
   export-fixes [options]            Report what happened to the fixes burndown proposed: counts,
@@ -1001,6 +1003,23 @@ Options:
   --metadata <path>  Optional run.json invocation and revision metadata
   --db-path <path>   Destination engine database; stop its browser engine before importing
   -h, --help         display help for command
+
+### 0security findings rollup
+Usage: 0security findings rollup [options] [inputs...]
+
+Count open findings across repositories by severity, category, age and owner, from export files and
+findings databases
+
+Options:
+  --export <file>      Also write these findings as a rollup export file that another rollup can
+                       read
+  --owners <file>      JSON file mapping repository names to owners, used when a finding has no
+                       assignee
+  --repository <name>  Repository name for findings read from a database (default: the scan target's
+                       folder name)
+  --format <format>    Output: text, json or html (choices: "text", "json", "html")
+  -o, --output <file>  Write the rollup to a file instead of stdout
+  -h, --help           display help for command
 
 ### 0security findings show
 Usage: 0security findings show [options] <id>
