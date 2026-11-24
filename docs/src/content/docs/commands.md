@@ -3998,7 +3998,7 @@ Control what starts a Sentinel's automations.
 0security sentinels triggers
 ```
 
-Subcommands: [list](#sentinels-triggers-list) · [add](#sentinels-triggers-add) · [enable](#sentinels-triggers-enable) · [disable](#sentinels-triggers-disable) · [check](#sentinels-triggers-check) · [rm](#sentinels-triggers-rm).
+Subcommands: [list](#sentinels-triggers-list) · [add](#sentinels-triggers-add) · [enable](#sentinels-triggers-enable) · [disable](#sentinels-triggers-disable) · [check](#sentinels-triggers-check) · [secret](#sentinels-triggers-secret) · [rm](#sentinels-triggers-rm).
 
 #### sentinels triggers list
 
@@ -4033,7 +4033,7 @@ Add a trigger for an automation the Sentinel owns; disabled unless --enable --ye
 | Option | Registered default | Description |
 | --- | --- | --- |
 | `--automation <id>` | — | What the trigger starts (default: the only one this Sentinel owns) |
-| `--kind <kind>` | — | schedule \| manual \| github-pr \| release \| check-completed |
+| `--kind <kind>` | — | schedule \| manual \| github-pr \| release \| check-completed \| webhook |
 | `--file <path>` | — | Trigger JSON object with schedule, github, release or check settings |
 | `--enable` | — | Enable immediately |
 | `--yes` | — | Confirm that an enabled trigger was reviewed |
@@ -4047,6 +4047,7 @@ Add a trigger for an automation the Sentinel owns; disabled unless --enable --ye
 | `--base-branch <branch>` | — | github-pr: only pull requests into this branch |
 | `--comment` | — | github-pr: comment on each pull request with one short summary, edited in place on later pushes (default: off) |
 | `--include-forks` | — | github-pr: also review pull requests from forks, marked untrusted (default: skipped) |
+| `--label <text>` | — | webhook: a name for this webhook (default: webhook) |
 | `--json` | — | Print machine-readable JSON |
 | `--db-path <path>` | — | Control database (default: the user database) |
 | `--format <format>` | — | Output: text or json Choices: text, json. |
@@ -4108,6 +4109,28 @@ Poll a pull request trigger now instead of waiting for its next poll.
 | `--json` | — | Print machine-readable JSON |
 | `--db-path <path>` | — | Control database (default: the user database) |
 | `--format <format>` | — | Output: text or json Choices: text, json. |
+
+#### sentinels triggers secret
+
+Create or replace the secret of a webhook trigger. The old secret keeps working for 5 minutes. The new one is printed once.
+
+```text
+0security sentinels triggers secret [options] <id> <trigger-id>
+```
+
+| Argument | Required | Description |
+| --- | --- | --- |
+| `id` | Yes |  |
+| `trigger-id` | Yes |  |
+
+| Option | Registered default | Description |
+| --- | --- | --- |
+| `--yes` | — | Confirm; update the calling system afterwards |
+| `--json` | — | Print machine-readable JSON |
+| `--db-path <path>` | — | Control database (default: the user database) |
+| `--format <format>` | — | Output: text or json Choices: text, json. |
+
+Needs server mode. See [Webhook trigger](/sentinels/#webhook-trigger).
 
 #### sentinels triggers rm
 

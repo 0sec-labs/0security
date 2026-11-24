@@ -23,7 +23,7 @@ import { GITHUB_EVENT_ALLOWLIST, parseGithubWebhook, type GithubEvent } from "./
 export const GITHUB_WEBHOOK_PATH = "/api/webhooks/github";
 export const WEBHOOK_MAX_BODY_BYTES = 1_000_000;
 export const WEBHOOK_ROTATION_GRACE_MS = 5 * 60_000;
-const BODY_DEADLINE_MS = 10_000;
+export const BODY_DEADLINE_MS = 10_000;
 const DELIVERY_TTL_MS = 24 * 60 * 60_000;
 const DELIVERY_MAX_ENTRIES = 5_000;
 const SOURCE_LIMIT_PER_MINUTE = 30;
@@ -43,7 +43,7 @@ interface SecretFile { version: 1; current: string; createdAt: string; previous?
 /** The per-instance secret: 32 random bytes as hex in a 0600 file. Never returned by an API after creation. */
 export class WebhookSecretStore {
   readonly path: string;
-  constructor(stateDir: string, private readonly now: () => number = Date.now) { this.path = join(stateDir, "github-webhook-secret.json"); }
+  constructor(stateDir: string, private readonly now: () => number = Date.now, fileName = "github-webhook-secret.json") { this.path = join(stateDir, fileName); }
 
   private read(): SecretFile | undefined {
     if (!existsSync(this.path)) return undefined;
@@ -117,10 +117,12 @@ export class DeliveryDedupe {
     for (const [key, when] of this.seen) { if (t - when >= this.ttlMs || this.seen.size > this.maxEntries) this.seen.delete(key); else break; }
     return true;
   }
+  /** Forgets an id so a retry of a delivery that was not acted on is accepted. */
+  release(id: string): void { this.seen.delete(id); }
   get size(): number { return this.seen.size; }
 }
 
-class WindowCounter {
+export class WindowCounter {
   private hits: number[] = [];
   constructor(private readonly limit: number, private readonly windowMs: number) {}
   take(t: number): boolean {
@@ -227,7 +229,7 @@ export class GitHubWebhookReceiver {
     if (typeof signature !== "string" || !SIGNATURE_SHAPE.test(signature)) { this.reject(res, 401, client, undefined, "signature_missing_or_malformed"); return; }
 
     let raw: Buffer;
-    try { raw = await this.readRaw(req); }
+    try { raw = await readBodyCapped(req, this.maxBody); }
     catch (error) {
       if (error instanceof BodyError) { if (error.reason === "too_large") this.tooLarge(req, res, client); else this.reject(res, 408, client, undefined, "body_timeout"); return; }
       this.reject(res, 400, client, undefined, "body_read"); return;
@@ -281,27 +283,28 @@ export class GitHubWebhookReceiver {
     reply(res, 413, {});
     res.once("finish", () => req.destroy());
   }
-
-  private readRaw(req: IncomingMessage): Promise<Buffer> {
-    return new Promise((resolve, reject) => {
-      const chunks: Buffer[] = []; let size = 0; let done = false;
-      const finish = (action: () => void) => { if (done) return; done = true; clearTimeout(timer); req.off("data", onData); action(); };
-      const timer = setTimeout(() => finish(() => reject(new BodyError("timeout"))), BODY_DEADLINE_MS);
-      timer.unref?.();
-      const onData = (chunk: Buffer) => {
-        size += chunk.length;
-        if (size > this.maxBody) { finish(() => reject(new BodyError("too_large"))); return; }
-        chunks.push(chunk);
-      };
-      req.on("data", onData);
-      req.once("end", () => finish(() => resolve(Buffer.concat(chunks, size))));
-      req.once("error", error => finish(() => reject(error)));
-      req.once("aborted", () => finish(() => reject(new Error("aborted"))));
-    });
-  }
 }
 
-class BodyError extends Error { constructor(readonly reason: "too_large" | "timeout") { super(reason); } }
+/** Reads the raw body with a hard byte cap and a deadline. Rejects with `BodyError` for either. */
+export function readBodyCapped(req: IncomingMessage, maxBytes: number): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = []; let size = 0; let done = false;
+    const finish = (action: () => void) => { if (done) return; done = true; clearTimeout(timer); req.off("data", onData); action(); };
+    const timer = setTimeout(() => finish(() => reject(new BodyError("timeout"))), BODY_DEADLINE_MS);
+    timer.unref?.();
+    const onData = (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > maxBytes) { finish(() => reject(new BodyError("too_large"))); return; }
+      chunks.push(chunk);
+    };
+    req.on("data", onData);
+    req.once("end", () => finish(() => resolve(Buffer.concat(chunks, size))));
+    req.once("error", error => finish(() => reject(error)));
+    req.once("aborted", () => finish(() => reject(new Error("aborted"))));
+  });
+}
+
+export class BodyError extends Error { constructor(readonly reason: "too_large" | "timeout") { super(reason); } }
 
 type ParsedEvent = { ok: true; action: string; repo: string; base: string } | { ok: false; reason: string };
 
@@ -319,13 +322,30 @@ export function parsePullRequestEvent(payload: unknown): ParsedEvent {
   return { ok: true, action, repo, base };
 }
 
-export interface WebhookConsoleContext { receiver?: GitHubWebhookReceiver; payloadUrl?: string }
+export interface WebhookConsoleContext {
+  receiver?: GitHubWebhookReceiver; payloadUrl?: string;
+  /** Signed webhook triggers (server mode): per-trigger secrets and a check that the id is a webhook trigger. */
+  signed?: { secrets: { rotate(triggerId: string): string; status(triggerId: string): { configured: boolean; createdAt?: string; graceUntil?: string } }; isWebhookTrigger(triggerId: string): boolean; baseUrl?: string };
+}
+const SIGNED_SECRET_PATH = /^github\/webhook\/triggers\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/secret$/;
 
 /**
  * Settings and CLI surface under /api/console/github/webhook (browser control token, owner in team mode, never the engine
  * bearer for mutations). The secret is returned exactly once, by create and rotate, and by nothing else.
  */
 export function handleWebhookConsoleRequest(path: string, method: string, context: WebhookConsoleContext): { status: number; data: unknown } | null {
+  const signedMatch = SIGNED_SECRET_PATH.exec(path);
+  if (signedMatch) {
+    const triggerId = signedMatch[1]!;
+    const signed = context.signed;
+    if (!signed) return { status: 409, data: { error: "Signed webhooks need server mode." } };
+    if (method === "GET") return signed.isWebhookTrigger(triggerId) ? { status: 200, data: { webhook: { path: `/api/webhooks/trigger/${triggerId}`, ...(signed.baseUrl ? { url: new URL(`/api/webhooks/trigger/${triggerId}`, signed.baseUrl).toString() } : {}), ...signed.secrets.status(triggerId) } } } : { status: 404, data: { error: "Not found." } };
+    if (method !== "POST") return { status: 405, data: { error: "Use GET or POST." } };
+    if (!signed.isWebhookTrigger(triggerId)) return { status: 404, data: { error: "Not found." } };
+    // Creating the first secret and rotating are the same call: the secret is returned once and never again.
+    const secret = signed.secrets.rotate(triggerId);
+    return { status: 200, data: { secret, graceSeconds: WEBHOOK_ROTATION_GRACE_MS / 1000, webhook: { path: `/api/webhooks/trigger/${triggerId}`, ...(signed.baseUrl ? { url: new URL(`/api/webhooks/trigger/${triggerId}`, signed.baseUrl).toString() } : {}), ...signed.secrets.status(triggerId) } } };
+  }
   if (path !== "github/webhook" && path !== "github/webhook/secret" && path !== "github/webhook/secret/rotate") return null;
   const { receiver } = context;
   if (!receiver) return path === "github/webhook" && method === "GET" ? { status: 200, data: { webhook: { serverMode: false } } } : { status: 404, data: { error: "Not found." } };

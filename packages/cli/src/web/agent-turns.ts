@@ -14,10 +14,10 @@ const fence = (label: string, text: string, max = MAX_EVENT_CHARS) => `<${label}
 
 export interface TurnRequest {
   sentinel: Sentinel;
-  origin: "schedule" | "github";
+  origin: "schedule" | "github" | "webhook";
   /** How it arrived: `schedule`, `poll`, `check` or `webhook`. */
   via: string;
-  trigger: { id: string; kind: "schedule" | "github-pr" | "release" | "check-completed" };
+  trigger: { id: string; kind: "schedule" | "github-pr" | "release" | "check-completed" | "webhook" };
   automation: SecurityWorkflow;
   event?: Record<string, string | number>;
   /** Unique per Sentinel: schedule is trigger and scheduled time; GitHub is trigger, pull request and head commit. */
@@ -230,7 +230,7 @@ export class AgentTurnDelivery {
     this.#seen.set(sentinel.id, { ...(charterFile ? { charter: charterFile.revision } : {}), ...(notesFile ? { notes: notesFile.revision } : {}), fingerprint });
     const steps = automation.nodes.filter(node => node.enabled && node.type !== "trigger").map(node => `- ${node.label} (${node.type})${node.execution?.instructions ? `: ${node.execution.instructions.slice(0, 600)}` : ""}`).join("\n");
     const when = request.scheduledFor ? ` at ${request.scheduledFor.slice(0, 16).replace("T", " ")} UTC` : "";
-    const source = request.origin === "github" ? (request.trigger.kind === "github-pr" ? `GitHub pull request ${event?.["repo"] ?? ""}#${event?.["pr"] ?? ""}` : `GitHub ${request.trigger.kind === "release" ? "release" : "check"} ${event?.["repo"] ?? ""}`) : `schedule "${automation.name}"${when}`;
+    const source = request.origin === "webhook" ? `webhook ${String(event?.["label"] ?? "")}`.trim() : request.origin === "github" ? (request.trigger.kind === "github-pr" ? `GitHub pull request ${event?.["repo"] ?? ""}#${event?.["pr"] ?? ""}` : `GitHub ${request.trigger.kind === "release" ? "release" : "check"} ${event?.["repo"] ?? ""}`) : `schedule "${automation.name}"${when}`;
     const charter = charterFile?.content ?? "";
     return [
       `[Turn from ${source} · turn ${nonce(turn.id)}]`,
