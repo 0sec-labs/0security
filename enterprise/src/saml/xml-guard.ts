@@ -2,8 +2,8 @@
 //
 // Refuses XML that SAML never needs and attackers like. Checked on the raw text before any parser or
 // signature library sees it, so a parser difference cannot hide anything from these rules.
-import { DOMParser } from "@xmldom/xmldom";
 import { SamlError } from "./errors.js";
+import { parseStrictXml } from "./xml-parse.js";
 
 /** Largest decoded SAML response or metadata document accepted. Real responses are a few kilobytes. */
 export const MAX_SAML_XML_BYTES = 512 * 1024;
@@ -64,15 +64,50 @@ const CANONICALIZATION_METHODS = new Set([
 const TRANSFORMS = new Set(["http://www.w3.org/2000/09/xmldsig#enveloped-signature", ...CANONICALIZATION_METHODS]);
 const ALLOWED: Record<string, Set<string>> = { SignatureMethod: SIGNATURE_METHODS, DigestMethod: DIGEST_METHODS, CanonicalizationMethod: CANONICALIZATION_METHODS, Transform: TRANSFORMS };
 
+/** Longest Algorithm attribute value accepted. The longest real algorithm URI is about 70 characters. */
+export const MAX_ALGORITHM_VALUE = 256;
+const isSpace = (c: number): boolean => c === 0x20 || c === 0x09 || c === 0x0a || c === 0x0d;
+
+/**
+ * Belt and braces before parsing: no real response writes an algorithm URI with a character reference or entity in
+ * it, so an Algorithm attribute that contains `&` is refused, whatever the parser would decode it to.
+ *
+ * One forward pass. Every character is looked at a bounded number of times: the search for the next `Algorithm`
+ * and the search for a closing quote both start where the last one ended, never at an earlier position. An
+ * attribute whose quote never closes, or whose value is longer than MAX_ALGORITHM_VALUE, is refused at once
+ * instead of being rescanned from every later `Algorithm`. The input size is capped too.
+ */
+export function assertNoReferenceInAlgorithms(xml: string): void {
+  if (xml.length > MAX_SAML_XML_BYTES) throw new SamlError("xml-too-large", "The SAML message is too large.", 400);
+  const refuse = (message: string): never => { throw new SamlError("weak-algorithm", message, 400); };
+  let at = 0;
+  for (;;) {
+    at = xml.indexOf("Algorithm", at);
+    if (at < 0) return;
+    let i = at + "Algorithm".length;
+    at = i; // the next search starts after this word, so nothing is scanned twice
+    while (i < xml.length && isSpace(xml.charCodeAt(i))) i++;
+    if (xml[i] !== "=") continue;
+    i++;
+    while (i < xml.length && isSpace(xml.charCodeAt(i))) i++;
+    const quote = xml[i];
+    if (quote !== '"' && quote !== "'") continue;
+    const start = i + 1;
+    const end = xml.indexOf(quote, start);
+    if (end < 0 || end - start > MAX_ALGORITHM_VALUE) refuse("The SAML signature has an Algorithm attribute that is unterminated or too long.");
+    if (xml.slice(start, end).includes("&")) refuse("The SAML signature names an algorithm with an XML reference, which is not allowed.");
+    at = end + 1;
+  }
+}
+
 /**
  * Refuse any signature, digest, canonicalisation or transform algorithm that is not on the allow-list.
  * Reads the decoded attribute values from the parsed document, with the same XML parser the signature
  * library uses, so character references, entity forms and case tricks cannot hide a weak algorithm.
  */
 export function assertStrongSignatureAlgorithms(xml: string): void {
-  const failures: string[] = [];
-  const doc = new DOMParser({ errorHandler: { warning: (m: string) => failures.push(String(m)), error: (m: string) => failures.push(String(m)), fatalError: (m: string) => failures.push(String(m)) } }).parseFromString(xml, "text/xml");
-  if (failures.length || !doc?.documentElement) throw new SamlError("xml-unsafe", "The SAML message is not well-formed XML.", 400);
+  assertNoReferenceInAlgorithms(xml);
+  const doc = parseStrictXml(xml, "xml-unsafe", "The SAML message is not well-formed XML.");
   const visit = (node: Node): void => {
     for (let n: Node | null = node.firstChild; n; n = n.nextSibling) {
       if (n.nodeType !== 1) continue;

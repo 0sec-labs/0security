@@ -14,6 +14,12 @@ updates:
       npm-minor-and-patch:
         update-types: [minor, patch]
     ignore:
+      # The SAML guard in enterprise/src/saml/ and the signature check in @node-saml/node-saml and xml-crypto must parse
+      # with one and the same xmldom. Both libraries require ^0.8, so 0.9 would give the guard and the verifier two
+      # different parsers, the gap signature-wrapping attacks use. Patch updates stay on. Lift this when both libraries
+      # accept 0.9; scripts/check-enterprise-boundary.mjs fails if the lockfile ever holds two xmldom lines.
+      - dependency-name: "@xmldom/xmldom"
+        update-types: [version-update:semver-minor, version-update:semver-major]
       # Grammar ABI must match the vendored tree-sitter 0.21.1 runtime.
       - dependency-name: tree-sitter-c
         update-types: [version-update:semver-minor, version-update:semver-major]

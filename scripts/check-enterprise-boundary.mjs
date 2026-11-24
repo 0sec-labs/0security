@@ -12,6 +12,10 @@
 //      license, enterprise or trust with key, public or anchor.
 //   5. The root LICENSE-MIT and LICENSE-APACHE do not mention enterprise/ (they must stay the plain
 //      standard texts so GitHub keeps showing the Apache-2.0 license).
+//   6. The lockfile resolves one @xmldom/xmldom line (major.minor) only. enterprise/src/saml/ guards
+//      responses with the same XML parser that @node-saml/node-saml and xml-crypto verify signatures
+//      with. Two parser versions would let the guard and the verifier read one text as two documents,
+//      which is how signature-wrapping bypasses work. Move all of them together or none.
 //
 // npm decision: enterprise/ is not published to npm. 0 ships as release binaries, install.sh and the
 // container image; enterprise/ is compiled into those. Every manifest is private and `files` is
@@ -67,6 +71,13 @@ export function moduleSpecifiers(text) {
   const re = /(?:\bfrom|\bimport|\brequire)\s*\(?\s*(["'`])([^"'`\n]+)\1/g;
   for (let m = re.exec(text); m; m = re.exec(text)) out.push(m[2]);
   return out;
+}
+
+/** Distinct @xmldom/xmldom major.minor lines named anywhere in a pnpm lockfile text, sorted. */
+export function xmldomLines(lockText) {
+  const lines = new Set();
+  for (const m of lockText.matchAll(/@xmldom\/xmldom'?(?:@|: )(\d+)\.(\d+)\.\d+/g)) lines.add(`${m[1]}.${m[2]}`);
+  return [...lines].sort();
 }
 
 export function checkEnterpriseBoundary(root, allowedBridges = ALLOWED_BRIDGES) {
@@ -166,6 +177,14 @@ export function checkEnterpriseBoundary(root, allowedBridges = ALLOWED_BRIDGES) 
   if (existsSync(licenseSource)) {
     for (const m of readFileSync(licenseSource, "utf8").matchAll(/\benv\s*(?:\.\s*|\[\s*["'`])([A-Za-z0-9_]+)/g)) {
       if (!ALLOWED_LICENSE_ENV.has(m[1])) errors.push(`enterprise/src/license.ts: reads ${m[1]}. The license code may read only ZERO_LICENSE and ZERO_LICENSE_FILE.`);
+    }
+  }
+  // 6. One XML parser version for the guard and the signature verifier.
+  const lock = join(root, "pnpm-lock.yaml");
+  if (existsSync(entDir) && existsSync(lock)) {
+    const lines = xmldomLines(readFileSync(lock, "utf8"));
+    if (lines.length > 1) {
+      errors.push(`pnpm-lock.yaml: @xmldom/xmldom resolves to more than one line (${lines.join(", ")}). The SAML guard in enterprise/src/saml/ and the signature library (@node-saml/node-saml, xml-crypto) must parse with the same copy. Keep one version; do not add an override that splits them.`);
     }
   }
   return errors;

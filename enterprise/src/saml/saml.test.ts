@@ -1,8 +1,9 @@
 // Licensed under the 0security Enterprise License. See enterprise/LICENSE.
 import { describe, expect, it } from "vitest";
 import { SamlError, SamlServiceProvider, parseIdpMetadata } from "./index.js";
-import { assertNoDtd, assertSafeResponseXml, assertStrongSignatureAlgorithms } from "./xml-guard.js";
+import { MAX_ALGORITHM_VALUE, MAX_SAML_XML_BYTES, assertNoDtd, assertNoReferenceInAlgorithms, assertSafeResponseXml, assertStrongSignatureAlgorithms } from "./xml-guard.js";
 import { BoundedCache } from "./cache.js";
+import { MAX_XML_DEPTH, MAX_XML_TAGS, assertBoundedStructure } from "./xml-parse.js";
 import { TestIdp, makeKey, readAuthnRequest, type ResponseOptions } from "./idp.testkit.js";
 
 const idp = new TestIdp();
@@ -152,6 +153,78 @@ describe("XML attacks", () => {
     expect(() => assertStrongSignatureAlgorithms(ds("CanonicalizationMethod", "http://www.w3.org/2001/10/xml-exc-c14n#"))).not.toThrow();
     expect(() => assertStrongSignatureAlgorithms(ds("Transform", "http://www.w3.org/TR/1999/REC-xpath-19991116"))).toThrow(/not allowed/);
     expect(() => assertStrongSignatureAlgorithms(`<a><b`)).toThrow(SamlError);
+  });
+
+  it("scans Algorithm attributes in linear time and refuses unterminated, oversized and over-cap input", () => {
+    const timed = (xml: string, check: (xml: string) => void): { ms: number; reason: string } => {
+      const started = performance.now();
+      let reason = "accepted";
+      try { check(xml); } catch (error) { reason = (error as SamlError).reason; }
+      return { ms: performance.now() - started, reason };
+    };
+    // Many unterminated attributes, as large as the input cap allows. A rescan from each one would take minutes.
+    const unterminated = `<a ${'Algorithm="'.repeat(Math.floor((MAX_SAML_XML_BYTES - 10) / 11))}`;
+    expect(unterminated.length).toBeLessThanOrEqual(MAX_SAML_XML_BYTES);
+    for (const check of [assertNoReferenceInAlgorithms, assertStrongSignatureAlgorithms]) {
+      const result = timed(unterminated, check);
+      expect(result.reason).toBe("weak-algorithm");
+      expect(result.ms).toBeLessThan(500);
+    }
+    // 2 MB: refused on size, without looking at the content.
+    const huge = `<a ${'Algorithm="'.repeat(200_000)}`;
+    expect(huge.length).toBeGreaterThan(2_000_000);
+    expect(timed(huge, assertNoReferenceInAlgorithms)).toMatchObject({ reason: "xml-too-large" });
+    expect(timed(huge, assertNoReferenceInAlgorithms).ms).toBeLessThan(100);
+    // Closed but oversized values, many of them; and long whitespace runs between the word and the quote.
+    const longValue = `<a ${`Algorithm="${"x".repeat(MAX_ALGORITHM_VALUE + 1)}" `.repeat(1000)}/>`;
+    expect(timed(longValue, assertNoReferenceInAlgorithms)).toMatchObject({ reason: "weak-algorithm" });
+    const spaces = `<a ${`Algorithm${" ".repeat(50)}`.repeat(8000)}/>`;
+    const spaced = timed(spaces, assertNoReferenceInAlgorithms);
+    expect(spaced.reason).toBe("accepted");
+    expect(spaced.ms).toBeLessThan(500);
+    // Many well-formed values stay fast and are accepted; one reference anywhere among them is found.
+    const fine = `<a ${'Algorithm="urn:x" '.repeat(20_000)}/>`;
+    expect(timed(fine, assertNoReferenceInAlgorithms)).toMatchObject({ reason: "accepted" });
+    expect(timed(fine.replace('urn:x" ', 'urn:&#120;" '), assertNoReferenceInAlgorithms)).toMatchObject({ reason: "weak-algorithm" });
+    expect(timed(`<a Algorithm = '&amp;'/>`, assertNoReferenceInAlgorithms)).toMatchObject({ reason: "weak-algorithm" });
+    expect(timed(`<a xAlgorithm="http://ok" Algorithm='b'/>`, assertNoReferenceInAlgorithms)).toMatchObject({ reason: "accepted" });
+  });
+
+  it("keeps every guard fast on adversarial input at the size cap, including what the XML parser is slow on", () => {
+    const cap = MAX_SAML_XML_BYTES - 16;
+    const n = (unit: string) => Math.floor(cap / unit.length);
+    const inputs: Record<string, string> = {
+      encodingWords: `<?xml ${"encoding ".repeat(n("encoding "))}`,
+      questionMarks: `<?xml version="1.0" ${"? ".repeat(n("? "))}`,
+      bangSpaces: `<!${" ".repeat(cap)}`,
+      bangs: "<!".repeat(n("<!")),
+      ampersands: "&".repeat(cap),
+      refStarts: "&#".repeat(n("&#")),
+      lessThans: "<".repeat(cap),
+      commentStarts: `<a>${"<!-".repeat(n("<!-"))}`,
+      deepNesting: "<a>".repeat(n("<a>")),
+      closingTags: "</".repeat(n("</")),
+      mismatchedClose: `${"<a>".repeat(n("<a></b>"))}${"</b>".repeat(n("<a></b>"))}`,
+      unclosedAttribute: `<a b="${"x".repeat(cap)}`,
+      unterminatedAlgorithms: `<a ${'Algorithm="'.repeat(n('Algorithm="'))}`,
+      manyTags: `<r>${"<a/>".repeat(n("<a/>"))}</r>`,
+    };
+    for (const [name, input] of Object.entries(inputs)) {
+      const started = performance.now();
+      for (const guard of [assertNoDtd, assertSafeResponseXml, assertStrongSignatureAlgorithms]) { try { guard(input); } catch { /* refusing is fine; only the time matters */ } }
+      expect(performance.now() - started, name).toBeLessThan(2000);
+    }
+  });
+
+  it("refuses badly nested, too deep or too large documents before the parser sees them", () => {
+    const reason = (xml: string, allowComments = false): string => { try { assertBoundedStructure(xml, "xml-unsafe", "x", allowComments); return "accepted"; } catch (e) { return (e as SamlError).reason; } };
+    expect(reason(`<?xml version="1.0"?><a><b c="1"/><d>text &amp; more</d></a>`)).toBe("accepted");
+    expect(reason(`<a>${"<b>".repeat(MAX_XML_DEPTH - 1)}${"</b>".repeat(MAX_XML_DEPTH - 1)}</a>`)).toBe("accepted");
+    expect(reason(`<a>${"<b>".repeat(MAX_XML_DEPTH)}${"</b>".repeat(MAX_XML_DEPTH)}</a>`)).toBe("xml-unsafe");
+    expect(reason(`<r>${"<a/>".repeat(MAX_XML_TAGS)}</r>`)).toBe("xml-unsafe");
+    for (const bad of [`<a></b>`, `</a>`, `<a>`, `<a><b></a></b>`, `<a <b>`, `<a`, `<>`, `<a></a`, `<?pi`, `<a><!-- x --></a>`, `<a><![CDATA[x]]></a>`]) expect(reason(bad), bad).toBe("xml-unsafe");
+    expect(reason(`<a><!-- fine in metadata --><b/></a>`, true)).toBe("accepted");
+    expect(reason(`<a><!-- never closed </a>`, true)).toBe("xml-unsafe");
   });
 
   it("rejects a validly SHA-1-signed assertion even when 'sha1' is spelled with character references", async () => {
@@ -310,6 +383,10 @@ describe("metadata", () => {
     expect(() => parseIdpMetadata(idp.metadataXml({ ssoUrl: "http://idp.test/sso" }))).toThrow(/HTTPS/);
     expect(() => parseIdpMetadata("<md:EntityDescriptor")).toThrow(/well-formed/);
     expect(() => parseIdpMetadata(idp.metadataXml().replace("MIIC", "@@@@"))).toThrow(SamlError);
+  });
+  it("accepts certificate text that carries line-break character references", () => {
+    const meta = parseIdpMetadata(idp.metadataXml().replace(/(<ds:X509Certificate>)(.{64})/, "$1$2&#13;\n"));
+    expect(meta.certificates).toEqual([idp.key.pem]);
   });
   it("describes this service for the identity provider", () => {
     const xml = provider().metadataXml();
