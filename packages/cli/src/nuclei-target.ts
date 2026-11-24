@@ -6,6 +6,7 @@
 import { execFile } from "node:child_process";
 import { accessSync, constants, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { isIP } from "node:net";
 import { delimiter, join } from "node:path";
 import { assertScopedTarget, describeScopedTarget, parseScopeFile, type ResolveTargetHost, type ScopedTarget } from "@0/engine";
 import { parseNucleiJsonl, type ImportedFinding } from "@0/engine/shared";
@@ -71,14 +72,27 @@ export function findNuclei(env: NodeJS.ProcessEnv = process.env): string | undef
 
 export const NUCLEI_INSTALL_HINT = "Install Nuclei yourself (brew install nuclei, or https://github.com/projectdiscovery/nuclei), or set ZERO_NUCLEI_PATH to the binary. 0 never downloads it.";
 
+/**
+ * The URL Nuclei is given. A name is replaced by the address 0 checked, so Nuclei cannot resolve it again to something else;
+ * the Host header and TLS server name keep the name. An address given directly is used as it is.
+ */
+export function pinnedUrl(target: ScopedTarget): { url: string; pin?: { host: string; hostname: string } } {
+  if (isIP(target.hostname)) return { url: target.url };
+  const address = target.addresses.find(candidate => isIP(candidate) === 4) ?? target.addresses[0]!;
+  const url = new URL(target.url);
+  url.hostname = address.includes(":") ? `[${address}]` : address;
+  return { url: url.href, pin: { host: target.host, hostname: target.hostname } };
+}
+
 /** The arguments for one run. Interactsh (out-of-band callbacks to a public server) and update checks are always off. */
-export function nucleiArguments(options: { url: string; out: string; rateLimit: number; concurrency: number; templates?: string }): string[] {
+export function nucleiArguments(options: { url: string; out: string; rateLimit: number; concurrency: number; templates?: string; pin?: { host: string; hostname: string } }): string[] {
   return [
     "-u", options.url, "-jle", options.out,
     "-rl", String(options.rateLimit), "-c", String(options.concurrency),
     "-etags", NUCLEI_EXCLUDED_TAGS.join(","),
     "-ni", "-duc", "-silent", "-nc", "-retries", "0", "-timeout", "10",
     ...(options.templates ? ["-t", options.templates] : []),
+    ...(options.pin ? ["-H", `Host: ${options.pin.host}`, "-sni", options.pin.hostname] : []),
   ];
 }
 
@@ -113,7 +127,7 @@ export async function runNucleiTarget(options: NucleiTargetOptions, io: NucleiTa
     let version: string | undefined;
     try { version = /v?(\d+\.\d+\.\d+)/.exec((await exec(binary, ["-version"], { env, cwd: scratch, timeout: 15000 })).stderr)?.[1]; } catch { /* the version is optional */ }
     try {
-      await exec(binary, nucleiArguments({ url: target.url, out, rateLimit, concurrency, ...(options.templates ? { templates: options.templates } : {}) }), { env, cwd: scratch, timeout: (options.timeoutSeconds ?? 600) * 1000, maxBuffer: 16 * 1024 * 1024 });
+      await exec(binary, nucleiArguments({ ...pinnedUrl(target), out, rateLimit, concurrency, ...(options.templates ? { templates: options.templates } : {}) }), { env, cwd: scratch, timeout: (options.timeoutSeconds ?? 600) * 1000, maxBuffer: 16 * 1024 * 1024 });
     } catch (error) {
       const failure = error as { killed?: boolean; signal?: string; stderr?: string; message?: string };
       if (failure.killed || failure.signal === "SIGTERM") throw new Error(`Nuclei did not finish within ${options.timeoutSeconds ?? 600} seconds.`);

@@ -2,7 +2,7 @@ import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { findNuclei, nucleiArguments, runNucleiTarget } from "./nuclei-target.js";
+import { findNuclei, nucleiArguments, pinnedUrl, runNucleiTarget } from "./nuclei-target.js";
 
 const directories: string[] = [];
 const scratch = () => { const dir = mkdtempSync(join(tmpdir(), "0-nuclei-test-")); directories.push(dir); return dir; };
@@ -39,6 +39,19 @@ describe("nucleiArguments", () => {
   });
 });
 
+describe("pinnedUrl", () => {
+  const target = (hostname: string, host: string, addresses: string[]) => ({ url: `http://${host}/x`, host, hostname, addresses, network: "loopback" as const, authorisedBy: ["acknowledged" as const] });
+  it("gives Nuclei the checked address and keeps the name in the Host header and TLS server name", () => {
+    const pinned = pinnedUrl(target("staging.test", "staging.test:8080", ["10.0.0.7", "10.0.0.8"]));
+    expect(pinned).toEqual({ url: "http://10.0.0.7:8080/x", pin: { host: "staging.test:8080", hostname: "staging.test" } });
+    const args = nucleiArguments({ ...pinned, out: "/o", rateLimit: 1, concurrency: 1 });
+    expect(args).toEqual(expect.arrayContaining(["-H", "Host: staging.test:8080", "-sni", "staging.test"]));
+    expect(pinnedUrl(target("fd00::1", "[fd00::1]:80", ["fd00::1"])).pin).toBeUndefined();
+    expect(pinnedUrl(target("127.0.0.1", "127.0.0.1:80", ["127.0.0.1"])).pin).toBeUndefined();
+    expect(pinnedUrl(target("v6.test", "v6.test", ["fd00::5"])).url).toBe("http://[fd00::5]/x");
+  });
+});
+
 describe("runNucleiTarget", () => {
   it("runs the binary on the named target with conservative limits and reads its findings", async () => {
     const dir = scratch();
@@ -52,6 +65,13 @@ describe("runNucleiTarget", () => {
     const args = readFileSync(join(dir, "args.txt"), "utf8").trim().split("\n");
     expect(args.slice(0, 2)).toEqual(["-u", "http://127.0.0.1:18089/"]);
     expect(args).toEqual(expect.arrayContaining(["-rl", "10", "-c", "5", "-etags", "intrusive,dos,fuzz", "-ni", "-duc"]));
+  });
+  it("starts Nuclei on the address it checked when the target is a name", async () => {
+    const dir = scratch();
+    await runNucleiTarget({ targetUrl: "http://localhost:18089", acknowledgeHost: "localhost" }, { env: { ZERO_NUCLEI_PATH: fakeNuclei(dir) }, resolve: async () => ["127.0.0.1"] });
+    const args = readFileSync(join(dir, "args.txt"), "utf8").trim().split("\n");
+    expect(args.slice(0, 2)).toEqual(["-u", "http://127.0.0.1:18089/"]);
+    expect(args).toEqual(expect.arrayContaining(["-H", "Host: localhost:18089"]));
   });
   it("reads the scope file, and passes the rate limit and templates it was given", async () => {
     const dir = scratch();
