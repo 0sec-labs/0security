@@ -9,7 +9,7 @@ zero-security:
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
   variables:
-    VERSION: 0.44.0 # Pin the CLI
+    VERSION: 0.45.0 # Pin the CLI
     GIT_DEPTH: "0"
     ZEROCI_FAIL_ON: high
   script:

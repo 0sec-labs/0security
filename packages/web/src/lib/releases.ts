@@ -8,6 +8,18 @@ export const RELEASES_URL = "https://github.com/0sec-labs/0security/releases";
 
 export const RELEASES: readonly Release[] = [
   {
+    version: "0.45.0",
+    date: "2026-11-24",
+    title: "Java projects, team sign-in, and signed releases",
+    summary: "Scans, SBOMs and fixes understand Maven and Gradle projects, and Bitbucket, Jenkins, Azure and GitLab get CI recipes. A license key adds SAML, SCIM, roles, a shared findings server and a tamper-evident audit log. Releases are signed with cosign.",
+    highlights: [
+      { icon: "Wrench", title: "Fixes and findings for Java", text: "A scan keeps each batch inside one Maven or Gradle module. 0 findings fix bumps a vulnerable dependency without a model call, and 0 sbom generate reads a Maven or Gradle report you already ran. 0 findings list --context orders findings by what matters to your business." },
+      { icon: "Plug", title: "Bitbucket, Jenkins, Azure and GitLab", text: "Sentinels review Bitbucket pull requests, and signed webhooks start a Sentinel from another system. CI recipes cover four pipelines. They are new and have not run on a live service. Azure OpenAI can sign in with Entra ID." },
+      { icon: "KeyRound", title: "Team features with a license key", text: "A license key unlocks SAML sign-in, SCIM provisioning, custom roles, a shared findings server, audit retention and signed evidence. Checking the audit log and the evidence stays free and offline." },
+      { icon: "ShieldCheck", title: "Signed releases and offline installs", text: "Checksums, the SBOM and container images are signed with cosign, and install.sh verifies the signature when cosign is installed. A Helm chart, an EKS example and an air-gapped bundle are included." },
+    ],
+  },
+  {
     version: "0.44.0",
     date: "2026-11-23",
     title: "Say what matters, and scans you can trust to finish",

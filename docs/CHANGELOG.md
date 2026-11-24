@@ -12,26 +12,61 @@ on the GitHub Release tag.
 
 ## [Unreleased]
 
-- `0security findings fix` now records its pull request in the same file as burndown, so `0security findings export-fixes` covers single fixes too. The report also gives the summary for each repository (`workspaces` in the JSON, a table in the Markdown), and the schema is documented.
-- `0security findings rollup` counts open findings across repositories by severity, category, age and owner, in text, JSON or HTML. It reads rollup export files (`--export` writes one) and findings databases, and sends nothing. Fixed, false-positive, accepted and suppressed findings are left out of the open count.
-- The web console and the docs site both render Mermaid diagrams with Mermaid 12. A leftover override had pinned both to version 11.
-- Sentinels have a signed `webhook` trigger. Another system calls `/api/webhooks/trigger/<trigger-id>` in server mode and proves it with GitHub's `X-Hub-Signature-256`, Bitbucket's `X-Hub-Signature`, GitLab's `X-Gitlab-Token` or `X-0-Signature-256` with a timestamp. Each trigger has its own secret (`0security sentinels triggers secret`), the body is capped at 256 KB, and repeated deliveries start one run. Refs #430.
-- The first line of `0security --help` now describes the product as a security agent (scan, fix, SBOM and evidence) instead of "security sentinels". The messages for `--chat` no longer point at a `0 chats` command that does not exist. The GitHub Action calls `0security`.
+## [0.45.0] - 2026-11-24
+
 ### Added
 
-- A key-gated `enterprise/` folder in the repository, under its own license (`enterprise/LICENSE`); the rest stays MIT OR Apache-2.0 (see `LICENSING.md`). It holds an offline license check (no network, no phone home), the list of paid features and tools to issue keys. Set `ZERO_LICENSE` or `ZERO_LICENSE_FILE`, then run `0security config get license` to see the customer, seats, features and expiry. Expired keys get 30 days of grace, then paid writes stop while reading, export and verification keep working. No paid feature ships in this change.
+- `0security findings rollup` counts open findings across repositories by severity, category, age and owner, in text, JSON or HTML. It reads rollup export files (`--export` writes one) and findings databases, and sends nothing.
+- `0security findings fix` records its pull request in the same file as burndown, so `0security findings export-fixes` covers single fixes too. The report also gives a summary for each repository.
+- `0security findings list --context <file>` orders findings by what matters to your business. A small JSON file tags paths as `payments`, `personal-data`, `internet-facing`, `operationally-critical`, `internal-only` or `non-production`, and each tag moves matching findings up or down by at most two severity steps. Severity, verification and fixes do not change.
+- `0security findings metrics` takes `--by week` or `--by model` to show one row per week or model, and `--format csv` to export those rows.
+- Fix pull request conventions cover a ticket key and a body layout. Use `{ticket}` in the branch prefix, title or commit template and pass `--ticket SEC-123` to `0security findings fix` or `findings burndown`. In the policy file, `bodyTemplate` lays out the body and `reviewersFromCodeowners` requests the owners from the base branch's CODEOWNERS file.
+- `0security findings fix` bumps a vulnerable Maven or Gradle dependency itself, without a model call, when the repository sets the version. It never lowers a version. Other cases go to the new `java-dependency-fix` skill, and the pull request says which way the change was made.
+- `0security findings fix --sandbox docker` has a setup step. `--sandbox-setup` runs once with the network on, and the `--test` checks reuse its cache with the network off. A canary confirms the checks have no network, and the pull request says whether the image is pinned by digest.
+- A batched scan of a Maven or Gradle project keeps each batch inside one build module. `--plan` prints the module map and `--resume` continues module by module.
+- `0security sbom generate --resolve-from` reads a `mvn dependency:tree` or `gradle dependencies` report you already ran, with no build and no network. `--maven-settings` and `--gradle-init-script` point `--resolve` at your own mirror or proxy. The new `sbom java-usage` lists where your Java, Kotlin, Scala and Groovy source imports each Maven component. An import is evidence, not a reachability verdict.
+- Sentinels have a signed `webhook` trigger. Another system calls `/api/webhooks/trigger/<trigger-id>` in server mode and proves it with a GitHub, Bitbucket or GitLab signature, or with `X-0-Signature-256` and a timestamp. Each trigger has its own secret (`0security sentinels triggers secret`), and repeated deliveries start one run.
+- `0security sentinels bitbucket review` and `watch` review Bitbucket Cloud and Data Center pull requests from your machine, by poll, by signed webhook or both. Each review publishes a Code Insights report and keeps one summary comment and a few inline comments up to date. New: checked against Atlassian's published API descriptions and a local fake server, not against a live Bitbucket.
+- Azure OpenAI can sign in with Microsoft Entra ID through a managed identity or workload identity. Set `AZURE_OPENAI_AUTH=entra` and no key is stored. Checked with fake token servers, not against a live Azure tenant.
+- Set `ZERO_WEB_SEARCH_PROVIDER=keenable` to send `web_search` queries to Keenable instead of Parallel. It is off by default, DuckDuckGo stays the fallback, and `ZERO_ENTERPRISE` still blocks it.
+- Extension scripts and MCP servers started with `node` also run under Node's permission flags (`--permission`). Where no operating system sandbox works, such as Windows or a Linux container without user namespaces, this is the only layer and the status line says the network is not restricted. Set `ZERO_SANDBOX_NODE_PERMISSION=off` to leave it out.
+- Release checksums, the release SBOM and container images are signed keyless with cosign, and the image carries a signed SBOM attestation. `install.sh` verifies the checksums signature when `cosign` is installed (`INSTALL_SIGNATURE=auto|require|0`). The signing of checksums and the SBOM has not yet run on a real release.
+- CI templates for Bitbucket Pipelines, Jenkins, Azure Pipelines and GitLab CI in `ci/`, with two shared scripts that scan a pull request and publish the result to Bitbucket Code Insights. A Docker Compose file starts Bitbucket Data Center and Jenkins for trying them. Tested with stand-in programs; none of it has run on a live Bitbucket, Jenkins, Azure or GitLab.
+- A Helm chart (`deploy/helm/zero`) and an EKS Terraform example (`deploy/terraform/eks`) run the console as one replica with a persistent volume, probes, a network policy and pod identity. Checked with `helm lint`, `kubeconform` and `terraform validate`, not on a real cluster.
+- An air-gapped install path. `scripts/airgap/build-bundle.sh` packs the verified binary, image and chart, and `install-bundle.sh` installs them with no network. `verify-no-egress.mjs` runs the CLI under `ZERO_ENTERPRISE=1` and reports any outside connection. Run on the CLI and in a container with no network, not on a real isolated network.
+- A Java benchmark for the scan agent in `scripts/bench/java`, a fix scorecard with four Java cases (`scripts/bench/fix-score.mjs`), and `scripts/bench/triage-truth.mjs`, which measures `0security findings verify` against the OWASP Benchmark or a hand-labelled set.
+- A docs page, "Evidence for the Cyber Resilience Act", maps the evidence files to the duties they support evidence for, and lists what they do not show.
+
+### Enterprise
+
+A license key unlocks these features. Set `ZERO_LICENSE` or `ZERO_LICENSE_FILE`, then run `0security config get license` to see the customer, seats, features and expiry. The check is offline. Expired keys get 30 days of grace, then paid writes stop while reading, export and verification keep working. The rest of the repository stays MIT OR Apache-2.0; the `enterprise/` folder has its own license (see `LICENSING.md`).
+
+- Shared findings server (`findings-server`). CI jobs and machines send SARIF or scan JSON with `0security findings upload --to <server-url>` and a `write:findings` key. The server labels findings by repository and source, keeps an append-only triage history, requires a reason to suppress, and shows an Org tab with counts. The local Findings page is unchanged without it.
+- SAML 2.0 single sign-on for the team workspace (`saml`), with group-to-role mapping. Checked with signed test documents and a fake identity provider, not against a live Okta or Entra ID tenant.
+- SCIM 2.0 provisioning at `/scim/v2` (`scim`) for Users and Groups, with Okta and Entra ID request shapes. Disabling a person disables the account, ends its sessions and revokes the findings API keys it created. Not tested against a live identity provider.
+- Roles as permissions (`rbac`): new `triager` and `auditor` roles, custom roles, repository and business-unit scope for findings, and `oidc.groupRoles`. Each role change is written to the audit log. A SAML member with a custom role keeps that role's permissions and scope. Owner, editor and viewer stay free.
+- Team accounts live in the server database and survive restarts. The free tier keeps its 1,000-account limit. With `rbac` the limit is lifted, and `oidc.jit` creates an account the first time someone signs in through OIDC. OIDC sign-in for listed users stays free.
+- The audit log is a hash chain. `0security config audit-verify` checks it offline and is free, and `config audit-verify --file` does the same for an export or archive. `0security config audit-prune` archives old events to a verified file before removing them (`retention`). `config audit-export --with-proof` writes events with their chain hashes (`audit-chain`) and keeps working after the license expires.
+- `0security findings evidence --sign <key>` signs the evidence folder with your own Ed25519 key (`evidence-signing`). `0security evidence verify <folder> --pub <key>` checks it offline and is free.
 
 ### Changed
 
-- The scan report is shown as readable text in a terminal (no `**`, backticks or `<details>` tags); files, pipes and `--output` still get markdown.
-- The one-line description and the README headline say "open-source" instead of "sovereign".
-- Every skill on the Skills page now has a topic icon: built-in skills show an icon for what they do (a terminal for command injection, a database for SQL injection, a key for secrets) instead of the 0security mark. Your own skills get an icon when their name matches a topic, and keep their initials otherwise.
-- the docs, help examples, hints and error messages name the command `0security`; `0` stays as its short alias. Set `ZERO_PROGRAM_NAME=0security` or `0` to force the name that help shows (tests and docs generation).
+- The scan report is shown as readable text in a terminal. Files, pipes and `--output` still get markdown.
+- The first line of `0security --help` describes the product as a security agent. The one-line description and the README headline say "open-source" instead of "sovereign".
+- The docs, help examples, hints and error messages name the command `0security`, and the GitHub Action calls `0security`. `0` stays as its short alias. Set `ZERO_PROGRAM_NAME=0security` or `0` to force the name that help shows.
+- Every skill on the Skills page has a topic icon. Your own skills get an icon when their name matches a topic.
+- The messages for `--chat` no longer point at a command that does not exist.
+- The first-run telemetry notice is one line.
+- The web console and the docs site render Mermaid diagrams with Mermaid 12.
 
 ### Fixed
 
-- opening a thread in the web console could show only part of the conversation until you refreshed. The console kept the message list from an earlier read while newer events arrived, so a reply or a whole turn could be missing for a few seconds (longer if you opened the thread from the cache). It now re-reads the messages as soon as a turn starts or ends, trusts a cached copy only if it was read a moment ago, and still shows a turn that only the event journal knows about.
-- saved threads in the web console's Threads list now show their folder under the title, like open threads do.
+- Opening a thread in the web console could show only part of the conversation until you refreshed. It now re-reads the messages when a turn starts or ends.
+- Saved threads in the web console's Threads list show their folder under the title.
+- Queued messages in the web console sit above the message box and say why they are paused (stopped, error, or thread reopened).
+- SBOM source attribution no longer credits a dependency declared in a submodule to the root `pom.xml` when the declared and resolved versions differ. A dependency declared in several files is not attributed to one at random.
+- The protected-paths hook closes six bypasses: ANSI-C `$'...'` quoting, the `>|` redirection, flags before the directory in `cd` and `pushd`, case differences on case-insensitive file systems, and several state files that were not protected.
+- Sentinel release, tag and check triggers reject git refs with dot segments or path traversal, so they cannot reach other GitHub API paths.
 
 ## [0.44.0] - 2026-11-23
 
