@@ -56,6 +56,7 @@ export async function handleTeamRequest(req: IncomingMessage, url: URL, auth: Te
       if (error instanceof TeamAuthError) audit({ actor: "anonymous", action: "access.login_failed", subject: "console", outcome: "denied", detail: { kind: "sso", reason: error.statusCode === 403 ? "not_a_member" : "verification_failed", status: error.statusCode, client } });
       throw error;
     }
+    if (login.provisioned) audit({ actor: "sso", action: "user.provisioned", subject: login.user.userId, detail: { id: login.user.userId, role: login.user.role, source: "oidc", client } });
     auditSignIn(login.user, "sso", client);
     return { status: 302, redirect: login.redirect, headers: { "Set-Cookie": login.setCookies } };
   }

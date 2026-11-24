@@ -32,7 +32,7 @@ test("a clean layout passes", () => {
 });
 
 test("the shipped allow list names only existing bridge files", () => {
-  assert.deepEqual(ALLOWED_BRIDGES, ["packages/cli/src/enterprise-bridge.ts", "packages/cli/src/findings-server-bridge.ts"]);
+  assert.deepEqual(ALLOWED_BRIDGES, ["packages/cli/src/enterprise-bridge.ts", "packages/cli/vitest.setup.ts", "packages/cli/src/enterprise-bridge.test.ts", "packages/cli/src/findings-server-bridge.ts"]);
 });
 
 test("moduleSpecifiers finds static, dynamic and require forms", () => {
@@ -90,4 +90,25 @@ test("the root license files must not mention enterprise", () => {
 test("the real repository passes", async () => {
   const { join: j } = await import("node:path");
   assert.deepEqual(checkEnterpriseBoundary(j(import.meta.dirname, "..")), []);
+});
+
+test("an environment variable that could add a trusted license key fails", () => {
+  for (const name of ["ZERO_LICENSE_TEST_PUBLIC_KEYS", "ZERO_LICENSE_PUBLIC_KEY", "ZERO_TRUST_ANCHORS", "ZERO_TRUSTED_KEYS_LICENSE"]) {
+    const root = fixture({ "packages/cli/src/x.ts": `const keys = process.env.${name};\n` });
+    assert.ok(checkEnterpriseBoundary(root, []).some((e) => e.includes(name)), name);
+    const bracket = fixture({ "packages/cli/src/y.ts": `const keys = env["${name}"];\n` });
+    assert.ok(checkEnterpriseBoundary(bracket, []).some((e) => e.includes(name)), `${name} (brackets)`);
+  }
+});
+
+test("the license code may read only ZERO_LICENSE and ZERO_LICENSE_FILE", () => {
+  const root = fixture({ "enterprise/src/license.ts": `// Licensed under the 0security Enterprise License. See enterprise/LICENSE.\nexport const a = env.ZERO_LICENSE; export const b = env.ZERO_LICENSE_FILE; export const c = env.ZERO_EXTRA_ANCHORS;\n` });
+  const errors = checkEnterpriseBoundary(root, []);
+  assert.ok(errors.some((e) => e.includes("ZERO_EXTRA_ANCHORS")));
+  assert.ok(!errors.some((e) => e.includes("reads ZERO_LICENSE_FILE") || e.includes("reads ZERO_LICENSE.")));
+});
+
+test("tests and fixtures may name such variables", () => {
+  const root = fixture({ "packages/cli/src/a.test.ts": "process.env.ZERO_LICENSE_TEST_PUBLIC_KEYS;\n" });
+  assert.deepEqual(checkEnterpriseBoundary(root, []), []);
 });

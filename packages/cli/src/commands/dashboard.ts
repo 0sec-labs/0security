@@ -53,7 +53,7 @@ import { isAnonymousApiExemption, isBrowserOnlyRoute, privilegedRouteDenial } fr
 import { audit, auditDenial, configureAudit, currentAuditDbPath, setAuditSinkStatus } from "../web/audit.js";
 import { ServerModeGuard, handleHealth, isHealthRequest, isWildcardHost, resolveAccessSecret, splitList, validateAccessToken, type ServerPhase, type ServerRequestContext } from "../web/server-mode.js";
 import { hostname } from "node:os";
-import { listAudit, startAuditSinkFromEnv, type AuditSink } from "@0/engine/storage";
+import { listAudit, startAuditSinkFromEnv, TeamUserTable, type AuditSink } from "@0/engine/storage";
 import { GITHUB_WEBHOOK_PATH, GitHubWebhookReceiver, WebhookSecretStore } from "../web/github-webhook.js";
 import { SignedWebhookReceiver, SignedWebhookSecrets, signedWebhookTriggerId } from "../web/signed-webhook.js";
 
@@ -201,6 +201,11 @@ export function registerDashboardCommand(program: Command): void {
       // Never recover another live host's database while opening a second UI.
       assertLocalEngineAvailable(opts.dbPath);
       configureAudit(opts.dbPath);
+      // Team accounts live in the server database. Users in the team file are imported once; the database wins afterwards.
+      if (teamAuth.enabled) {
+        const accounts = teamAuth.attachStore(new TeamUserTable(opts.dbPath));
+        if (accounts.imported > 0) console.error(chalk.dim(`  Imported ${accounts.imported} team account${accounts.imported === 1 ? "" : "s"} from the team file into the server database.`));
+      }
       // Optional SIEM push (ZERO_AUDIT_SINK_URL, environment only). A refused setting stops the start: a feed the operator thinks is on must not be silently off.
       let auditSink: AuditSink | null = null;
       if (serverMode) {

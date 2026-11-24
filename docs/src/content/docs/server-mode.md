@@ -340,7 +340,7 @@ From a terminal:
 0 --team-config ./team.json
 ```
 
-0 reads passwords from a prompt or stdin, never from arguments. The file stores salted scrypt hashes, so keep it private (`0600`). `init` never overwrites an existing file. Edits to the file apply when the computer restarts, and a restart ends open Threads.
+0 reads passwords from a prompt or stdin, never from arguments. The file stores salted scrypt hashes, so keep it private (`0600`). `init` never overwrites an existing file. 0 imports the accounts in the file into the server database when it starts. See [Accounts](#accounts).
 
 Owners and editors can change work. Viewers can read. Messages keep their authors, and avatars show who is viewing or typing.
 
@@ -405,6 +405,25 @@ Groups are optional. With `groupAttribute` and `groupRoles`, a member's role is 
 The same browser that started the sign-in must finish it. The session cookie lasts eight hours, as with OIDC.
 
 Limits: the signature check relies on the open-source node-saml and xml-crypto libraries. It is tested with signed test responses and not yet against a real Okta or Entra ID tenant. Metadata is trusted as you supply it, and its own signature is not checked. Single logout, encrypted assertions and signed requests are not supported. Pending sign-ins and seen assertion IDs are kept in memory, so a restart forgets them. Anyone can start a sign-in, so one address may hold 20 pending sign-ins and the server 1000. Behind a reverse proxy every visitor shares the proxy's address, so the per-address limit then protects nothing; rate limit `/api/team/auth/saml/sso` at the proxy. A `metadataUrl` is refused under `ZERO_ENTERPRISE`; use `metadataFile`.
+### Accounts
+
+Team accounts live in the server database, next to the audit log. A teammate you add in the browser is stored there and is still there after a restart.
+
+When 0 starts, it adds the accounts from the team file that the database does not have yet. It never changes an account that is already in the database. To change the role of an existing account, change it in the database through the app, not in the file. Removing a user from the file does not remove the account.
+
+The free tier holds up to 1,000 accounts. With an enterprise license that includes `rbac`, there is no limit. A test with 3,000 accounts starts in well under a second and looks accounts up from memory.
+
+### Create accounts at first sign-in
+
+With the `rbac` license feature, 0 can create an account the first time someone signs in through OIDC. Add `jit` to the `oidc` object:
+
+```json
+"oidc": { "issuer": "https://identity.example.com", "clientId": "your-client-id", "redirectUri": "http://127.0.0.1:48123/api/team/auth/callback", "jit": { "role": "viewer" } }
+```
+
+The role is `viewer` or `editor`. Everyone your provider lets sign in to this client gets an account with that role, so restrict who can use the client at the provider. The account has no password and can sign in only through OIDC. 0 records each new account in the audit log.
+
+Without the license, a person who is not in the file is refused as before, and the message says what is needed. OIDC sign-in for people you listed with an `oidcSub` stays free.
 
 ## Teams and enterprise
 
