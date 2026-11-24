@@ -265,6 +265,20 @@
       "disable": "Not disabled. Point the provider at a local or in-network gateway."
     },
     {
+      "id": "azure-entra-token",
+      "class": "model",
+      "enterprise": "allowed",
+      "destinations": [
+        "login.microsoftonline.com or the authority in AZURE_AUTHORITY_HOST, 169.254.169.254 (Azure instance metadata), the host-injected IDENTITY_ENDPOINT"
+      ],
+      "files": [
+        "packages/engine/src/runtime/llm-api/azure-entra.ts"
+      ],
+      "when": "Only when AZURE_OPENAI_AUTH=entra. One token request, then again shortly before the token expires.",
+      "sent": "The federated assertion of the workload identity, or a metadata request for the managed identity. No prompts or code.",
+      "disable": "Use an API key. With ZERO_ENTERPRISE the public authority is refused unless AZURE_AUTHORITY_HOST names yours."
+    },
+    {
       "id": "provider-sign-in",
       "class": "model",
       "enterprise": "allowed",
@@ -523,6 +537,7 @@
     "auth.x.ai",
     "chatgpt.com",
     "cloud.0.security",
+    "cognitiveservices.azure.com",
     "docs.0.security",
     "duckduckgo.com",
     "eu.i.posthog.com",
@@ -532,6 +547,7 @@
     "html.duckduckgo.com",
     "httpbin.org",
     "json.schemastore.org",
+    "login.microsoftonline.com",
     "mcp.parallel.ai",
     "models.dev",
     "nodejs.org",

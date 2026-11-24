@@ -18,6 +18,7 @@ import { CODEX_API_ENDPOINT, CODEX_PROTOCOL_HEADERS, FREE_OPENROUTER_MODEL, PROC
 import { getFallbackChain, resolveFailoverProvider, type ApiProviderConnection, type FallbackEntry } from "./fallback.js";
 import { readChatGptCodexAuthFile, readChatGptCodexEnv, refreshChatGptCodexAuthState, resolveChatGptCodexAuthState, type ChatGptCodexAuthState } from "./codex-auth.js";
 import { parseCodexAzureConfig } from "./provider-config.js";
+import { azureEntraEnabled, createAzureEntraTokenProvider, type AzureEntraTokenProvider } from "./azure-entra.js";
 import { AUTO_MODEL_SENTINEL, DEFAULT_PROVIDER_MODELS, detectProvider, providerForModel, type ApiRuntimeDiagnostics } from "./provider-detect.js";
 
 let googleFunctionCallSequence = 0;
@@ -80,6 +81,7 @@ export class LlmApiRuntime implements Runtime, NativeRuntime {
   private siwcModels?: Promise<ReadonlySet<string>>;
   private provider!: ApiProvider;
   private apiKey!: string;
+  private entraTokens?: AzureEntraTokenProvider;
   private baseUrl!: string;
   private model!: string;
   private pricingModelSource = "";
@@ -920,6 +922,12 @@ export class LlmApiRuntime implements Runtime, NativeRuntime {
       if (!this.siwcConnection) throw new Error("ChatGPT plan connection is unavailable");
       return siwcHeaders(this.siwcConnection, signal);
     }
+    if (this.provider === "azure" && azureEntraEnabled(this.env)) {
+      this.entraTokens ??= createAzureEntraTokenProvider({ env: this.env });
+      delete base["api-key"];
+      base["Authorization"] = `Bearer ${await this.entraTokens.getToken(signal)}`;
+      return base;
+    }
     if (this.provider !== "chatgpt-codex") return base;
     if (!this.codexAuthState) throw new Error("ChatGPT Codex auth: no credential captured for this runtime");
     const { accessToken, accountId } = await refreshChatGptCodexAuthState(this.codexAuthState);
@@ -1128,6 +1136,7 @@ export class LlmApiRuntime implements Runtime, NativeRuntime {
       "  export DEEPSEEK_API_KEY=...           (DeepSeek — direct Flash 0731 inference)\n" +
       "  export ANTHROPIC_API_KEY=sk-ant-...    (Anthropic — direct Claude access)\n" +
       "  export AZURE_OPENAI_API_KEY=...        (Azure OpenAI — reuse your Codex Azure provider)\n" +
+      "  export AZURE_OPENAI_AUTH=entra         (Azure OpenAI with a managed or workload identity, no key)\n" +
       "  export OPENAI_API_KEY=sk-...           (OpenAI — direct GPT access)\n" +
       "  export Z_AI_API_KEY=...                (Z.ai GLM — flat-rate Coding Plan, Anthropic-compatible)\n" +
       "  export KIMI_API_KEY=...                (Moonshot Kimi K3 — flat-rate coding, Anthropic-compatible)\n" +

@@ -139,8 +139,8 @@ const PROVIDER_DEFS: readonly Omit<ProviderInfo, "auth">[] = [
     // AZURE_OPENAI_BASE_URL / OPENAI_BASE_URL / ~/.codex/config.toml
     // (L1435-1445). A key with no reachable base URL still counts as
     // configured here because detectProvider selects azure on the key alone.
-    envVars: ["AZURE_OPENAI_API_KEY"],
-    hint: "set AZURE_OPENAI_API_KEY plus AZURE_OPENAI_BASE_URL (or [model_providers.azure] in ~/.codex/config.toml)",
+    envVars: ["AZURE_OPENAI_API_KEY", "AZURE_OPENAI_AUTH"],
+    hint: "set AZURE_OPENAI_API_KEY (or AZURE_OPENAI_AUTH=entra for a managed identity) plus AZURE_OPENAI_BASE_URL (or [model_providers.azure] in ~/.codex/config.toml)",
   },
   {
     id: "openai",
@@ -251,7 +251,7 @@ function hasCredential(value: string | undefined): boolean {
 function satisfyingVar(info: ProviderInfo, env: Record<string, string | undefined>): string | undefined {
   // envVars is ordered most-preferred first, so the first hit is the one the
   // runtime would use — that is what `via` has to report.
-  return info.envVars.find((name) => hasCredential(env[name]));
+  return info.envVars.find((name) => hasCredential(env[name]) && (name !== "AZURE_OPENAI_AUTH" || env[name]?.trim().toLowerCase() === "entra"));
 }
 
 /** Pure over an injected environment so it is testable. */

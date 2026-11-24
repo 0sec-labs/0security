@@ -4,6 +4,7 @@ import { resolveWorkbenchProviderProxy } from "../workbench-provider-proxy.js";
 import { BEDROCK_DEFAULT_MODEL, AZURE_FOUNDRY_DEPLOYMENT_IDS, TOGETHER_DEFAULT_MODEL, togetherBaseUrl, CODEX_API_ENDPOINT, CODEX_DEFAULT_MODEL, DEEPSEEK_DEFAULT_BASE_URL, DEEPSEEK_DEFAULT_MODEL, DEFAULT_ANTHROPIC_MODEL, DEFAULT_OPENAI_MODEL, DEFAULT_OPENROUTER_MODEL, isRemovedProvider, KIMI_DEFAULT_BASE_URL, KIMI_DEFAULT_MODEL, OPENCODE_DEFAULT_BASE_URL, OPENCODE_DEFAULT_MODEL, QWEN_DEFAULT_BASE_URL, QWEN_DEFAULT_MODEL, QWEN_TOKEN_PLAN_DEEPSEEK_MODEL, XAI_DEFAULT_BASE_URL, XAI_DEFAULT_MODEL, ZAI_DEFAULT_BASE_URL, ZAI_DEFAULT_MODEL, openAICompatibleWireApi, opencodeWireApiForModel, type ApiProvider, type WireApi } from "./provider-config.js";
 import { resolveFailoverProvider } from "./fallback.js";
 import { parseCodexAzureConfig } from "./provider-config.js";
+import { AZURE_ENTRA_PLACEHOLDER, azureEntraEnabled } from "./azure-entra.js";
 import { readChatGptCodexAuthFile, readChatGptCodexEnv } from "./codex-auth.js";
 
 export interface ApiRuntimeDiagnostics {
@@ -35,7 +36,7 @@ export function providerForModel(model: string | undefined, env: Readonly<NodeJS
   // DeepSeek failover key; otherwise env priority would send the Azure model
   // to the direct endpoint.
   if (AZURE_FOUNDRY_DEPLOYMENT_IDS[m]) {
-    return env.AZURE_OPENAI_API_KEY ? "azure" : undefined;
+    return env.AZURE_OPENAI_API_KEY || azureEntraEnabled(env) ? "azure" : undefined;
   }
   // Alibaba Token Plan DeepSeek revision: qwen-served, exact id.
   if (m === QWEN_TOKEN_PLAN_DEEPSEEK_MODEL) {
@@ -224,7 +225,7 @@ export function detectProvider(configApiKey: string | undefined, preferredModel:
         baseUrl: env.DEEPSEEK_BASE_URL ?? DEEPSEEK_DEFAULT_BASE_URL,
         defaultModel: DEEPSEEK_DEFAULT_MODEL, wireApi: "responses" };
     case "azure": {
-      const azureKey = env.AZURE_OPENAI_API_KEY;
+      const azureKey = env.AZURE_OPENAI_API_KEY || (azureEntraEnabled(env) ? AZURE_ENTRA_PLACEHOLDER : undefined);
       if (!azureKey) break;
       const azureConfig = parseCodexAzureConfig(env);
       return {
@@ -349,7 +350,7 @@ export function detectProvider(configApiKey: string | undefined, preferredModel:
     };
   }
 
-  const azureKey = env.AZURE_OPENAI_API_KEY;
+  const azureKey = env.AZURE_OPENAI_API_KEY || (azureEntraEnabled(env) ? AZURE_ENTRA_PLACEHOLDER : undefined);
   if (azureKey) {
     const azureConfig = parseCodexAzureConfig(env);
     return {

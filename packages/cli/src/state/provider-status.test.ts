@@ -203,10 +203,15 @@ describe("providerStates", () => {
     expect(state.via).toBe("ZERO_CHATGPT_OAUTH_REFRESH_TOKEN");
   });
 
-  it("configures each provider from its own documented var", () => {
+  it("counts AZURE_OPENAI_AUTH only when it selects Entra ID", () => {
+      expect(stateFor("azure", { AZURE_OPENAI_AUTH: "entra" })).toMatchObject({ configured: true, via: "AZURE_OPENAI_AUTH" });
+      expect(stateFor("azure", { AZURE_OPENAI_AUTH: "key" }).configured).toBe(false);
+    });
+
+    it("configures each provider from its own documented var", () => {
     for (const provider of PROVIDERS) {
       for (const name of provider.envVars) {
-        const state = stateFor(provider.id, { [name]: "value" });
+        const state = stateFor(provider.id, { [name]: name === "AZURE_OPENAI_AUTH" ? "entra" : "value" });
         expect(state.configured).toBe(true);
         expect(state.via).toBe(name);
       }
