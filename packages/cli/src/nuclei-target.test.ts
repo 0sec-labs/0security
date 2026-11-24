@@ -102,6 +102,10 @@ describe("runNucleiTarget", () => {
   it("says plainly when Nuclei is not installed, and never downloads it", async () => {
     await expect(runNucleiTarget({ targetUrl: "http://127.0.0.1:1", acknowledgeHost: "127.0.0.1:1" }, { env: { PATH: "/nonexistent" } })).rejects.toThrow(/Nuclei is not installed.*never downloads/);
   });
+  it("stops Nuclei when its result file grows past 20 MB", async () => {
+    const big = fakeNuclei(scratch(), `head -c 22000000 /dev/zero | tr '\\0' 'a' > "$out"; exec sleep 30`);
+    await expect(runNucleiTarget({ targetUrl: "http://127.0.0.1:1", acknowledgeHost: "127.0.0.1:1" }, { env: { ZERO_NUCLEI_PATH: big } })).rejects.toThrow("more than 20 MB");
+  }, 20000);
   it("rejects limits outside the allowed range", async () => {
     const env = { ZERO_NUCLEI_PATH: fakeNuclei(scratch()) };
     await expect(runNucleiTarget({ targetUrl: "http://127.0.0.1:1", acknowledgeHost: "127.0.0.1:1", rateLimit: 1000 }, { env })).rejects.toThrow("--rate-limit");

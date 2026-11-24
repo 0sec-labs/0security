@@ -12,9 +12,17 @@ import { assertScopedTarget, describeScopedTarget, parseScopeFile, type ResolveT
 import { parseNucleiJsonl, type ImportedFinding } from "@0/engine/shared";
 
 /** Run a binary without a shell. Its standard input is closed at once: Nuclei reads targets from a pipe on standard input and would wait for it. */
-function exec(file: string, args: string[], options: { env: NodeJS.ProcessEnv; cwd: string; timeout: number; maxBuffer?: number }): Promise<{ stdout: string; stderr: string }> {
+function exec(file: string, args: string[], options: { env: NodeJS.ProcessEnv; cwd: string; timeout: number; maxBuffer?: number; /** Stop the process when this file grows past `max` bytes. */ limitFile?: { path: string; max: number } }): Promise<{ stdout: string; stderr: string }> {
+  const { limitFile, ...execOptions } = options;
   return new Promise((resolve, reject) => {
-    const child = execFile(file, args, { ...options, windowsHide: true }, (error, stdout, stderr) => error ? reject(Object.assign(error, { stdout, stderr })) : resolve({ stdout, stderr }));
+    let tooBig = false;
+    const child = execFile(file, args, { ...execOptions, windowsHide: true }, (error, stdout, stderr) => {
+      clearInterval(watch);
+      if (tooBig) reject(new Error("Nuclei wrote more than 20 MB of results and was stopped."));
+      else if (error) reject(Object.assign(error, { stdout, stderr }));
+      else resolve({ stdout, stderr });
+    });
+    const watch = setInterval(() => { try { if (limitFile && statSync(limitFile.path).size > limitFile.max) { tooBig = true; child.kill("SIGKILL"); } } catch { /* not written yet */ } }, 250);
     child.stdin?.end();
   });
 }
@@ -131,7 +139,7 @@ export async function runNucleiTarget(options: NucleiTargetOptions, io: NucleiTa
     let version: string | undefined;
     try { version = /v?(\d+\.\d+\.\d+)/.exec((await exec(binary, ["-version"], { env, cwd: scratch, timeout: 15000 })).stderr)?.[1]; } catch { /* the version is optional */ }
     try {
-      await exec(binary, nucleiArguments({ ...pinnedUrl(target), out, rateLimit, concurrency, ...(options.templates ? { templates: options.templates } : {}) }), { env, cwd: scratch, timeout: (options.timeoutSeconds ?? 600) * 1000, maxBuffer: 16 * 1024 * 1024 });
+      await exec(binary, nucleiArguments({ ...pinnedUrl(target), out, rateLimit, concurrency, ...(options.templates ? { templates: options.templates } : {}) }), { env, cwd: scratch, timeout: (options.timeoutSeconds ?? 600) * 1000, maxBuffer: 16 * 1024 * 1024, limitFile: { path: out, max: MAX_OUTPUT_BYTES } });
     } catch (error) {
       const failure = error as { killed?: boolean; signal?: string; stderr?: string; message?: string };
       if (failure.killed || failure.signal === "SIGTERM") throw new Error(`Nuclei did not finish within ${options.timeoutSeconds ?? 600} seconds.`);
