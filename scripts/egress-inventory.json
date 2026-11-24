@@ -534,6 +534,20 @@
       "when": "Server mode, only when ZERO_AUDIT_SINK_URL is set in the process environment. Off by default. Never read from a repository, a project file or the database.",
       "sent": "Batches of audit events (action, actor, subject, outcome, whitelisted and redacted detail), with ZERO_AUDIT_SINK_TOKEN as a bearer token when set. Plain http and plain TCP syslog are refused except to this machine; UDP is refused.",
       "disable": "Leave ZERO_AUDIT_SINK_URL unset."
+    },
+    {
+      "id": "findings-server-upload",
+      "class": "operator",
+      "enterprise": "allowed",
+      "destinations": [
+        "the https URL of your own shared findings server, named with --to"
+      ],
+      "files": [
+        "packages/cli/src/commands/findings-server-upload.ts"
+      ],
+      "when": "Explicit `0 findings upload <file> --to https://...` with ZERO_FINDINGS_API_KEY set. Nothing is sent without both.",
+      "sent": "The SARIF or findings JSON file you name, with repository, source, commit and ref labels, and the key in the Authorization header. A plain http:// URL is refused unless the host is this machine or --allow-insecure-http is passed. Redirects are not followed.",
+      "disable": "Do not run the command, or leave ZERO_FINDINGS_API_KEY unset."
     }
   ],
   "knownHosts": [

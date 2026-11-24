@@ -200,6 +200,10 @@ export const findings = sqliteTable(
     modelVerification: text("modelVerification"),
     /** Scanner that produced the finding when it was imported (for example `CodeQL`); NULL for findings 0 found itself. */
     tool: text("tool"),
+    /** Repository a finding was sent from (`owner/name`), set only by the shared findings server's ingest. NULL otherwise. */
+    repo: text("repo"),
+    /** Label of the CI job or machine that sent it (shared findings server only). NULL otherwise. */
+    source: text("source"),
     timestamp: integer("timestamp").notNull(),
   },
   (table) => [

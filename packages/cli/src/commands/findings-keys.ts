@@ -23,10 +23,10 @@ const defaults: FindingsKeysDeps = {
     return new FindingsAccessTokenStore({ workspaceId: createBackendHandshake(dbPath).engineId, stateDir: join(homeStateDir(), "findings-api-access") });
   },
 };
-interface KeyOptions { dbPath?: string; json?: boolean; name?: string; expiresIn?: string; yes?: boolean }
+interface KeyOptions { dbPath?: string; json?: boolean; name?: string; expiresIn?: string; yes?: boolean; scope?: string }
 
 export function registerFindingsKeysCommand(parent: Command, deps: FindingsKeysDeps = defaults): void {
-  const keys = parent.command("keys").description("Manage read-only API access keys for the findings API");
+  const keys = parent.command("keys").description("Manage API access keys for the findings API (read, or write for the shared findings server)");
   const run = (command: Command, handler: (store: FindingsAccessTokenStore, options: KeyOptions, args: string[]) => void, validate: (options: KeyOptions, args: string[]) => void = () => {}) =>
     command.option("--db-path <path>", "Path to SQLite database").option("--json", "Print JSON")
       .action((...received: unknown[]) => {
@@ -39,19 +39,21 @@ export function registerFindingsKeysCommand(parent: Command, deps: FindingsKeysD
   run(keys.command("list").description("List API access keys (secrets are never shown)"), (store, options) => {
     const credentials = store.list();
     deps.out(options.json ? JSON.stringify({ credentials }, null, 2) : credentials.length ? renderTable(credentials, [
-      { header: "ID", value: row => row.id, max: 36 }, { header: "NAME", value: row => row.name },
+      { header: "ID", value: row => row.id, max: 36 }, { header: "NAME", value: row => row.name }, { header: "SCOPE", value: row => row.scopes[0] === "write:findings" ? "write" : "read" },
       { header: "EXPIRES", value: row => row.expiresAt ?? "never" }, { header: "STATUS", value: row => row.revokedAt ? "revoked" : "active" },
     ]) : "No API access keys.");
   });
 
-  run(keys.command("create <name>").description("Create a read-only API access key; the secret is printed once")
+  run(keys.command("create <name>").description("Create an API access key; the secret is printed once")
+    .option("--scope <scope>", "read (default) lists and reads findings; write sends findings to the shared findings server and needs an enterprise license", "read")
     .option("--expires-in <days>", "Days until the key expires (default 90)"), (store, options, [name]) => {
     const days = options.expiresIn === undefined ? undefined : Number(options.expiresIn);
-    const created = store.create({ name, ...(days === undefined ? {} : { expiresAt: new Date(Date.now() + days * 86_400_000).toISOString() }) }, "local-owner");
+    const created = store.create({ name, scopes: [options.scope === "write" ? "write:findings" : "read:findings"], ...(days === undefined ? {} : { expiresAt: new Date(Date.now() + days * 86_400_000).toISOString() }) }, "local-owner");
     deps.out(options.json ? JSON.stringify(created, null, 2) : `${created.token}\n`);
     if (!options.json) deps.err(`Created key ${created.credential.id} (${created.credential.name}). Store the secret now; it cannot be shown again.`);
   }, (options, [name]) => {
     if (!name?.trim()) throw new UsageError("Supply a key name.");
+    if (options.scope !== undefined && options.scope !== "read" && options.scope !== "write") throw new UsageError("--scope must be read or write.");
     if (options.expiresIn !== undefined && (!Number.isFinite(Number(options.expiresIn)) || Number(options.expiresIn) <= 0)) throw new UsageError("--expires-in must be a positive number of days.");
   });
 

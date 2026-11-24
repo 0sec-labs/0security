@@ -28,6 +28,7 @@ import { retainedFindingsAcrossDatabases } from "../web/findings-export.js";
 import { handleFindingImpactRequest } from "../web/finding-impact.js";
 import { FindingsAccessError, FindingsAccessTokenStore, handleFindingsAccessTokenRequest } from "../web/findings-access-tokens.js";
 import { FindingsReadApi, handleFindingsReadRequest } from "../web/findings-read-api.js";
+import { handleFindingsIngest } from "../web/findings-ingest.js";
 import { engagementMarkdown } from "../web/engagement-report.js";
 import { createWorkspaceServices } from "../web/workspace-services.js";
 import { findTeamConfigPath, handleTeamSetupRequest, TeamSetupService } from "../web/team-setup.js";
@@ -351,6 +352,10 @@ export function registerDashboardCommand(program: Command): void {
               if (requestUrl.pathname === "/api/v1/findings" || requestUrl.pathname.startsWith("/api/v1/findings/")) {
                 if (setup.status().pending) throw new WebRequestError("Workspace setup is in progress. Try again shortly.", 503);
                 if (!findingsCredential) throw new FindingsAccessError("A findings API key is required in the Authorization header.", 401);
+                if (requestUrl.pathname === "/api/v1/findings/ingest") {
+                  const ingested = await handleFindingsIngest(req, requestUrl, findingsCredential, opts.dbPath);
+                  json(res, ingested.status, ingested.data); return;
+                }
                 const reply = handleFindingsReadRequest(req, requestUrl, findingsRead);
                 if (!reply) throw new FindingsAccessError("Findings API route was not found.", 404);
                 json(res, reply.status, reply.data); return;

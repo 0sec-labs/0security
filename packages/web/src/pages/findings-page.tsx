@@ -8,6 +8,7 @@ import { FindingDetail } from "@/components/findings/finding-detail";
 import { FindingsBoard } from "@/components/findings/findings-board";
 import { FindingsBulkBar } from "@/components/findings/findings-bulk-bar";
 import { FindingsList } from "@/components/findings/findings-list";
+import { FindingsOrg, FindingsViewTabs } from "@/components/findings/findings-org";
 import { FindingsToolbar, FindingsTopActions } from "@/components/findings/findings-toolbar";
 import {
   findingCode, findingStatus, mergeView, resolveDrop, STATUS_LABEL, missionKey, stepCursor,
@@ -41,6 +42,7 @@ export function FindingsPage({ dashboard }: { dashboard: DashboardResponse }) {
   // Links from before findings had their own page: /findings?finding=<id>.
   const legacy = searchParams.get("finding");
   if (!fingerprint && legacy) return <Navigate to={pagePath(legacy)} replace />;
+  if (!fingerprint && searchParams.get("view") === "org") return <FindingsOrg />;
   return fingerprint ? <FindingFullPage dashboard={dashboard} fingerprint={fingerprint} /> : <FindingsWorkspace dashboard={dashboard} />;
 }
 
@@ -192,6 +194,7 @@ function FindingsWorkspace({ dashboard }: { dashboard: DashboardResponse }) {
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="findings-workspace" data-search-owner="findings">
+      <FindingsViewTabs current="findings" />
       <FindingsToolbar
         total={groups.length}
         shown={visible.length}

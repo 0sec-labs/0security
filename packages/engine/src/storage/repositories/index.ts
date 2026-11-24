@@ -10,6 +10,7 @@ import { VerificationRepository } from "./verification-repository.js";
 import { PipelineRepository } from "./pipeline-repository.js";
 import { WorkerRepository } from "./worker-repository.js";
 import { TrustRepository } from "./trust-repository.js";
+import { FindingsServerRepository } from "./findings-server-repository.js";
 
 export type { OsecDrizzle };
 export { Repository };
@@ -24,6 +25,7 @@ export interface Repositories {
   pipeline: PipelineRepository;
   workers: WorkerRepository;
   trust: TrustRepository;
+  findingsServer: FindingsServerRepository;
 }
 
 /** Build every aggregate repository over one open database connection. */
@@ -39,6 +41,7 @@ export function createRepositories(sqlite: ShimmedDatabase, db: OsecDrizzle, own
     pipeline: new PipelineRepository(sqlite, db, repos, owner),
     workers: new WorkerRepository(sqlite, db, repos, owner),
     trust: new TrustRepository(sqlite, db, repos, owner),
+    findingsServer: new FindingsServerRepository(sqlite, db, repos, owner),
   });
   return repos;
 }

@@ -388,6 +388,41 @@ See what your key unlocks:
 
 When a key expires, paid features keep working for 30 days with a warning. After that, paid writes stop. You can still read, export and verify your data, and the server still starts. `ZERO_ENTERPRISE` is the separate no-egress switch and does not need a key.
 
+### Collect findings from many repositories
+
+The shared findings server collects findings from CI jobs and other machines into one console. It needs the `findings-server` feature in your license. Without it, the Findings page works as before on the findings stored on this server.
+
+Mint a key that can send findings. Run it where the server runs, or as the workspace owner in the browser under the findings API page:
+
+```bash
+0security findings keys create ci-main --scope write
+```
+
+Send a scan from a CI job. The key comes from the environment:
+
+```bash
+export ZERO_FINDINGS_API_KEY="<the key>"
+0security scan . --format sarif -o scan.sarif
+0security findings upload scan.sarif --to https://findings.example.com --repo acme/api --source ci-main
+```
+
+The server accepts SARIF 2.1.0, the JSON that `0security scan --format json` writes, or a file from `0security findings rollup --export`. It labels each finding with the repository and the source, and recognises a finding it has seen before in the same repository, so a second upload adds only what is new. Sending the same file twice stores it once. An upload is limited to 20 MB and 5,000 findings.
+
+Open the Org tab on the Findings page to see counts by severity, status and repository, filter to one repository, and read the history of a finding. The history shows who changed it, when and why.
+
+Suppressing a finding needs a reason of at least 8 characters. Every accept, suppress and reopen is kept in a history that cannot be edited. Findings that the server has not received from a CI job keep the old behaviour in the Findings page when no license is set.
+
+The read API gains `repo` and `source` filters and a history route:
+
+```bash
+curl -H "Authorization: Bearer $READ_KEY" "https://findings.example.com/api/v1/findings?repo=acme/api"
+curl -H "Authorization: Bearer $READ_KEY" "https://findings.example.com/api/v1/findings/<fingerprint>/history"
+```
+
+A write key can only send findings. A read key can only read. After a license expires and its 30 days of grace pass, new uploads stop. Everything already stored stays readable and exportable.
+
+This is a single server with one SQLite database. Every signed-in user sees every repository. A finding that disappears from a later upload is not marked as fixed.
+
 A team workspace shares one computer between members. It is not multi-tenant. Sessions are held in memory, so members sign in again after a restart. Results from several computers are not merged.
 
 Enterprise is arranged with us, not self-served. We can help you run 0 on your own infrastructure, or operate a dedicated deployment for you, one customer per deployment, by contract. We publish no Helm chart or Terraform module and offer no shared multi-tenant cloud. [Book a demo](https://0.security/enterprise/).

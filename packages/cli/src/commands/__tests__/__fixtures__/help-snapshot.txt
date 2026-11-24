@@ -863,7 +863,7 @@ Options:
 ### 0security findings keys (hidden)
 Usage: 0security findings keys [options] [command]
 
-Manage read-only API access keys for the findings API
+Manage API access keys for the findings API (read, or write for the shared findings server)
 
 Options:
   -h, --help      display help for command
@@ -874,9 +874,11 @@ Commands:
 ### 0security findings keys create (hidden)
 Usage: 0security findings keys create [options] <name>
 
-Create a read-only API access key; the secret is printed once
+Create an API access key; the secret is printed once
 
 Options:
+  --scope <scope>      read (default) lists and reads findings; write sends findings to the shared
+                       findings server and needs an enterprise license (default: "read")
   --expires-in <days>  Days until the key expires (default 90)
   --db-path <path>     Path to SQLite database
   --format <format>    Output: text or json (choices: "text", "json")
@@ -1077,20 +1079,25 @@ Options:
 ### 0security findings upload (hidden)
 Usage: 0security findings upload [options] <file>
 
-Upload findings to GitHub code scanning (SARIF) or to Bitbucket Code Insights (scan JSON or SARIF)
+Upload findings to GitHub code scanning (SARIF), to Bitbucket Code Insights (scan JSON or SARIF) or
+to a shared findings server (SARIF or scan JSON)
 
 Arguments:
   file                    SARIF 2.1.0 file from `0security scan --format sarif -o scan.sarif`; for
                           Bitbucket also `0security scan --format json -o scan.json`
 
 Options:
-  --to <target>           github (default), bitbucket-cloud or bitbucket-dc (default: "github")
+  --to <target>           github (default), bitbucket-cloud, bitbucket-dc, or the https URL of a
+                          shared findings server (key from ZERO_FINDINGS_API_KEY) (default:
+                          "github")
+  --source <label>        Shared findings server: name of this CI job or machine (default: the key's
+                          name)
   --url <url>             Bitbucket Data Center base URL (default: BITBUCKET_URL)
   --report-id <id>        Bitbucket report id or key (default: "0-security")
   --print                 Bitbucket: print the report and annotation payload instead of posting it
                           (also the behaviour without BITBUCKET_TOKEN)
-  --allow-insecure-http   Bitbucket: allow sending the token to an http:// URL that is not on this
-                          machine (default: refuse)
+  --allow-insecure-http   Bitbucket and shared findings server: allow sending the token or key to an
+                          http:// URL that is not on this machine (default: refuse)
   --repo <owner/name>     Repository (default: the current clone's); Bitbucket: workspace/repo or
                           PROJECT/repo
   --commit <sha>          Commit the results are for (default: HEAD, or GITHUB_SHA in Actions)

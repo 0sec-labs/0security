@@ -7,6 +7,7 @@ export {
   parseFindingReviewAnnotation,
   restoreFindingReviewFields,
 } from "./database.js";
+export type { FindingHistoryAction, FindingHistoryInput, FindingHistoryRow, IngestFindingsInput, IngestFindingsResult, OrgFindingRow } from "./database.js";
 export {
   listOsecRunDatabasePaths,
   resolveOsecRunStorage,

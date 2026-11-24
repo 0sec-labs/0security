@@ -4,11 +4,12 @@ import { join } from "node:path";
 import type { IncomingMessage } from "node:http";
 import { z } from "zod";
 import { TeamAuth, TeamAuthError } from "./team-auth.js";
+import { findingsServerMessage, hasFindingsServer } from "../findings-server-bridge.js";
 
 export class FindingsAccessError extends Error {
   constructor(message: string, readonly statusCode = 400) { super(message); this.name = "FindingsAccessError"; }
 }
-const scopesSchema = z.tuple([z.literal("read:findings")]);
+const scopesSchema = z.tuple([z.enum(["read:findings", "write:findings"])]);
 const publicTokenSchema = z.object({
   id: z.string().uuid(), workspaceId: z.string().min(1).max(256), name: z.string().min(1).max(160),
   scopes: scopesSchema, createdBy: z.string().min(1).max(256), createdAt: z.string().datetime(),
@@ -25,7 +26,11 @@ const createSchema = z.object({
 /** Explicit external read contract only. Browser/admin APIs never inherit this grant. */
 export function findingsReadPath(method: string, pathname: string): boolean {
   if (method !== "GET" && method !== "HEAD") return false;
-  return pathname === "/api/v1/findings" || pathname === "/api/v1/findings/export" || /^\/api\/v1\/findings\/[A-Za-z0-9_.:-]+$/.test(pathname);
+  return pathname === "/api/v1/findings" || pathname === "/api/v1/findings/export" || /^\/api\/v1\/findings\/[A-Za-z0-9_.:-]+(?:\/history)?$/.test(pathname);
+}
+/** The one write route: sending findings to the shared findings server. Only a `write:findings` key reaches it. */
+export function findingsWritePath(method: string, pathname: string): boolean {
+  return method === "POST" && pathname === "/api/v1/findings/ingest";
 }
 const redact = (record: z.infer<typeof tokenSchema>): FindingsAccessToken => { const { tokenHash: _hash, ...publicRecord } = record; return publicRecord; };
 
@@ -72,13 +77,16 @@ export class FindingsAccessTokenStore {
   create(input: unknown, createdBy: string): { credential: FindingsAccessToken; token: string } {
     return this.#mutate(() => {
     const parsed = createSchema.safeParse(input);
-    if (!parsed.success || !createdBy || createdBy.length > 256) throw new FindingsAccessError("Use a name, optional read:findings scope and future expiry.");
+    if (!parsed.success || !createdBy || createdBy.length > 256) throw new FindingsAccessError("Use a name, an optional read:findings or write:findings scope and a future expiry.");
     const records = this.#read();
     const now = this.#now();
+    const scopes = parsed.data.scopes ?? ["read:findings"] as ["read:findings"];
+    // A key that can send findings only makes sense with the shared findings server.
+    if (scopes[0] === "write:findings" && !hasFindingsServer()) throw new FindingsAccessError(findingsServerMessage(), 403);
     const expiresAt = parsed.data.expiresAt === undefined ? new Date(now + 90 * 86400000).toISOString() : parsed.data.expiresAt;
     if (expiresAt !== null && Date.parse(expiresAt) <= now) throw new FindingsAccessError("API credential expiry must be in the future.");
     const token = "0_find_" + randomBytes(32).toString("base64url");
-    const record: z.infer<typeof tokenSchema> = { id: randomUUID(), workspaceId: this.workspaceId, name: parsed.data.name, scopes: ["read:findings"], createdBy, createdAt: new Date(now).toISOString(), expiresAt, revokedAt: null, tokenHash: createHash("sha256").update(token).digest("hex") };
+    const record: z.infer<typeof tokenSchema> = { id: randomUUID(), workspaceId: this.workspaceId, name: parsed.data.name, scopes, createdBy, createdAt: new Date(now).toISOString(), expiresAt, revokedAt: null, tokenHash: createHash("sha256").update(token).digest("hex") };
     this.#write([...records, record]);
     return { credential: redact(record), token };
     });
@@ -101,7 +109,9 @@ export class FindingsAccessTokenStore {
     let found: z.infer<typeof tokenSchema> | undefined;
     for (const token of this.#read()) if (timingSafeEqual(digest, Buffer.from(token.tokenHash, "hex"))) found = token;
     if (!found || found.revokedAt || (found.expiresAt !== null && Date.parse(found.expiresAt) <= this.#now())) throw new FindingsAccessError("Invalid or expired findings API credential.", 401);
-    if (found.workspaceId !== this.workspaceId || !findingsReadPath(req.method ?? "GET", url.pathname)) throw new FindingsAccessError("This API credential permits read-only findings access.", 403);
+    const method = req.method ?? "GET";
+    const permitted = found.scopes[0] === "write:findings" ? findingsWritePath(method, url.pathname) : findingsReadPath(method, url.pathname);
+    if (found.workspaceId !== this.workspaceId || !permitted) throw new FindingsAccessError(found.scopes[0] === "write:findings" ? "This API credential only permits sending findings." : "This API credential permits read-only findings access.", 403);
     return redact(found);
   }
 }

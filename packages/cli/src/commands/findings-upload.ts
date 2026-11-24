@@ -13,6 +13,7 @@ import { runGh } from "../host/gh.js";
 import { selectHost } from "../host/index.js";
 import { buildCodeInsights, postCodeInsights, readInsightFindings, type CodeInsightsPlatform, type FetchLike } from "../code-insights.js";
 import { finishWithError, UsageError } from "./output.js";
+import { isServerTarget, runServerUpload, serverUploadDefaults } from "./findings-server-upload.js";
 
 const exec = promisify(execFile);
 const MAX_SARIF_BYTES = 20 * 1024 * 1024;
@@ -72,7 +73,7 @@ export function withoutOutOfScope(text: string): { text: string; dropped: number
   return dropped ? { text: JSON.stringify(document), dropped } : { text, dropped: 0 };
 }
 
-export interface UploadOptions { includeOutOfScope?: boolean; repo?: string; commit?: string; ref?: string; wait: boolean; tool?: string; format?: string; to?: string; url?: string; reportId?: string; print?: boolean; allowInsecureHttp?: boolean }
+export interface UploadOptions { includeOutOfScope?: boolean; repo?: string; commit?: string; ref?: string; wait: boolean; tool?: string; format?: string; to?: string; url?: string; source?: string; reportId?: string; print?: boolean; allowInsecureHttp?: boolean }
 
 const BITBUCKET_TARGETS: Record<string, CodeInsightsPlatform> = { "bitbucket-cloud": "bitbucket-cloud", "bitbucket-dc": "bitbucket-dc" };
 const SLUG = /^[A-Za-z0-9._~-]{1,200}$/;
@@ -165,13 +166,14 @@ export async function runUpload(file: string, options: UploadOptions, deps: Uplo
 
 export function registerFindingsUploadCommand(parent: Command, deps: UploadDeps = defaults): void {
   parent.command("upload")
-    .description("Upload findings to GitHub code scanning (SARIF) or to Bitbucket Code Insights (scan JSON or SARIF)")
+    .description("Upload findings to GitHub code scanning (SARIF), to Bitbucket Code Insights (scan JSON or SARIF) or to a shared findings server (SARIF or scan JSON)")
     .argument("<file>", "SARIF 2.1.0 file from `0security scan --format sarif -o scan.sarif`; for Bitbucket also `0security scan --format json -o scan.json`")
-    .option("--to <target>", "github (default), bitbucket-cloud or bitbucket-dc", "github")
+    .option("--to <target>", "github (default), bitbucket-cloud, bitbucket-dc, or the https URL of a shared findings server (key from ZERO_FINDINGS_API_KEY)", "github")
+    .option("--source <label>", "Shared findings server: name of this CI job or machine (default: the key's name)")
     .option("--url <url>", "Bitbucket Data Center base URL (default: BITBUCKET_URL)")
     .option("--report-id <id>", "Bitbucket report id or key", "0-security")
     .option("--print", "Bitbucket: print the report and annotation payload instead of posting it (also the behaviour without BITBUCKET_TOKEN)")
-    .option("--allow-insecure-http", "Bitbucket: allow sending the token to an http:// URL that is not on this machine (default: refuse)")
+    .option("--allow-insecure-http", "Bitbucket and shared findings server: allow sending the token or key to an http:// URL that is not on this machine (default: refuse)")
     .option("--repo <owner/name>", "Repository (default: the current clone's); Bitbucket: workspace/repo or PROJECT/repo")
     .option("--commit <sha>", "Commit the results are for (default: HEAD, or GITHUB_SHA in Actions)")
     .option("--ref <ref>", "refs/heads/<branch> or refs/pull/<n>/merge (default: the current branch, or GITHUB_REF in Actions)")
@@ -181,6 +183,12 @@ export function registerFindingsUploadCommand(parent: Command, deps: UploadDeps 
     .option("--format <format>", "Output: text or json", "text")
     .action(async (file: string, options: UploadOptions) => {
       try {
+        if (isServerTarget(options.to)) {
+          const sent = await runServerUpload(options.includeOutOfScope ? deps.readText(file) : withoutOutOfScope(deps.readText(file)).text, { ...options, to: options.to! }, { ...(deps.fetch ? { fetch: deps.fetch as never } : {}), ...(deps.env ? { env: deps.env } : {}), git: deps.git ?? serverUploadDefaults.git });
+          if (options.format === "json") deps.out(JSON.stringify(sent));
+          else deps.out(sent.alreadyImported ? `Already sent: this exact file was uploaded before (${sent.total} finding${sent.total === 1 ? "" : "s"} for ${sent.repo}).` : `Sent ${sent.total} finding${sent.total === 1 ? "" : "s"} for ${sent.repo}: ${sent.created} new, ${sent.known} already known.`);
+          return;
+        }
         if (options.to && options.to !== "github") {
           const posted = await runBitbucketUpload(file, options, deps);
           if (!posted.published) return;

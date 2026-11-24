@@ -6,15 +6,17 @@ import type { Finding } from "@0/engine/shared";
 import { findingFromRow } from "../finding-focus.js";
 import { retainedFindingSnapshot } from "./report-artifacts.js";
 import { FindingsAccessError } from "./findings-access-tokens.js";
+import { canReadFindingsServer, findingsServerMessage } from "../findings-server-bridge.js";
 
 const boundedId = z.string().min(1).max(256).regex(/^[A-Za-z0-9_.:-]+$/);
 const severitySchema = z.enum(["critical", "high", "medium", "low", "info"]);
 const querySchema = z.object({ limit: z.coerce.number().int().min(1).max(100).default(50), scanId: boundedId.optional(),
   severity: severitySchema.optional(), status: z.enum(findingStatuses).optional(),
-  includeSuppressed: z.enum(["true", "false"]).default("false"), cursor: z.string().min(1).max(2048).optional(),
+  includeSuppressed: z.enum(["true", "false"]).default("false"),
+  repo: z.string().min(1).max(300).regex(/^[A-Za-z0-9._\/-]+$/).optional(), source: z.string().min(1).max(80).regex(/^[A-Za-z0-9._:/@-]+$/).optional(), cursor: z.string().min(1).max(2048).optional(),
 }).strict();
 const cursorSchema = z.object({ version: z.literal(1), workspaceId: z.string(), filters: z.string().length(64), timestamp: z.number().finite().nonnegative(), id: boundedId }).strict();
-interface FindingsApiItem { scanId: string; target: string; finding: Finding }
+interface FindingsApiItem { scanId: string; target: string; finding: Finding; repo?: string; source?: string | null }
 
 /** Reads only the selected engine database; never falls back to another run store. */
 export class FindingsReadApi {
@@ -27,7 +29,7 @@ export class FindingsReadApi {
     const scan = db.getScan(row.scanId);
     if (!scan) throw new FindingsAccessError("Finding source scan was not retained.", 404);
     // Keep review/replay metadata with the evidence version already read.
-    return { scanId: row.scanId, target: scan.target, finding: findingFromRow(row, { ...restoreFindingReviewFields(row) }) };
+    return { scanId: row.scanId, target: scan.target, finding: findingFromRow(row, { ...restoreFindingReviewFields(row) }), ...(row.repo ? { repo: row.repo, source: row.source ?? null } : {}) };
   }
   list(query: URLSearchParams) {
     const raw: Record<string, string> = {};
@@ -35,7 +37,9 @@ export class FindingsReadApi {
     const parsed = querySchema.safeParse(raw);
     if (!parsed.success) throw new FindingsAccessError("Use limit 1–100, cursor, scanId, severity, status or includeSuppressed.");
     const input = parsed.data;
-    const filters = createHash("sha256").update(JSON.stringify({ database: this.#dbPath, scanId: input.scanId ?? null, severity: input.severity ?? null, status: input.status ?? null, includeSuppressed: input.includeSuppressed })).digest("hex");
+    // Filtering by repository or source is part of the shared findings server; the plain list stays free.
+    if ((input.repo || input.source) && !canReadFindingsServer()) throw new FindingsAccessError(findingsServerMessage(), 403);
+    const filters = createHash("sha256").update(JSON.stringify({ database: this.#dbPath, scanId: input.scanId ?? null, severity: input.severity ?? null, status: input.status ?? null, includeSuppressed: input.includeSuppressed, repo: input.repo ?? null, source: input.source ?? null })).digest("hex");
     let before: { id: string; timestamp: number } | undefined;
     if (input.cursor) {
       try {
@@ -47,7 +51,7 @@ export class FindingsReadApi {
     }
     const db = new osecDB(this.#dbPath, { readOnly: true });
     try {
-      const rows = db.listFindingsApiPage({ limit: input.limit + 1, scanId: input.scanId, severity: input.severity, status: input.status, includeSuppressed: input.includeSuppressed === "true", before });
+      const rows = db.listFindingsApiPage({ limit: input.limit + 1, scanId: input.scanId, severity: input.severity, status: input.status, includeSuppressed: input.includeSuppressed === "true", repo: input.repo, source: input.source, before });
       const hasMore = rows.length > input.limit;
       const selected = rows.slice(0, input.limit);
       const last = selected.at(-1);
@@ -61,6 +65,14 @@ export class FindingsReadApi {
     try { return { schemaVersion: 1 as const, workspaceId: this.workspaceId, ...this.#item(db, id) }; }
     finally { db.close(); }
   }
+  /** Who changed a finding family and when, oldest first. Part of the shared findings server. */
+  history(fingerprint: string) {
+    if (!boundedId.safeParse(fingerprint).success) throw new FindingsAccessError("Invalid finding fingerprint.");
+    if (!canReadFindingsServer()) throw new FindingsAccessError(findingsServerMessage(), 403);
+    const db = new osecDB(this.#dbPath, { readOnly: true });
+    try { return { schemaVersion: 1 as const, workspaceId: this.workspaceId, fingerprint, history: db.listFindingHistory(fingerprint) }; }
+    finally { db.close(); }
+  }
   export(query: URLSearchParams) {
     if ([...query.keys()].some(key => key !== "id")) throw new FindingsAccessError("Use repeated id parameters to select export findings.");
     const ids = query.getAll("id");
@@ -70,10 +82,14 @@ export class FindingsReadApi {
 }
 
 export function handleFindingsReadRequest(req: Pick<IncomingMessage, "method">, url: URL, api: FindingsReadApi): { status: number; data: unknown } | undefined {
-  const match = /^\/api\/v1\/findings(?:\/([A-Za-z0-9_.:-]+))?$/.exec(url.pathname);
+  const match = /^\/api\/v1\/findings(?:\/([A-Za-z0-9_.:-]+)(?:\/(history))?)?$/.exec(url.pathname);
   if (!match) return;
   if (req.method !== "GET" && req.method !== "HEAD") throw new FindingsAccessError("Findings API is read-only.", 405);
   if (!match[1]) return { status: 200, data: api.list(url.searchParams) };
+  if (match[2]) {
+    if (url.search) throw new FindingsAccessError("Finding history does not accept query parameters.");
+    return { status: 200, data: api.history(match[1]) };
+  }
   if (match[1] === "export") return { status: 200, data: api.export(url.searchParams) };
   if (url.search) throw new FindingsAccessError("Finding detail does not accept query parameters.");
   return { status: 200, data: api.detail(match[1]) };

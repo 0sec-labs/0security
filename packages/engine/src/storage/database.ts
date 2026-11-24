@@ -43,6 +43,9 @@ import type { FindingModelVerification, PersistedFindingReviewFields, WorkflowSt
 import type { TriageDetails } from "./repositories/finding-repository.js";
 import { createRepositories, type Repositories } from "./repositories/index.js";
 import type { ScanRepository } from "./repositories/scan-repository.js";
+import type { FindingHistoryInput, FindingHistoryRow, IngestFindingsInput, IngestFindingsResult, OrgFindingRow } from "./repositories/findings-server-repository.js";
+
+export type { FindingHistoryAction, FindingHistoryInput, FindingHistoryRow, IngestFindingsInput, IngestFindingsResult, OrgFindingRow } from "./repositories/findings-server-repository.js";
 
 export { resolveOsecDbPath, resetOsecDatabase } from "./database-lifecycle.js";
 export type {
@@ -241,7 +244,7 @@ export class osecDB {
   }
 
   /** Stable bounded keyset projection for read-only external findings APIs. */
-  listFindingsApiPage(options: { limit: number; scanId?: string; severity?: string; status?: string; includeSuppressed?: boolean; before?: { timestamp: number; id: string } }) {
+  listFindingsApiPage(options: { limit: number; scanId?: string; severity?: string; status?: string; includeSuppressed?: boolean; repo?: string; source?: string; before?: { timestamp: number; id: string } }) {
     return this.repos.findings.listFindingsApiPage(options);
   }
 
@@ -485,6 +488,28 @@ export class osecDB {
    */
   upsertPersistentCredential(input: PersistentCredentialUpsert): PersistentCredentialRow {
     return this.repos.trust.upsertPersistentCredential(input);
+  }
+
+  // ── Shared findings server (ingest, triage history, org rollup) ──
+
+  ingestFindings(input: IngestFindingsInput): IngestFindingsResult {
+    return this.repos.findingsServer.ingestFindings(input);
+  }
+
+  appendFindingHistory(input: FindingHistoryInput): string {
+    return this.repos.findingsServer.appendFindingHistory(input);
+  }
+
+  listFindingHistory(fingerprint: string, limit?: number): FindingHistoryRow[] {
+    return this.repos.findingsServer.listFindingHistory(fingerprint, limit);
+  }
+
+  repoOfFingerprint(fingerprint: string): { repo: string; source: string | null } | null {
+    return this.repos.findingsServer.repoOfFingerprint(fingerprint);
+  }
+
+  listOrgFindings(options?: { repo?: string; limit?: number }): OrgFindingRow[] {
+    return this.repos.findingsServer.listOrgFindings(options);
   }
 
   getPersistentCredential(credentialKind: string, valueHash: string): PersistentCredentialRow | undefined {

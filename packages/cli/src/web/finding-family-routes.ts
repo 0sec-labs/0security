@@ -10,6 +10,7 @@ import {
   buildArtifacts, buildCases, buildWorkItems, buildWorkflowSummary, normalizeFinding, normalizeTriageStatus, normalizeWorkflowStatus,
 } from "./dashboard-summaries.js";
 import { workflowTransitionRejection } from "./dashboard-api.js";
+import { hasFindingsServer, suppressionReasonError, triageHistoryAction } from "../findings-server-bridge.js";
 
 type Persisted = { id: string; kind: string; title?: string; label?: string; owner?: string | null; status?: string; summary?: string | null; content?: string | null };
 
@@ -35,8 +36,23 @@ export async function handleFindingFamilyRequest(
     if (!requireControlToken(req, res, controlToken, engineBearer)) return;
     const body = await readJsonObject<{ triageStatus?: string; triageNote?: string }>(req);
     const status = normalizeTriageStatus(body.triageStatus);
+    const note = typeof body.triageNote === "string" ? body.triageNote : undefined;
+    // With the shared findings server licensed, a suppression needs a reason and every decision is kept in the history.
+    const recordHistory = hasFindingsServer();
+    if (recordHistory) {
+      const missingReason = suppressionReasonError(status, note);
+      if (missingReason) { json(res, 400, { error: missingReason }); return; }
+    }
+    const actor = caller.engineRequest ? "engine" : caller.userId ?? "local operator";
     // The decision applies to the whole family, in every database that holds one of its findings.
-    await findings.writeFamily(fingerprint, db => db.updateFindingTriageByFingerprint(fingerprint, status, typeof body.triageNote === "string" ? body.triageNote : undefined));
+    await findings.writeFamily(fingerprint, db => {
+      const before = recordHistory ? db.getLatestFindingByFingerprint(fingerprint) : undefined;
+      db.updateFindingTriageByFingerprint(fingerprint, status, note);
+      if (recordHistory) {
+        const labels = db.repoOfFingerprint(fingerprint);
+        db.appendFindingHistory({ fingerprint, actor, action: triageHistoryAction(status), reason: note?.trim() || null, prevState: before?.triageStatus ?? "new", newState: status, repo: labels?.repo ?? null, source: labels?.source ?? null });
+      }
+    });
     audit({ actor: auditActor(caller), action: "finding.triage", subject: fingerprint, detail: { fingerprint, decision: status, ...(caller.userId ? { id: caller.userId } : {}) } });
     json(res, 200, { ok: true });
     return;
@@ -50,7 +66,22 @@ export async function handleFindingFamilyRequest(
     const rejection = workflowTransitionRejection(body.workflowStatus, current.workflowStatus);
     if (rejection) { json(res, rejection.status, { error: rejection.error }); return; }
     const assignee = typeof body.workflowAssignee === "string" ? body.workflowAssignee.trim() : null;
-    await findings.writeFamily(fingerprint, db => db.updateFindingWorkflowByFingerprint(fingerprint, normalizeWorkflowStatus(body.workflowStatus), assignee));
+    const nextWorkflow = normalizeWorkflowStatus(body.workflowStatus);
+    // Cancelled suppresses the finding, so with the shared findings server licensed it needs the same reason as Dismiss.
+    const recordHistory = hasFindingsServer();
+    const missingReason = recordHistory && nextWorkflow === "cancelled" && current.triageStatus !== "suppressed" ? suppressionReasonError("suppressed", current.triageNote) : null;
+    if (missingReason) { json(res, 400, { error: `${missingReason} Dismiss the finding with a note instead.` }); return; }
+    const actor = caller.engineRequest ? "engine" : caller.userId ?? "local operator";
+    await findings.writeFamily(fingerprint, db => {
+      const before = recordHistory ? db.getLatestFindingByFingerprint(fingerprint) : undefined;
+      db.updateFindingWorkflowByFingerprint(fingerprint, nextWorkflow, assignee);
+      const after = recordHistory ? db.getLatestFindingByFingerprint(fingerprint) : undefined;
+      if (before && after && (before.triageStatus ?? "new") !== (after.triageStatus ?? "new")) {
+        const labels = db.repoOfFingerprint(fingerprint);
+        const newState = after.triageStatus ?? "new";
+        db.appendFindingHistory({ fingerprint, actor, action: triageHistoryAction(newState), reason: newState === "suppressed" ? before.triageNote ?? null : null, prevState: before.triageStatus ?? "new", newState, repo: labels?.repo ?? null, source: labels?.source ?? null });
+      }
+    });
     json(res, 200, { ok: true });
     return;
   }

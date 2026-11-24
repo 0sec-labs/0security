@@ -2237,7 +2237,7 @@ Exit codes:
 
 #### findings upload
 
-Upload findings to GitHub code scanning (SARIF) or to Bitbucket Code Insights (scan JSON or SARIF)
+Upload findings to GitHub code scanning (SARIF), to Bitbucket Code Insights (scan JSON or SARIF) or to a shared findings server (SARIF or scan JSON)
 
 ```text
 0security findings upload [options] <file>
@@ -2254,17 +2254,20 @@ The repository, commit and ref come from the clone (`GITHUB_SHA` and `GITHUB_REF
 
 With `--to bitbucket-cloud` or `--to bitbucket-dc` the findings go to Bitbucket Code Insights instead. Upload the file from `0security scan --format json`, which carries the agent's verdict, rationale and fix guidance. With `BITBUCKET_TOKEN` set the report and its annotations are sent; without it the payload is printed. See [Bitbucket, Jenkins and Azure Pipelines](/ci/#bitbucket-jenkins-and-azure-pipelines).
 
+With `--to` set to an https URL, the findings go to your own shared findings server. Set `ZERO_FINDINGS_API_KEY` to a write key from `0security findings keys create <name> --scope write`. Name the repository with `--repo owner/name` (the clone's origin is used when you omit it) and a CI job or machine with `--source`. This needs an enterprise license on the server. See [Collect findings from many repositories](/server-mode/#collect-findings-from-many-repositories).
+
 | Argument | Required | Description |
 | --- | --- | --- |
 | `file` | Yes | SARIF 2.1.0 file from `0security scan --format sarif -o scan.sarif`; for Bitbucket also `0security scan --format json -o scan.json` |
 
 | Option | Registered default | Description |
 | --- | --- | --- |
-| `--to <target>` | `github` | github (default), bitbucket-cloud or bitbucket-dc |
+| `--to <target>` | `github` | github (default), bitbucket-cloud, bitbucket-dc, or the https URL of a shared findings server (key from ZERO_FINDINGS_API_KEY) |
+| `--source <label>` | — | Shared findings server: name of this CI job or machine (default: the key's name) |
 | `--url <url>` | — | Bitbucket Data Center base URL (default: BITBUCKET_URL) |
 | `--report-id <id>` | `0-security` | Bitbucket report id or key |
 | `--print` | — | Bitbucket: print the report and annotation payload instead of posting it (also the behaviour without BITBUCKET_TOKEN) |
-| `--allow-insecure-http` | — | Bitbucket: allow sending the token to an http:// URL that is not on this machine (default: refuse) |
+| `--allow-insecure-http` | — | Bitbucket and shared findings server: allow sending the token or key to an http:// URL that is not on this machine (default: refuse) |
 | `--repo <owner/name>` | — | Repository (default: the current clone's); Bitbucket: workspace/repo or PROJECT/repo |
 | `--commit <sha>` | — | Commit the results are for (default: HEAD, or GITHUB_SHA in Actions) |
 | `--ref <ref>` | — | refs/heads/&lt;branch&gt; or refs/pull/&lt;n&gt;/merge (default: the current branch, or GITHUB_REF in Actions) |
@@ -2340,7 +2343,7 @@ Export selected findings, or a whole scan, as `json`, `md`, `sarif`, `html` or `
 
 #### findings keys
 
-Manage read-only API access keys for the findings API. The secret is printed once at creation and never stored in plaintext. Team workspaces manage keys in the browser.
+Manage API access keys for the findings API. A read key lists and reads findings. A write key sends findings to a shared findings server. The secret is printed once at creation and never stored in plaintext. Team workspaces manage keys in the browser.
 
 ```text
 0security findings keys
@@ -2372,7 +2375,7 @@ List keys with their expiry and status. Secrets are never shown.
 
 #### findings keys create
 
-Create a read-only key. Default expiry is 90 days.
+Create a key. It reads findings unless you pass `--scope write`, which makes a key that only sends findings and needs an enterprise license. Default expiry is 90 days.
 
 ```text
 0security findings keys create [options] <name>
@@ -2388,6 +2391,7 @@ Create a read-only key. Default expiry is 90 days.
 
 | Option | Registered default | Description |
 | --- | --- | --- |
+| `--scope <scope>` | `read` | read (default) lists and reads findings; write sends findings to the shared findings server and needs an enterprise license |
 | `--expires-in <days>` | — | Days until the key expires (default 90) |
 | `--db-path <path>` | — | Path to SQLite database |
 | `--json` | — | Print JSON |

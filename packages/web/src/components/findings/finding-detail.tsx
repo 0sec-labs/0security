@@ -23,6 +23,7 @@ import { Skeleton, SkeletonPanel } from "@/ui/components/skeleton";
 import type { FindingFamilyResponse, FindingGroup } from "@/types";
 import { SeverityIcon, StatusIcon } from "./finding-icons";
 import { useMissionHrefs } from "./use-mission-href";
+import { useOrgOverview } from "./findings-org";
 import { provenanceLabel } from "./finding-provenance";
 import {
   SETTABLE_STATUSES, REVIEW_LOCK_NOTE, statusLockedByReview, SEVERITY_LABELS, STATUS_LABEL, buildActivity, findingCode, findingStatus, normalizeSeverity, type FindingStatus,
@@ -217,11 +218,13 @@ function ReviewControls({ fingerprint, initialNote, triageStatus, saving, mutati
   fingerprint: string; initialNote: string; triageStatus: "new" | "accepted" | "suppressed"; saving: boolean; mutations: ReturnType<typeof useFindingMutations>;
 }) {
   const [note, setNote] = useState(initialNote);
+  // On a server with the shared findings server licensed, dismissing needs a reason (the server refuses it otherwise).
+  const reasonRequired = useOrgOverview().data?.canWrite === true;
   useEffect(() => setNote(initialNote), [initialNote]);
   const triage = (next: "new" | "accepted" | "suppressed") => mutations.triage.mutate({ fingerprint, triageStatus: next, triageNote: note });
   return (
     <>
-      <Textarea value={note} onChange={event => setNote(event.target.value)} aria-label="Review note" placeholder="Note (optional)" />
+      <Textarea value={note} onChange={event => setNote(event.target.value)} aria-label="Review note" placeholder={reasonRequired ? "Reason (required to dismiss, at least 8 characters)" : "Note (optional)"} />
       <div className="flex flex-wrap gap-2">
         <Button variant="outline" onClick={() => triage("accepted")} disabled={saving || triageStatus === "accepted"} aria-pressed={triageStatus === "accepted"}><ShieldCheck className="size-4" />Accept risk</Button>
         <Button variant="outline" onClick={() => triage("suppressed")} disabled={saving || triageStatus === "suppressed"} aria-pressed={triageStatus === "suppressed"}><ShieldOff className="size-4" />Dismiss</Button>
