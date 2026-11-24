@@ -29,7 +29,23 @@ const { publicKey, privateKey } = generateKeyPair();
 function generateKeyPair() { return generateKeyPairSync('ed25519'); }
 const payload = Buffer.from(JSON.stringify({ v: 1, id: 'lic_browser', customer: 'test', seats: 10, features: ['rbac'], issuedAt: new Date(Date.now() - 864e5).toISOString().replace(/\.\d+Z$/, 'Z'), expires: new Date(Date.now() + 30 * 864e5).toISOString().replace(/\.\d+Z$/, 'Z'), kid: 'b1' }));
 const license = `${payload.toString('base64url')}.${sign(null, payload, privateKey).toString('base64url')}`;
-const publicKeys = JSON.stringify({ b1: publicKey.export({ format: 'der', type: 'spki' }).toString('base64') });
+const publicKeys = { b1: publicKey.export({ format: 'der', type: 'spki' }).toString('base64') };
+// The server trusts the throwaway key through a loader hook written next to this run's files. The product has no
+// setting that adds a trusted license key.
+const enterpriseEntry = pathToFileURL(join(root, 'enterprise/dist/index.js')).href;
+await mkdir(join(base, 'shim'), { recursive: true });
+await writeFile(join(base, 'shim/shim.mjs'), `import * as real from ${JSON.stringify(enterpriseEntry)};
+const extra = ${JSON.stringify(publicKeys)};
+const merged = () => ({ ...real.PRODUCTION_PUBLIC_KEYS, ...extra });
+export * from ${JSON.stringify(enterpriseEntry)};
+export const hasFeature = (n, e, t, k) => real.hasFeature(n, e, t, k ?? merged());
+export const featureMode = (n, e, t, k) => real.featureMode(n, e, t, k ?? merged());
+export const requireFeature = (n, e, t, k) => real.requireFeature(n, e, t, k ?? merged());
+export const licenseStatus = (e, t, k) => real.licenseStatus(e, t, k ?? merged());
+export const loadLicense = (e, t, k) => real.loadLicense(e, t, k ?? merged());
+`);
+await writeFile(join(base, 'shim/hooks.mjs'), `export async function resolve(s, c, next) { if (s === '@0/enterprise') return { url: ${JSON.stringify(pathToFileURL(join(base, 'shim/shim.mjs')).href)}, shortCircuit: true }; return next(s, c); }\n`);
+await writeFile(join(base, 'shim/register.mjs'), `import { register } from 'node:module'; register(${JSON.stringify(pathToFileURL(join(base, 'shim/hooks.mjs')).href)});\n`);
 
 const hash = await hashTeamPassword(PASSWORD);
 const people = [['owner', 'owner'], ['viewer', 'viewer'], ['triager', 'triager'], ['auditor', 'auditor'], ['scoped', 'payments-triager']];
@@ -52,8 +68,8 @@ let child, browser, output = '';
 const results = [];
 const ok = name => { results.push(name); console.log(`ok  ${name}`); };
 try {
-  child = spawn(process.execPath, [join(root, 'packages/cli/dist/index.js'), 'web', '--host', '127.0.0.1', '--port', String(port), '--no-open', '--ready-json', '--team-config', teamConfig, '--db-path', dbPath, '--asset-dir', join(root, 'packages/web/dist')],
-    { cwd: base, env: { PATH: process.env.PATH, HOME: home, NO_COLOR: '1', ZERO_NO_TELEMETRY: '1', ZERO_SKIP_UPDATE_CHECK: '1', ZERO_LICENSE: license, ZERO_LICENSE_TEST_PUBLIC_KEYS: publicKeys }, stdio: ['ignore', 'pipe', 'pipe'] });
+  child = spawn(process.execPath, ['--import', join(base, 'shim/register.mjs'), join(root, 'packages/cli/dist/index.js'), 'web', '--host', '127.0.0.1', '--port', String(port), '--no-open', '--ready-json', '--team-config', teamConfig, '--db-path', dbPath, '--asset-dir', join(root, 'packages/web/dist')],
+    { cwd: base, env: { PATH: process.env.PATH, HOME: home, NO_COLOR: '1', ZERO_NO_TELEMETRY: '1', ZERO_SKIP_UPDATE_CHECK: '1', ZERO_LICENSE: license }, stdio: ['ignore', 'pipe', 'pipe'] });
   child.stdout.on('data', data => { output = (output + data).slice(-32000); });
   child.stderr.on('data', data => { output = (output + data).slice(-32000); });
   let origin;

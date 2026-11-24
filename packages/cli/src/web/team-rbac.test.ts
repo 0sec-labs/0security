@@ -258,6 +258,6 @@ describe("role and scope changes", () => {
 describe("test license", () => {
   it("is signed with a throwaway key", () => {
     const one = makeTestLicense(["rbac"]); const two = makeTestLicense(["rbac"]);
-    expect(one.env.ZERO_LICENSE_TEST_PUBLIC_KEYS).not.toBe(two.env.ZERO_LICENSE_TEST_PUBLIC_KEYS);
+    expect(Object.values(one.publicKeys)[0]).not.toBe(Object.values(two.publicKeys)[0]);
   });
 });

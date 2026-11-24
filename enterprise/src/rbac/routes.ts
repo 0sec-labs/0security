@@ -36,7 +36,7 @@ export const ROUTE_RULES: readonly Rule[] = [
   rule("write", /^\/api\/console\/audit-log$/, "settings.write"),
 
   // Findings.
-  rule("read", /^\/api\/(?:dashboard|scans|findings|finding-family|events)(?:\/|$)/, "findings.read"),
+  rule("read", /^\/api\/(?:dashboard|scans|findings|finding-family|findings-server|events)(?:\/|$)/, "findings.read"),
   rule("write", /^\/api\/(?:findings|finding-family)(?:\/|$)/, "findings.triage"),
 
   // Settings that belong to the owner, before the general work rules below.

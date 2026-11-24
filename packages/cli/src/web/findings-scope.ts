@@ -12,6 +12,7 @@ export function scopeFilterFor(member: Pick<TeamIdentity, "scope"> | null | unde
 // Routes that return findings data this change does not filter. A scoped account is refused on them.
 const UNFILTERED_FINDINGS_ROUTES: readonly RegExp[] = [
   /^\/api\/work(?:\/|$)/,
+  /^\/api\/findings-server(?:\/|$)/,
   /^\/api\/engagements(?:\/|$)/,
   /^\/api\/findings\/export$/,
   /^\/api\/scans\/[^/]+\/export$/,

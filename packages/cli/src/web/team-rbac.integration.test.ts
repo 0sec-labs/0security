@@ -11,10 +11,11 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 vi.setConfig({ testTimeout: 60_000 });
 import { hashTeamPassword } from "./team-auth.js";
-import { makeTestLicense } from "./__fixtures__/test-license.js";
+import { makeTestLicense, writeLicenseShim } from "./__fixtures__/test-license.js";
 
 const entry = fileURLToPath(new URL("../index.ts", import.meta.url));
 const cwd = fileURLToPath(new URL("../..", import.meta.url));
+const enterpriseEntry = fileURLToPath(new URL("../../../../enterprise/dist/index.js", import.meta.url));
 const PASSWORD = "integration-password-1";
 
 interface Reply { status: number; text: string; json: () => any }
@@ -33,7 +34,7 @@ interface Running { child: ChildProcess; port: number; log: () => string; as: (u
 const running: Running[] = [];
 afterAll(() => { for (const server of running) server.child.kill("SIGKILL"); });
 
-async function startServer(port: number, env: Record<string, string>): Promise<Running> {
+async function startServer(port: number, license?: ReturnType<typeof makeTestLicense>): Promise<Running> {
   const home = mkdtempSync(join(tmpdir(), "zero-rbac-http-"));
   const assets = join(home, "assets"); mkdirSync(assets);
   writeFileSync(join(assets, "index.html"), "<!doctype html><html><head><title>t</title></head><body>app</body></html>");
@@ -54,7 +55,9 @@ async function startServer(port: number, env: Record<string, string>): Promise<R
   }
   db.close();
   let output = "";
-  const child = spawn(process.execPath, ["--import", "tsx", entry, "web", "--port", String(port), "--host", "127.0.0.1", "--asset-dir", assets, "--no-open", "--team-config", teamConfig, "--db-path", dbPath], { cwd, env: { ...process.env, HOME: home, ZERO_NO_TELEMETRY: "1", ZERO_LICENSE: "", ZERO_LICENSE_FILE: "", ...env } });
+  // The child trusts the throwaway key through a loader hook in this test's own temp folder, never through the environment.
+  const shim = license ? writeLicenseShim(join(home, "shim"), license.publicKeys, enterpriseEntry) : [];
+  const child = spawn(process.execPath, ["--import", "tsx", ...shim, entry, "web", "--port", String(port), "--host", "127.0.0.1", "--asset-dir", assets, "--no-open", "--team-config", teamConfig, "--db-path", dbPath], { cwd, env: { ...process.env, HOME: home, ZERO_NO_TELEMETRY: "1", ZERO_LICENSE: "", ZERO_LICENSE_FILE: "", ...(license?.env ?? {}) } });
   child.stdout!.on("data", d => { output += String(d); }); child.stderr!.on("data", d => { output += String(d); });
   const deadline = Date.now() + 90_000;
   while (!output.includes("ZERO_DASHBOARD_READY") && Date.now() < deadline) {
@@ -78,7 +81,7 @@ async function startServer(port: number, env: Record<string, string>): Promise<R
 
 describe("real server, licensed", () => {
   let server: Running;
-  beforeAll(async () => { server = await startServer(48971, makeTestLicense(["rbac"]).env); }, 120_000);
+  beforeAll(async () => { server = await startServer(48971, makeTestLicense(["rbac"])); }, 120_000);
 
   it("enforces the permission of each role on the real routes", async () => {
     const viewer = await server.as("viewer"); const triager = await server.as("triager"); const auditor = await server.as("auditor"); const owner = await server.as("owner");
@@ -143,7 +146,7 @@ describe("real server, licensed", () => {
 
 describe("real server, no license", () => {
   let server: Running;
-  beforeAll(async () => { server = await startServer(48972, {}); }, 120_000);
+  beforeAll(async () => { server = await startServer(48972); }, 120_000);
 
   it("keeps the three fixed roles and refuses the paid ones", async () => {
     const owner = await server.as("owner"); const triager = await server.as("triager"); const auditor = await server.as("auditor");
