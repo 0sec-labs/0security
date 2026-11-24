@@ -90,7 +90,7 @@ export async function handleTeamRequest(req: IncomingMessage, url: URL, auth: Te
     const parsed = z.object({ role: z.string().min(1).max(64).optional(), scope: z.unknown().optional() }).strict().safeParse(await readBody());
     if (!parsed.success || (parsed.data.role === undefined && parsed.data.scope === undefined)) throw new TeamAuthError("Send a role, a scope, or both.", 400);
     const userId = decodeURIComponent(accountRoute[1]!);
-    const change = auth.setAccess(userId, parsed.data);
+    const change = auth.setAccess(userId, parsed.data, actor);
     const who = auditActor({ engineRequest: false, teamEnabled: true, displayName: actor.displayName });
     if (change.before.role !== change.after.role) audit({ actor: who, action: "user.role_changed", subject: userId, detail: { id: userId, old: change.before.role, new: change.after.role, source: "admin" } });
     const describe = (scope: { repos?: string[]; businessUnits?: string[] } | null) => scope ? [...(scope.repos ?? []), ...(scope.businessUnits ?? []).map(unit => `unit:${unit}`)].join(", ") || "none" : "none";

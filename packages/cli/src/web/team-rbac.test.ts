@@ -242,6 +242,45 @@ describe("role and scope changes", () => {
     await expect(patch(auth, c.owner!, "owner", { role: "viewer" })).resolves.toMatchObject({ status: 200 });
   });
 
+  it("blocks vertical privilege escalation and scope escape by non-owner users.manage roles", async () => {
+    restore = applyTestLicense(["rbac"]);
+    const cfg = config({
+      roles: {
+        "payments-lead": { permissions: ["workspace.read", "findings.read", "findings.triage"], scope: { businessUnits: ["payments"] } },
+        "legacy-power": { permissions: ["workspace.read", "findings.read", "settings.write", "users.manage"] },
+        "payments-admin": { permissions: ["workspace.read", "findings.read", "users.manage"], scope: { businessUnits: ["payments"] } },
+        "payments-viewer": { permissions: ["workspace.read", "findings.read"], scope: { businessUnits: ["payments"] } },
+      },
+    }, ["owner", "viewer", "auditor", "legacy-power", "payments-admin", "payments-viewer"]);
+    const auth = start(cfg);
+    const c = await cookiesFor(auth, ["owner", "legacy-power", "payments-admin"]);
+
+    // Non-owner with users.manage cannot escalate self or others to owner.
+    await expect(patch(auth, c["legacy-power"]!, "legacy-power", { role: "owner" })).rejects.toMatchObject({ statusCode: 403 });
+    await expect(patch(auth, c["legacy-power"]!, "viewer", { role: "owner" })).rejects.toMatchObject({ statusCode: 403 });
+    expect(auth.lookupUser("legacy-power")?.role).not.toBe("owner");
+
+    // Non-owner with users.manage cannot demote or scope an owner, nor touch/assign permissions it does not hold.
+    await expect(patch(auth, c["legacy-power"]!, "owner", { role: "viewer" })).rejects.toMatchObject({ statusCode: 403 });
+    await expect(patch(auth, c["legacy-power"]!, "owner", { scope: { repos: ["acme/web"] } })).rejects.toMatchObject({ statusCode: 403 });
+    await expect(patch(auth, c["legacy-power"]!, "viewer", { role: "auditor" })).rejects.toMatchObject({ statusCode: 403 });
+    await expect(patch(auth, c["legacy-power"]!, "auditor", { role: "viewer" })).rejects.toMatchObject({ statusCode: 403 });
+
+    // Non-owner with users.manage CAN manage accounts/roles within its own permission set.
+    await expect(patch(auth, c["legacy-power"]!, "viewer", { role: "payments-viewer" })).resolves.toMatchObject({ status: 200 });
+
+    // Repository-scoped users.manage role cannot clear or widen scope, nor modify unscoped accounts.
+    await expect(patch(auth, c["payments-admin"]!, "payments-admin", { scope: { repos: ["*"] } })).rejects.toMatchObject({ statusCode: 403 });
+    await expect(patch(auth, c["payments-admin"]!, "payments-admin", { scope: { repos: ["acme/web"] } })).rejects.toMatchObject({ statusCode: 403 });
+    await expect(patch(auth, c["payments-admin"]!, "payments-viewer", { role: "viewer" })).rejects.toMatchObject({ statusCode: 403 });
+    // Narrowing scope inside its own business unit is still permitted.
+    await expect(patch(auth, c["payments-admin"]!, "payments-viewer", { scope: { repos: ["acme/pay-api"] } })).resolves.toMatchObject({ status: 200 });
+    // Once narrowed to a single repo, clearing the user scope to widen back to the role scope (or unscoped) is refused.
+    await patch(auth, c.owner!, "payments-admin", { scope: { repos: ["acme/pay-api"] } });
+    await expect(patch(auth, c["payments-admin"]!, "payments-admin", { scope: null })).rejects.toMatchObject({ statusCode: 403 });
+    await expect(patch(auth, c["payments-admin"]!, "payments-viewer", { scope: { repos: ["acme/pay-other"] } })).rejects.toMatchObject({ statusCode: 403 });
+  });
+
   it("is a paid feature: no license, no change", async () => {
     const auth = start(); const c = await cookiesFor(auth, ["owner", "viewer"]);
     await expect(patch(auth, c.owner!, "viewer", { role: "editor" })).rejects.toMatchObject({ statusCode: 403, message: expect.stringContaining("enterprise license") });
