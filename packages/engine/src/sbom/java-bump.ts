@@ -134,20 +134,40 @@ function bumpGradle(folder: string, request: BumpRequest): BumpResult {
   }
   for (const path of files(folder, /(^|\/)libs\.versions\.toml$/)) {
     let text = readFileSync(path, "utf8");
-    const libraries = [...text.matchAll(/^([\w.-]+)\s*=\s*(\{[^}\n]*\}|"[^"\n]*")\s*$/gm)];
+    const libraries = [...text.matchAll(/^([\w.-]+)\s*=\s*(\{[^}\n]*\}|"[^"\n]*")(?:\s*#[^\n]*)?\s*$/gm)];
     for (const library of libraries) {
       const body = library[2]!;
       const module = /module\s*=\s*"([^"]+)"/.exec(body)?.[1] ?? (/^"([^":]+:[^":]+):[^"]+"$/.exec(body)?.[1]);
-      const split = /group\s*=\s*"([^"]+)"[^}]*name\s*=\s*"([^"]+)"/.exec(body);
-      if ((module ?? (split ? `${split[1]}:${split[2]}` : undefined)) !== `${group}:${artifact}`) continue;
+      const g = /group\s*=\s*"([^"]+)"/.exec(body)?.[1];
+      const a = /name\s*=\s*"([^"]+)"/.exec(body)?.[1];
+      const split = g && a ? `${g}:${a}` : undefined;
+      if ((module ?? split) !== `${group}:${artifact}`) continue;
       found = true;
       const ref = /version\.ref\s*=\s*"([^"]+)"/.exec(body)?.[1];
-      const literal = /version\s*=\s*"([^"]+)"/.exec(body)?.[1] ?? (/^"[^":]+:[^":]+:([^"]+)"$/.exec(body)?.[1]);
       let target: { was: string; index: number; where: string } | undefined;
       if (ref) {
-        const versions = new RegExp(`^(${escape(ref)}\\s*=\\s*")([^"]+)(")`, "m").exec(text);
-        if (versions) target = { was: versions[2]!, index: versions.index + versions[1]!.length, where: `version ${ref}` };
-      } else if (literal) target = { was: literal, index: library.index! + body.lastIndexOf(literal) + (library[0]!.indexOf(body)), where: "version" };
+        const section = /^\s*\[versions\]\s*$/m.exec(text);
+        if (section) {
+          const start = section.index + section[0].length;
+          const next = text.slice(start).search(/^\s*\[/m);
+          const end = next === -1 ? text.length : start + next;
+          const block = text.slice(start, end);
+          const match = new RegExp(`^(${escape(ref)}\\s*=\\s*")([^"]+)(")`, "m").exec(block);
+          if (match) target = { was: match[2]!, index: start + match.index + match[1]!.length, where: `version ${ref}` };
+        }
+      } else {
+        const vMatch = /version\s*=\s*"([^"]+)"/.exec(body);
+        if (vMatch) {
+          const at = library.index! + library[0]!.indexOf(body) + vMatch.index + vMatch[0].indexOf(vMatch[1]!);
+          target = { was: vMatch[1]!, index: at, where: "version" };
+        } else {
+          const short = /^"[^":]+:[^":]+:([^"]+)"$/.exec(body);
+          if (short) {
+            const was = short[1]!;
+            target = { was, index: library.index! + library[0]!.indexOf(body) + body.lastIndexOf(was), where: "version" };
+          }
+        }
+      }
       if (!target) { reasons.push(`the catalog entry ${library[1]} has no version I can read`); continue; }
       if (!VERSION.test(target.was)) { reasons.push(`the catalog version '${target.was}' is a range`); continue; }
       if (request.currentVersion && target.was !== request.currentVersion) continue;

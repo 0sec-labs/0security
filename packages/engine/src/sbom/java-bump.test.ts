@@ -80,6 +80,104 @@ describe("bumpJavaDependency: Gradle", () => {
     expect(bumpJavaDependency(literal, CT)).toMatchObject({ applied: true });
     expect(text(literal, "gradle/libs.versions.toml")).toContain('version = "1.10.0"');
   });
+  it("changes the version in a short-notation catalog entry", () => {
+    const dir = project({ "gradle/libs.versions.toml": '[libraries]\nshort = "org.apache.commons:commons-text:1.9"\n' });
+    expect(bumpJavaDependency(dir, CT)).toMatchObject({ applied: true, edits: [{ was: "1.9", now: "1.10.0", where: "version" }] });
+    expect(text(dir, "gradle/libs.versions.toml")).toBe('[libraries]\nshort = "org.apache.commons:commons-text:1.10.0"\n');
+  });
+  it("changes a catalog entry whether name or group comes first", () => {
+    const nameFirst = project({
+      "gradle/libs.versions.toml": '[libraries]\ncommons-text = { name = "commons-text", group = "org.apache.commons", version = "1.9" }\n'
+    });
+    expect(bumpJavaDependency(nameFirst, CT)).toMatchObject({ applied: true, edits: [{ was: "1.9", now: "1.10.0", where: "version" }] });
+    expect(text(nameFirst, "gradle/libs.versions.toml")).toBe('[libraries]\ncommons-text = { name = "commons-text", group = "org.apache.commons", version = "1.10.0" }\n');
+
+    const groupFirst = project({
+      "gradle/libs.versions.toml": '[libraries]\ncommons-text = { group = "org.apache.commons", name = "commons-text", version = "1.9" }\n'
+    });
+    expect(bumpJavaDependency(groupFirst, CT)).toMatchObject({ applied: true, edits: [{ was: "1.9", now: "1.10.0", where: "version" }] });
+    expect(text(groupFirst, "gradle/libs.versions.toml")).toBe('[libraries]\ncommons-text = { group = "org.apache.commons", name = "commons-text", version = "1.10.0" }\n');
+  });
+  it("mutates only the literal version when the version substring appears in the artifact name or module", () => {
+    const dir = project({
+      "gradle/libs.versions.toml": '[libraries]\nmy-lib = { version = "1.9", group = "org.apache.commons", name = "commons-text-1.9" }\nshort = "org.apache.commons:commons-text-1.9:1.9"\n'
+    });
+    const result = bumpJavaDependency(dir, { name: "org.apache.commons/commons-text-1.9", fixedVersion: "1.10.0" });
+    expect(result).toMatchObject({ applied: true, edits: [{ was: "1.9", now: "1.10.0", where: "version" }] });
+    expect(text(dir, "gradle/libs.versions.toml")).toBe('[libraries]\nmy-lib = { version = "1.10.0", group = "org.apache.commons", name = "commons-text-1.9" }\nshort = "org.apache.commons:commons-text-1.9:1.9"\n');
+  });
+  it("scopes version.ref lookup to [versions] when [plugins] precedes it with a shared alias", () => {
+    const dir = project({
+      "gradle/libs.versions.toml": [
+        "[plugins]",
+        'detekt = "io.gitlab.arturbosch.detekt:1.23.0"',
+        "",
+        "[versions]",
+        'detekt = "1.23.0"',
+        "",
+        "[libraries]",
+        'detekt-cli = { module = "io.gitlab.arturbosch.detekt:detekt-cli", version.ref = "detekt" }',
+        ""
+      ].join("\n")
+    });
+    const result = bumpJavaDependency(dir, { name: "io.gitlab.arturbosch.detekt/detekt-cli", fixedVersion: "1.23.1" });
+    expect(result).toMatchObject({ applied: true, edits: [{ was: "1.23.0", now: "1.23.1", where: "version detekt" }] });
+    expect(text(dir, "gradle/libs.versions.toml")).toBe([
+      "[plugins]",
+      'detekt = "io.gitlab.arturbosch.detekt:1.23.0"',
+      "",
+      "[versions]",
+      'detekt = "1.23.1"',
+      "",
+      "[libraries]",
+      'detekt-cli = { module = "io.gitlab.arturbosch.detekt:detekt-cli", version.ref = "detekt" }',
+      ""
+    ].join("\n"));
+  });
+  it("scopes version.ref lookup to [versions] when [libraries] precedes it", () => {
+    const dir = project({
+      "gradle/libs.versions.toml": [
+        "[libraries]",
+        'detekt = "io.gitlab.arturbosch.detekt:detekt-core:1.23.0"',
+        'detekt-cli = { module = "io.gitlab.arturbosch.detekt:detekt-cli", version.ref = "detekt" }',
+        "",
+        "[versions]",
+        'detekt = "1.23.0"',
+        ""
+      ].join("\n")
+    });
+    const result = bumpJavaDependency(dir, { name: "io.gitlab.arturbosch.detekt/detekt-cli", fixedVersion: "1.23.1" });
+    expect(result).toMatchObject({ applied: true, edits: [{ was: "1.23.0", now: "1.23.1", where: "version detekt" }] });
+    expect(text(dir, "gradle/libs.versions.toml")).toBe([
+      "[libraries]",
+      'detekt = "io.gitlab.arturbosch.detekt:detekt-core:1.23.0"',
+      'detekt-cli = { module = "io.gitlab.arturbosch.detekt:detekt-cli", version.ref = "detekt" }',
+      "",
+      "[versions]",
+      'detekt = "1.23.1"',
+      ""
+    ].join("\n"));
+  });
+  it("preserves trailing comments and handles combined field-ordering with comments", () => {
+    const dir = project({
+      "gradle/libs.versions.toml": [
+        "[libraries]",
+        "# Keep this comment",
+        'commons-text = { name = "commons-text", group = "org.apache.commons", version = "1.9" } # CVE-2022-42889 mitigation',
+        'unrelated = { group = "junit", name = "junit", version = "4.13.2" } # do not touch',
+        ""
+      ].join("\n")
+    });
+    const result = bumpJavaDependency(dir, CT);
+    expect(result).toMatchObject({ applied: true, edits: [{ was: "1.9", now: "1.10.0", where: "version" }] });
+    expect(text(dir, "gradle/libs.versions.toml")).toBe([
+      "[libraries]",
+      "# Keep this comment",
+      'commons-text = { name = "commons-text", group = "org.apache.commons", version = "1.10.0" } # CVE-2022-42889 mitigation',
+      'unrelated = { group = "junit", name = "junit", version = "4.13.2" } # do not touch',
+      ""
+    ].join("\n"));
+  });
   it("declines a variable version", () => {
     const dir = project({ "build.gradle": "dependencies { implementation \"org.apache.commons:commons-text:$textVersion\" }\n" });
     expect(bumpJavaDependency(dir, CT)).toMatchObject({ applied: false, reason: expect.stringContaining("variable") });
