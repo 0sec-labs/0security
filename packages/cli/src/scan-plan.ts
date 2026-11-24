@@ -2,7 +2,7 @@
  * `0 scan --plan`: what a scan of a folder would involve, worked out from the inventory alone. No model, no scanner binary
  * and no database is touched. The cost range is a rough estimate from one measurement and is stated as such.
  */
-import { planBatches, UNIT_KINDS, type Inventory } from "@0/engine";
+import { isEntryPointKind, planBatches, UNIT_KINDS, type Inventory, type InventoryUnit } from "@0/engine";
 import type { ScanTierInfo } from "@0/engine/shared";
 import { shouldBatch } from "./scan-batched.js";
 
@@ -38,6 +38,8 @@ export function estimateCost(threads: number, batched: boolean, budgetUsd: numbe
   return { lowUsd, highUsd, verdict, basis };
 }
 
+export interface ModuleRow { module: string; files: number; entryPoints: number; batches: number }
+
 export interface ScanPlan {
   schemaVersion: 1;
   folder: string;
@@ -57,16 +59,37 @@ export interface ScanPlan {
   budgetUsd: number;
   estimate: { lowUsd: number; highUsd: number; threads: number; verdict: BudgetVerdict; basis: string };
   notes: string[];
+  /** The module map: one row per build module (Maven or Gradle) when the folder has more than one, in the order its batches run. */
+  modules?: ModuleRow[];
   /** The tier map's decision, when a tier map applies; a skipped or pre-pass-only tier means no model would run. */
   tier?: ScanTierInfo;
 }
 
-export interface PlanOptions { folder: string; batchSize: number; batchesMode: string; budgetUsd: number; tier?: ScanTierInfo }
+export interface PlanOptions { shardOf?: (unit: InventoryUnit) => string | undefined; folder: string; batchSize: number; batchesMode: string; budgetUsd: number; tier?: ScanTierInfo }
+
+/** The module map of a plan: files, entry points and batches per module. Empty when the plan was not split by module. */
+export function moduleRows(batches: ReadonlyArray<{ module?: string; units: readonly InventoryUnit[] }>): ModuleRow[] {
+  const rows = new Map<string, { files: Set<string>; entryPoints: number; batches: number }>();
+  for (const batch of batches) {
+    const key = batch.module ?? "(no build file)";
+    const row = rows.get(key) ?? { files: new Set<string>(), entryPoints: 0, batches: 0 };
+    row.batches++;
+    for (const unit of batch.units) {
+      for (const file of unit.files ?? [unit.path]) row.files.add(file);
+      if (isEntryPointKind(unit.kind)) row.entryPoints++;
+    }
+    rows.set(key, row);
+  }
+  if (!batches.some(batch => batch.module)) return [];
+  return [...rows.entries()].map(([module, row]) => ({ module, files: row.files.size, entryPoints: row.entryPoints, batches: row.batches }));
+}
 
 /** The plan of a folder from its inventory. Pure. */
 export function planScan(inventory: Inventory, options: PlanOptions): ScanPlan {
   const { summary } = inventory;
-  const batchCount = planBatches(inventory.units, options.batchSize).length;
+  const batchList = planBatches(inventory.units, options.batchSize, options.shardOf ? { shardOf: options.shardOf } : {});
+  const batchCount = batchList.length;
+  const modules = moduleRows(batchList);
   const autoWouldBatch = inventory.units.length > 0 && shouldBatch(inventory, options.batchSize);
   const wouldBatch = options.batchesMode === "on" ? inventory.units.length > 0 : options.batchesMode === "off" ? false : autoWouldBatch;
   const threads = wouldBatch ? batchCount : inventory.units.length ? 1 : 0;
@@ -83,6 +106,7 @@ export function planScan(inventory: Inventory, options: PlanOptions): ScanPlan {
     batchSize: options.batchSize, batchCount, batchesMode: options.batchesMode, wouldBatch, autoWouldBatch, budgetUsd: options.budgetUsd,
     estimate: { lowUsd: Number(estimate.lowUsd.toFixed(4)), highUsd: Number(estimate.highUsd.toFixed(4)), threads, verdict: estimate.verdict, basis: estimate.basis },
     notes,
+    ...(modules.length > 1 ? { modules } : {}),
     ...(options.tier ? { tier: options.tier } : {}),
   };
 }
@@ -108,6 +132,11 @@ export function planText(plan: ScanPlan): string {
       `At the ${budget} budget: ${plan.estimate.verdict}`,
       plan.estimate.basis,
     );
+  }
+  if (plan.modules) {
+    lines.push("", `Modules: ${plan.modules.length}. A batch never mixes two modules.`, ...plan.modules.slice(0, 40).map(row => `  ${row.module}: ${row.files} files, ${row.entryPoints} entry points, ${row.batches} batch${row.batches === 1 ? "" : "es"}`));
+    if (plan.modules.length > 40) lines.push(`  ... and ${plan.modules.length - 40} more (the JSON plan lists all)`);
+    lines.push("");
   }
   for (const note of plan.notes) lines.push(note);
   if (plan.estimate.threads && plan.estimate.verdict !== "likely complete") lines.push("A scan that stops at its budget exits 3 and prints the command that continues it.");

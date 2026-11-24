@@ -248,6 +248,39 @@ describe("batched scan", () => {
     expect(report(h).coverage.resume).toMatch(/^0security scan '.*my app' --resume scan-/);
   });
 
+  it("shards a multi-module Java folder: no batch mixes modules, the plan shows the map, and resume continues the unreached module", async () => {
+    const dir = temp();
+    for (const mod of ["core", "web"]) {
+      mkdirSync(join(dir, mod, "src", "main", "java", "org", "ex"), { recursive: true });
+      writeFileSync(join(dir, mod, "pom.xml"), "<project/>\n");
+      for (let i = 0; i < 5; i++) writeFileSync(join(dir, mod, "src", "main", "java", "org", "ex", `C${i}.java`), `@RestController\nclass C${i} {\n  @GetMapping("/${mod}${i}")\n  String a() { return ""; }\n}\n`);
+    }
+    const db = join(temp(), "db.sqlite");
+    const planned = harness(db);
+    await runScan(dir, opts(db, { plan: true }), planned.deps);
+    const plan = JSON.parse(planned.out.join(""));
+    expect(plan.batchCount).toBe(2);
+    expect(plan.modules.map((row: { module: string; batches: number }) => [row.module, row.batches])).toEqual([["core", 1], ["web", 1]]);
+    const text = harness(db);
+    await runScan(dir, opts(db, { plan: true, format: "md" }), text.deps);
+    expect(text.out.join("")).toMatch(/Modules: 2/);
+
+    const first = harness(db, n => (n === 1 ? "ceiling" : "ok"));
+    await runScan(dir, opts(db, { batches: "on" }), first.deps);
+    expect(first.messages[0]).toContain("build module core");
+    expect(first.messages[0]).not.toContain("web/src");
+    expect(first.messages[1]).toContain("build module web");
+    expect(first.messages[1]).not.toContain("core/src");
+    process.exitCode = undefined;
+
+    const second = harness(db, () => "ok", () => "abc1234567", 10);
+    await runScan(dir, opts(db, { resume: "latest" }), second.deps);
+    expect(second.created).toHaveLength(1);
+    expect(second.messages[0]).toContain("build module core");
+    expect(second.messages[0]).not.toContain("web/src");
+    expect(report(second).coverage).toMatchObject({ complete: true });
+  });
+
   it("--plan lists the folder and starts nothing", async () => {
     const dir = app(20);
     const db = join(temp(), "db.sqlite");
