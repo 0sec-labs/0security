@@ -10,7 +10,7 @@ description: "Bring your own browser MCP server to 0security as an extension, an
 Run this command. It shows the install prompt with the exact command, and installs nothing until you approve it with `--yes`:
 
 ```bash
-0security skills extensions mcp pw -- npx @playwright/mcp@0.0.86 --headless --isolated
+0security skills extensions mcp pw -- npx -y @playwright/mcp@0.0.86 --headless --isolated
 ```
 
 Pin the version, as shown. The server is saved turned off. Enable it, and it starts when a Thread first uses it. See [MCP servers](/extensions/#mcp-servers).
