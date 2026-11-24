@@ -118,13 +118,52 @@ describe("XML attacks", () => {
     expect(await reason(login(provider(), { prolog: `<!DOCTYPE r>` }))).toBe("xml-dtd");
   });
 
-  it("rejects entity expansion, CDATA and processing instructions", async () => {
+  it("rejects entity expansion, CDATA and processing instructions", () => {
     expect(() => assertNoDtd(`<a>&lol9;</a>`)).toThrow(SamlError);
     expect(() => assertSafeResponseXml(`<a><![CDATA[x]]></a>`)).toThrow(SamlError);
     expect(() => assertSafeResponseXml(`<a><?pi x?></a>`)).toThrow(SamlError);
     expect(() => assertSafeResponseXml(`<?xml version="1.0"?><a>&amp;&#65;&#x41;</a>`)).not.toThrow();
-    expect(() => assertStrongSignatureAlgorithms(`<a Algorithm="http://www.w3.org/2000/09/xmldsig#rsa-sha1"/>`)).toThrow(SamlError);
-    expect(() => assertStrongSignatureAlgorithms(`<a Algorithm="http://www.w3.org/2001/04/xmldsig-more#rsa-sha256"/>`)).not.toThrow();
+    expect(() => assertSafeResponseXml(`\uFEFF<?xml version="1.0" encoding="UTF-8"?><a/>`)).not.toThrow();
+  });
+
+  it("rejects DTD, comment and encoding variants", () => {
+    for (const xml of [`<!doctype a><a/>`, `<!DocType a [ ]><a/>`, `<!ENTITY x "y"><a/>`, `<a><!-- x --></a>`, `<a><!----></a>`, `<?xml version="1.0" encoding="UTF-16"?><a/>`, `<?xml version='1.0' encoding='iso-8859-1'?><a/>`, `<a>\u0000</a>`, `<a><?xml-stylesheet href="x"?></a>`]) {
+      expect(() => assertSafeResponseXml(xml), xml).toThrow(SamlError);
+    }
+    const utf16 = Buffer.from(`\uFEFF<a/>`, "utf16le").toString("utf8");
+    expect(() => assertSafeResponseXml(utf16)).toThrow(SamlError);
+  });
+
+  it("allows only listed signature algorithms, read from the parsed document", () => {
+    const ds = (tag: string, algorithm: string) => `<ds:Signature xmlns:ds="http://www.w3.org/2000/09/xmldsig#"><ds:SignedInfo><ds:${tag} Algorithm="${algorithm}"/></ds:SignedInfo></ds:Signature>`;
+    const sha1Sig = "http://www.w3.org/2000/09/xmldsig#rsa-sha1";
+    const ok = "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256";
+    expect(() => assertStrongSignatureAlgorithms(ds("SignatureMethod", ok))).not.toThrow();
+    expect(() => assertStrongSignatureAlgorithms(ds("SignatureMethod", sha1Sig))).toThrow(/not allowed/);
+    // decimal, hex, mixed, case and doubled-encoding spellings of the same weak algorithm
+    for (const spelled of [
+      "http://www.w3.org/2000/09/xmldsig#rsa-&#115;ha1", "http://www.w3.org/2000/09/xmldsig#rsa-&#x73;ha1", "http://www.w3.org/2000/09/xmldsig#rsa-&#X73;&#104;a1",
+      "http://www.w3.org/2000/09/xmldsig#rsa-SHA1", "http://www.w3.org/2000/09/xmldsig#rsa-sha&#49;", "&#104;ttp://www.w3.org/2000/09/xmldsig#rsa-sha1",
+      "http://www.w3.org/2000/09/xmldsig#rsa-&amp;#115;ha1", "http://www.w3.org/2000/09/xmldsig#rsa-md5", "", "urn:unknown",
+    ]) expect(() => assertStrongSignatureAlgorithms(ds("SignatureMethod", spelled)), spelled).toThrow(/not allowed/);
+    expect(() => assertStrongSignatureAlgorithms(ds("DigestMethod", "http://www.w3.org/2000/09/xmldsig#sha1"))).toThrow(/not allowed/);
+    expect(() => assertStrongSignatureAlgorithms(ds("DigestMethod", "http://www.w3.org/2000/09/xmldsig#&#115;ha1"))).toThrow(/not allowed/);
+    expect(() => assertStrongSignatureAlgorithms(ds("DigestMethod", "http://www.w3.org/2001/04/xmlenc#sha256"))).not.toThrow();
+    expect(() => assertStrongSignatureAlgorithms(ds("CanonicalizationMethod", "http://www.w3.org/2001/10/xml-exc-c14n#"))).not.toThrow();
+    expect(() => assertStrongSignatureAlgorithms(ds("Transform", "http://www.w3.org/TR/1999/REC-xpath-19991116"))).toThrow(/not allowed/);
+    expect(() => assertStrongSignatureAlgorithms(`<a><b`)).toThrow(SamlError);
+  });
+
+  it("rejects a validly SHA-1-signed assertion even when 'sha1' is spelled with character references", async () => {
+    for (const encode of [(t: string) => t.replace(/sha1/g, "&#115;ha1"), (t: string) => t.replace(/sha1/g, "&#x73;&#x68;a&#49;")]) {
+      const sp = provider();
+      const { relayState, request } = await start(sp);
+      const signed = idp.response({ requestId: request.id, weakSignature: true });
+      const spelled = encode(signed);
+      expect(spelled).not.toBe(signed);
+      expect(spelled).not.toMatch(/sha1/);
+      try { await sp.consume({ SAMLResponse: TestIdp.encode(spelled), RelayState: relayState }); expect.unreachable(); } catch (error) { expect((error as SamlError).reason).toBe("weak-algorithm"); }
+    }
   });
 
   it("rejects an oversized or malformed body", async () => {
@@ -134,7 +173,7 @@ describe("XML attacks", () => {
     const second = await start(sp);
     expect(await reason(sp.consume({ SAMLResponse: "not base64 !!", RelayState: second.relayState }))).toBe("bad-request");
     const third = await start(sp);
-    expect(await reason(sp.consume({ SAMLResponse: Buffer.from("<not xml").toString("base64"), RelayState: third.relayState }))).toBe("verification");
+    expect(await reason(sp.consume({ SAMLResponse: Buffer.from("<not xml").toString("base64"), RelayState: third.relayState }))).toBe("xml-unsafe");
   });
 });
 
