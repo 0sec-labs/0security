@@ -15,6 +15,22 @@ export {
   requireFeature,
   verifyLicense,
 } from "./license.js";
+export {
+  INGEST_LIMITS,
+  IngestError,
+  MIN_SUPPRESSION_REASON,
+  SEVERITIES,
+  STATUSES,
+  WRITE_FINDINGS_SCOPE,
+  ingestDigest,
+  ingestFingerprint,
+  parseIngestBody,
+  parseIngestLabels,
+  summarizeOrg,
+  suppressionReasonError,
+  triageHistoryAction,
+} from "./findings-server.js";
+export type { HistoryAction, IngestFormat, IngestLabels, OrgRow, OrgSummary, ParsedIngestBody } from "./findings-server.js";
 export type {
   EnterpriseFeature,
   FeatureMode,

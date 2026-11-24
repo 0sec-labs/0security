@@ -80,8 +80,31 @@ CREATE TABLE IF NOT EXISTS findings (
   sourceVerification TEXT,
   modelVerification TEXT,
   tool TEXT,
+  repo TEXT,
+  source TEXT,
   timestamp INTEGER NOT NULL
 );
+
+-- Append-only triage history of the shared findings server. Rows are never updated or deleted.
+CREATE TABLE IF NOT EXISTS finding_history (
+  id TEXT PRIMARY KEY,
+  fingerprint TEXT NOT NULL,
+  ts TEXT NOT NULL,
+  actor TEXT NOT NULL,
+  action TEXT NOT NULL,
+  reason TEXT,
+  expiresAt TEXT,
+  prevState TEXT,
+  newState TEXT,
+  repo TEXT,
+  source TEXT
+);
+
+CREATE TRIGGER IF NOT EXISTS finding_history_no_update BEFORE UPDATE ON finding_history
+BEGIN SELECT RAISE(ABORT, 'finding_history is append-only'); END;
+
+CREATE TRIGGER IF NOT EXISTS finding_history_no_delete BEFORE DELETE ON finding_history
+BEGIN SELECT RAISE(ABORT, 'finding_history is append-only'); END;
 
 CREATE TABLE IF NOT EXISTS attack_results (
   id TEXT PRIMARY KEY,
@@ -272,6 +295,7 @@ CREATE INDEX IF NOT EXISTS idx_findings_status ON findings(status);
 CREATE INDEX IF NOT EXISTS idx_findings_fingerprint ON findings(fingerprint);
 CREATE INDEX IF NOT EXISTS idx_findings_priority_latest ON findings(COALESCE(fingerprint,id),timestamp DESC,id DESC);
 CREATE INDEX IF NOT EXISTS idx_findings_triageStatus ON findings(triageStatus);
+CREATE INDEX IF NOT EXISTS idx_finding_history_fp ON finding_history(fingerprint, ts);
 CREATE INDEX IF NOT EXISTS idx_findings_workflowStatus ON findings(workflowStatus);
 CREATE INDEX IF NOT EXISTS idx_attack_results_scanId ON attack_results(scanId);
 CREATE INDEX IF NOT EXISTS idx_targets_url ON targets(url);
@@ -410,6 +434,13 @@ export function migrateLegacySchema(sqlite: ShimmedDatabase): void {
   }
   if (!colNames.has("tool")) {
     sqlite.exec("ALTER TABLE findings ADD COLUMN tool TEXT");
+  }
+  // Shared findings server labels. Additive and nullable; NULL on every finding that was not ingested.
+  if (!colNames.has("repo")) {
+    sqlite.exec("ALTER TABLE findings ADD COLUMN repo TEXT");
+  }
+  if (!colNames.has("source")) {
+    sqlite.exec("ALTER TABLE findings ADD COLUMN source TEXT");
   }
   // Second-pass model verification (`0 findings verify`). Additive and nullable.
   if (!colNames.has("modelVerification")) {
