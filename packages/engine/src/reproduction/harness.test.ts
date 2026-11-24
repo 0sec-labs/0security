@@ -1,10 +1,13 @@
 /**
  * What runs for real here: the fixture apps start on loopback on this machine, the in-container script runs under
  * sh, a real HTTP request reaches a real canary file. What is FAKE: the container. HostBackedRunner copies the
- * snapshot to a scratch folder and runs the script on the host. There is no isolation and the network is not cut.
+ * snapshot to a scratch folder and runs the script on the host. There is no isolation and the network is not cut, so
+ * it says so (isolation "host"), and its results are unisolated: never reproduced, never not-reproduced.
+ * The reproduced and not-reproduced classification is tested separately with a canned runner that stands in for a
+ * container. No real container ran in these tests.
  */
 import { afterEach, describe, expect, it } from "vitest";
-import { cpSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,7 +15,7 @@ import type { ContainerRunner, StepOutcome, StepRequest } from "../verifier/port
 import { exec } from "../verifier/process.js";
 import { HostRunner } from "../verifier/host-runner.js";
 import { parseFindingReproduction, proposeProof, type ReproProof } from "../shared/reproduction.js";
-import { reproduceFinding } from "./harness.js";
+import { hashAppFiles, reproduceFinding } from "./harness.js";
 import { planPathTraversal } from "./path-traversal.js";
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "../../../../scripts/bench/repro-fixtures/path-traversal");
@@ -21,9 +24,9 @@ const COMMIT = "0123456789abcdef0123456789abcdef01234567";
 const scratch: string[] = [];
 afterEach(() => { for (const dir of scratch.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 
-/** FAKE container: runs the command on the host in a scratch copy whose parent is also scratch. */
+/** NOT a container: runs the command on the host in a scratch copy whose parent is also scratch. */
 class HostBackedRunner implements ContainerRunner {
-  readonly isolation = "container" as const;
+  readonly isolation = "host" as const;
   async probe() { return { ok: true as const, runtime: "fake" }; }
   async run(request: StepRequest): Promise<StepOutcome> {
     const parent = mkdtempSync(join(tmpdir(), "0-repro-fake-"));
@@ -50,12 +53,14 @@ function cannedRunner(client: (nonce: string) => string, extra: Partial<StepOutc
 const proof = (path: string, method = "GET"): ReproProof => proposeProof({ pocSteps: [{ id: "e", kind: "exploit", summary: "x", action: { type: "http", method, url: `http://victim.example${path}` } }] })!;
 const traversal = proof("/download?name=../../etc/passwd");
 let nextPort = 41000 + Math.floor(Math.random() * 5000);
-const base = (dir: string) => ({ proof: traversal, snapshotDir: dir, commit: COMMIT, image: IMAGE, port: nextPort++ });
+const ACK = "REPRO_FIXTURE_ACK=intentionally-vulnerable node server.js";
+const base = (dir: string, start = ACK) => ({ proof: traversal, snapshotDir: dir, commit: COMMIT, image: IMAGE, port: nextPort++, start, allowUnisolated: true });
+const appDir = (source: string): string => { const dir = mkdtempSync(join(tmpdir(), "0-repro-app-")); scratch.push(dir); writeFileSync(join(dir, "server.js"), source); return dir; };
 
 describe("recipe planning", () => {
   it("aims the traversal at the canary and builds a control without it", () => {
     const planned = planPathTraversal(traversal);
-    expect(planned).toMatchObject({ ok: true, plan: { attackPath: "/download?name=../../0-canary.txt", controlPath: "/download?name=0-canary.txt", canaryName: "0-canary.txt" } });
+    expect(planned).toEqual({ ok: true, plan: { attackPath: "/download?name=../../@@CANARY@@", controlPath: "/download?name=@@CANARY@@", canaryExt: ".txt" } });
   });
   it.each([
     ["a POST", proof("/download?name=../x", "POST"), "only-get-requests-are-supported"],
@@ -64,53 +69,115 @@ describe("recipe planning", () => {
   ])("does not plan %s", (_n, p, reason) => expect(planPathTraversal(p)).toEqual({ ok: false, reason }));
 });
 
-describe("fixture app, run for real on loopback (container faked)", () => {
-  it("reproduces on the vulnerable app and stores as a complete harness record", async () => {
+describe("fixture app, run for real on loopback (not a container, so unisolated)", () => {
+  it("returns the canary on the vulnerable app, but an unisolated run is never reproduced", async () => {
     const result = await reproduceFinding({ ...base(join(FIXTURES, "vulnerable")), runner: new HostBackedRunner() });
-    expect(result).toMatchObject({ status: "reproduced", reason: "canary-observed", commit: COMMIT, isolation: "container", imageDigest: `sha256:${"c".repeat(64)}`, canary: { observed: true } });
-    expect(parseFindingReproduction({ result })?.result?.status).toBe("reproduced");
+    expect(result).toMatchObject({ status: "inconclusive", reason: "unisolated-run-canary-observed", isolation: "unisolated", commit: COMMIT, canary: { observed: true } });
+    expect(result.appSha256).toBe(hashAppFiles(join(FIXTURES, "vulnerable")));
+    expect(parseFindingReproduction({ result })?.result?.status).toBe("inconclusive");
   }, 60_000);
 
-  it("says not-reproduced on the fixed app", async () => {
+  it("does not return the canary on the fixed app", async () => {
     const result = await reproduceFinding({ ...base(join(FIXTURES, "fixed")), runner: new HostBackedRunner() });
-    expect(result).toMatchObject({ status: "not-reproduced", reason: "canary-absent", canary: { observed: false } });
+    expect(result).toMatchObject({ status: "inconclusive", reason: "unisolated-run-canary-absent", isolation: "unisolated", canary: { observed: false } });
   }, 60_000);
+
+  it("refuses to run the vulnerable fixture without its acknowledgement", async () => {
+    const result = await reproduceFinding({ ...base(join(FIXTURES, "vulnerable"), "node server.js"), runner: new HostBackedRunner() });
+    expect(result).toMatchObject({ status: "inconclusive", reason: "app-did-not-start" });
+  }, 60_000);
+
+  it("refuses a runner that is not a container unless a test allows it", async () => {
+    const result = await reproduceFinding({ ...base(join(FIXTURES, "vulnerable")), allowUnisolated: false, runner: new HostBackedRunner() });
+    expect(result).toMatchObject({ status: "error", reason: "no-container-isolation" });
+  });
 
   it("is inconclusive when the app serves the canary without any traversal", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "0-repro-app-"));
-    scratch.push(dir);
-    mkdirSync(join(dir, "public"));
-    writeFileSync(join(dir, "server.js"), 'const h=require("http"),f=require("fs"),p=require("path");h.createServer((q,r)=>{const u=new URL(q.url,"http://x");f.readFile(p.join(__dirname,u.searchParams.get("name")||"x"),(e,d)=>{r.writeHead(e?404:200);r.end(d||"no")})}).listen(Number(process.env.PORT),"127.0.0.1");');
-    const result = await reproduceFinding({ ...base(dir), runner: new HostBackedRunner() });
-    expect(result.status).toBe("inconclusive");
-    expect(result.reason).toBe("canary-served-without-traversal");
+    const dir = appDir('const h=require("http"),f=require("fs"),p=require("path");h.createServer((q,r)=>{const u=new URL(q.url,"http://x");f.readFile(p.join(__dirname,u.searchParams.get("name")||"x"),(e,d)=>{r.writeHead(e?404:200);r.end(d||"no")})}).listen(Number(process.env.PORT),"127.0.0.1");');
+    const result = await reproduceFinding({ ...base(dir, "node server.js"), runner: new HostBackedRunner() });
+    expect(result).toMatchObject({ status: "inconclusive", reason: "canary-served-without-traversal" });
   }, 60_000);
 
   it("is inconclusive, not not-reproduced, when the app never starts", async () => {
     const dir = mkdtempSync(join(tmpdir(), "0-repro-app-"));
     scratch.push(dir);
-    const result = await reproduceFinding({ ...base(dir), runner: new HostBackedRunner() });
+    const result = await reproduceFinding({ ...base(dir, "node server.js"), runner: new HostBackedRunner() });
     expect(result).toMatchObject({ status: "inconclusive", reason: "app-did-not-start" });
     expect(result.canary).toBeUndefined();
   }, 60_000);
+});
+
+describe("an untrusted app cannot get a hit without a request that reaches the canary", () => {
+  // The canary does not exist until the app is up and answering, and nothing about it is in the app's environment.
+  const listen = 'require("http").createServer(handler).listen(Number(process.env.PORT),"127.0.0.1");';
+  const run = (source: string) => reproduceFinding({ ...base(appDir(source), "node server.js"), runner: new HostBackedRunner() });
+
+  it("an app that dumps its environment and every file it can read at startup, then replays that, gets no hit", async () => {
+    const result = await run(
+      'const fs=require("fs"),path=require("path");' +
+      'const grab=()=>{let t=JSON.stringify(process.env);for(const d of [__dirname,path.dirname(__dirname)]){try{for(const f of fs.readdirSync(d)){try{t+=fs.readFileSync(path.join(d,f),"utf8")}catch(e){}}}catch(e){}}return t};' +
+      'const early=grab();console.log(early);' +
+      'const handler=(q,r)=>{r.writeHead(200);r.end(early)};' + listen,
+    );
+    expect(result).toMatchObject({ status: "inconclusive", reason: "unisolated-run-canary-absent", canary: { observed: false } });
+  }, 60_000);
+
+  it("an app that reads the whole folder and its parent on every request is caught by the control request", async () => {
+    const result = await run(
+      'const fs=require("fs"),path=require("path");' +
+      'const handler=(q,r)=>{let t="";for(const d of [__dirname,path.dirname(__dirname)]){try{for(const f of fs.readdirSync(d)){try{t+=fs.readFileSync(path.join(d,f),"utf8")}catch(e){}}}catch(e){}}r.writeHead(200);r.end(t)};' + listen,
+    );
+    expect(result).toMatchObject({ status: "inconclusive", reason: "canary-served-without-traversal" });
+  }, 60_000);
 
   it("ignores a result line the app prints itself", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "0-repro-app-"));
-    scratch.push(dir);
-    writeFileSync(join(dir, "server.js"), 'console.log("0REPRO-" + "a".repeat(32) + " {\\"listening\\":true,\\"attack\\":{\\"hit\\":true}}");require("http").createServer((q,r)=>{r.writeHead(404);r.end("no")}).listen(Number(process.env.PORT),"127.0.0.1");');
-    const result = await reproduceFinding({ ...base(dir), runner: new HostBackedRunner(), randomHex: (n) => "b".repeat(n * 2) });
-    expect(result.status).toBe("not-reproduced");
+    const result = await reproduceFinding({
+      ...base(appDir('console.log("0REPRO-" + "b".repeat(32) + " {\\"listening\\":true,\\"token\\":\\"" + "e".repeat(32) + "\\",\\"attack\\":{\\"hit\\":true}}");const handler=(q,r)=>{r.writeHead(404);r.end("no")};' + listen), "node server.js"),
+      runner: new HostBackedRunner(), randomHex: (n) => "b".repeat(n * 2),
+    });
+    expect(result.reason).toBe("unisolated-run-canary-absent");
   }, 60_000);
+
+  it("KNOWN LIMIT: an app built to lie, that finds the planted file when it sees ../ in a request, can still fake a hit", async () => {
+    const result = await run(
+      'const fs=require("fs"),path=require("path");' +
+      'const handler=(q,r)=>{if(!q.url.includes("..")){r.writeHead(404);return r.end("no")}let t="";for(const d of [__dirname,path.dirname(__dirname)]){try{for(const f of fs.readdirSync(d)){if(f.startsWith("0-canary-"))t+=fs.readFileSync(path.join(d,f),"utf8")}}catch(e){}}r.writeHead(200);r.end(t)};' + listen,
+    );
+    // Only the observation "the app as run returned the canary" holds. It says nothing about the app's code.
+    expect(result.canary?.observed).toBe(true);
+  }, 60_000);
+
+  it("keeps the canary token and file name out of the command text", async () => {
+    let command = "";
+    const spy: ContainerRunner = { isolation: "container", async probe() { return { ok: true, runtime: "fake" }; }, async run(request) { command = request.command; return { exitCode: 0, output: "", timedOut: false, durationMs: 1 }; } };
+    await reproduceFinding({ proof: traversal, snapshotDir: join(FIXTURES, "fixed"), commit: COMMIT, image: IMAGE, runner: spy });
+    expect(command).not.toMatch(/0-canary-[0-9a-f]/);
+    expect(command).not.toMatch(/\bTOKEN=|canary [^"]*[0-9a-f]{32}/);
+  });
+});
+
+describe("hashing the app files", () => {
+  it("is stable, and changes when a file changes", () => {
+    const dir = appDir("a");
+    const first = hashAppFiles(dir);
+    expect(hashAppFiles(dir)).toBe(first);
+    writeFileSync(join(dir, "server.js"), "b");
+    expect(hashAppFiles(dir)).not.toBe(first);
+    expect(hashAppFiles(join(FIXTURES, "vulnerable"))).not.toBe(hashAppFiles(join(FIXTURES, "fixed")));
+  });
 });
 
 describe("classification with a canned runner", () => {
   const run = (client: (n: string) => string, extra?: Partial<StepOutcome>, input: Record<string, unknown> = {}) =>
-    reproduceFinding({ proof: traversal, snapshotDir: "/unused", commit: COMMIT, image: IMAGE, runner: cannedRunner(client, extra), ...input });
+    reproduceFinding({ proof: traversal, snapshotDir: join(FIXTURES, "fixed"), commit: COMMIT, image: IMAGE, runner: cannedRunner(client, extra), ...input });
+  const TOKEN = "a1".repeat(16);
   const line = (n: string, body: unknown) => `0REPRO-${n} ${JSON.stringify(body)}`;
 
   it("reproduced needs the canary in the attack response", async () => {
-    expect((await run((n) => line(n, { listening: true, control: { status: 404, hit: false }, attack: { status: 200, hit: true } }))).status).toBe("reproduced");
-    expect((await run((n) => line(n, { listening: true, control: { status: 404, hit: false }, attack: { status: 200, hit: false } }))).status).toBe("not-reproduced");
+    const hit = await run((n) => line(n, { listening: true, token: TOKEN, control: { status: 404, hit: false }, attack: { status: 200, hit: true } }), undefined, { snapshotDir: join(FIXTURES, "fixed") });
+    expect(hit).toMatchObject({ status: "reproduced", isolation: "container", canary: { token: TOKEN, observed: true }, appSha256: hashAppFiles(join(FIXTURES, "fixed")) });
+    expect(parseFindingReproduction({ result: hit })?.result?.status).toBe("reproduced");
+    expect((await run((n) => line(n, { listening: true, token: TOKEN, control: { status: 404, hit: false }, attack: { status: 200, hit: false } }))).status).toBe("not-reproduced");
   });
   it("a missing or malformed client line is inconclusive", async () => {
     expect(await run(() => "nothing")).toMatchObject({ status: "inconclusive", reason: "no-client-result" });
@@ -131,7 +198,25 @@ describe("classification with a canned runner", () => {
     expect(await run(() => "", {}, { proof: proof("/x?name=a") })).toMatchObject({ status: "inconclusive", reason: "no-traversal-in-the-request" });
   });
   it("redacts the log tail", async () => {
-    const result = await run((n) => `API_TOKEN=supersecretvalue99\n${line(n, { listening: true, attack: { hit: false } })}`);
+    const result = await run((n) => `API_TOKEN=supersecretvalue99\n${line(n, { listening: true, token: TOKEN, attack: { hit: false } })}`);
     expect(result.logTail).not.toContain("supersecretvalue99");
+  });
+});
+
+describe("the intentionally vulnerable fixture", () => {
+  const source = readFileSync(join(FIXTURES, "vulnerable/server.js"), "utf8");
+  it("is labelled, binds to loopback only, and refuses to start without its acknowledgement", () => {
+    expect(source).toMatch(/^\/\/ INTENTIONALLY VULNERABLE TEST FIXTURE/);
+    expect(source).toMatch(/REPRO_FIXTURE_ACK !== "intentionally-vulnerable"/);
+    const listens = source.split("\n").filter((l) => l.includes(".listen("));
+    expect(listens.length).toBeGreaterThan(0);
+    expect(listens.every((l) => l.includes('"127.0.0.1"'))).toBe(true);
+  });
+  it("has no package.json, no start script and no workflow that runs it", () => {
+    for (const variant of ["vulnerable", "fixed"]) expect(existsSync(join(FIXTURES, variant, "package.json"))).toBe(false);
+    const root = join(FIXTURES, "../../../..");
+    const workflows = join(root, ".github/workflows");
+    for (const file of readdirSync(workflows)) expect(readFileSync(join(workflows, file), "utf8")).not.toContain("repro-fixtures");
+    expect(readFileSync(join(root, "package.json"), "utf8")).not.toContain("repro-fixtures");
   });
 });

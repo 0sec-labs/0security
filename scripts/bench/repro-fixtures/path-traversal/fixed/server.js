@@ -1,5 +1,5 @@
-// The same app with the flaw fixed: the resolved path must stay inside the public folder.
-// MIT licensed, written for this repository.
+// TEST FIXTURE: the same app as ../vulnerable with the flaw fixed. The resolved path must stay inside the public folder.
+// MIT licensed, written for this repository. Binds to 127.0.0.1 only. Has no package.json and no start script.
 const http = require("http");
 const fs = require("fs");
 const path = require("path");

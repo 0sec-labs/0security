@@ -1,7 +1,8 @@
 /**
  * Run for real: git, the SQLite store, the fixture app on loopback, the in-container script under sh.
- * FAKE: the container. HostBackedRunner copies the snapshot to a scratch folder and runs the script on the host,
- * with no isolation and no network cut. Nothing here proves the OciRunner path.
+ * NOT a container: HostBackedRunner copies the snapshot to a scratch folder and runs the script on the host, with no
+ * isolation and no network cut. It says so, so its results are unisolated and can never be reproduced.
+ * Nothing here proves the OciRunner path.
  */
 import { afterEach, describe, expect, it } from "vitest";
 import { execFileSync, spawn } from "node:child_process";
@@ -21,7 +22,7 @@ afterEach(() => { for (const dir of scratch.splice(0)) rmSync(dir, { recursive: 
 const tmp = (prefix: string) => { const dir = mkdtempSync(join(tmpdir(), prefix)); scratch.push(dir); return dir; };
 
 const hostBacked: ContainerRunner = {
-  isolation: "container",
+  isolation: "host",
   async probe() { return { ok: true, runtime: "fake" }; },
   run(request) {
     const parent = tmp("0-repro-cli-run-");
@@ -59,23 +60,23 @@ function dbWithFinding(): string {
 }
 
 const deps = (repo: { folder: string }): ReproduceDeps => ({
-  out: () => undefined, err: () => undefined, runner: () => hostBacked,
+  out: () => undefined, err: () => undefined, runner: () => hostBacked, allowUnisolated: true,
   head: async () => ({ commit: execFileSync("git", ["-C", repo.folder, "rev-parse", "HEAD"], { encoding: "utf8" }).trim(), dirty: false }),
   snapshot: async (folder) => { const dir = tmp("0-repro-cli-snap-"); cpSync(folder, dir, { recursive: true }); return { dir, cleanup: () => undefined }; },
 });
-const start = () => `node server.js`;
+const start = () => "REPRO_FIXTURE_ACK=intentionally-vulnerable node server.js";
 
 describe("findings reproduce", () => {
-  it("records reproduced for the vulnerable commit and not-reproduced for the fixed one", async () => {
+  it("records what the app returned for the vulnerable and the fixed commit, as unisolated results", async () => {
     const dbPath = dbWithFinding();
     const vuln = repoFrom("vulnerable");
     const first = await runReproduce("f-abc123", { image: IMAGE, folder: vuln.folder, dbPath, start: start() }, deps(vuln));
-    expect(first).toMatchObject({ stored: true, result: { status: "reproduced", commit: vuln.commit } });
-    expect(first.line).toMatch(/^Reproduced on commit/);
+    expect(first).toMatchObject({ stored: true, result: { status: "inconclusive", reason: "unisolated-run-canary-observed", isolation: "unisolated", commit: vuln.commit } });
+    expect(first.line).toMatch(/cannot count as reproduced/);
 
     const fixed = repoFrom("fixed");
     const second = await runReproduce("f-abc123", { image: IMAGE, folder: fixed.folder, dbPath, start: start() }, deps(fixed));
-    expect(second.result.status).toBe("not-reproduced");
+    expect(second.result).toMatchObject({ status: "inconclusive", reason: "unisolated-run-canary-absent" });
     expect(second.line).toMatch(/does not mean the issue is absent/);
 
     const db = new osecDB(dbPath);
@@ -83,7 +84,7 @@ describe("findings reproduce", () => {
       const stored = db.getFindingReproduction("f-abc123");
       expect(stored?.result?.commit).toBe(fixed.commit);
       expect(stored?.proof?.label).toBe("proposed");
-      expect(reproductionDetail(db.getFinding("f-abc123") as never)?.line).toMatch(/^Not reproduced by this recipe/);
+      expect(reproductionDetail(db.getFinding("f-abc123") as never)?.line).toMatch(/^Inconclusive/);
       expect(db.getFinding("f-abc123")).toMatchObject({ severity: "high", status: "discovered", triageStatus: "new" });
     } finally { db.close(); }
   }, 120_000);
@@ -96,7 +97,7 @@ describe("findings reproduce", () => {
     const outcome = await runReproduce("f-abc123", { image: IMAGE, folder: vuln.folder, dbPath }, broken);
     expect(outcome).toMatchObject({ stored: false, result: { status: "error", reason: "no-container-runtime" } });
     const db = new osecDB(dbPath);
-    try { expect(db.getFindingReproduction("f-abc123")?.result?.status).toBe("reproduced"); } finally { db.close(); }
+    try { expect(db.getFindingReproduction("f-abc123")?.result?.reason).toBe("unisolated-run-canary-observed"); } finally { db.close(); }
   }, 120_000);
 
   it("refuses a tag, an unknown finding and a folder that is not a Git repository", async () => {

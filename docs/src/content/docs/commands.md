@@ -2304,13 +2304,17 @@ Experimental: run a finding's proposed steps against a local copy of the app in 
 
 Reproduce replays a finding's proposed request against your app and checks whether a canary file came back. It runs the committed tree of `--folder` (default: the current directory) in a container started from `--image`, which must be pinned by digest and contain node. Uncommitted changes are not included.
 
-The container has no network except its own loopback. The harness plants a canary file outside the folder the app serves, starts the app, and replays the finding's request with the file name swapped for the canary. It never contacts a live URL. A second request without the traversal checks that the app does not serve the canary anyway.
+The container has no network except its own loopback. The harness starts the app and waits until it answers. Then it plants a fresh canary file with a random name and content next to the app folder and in its parent, and replays the finding's request with the file name swapped for the canary. The canary does not exist before that, and its token is not in the command or the app's environment. The harness never contacts a live URL. A second request without the traversal checks that the app does not serve the canary anyway.
 
 The start command is `node server.js` unless you pass `--start`. It comes from you. The repository is untrusted, so its scripts and configuration are never read as instructions. Only path traversal on an HTTP GET route is supported. Other findings, encoded payloads and POST requests give an inconclusive result.
 
-The result is stored next to the finding with the commit, the image digest, the canary, the times and a redacted log tail. [findings show](#findings-show) prints it. Severity, status and triage do not change. An error result is printed but never stored over an earlier result.
+The result is stored next to the finding with the commit, the image digest, a hash of the app files, the canary, the times and a redacted log tail. [findings show](#findings-show) prints it. Severity, status and triage do not change. An error result is printed but never stored over an earlier result.
+
+Reproduced means the app as run returned the canary for this request. It is an observation of the running app, not a statement about the code. An app built to lie can fake it by reading the planted file when it sees the request, so read the code before you trust a result from an app you do not trust.
 
 Not reproduced does not mean safe. It means this one request did not reach the canary on this commit. The app may need other input, state or a different route.
+
+A run that is not in a container is marked unisolated and is never reproduced.
 
 Exit codes:
 

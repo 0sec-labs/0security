@@ -29,6 +29,8 @@ export interface ReproduceDeps {
   head(folder: string): Promise<{ commit: string; dirty: boolean } | undefined>;
   /** A copy of the committed tree. The caller cleans it up. */
   snapshot(folder: string): Promise<{ dir: string; cleanup(): void }>;
+  /** Tests only: let a runner that is not a container run, with the result marked unisolated. No flag sets this. */
+  allowUnisolated?: boolean;
 }
 
 const defaults: ReproduceDeps = {
@@ -63,7 +65,7 @@ export async function runReproduce(id: string, options: ReproduceOptions, deps: 
     const snapshot = await deps.snapshot(folder);
     let result: ReproductionResult;
     try {
-      result = await reproduceFinding({ proof: rep?.proof, snapshotDir: snapshot.dir, commit: head.commit, runner: deps.runner(), image: options.image, ...(options.start ? { start: options.start } : {}) });
+      result = await reproduceFinding({ proof: rep?.proof, snapshotDir: snapshot.dir, commit: head.commit, runner: deps.runner(), image: options.image, ...(deps.allowUnisolated ? { allowUnisolated: true } : {}), ...(options.start ? { start: options.start } : {}) });
     } finally { snapshot.cleanup(); }
 
     // An error says nothing about the finding, so it never replaces an earlier result.

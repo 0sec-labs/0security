@@ -3,11 +3,14 @@
  * and writes the result record. It never touches a live URL: the only network the recipe can use is the loopback
  * inside the container, and the container has no other network. The model cannot call it and cannot set its result.
  *
- * What a result means: "reproduced" says the canary file, planted outside the served folder, came back in a response
- * to the replayed request. "not-reproduced" says it did not, for this one request on this one commit. It does not say
- * the code is safe.
+ * What a result means: "reproduced" says the app as run returned the canary, a file planted fresh outside the served
+ * folder, in a response to the replayed request. "not-reproduced" says it did not, for this one request on this one
+ * commit. Neither says anything certain about the code, and an app built to lie can forge a hit. A run outside the
+ * container is marked unisolated and can never be reproduced.
  */
 import { createHash, randomBytes } from "node:crypto";
+import { lstatSync, readdirSync, readFileSync, readlinkSync } from "node:fs";
+import { join } from "node:path";
 import type { ContainerRunner } from "../verifier/port.js";
 import { redactLog } from "../verifier/redact.js";
 import { imageDigest, isPinnedImage } from "../verifier/spec.js";
@@ -27,6 +30,11 @@ export interface ReproduceInput {
   /** Start command from the operator. Never read from the repository. Default: `node server.js`. */
   start?: string;
   port?: number;
+  /**
+   * Allow a runner that is not a container (a host runner or a stand-in). Only tests set this. The result is marked
+   * unisolated and cannot be reproduced or not-reproduced. The command line never sets it.
+   */
+  allowUnisolated?: boolean;
   timeoutMs?: number;
   signal?: AbortSignal;
   now?: () => Date;
@@ -35,12 +43,27 @@ export interface ReproduceInput {
 
 const MAX_START = 500;
 
+/** SHA-256 over the relative paths and contents of every file under `dir`, in a fixed order. Symlinks hash their target text. */
+export function hashAppFiles(dir: string): string {
+  const hash = createHash("sha256");
+  const walk = (rel: string): void => {
+    for (const entry of readdirSync(join(dir, rel), { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))) {
+      const next = rel ? `${rel}/${entry.name}` : entry.name;
+      const full = join(dir, next);
+      if (entry.isDirectory()) walk(next);
+      else if (lstatSync(full).isSymbolicLink()) hash.update(`link ${next} ${readlinkSync(full)}\n`);
+      else if (entry.isFile()) hash.update(`file ${next} ${createHash("sha256").update(readFileSync(full)).digest("hex")}\n`);
+    }
+  };
+  walk("");
+  return hash.digest("hex");
+}
+
 export async function reproduceFinding(input: ReproduceInput): Promise<ReproductionResult> {
   const now = input.now ?? (() => new Date());
   const hex = input.randomHex ?? ((n: number) => randomBytes(n).toString("hex"));
   const startedAt = now().toISOString();
   const start = input.start ?? DEFAULT_START;
-  const token = hex(16);
   const nonce = hex(16);
 
   const done = (status: ReproductionStatus, reason: string, extra: Partial<ReproductionResult> = {}): ReproductionResult => {
@@ -54,7 +77,8 @@ export async function reproduceFinding(input: ReproduceInput): Promise<Reproduct
   if (!input.proof) return done("inconclusive", "no-proposed-steps");
   if (!isPinnedImage(input.image)) return done("error", "image-not-pinned-by-digest");
   if (!start || start.length > MAX_START || /[\0\r\n]/.test(start)) return done("error", "unusable-start-command");
-  if (input.runner.isolation !== "container") return done("error", "no-container-isolation");
+  const isolated = input.runner.isolation === "container";
+  if (!isolated && !input.allowUnisolated) return done("error", "no-container-isolation");
   const planned = planPathTraversal(input.proof);
   if (!planned.ok) return done("inconclusive", planned.reason);
 
@@ -63,30 +87,37 @@ export async function reproduceFinding(input: ReproduceInput): Promise<Reproduct
 
   const port = input.port ?? DEFAULT_PORT;
   let command: string;
-  try { command = buildPathTraversalScript({ start, port, token, nonce, plan: planned.plan }); }
+  try { command = buildPathTraversalScript({ start, port, nonce, plan: planned.plan }); }
   catch (error) { return done("error", "recipe-could-not-be-built", { logTail: tailOf(redactLog(error instanceof Error ? error.message : String(error))) }); }
 
   const recipeSha256 = createHash("sha256").update(JSON.stringify({ class: PATH_TRAVERSAL_CLASS, start, port, plan: planned.plan, image: input.image })).digest("hex");
+  let appSha256: string;
+  try { appSha256 = hashAppFiles(input.snapshotDir); }
+  catch (error) { return done("error", "app-files-could-not-be-hashed", { logTail: tailOf(redactLog(error instanceof Error ? error.message : String(error))) }); }
   const outcome = await input.runner.run({
     image: input.image, dir: input.snapshotDir, command, network: "none", timeoutMs: input.timeoutMs ?? 120_000,
     ...(input.signal ? { signal: input.signal } : {}),
   });
   const logTail = tailOf(redactLog(tailOf(outcome.output, 4096)));
-  const common = { commit: input.commit, imageDigest: imageDigest(input.image), isolation: "container" as const, network: "loopback" as const, recipeSha256, logTail };
+  const common = { commit: input.commit, imageDigest: imageDigest(input.image), isolation: (isolated ? "container" : "unisolated") as "container" | "unisolated", network: "loopback" as const, recipeSha256, appSha256, logTail };
 
   if (outcome.infraError) return done("error", "runner-failed", { logTail: tailOf(redactLog(outcome.infraError)) });
   if (outcome.timedOut) return done("inconclusive", "timeout", common);
 
-  const line = outcome.output.split("\n").find((l) => l.startsWith(`0REPRO-${nonce} `));
+  // Only text before the app log counts: the app's own output is never read as a result.
+  const clientPart = outcome.output.split("--- app log ---")[0] ?? "";
+  const line = clientPart.split("\n").find((l) => l.startsWith(`0REPRO-${nonce} `));
   if (!line) return done("inconclusive", "no-client-result", common);
-  let seen: { listening?: boolean; control?: { hit?: boolean } | null; attack?: { hit?: boolean } | null };
+  let seen: { listening?: boolean; token?: string; control?: { hit?: boolean } | null; attack?: { hit?: boolean } | null };
   try { seen = JSON.parse(line.slice(`0REPRO-${nonce} `.length)); } catch { return done("inconclusive", "unreadable-client-result", common); }
-  const alive = outcome.output.includes(`0ALIVE-${nonce} 1`);
+  const alive = clientPart.includes(`0ALIVE-${nonce} 1`);
 
   if (!seen.listening) return done("inconclusive", "app-did-not-start", common);
   if (seen.control?.hit) return done("inconclusive", "canary-served-without-traversal", common);
   if (!seen.attack) return done("inconclusive", "no-response-to-the-request", common);
   if (!alive) return done("inconclusive", "app-exited-during-the-run", common);
+  if (typeof seen.token !== "string" || !/^[0-9a-f]{32}$/.test(seen.token)) return done("inconclusive", "unreadable-client-result", common);
   const observed = seen.attack.hit === true;
-  return done(observed ? "reproduced" : "not-reproduced", observed ? "canary-observed" : "canary-absent", { ...common, canary: { token, observed } });
+  if (!isolated) return done("inconclusive", observed ? "unisolated-run-canary-observed" : "unisolated-run-canary-absent", { ...common, canary: { token: seen.token, observed } });
+  return done(observed ? "reproduced" : "not-reproduced", observed ? "canary-observed" : "canary-absent", { ...common, canary: { token: seen.token, observed } });
 }

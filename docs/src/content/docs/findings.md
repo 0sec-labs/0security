@@ -171,7 +171,7 @@ Pin the image by digest. This runs the committed tree of the folder:
 
 Use `--start "node app.js"` when your app starts another way. The command comes from you. 0 never reads start commands from the repository.
 
-The harness plants a canary file outside the folder the app serves and replays the finding's request against it. If the canary comes back, the result is reproduced. Run it again after a fix and the result should change to not reproduced. Not reproduced does not prove the fix: it means this request found nothing.
+The harness starts your app, then plants a fresh canary file outside the folder the app serves and replays the finding's request against it. If the app returns the canary, the result is reproduced. Run it again after a fix and the result should change to not reproduced. Not reproduced does not prove the fix: it means this request found nothing.
 
 Only path traversal on an HTTP GET route is supported. The request goes to the loopback inside the container, never to a live address. The container step is untested against a real runtime. Tests start the fixture app on the host with a stand-in for the container.
 
