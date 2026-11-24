@@ -908,6 +908,41 @@ describe("ConsoleGateway", () => {
         await vi.waitFor(() => expect(instance.get(chat.id).events.some(event => event.type === "error")).toBe(true));
         expect(delivered).toEqual(["first"]);
         expect(instance.get(chat.id).queuedMessages.map(message => message.text)).toEqual(["scheduled A", "scheduled B"]);
+        expect(instance.get(chat.id).queuePausedReason).toBe("error");
+      }
+    }
+  });
+
+  it("sends a queued message when the turn ends normally and holds it, saying why, only after a stop", async () => {
+    for (const stop of [false, true]) {
+      let finish!: () => void;
+      const delivered: string[] = [];
+      const instance = gateway(input => {
+        const session = engine(input);
+        session.send = async (text, _callbacks, options) => {
+          delivered.push(text);
+          if (text === "first") await new Promise<void>(resolve => { finish = resolve; options?.signal?.addEventListener("abort", () => resolve()); });
+          return outcome();
+        };
+        return session;
+      });
+      const chat = instance.create();
+      await instance.send(chat.id, "first");
+      await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
+      await instance.send(chat.id, { text: "second", mode: "queue" });
+      expect(instance.get(chat.id).queuePausedReason).toBeUndefined();
+      if (stop) await instance.cancel(chat.id); else finish();
+      if (stop) {
+        await vi.waitFor(() => expect(instance.get(chat.id).session.status).toBe("ready"));
+        await new Promise(resolve => setTimeout(resolve, 20));
+        expect(delivered).toEqual(["first"]);
+        expect(instance.get(chat.id).queuedMessages.map(message => message.text)).toEqual(["second"]);
+        expect(instance.get(chat.id).queuePausedReason).toBe("stopped");
+      } else {
+        await vi.waitFor(() => expect(delivered).toEqual(["first", "second"]));
+        await idle(instance, chat.id);
+        expect(instance.get(chat.id).queuedMessages).toEqual([]);
+        expect(instance.get(chat.id).queuePausedReason).toBeUndefined();
       }
     }
   });
