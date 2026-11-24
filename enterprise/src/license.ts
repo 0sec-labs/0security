@@ -242,7 +242,7 @@ const FEATURE_LABELS: Record<EnterpriseFeature, string> = {
   rbac: "role-based access control",
   scim: "SCIM provisioning",
   saml: "SAML sign-in",
-  "evidence-signing": "signed evidence bundles",
+  "evidence-signing": "evidence signing",
   "audit-chain": "the tamper-evident audit log",
   retention: "retention policies",
 };

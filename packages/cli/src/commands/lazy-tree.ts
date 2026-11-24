@@ -33,6 +33,10 @@ const SECTIONS: Readonly<Record<string, Build>> = {
     (await import("./sbom.js")).registerSbomCommand(root);
   },
 
+  async evidence(root) {
+    (await import("./evidence.js")).registerEvidenceCommand(root);
+  },
+
   async findings(root) {
     const [reports, findings, exportCommand, keys, importCommand, fix, burndown, verify, upload, issues, draft, evidence, metrics, exportFixes, rollup] = await Promise.all([
       import("./reports.js"), import("./findings.js"), import("./findings-export.js"), import("./findings-keys.js"), import("./findings-import.js"), import("./fix.js"), import("./burndown.js"), import("./verify.js"), import("./findings-upload.js"), import("./findings-issues.js"), import("./findings-report-draft.js"), import("./findings-evidence.js"), import("./findings-metrics.js"), import("./findings-export-fixes.js"), import("./findings-rollup.js"),

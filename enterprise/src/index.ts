@@ -43,3 +43,5 @@ export type {
   LoadedLicense,
   PublicKeys,
 } from "./license.js";
+export { DSSE_PAYLOAD_TYPE, EvidenceKeyError, dssePae, evidenceKeyId, signEvidenceStatement } from "./evidence-signing.js";
+export type { DsseEnvelope } from "./evidence-signing.js";

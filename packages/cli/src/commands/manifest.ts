@@ -58,6 +58,7 @@ export const TOP_LEVEL_COMMANDS: readonly TopLevelCommand[] = [
   { name: "computers", aliases: [], description: GROUP_DESCRIPTIONS["computers"]! },
   { name: "config", aliases: [], description: GROUP_DESCRIPTIONS["config"]! },
   // Implementation commands behind the grammar in command-grammar.ts: hidden.
+  { name: "evidence", aliases: [], description: "Check evidence folders signed with findings evidence --sign", hidden: true },
   { name: "automation", aliases: [], description: "Discover templates, inspect saved automations, and run an automation", hidden: true },
   { name: "doctor", aliases: [], description: "Check local runtime prerequisites and suggest the next command", hidden: true, options: true },
   { name: "web", aliases: [], description: "Run the local browser console and operations workspace", hidden: true, options: true },

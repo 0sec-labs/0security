@@ -618,6 +618,30 @@ Options:
   --json      Print machine-readable status (no credential values)
   -h, --help  display help for command
 
+### 0security evidence (hidden)
+Usage: 0security evidence [options] [command]
+
+Check evidence folders signed with 0security findings evidence --sign
+
+Options:
+  -h, --help                 display help for command
+
+Commands:
+  verify [options] <folder>  Check offline that evidence.dsse.json is signed by this key and no file
+                             was changed, added or removed
+  help [command]             display help for command
+
+### 0security evidence verify
+Usage: 0security evidence verify [options] <folder>
+
+Check offline that evidence.dsse.json is signed by this key and no file was changed, added or
+removed
+
+Options:
+  --pub <file>  Public key (PEM) that matches the signing key (required)
+  --json        Print the result as JSON
+  -h, --help    display help for command
+
 ### 0security findings
 Usage: 0security findings [options] [command]
 
@@ -749,6 +773,8 @@ Options:
   --check-advisories  Look the SBOM components up in the public OSV database (the only network use)
   --include-evidence  Also write evidence and proof-of-concept bodies (can contain working exploit
                       details)
+  --sign <key>        Sign the folder with your Ed25519 private key (PEM file). Needs an enterprise
+                      license
   --name <name>       Name of the application the SBOM describes (default: the repository folder's
                       name)
   --db-path <path>    Path to SQLite database
