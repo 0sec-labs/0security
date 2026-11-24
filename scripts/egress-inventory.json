@@ -108,14 +108,16 @@
       "enterprise": "blocked",
       "destinations": [
         "mcp.parallel.ai",
-        "html.duckduckgo.com"
+        "html.duckduckgo.com",
+        "api.keenable.ai"
       ],
       "files": [
         "packages/engine/src/agent/tools.ts",
-        "packages/engine/src/agent/tools/web-search-parallel.ts"
+        "packages/engine/src/agent/tools/web-search-parallel.ts",
+        "packages/engine/src/agent/tools/web-search-keenable.ts"
       ],
-      "when": "The agent calls web_search (on by default).",
-      "sent": "The model-written search query.",
+      "when": "The agent calls web_search (on by default). api.keenable.ai is contacted only when ZERO_WEB_SEARCH_PROVIDER=keenable, instead of mcp.parallel.ai.",
+      "sent": "The model-written search query. With KEENABLE_API_KEY set, that key goes to api.keenable.ai.",
       "disable": "ZERO_FEATURE_WEB_SEARCH=0, or ZERO_ENTERPRISE (tool is removed and refuses)."
     },
     {

@@ -37,6 +37,7 @@ import { formatTruncated } from "./output-truncation.js";
 import { isRepoRelativePath, isSuggestionAcceptable, probeFileRefTarget } from "../findings-parser.js";
 import type { osecDB } from "../storage/index.js";
 import { searchParallel } from "./tools/web-search-parallel.js";
+import { searchKeenable, selectedWebSearchProvider } from "./tools/web-search-keenable.js";
 import { parseDuckDuckGoResults, readWebSearchResponse } from "./tools/web-search-response.js";
 import { features as featureFlags } from "./features.js";
 import { sanitizedEnv } from "./sanitized-env.js";
@@ -1348,6 +1349,10 @@ export class ToolExecutor {
       return { success: false, output: null, error: "web_search is disabled. Set ZERO_FEATURE_WEB_SEARCH=1 to enable." };
     }
 
+    const selection = selectedWebSearchProvider();
+    if ("error" in selection) return { success: false, output: null, error: selection.error };
+    const useKeenable = selection.provider === "keenable";
+
     const query = (args.query as string ?? "").trim();
     if (!query) {
       return { success: false, output: null, error: "query is required" };
@@ -1372,17 +1377,20 @@ export class ToolExecutor {
 
     try {
       let primary: Awaited<ReturnType<typeof searchParallel>>;
+      const primaryName = useKeenable ? "Keenable" : "Parallel";
+      const primaryHost = useKeenable ? "api.keenable.ai" : "mcp.parallel.ai";
+      const search = useKeenable ? searchKeenable : searchParallel;
       try {
-        primary = await searchParallel(query, {
+        primary = await search(query, {
           signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]),
           fetchImpl: async (input, init) => {
             const url = input instanceof Request ? input.url : String(input);
             const endpoint = new URL(url);
-            if (endpoint.protocol !== "https:" || endpoint.hostname !== "mcp.parallel.ai" || endpoint.username || endpoint.password) throw new Error("Invalid search provider endpoint.");
+            if (endpoint.protocol !== "https:" || endpoint.hostname !== primaryHost || endpoint.username || endpoint.password) throw new Error("Invalid search provider endpoint.");
             const requestSignal = init?.signal ? AbortSignal.any([signal, init.signal]) : signal;
             execution?.assertAuthority?.();
             const response = await fetchScoped(url, { ...init, signal: requestSignal, redirect: "error" }, {
-              baseUrl: "https://mcp.parallel.ai", timeoutMs: 10_000,
+              baseUrl: `https://${primaryHost}`, timeoutMs: 10_000,
               validateUrl: () => execution?.assertAuthority?.(),
             });
             return response;
@@ -1392,10 +1400,10 @@ export class ToolExecutor {
         // A primary-provider deadline may leave time for the fallback, while
         // parent cancellation and the overall deadline must never retry.
         signal.throwIfAborted();
-        primary = { ok: false, error: "Parallel search timed out or was unavailable." };
+        primary = { ok: false, error: `${primaryName} search timed out or was unavailable.` };
       }
       signal.throwIfAborted();
-      let provider = "Parallel";
+      let provider = primaryName;
       let results: Array<{ title: string; url: string; snippet: string }>;
       if (primary.ok) {
         results = primary.results;
@@ -1411,10 +1419,10 @@ export class ToolExecutor {
         });
         if (!res.ok) {
           void res.body?.cancel().catch(() => {});
-          return { success: false, output: null, error: `Web search unavailable. Parallel: ${primary.error} DuckDuckGo: HTTP ${res.status}.` };
+          return { success: false, output: null, error: `Web search unavailable. ${primaryName}: ${primary.error} DuckDuckGo: HTTP ${res.status}.` };
         }
         const parsed = parseDuckDuckGoResults(await readWebSearchResponse(res, signal));
-        if (!parsed.ok) return { success: false, output: null, error: `Web search unavailable. Parallel: ${primary.error} DuckDuckGo: ${parsed.error}` };
+        if (!parsed.ok) return { success: false, output: null, error: `Web search unavailable. ${primaryName}: ${primary.error} DuckDuckGo: ${parsed.error}` };
         results = parsed.results;
       }
 
