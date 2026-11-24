@@ -8,6 +8,7 @@ The rest of the repository is open source under MIT OR Apache-2.0 and needs no k
 
 - The license check: a signed key, verified offline with a public key. It never contacts a server.
 - The list of paid features: `findings-server`, `rbac`, `scim`, `saml`, `evidence-signing`, `audit-chain` and `retention`.
+- SAML 2.0 sign-in for the team workspace (`saml`), in `src/saml/`. It uses the node-saml library for XML signatures and adds the SAML profile checks. See [SAML sign-in](../docs/src/content/docs/server-mode.md).
 - Tools to create a signing keypair and to issue a key.
 
 ## Use it
