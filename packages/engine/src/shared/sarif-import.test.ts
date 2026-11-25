@@ -63,6 +63,39 @@ describe("parseSarif", () => {
     expect(looksLikeSarif(JSON.stringify({ findings: [], target: "x" }))).toBe(false);
   });
 
+  it("resolves rule metadata from nested rule.index, rule.id, and legacy ruleIndex", () => {
+    const rules = [
+      { id: "SEC-001", shortDescription: { text: "Hardcoded Secret" }, properties: { "security-severity": "9.1", tags: ["external/cwe/cwe-798"] } },
+      { id: "SEC-002", shortDescription: { text: "Weak Hash" }, properties: { "security-severity": "5.0", tags: ["external/cwe/cwe-328"] } },
+    ];
+    const parsed = parseSarif(JSON.stringify({
+      version: "2.1.0",
+      runs: [{
+        tool: { driver: { name: "TestScanner", rules } },
+        results: [
+          { rule: { index: 0 }, message: { text: "Found secret" }, locations: [at("config.ts", 12)] },
+          { rule: { index: 1 }, message: { text: "Found md5" }, locations: [at("hash.ts", 4)] },
+          { rule: { id: "SEC-002" }, message: { text: "By rule.id" } },
+          { ruleIndex: 1, message: { text: "By legacy ruleIndex" } },
+        ],
+      }],
+    }));
+    expect(parsed.findings[0]).toMatchObject({ ruleId: "SEC-001", title: "Hardcoded Secret", severity: "critical", cwe: ["CWE-798"], path: "config.ts", startLine: 12 });
+    expect(parsed.findings[1]).toMatchObject({ ruleId: "SEC-002", title: "Weak Hash", severity: "medium", cwe: ["CWE-328"], path: "hash.ts", startLine: 4 });
+    expect(parsed.findings[2]).toMatchObject({ ruleId: "SEC-002", title: "Weak Hash", severity: "medium", cwe: ["CWE-328"] });
+    expect(parsed.findings[3]).toMatchObject({ ruleId: "SEC-002", title: "Weak Hash", severity: "medium", cwe: ["CWE-328"] });
+  });
+
+  it("ignores invalid or out-of-range rule indices without resolving an unrelated rule", () => {
+    const rules = [{ id: "SEC-001", shortDescription: { text: "Hardcoded Secret" }, properties: { "security-severity": "9.1", tags: ["CWE-798"] } }];
+    for (const bad of [{ rule: { index: -1 } }, { rule: { index: 0.5 } }, { rule: { index: 99 } }, { rule: { index: "0" } }, { rule: {} }, { ruleIndex: -1 }, { rule: { index: 99 }, ruleIndex: 0 }]) {
+      const finding = parseSarif(log([{ ...bad, message: { text: "Unknown issue" } }], rules)).findings[0]!;
+      expect(finding).toMatchObject({ ruleId: "unknown-rule", title: "Unknown issue", severity: "medium", cwe: [] });
+    }
+    const emptyRules = parseSarif(log([{ rule: { index: 0 }, message: { text: "No rules" } }], [])).findings[0]!;
+    expect(emptyRules).toMatchObject({ ruleId: "unknown-rule", title: "No rules", severity: "medium", cwe: [] });
+  });
+
   it("makes absolute paths relative to the scanned folder, and drops other absolute paths", () => {
     const text = log([{ ruleId: "r", message: { text: "m" }, locations: [at("file:///work/app/src/a.ts", 3)] }, { ruleId: "r", message: { text: "m" }, locations: [at("file:///elsewhere/b.ts", 3)] }]);
     const parsed = parseSarif(text, { roots: ["/work/app"] }).findings;
