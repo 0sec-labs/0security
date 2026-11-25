@@ -136,8 +136,9 @@ export function importCiReport(options: { reportJson: string; metadataJson?: str
  */
 export function prepareSarifImport(sarifJson: string, options: { tool?: string; roots?: string[]; now?: Date } = {}): Parameters<osecDB["importCiReport"]>[0] {
   if (Buffer.byteLength(sarifJson, "utf8") > MAX_REPORT_BYTES) throw new Error("The SARIF file exceeds the size limit.");
-  const parsed = parseScannerOutput(sarifJson, { ...(options.tool ? { tool: options.tool } : {}), ...(options.roots ? { roots: options.roots } : {}) });
-  const digest = hash((looksLikeNucleiJsonl(sarifJson) ? sarifJson : canonical(JSON.parse(sarifJson))) + `\n${options.tool ?? ""}`);
+  const source = sarifJson.startsWith("\uFEFF") ? sarifJson.slice(1) : sarifJson;
+  const parsed = parseScannerOutput(source, { ...(options.tool ? { tool: options.tool } : {}), ...(options.roots ? { roots: options.roots } : {}) });
+  const digest = hash((looksLikeNucleiJsonl(source) ? source : canonical(JSON.parse(source))) + `\n${options.tool ?? ""}`);
   const scanId = `sarif-${digest}`;
   const now = options.now ?? new Date();
   const importedAt = now.toISOString();

@@ -176,11 +176,12 @@ export function locationLabel(item: Pick<ImportedFinding, "path" | "startLine" |
 }
 
 const sha = (value: string): string => createHash("sha256").update(value).digest("hex").slice(0, 24);
+const stripBom = (text: string): string => (text.startsWith("\uFEFF") ? text.slice(1) : text);
 
 /** Parse a SARIF log. Throws a short message when the document is not SARIF 2.1.0 or is too large. */
 export function parseSarif(text: string, options: { tool?: string; roots?: readonly string[] } = {}): SarifImport {
   let log: unknown;
-  try { log = JSON.parse(text); } catch { throw new Error("The file is not valid JSON."); }
+  try { log = JSON.parse(stripBom(text)); } catch { throw new Error("The file is not valid JSON."); }
   if (!isObject(log) || !Array.isArray(log.runs)) throw new Error("This is not a SARIF log: it has no runs.");
   if (typeof log.version === "string" && !log.version.startsWith("2.1")) throw new Error(`Unsupported SARIF version ${clean(log.version, 16)}; expected 2.1.0.`);
   if (log.runs.length > MAX_RUNS) throw new Error(`The log has more than ${MAX_RUNS} runs.`);
@@ -262,8 +263,9 @@ export function parseSarif(text: string, options: { tool?: string; roots?: reado
 
 /** True when the parsed JSON looks like a SARIF log rather than one of 0's own reports. */
 export function looksLikeSarif(text: string): boolean {
-  if (!/"runs"\s*:/.test(text)) return false;
-  try { const value = JSON.parse(text); return isObject(value) && Array.isArray(value.runs); } catch { return false; }
+  const source = stripBom(text);
+  if (!/"runs"\s*:/.test(source)) return false;
+  try { const value = JSON.parse(source); return isObject(value) && Array.isArray(value.runs); } catch { return false; }
 }
 
 const MAX_JSONL_LINE = 512 * 1024;
@@ -271,8 +273,9 @@ const NUCLEI_SEVERITY: Record<string, Severity> = { critical: "critical", high: 
 
 /** True when the text is Nuclei's JSON Lines output (`-jsonl-export`): the first line is an object with a `template-id`. */
 export function looksLikeNucleiJsonl(text: string): boolean {
-  const newline = text.indexOf("\n");
-  const first = (newline === -1 ? text : text.slice(0, newline)).trim();
+  const source = stripBom(text);
+  const newline = source.indexOf("\n");
+  const first = (newline === -1 ? source : source.slice(0, newline)).trim();
   if (!first.startsWith("{") || first.length > MAX_JSONL_LINE) return false;
   try { const value = JSON.parse(first); return isObject(value) && typeof value["template-id"] === "string"; } catch { return false; }
 }
@@ -282,13 +285,14 @@ export function looksLikeNucleiJsonl(text: string): boolean {
  * severity name, so this reads the richer file. Same limits as the SARIF reader: untrusted text, nothing is executed or fetched.
  */
 export function parseNucleiJsonl(text: string, options: { tool?: string } = {}): SarifImport {
+  const source = stripBom(text);
   const tool = options.tool?.trim() ? clean(options.tool, 80) : "Nuclei";
   const findings: ImportedFinding[] = [];
   // Walk the text line by line instead of splitting it: a file of millions of empty lines must not become an array.
-  for (let start = 0; start < text.length;) {
-    const newline = text.indexOf("\n", start);
-    const end = newline === -1 ? text.length : newline;
-    const line = end - start > MAX_JSONL_LINE ? "" : text.slice(start, end);
+  for (let start = 0; start < source.length;) {
+    const newline = source.indexOf("\n", start);
+    const end = newline === -1 ? source.length : newline;
+    const line = end - start > MAX_JSONL_LINE ? "" : source.slice(start, end);
     start = end + 1;
     if (!line.trim()) continue;
     let raw: unknown;
