@@ -24,7 +24,6 @@ export function broadPermission(entry: string): string | undefined {
   return undefined;
 }
 
-const AUTO_KEY = /^(?:.*yolo.*|autorun|auto_run|autorunmode|enableallprojectmcpservers|dangerouslyskippermissions|skipdangerousmodepermissionprompt|alwaysallow)$/i;
 
 export function scanSettings(file: string, text: string, parsed: unknown): AgentConfigFinding[] {
   const found: AgentConfigFinding[] = [];
@@ -48,18 +47,20 @@ export function scanSettings(file: string, text: string, parsed: unknown): Agent
     for (const [key, value] of Object.entries(node).slice(0, 1000)) {
       const here = [...path, key];
       const dotted = here.join(".");
-      if ((key === "allow" || key === "allowedTools" || key === "alwaysAllow") && Array.isArray(value)) {
+      if (key === "allow" && path[path.length - 1] === "permissions" && Array.isArray(value)) { // Claude Code and Cursor CLI: permissions.allow
         for (const entry of value.slice(0, 500)) if (typeof entry === "string") { const why = broadPermission(entry); if (why) add(JSON.stringify(entry), entry, `Permission ${entry} ${why}.`); }
       }
-      if (key === "defaultMode" && typeof value === "string" && value === "bypassPermissions") add(JSON.stringify(value), `${key}: ${value}`, `defaultMode ${value} turns off permission prompts.`);
-      if (key === "permissionMode" && value === "bypassPermissions") add(JSON.stringify(value), `${key}: ${value}`, "permissionMode bypassPermissions turns off permission prompts.");
-      if (AUTO_KEY.test(key) && value === true) add(JSON.stringify(key), `${key}: true`, key === "enableAllProjectMcpServers" ? "enableAllProjectMcpServers approves every MCP server the repository defines, without asking." : key === "alwaysAllow" ? "alwaysAllow is on." : `${key} is on, so the tool acts without asking.`);
+      if (key === "defaultMode" && value === "bypassPermissions") add(JSON.stringify(value), `${key}: ${value}`, "defaultMode bypassPermissions turns off permission prompts. Claude Code ignores it in project settings files, so remove it.", "medium");
+      if (key === "skipDangerousModePermissionPrompt" && value === true) add(JSON.stringify(key), `${key}: true`, "skipDangerousModePermissionPrompt hides the warning that Claude Code shows before bypass permissions mode.", "medium");
+      if (key === "enableAllProjectMcpServers" && value === true) add(JSON.stringify(key), `${key}: true`, "enableAllProjectMcpServers approves every server in the project .mcp.json without a prompt once the folder is trusted.");
       if (key === "enabledMcpjsonServers" && Array.isArray(value) && value.length) add(JSON.stringify(key), `${key}: ${value.slice(0, 5).map(String).join(", ")}`, `enabledMcpjsonServers pre-approves ${value.length} MCP server${value.length === 1 ? "" : "s"} defined in the repository.`, "medium");
       if (key === "trust" && value === true && path.some(part => /mcp/i.test(part))) add(JSON.stringify(key), `${dotted}: true`, `MCP server "${path[path.length - 1]}" is trusted, so its tool calls skip confirmation.`);
-      if (/(?:^|\.)autoApprove$/i.test(key) && (value === true || (isObject(value) && Object.entries(value).some(([k, v]) => v === true && /^\/?\.\*\/?$/.test(k))))) add(JSON.stringify(key), `${dotted}: ${value === true ? "true" : "{\".*\": true}"}`, `${dotted} approves agent actions without asking.`);
-      if ((key === "approval_policy" && value === "never") || (key === "sandbox_mode" && value === "danger-full-access") || (key === "approvalMode" && value === "yolo")) add(JSON.stringify(key), `${key} = ${String(value)}`, `${key} ${String(value)} removes the check before an agent runs commands.`);
+      if ((key === "chat.tools.global.autoApprove" && value === true) || (key === "chat.tools.terminal.autoApprove" && isObject(value) && Object.entries(value).some(([k, v]) => v === true && /^\/?\.\*\/?$/.test(k)))) add(JSON.stringify(key), `${key}: ${value === true ? "true" : "a rule that matches every command"}`, `${key} approves agent actions without asking. The VS Code documentation says to set it in User settings.`);
+      // Codex: https://developers.openai.com/codex/config-basic and https://developers.openai.com/codex/agent-approvals-security
+      if (key === "approval_policy" && value === "never") add(JSON.stringify(key), `${key} = never`, "approval_policy never stops Codex from asking before it runs commands.", "medium");
+      if ((key === "sandbox_mode" && value === "danger-full-access") || (key === "default_permissions" && value === ":danger-full-access")) add(JSON.stringify(key), `${key} = ${String(value)}`, `${key} ${String(value)} runs Codex with no sandbox.`);
       if (key === "hooks" && !inHooks) hookTree(value, "");
-      if (typeof value === "string" && /--dangerously-skip-permissions|--yolo\b|--trust-all-tools|--dangerously-bypass-approvals-and-sandbox|--allow-dangerously-skip-permissions/.test(value)) add(JSON.stringify(value), `${dotted}: ${value.slice(0, 120)}`, `${dotted} passes a flag that turns off the permission check.`);
+      if (typeof value === "string" && /--dangerously-skip-permissions|--allow-dangerously-skip-permissions|--dangerously-bypass-approvals-and-sandbox|--sandbox[ =]danger-full-access|--yolo\b|--trust-all-tools/.test(value)) add(JSON.stringify(value), `${dotted}: ${value.slice(0, 120)}`, `${dotted} passes a flag that turns off the permission check.`);
       walk(value, here, depth + 1);
     }
   };
@@ -68,8 +69,7 @@ export function scanSettings(file: string, text: string, parsed: unknown): Agent
     if (Array.isArray(node)) { node.slice(0, 500).forEach(item => hookTree(item, event, depth + 1)); return; }
     if (!isObject(node)) return;
     for (const [key, value] of Object.entries(node)) {
-      if (typeof value === "string" && (key === "command" || key === "bash" || key === "powershell" || key === "shell")) hook(value, event);
-      else if (typeof value === "string" && key === "run") hook(value, event);
+      if (typeof value === "string" && key === "command") hook(value, event);
       else hookTree(value, event || key, depth + 1);
     }
   };
@@ -90,7 +90,7 @@ export function scanAllowedTools(file: string, text: string): AgentConfigFinding
   let depth = 0, current = "";
   for (const ch of listed.replace(/^\[|\]$/g, "")) {
     if (ch === "(") depth++; if (ch === ")") depth = Math.max(0, depth - 1);
-    if ((ch === "," || ch === "\n") && depth === 0) { entries.push(current); current = ""; } else current += ch;
+    if ((ch === "," || ch === "\n" || /\s/.test(ch)) && depth === 0) { entries.push(current); current = ""; } else current += ch;
   }
   entries.push(current);
   for (const raw of entries) {

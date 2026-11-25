@@ -16,9 +16,9 @@ export function agentConfigToSarif(findings: AgentConfigFinding[], options: { to
           name: "0 sbom agent-config", version: options.toolVersion, informationUri: "https://github.com/0sec-labs/0security",
           rules: RULES.map(rule => ({
             id: rule.id, name: rule.title.replace(/[^A-Za-z0-9 ]/g, "").split(" ").map(word => word.charAt(0).toUpperCase() + word.slice(1)).join("").slice(0, 60),
-            shortDescription: { text: rule.heuristic && !/heuristic/i.test(rule.title) ? `${rule.title} [heuristic]` : rule.title }, fullDescription: { text: rule.explanation }, help: { text: rule.fix },
+            shortDescription: { text: rule.heuristic && !/heuristic/i.test(rule.title) ? `${rule.title} [heuristic]` : rule.title }, fullDescription: { text: rule.explanation }, help: { text: `${rule.fix} Sources: ${rule.reference.join(" ")}` }, helpUri: rule.reference[0],
+            properties: { tags: ["security", "agent-config", ...rule.cwe.map(cwe => `external/cwe/${cwe.toLowerCase()}`)], heuristic: rule.heuristic, references: rule.reference },
             defaultConfiguration: { level: LEVEL[rule.severity] },
-            properties: { tags: ["security", "agent-config", ...rule.cwe.map(cwe => `external/cwe/${cwe.toLowerCase()}`)], heuristic: rule.heuristic },
           })),
         },
       },
