@@ -47,6 +47,14 @@ describe("SARIF import", () => {
   it("refuses a file that is not SARIF", () => {
     expect(() => prepareSarifImport(JSON.stringify({ findings: [] }))).toThrow("not a SARIF log");
   });
+
+  it("strips a leading UTF-8 BOM in prepareSarifImport and produces the same scanId", () => {
+    const text = sarif([result("js/sqli", "src/db.ts", 10)]);
+    const plain = prepareSarifImport(text);
+    const bom = prepareSarifImport(`\uFEFF${text}`);
+    expect(bom.scanId).toBe(plain.scanId);
+    expect(bom.findings).toHaveLength(1);
+  });
 });
 
 describe("web scanner import", () => {

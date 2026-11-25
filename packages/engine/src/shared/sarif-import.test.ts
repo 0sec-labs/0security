@@ -186,6 +186,27 @@ describe("dynamic scanner output", () => {
     expect(looksLikeNucleiJsonl(read("zap.sarif"))).toBe(false);
   });
 
+  it("handles a leading UTF-8 BOM in SARIF without changing non-BOM or malformed behavior", () => {
+    const sarif = read("nuclei.sarif");
+    const withBom = `\uFEFF${sarif}`;
+    expect(looksLikeSarif(withBom)).toBe(true);
+    expect(parseSarif(withBom)).toEqual(parseSarif(sarif));
+    expect(() => parseSarif("\uFEFF{bad")).toThrow("not valid JSON");
+    expect(looksLikeSarif("\uFEFF{bad")).toBe(false);
+  });
+
+  it("handles a leading UTF-8 BOM in Nuclei JSON Lines without dropping the first record", () => {
+    const first = read("nuclei.jsonl").trim();
+    const second = JSON.stringify({ "template-id": "cve-2021-44228", info: { name: "Log4Shell", severity: "critical" }, "matched-at": "http://127.0.0.1:18089/login" });
+    const withBom = `\uFEFF${first}\n\n{malformed\n${second}\n`;
+    expect(looksLikeNucleiJsonl(withBom)).toBe(true);
+    const parsed = parseNucleiJsonl(withBom);
+    expect(parsed.findings).toHaveLength(2);
+    expect(parsed.findings.map(f => f.ruleId)).toEqual(["local-admin-panel-exposed", "cve-2021-44228"]);
+    expect(parseScannerOutput(`\uFEFF${first}\n`).findings).toHaveLength(1);
+    expect(() => parseNucleiJsonl("\uFEFF\n")).toThrow("empty");
+  });
+
   describe("hostile input", () => {
     const hostile = (result: Record<string, unknown>) => parseSarif(log([{ ruleId: "r", message: { text: "m" }, ...result }])).findings[0]!;
     it("never turns a URL, absolute path or traversal into a repo path", () => {
