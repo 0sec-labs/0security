@@ -15,6 +15,8 @@ export interface ContainerLimits {
   storageSize?: string;
   /** Mount the root file system read-only. */
   readOnlyRoot?: boolean;
+  /** Run even when the writable-layer cap cannot be applied. Off by default: the run is refused instead. */
+  allowUnboundedStorage?: boolean;
 }
 
 export interface StepRequest {
@@ -39,7 +41,7 @@ export interface StepOutcome {
   durationMs: number;
   /** Set when the adapter could not run the step at all (image pull, runtime failure). */
   infraError?: string;
-  /** Limits the adapter could not apply and ran without, for example a writable-layer cap the storage driver refused. */
+  /** Limits the adapter could not apply and ran without, only when the request allowed it. */
   limitsNotApplied?: string[];
 }
 

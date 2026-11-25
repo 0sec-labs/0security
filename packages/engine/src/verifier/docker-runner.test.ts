@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { OciRunner, buildCreateArgs } from "./docker-runner.js";
+import { OciRunner, STORAGE_LIMIT_UNAVAILABLE, buildCreateArgs } from "./docker-runner.js";
 import type { ExecResult } from "./process.js";
 import type { StepRequest } from "./port.js";
 
@@ -55,15 +55,32 @@ describe("OciRunner with limits", () => {
     expect(outcome.limitsNotApplied).toBeUndefined();
   });
 
-  it("retries without the storage cap when the driver refuses it, and says so", async () => {
+  it("fails closed when the driver refuses the storage cap: no retry, no start, nothing runs", async () => {
     const { calls, runner } = scripted(true);
     const outcome = await runner.run(request({ limits }));
+    expect(outcome.infraError).toBe(STORAGE_LIMIT_UNAVAILABLE);
+    expect(outcome.infraError).toBe("storage limit unavailable: reproduction refused");
+    expect(calls.filter((c) => c[0] === "create")).toHaveLength(1);
+    expect(calls.some((c) => c[0] === "start" || c[0] === "cp" || c[0] === "exec")).toBe(false);
+    expect(calls.at(-1)?.slice(0, 2)).toEqual(["rm", "-f"]);
+  });
+
+  it("retries without the storage cap only when the caller opted out, and says so", async () => {
+    const { calls, runner } = scripted(true);
+    const outcome = await runner.run(request({ limits: { ...limits, allowUnboundedStorage: true } }));
     const creates = calls.filter((c) => c[0] === "create");
     expect(creates).toHaveLength(2);
     expect(creates[1]).not.toContain("--storage-opt");
-    expect(creates[1]).toEqual(expect.arrayContaining(["--pids-limit", "128", "--memory", "512m"]));
+    expect(creates[1]).toEqual(expect.arrayContaining(["--pids-limit", "128", "--memory", "512m", "--tmpfs", "/tmp:rw,size=64m,noexec,nosuid"]));
     expect(outcome.limitsNotApplied).toEqual(["storage-size"]);
     expect(outcome.exitCode).toBe(0);
+  });
+
+  it("does not turn another create failure into an opt-out retry", async () => {
+    const exec = async (_f: string, args: string[]) => (args[0] === "create" ? { code: 1, output: "pull access denied", timedOut: false } : { code: 0, output: "27", timedOut: false });
+    const outcome = await new OciRunner({ exec: exec as never, binaries: ["docker"] }).run(request({ limits: { ...limits, allowUnboundedStorage: true } }));
+    expect(outcome.infraError).toMatch(/could not create container: pull access denied/);
+    expect(outcome.limitsNotApplied).toBeUndefined();
   });
 
   it("always removes the container", async () => {

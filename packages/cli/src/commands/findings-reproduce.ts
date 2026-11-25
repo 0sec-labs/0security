@@ -19,7 +19,7 @@ import { finishWithError, UsageError } from "./output.js";
 
 const run = promisify(execFile);
 
-export interface ReproduceOptions { folder?: string; image?: string; start?: string; dbPath?: string; json?: boolean }
+export interface ReproduceOptions { folder?: string; image?: string; start?: string; dbPath?: string; json?: boolean; allowUnboundedStorage?: boolean }
 
 export interface ReproduceDeps {
   out(text: string): void;
@@ -65,7 +65,7 @@ export async function runReproduce(id: string, options: ReproduceOptions, deps: 
     const snapshot = await deps.snapshot(folder);
     let result: ReproductionResult;
     try {
-      result = await reproduceFinding({ proof: rep?.proof, snapshotDir: snapshot.dir, commit: head.commit, runner: deps.runner(), image: options.image, ...(deps.allowUnisolated ? { allowUnisolated: true } : {}), ...(options.start ? { start: options.start } : {}) });
+      result = await reproduceFinding({ proof: rep?.proof, snapshotDir: snapshot.dir, commit: head.commit, runner: deps.runner(), image: options.image, ...(deps.allowUnisolated ? { allowUnisolated: true } : {}), ...(options.allowUnboundedStorage ? { allowUnboundedStorage: true } : {}), ...(options.start ? { start: options.start } : {}) });
     } finally { snapshot.cleanup(); }
 
     // An error says nothing about the finding, so it never replaces an earlier result.
@@ -82,6 +82,7 @@ export function registerFindingsReproduceCommand(parent: Command, deps: Reproduc
     .argument("<id>", "Finding ID (full or prefix)")
     .requiredOption("--image <image>", "Container image pinned by digest, with node in it, like node:24-bookworm-slim@sha256:<64 hex digits>")
     .option("--start <command>", "Command that starts the app inside the container (default: node server.js). It comes from you, never from the repository.")
+    .option("--allow-unbounded-storage", "Run even when the container runtime cannot cap writable storage. Without this the run is refused. The result records that storage was unbounded.")
     .option("--folder <path>", "Git repository holding the app (default: current directory)")
     .option("--db-path <path>", "Path to SQLite database")
     .option("--json", "Print JSON")

@@ -100,6 +100,17 @@ describe("findings reproduce", () => {
     try { expect(db.getFindingReproduction("f-abc123")?.result?.reason).toBe("unisolated-run-canary-observed"); } finally { db.close(); }
   }, 120_000);
 
+  it("refuses to run when storage cannot be capped, and passes the opt-out through when asked", async () => {
+    const dbPath = dbWithFinding();
+    const vuln = repoFrom("vulnerable");
+    const seen: Array<boolean | undefined> = [];
+    const refusing = (): ContainerRunner => ({ isolation: "container", probe: async () => ({ ok: true, runtime: "fake" }), run: async (request) => { seen.push(request.limits?.allowUnboundedStorage); return { exitCode: null, output: "", timedOut: false, durationMs: 1, infraError: "storage limit unavailable: reproduction refused" }; } });
+    const outcome = await runReproduce("f-abc123", { image: IMAGE, folder: vuln.folder, dbPath }, { ...deps(vuln), runner: refusing });
+    expect(outcome).toMatchObject({ stored: false, result: { status: "error", reason: "storage-limit-unavailable" } });
+    await runReproduce("f-abc123", { image: IMAGE, folder: vuln.folder, dbPath, allowUnboundedStorage: true }, { ...deps(vuln), runner: refusing });
+    expect(seen).toEqual([undefined, true]);
+  });
+
   it("refuses a tag, an unknown finding and a folder that is not a Git repository", async () => {
     const dbPath = dbWithFinding();
     const vuln = repoFrom("vulnerable");

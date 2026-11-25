@@ -11,6 +11,9 @@ import { exec } from "./process.js";
 
 type Exec = typeof exec;
 
+/** The message of the refusal when a writable-storage cap cannot be applied. */
+export const STORAGE_LIMIT_UNAVAILABLE = "storage limit unavailable: reproduction refused";
+
 /** The `create` argument list for one step. Pure, so the limits can be tested without a container runtime. */
 export function buildCreateArgs(name: string, request: StepRequest, options: { storage?: boolean } = {}): string[] {
   const withSetup = Boolean(request.setup) && request.network === "none";
@@ -67,8 +70,9 @@ export class OciRunner implements ContainerRunner {
     try {
       let created = await run(buildCreateArgs(name, request), Math.max(remaining(), 300_000)); // first use may pull the image
       if (created.code !== 0 && request.limits?.storageSize && /storage-opt|storage option|quota/i.test(created.output)) {
-        // The storage driver cannot cap the writable layer. Run without that one cap and say so; the other limits still apply.
+        // The storage driver cannot cap the writable layer. Fail closed: refuse to run uncapped unless the caller opted out.
         await this.#exec(bin, ["rm", "-f", name], { timeoutMs: 20_000 });
+        if (!request.limits.allowUnboundedStorage) return out({ infraError: STORAGE_LIMIT_UNAVAILABLE });
         notApplied.push("storage-size");
         created = await run(buildCreateArgs(name, request, { storage: false }), Math.max(remaining(), 300_000));
       }

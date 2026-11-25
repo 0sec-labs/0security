@@ -12,6 +12,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { lstatSync, readdirSync, readFileSync, readlinkSync } from "node:fs";
 import { join } from "node:path";
 import type { ContainerLimits, ContainerRunner } from "../verifier/port.js";
+import { STORAGE_LIMIT_UNAVAILABLE } from "../verifier/docker-runner.js";
 import { redactLog } from "../verifier/redact.js";
 import { imageDigest, isPinnedImage } from "../verifier/spec.js";
 import { tailOf } from "../verifier/result.js";
@@ -35,6 +36,8 @@ export interface ReproduceInput {
    * unisolated and cannot be reproduced or not-reproduced. The command line never sets it.
    */
   allowUnisolated?: boolean;
+  /** Operator opt-out: run even when the writable-storage cap cannot be applied. Recorded in the result. */
+  allowUnboundedStorage?: boolean;
   timeoutMs?: number;
   signal?: AbortSignal;
   now?: () => Date;
@@ -45,7 +48,8 @@ const MAX_START = 500;
 
 /**
  * Limits for every reproduction container: the app is untrusted code. Processes, memory, CPU and writable storage are
- * capped, /tmp is a small tmpfs, and the run has a wall-clock timeout. The root file system is not read-only: the
+ * capped, /tmp is a small tmpfs, and the run has a wall-clock timeout. The writable-storage cap fails closed: when the
+ * storage driver cannot apply it, the run is refused unless the operator allowed it. The root file system is not read-only: the
  * snapshot is copied into the container and the canary is planted in the app folder's parent, both of which need
  * writable space, and `docker cp` cannot write into a tmpfs.
  */
@@ -110,13 +114,15 @@ export async function reproduceFinding(input: ReproduceInput): Promise<Reproduct
   try { appSha256 = hashAppFiles(input.snapshotDir); }
   catch (error) { return done("error", "app-files-could-not-be-hashed", { logTail: tailOf(redactLog(error instanceof Error ? error.message : String(error))) }); }
   const outcome = await input.runner.run({
-    image: input.image, dir: input.snapshotDir, command, network: "none", timeoutMs: input.timeoutMs ?? REPRODUCTION_TIMEOUT_MS, limits: REPRODUCTION_LIMITS,
+    image: input.image, dir: input.snapshotDir, command, network: "none", timeoutMs: input.timeoutMs ?? REPRODUCTION_TIMEOUT_MS, limits: { ...REPRODUCTION_LIMITS, ...(input.allowUnboundedStorage ? { allowUnboundedStorage: true } : {}) },
     ...(input.signal ? { signal: input.signal } : {}),
   });
+  const storageUnbounded = Boolean(outcome.limitsNotApplied?.includes("storage-size"));
   const notApplied = outcome.limitsNotApplied?.length ? `limits not applied: ${outcome.limitsNotApplied.join(", ")}\n` : "";
   const logTail = tailOf(redactLog(`${notApplied}${tailOf(outcome.output, 4096)}`));
-  const common = { commit: input.commit, imageDigest: imageDigest(input.image), isolation: (isolated ? "container" : "unisolated") as "container" | "unisolated", network: "loopback" as const, recipeSha256, appSha256, logTail };
+  const common = { commit: input.commit, imageDigest: imageDigest(input.image), isolation: (isolated ? "container" : "unisolated") as "container" | "unisolated", network: "loopback" as const, recipeSha256, appSha256, logTail, ...(storageUnbounded ? { storageUnbounded: true as const } : {}) };
 
+  if (outcome.infraError === STORAGE_LIMIT_UNAVAILABLE) return done("error", "storage-limit-unavailable", { logTail: STORAGE_LIMIT_UNAVAILABLE });
   if (outcome.infraError) return done("error", "runner-failed", { logTail: tailOf(redactLog(outcome.infraError)) });
   if (outcome.timedOut) return done("inconclusive", "timeout", common);
 

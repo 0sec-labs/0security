@@ -1083,17 +1083,20 @@ Experimental: run a finding's proposed steps against a local copy of the app in 
 network off, and record the result
 
 Arguments:
-  id                 Finding ID (full or prefix)
+  id                         Finding ID (full or prefix)
 
 Options:
-  --image <image>    Container image pinned by digest, with node in it, like
-                     node:24-bookworm-slim@sha256:<64 hex digits>
-  --start <command>  Command that starts the app inside the container (default: node server.js). It
-                     comes from you, never from the repository.
-  --folder <path>    Git repository holding the app (default: current directory)
-  --db-path <path>   Path to SQLite database
-  --format <format>  Output: text or json (choices: "text", "json")
-  -h, --help         display help for command
+  --image <image>            Container image pinned by digest, with node in it, like
+                             node:24-bookworm-slim@sha256:<64 hex digits>
+  --start <command>          Command that starts the app inside the container (default: node
+                             server.js). It comes from you, never from the repository.
+  --allow-unbounded-storage  Run even when the container runtime cannot cap writable storage.
+                             Without this the run is refused. The result records that storage was
+                             unbounded.
+  --folder <path>            Git repository holding the app (default: current directory)
+  --db-path <path>           Path to SQLite database
+  --format <format>          Output: text or json (choices: "text", "json")
+  -h, --help                 display help for command
 
 ### 0security findings rollup
 Usage: 0security findings rollup [options] [inputs...]

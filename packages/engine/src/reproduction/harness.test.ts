@@ -170,6 +170,38 @@ describe("container limits", () => {
   });
 });
 
+describe("storage cap fails closed", () => {
+  const refusing: ContainerRunner = { isolation: "container", async probe() { return { ok: true, runtime: "fake" }; }, async run() { return { exitCode: null, output: "", timedOut: false, durationMs: 1, infraError: "storage limit unavailable: reproduction refused" }; } };
+  const optedOut: ContainerRunner = { isolation: "container", async probe() { return { ok: true, runtime: "fake" }; }, async run(request) {
+    const nonce = /0REPRO-([0-9a-f]+)/.exec(request.command)![1]!;
+    return { exitCode: 0, output: `0REPRO-${nonce} ${JSON.stringify({ listening: true, token: "a1".repeat(16), control: { hit: false }, attack: { hit: true } })}\n0ALIVE-${nonce} 1\n`, timedOut: false, durationMs: 1, limitsNotApplied: request.limits?.allowUnboundedStorage ? ["storage-size"] : [] };
+  } };
+  const input = { proof: traversal, snapshotDir: join(FIXTURES, "fixed"), commit: COMMIT, image: IMAGE };
+
+  it("returns error, not a result, when the cap cannot be applied", async () => {
+    const result = await reproduceFinding({ ...input, runner: refusing });
+    expect(result).toMatchObject({ status: "error", reason: "storage-limit-unavailable", logTail: "storage limit unavailable: reproduction refused" });
+    expect(result.canary).toBeUndefined();
+  });
+
+  it("passes the operator's opt-out to the runner only when set, and records it in the result", async () => {
+    let seen: StepRequest | undefined;
+    const spy: ContainerRunner = { ...optedOut, run: (request) => { seen = request; return optedOut.run(request); } };
+    await reproduceFinding({ ...input, runner: spy });
+    expect(seen?.limits?.allowUnboundedStorage).toBeUndefined();
+    const result = await reproduceFinding({ ...input, runner: spy, allowUnboundedStorage: true });
+    expect(seen?.limits?.allowUnboundedStorage).toBe(true);
+    expect(result).toMatchObject({ status: "reproduced", storageUnbounded: true });
+    expect(result.logTail).toContain("limits not applied: storage-size");
+    expect(parseFindingReproduction({ result })?.result?.storageUnbounded).toBe(true);
+  });
+
+  it("does not mark a run unbounded when the cap applied", async () => {
+    const result = await reproduceFinding({ ...input, runner: optedOut });
+    expect(result.storageUnbounded).toBeUndefined();
+  });
+});
+
 describe("hashing the app files", () => {
   it("is stable, and changes when a file changes", () => {
     const dir = appDir("a");

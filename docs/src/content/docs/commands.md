@@ -2304,7 +2304,7 @@ Experimental: run a finding's proposed steps against a local copy of the app in 
 
 Reproduce replays a finding's proposed request against your app and checks whether a canary file came back. It runs the committed tree of `--folder` (default: the current directory) in a container started from `--image`, which must be pinned by digest and contain node. Uncommitted changes are not included.
 
-The container has no network except its own loopback. It is capped at 128 processes, 512 MB of memory, one CPU, 256 MB of writable storage and 64 MB of `/tmp`, and a run stops after two minutes. Some storage drivers cannot cap writable storage. The run then goes ahead without that one cap and the result's log says so. The harness starts the app and waits until it answers. Then it plants a fresh canary file with a random name and content next to the app folder and in its parent, and replays the finding's request with the file name swapped for the canary. The canary does not exist before that, and its token is not in the command or the app's environment. The harness never contacts a live URL. A second request without the traversal checks that the app does not serve the canary anyway.
+The container has no network except its own loopback. It is capped at 128 processes, 512 MB of memory, one CPU, 256 MB of writable storage and 64 MB of `/tmp`, and a run stops after two minutes. Some storage drivers cannot cap writable storage. The run is then refused with "storage limit unavailable: reproduction refused". Pass `--allow-unbounded-storage` to run anyway. The result records that storage was unbounded. The harness starts the app and waits until it answers. Then it plants a fresh canary file with a random name and content next to the app folder and in its parent, and replays the finding's request with the file name swapped for the canary. The canary does not exist before that, and its token is not in the command or the app's environment. The harness never contacts a live URL. A second request without the traversal checks that the app does not serve the canary anyway.
 
 The start command is `node server.js` unless you pass `--start`. It comes from you. The repository is untrusted, so its scripts and configuration are never read as instructions. Only path traversal on an HTTP GET route is supported. Other findings, encoded payloads and POST requests give an inconclusive result.
 
@@ -2330,6 +2330,7 @@ Exit codes:
 | --- | --- | --- |
 | `--image <image>` **required** | — | Container image pinned by digest, with node in it, like node:24-bookworm-slim@sha256:&lt;64 hex digits&gt; |
 | `--start <command>` | — | Command that starts the app inside the container (default: node server.js). It comes from you, never from the repository. |
+| `--allow-unbounded-storage` | — | Run even when the container runtime cannot cap writable storage. Without this the run is refused. The result records that storage was unbounded. |
 | `--folder <path>` | — | Git repository holding the app (default: current directory) |
 | `--db-path <path>` | — | Path to SQLite database |
 | `--json` | — | Print JSON |
