@@ -7,6 +7,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { parseSarif } from "../shared/sarif-import.js";
 import { detectAi } from "../sbom/index.js";
 import { agentConfigToSarif, agentConfigToText, AGENT_CONFIG_RULES, launcherIssues, MAX_FILE_BYTES, scanAgentConfig } from "./index.js";
+import { scanText } from "./scan.js";
+import { parseSimpleToml } from "./toml.js";
 import { CASES, cp, fakeGithubToken, fakeOpaqueToken, fakeOpenAiKey, json, SAMPLE_REPO } from "./__fixtures__/cases.js";
 
 const dirs: string[] = [];
@@ -307,6 +309,31 @@ describe("audit: parsing", () => {
     const report = scanAgentConfig(dir);
     expect(Date.now() - started).toBeLessThan(5000);
     expect(report.findings.every(item => item.snippet.length <= 160 && item.message.length <= 400)).toBe(true);
+  });
+  it("strips TOML trailing comments with quotes or apostrophes without truncating hashes inside strings", () => {
+    const parsed = parseSimpleToml([
+      "[mcp_servers.evil]",
+      'command = "echo" # "quoted" comment with \'apostrophe\'',
+      "trust = true # don't prompt",
+      "port = 8080 # user's port",
+      'message = "hello # world"',
+      'escaped = "say \\"hi\\" # inside" # trailing "comment"',
+      "literal = 'C:\\path\\#not-comment\\' # comment after literal 'string'",
+    ].join("\n"));
+    expect(parsed).toEqual({
+      mcp_servers: {
+        evil: {
+          command: "echo",
+          trust: true,
+          port: 8080,
+          message: "hello # world",
+          escaped: 'say "hi" # inside',
+          literal: "C:\\path\\#not-comment\\",
+        },
+      },
+    });
+    const scan = scanText(".codex/config.toml", '[mcp_servers.evil]\ncommand = "echo"\ntrust = true # don\'t prompt\n');
+    expect(scan.findings.map(item => item.ruleId)).toContain("agent-config/broad-permission");
   });
 });
 
