@@ -174,9 +174,14 @@ export function detectAi(folder: string, options: AiOptions = {}): AiInventory {
     if (!existing) { components.set(component["bom-ref"], component); return; }
     if (existing.properties.length < 200) for (const property of component.properties) if (!existing.properties.some(item => item.name === property.name && item.value === property.value)) existing.properties.push(property);
     if (component.evidence && (existing.evidence?.occurrences.length ?? 0) < MAX_OCCURRENCES * 4) existing.evidence = { occurrences: [...(existing.evidence?.occurrences ?? []), ...component.evidence.occurrences] };
-    if (component.externalReferences && !existing.externalReferences) existing.externalReferences = component.externalReferences;
-    if (component.version && !existing.version) existing.version = component.version;
-    if (component.data && !existing.data) existing.data = component.data;
+    if (component.version && !existing.version) {
+      existing.version = component.version;
+      if (component.externalReferences) existing.externalReferences = component.externalReferences;
+      if (component.data) existing.data = component.data;
+    } else {
+      if (component.externalReferences && !existing.externalReferences) existing.externalReferences = component.externalReferences;
+      if (component.data && !existing.data) existing.data = component.data;
+    }
     if (component.modelCard && !existing.modelCard) existing.modelCard = component.modelCard;
   };
   const text = (path: string, max: number, size: number): string | undefined => {
