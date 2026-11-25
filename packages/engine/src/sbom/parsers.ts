@@ -16,6 +16,8 @@ export interface Component {
   dependsOn?: Array<{ name: string; version: string }>;
   /** Licenses exactly as the lockfile states them (an SPDX expression or free text); classified when the SBOM is written. */
   licenses?: string[];
+  /** Not from the public registry: a workspace member, a local path, or a package the lockfile resolves from another registry. */
+  local?: "workspace" | "private-registry";
   /** Resolved by running the project's own build tool (`0 sbom generate --resolve`), not read from a declaration. */
   resolved?: boolean;
 }
@@ -80,7 +82,10 @@ export function parseNpmLock(source: string): Component[] {
       }
       const hashes = sriToHashes(entry.integrity);
       const licenses = licenseList(entry.license);
-      found.push({ ecosystem: "npm", name, version, ...(entry.dev === true ? { dev: true } : {}), ...(hashes.length ? { hashes } : {}), dependsOn, ...(licenses.length ? { licenses } : {}) });
+      const resolvedUrl = text(entry.resolved);
+      const local = !path.includes("node_modules/") || /^file:/.test(resolvedUrl) ? "workspace" as const
+        : /^https?:\/\//.test(resolvedUrl) && !/^https:\/\/registry\.(npmjs\.org|yarnpkg\.com)\//.test(resolvedUrl) ? "private-registry" as const : undefined;
+      found.push({ ecosystem: "npm", name, version, ...(local ? { local } : {}), ...(entry.dev === true ? { dev: true } : {}), ...(hashes.length ? { hashes } : {}), dependsOn, ...(licenses.length ? { licenses } : {}) });
     }
     return found;
   }

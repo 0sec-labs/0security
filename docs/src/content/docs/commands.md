@@ -1485,6 +1485,24 @@ Importing the same results again changes nothing. `--format json` writes the adv
 
 Add `--outdated` to also list components that have a newer version. This looks each package up at `https://api.deps.dev`, so package names go out. It checks at most 200 components, runtime dependencies first, and says how many it skipped. Each note shows the latest version and how far behind the installed one is. A newer version is information only. It does not mean the installed one is unsafe, and it never changes the exit code.
 
+Add `--registry` to look each npm and PyPI package up on its public registry for invented or planted names. AI coding tools sometimes write package names that do not exist, and attackers register those names ([Spracklen et al., USENIX Security 2025](https://arxiv.org/abs/2406.10279)). A code review of AI-written changes does not catch a name that looks plausible.
+
+```bash
+0security sbom check sbom.cdx.json --registry --fail-on high
+```
+
+The check reports signals, not proof. It makes no model call. These rules can appear:
+
+- `slopsquat/nonexistent` (medium): the name is not on the public registry. If the package is private, ignore it.
+- `slopsquat/new-package`: first published less than 30 days ago (change it with `--new-days`) and three releases or fewer. It is high with an npm install script, medium with under 1000 downloads last week, and low otherwise.
+- `slopsquat/typosquat-candidate`: the name is one or two edits from a very popular package, and the package is new or little used. It is high when new or when it has an install script, and medium otherwise.
+
+Each finding states the values it rests on, such as age, releases, maintainers, weekly downloads and install script, with a link to the package page. Weekly downloads are an npm signal only. The popular names come from a bundled list of 300 npm and 300 PyPI packages.
+
+Private and local packages are skipped and listed as skipped: private or local. That covers scoped npm names outside a short list of well-known public scopes, workspace members, packages the lockfile resolves from another registry or from a path, and anything you name with `--private` (a name or `@scope/*`, repeatable). Name your own packages so they are not looked up.
+
+Only package names go out, to `https://registry.npmjs.org`, `https://api.npmjs.org` and `https://pypi.org`. It checks at most 200 packages, four at a time, with a 10 second timeout and an 8 MB answer limit. A lookup that fails or is too large is listed as not checked. Under `ZERO_ENTERPRISE` or `ZERO_OFFLINE` nothing is looked up, and the report says `not checked`, never a clean result. Without `--fail-on` registry findings never change the exit code. With it, a finding at or above that severity exits 1. SARIF output includes registry findings. Cargo and Go are not covered.
+
 The network use is the lookup at `https://api.osv.dev`: package URLs go out and nothing else does.
 
 | Argument | Required | Description |
@@ -1496,6 +1514,10 @@ The network use is the lookup at `https://api.osv.dev`: package URLs go out and 
 | `--format <format>` | `text` | Output: text, json or sarif (SARIF imports with `0security findings import`) |
 | `-o, --output <file>` | — | Write the result to a file instead of stdout |
 | `--outdated` | — | Also list components with a newer version (looks packages up at https://api.deps.dev; information only, not a vulnerability) |
+| `--registry` | — | Also look each npm and PyPI package up on its public registry for invented or planted names (sends package names to registry.npmjs.org, api.npmjs.org and pypi.org) |
+| `--new-days <days>` | — | With --registry: a package first published fewer days ago than this is new (default 30) |
+| `--private <name>` | — | With --registry: a package name, or @scope/*, to treat as private and skip; repeat the option or separate names with commas |
+| `--fail-on <severity>` | — | With --registry: exit 1 when a registry finding is at or above this severity: critical, high, medium, low or info |
 
 #### sbom licenses
 

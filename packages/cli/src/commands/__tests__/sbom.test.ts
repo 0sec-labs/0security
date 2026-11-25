@@ -119,6 +119,26 @@ describe("0 sbom check", () => {
     expect(text).toContain("pkg:npm/lodash@4.17.20");
     expect(text).toContain("GHSA-1 (CVE-1)  high  Fixed in 4.17.21.");
   });
+  it("--registry reports a missing public name, skips workspace members, and --fail-on sets the exit code", async () => {
+    const registryBom = JSON.stringify({ components: [{ purl: "pkg:npm/zzz-made-up-name@1.0.0" }, { purl: "pkg:npm/local-lib@1.0.0", properties: [{ name: "0:local", value: "workspace" }] }] });
+    const calls: string[] = [];
+    const fetcher = (async (url: string | URL | Request) => {
+      calls.push(String(url));
+      if (String(url).endsWith("querybatch")) return new Response(JSON.stringify({ results: [{}, {}] }));
+      return new Response("{}", { status: 404 });
+    }) as typeof fetch;
+    const quiet = deps({ read: () => registryBom, fetch: fetcher });
+    expect(await runCheck("sbom.json", { registry: true }, quiet.deps)).toBe(0);
+    const text = quiet.out.join("");
+    expect(text).toContain("slopsquat/nonexistent");
+    expect(text).toContain("not found on the public registry: if this is private, ignore");
+    expect(text).toContain("1 skipped: private or local");
+    expect(calls.some(url => url.includes("local-lib"))).toBe(false);
+    const strict = deps({ read: () => registryBom, fetch: fetcher });
+    expect(await runCheck("sbom.json", { registry: true, failOn: "medium" }, strict.deps)).toBe(1);
+    await expect(runCheck("sbom.json", { failOn: "high" }, deps({ read: () => registryBom, fetch: fetcher }).deps)).rejects.toThrow("apply to --registry");
+    await expect(runCheck("sbom.json", { registry: true, newDays: "x" }, deps({ read: () => registryBom, fetch: fetcher }).deps)).rejects.toThrow("--new-days");
+  });
   it("returns 0 for a clean SBOM, and prints JSON on request", async () => {
     const clean = deps({ read: () => bom, fetch: osv([]) });
     expect(await runCheck("sbom.json", {}, clean.deps)).toBe(0);

@@ -1415,15 +1415,24 @@ Usage: 0security sbom check [options] <file>
 Look every component of an SBOM up in the public OSV database and list the advisories
 
 Arguments:
-  file                 CycloneDX SBOM (JSON), for example from `0security sbom generate`
+  file                  CycloneDX SBOM (JSON), for example from `0security sbom generate`
 
 Options:
-  --format <format>    Output: text, json or sarif (SARIF imports with `0security findings import`)
-                       (default: "text")
-  -o, --output <file>  Write the result to a file instead of stdout
-  --outdated           Also list components with a newer version (looks packages up at
-                       https://api.deps.dev; information only, not a vulnerability)
-  -h, --help           display help for command
+  --format <format>     Output: text, json or sarif (SARIF imports with `0security findings import`)
+                        (default: "text")
+  -o, --output <file>   Write the result to a file instead of stdout
+  --outdated            Also list components with a newer version (looks packages up at
+                        https://api.deps.dev; information only, not a vulnerability)
+  --registry            Also look each npm and PyPI package up on its public registry for invented
+                        or planted names (sends package names to registry.npmjs.org, api.npmjs.org
+                        and pypi.org)
+  --new-days <days>     With --registry: a package first published fewer days ago than this is new
+                        (default 30)
+  --private <name>      With --registry: a package name, or @scope/*, to treat as private and skip;
+                        repeat the option or separate names with commas
+  --fail-on <severity>  With --registry: exit 1 when a registry finding is at or above this
+                        severity: critical, high, medium, low or info
+  -h, --help            display help for command
 
 ### 0security sbom generate
 Usage: 0security sbom generate [options] [folder]

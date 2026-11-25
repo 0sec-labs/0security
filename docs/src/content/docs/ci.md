@@ -726,7 +726,7 @@ jobs:
         with: { name: sbom, path: sbom.cdx.json }
 ```
 
-`0security sbom check` exits 1 when it finds an advisory, which fails the job. The output is evidence for your records. It does not make a product compliant.
+`0security sbom check` exits 1 when it finds an advisory, which fails the job. Add `--registry --fail-on high` to also fail on a package that looks invented or planted. The output is evidence for your records. It does not make a product compliant.
 
 ## Collect evidence and draft vulnerability reports
 

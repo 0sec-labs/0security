@@ -479,6 +479,22 @@
       "disable": "Do not pass --outdated; ZERO_ENTERPRISE refuses the lookup."
     },
     {
+      "id": "sbom-slopsquat-registry",
+      "class": "feature",
+      "enterprise": "blocked",
+      "destinations": [
+        "registry.npmjs.org",
+        "api.npmjs.org",
+        "pypi.org"
+      ],
+      "files": [
+        "packages/engine/src/sbom/slopsquat.ts"
+      ],
+      "when": "0 sbom check --registry.",
+      "sent": "Package names of npm and PyPI components (at most 200). Nothing else: no versions, paths or project details.",
+      "disable": "Do not pass --registry; ZERO_ENTERPRISE and ZERO_OFFLINE refuse the lookup and the report says not checked."
+    },
+    {
       "id": "sbom-licenses-resolve",
       "class": "feature",
       "enterprise": "blocked",
@@ -587,11 +603,13 @@
     "api.deps.dev",
     "api.github.com",
     "api.kimi.com",
+    "api.npmjs.org",
     "api.openai.com",
     "api.osv.dev",
     "api.together.ai",
     "api.x.ai",
     "api.z.ai",
+    "arxiv.org",
     "auth.kimi.com",
     "auth.openai.com",
     "auth.x.ai",
@@ -623,13 +641,16 @@
     "opencode.ai",
     "openrouter.ai",
     "osv.dev",
+    "pypi.org",
     "raw.githubusercontent.com",
+    "registry.npmjs.org",
     "semgrep.dev",
     "spdx.org",
     "token-plan.ap-southeast-1.maas.aliyuncs.com",
     "trivy.dev",
     "trojansource.codes",
     "www.checkov.io",
+    "www.npmjs.com",
     "www.pillar.security",
     "www.wiz.io"
   ]

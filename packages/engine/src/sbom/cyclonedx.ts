@@ -24,6 +24,8 @@ export interface Bom {
 /** Metadata property naming one declared dependency, profile, module, parent or BOM that was not analysed, and why. */
 export const UNRESOLVED_PROPERTY = "0:unresolved";
 /** Component property set to `true` when a build tool resolved the component (`0 sbom generate --resolve`). */
+/** Set on a component that is not from the public registry (`workspace` or `private-registry`). */
+export const LOCAL_PROPERTY = "0:local";
 export const RESOLVED_PROPERTY = "0:resolved";
 export type LicenseChoice = { license: { id: string } } | { license: { name: string } } | { expression: string };
 export interface LibraryComponent { type: "library"; "bom-ref": string; name: string; version: string; purl: string; scope?: "excluded"; hashes?: Hash[]; licenses?: LicenseChoice[]; properties?: Array<{ name: string; value: string }> }
@@ -104,6 +106,7 @@ const GRADLE_SCRIPTS = new Set(["build.gradle", "build.gradle.kts"]);
 /** Fold what a second lockfile says about the same package into the first: edges are unioned, a hash is kept only where lockfiles agree, licenses come from the first that states them. */
 function mergeFacts(into: Component, from: Component): void {
   if (from.dependsOn) into.dependsOn = [...(into.dependsOn ?? []), ...from.dependsOn];
+  if (into.local && !from.local) delete into.local;
   if (!into.licenses?.length && from.licenses?.length) into.licenses = from.licenses;
   if (from.hashes) {
     const kept = [...(into.hashes ?? [])];
@@ -237,7 +240,7 @@ export function generateSbom(folder: string, options: { name?: string; toolVersi
       ...(component.dev ? { scope: "excluded" as const } : {}),
       ...(component.hashes?.length ? { hashes: [...component.hashes].sort((a, b) => (a.alg < b.alg ? -1 : 1)) } : {}),
       ...(component.licenses?.length ? { licenses: licenseChoices(component.licenses) } : {}),
-      properties: [{ name: "0:source", value: source }, ...(component.resolved ? [{ name: RESOLVED_PROPERTY, value: "true" }] : [])],
+      properties: [{ name: "0:source", value: source }, ...(component.local ? [{ name: LOCAL_PROPERTY, value: component.local }] : []), ...(component.resolved ? [{ name: RESOLVED_PROPERTY, value: "true" }] : [])],
     })), ...ai.components],
     ...(ai.services.length ? { services: ai.services } : {}),
   };
