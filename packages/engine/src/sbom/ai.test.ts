@@ -150,6 +150,75 @@ describe("AI inventory: ML-BOM fields", () => {
     expect(get(dir, "dataset:org/data").data?.[0]?.contents?.url).toBe(`https://huggingface.co/datasets/org/data/tree/${commit}`);
     expect(get(dir, "hub-model:org/pinned").evidence?.occurrences).toEqual([{ location: "app.py", line: 1 }]);
   });
+  it("keeps pinned Hub model URLs and version consistent regardless of file traversal order", () => {
+    const commit = "0123456789abcdef0123456789abcdef01234567";
+    const expectedUrl = `https://huggingface.co/org/model/tree/${commit}`;
+    const unpinnedFirst = bin({
+      "a.py": 'AutoModel.from_pretrained("org/model")\n',
+      "b.py": `AutoModel.from_pretrained("org/model", revision="${commit}")\n`,
+    });
+    const pinnedFirst = bin({
+      "a.py": `AutoModel.from_pretrained("org/model", revision="${commit}")\n`,
+      "b.py": 'AutoModel.from_pretrained("org/model")\n',
+    });
+    for (const [dir, pinnedFile, unpinnedFile] of [[unpinnedFirst, "b.py", "a.py"], [pinnedFirst, "a.py", "b.py"]] as const) {
+      const model = get(dir, "hub-model:org/model");
+      expect(model.version).toBe(commit);
+      expect(model.externalReferences).toEqual([
+        { type: "distribution", url: expectedUrl, comment: "Hugging Face Hub repository named in the code; not contacted or checked" },
+      ]);
+      expect(model.evidence?.occurrences).toEqual([
+        { location: "a.py", line: 1 },
+        { location: "b.py", line: 1 },
+      ]);
+      expect(model.properties).toEqual(expect.arrayContaining([
+        { name: "0:source", value: `${pinnedFile}:1` },
+        { name: "0:source", value: `${unpinnedFile}:1` },
+        { name: "0:found-by", value: "from_pretrained" },
+        { name: "0:revision", value: `${commit} (${pinnedFile}:1)` },
+        { name: "0:unpinned-revision", value: `no revision in the reference (${unpinnedFile}:1)` },
+      ]));
+    }
+  });
+  it("keeps pinned dataset URLs and version consistent regardless of file traversal order", () => {
+    const commit = "0123456789abcdef0123456789abcdef01234567";
+    const expectedUrl = `https://huggingface.co/datasets/org/data/tree/${commit}`;
+    const unpinnedFirst = bin({
+      "m/w.safetensors": "x",
+      "m/README.md": "---\ndatasets:\n  - org/data\n---\n",
+      "z_train.py": `load_dataset("org/data", revision="${commit}")\n`,
+    });
+    const pinnedFirst = bin({
+      "a_train.py": `load_dataset("org/data", revision="${commit}")\n`,
+      "m/w.safetensors": "x",
+      "m/README.md": "---\ndatasets:\n  - org/data\n---\n",
+    });
+    for (const [dir, pyFile] of [[unpinnedFirst, "z_train.py"], [pinnedFirst, "a_train.py"]] as const) {
+      const dataset = get(dir, "dataset:org/data");
+      expect(dataset.version).toBe(commit);
+      expect(dataset.externalReferences).toEqual([
+        { type: "distribution", url: expectedUrl, comment: "Hugging Face Hub dataset named in the code; not contacted or checked" },
+      ]);
+      expect(dataset.data).toEqual([
+        { type: "dataset", name: "org/data", contents: { url: expectedUrl } },
+      ]);
+      expect(dataset.evidence?.occurrences).toEqual(
+        [
+          { location: "m/README.md" },
+          { location: pyFile, line: 1 },
+        ].sort((a, b) => (a.location < b.location ? -1 : 1)),
+      );
+      expect(dataset.properties).toEqual(expect.arrayContaining([
+        { name: "0:source", value: "m/README.md" },
+        { name: "0:found-by", value: "model card front matter" },
+        { name: "0:unpinned-revision", value: "no revision in the reference (m/README.md)" },
+        { name: "0:source", value: `${pyFile}:1` },
+        { name: "0:found-by", value: "load_dataset" },
+        { name: "0:revision", value: `${commit} (${pyFile}:1)` },
+      ]));
+      expect(get(dir, "ml-file:m/w.safetensors").modelCard?.modelParameters?.datasets).toEqual([{ ref: "dataset:org/data" }]);
+    }
+  });
   it("lists local data files with hashes under the cap, and datasets named by a model card", () => {
     const dir = bin({ "data/train.csv": "a,b\n1,2\n", "data/big.parquet": "x", "m/README.md": "---\ndatasets:\n  - org/corpus\n---\n", "m/w.safetensors": "x" });
     const csv = get(dir, "data-file:data/train.csv");
