@@ -2,7 +2,7 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { checkSlopsquat, editDistance, lookalikeOf, slopsquatFails, slopsquatSarifParts, slopsquatToText } from "./slopsquat.js";
-import { parseNpmLock } from "./parsers.js";
+import { parseNpmLock, parsePipfileLock, parsePnpmLock, parsePoetryLock, parseRequirements, parseYarnLock } from "./parsers.js";
 import { parseSarif } from "../shared/sarif-import.js";
 
 const NOW = new Date("2026-06-01T00:00:00Z");
@@ -222,5 +222,29 @@ describe("lockfile marks local packages", () => {
       "node_modules/vendored": { version: "1.0.0", resolved: "file:vendor/vendored" },
     } });
     expect(parseNpmLock(lock).map(item => [item.name, item.local])).toEqual([["app", "workspace"], ["lodash", undefined], ["corp", "private-registry"], ["vendored", "workspace"]]);
+  });
+});
+
+describe("other lockfiles mark private sources", () => {
+  const local = (items: Array<{ name: string; local?: string }>): Array<[string, string | undefined]> => items.map(item => [item.name, item.local]);
+  it("npm v1", () => {
+    expect(local(parseNpmLock(JSON.stringify({ dependencies: { a: { version: "1.0.0", resolved: "https://registry.npmjs.org/a/-/a-1.0.0.tgz" }, b: { version: "1.0.0", resolved: "https://npm.corp.test/b.tgz" } } })))).toEqual([["a", undefined], ["b", "private-registry"]]);
+  });
+  it("pnpm", () => {
+    const lock = "lockfileVersion: '9.0'\npackages:\n  a@1.0.0:\n    resolution: {integrity: sha512-AAAA}\n  b@1.0.0:\n    resolution: {tarball: https://npm.corp.test/b.tgz}\n";
+    expect(local(parsePnpmLock(lock))).toEqual([["a", undefined], ["b", "private-registry"]]);
+  });
+  it("yarn classic and Berry", () => {
+    const classic = 'a@^1.0.0:\n  version "1.0.0"\n  resolved "https://registry.yarnpkg.com/a/-/a-1.0.0.tgz#abc"\n\nb@^1.0.0:\n  version "1.0.0"\n  resolved "https://npm.corp.test/b.tgz"\n';
+    expect(local(parseYarnLock(classic))).toEqual([["a", undefined], ["b", "private-registry"]]);
+    const berry = '"app@workspace:.":\n  version: 0.0.0-use.local\n  resolution: "app@workspace:."\n\n"a@npm:^1.0.0":\n  version: 1.0.0\n  resolution: "a@npm:1.0.0"\n';
+    expect(local(parseYarnLock(berry))).toEqual([["app", "workspace"], ["a", undefined]]);
+  });
+  it("poetry, Pipfile and requirements", () => {
+    const poetry = '[[package]]\nname = "pub"\nversion = "1.0"\n\n[[package]]\nname = "priv"\nversion = "1.0"\n\n[package.source]\ntype = "legacy"\nurl = "https://pypi.corp.test/simple"\n';
+    expect(local(parsePoetryLock(poetry))).toEqual([["pub", undefined], ["priv", "private-registry"]]);
+    expect(local(parsePipfileLock(JSON.stringify({ default: { a: { version: "==1.0", index: "pypi" }, b: { version: "==1.0", index: "corp" } } })))).toEqual([["a", undefined], ["b", "private-registry"]]);
+    expect(local(parseRequirements("a==1.0\n"))).toEqual([["a", undefined]]);
+    expect(local(parseRequirements("--extra-index-url https://pypi.corp.test/simple\na==1.0\n"))).toEqual([["a", "private-registry"]]);
   });
 });

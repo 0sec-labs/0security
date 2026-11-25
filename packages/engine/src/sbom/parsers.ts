@@ -51,6 +51,13 @@ const text = (value: unknown): string => typeof value === "string" ? value : "";
 const npmNameOf = (path: string, entry: Record<string, unknown>): string => text(entry.name) || path.split("node_modules/").pop() || "";
 const licenseList = (value: unknown): string[] => typeof value === "string" && value.trim() ? [value.trim()] : Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && !!item.trim()).map(item => item.trim()) : [];
 
+/** `local` for a resolved URL or path that is not the public npm registry. */
+function npmLocalOf(resolved: string): Component["local"] {
+  if (!resolved) return undefined;
+  if (/^(file|link|portal|workspace):/.test(resolved)) return "workspace";
+  return /^https?:\/\//.test(resolved) && !/^https:\/\/registry\.(npmjs\.org|yarnpkg\.com)\//.test(resolved) ? "private-registry" : undefined;
+}
+
 export function parseNpmLock(source: string): Component[] {
   let lock: unknown;
   try { lock = JSON.parse(source); } catch { return []; }
@@ -83,8 +90,7 @@ export function parseNpmLock(source: string): Component[] {
       const hashes = sriToHashes(entry.integrity);
       const licenses = licenseList(entry.license);
       const resolvedUrl = text(entry.resolved);
-      const local = !path.includes("node_modules/") || /^file:/.test(resolvedUrl) ? "workspace" as const
-        : /^https?:\/\//.test(resolvedUrl) && !/^https:\/\/registry\.(npmjs\.org|yarnpkg\.com)\//.test(resolvedUrl) ? "private-registry" as const : undefined;
+      const local = !path.includes("node_modules/") ? "workspace" as const : npmLocalOf(resolvedUrl);
       found.push({ ecosystem: "npm", name, version, ...(local ? { local } : {}), ...(entry.dev === true ? { dev: true } : {}), ...(hashes.length ? { hashes } : {}), dependsOn, ...(licenses.length ? { licenses } : {}) });
     }
     return found;
@@ -94,7 +100,7 @@ export function parseNpmLock(source: string): Component[] {
     for (const [name, entry] of Object.entries(dependencies)) {
       if (!isObject(entry)) continue;
       const version = text(entry.version);
-      if (version && !/^(file:|link:|git|https?:)/.test(version)) { const hashes = sriToHashes(entry.integrity); found.push({ ecosystem: "npm", name, version, ...(entry.dev === true ? { dev: true } : {}), ...(hashes.length ? { hashes } : {}) }); }
+      if (version && !/^(file:|link:|git|https?:)/.test(version)) { const hashes = sriToHashes(entry.integrity); const local = npmLocalOf(text(entry.resolved)); found.push({ ecosystem: "npm", name, version, ...(local ? { local } : {}), ...(entry.dev === true ? { dev: true } : {}), ...(hashes.length ? { hashes } : {}) }); }
       walk(entry.dependencies);
     }
   };
@@ -145,9 +151,10 @@ export function parsePnpmLock(source: string): Component[] {
     const resolution = isObject(entry) && isObject(entry.resolution) ? entry.resolution : {};
     const hashes = sriToHashes(resolution.integrity);
     const dev = isObject(entry) && entry.dev === true;
+    const local = npmLocalOf(text(resolution.tarball)) ?? (text(resolution.directory) ? "workspace" as const : undefined);
     const previous = found.get(identity(parsed));
     if (previous) { if (!previous.hashes?.length && hashes.length) previous.hashes = hashes; continue; }
-    found.set(identity(parsed), { ecosystem: "npm", name: parsed.name, version: parsed.version, ...(dev ? { dev: true } : {}), ...(hashes.length ? { hashes } : {}), ...(edges.has(identity(parsed)) ? { dependsOn: [...edges.get(identity(parsed))!.values()] } : {}) });
+    found.set(identity(parsed), { ecosystem: "npm", name: parsed.name, version: parsed.version, ...(local ? { local } : {}), ...(dev ? { dev: true } : {}), ...(hashes.length ? { hashes } : {}), ...(edges.has(identity(parsed)) ? { dependsOn: [...edges.get(identity(parsed))!.values()] } : {}) });
   }
   return [...found.values()];
 }
@@ -157,7 +164,7 @@ export function parsePnpmLock(source: string): Component[] {
  * Berry's `checksum` is a hash of Yarn's own cache archive, not of the published tarball, so it is not reported.
  */
 export function parseYarnLock(source: string): Component[] {
-  interface Block { specs: string[]; name: string; version: string; integrity: string; deps: Array<[string, string]> }
+  interface Block { specs: string[]; name: string; version: string; integrity: string; resolved: string; deps: Array<[string, string]> }
   const blocks: Block[] = [];
   let block: Block | undefined;
   let inDeps = false;
@@ -169,7 +176,7 @@ export function parseYarnLock(source: string): Component[] {
       if (!line.endsWith(":")) continue;
       const specs = line.slice(0, -1).split(",").map(unquote).filter(Boolean);
       const names = specs.map(spec => { const at = spec.lastIndexOf("@"); return at > 0 ? spec.slice(0, at) : ""; }).filter(Boolean);
-      if (names.length) { block = { specs, name: names[0]!, version: "", integrity: "", deps: [] }; blocks.push(block); }
+      if (names.length) { block = { specs, name: names[0]!, version: "", integrity: "", resolved: "", deps: [] }; blocks.push(block); }
       continue;
     }
     if (!block) continue;
@@ -180,6 +187,8 @@ export function parseYarnLock(source: string): Component[] {
       if (version && !block.version) block.version = version[1]!;
       const integrity = /^\s+integrity:?\s+"?([^"\s]+)"?/.exec(line);
       if (integrity) block.integrity = integrity[1]!;
+      const resolved = /^\s+resolved:?\s+"?([^"\s]+)"?/.exec(line) ?? /^\s+resolution:\s+"[^"]*@((?:workspace|file|portal|link):[^"]*)"/.exec(line);
+      if (resolved) block.resolved = resolved[1]!;
       continue;
     }
     if (inDeps) {
@@ -198,7 +207,8 @@ export function parseYarnLock(source: string): Component[] {
       const target = bySpec.get(`${name}@${range}`) ?? bySpec.get(`${name}@npm:${range}`);
       if (target) dependsOn.set(`${target.name}@${target.version}`, target);
     }
-    found.push({ ecosystem: "npm", name: item.name, version: item.version, ...(hashes.length ? { hashes } : {}), dependsOn: [...dependsOn.values()] });
+    const local = npmLocalOf(item.resolved);
+    found.push({ ecosystem: "npm", name: item.name, version: item.version, ...(local ? { local } : {}), ...(hashes.length ? { hashes } : {}), dependsOn: [...dependsOn.values()] });
   }
   return found;
 }
@@ -221,6 +231,7 @@ function parsePackageTables(source: string): PackageTable[] {
     if (line.startsWith("[")) { section = line.trim().replace(/^\[|\]$/g, ""); if (!section.startsWith("package.")) current = undefined; continue; }
     if (!current) continue;
     if (section === "package.dependencies") { const pair = /^("[^"]+"|[A-Za-z0-9_.-]+)\s*=/.exec(line); if (pair) current.sections["dependencies"] = [...(current.sections["dependencies"] ?? []), pair[1]!.replace(/^"|"$/g, "")]; continue; }
+    if (section === "package.source") { const type = /^type\s*=\s*"([^"]*)"/.exec(line); if (type) current.fields["sourceType"] = type[1]!; continue; }
     if (section) continue;
     const pair = /^(\w+)\s*=\s*"([^"]*)"/.exec(line);
     if (pair) { current.fields[pair[1]!] = pair[2]!; continue; }
@@ -269,7 +280,7 @@ export function parsePoetryLock(source: string): Component[] {
       if (candidates.length === 1) dependsOn.set(`${candidates[0]!.fields.name}@${candidates[0]!.fields.version}`, { name: candidates[0]!.fields.name!, version: candidates[0]!.fields.version! });
     }
     const only = table.files.length === 1 ? /^sha256:([0-9a-fA-F]{64})$/.exec(table.files[0]!) : null;
-    return { ecosystem: "pypi" as const, name: table.fields.name!, version: table.fields.version!, ...(only ? { hashes: hexHash("SHA-256", only[1]) } : {}), dependsOn: [...dependsOn.values()] };
+    return { ecosystem: "pypi" as const, name: table.fields.name!, version: table.fields.version!, ...(table.fields.sourceType ? { local: "private-registry" as const } : {}), ...(only ? { hashes: hexHash("SHA-256", only[1]) } : {}), dependsOn: [...dependsOn.values()] };
   });
 }
 
@@ -296,7 +307,8 @@ export function parsePipfileLock(source: string): Component[] {
     if (!isObject(packages)) continue;
     for (const [name, entry] of Object.entries(packages)) {
       const version = isObject(entry) ? text(entry.version).replace(/^==/, "") : "";
-      if (version) found.push({ ecosystem: "pypi", name, version, ...(dev ? { dev: true } : {}) });
+      const index = isObject(entry) ? text(entry.index) : "";
+      if (version) found.push({ ecosystem: "pypi", name, version, ...(index && index !== "pypi" ? { local: "private-registry" as const } : {}), ...(dev ? { dev: true } : {}) });
     }
   }
   return found;
@@ -304,10 +316,13 @@ export function parsePipfileLock(source: string): Component[] {
 
 export function parseRequirements(source: string): Component[] {
   const found: Component[] = [];
+  // Any index or find-links option other than the public index may serve private packages: mark every package local.
+  const custom = [...source.matchAll(/^\s*(?:-i|--index-url|--extra-index-url|-f|--find-links)(?:\s+|=)(\S+)/gm)].some(match => !/^https:\/\/pypi\.org\//.test(match[1]!));
+  const local = custom ? { local: "private-registry" as const } : {};
   for (const raw of source.split(/\r?\n/)) {
     const line = raw.replace(/\s+#.*$/, "").replace(/\s*\\$/, "").split(";")[0]!.trim();
     const match = /^([A-Za-z0-9][A-Za-z0-9._-]*)(?:\[[^\]]*\])?\s*==\s*([A-Za-z0-9][A-Za-z0-9._+!-]*)$/.exec(line);
-    if (match) found.push({ ecosystem: "pypi", name: match[1]!, version: match[2]! });
+    if (match) found.push({ ecosystem: "pypi", name: match[1]!, version: match[2]!, ...local });
   }
   return found;
 }
