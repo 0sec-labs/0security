@@ -155,7 +155,7 @@ export function parsePnpmLock(source: string): Component[] {
     const resolution = isObject(entry) && isObject(entry.resolution) ? entry.resolution : {};
     const hashes = sriToHashes(resolution.integrity);
     const dev = isObject(entry) && entry.dev === true;
-    const local = npmLocalOf(text(resolution.tarball)) ?? (text(resolution.directory) ? "workspace" as const : undefined);
+    const local = npmLocalOf(text(resolution.tarball)) ?? (text(resolution.directory) || text(resolution.repo) || text(resolution.commit) || (text(resolution.type) && text(resolution.type) !== "npm") ? "workspace" as const : undefined);
     const previous = found.get(identity(parsed));
     if (previous) { if (!previous.hashes?.length && hashes.length) previous.hashes = hashes; if (!previous.local && local) previous.local = local; continue; }
     found.set(identity(parsed), { ecosystem: "npm", name: parsed.name, version: parsed.version, ...(local ? { local } : {}), ...(dev ? { dev: true } : {}), ...(hashes.length ? { hashes } : {}), ...(edges.has(identity(parsed)) ? { dependsOn: [...edges.get(identity(parsed))!.values()] } : {}) });
@@ -191,8 +191,11 @@ export function parseYarnLock(source: string): Component[] {
       if (version && !block.version) block.version = version[1]!;
       const integrity = /^\s+integrity:?\s+"?([^"\s]+)"?/.exec(line);
       if (integrity) block.integrity = integrity[1]!;
-      const resolved = /^\s+resolved:?\s+"?([^"\s]+)"?/.exec(line) ?? /^\s+resolution:\s+"[^"]*@((?:workspace|file|portal|link):[^"]*)"/.exec(line);
+      const resolved = /^\s+resolved:?\s+"?([^"\s]+)"?/.exec(line);
       if (resolved) block.resolved = resolved[1]!;
+      // Berry: `resolution: "name@npm:1.2.3"` is the public registry; any other protocol (git, patch, workspace, https) is not.
+      const resolution = /^\s+resolution:\s+"?(.*?)"?\s*$/.exec(line);
+      if (resolution) { const rest = /^@?[^@]+@(.*)$/.exec(resolution[1]!)?.[1] ?? ""; block.resolved = rest.startsWith("npm:") ? "" : rest || "unknown:"; }
       continue;
     }
     if (inDeps) {
