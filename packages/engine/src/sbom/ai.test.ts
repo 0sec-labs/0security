@@ -190,3 +190,13 @@ describe("AI inventory: bounds", () => {
     expect(component.evidence!.occurrences.length).toBeLessThanOrEqual(100);
   });
 });
+
+describe("AI inventory: pickle scan budget", () => {
+  it("does not scan a pickle file over the limit and says so", () => {
+    const dir = mkdtempSync(join(tmpdir(), "0-aibom-")); dirs.push(dir);
+    const big = join(dir, "big.pkl"); writeFileSync(big, ""); truncateSync(big, 300 * 1024 ** 2);
+    const component = detectAi(dir, { maxModelHashBytes: 1 }).components[0]!;
+    expect(prop(component, "0:pickle-scan-skipped")).toContain("too large");
+    expect(prop(component, "0:risk")).toContain("pickle");
+  });
+});

@@ -60,6 +60,9 @@ const MAX_FILES = 8000;
 const MAX_DIRS = 4000;
 const MAX_DIR_ENTRIES = 10000;
 const MAX_OCCURRENCES = 100;
+/** Largest pickle file scanned for dangerous imports, and the most bytes scanned in one run. */
+const MAX_PICKLE_SCAN_BYTES = 256 * 1024 ** 2;
+const MAX_TOTAL_PICKLE_SCAN_BYTES = 1024 ** 3;
 const MAX_DATA_COMPONENTS = 200;
 const MAX_TEXT_BYTES = 1024 * 1024;
 const HOSTED = /(?:^|[^\w.-])(?:model|model_name|modelName|model_id|modelId)\s*[:=]\s*["']((?:gpt-|o[134](?:-|["'])|chatgpt-|claude-|gemini-|gemma|llama|mistral|mixtral|codestral|deepseek-|qwen|grok-|command-|text-embedding-|sonar)[\w.:/-]{0,60})["']/g;
@@ -155,6 +158,12 @@ export function detectAi(folder: string, options: AiOptions = {}): AiInventory {
   const components = new Map<string, AiComponent>();
   const services = new Map<string, AiService>();
   const root = resolve(folder);
+  let pickleLeft = MAX_TOTAL_PICKLE_SCAN_BYTES;
+  const pickleRisk = (path: string, size: number): Property[] => {
+    if (size > MAX_PICKLE_SCAN_BYTES || size > pickleLeft) return [{ name: "0:pickle-scan-skipped", value: `too large: ${size} bytes is over the ${MAX_PICKLE_SCAN_BYTES} byte file limit or the ${MAX_TOTAL_PICKLE_SCAN_BYTES} byte limit for one run` }];
+    pickleLeft -= size;
+    return pickleScanRisk(path);
+  };
   let textLeft = MAX_TOTAL_TEXT_BYTES; let hashLeft = MAX_TOTAL_HASH_BYTES;
   const add = (component: AiComponent): void => {
     const existing = components.get(component["bom-ref"]);
@@ -238,7 +247,7 @@ export function detectAi(folder: string, options: AiOptions = {}): AiInventory {
         properties: [{ name: "0:source", value: rel }, { name: "0:found-by", value: "model file" }, { name: "0:format", value: model.format }, { name: "0:size-bytes", value: String(size) },
           ...(hash.note ? [hash.note] : []), ...props(facts?.props ?? []),
           ...(side.license.length ? [{ name: "0:license-source", value: clean(side.license.map(item => item.source).join("; "), 200) }] : []),
-          ...(model.pickle ? [{ name: "0:risk", value: "pickle-based format: loading can run code" }, ...pickleScanRisk(path)] : [])],
+          ...(model.pickle ? [{ name: "0:risk", value: "pickle-based format: loading can run code" }, ...pickleRisk(path, size)] : [])],
       });
       continue;
     }
