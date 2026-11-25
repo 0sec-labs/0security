@@ -293,6 +293,6 @@ describe("git sources in pnpm and Yarn Berry", () => {
     const pnpm = "lockfileVersion: '9.0'\npackages:\n  g@1.0.0:\n    resolution: {type: git, repo: https://git.corp.test/g.git, commit: abc}\n  ok@1.0.0:\n    resolution: {integrity: sha512-AAAA}\n";
     expect(parsePnpmLock(pnpm).map(item => [item.name, item.local])).toEqual([["g", "workspace"], ["ok", undefined]]);
     const berry = '"g@https://git.corp.test/x/g.git#commit=abc":\n  version: 1.0.0\n  resolution: "g@https://git.corp.test/x/g.git#commit=abc"\n\n"p@patch:p@npm%3A1.0.0#./p.patch":\n  version: 1.0.0\n  resolution: "p@patch:p@npm%3A1.0.0#./p.patch"\n';
-    expect(parseYarnLock(berry).map(item => [item.name, item.local])).toEqual([["g", "private-registry"], ["p", "workspace"]]);
+    expect(parseYarnLock(berry).map(item => [item.name, item.local])).toEqual([["g", "private-registry"], ["p@patch:p", "workspace"]]);
   });
 });
