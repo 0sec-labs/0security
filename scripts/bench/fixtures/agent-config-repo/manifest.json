@@ -1,0 +1,41 @@
+{
+  "name": "agent-config-repo",
+  "note": "Answer key for the agent-config benchmark. Build the folders with build.mjs, then run `0security sbom agent-config` on <out>/planted and <out>/clean. Every planted item is matched on rule id, file and line, exactly.",
+  "planted": [
+    { "id": "ac-hidden-tags", "ruleId": "agent-config/hidden-unicode", "file": ".cursor/rules/style.mdc", "line": 7, "description": "invisible tag characters spell an instruction after a visible rule" },
+    { "id": "ac-hidden-bidi", "ruleId": "agent-config/hidden-unicode", "file": ".github/copilot-instructions.md", "line": 4, "description": "zero width spaces and a right-to-left override inside a sentence" },
+    { "id": "ac-comment-injection", "ruleId": "agent-config/injection-phrase", "file": "AGENTS.md", "line": 6, "description": "an HTML comment tells the agent to ignore earlier instructions" },
+    { "id": "ac-npx-unpinned", "ruleId": "agent-config/mcp-unpinned-launcher", "file": ".mcp.json", "line": 4, "description": "npx -y with no version" },
+    { "id": "ac-bunx-latest", "ruleId": "agent-config/mcp-unpinned-launcher", "file": ".mcp.json", "line": 8, "description": "bunx with the tag latest" },
+    { "id": "ac-pipx-unpinned", "ruleId": "agent-config/mcp-unpinned-launcher", "file": ".mcp.json", "line": 12, "description": "pipx run with no exact version" },
+    { "id": "ac-docker-latest", "ruleId": "agent-config/mcp-unpinned-launcher", "file": ".mcp.json", "line": 16, "description": "docker image with the tag latest" },
+    { "id": "ac-remote-http", "ruleId": "agent-config/mcp-remote-insecure", "file": ".mcp.json", "line": 35, "description": "remote MCP server over plain http" },
+    { "id": "ac-secret-model-key", "ruleId": "agent-config/mcp-secret", "file": ".cursor/mcp.json", "line": 7, "description": "model provider key in env (built at run time from fragments)" },
+    { "id": "ac-secret-repo-token", "ruleId": "agent-config/mcp-secret", "file": ".cursor/mcp.json", "line": 15, "description": "repository token in env (built at run time from fragments)" },
+    { "id": "ac-perm-bash-any", "ruleId": "agent-config/broad-permission", "file": ".claude/settings.json", "line": 5, "description": "Bash(*) allows any shell command" },
+    { "id": "ac-perm-curl", "ruleId": "agent-config/broad-permission", "file": ".claude/settings.json", "line": 6, "description": "Bash(curl:*) allows curl with any arguments" },
+    { "id": "ac-perm-all-mcp", "ruleId": "agent-config/broad-permission", "file": ".claude/settings.json", "line": 29, "description": "enableAllProjectMcpServers approves every project server" },
+    { "id": "ac-hook-curl-sh", "ruleId": "agent-config/hook-command", "file": ".claude/settings.json", "line": 17, "description": "a hook downloads a script and pipes it into a shell" },
+    { "id": "ac-project-mcp", "ruleId": "agent-config/mcp-project-autostart", "file": ".vscode/mcp.json", "line": 3, "description": "a server defined in the repository that starts when the project loads" },
+    { "id": "ac-symlink", "ruleId": "agent-config/symlinked-config", "file": ".cursor/rules/team.mdc", "line": 1, "description": "a rules file that is a symbolic link (created at run time)" }
+  ],
+  "decoys": [
+    { "id": "acd-emoji-zwj", "file": "CLAUDE.md", "startLine": 3, "endLine": 4, "ruleIds": ["agent-config/hidden-unicode"], "description": "a family emoji joined with zero width joiners and the England flag tag sequence are normal text" },
+    { "id": "acd-mention", "file": "CLAUDE.md", "startLine": 7, "endLine": 7, "ruleIds": ["agent-config/injection-phrase"], "description": "a rules file that names the attack phrase in a security note, in plain view" },
+    { "id": "acd-npx-pinned", "file": ".mcp.json", "startLine": 19, "endLine": 21, "ruleIds": ["agent-config/mcp-unpinned-launcher"], "description": "npx with an exact version" },
+    { "id": "acd-docker-digest", "file": ".mcp.json", "startLine": 23, "endLine": 25, "ruleIds": ["agent-config/mcp-unpinned-launcher"], "description": "docker image pinned by digest" },
+    { "id": "acd-uvx-pinned", "file": ".mcp.json", "startLine": 27, "endLine": 29, "ruleIds": ["agent-config/mcp-unpinned-launcher"], "description": "uvx with ==2.0.1" },
+    { "id": "acd-remote-https", "file": ".mcp.json", "startLine": 31, "endLine": 33, "ruleIds": ["agent-config/mcp-remote-insecure"], "description": "remote MCP server over https" },
+    { "id": "acd-env-not-secret", "file": ".cursor/mcp.json", "startLine": 8, "endLine": 8, "ruleIds": ["agent-config/mcp-secret"], "description": "a log level" },
+    { "id": "acd-env-reference", "file": ".cursor/mcp.json", "startLine": 16, "endLine": 17, "ruleIds": ["agent-config/mcp-secret"], "description": "a reference to the environment and a placeholder" },
+    { "id": "acd-perm-narrow", "file": ".claude/settings.json", "startLine": 7, "endLine": 9, "ruleIds": ["agent-config/broad-permission"], "description": "git diff, npm test and a path-scoped Read" },
+    { "id": "acd-mode-edits", "file": ".claude/settings.json", "startLine": 3, "endLine": 3, "ruleIds": ["agent-config/broad-permission"], "description": "defaultMode acceptEdits" },
+    { "id": "acd-link-elsewhere", "file": "docs/readme-link.md", "startLine": 1, "endLine": 1, "ruleIds": ["agent-config/symlinked-config"], "description": "a symbolic link that no agent reads" }
+  ],
+  "context": [
+    { "file": ".mcp.json", "ruleId": "agent-config/mcp-project-autostart", "note": "reported once for every enabled server in a project file, by design" },
+    { "file": ".cursor/mcp.json", "ruleId": "agent-config/mcp-project-autostart", "note": "same" },
+    { "file": ".claude/settings.json", "ruleId": "agent-config/hook-command", "note": "every hook is listed; the local echo hook is low severity" }
+  ],
+  "clean": { "folder": "clean", "expectedFindings": 0 }
+}

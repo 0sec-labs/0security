@@ -6,6 +6,8 @@ dist-bin/
 .DS_Store
 .cache/
 .claude/
+# The agent-config benchmark fixtures hold a planted .claude folder of their own
+!scripts/bench/fixtures/agent-config-repo/**/.claude/
 .omx/
 pnpm-publish-summary.json
 *.sync-conflict-*

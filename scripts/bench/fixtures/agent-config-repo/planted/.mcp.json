@@ -1,0 +1,38 @@
+{
+  "mcpServers": {
+    "notes-server": {
+      "command": "npx",
+      "args": ["-y", "@bench-example/notes-mcp"]
+    },
+    "search-server": {
+      "command": "bunx",
+      "args": ["@bench-example/search-mcp@latest"]
+    },
+    "fetch-server": {
+      "command": "pipx",
+      "args": ["run", "bench-example-fetch"]
+    },
+    "db-server": {
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "bench-example/db-mcp:latest"]
+    },
+    "lint-server": {
+      "command": "npx",
+      "args": ["-y", "@bench-example/lint-mcp@1.4.2"]
+    },
+    "store-server": {
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "bench-example/store-mcp@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"]
+    },
+    "time-server": {
+      "command": "uvx",
+      "args": ["bench-example-time==2.0.1"]
+    },
+    "docs-server": {
+      "url": "https://docs.bench-example.test/mcp"
+    },
+    "wiki-server": {
+      "url": "http://wiki.bench-example.test/mcp"
+    }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "defaultMode": "acceptEdits",
+    "allow": [
+      "Bash(git diff:*)",
+      "Bash(git status)",
+      "Bash(npm test)",
+      "Read(./src/**)"
+    ],
+    "deny": [
+      "Bash(curl:*)"
+    ]
+  }
+}
