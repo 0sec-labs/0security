@@ -176,3 +176,17 @@ describe("AI inventory: ML-BOM fields", () => {
     expect(detectAi(dir).services.map(service => service["bom-ref"])).toEqual(["mcp:.claude/settings.json:s", "mcp:.codex/mcp.json:s", "mcp:.github/mcp.json:s"]);
   });
 });
+
+describe("AI inventory: bounds", () => {
+  it("stops reading a folder at its entry limit and says so", () => {
+    const dir = mkdtempSync(join(tmpdir(), "0-aibom-")); dirs.push(dir);
+    for (let index = 0; index < 10050; index += 1) writeFileSync(join(dir, `f${index}.txt`), "");
+    expect(detectAi(dir).notes.join(" ")).toContain("entries in one folder");
+  });
+  it("keeps the evidence for a model named many times bounded", () => {
+    const body = Array.from({ length: 3000 }, () => 'AutoModel.from_pretrained("org/m")').join("\n");
+    const dir = mkdtempSync(join(tmpdir(), "0-aibom-")); dirs.push(dir); writeFileSync(join(dir, "a.py"), body);
+    const component = detectAi(dir).components[0]!;
+    expect(component.evidence!.occurrences.length).toBeLessThanOrEqual(100);
+  });
+});

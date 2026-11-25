@@ -5,7 +5,7 @@
  * up to a size limit and, for safetensors, GGUF and ONNX, their header is read as data. Nothing is checked against the
  * Hugging Face Hub: a Hub reference is a URL built from the id written in the code.
  */
-import { closeSync, lstatSync, readdirSync, type Dirent } from "node:fs";
+import { closeSync, lstatSync, opendirSync, type Dirent } from "node:fs";
 import { extname, join, relative, resolve, sep } from "node:path";
 import { extractMcpServers } from "../agentconfig/mcp.js";
 import { launcherIssues } from "../agentconfig/launchers.js";
@@ -58,6 +58,8 @@ const MCP_CONFIGS = new Set(["mcp.json", ".mcp.json", "claude_desktop_config.jso
 const TOOL_DIRS = new Set([".cursor", ".vscode", ".claude", ".gemini", ".codex", ".windsurf", ".continue", ".github", ".roo", ".cline"]);
 const MAX_FILES = 8000;
 const MAX_DIRS = 4000;
+const MAX_DIR_ENTRIES = 10000;
+const MAX_OCCURRENCES = 100;
 const MAX_DATA_COMPONENTS = 200;
 const MAX_TEXT_BYTES = 1024 * 1024;
 const HOSTED = /(?:^|[^\w.-])(?:model|model_name|modelName|model_id|modelId)\s*[:=]\s*["']((?:gpt-|o[134](?:-|["'])|chatgpt-|claude-|gemini-|gemma|llama|mistral|mixtral|codestral|deepseek-|qwen|grok-|command-|text-embedding-|sonar)[\w.:/-]{0,60})["']/g;
@@ -87,7 +89,12 @@ function listFiles(folder: string, notes: string[]): Entry[] {
   const walk = (dir: string, depth: number): void => {
     if (cut) return;
     let entries: Dirent[];
-    try { entries = readdirSync(dir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)); } catch { return; }
+    try {
+      // Read the folder in a stream and stop at the limit, so a folder with millions of entries costs bounded memory.
+      const handle = opendirSync(dir); entries = [];
+      try { for (let entry = handle.readSync(); entry; entry = handle.readSync()) { entries.push(entry); if (entries.length >= MAX_DIR_ENTRIES) { cut = true; break; } } } finally { handle.closeSync(); }
+      entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    } catch { return; }
     dirs += 1;
     for (const entry of entries) {
       const path = join(dir, entry.name);
@@ -109,7 +116,7 @@ function listFiles(folder: string, notes: string[]): Entry[] {
     }
   };
   walk(folder, 0);
-  if (cut) notes.push(`AI inventory stopped after ${found.length} files and ${dirs} folders (limits ${MAX_FILES} and ${MAX_DIRS}); later files were not read`);
+  if (cut) notes.push(`AI inventory stopped after ${found.length} files and ${dirs} folders (limits ${MAX_FILES} files, ${MAX_DIRS} folders and ${MAX_DIR_ENTRIES} entries in one folder); later files were not read`);
   return found;
 }
 
@@ -152,8 +159,8 @@ export function detectAi(folder: string, options: AiOptions = {}): AiInventory {
   const add = (component: AiComponent): void => {
     const existing = components.get(component["bom-ref"]);
     if (!existing) { components.set(component["bom-ref"], component); return; }
-    for (const property of component.properties) if (!existing.properties.some(item => item.name === property.name && item.value === property.value)) existing.properties.push(property);
-    if (component.evidence) existing.evidence = { occurrences: [...(existing.evidence?.occurrences ?? []), ...component.evidence.occurrences] };
+    if (existing.properties.length < 200) for (const property of component.properties) if (!existing.properties.some(item => item.name === property.name && item.value === property.value)) existing.properties.push(property);
+    if (component.evidence && (existing.evidence?.occurrences.length ?? 0) < MAX_OCCURRENCES * 4) existing.evidence = { occurrences: [...(existing.evidence?.occurrences ?? []), ...component.evidence.occurrences] };
     if (component.externalReferences && !existing.externalReferences) existing.externalReferences = component.externalReferences;
     if (component.version && !existing.version) existing.version = component.version;
     if (component.data && !existing.data) existing.data = component.data;
@@ -282,7 +289,11 @@ export function detectAi(folder: string, options: AiOptions = {}): AiInventory {
   }
   const byRef = (a: { "bom-ref": string }, b: { "bom-ref": string }) => (a["bom-ref"] < b["bom-ref"] ? -1 : a["bom-ref"] > b["bom-ref"] ? 1 : 0);
   const sorted = [...components.values()].sort(byRef);
-  for (const component of sorted) if (component.evidence) component.evidence.occurrences = component.evidence.occurrences.filter((item, index, all) => all.findIndex(other => other.location === item.location && other.line === item.line) === index).sort((a, b) => (a.location < b.location ? -1 : a.location > b.location ? 1 : (a.line ?? 0) - (b.line ?? 0)));
+  for (const component of sorted) if (component.evidence) {
+    const unique = new Map<string, { location: string; line?: number }>();
+    for (const item of component.evidence.occurrences) unique.set(`${item.location}\0${item.line ?? ""}`, item);
+    component.evidence.occurrences = [...unique.values()].sort((a, b) => (a.location < b.location ? -1 : a.location > b.location ? 1 : (a.line ?? 0) - (b.line ?? 0))).slice(0, MAX_OCCURRENCES);
+  }
   return { components: sorted, services: [...services.values()].sort(byRef), notes: [...new Set(notes)].sort() };
 }
 
