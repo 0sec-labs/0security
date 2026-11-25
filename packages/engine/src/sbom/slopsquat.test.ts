@@ -270,3 +270,20 @@ describe("one name, several components", () => {
     expect(hits).toEqual([]);
   });
 });
+
+describe("source URL judgement", () => {
+  it("treats git sources and look-alike hosts as private", () => {
+    const lock = JSON.stringify({ packages: {
+      "node_modules/gitdep": { version: "1.0.0", resolved: "git+ssh://git@git.corp.test/x.git#abc" },
+      "node_modules/spoof": { version: "1.0.0", resolved: "https://registry.npmjs.org@evil.test/spoof.tgz" },
+      "node_modules/port": { version: "1.0.0", resolved: "https://registry.npmjs.org:8443/port.tgz" },
+    } });
+    expect(parseNpmLock(lock).map(item => item.local)).toEqual(["workspace", "private-registry", "private-registry"]);
+    expect(parseRequirements("--index-url https://pypi.org@evil.test/simple\na==1.0\n")[0]!.local).toBe("private-registry");
+    expect(parseRequirements("--index-url https://pypi.org/simple\na==1.0\n")[0]!.local).toBeUndefined();
+  });
+  it("keeps the private marker when pnpm lists the same identity twice", () => {
+    const lock = "lockfileVersion: '6.0'\npackages:\n  /a@1.0.0:\n    resolution: {integrity: sha512-AAAA}\n  /a@1.0.0(peer@1.0.0):\n    resolution: {tarball: https://npm.corp.test/a.tgz}\n";
+    expect(parsePnpmLock(lock).map(item => item.local)).toEqual(["private-registry"]);
+  });
+});

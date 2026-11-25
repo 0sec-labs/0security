@@ -51,11 +51,15 @@ const text = (value: unknown): string => typeof value === "string" ? value : "";
 const npmNameOf = (path: string, entry: Record<string, unknown>): string => text(entry.name) || path.split("node_modules/").pop() || "";
 const licenseList = (value: unknown): string[] => typeof value === "string" && value.trim() ? [value.trim()] : Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && !!item.trim()).map(item => item.trim()) : [];
 
-/** `local` for a resolved URL or path that is not the public npm registry. */
+/** True for an https URL on one of these hosts, with no credentials and the default port. Prefix matching on text is not enough. */
+function isPublicUrl(value: string, hosts: string[]): boolean {
+  try { const url = new URL(value); return url.protocol === "https:" && hosts.includes(url.hostname) && !url.username && !url.password && !url.port; } catch { return false; }
+}
+const NPM_HOSTS = ["registry.npmjs.org", "registry.yarnpkg.com"];
+/** `local` for a resolved URL or path that is not the public npm registry (git, file, other registry). */
 function npmLocalOf(resolved: string): Component["local"] {
-  if (!resolved) return undefined;
-  if (/^(file|link|portal|workspace):/.test(resolved)) return "workspace";
-  return /^https?:\/\//.test(resolved) && !/^https:\/\/registry\.(npmjs\.org|yarnpkg\.com)\//.test(resolved) ? "private-registry" : undefined;
+  if (!resolved || isPublicUrl(resolved, NPM_HOSTS)) return undefined;
+  return /^https?:\/\//.test(resolved) ? "private-registry" : "workspace";
 }
 
 export function parseNpmLock(source: string): Component[] {
@@ -153,7 +157,7 @@ export function parsePnpmLock(source: string): Component[] {
     const dev = isObject(entry) && entry.dev === true;
     const local = npmLocalOf(text(resolution.tarball)) ?? (text(resolution.directory) ? "workspace" as const : undefined);
     const previous = found.get(identity(parsed));
-    if (previous) { if (!previous.hashes?.length && hashes.length) previous.hashes = hashes; continue; }
+    if (previous) { if (!previous.hashes?.length && hashes.length) previous.hashes = hashes; if (!previous.local && local) previous.local = local; continue; }
     found.set(identity(parsed), { ecosystem: "npm", name: parsed.name, version: parsed.version, ...(local ? { local } : {}), ...(dev ? { dev: true } : {}), ...(hashes.length ? { hashes } : {}), ...(edges.has(identity(parsed)) ? { dependsOn: [...edges.get(identity(parsed))!.values()] } : {}) });
   }
   return [...found.values()];
@@ -305,7 +309,7 @@ export function parsePipfileLock(source: string): Component[] {
   // `index` names a source in `_meta.sources`; the alias "pypi" can point anywhere, so judge the source's URL.
   const meta = isObject(lock._meta) ? lock._meta : {};
   const sources = (Array.isArray(meta.sources) ? meta.sources : []).filter(isObject);
-  const publicUrl = (url: string): boolean => /^https:\/\/pypi\.org\//.test(url);
+  const publicUrl = (url: string): boolean => isPublicUrl(url, ["pypi.org"]);
   const isPrivateSource = (index: string): boolean => {
     const source = index ? sources.find(item => text(item.name) === index) : sources[0];
     return source ? !publicUrl(text(source.url)) : !!index && index !== "pypi";
@@ -325,7 +329,7 @@ export function parsePipfileLock(source: string): Component[] {
 export function parseRequirements(source: string): Component[] {
   const found: Component[] = [];
   // Any index or find-links option other than the public index may serve private packages: mark every package local.
-  const custom = [...source.matchAll(/^\s*(?:-i|--index-url|--extra-index-url|-f|--find-links)(?:\s+|=)(\S+)/gm)].some(match => !/^https:\/\/pypi\.org\//.test(match[1]!));
+  const custom = [...source.matchAll(/^\s*(?:-i|--index-url|--extra-index-url|-f|--find-links)(?:\s+|=)(\S+)/gm)].some(match => !isPublicUrl(match[1]!, ["pypi.org"]));
   const local = custom ? { local: "private-registry" as const } : {};
   for (const raw of source.split(/\r?\n/)) {
     const line = raw.replace(/\s+#.*$/, "").replace(/\s*\\$/, "").split(";")[0]!.trim();
