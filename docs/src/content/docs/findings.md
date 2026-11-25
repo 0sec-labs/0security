@@ -438,6 +438,16 @@ On one planted Node app (an old lodash with one vulnerable function called, and 
 
 Add `--outdated` to `0security sbom check` to list newer versions. These are notes, not findings.
 
+### AI-written code and invented packages
+
+AI coding tools sometimes write dependency names that do not exist. Attackers register those names, so the next install pulls their code. In a study of 16 models and 576,000 code samples, about one in five recommended packages did not exist ([Spracklen et al., USENIX Security 2025](https://arxiv.org/abs/2406.10279)). Check a lockfile for names that are missing, brand new or close to a popular package:
+
+```bash
+0security sbom check sbom.cdx.json --registry
+```
+
+See [sbom check](/commands/#sbom-check) for the rules, the skipped private packages and what goes over the network.
+
 ## Check findings for false positives
 
 `0security findings verify` is experimental. It re-checks findings with a fresh thread for each one. The thread gets only the finding's own text, reads the code itself, and tries to build a concrete attack. It stores a verdict next to the finding: true-positive, false-positive, fixed, uncertain or duplicate.

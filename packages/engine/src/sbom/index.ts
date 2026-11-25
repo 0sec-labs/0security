@@ -1,5 +1,5 @@
 export { LOCKFILES, parseCargoLock, parseComposerLock, parseGemfileLock, parseGoMod, parseGradleLock, parseMixLock, parseNugetLock, parsePubspecLock, parseNpmLock, parsePipfileLock, parsePnpmLock, parsePoetryLock, parseRequirements, parseYarnLock, sriToHashes, type Component, type Hash } from "./parsers.js";
-export { classifyLicense, generateSbom, packageUrl, UNRESOLVED_PROPERTY, RESOLVED_PROPERTY, type Bom, type LibraryComponent, type LicenseChoice, type SbomResult } from "./cyclonedx.js";
+export { classifyLicense, generateSbom, packageUrl, UNRESOLVED_PROPERTY, RESOLVED_PROPERTY, LOCAL_PROPERTY, type Bom, type LibraryComponent, type LicenseChoice, type SbomResult } from "./cyclonedx.js";
 export { checkBomAgainstOsv, type Advisory, type AdvisorySeverity, type OsvOptions } from "./osv.js";
 export { compareVersions, cvss3BaseScore } from "./advisory-facts.js";
 export { toSpdx, type SpdxDocument, type SpdxPackage } from "./spdx.js";
@@ -13,3 +13,4 @@ export { bumpJavaDependency, parseDependencyFinding, type BumpEdit, type BumpReq
 export { parseCatalog, parseGradleBuild, parseVersionCatalog } from "./gradle.js";
 export { buildToolEnv, mergeComponents, parseDependencyReport, parseGradleTree, parseMavenTree, ResolveFailedError, resolveJvmDependencies, RESOLVE_TIMEOUT_MS, type ResolveOptions, type ResolveResult } from "./resolve.js";
 export { javaUsageToText, parseImports, scanJavaUsage, type JavaImport, type JavaUsage, type JavaUsageReport, type JavaUsageVerdict } from "./java-usage.js";
+export { checkSlopsquat, editDistance, lookalikeOf, slopsquatFails, slopsquatSarifParts, slopsquatToText, SLOPSQUAT_CAP, SLOPSQUAT_NEW_DAYS, type SlopFinding, type SlopOptions, type SlopResult } from "./slopsquat.js";
