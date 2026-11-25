@@ -199,6 +199,7 @@ export async function checkSlopsquat(bom: unknown, options: SlopOptions = {}): P
   const wanted = new Map<string, { purl: string; ecosystem: "npm" | "pypi"; name: string; version: string }>();
   const skipped: SlopSkip[] = [];
   const privateKeys = new Set<string>();
+  const seenPurls = new Set<string>();
   let unsupported = 0;
   for (const component of ordered) {
     const purl = typeof component.purl === "string" && /^pkg:[a-z]+\/\S{1,380}$/.test(component.purl) ? component.purl : undefined;
@@ -206,7 +207,8 @@ export async function checkSlopsquat(bom: unknown, options: SlopOptions = {}): P
     const found = target(purl);
     if (!found) { unsupported += 1; continue; }
     const key = `${found.ecosystem}:${found.name}`;
-    if (skipped.some(item => item.purl === purl)) continue;
+    if (seenPurls.has(purl)) continue;
+    seenPurls.add(purl);
     const properties = Array.isArray(component.properties) ? component.properties.filter(isObject) : [];
     const local = properties.some(property => property.name === "0:local");
     const scope = found.name.startsWith("@") ? found.name.slice(1, found.name.indexOf("/")) : "";
