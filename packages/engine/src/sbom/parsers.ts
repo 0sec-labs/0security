@@ -302,13 +302,21 @@ export function parsePipfileLock(source: string): Component[] {
   try { lock = JSON.parse(source); } catch { return []; }
   if (!isObject(lock)) return [];
   const found: Component[] = [];
+  // `index` names a source in `_meta.sources`; the alias "pypi" can point anywhere, so judge the source's URL.
+  const meta = isObject(lock._meta) ? lock._meta : {};
+  const sources = (Array.isArray(meta.sources) ? meta.sources : []).filter(isObject);
+  const publicUrl = (url: string): boolean => /^https:\/\/pypi\.org\//.test(url);
+  const isPrivateSource = (index: string): boolean => {
+    const source = index ? sources.find(item => text(item.name) === index) : sources[0];
+    return source ? !publicUrl(text(source.url)) : !!index && index !== "pypi";
+  };
   for (const [section, dev] of [["default", false], ["develop", true]] as const) {
     const packages = lock[section];
     if (!isObject(packages)) continue;
     for (const [name, entry] of Object.entries(packages)) {
       const version = isObject(entry) ? text(entry.version).replace(/^==/, "") : "";
       const index = isObject(entry) ? text(entry.index) : "";
-      if (version) found.push({ ecosystem: "pypi", name, version, ...(index && index !== "pypi" ? { local: "private-registry" as const } : {}), ...(dev ? { dev: true } : {}) });
+      if (version) found.push({ ecosystem: "pypi", name, version, ...(isPrivateSource(index) ? { local: "private-registry" as const } : {}), ...(dev ? { dev: true } : {}) });
     }
   }
   return found;

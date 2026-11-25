@@ -244,6 +244,10 @@ describe("other lockfiles mark private sources", () => {
     const poetry = '[[package]]\nname = "pub"\nversion = "1.0"\n\n[[package]]\nname = "priv"\nversion = "1.0"\n\n[package.source]\ntype = "legacy"\nurl = "https://pypi.corp.test/simple"\n';
     expect(local(parsePoetryLock(poetry))).toEqual([["pub", undefined], ["priv", "private-registry"]]);
     expect(local(parsePipfileLock(JSON.stringify({ default: { a: { version: "==1.0", index: "pypi" }, b: { version: "==1.0", index: "corp" } } })))).toEqual([["a", undefined], ["b", "private-registry"]]);
+    const remapped = { _meta: { sources: [{ name: "pypi", url: "https://pypi.corp.test/simple" }] }, default: { a: { version: "==1.0", index: "pypi" }, b: { version: "==1.0" } } };
+    expect(local(parsePipfileLock(JSON.stringify(remapped)))).toEqual([["a", "private-registry"], ["b", "private-registry"]]);
+    const publicLock = { _meta: { sources: [{ name: "pypi", url: "https://pypi.org/simple" }] }, default: { a: { version: "==1.0", index: "pypi" }, b: { version: "==1.0" } } };
+    expect(local(parsePipfileLock(JSON.stringify(publicLock)))).toEqual([["a", undefined], ["b", undefined]]);
     expect(local(parseRequirements("a==1.0\n"))).toEqual([["a", undefined]]);
     expect(local(parseRequirements("--extra-index-url https://pypi.corp.test/simple\na==1.0\n"))).toEqual([["a", "private-registry"]]);
   });
