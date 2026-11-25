@@ -65,6 +65,19 @@ For a stronger guarantee than a test, also block egress at the network: run 0 in
 | `windows-evidence-worker` | The base URL in a cloud-issued grant | A cloud Windows evidence job. | A bounded evidence envelope. | Do not accept cloud jobs. |
 | `remote-worker-provisioning` | `nodejs.org`, apt and npm registries, from the remote computer | `0security computers add`. | Package downloads. | Prepare the remote computer yourself. |
 
+## Dependency audit
+
+Generating an SBOM and checking licenses from the SBOM make no network request. The lookups in the table above are the only network use of the dependency checks:
+
+- `sbom check` sends package URLs to `api.osv.dev`.
+- `sbom check --outdated` sends package names to `api.deps.dev`.
+- `sbom licenses --resolve` sends package names and versions to `api.deps.dev`.
+- `findings evidence --check-advisories` sends package URLs to `api.osv.dev`.
+- `sbom generate --resolve` runs your own `mvn` or `gradle`, which contacts the repositories your build names.
+- `sbom generate --generator syft` or `trivy` with `--image` runs that tool, which may pull the image.
+
+`sbom generate --resolve-from`, `sbom java-usage`, `sbom scan-models` and `sbom agent-config` send nothing. See [Dependency audit](/dependency-audit/).
+
 ## Your model endpoint
 
 | Entry | Destination | When | What is sent |

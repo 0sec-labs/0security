@@ -393,7 +393,7 @@ Stop a running console on the same database before you import. See [findings imp
 
 ## Dependencies
 
-Check the packages your project uses against known advisories, import the results as findings, and fix them with a version bump.
+Check the packages your project uses against known advisories, import the results as findings, and fix them with a version bump. [Dependency audit](/dependency-audit/) covers every check, including licenses and newer versions.
 
 ```bash
 0security sbom generate . -o sbom.cdx.json
