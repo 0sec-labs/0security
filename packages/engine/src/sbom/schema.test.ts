@@ -6,20 +6,20 @@ import addFormats from "ajv-formats";
 import { afterEach, describe, expect, it } from "vitest";
 import { generateSbom } from "./index.js";
 
-// The official CycloneDX 1.5 JSON schema (Apache-2.0), vendored so this check needs no network.
+// The official CycloneDX 1.6 JSON schema (Apache-2.0), vendored so this check needs no network.
 const schemas = join(import.meta.dirname, "..", "..", "test-fixtures", "cyclonedx");
 const load = (name: string) => JSON.parse(readFileSync(join(schemas, name), "utf8"));
 const ajv = new Ajv({ strict: false, allErrors: true, validateFormats: false });
 addFormats(ajv);
 ajv.addSchema(load("spdx.schema.json")); ajv.addSchema(load("jsf-0.82.schema.json"));
-const validate = ajv.compile(load("bom-1.5.schema.json"));
+const validate = ajv.compile(load("bom-1.6.schema.json"));
 
 const dirs: string[] = [];
 afterEach(() => dirs.splice(0).forEach(dir => rmSync(dir, { recursive: true, force: true })));
 const folder = (files: Record<string, string>) => { const dir = mkdtempSync(join(tmpdir(), "0-cdx-")); dirs.push(dir); for (const [path, content] of Object.entries(files)) { mkdirSync(join(dir, path, ".."), { recursive: true }); writeFileSync(join(dir, path), content); } return dir; };
 const problems = () => (validate.errors ?? []).slice(0, 5).map(error => `${error.instancePath} ${error.message}`);
 
-describe("the SBOM is valid CycloneDX 1.5", () => {
+describe("the SBOM is valid CycloneDX 1.6", () => {
   it("for libraries from every supported lockfile", () => {
     const dir = folder({
       "package-lock.json": JSON.stringify({ packages: { "node_modules/lodash": { version: "4.17.20" }, "node_modules/@babel/core": { version: "7.1.0", dev: true } } }),
@@ -59,6 +59,17 @@ describe("the SBOM is valid CycloneDX 1.5", () => {
     const { bom } = generateSbom(dir, { toolVersion: "0.0.0", ai: true });
     expect(bom.services).toHaveLength(2);
     expect(validate(bom), problems().join("; ")).toBe(true);
+  });
+  it("with a full ML-BOM: model files with headers and hashes, Hub references, datasets, licences and a model card", () => {
+    const dir = folder({ ".mcp.json": "{}", "app.py": 'AutoModel.from_pretrained("org/model", revision="' + "a".repeat(40) + '")\nload_dataset("imdb")\n', "m/README.md": "---\nlicense: apache-2.0\npipeline_tag: text-generation\ndatasets:\n  - org/data\n---\n", "m/config.json": '{"architectures":["LlamaForCausalLM"],"model_type":"llama"}', "m/w.safetensors": "x", "data/train.csv": "a,b\n" });
+    const { bom } = generateSbom(dir, { toolVersion: "0.0.0", ai: true });
+    expect(bom.components.some(component => "modelCard" in component && component.modelCard)).toBe(true);
+    expect(bom.components.some(component => "externalReferences" in component && component.externalReferences)).toBe(true);
+    expect(validate(bom), problems().join("; ")).toBe(true);
+  });
+  it("and the validator is real for the model card: an unknown modelCard field is rejected", () => {
+    const { bom } = generateSbom(folder({ "app.py": 'AutoModel.from_pretrained("org/model")\n' }), { toolVersion: "0", ai: true });
+    expect(validate({ ...bom, components: [{ ...bom.components[0], modelCard: { modelParameters: { bogus: 1 } } }] })).toBe(false);
   });
   it("and the validator is real: a service listed as a component is rejected", () => {
     const { bom } = generateSbom(folder({ "package-lock.json": JSON.stringify({ packages: { "node_modules/a": { version: "1.0.0" } } }) }), { toolVersion: "0" });

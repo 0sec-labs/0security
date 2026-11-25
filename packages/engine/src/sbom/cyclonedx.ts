@@ -13,7 +13,7 @@ const SKIP = new Set(["node_modules", ".git", "dist", "build", "target", "vendor
 
 export interface Bom {
   bomFormat: "CycloneDX";
-  specVersion: "1.5";
+  specVersion: "1.6";
   serialNumber: string;
   version: 1;
   metadata: { timestamp: string; tools: { components: Array<{ type: "application"; author: string; name: string; version: string }> }; component: { type: "application"; name: string }; properties?: Array<{ name: string; value: string }> };
@@ -115,7 +115,7 @@ function mergeFacts(into: Component, from: Component): void {
   }
 }
 
-/** Build a CycloneDX 1.5 SBOM from the lockfiles under a folder. Sorted and de-duplicated, so the same lockfiles give the same SBOM. */
+/** Build a CycloneDX 1.6 SBOM from the lockfiles under a folder. Sorted and de-duplicated, so the same lockfiles give the same SBOM. */
 export function generateSbom(folder: string, options: { name?: string; toolVersion: string; now?: Date; ai?: boolean; resolved?: Component[] }): SbomResult {
   const files = listFiles(folder);
   const locks: Found[] = [];
@@ -220,17 +220,17 @@ export function generateSbom(folder: string, options: { name?: string; toolVersi
   const seenUnresolved = new Set<string>();
   const unresolvedSorted = unresolved.filter(item => !resolvedNames.has(item.name.replace(":", "/"))).filter(item => { const key = `${item.source}\n${item.name}\n${item.reason}`; if (seenUnresolved.has(key)) return false; seenUnresolved.add(key); return true; })
     .sort((a, b) => (a.source !== b.source ? (a.source < b.source ? -1 : 1) : a.name !== b.name ? (a.name < b.name ? -1 : 1) : a.reason < b.reason ? -1 : a.reason > b.reason ? 1 : 0));
-  const ai = options.ai ? detectAi(folder) : { components: [], services: [] };
+  const ai = options.ai ? detectAi(folder) : { components: [], services: [], notes: [] as string[] };
   const sorted = [...byPurl.values()].sort((a, b) => (a.purl < b.purl ? -1 : a.purl > b.purl ? 1 : 0));
-  const digest = createHash("sha256").update([...sorted.map(item => item.purl), ...ai.components.map(item => item["bom-ref"]), ...ai.services.map(item => item["bom-ref"]), ...unresolvedSorted.map(item => `${item.source} ${item.name}`)].join("\n")).digest("hex");
+  const digest = createHash("sha256").update([...sorted.map(item => item.purl), ...ai.components.map(item => item["bom-ref"] + (item.hashes?.map(hash => hash.content).join(",") ?? "")), ...ai.services.map(item => item["bom-ref"]), ...unresolvedSorted.map(item => `${item.source} ${item.name}`)].join("\n")).digest("hex");
   const serial = `urn:uuid:${digest.slice(0, 8)}-${digest.slice(8, 12)}-4${digest.slice(13, 16)}-8${digest.slice(17, 20)}-${digest.slice(20, 32)}`;
   const bom: Bom = {
-    bomFormat: "CycloneDX", specVersion: "1.5", serialNumber: serial, version: 1,
+    bomFormat: "CycloneDX", specVersion: "1.6", serialNumber: serial, version: 1,
     metadata: {
       timestamp: (options.now ?? new Date()).toISOString(),
       tools: { components: [{ type: "application", author: "0sec-labs", name: "0", version: options.toolVersion }] },
       component: { type: "application", name: options.name ?? (folder.split(/[\\/]/).filter(Boolean).pop() ?? "application") },
-      ...(unresolvedSorted.length ? { properties: unresolvedSorted.map(item => ({ name: UNRESOLVED_PROPERTY, value: `${item.name} (${item.reason}) in ${item.source}` })) } : {}),
+      ...(unresolvedSorted.length || ai.notes.length ? { properties: [...unresolvedSorted.map(item => ({ name: UNRESOLVED_PROPERTY, value: `${item.name} (${item.reason}) in ${item.source}` })), ...ai.notes.map(note => ({ name: "0:ai-note", value: note }))] } : {}),
     },
     components: [...sorted.map(({ component, purl, source }): LibraryComponent => ({
       type: "library", "bom-ref": purl, name: component.name, version: component.version, purl,
