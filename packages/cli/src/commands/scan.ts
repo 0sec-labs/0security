@@ -17,6 +17,7 @@ import { CoverageLedger, coverageSentence, listOsecRunDatabasePaths, osecDB, res
 import { consoleTransportOptions, openConsole, type ConsoleClient, type ConsoleTransportOptions } from "../console-client.js";
 import { homeStateDir, parseSarif, parseScannerList, scanPrompt, scannerArguments, scannerById, scannerTakesRules, SCANNERS, type KnownItem, type PrePassLeads, type BatchPromptInfo, type ScanFileCoverage, type ScanReport } from "@0/engine/shared";
 import { runPrePass } from "../prepass.js";
+import { runNucleiTarget, type NucleiTargetRun } from "../nuclei-target.js";
 import { checkRulesScanners, resolveRulePaths } from "../scan-rules.js";
 import { applyScope, markKnown, mergePasses, scanExitCode, scanJson, toScanReport, type ScanOutcome } from "../scan-report.js";
 import { followUpText, reviewDepth, reviewScopeFiles, shallowReviewWarning, toolCallText, unopenedFiles } from "../scan-review.js";
@@ -32,6 +33,8 @@ import { knownIn, leadsToFindings, loadKnown, type KnownSet } from "../scan-know
 import { finishWithError, UsageError } from "./output.js";
 import { appendRunMetric, type RunMetric } from "../run-metrics.js";
 import { applyWorkflowDefaults } from "../workflow-defaults.js";
+import { importSarif } from "../report-import.js";
+import { assertLocalEngineAvailable } from "../local-engine.js";
 import { asJson, finishedThread, lastAssistantText, usageLine, type FinishedThread, type Json } from "./thread-output.js";
 
 const exec = promisify(execFile);
@@ -101,6 +104,10 @@ export interface ScanDeps {
   openLedger?(dbPath?: string): CoverageLedger;
   /** The commit a folder is on, or undefined when it is not a git work tree. A resumed scan refuses a different one. */
   gitHead?(folder: string): Promise<string | undefined>;
+  /** `--target-url`: run Nuclei against the named target. Replaced in tests. */
+  nucleiTarget?(options: Parameters<typeof runNucleiTarget>[0]): Promise<NucleiTargetRun>;
+  /** Store a Nuclei result file in the findings database, so the findings sit in the same list as the rest. Throws when that cannot be done. */
+  saveTargetFindings?(jsonl: string, dbPath?: string): { scanId: string; findings: number };
   /** Record one run in the metrics file (counts and ids only). Absent in tests, so they write nothing. */
   metrics?(record: Omit<RunMetric, "version" | "ci">): void;
   /** Store the declared-scope labels on the findings in the local findings databases. Absent in tests, so they write nothing. */
@@ -129,6 +136,8 @@ function saveScopeLabels(labels: ScopeLabelRow[], dbPath?: string): void {
 }
 
 export const defaultScanDeps: ScanDeps = {
+  nucleiTarget: options => runNucleiTarget(options, { note: text => process.stderr.write(`${text}\n`) }),
+  saveTargetFindings: (jsonl, dbPath) => { const path = resolveOsecDbPath(dbPath); assertLocalEngineAvailable(dbPath); return importSarif({ sarifJson: jsonl, dbPath: path, tool: "Nuclei" }); },
   saveScope: saveScopeLabels,
   scopeHint: interactiveScopeHint,
   open: options => openConsole(options),
@@ -189,6 +198,7 @@ interface ScanOptions extends ConsoleTransportOptions {
   budget: string; diff?: string; prepass?: string; scanner?: string[]; rules?: string[]; format: string; output?: string; timeout: string; failOn?: string; model?: string; skill: string; passes: string;
   context?: string[]; policy?: string[]; orgPolicy?: string[]; repoContext?: boolean; repoIgnores?: boolean;
   scope?: string; repoScope?: boolean; scopeSarif?: string;
+  targetUrl?: string; scopeFile?: string; acknowledgeHost?: string; rateLimit?: string; templates?: string;
   batches?: string; batchSize?: string; concurrency?: string; resume?: string; force?: boolean; coverage?: string | boolean; allowPartial?: boolean; plan?: boolean;
   tiers?: string; failOnSkip?: boolean; known?: string[]; onlyNew?: boolean;
   retries?: string; batchTimeout?: string; coverageRounds?: string;
@@ -712,7 +722,73 @@ async function runPrePassOnly(resolved: ResolvedTarget, options: ScanOptions, de
   if (code !== 0) process.exitCode = code;
 }
 
+/** Flags that only make sense for a folder or repository scan; a target scan refuses them rather than ignore them. */
+const FOLDER_ONLY = ["diff", "rules", "policy", "orgPolicy", "context", "known", "tiers", "resume", "coverage", "plan"] as const;
+
+function validateTargetScan(target: string | undefined, options: ScanOptions): void {
+  if (options.targetUrl === undefined) throw new UsageError("--scanner nuclei tests a running app: add --target-url <url>.");
+  if ((options.scanner ?? []).flatMap(value => value.split(",")).map(value => value.trim()).filter(Boolean).join() !== "nuclei") throw new UsageError("--target-url needs --scanner nuclei, and no other scanner.");
+  if (target?.trim()) throw new UsageError("--target-url replaces the folder or git URL: give one or the other.");
+  if (!options.scopeFile && options.acknowledgeHost === undefined) throw new UsageError("Name what you may test: pass --scope-file <file> (one host per line) or --acknowledge-host <host>.");
+  const given = FOLDER_ONLY.filter(name => { const value = (options as unknown as Record<string, unknown>)[name]; return Array.isArray(value) ? value.length > 0 : value !== undefined && value !== false; });
+  if (given.length) throw new UsageError(`--target-url does not take ${given.map(name => `--${name.replace(/[A-Z]/g, letter => `-${letter.toLowerCase()}`)}`).join(", ")}.`);
+  if (!(FORMATS as readonly string[]).includes(options.format)) throw new UsageError(`--format must be one of: ${FORMATS.join(", ")}.`);
+  if (options.format === "pdf" && !options.output) throw new UsageError("PDF is binary; supply -o <file>.");
+}
+
+const wholeNumber = (value: string | undefined, flag: string): number | undefined => {
+  if (value === undefined) return undefined;
+  if (!/^\d+$/.test(value.trim())) throw new UsageError(`${flag} must be a whole number.`);
+  return Number(value);
+};
+
+/** `--scanner nuclei --target-url`: Nuclei, run by you against one named target. No model, no request from 0 itself. */
+async function runTargetScan(target: string | undefined, options: ScanOptions, deps: ScanDeps): Promise<void> {
+  validateTargetScan(target, options);
+  const startedAt = deps.now().toISOString();
+  const typedConcurrency = options.explicit?.includes("concurrency") || (options.concurrency !== undefined && options.concurrency !== "1");
+  const timeout = Number(options.timeout);
+  let run: NucleiTargetRun;
+  try {
+    run = await (deps.nucleiTarget ?? defaultScanDeps.nucleiTarget!)({
+      targetUrl: options.targetUrl!, ...(options.scopeFile ? { scopeFile: options.scopeFile } : {}), ...(options.acknowledgeHost !== undefined ? { acknowledgeHost: options.acknowledgeHost } : {}),
+      ...(wholeNumber(options.rateLimit, "--rate-limit") !== undefined ? { rateLimit: wholeNumber(options.rateLimit, "--rate-limit")! } : {}),
+      ...(typedConcurrency ? { concurrency: wholeNumber(options.concurrency, "--concurrency")! } : {}),
+      ...(options.templates ? { templates: options.templates } : {}), ...(Number.isFinite(timeout) && timeout > 0 ? { timeoutSeconds: timeout } : {}),
+    });
+  } catch (error) {
+    if (error instanceof UsageError) throw error;
+    // A refused target, a missing Nuclei and a bad template path are all things the person fixes on the command line.
+    throw new UsageError(error instanceof Error ? error.message : String(error));
+  }
+  const at = deps.now();
+  const excluded = "intrusive, dos and fuzz templates excluded";
+  const summary = `Nuclei ${run.version ?? ""} run by you against ${run.target.url}: ${run.findings.length} result${run.findings.length === 1 ? "" : "s"}. Scope: ${run.scope}. ${run.rateLimit} requests per second, ${run.concurrency} templates at once, ${excluded}, no out-of-band callbacks. 0 sent no request itself and no model reviewed the results.`.replace("Nuclei  run", "Nuclei run");
+  const base = { target: `nuclei:${run.target.host}`, threadId: "none", startedAt, completedAt: at.toISOString(), budgetUsd: 0, budgetExhausted: false, failed: false, summary };
+  const outcome: ScanOutcome = base;
+  const findings = leadsToFindings(run.findings, at);
+  await writeReport(outcome, findings, { ...emptyStoredReport(startedAt), findings }, "0-scan-nuclei", options, deps);
+  if (run.jsonl.trim()) {
+    try {
+      const saved = (deps.saveTargetFindings ?? defaultScanDeps.saveTargetFindings!)(run.jsonl, options.dbPath);
+      deps.err(`${saved.findings} finding${saved.findings === 1 ? "" : "s"} saved for triage (unverified imports, scan ${saved.scanId.slice(0, 18)}).`);
+    } catch (error) {
+      const file = `nuclei-results-${at.toISOString().replace(/[:.]/g, "-")}.jsonl`;
+      deps.writeBytes(file, new TextEncoder().encode(run.jsonl));
+      deps.err(`warning: the findings were not saved (${error instanceof Error ? error.message : String(error)}). Nuclei's results are in ${file}; import them with: 0security findings import ${file}`);
+    }
+  }
+  deps.err(`${findings.length} finding${findings.length === 1 ? "" : "s"} from Nuclei, not reviewed by a model`);
+  const code = scanExitCode(outcome, findings, options.failOn as typeof SEVERITIES[number] | undefined);
+  if (code !== 0) process.exitCode = code;
+}
+
 export async function runScan(target: string | undefined, options: ScanOptions, deps: ScanDeps = defaultScanDeps): Promise<void> {
+  if (options.targetUrl !== undefined || (options.scanner ?? []).some(value => value.split(",").some(id => id.trim() === "nuclei"))) {
+    try { await runTargetScan(target, options, deps); }
+    catch (error) { finishWithError(error, { err: deps.err }, options.format === "json"); }
+    return;
+  }
   let resolved: ResolvedTarget | undefined;
   let client: ConsoleClient | undefined;
   let stopConsole: (() => void) | undefined;
@@ -868,7 +944,12 @@ export function registerScanCommand(program: Command, deps: ScanDeps = defaultSc
     .option("--passes <n>", `Scan this many times and merge the findings (a scan misses some issues that another run finds); the budget is split between them, up to ${MAX_PASSES}`, "1")
     .option("--diff <ref>", "Review only the files that differ from this git ref (for example origin/main), and what they connect to; an empty diff scans nothing")
     .option("--prepass <mode>", "auto runs the pattern scanners first when they are installed and gives their hits to the scan as leads; off skips them", "auto")
-    .option("--scanner <id>", `Scanner for the pre-pass (${SCANNERS.map(scanner => scanner.id).join(", ")}); repeat or separate with commas to use several (default: foxguard). gitleaks, trivy and osv-scanner must be installed; secret values are redacted`, (value: string, previous: string[] = []) => [...previous, value])
+    .option("--scanner <id>", `Scanner for the pre-pass (${SCANNERS.map(scanner => scanner.id).join(", ")}); nuclei is only for --target-url; repeat or separate with commas to use several (default: foxguard). gitleaks, trivy and osv-scanner must be installed; secret values are redacted`, (value: string, previous: string[] = []) => [...previous, value])
+    .option("--target-url <url>", "With --scanner nuclei: test this running app with Nuclei, which you installed. Needs --scope-file or --acknowledge-host. 0 sends no request itself; link-local and cloud metadata addresses are always refused")
+    .option("--scope-file <file>", "With --target-url: a file listing the hosts you may test, one host or host:port per line")
+    .option("--acknowledge-host <host>", "With --target-url: type the exact host being tested. A public host is refused without it")
+    .option("--rate-limit <n>", `With --target-url: Nuclei requests per second (1 to 150)`, "10")
+    .option("--templates <path>", "With --target-url: a Nuclei template file or folder to run instead of the templates Nuclei has installed. 0 never downloads templates")
     .option("--rules <file-or-folder>", "Semgrep or OpenGrep rules for the pre-pass (a file or a folder); repeat for several. Replaces the default rules and needs --scanner semgrep or opengrep. Rules are never read from the scanned folder unless you name them", (value: string, previous: string[] = []) => [...previous, value])
     .option("--context <file>", "Give the scan this file (a threat model, notes on who may do what) as lower-priority background; repeat for several. It can steer what the scan weighs but cannot change how it works", (value: string, previous: string[] = []) => [...previous, value])
     .option("--policy <file-or-folder>", "Check the code against these Markdown policies (a file or a folder of .md files) and report pass or fail for each; repeat for several. Runs the policy-check skill", (value: string, previous: string[] = []) => [...previous, value])
@@ -885,7 +966,7 @@ export function registerScanCommand(program: Command, deps: ScanDeps = defaultSc
     .option("--retries <n>", `Run a batch again when it fails for a reason that may pass: a dropped connection, a provider timeout, rate limit or server error (0 to ${MAX_RETRIES}; 0 turns it off). A thread that is not a batch is asked once to continue. The cost of every attempt counts against --budget`, String(DEFAULT_RETRIES))
     .option("--coverage-rounds <n>", `After a thread ends, send it a follow-up that names the source files it never opened, up to this many times (0 to ${MAX_COVERAGE_ROUNDS}; 0 turns it off). Each round counts against --budget`, String(DEFAULT_COVERAGE_ROUNDS))
     .option("--batch-timeout <seconds>", `Longest one batch may run before it is cancelled and left pending (the scan goes on with the next batch); --timeout still limits the whole scan`, String(DEFAULT_BATCH_TIMEOUT_SECONDS))
-    .option("--concurrency <n>", `Batches that run at the same time (1 to ${MAX_PARALLEL_PASSES})`, "1")
+    .option("--concurrency <n>", `Batches that run at the same time (1 to ${MAX_PARALLEL_PASSES}). With --target-url: Nuclei templates that run at once (1 to 25, default 5)`, "1")
     .option("--resume <scan>", "Continue the units an earlier batched scan of this folder did not reach (a scan id from its report, or latest); refuses when the git HEAD changed unless --force")
     .option("--force", "With --resume: continue even though the folder's git HEAD changed")
     .option("--coverage [scan]", "Print the coverage ledger of a batched scan of this folder (the latest, or the id given) and exit; --format json for JSON")
@@ -900,7 +981,7 @@ export function registerScanCommand(program: Command, deps: ScanDeps = defaultSc
     .action(async (target: string, options: ScanOptions, command: Command) => {
       // Precedence: a flag you typed (or set in the environment) > the tier map > the operator's workflow defaults > the built-in default.
       // Workflow defaults fill budget and model here; runScan lets a tier replace them unless the flag was typed.
-      const typed = ["budget", "batches", "skill"].filter(name => ["cli", "env"].includes(String(command.getOptionValueSource(name))));
+      const typed = ["budget", "batches", "skill", "concurrency"].filter(name => ["cli", "env"].includes(String(command.getOptionValueSource(name))));
       await runScan(target, { ...applyWorkflowDefaults("scan", options, command), explicit: typed }, deps);
     });
 }

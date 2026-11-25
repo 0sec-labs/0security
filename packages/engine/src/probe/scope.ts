@@ -1,11 +1,13 @@
 import { lookup as dnsLookup } from "node:dns/promises";
 import { request as httpRequest, type IncomingMessage } from "node:http";
 import { request as httpsRequest } from "node:https";
-import { BlockList, isIP } from "node:net";
+import { isIP } from "node:net";
+import { classifyAddress, type NetworkClass, type ResolveHost } from "../policy/scoped-target.js";
 import { brotliDecompressSync, gunzipSync, inflateSync } from "node:zlib";
 
 /**
- * Scope guard for `0 probe`. Attack traffic goes only where the operator says they may send it.
+ * Scope guard for `0 probe`. Attack traffic goes only where the operator says they may send it. The address rules
+ * (loopback, private, public, never allowed) live in `policy/scoped-target.ts`, shared with `scan --target-url`.
  *
  * - Loopback and private networks (RFC 1918, unique-local IPv6, and 100.64.0.0/10 shared space such as a tailnet)
  *   are allowed without a flag: they are the operator's own machine or network.
@@ -15,8 +17,6 @@ import { brotliDecompressSync, gunzipSync, inflateSync } from "node:zlib";
  *   second DNS answer cannot move the traffic. A redirect off the named origin is refused.
  */
 
-export type NetworkClass = "loopback" | "private" | "public";
-export type ResolveHost = (hostname: string) => Promise<string[]>;
 
 export class ProbeScopeError extends Error {
   constructor(message: string) { super(message); this.name = "ProbeScopeError"; }
@@ -33,39 +33,7 @@ export interface ProbeScope {
   acknowledgedHost?: string;
 }
 
-const blocked = new BlockList();
-for (const [address, prefix] of [
-  ["0.0.0.0", 8], ["169.254.0.0", 16], ["224.0.0.0", 4], ["240.0.0.0", 4], ["100.100.100.200", 32], ["192.0.0.192", 32],
-] as const) blocked.addSubnet(address, prefix, "ipv4");
-for (const [address, prefix] of [["::", 128], ["fe80::", 10], ["ff00::", 8], ["fd00:ec2::", 32]] as const) blocked.addSubnet(address, prefix, "ipv6");
-const loopback = new BlockList();
-loopback.addSubnet("127.0.0.0", 8, "ipv4");
-loopback.addAddress("::1", "ipv6");
-const privateNet = new BlockList();
-for (const [address, prefix] of [["10.0.0.0", 8], ["172.16.0.0", 12], ["192.168.0.0", 16], ["100.64.0.0", 10]] as const) privateNet.addSubnet(address, prefix, "ipv4");
-privateNet.addSubnet("fc00::", 7, "ipv6");
-
-/** The IPv4 inside an IPv4-mapped IPv6 address (`::ffff:a.b.c.d` or `::ffff:7f00:1`), or the address itself. */
-function unmap(address: string): string {
-  const lower = address.toLowerCase();
-  const dotted = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(lower);
-  if (dotted) return dotted[1]!;
-  const hex = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(lower);
-  if (hex) { const high = parseInt(hex[1]!, 16), low = parseInt(hex[2]!, 16); return `${high >> 8}.${high & 255}.${low >> 8}.${low & 255}`; }
-  return address;
-}
-
-/** Where an IP address sits. `blocked` is never allowed. */
-export function classifyAddress(raw: string): NetworkClass | "blocked" {
-  const address = unmap(raw.replace(/^\[|\]$/g, ""));
-  const family = isIP(address);
-  if (!family) return "blocked";
-  const kind = family === 4 ? "ipv4" : "ipv6";
-  if (blocked.check(address, kind)) return "blocked";
-  if (loopback.check(address, kind)) return "loopback";
-  if (privateNet.check(address, kind)) return "private";
-  return "public";
-}
+export { classifyAddress, type NetworkClass, type ResolveHost };
 
 const defaultResolve: ResolveHost = async hostname => (await dnsLookup(hostname, { all: true })).map(entry => entry.address);
 const bareHost = (hostname: string) => hostname.toLowerCase().replace(/^\[|\]$/g, "").replace(/\.+$/, "");

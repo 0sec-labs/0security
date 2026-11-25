@@ -29,6 +29,7 @@ export const OUTBOUND_PATTERNS = {
   socket: /\bnet\.connect|createConnection|new WebSocket|new EventSource|XMLHttpRequest/,
   process: /(?:spawn|execFile|execFileSync|spawnSync|execute|run|exec)\w*\(\s*"(?:gh|curl|wget|ssh|scp|mvn|gradle|docker)"/,
   gitNetwork: /"(?:clone|ls-remote|fetch|push|pull)"/,
+  scannerProcess: /\bnucleiArguments\(/,
 };
 
 const isSource = path => /\.(ts|tsx|mjs)$/.test(path) && !/\.test\.|\.d\.ts|\.generated\.|[\\/](?:__tests__|test|tests|scripts)[\\/]/.test(path);
