@@ -207,9 +207,11 @@ export function parseSarif(text: string, options: { tool?: string; roots?: reado
       // Coverage and not-applicable entries (Strix writes them beside its findings) are not findings.
       const kind = clean(raw.kind, 20);
       if (kind === "pass" || kind === "notApplicable" || (kind && kind !== "fail" && (raw.level === undefined || raw.level === "none"))) continue;
-      const index = typeof raw.ruleIndex === "number" ? raw.ruleIndex : -1;
-      const ruleId = clean(raw.ruleId, 200) || clean(isObject(raw.rule) ? raw.rule.id : "", 200) || clean(rules[index]?.id, 200) || "unknown-rule";
-      const rule = byId.get(ruleId) ?? rules[index];
+      const rawIndex = isObject(raw.rule) && raw.rule.index !== undefined ? raw.rule.index : raw.ruleIndex;
+      const index = typeof rawIndex === "number" && Number.isInteger(rawIndex) && rawIndex >= 0 && rawIndex < rules.length ? rawIndex : -1;
+      const indexedRule = index >= 0 ? rules[index] : undefined;
+      const ruleId = clean(raw.ruleId, 200) || clean(isObject(raw.rule) ? raw.rule.id : "", 200) || clean(indexedRule?.id, 200) || "unknown-rule";
+      const rule = byId.get(ruleId) ?? indexedRule;
       const message = scrubText(raw.message, 4000);
       const ruleTitle = scrubText(rule?.shortDescription, 300) || scrub(rule?.name, 300);
       const title = (ruleTitle || message.split("\n")[0] || ruleId).slice(0, 300);
