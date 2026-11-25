@@ -2,6 +2,23 @@
 
 export type Probe = { ok: true; runtime: string } | { ok: false; reason: string };
 
+/** Resource and filesystem limits for one container. Absent fields keep the runner's defaults. */
+export interface ContainerLimits {
+  pidsLimit?: number;
+  /** Memory cap, like `512m`. Swap is capped to the same value. */
+  memory?: string;
+  /** CPU cap, like `1`. */
+  cpus?: string;
+  /** Size-capped tmpfs mounts, like `/tmp:rw,size=64m,noexec,nosuid`. */
+  tmpfs?: string[];
+  /** Cap on the writable layer, like `256m`. Needs a storage driver that supports it; the runner retries without it when the daemon refuses. */
+  storageSize?: string;
+  /** Mount the root file system read-only. */
+  readOnlyRoot?: boolean;
+  /** Run even when the writable-layer cap cannot be applied. Off by default: the run is refused instead. */
+  allowUnboundedStorage?: boolean;
+}
+
 export interface StepRequest {
   /** Digest-pinned image. Ignored by the host adapter. */
   image?: string;
@@ -13,6 +30,7 @@ export interface StepRequest {
   network: "none" | "allowed";
   timeoutMs: number;
   signal?: AbortSignal;
+  limits?: ContainerLimits;
 }
 
 export interface StepOutcome {
@@ -23,6 +41,8 @@ export interface StepOutcome {
   durationMs: number;
   /** Set when the adapter could not run the step at all (image pull, runtime failure). */
   infraError?: string;
+  /** Limits the adapter could not apply and ran without, only when the request allowed it. */
+  limitsNotApplied?: string[];
 }
 
 export interface ContainerRunner {

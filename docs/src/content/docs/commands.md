@@ -1749,7 +1749,7 @@ Browse and manage persisted findings
 
 Triage (`new`, `accepted`, `suppressed`) and verification are separate states. Accepting a finding records your decision; reproduction and fix verification are separate steps.
 
-Subcommands: [list](#findings-list) · [show](#findings-show) · [update](#findings-update) · [import](#findings-import) · [fix](#findings-fix) · [burndown](#findings-burndown) · [verify](#findings-verify) · [metrics](#findings-metrics) · [rollup](#findings-rollup) · [evidence](#findings-evidence) · [export-fixes](#findings-export-fixes) · [report-draft](#findings-report-draft) · [accept](#findings-accept) · [suppress](#findings-suppress) · [reopen](#findings-reopen) · [export](#findings-export) · [keys](#findings-keys) · [upload](#findings-upload) · [issues](#findings-issues) · [reports](#findings-reports).
+Subcommands: [list](#findings-list) · [show](#findings-show) · [update](#findings-update) · [import](#findings-import) · [fix](#findings-fix) · [burndown](#findings-burndown) · [verify](#findings-verify) · [metrics](#findings-metrics) · [rollup](#findings-rollup) · [evidence](#findings-evidence) · [export-fixes](#findings-export-fixes) · [report-draft](#findings-report-draft) · [reproduce](#findings-reproduce) · [accept](#findings-accept) · [suppress](#findings-suppress) · [reopen](#findings-reopen) · [export](#findings-export) · [keys](#findings-keys) · [upload](#findings-upload) · [issues](#findings-issues) · [reports](#findings-reports).
 
 | Option | Registered default | Description |
 | --- | --- | --- |
@@ -2350,6 +2350,48 @@ The rollup does not keep history, so it shows no trend. Keep the JSON output of 
 | `--repository <name>` | — | Repository name for findings read from a database (default: the scan target's folder name) |
 | `--format <format>` | — | Output: text, json or html Choices: text, json, html. |
 | `-o, --output <file>` | — | Write the rollup to a file instead of stdout |
+
+#### findings reproduce
+
+Experimental: run a finding's proposed steps against a local copy of the app in a container with the network off, and record the result
+
+```text
+0security findings reproduce [options] <id>
+```
+
+Reproduce replays a finding's proposed request against your app and checks whether a canary file came back. It runs the committed tree of `--folder` (default: the current directory) in a container started from `--image`, which must be pinned by digest and contain node. Uncommitted changes are not included.
+
+The container has no network except its own loopback. It is capped at 128 processes, 512 MB of memory, one CPU, 256 MB of writable storage and 64 MB of `/tmp`, and a run stops after two minutes. Some storage drivers cannot cap writable storage. The run is then refused with "storage limit unavailable: reproduction refused". Pass `--allow-unbounded-storage` to run anyway. The result records that storage was unbounded. The harness starts the app and waits until it answers. Then it plants a fresh canary file with a random name and content next to the app folder and in its parent, and replays the finding's request with the file name swapped for the canary. The canary does not exist before that, and its token is not in the command or the app's environment. The harness never contacts a live URL. A second request without the traversal checks that the app does not serve the canary anyway.
+
+The start command is `node server.js` unless you pass `--start`. It comes from you. The repository is untrusted, so its scripts and configuration are never read as instructions. Only path traversal on an HTTP GET route is supported. Other findings, encoded payloads and POST requests give an inconclusive result.
+
+The result is stored next to the finding with the commit, the image digest, a hash of the app files, the canary, the times and a redacted log tail. [findings show](#findings-show) prints it. Severity, status and triage do not change. An error result is printed but never stored over an earlier result.
+
+Reproduced means the app as run returned the canary for this request. It is an observation of the running app, not a statement about the code. An app built to lie can fake it by reading the planted file when it sees the request, so read the code before you trust a result from an app you do not trust.
+
+Not reproduced does not mean safe. It means this one request did not reach the canary on this commit. The app may need other input, state or a different route.
+
+A run that is not in a container is marked unisolated and is never reproduced.
+
+Exit codes:
+
+- 0: reproduced or not reproduced.
+- 1: inconclusive or error.
+- 2: bad usage.
+
+| Argument | Required | Description |
+| --- | --- | --- |
+| `id` | Yes | Finding ID (full or prefix) |
+
+| Option | Registered default | Description |
+| --- | --- | --- |
+| `--image <image>` **required** | — | Container image pinned by digest, with node in it, like node:24-bookworm-slim@sha256:&lt;64 hex digits&gt; |
+| `--start <command>` | — | Command that starts the app inside the container (default: node server.js). It comes from you, never from the repository. |
+| `--allow-unbounded-storage` | — | Run even when the container runtime cannot cap writable storage. Without this the run is refused. The result records that storage was unbounded. |
+| `--folder <path>` | — | Git repository holding the app (default: current directory) |
+| `--db-path <path>` | — | Path to SQLite database |
+| `--json` | — | Print JSON |
+| `--format <format>` | — | Output: text or json Choices: text, json. |
 
 #### findings verify
 

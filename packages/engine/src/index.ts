@@ -253,6 +253,8 @@ export type {
 // both pass.
 export { parseVerifySpec, inlineVerifySpec, verificationLine, isVerified, gateDone, claimsFixed, runVerifier, OciRunner, HostRunner, snapshotWorktree, snapshotHead, isGitRepo, isPinnedImage } from "./verifier/index.js";
 export type { VerifySpec, VerifierResult, ContainerRunner } from "./verifier/index.js";
+export { reproduceFinding } from "./reproduction/index.js";
+export type { ReproduceInput } from "./reproduction/index.js";
 
 // Cloud credentials and the independent Windows evidence-worker transport.
 export {

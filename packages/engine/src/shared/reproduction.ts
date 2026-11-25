@@ -61,6 +61,8 @@ export interface ReproductionResult {
   recipeSha256?: string;
   /** SHA-256 over the paths and contents of the app files the run used. */
   appSha256?: string;
+  /** True when the operator allowed the run without a writable-storage cap. Absent when the cap applied. */
+  storageUnbounded?: true;
   startedAt: string;
   finishedAt: string;
   /** Last 2 KB of output, secrets redacted. */
@@ -122,6 +124,7 @@ export function parseReproductionResult(value: unknown): ReproductionResult | un
   if (r.network === "none" || r.network === "loopback") out.network = r.network;
   if (typeof r.recipeSha256 === "string" && HEX64.test(r.recipeSha256)) out.recipeSha256 = r.recipeSha256;
   if (typeof r.appSha256 === "string" && HEX64.test(r.appSha256)) out.appSha256 = r.appSha256;
+  if (r.storageUnbounded === true) out.storageUnbounded = true;
   const canary = r.canary as { token?: unknown; observed?: unknown } | undefined;
   if (canary && typeof canary.token === "string" && typeof canary.observed === "boolean") out.canary = { token: canary.token, observed: canary.observed };
   return out;
