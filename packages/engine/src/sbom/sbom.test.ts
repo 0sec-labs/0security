@@ -88,14 +88,14 @@ describe("package URLs", () => {
 });
 
 describe("generateSbom", () => {
-  it("writes a sorted CycloneDX 1.5 document from every lockfile it finds, skipping dependency folders", () => {
+  it("writes a sorted CycloneDX 1.6 document from every lockfile it finds, skipping dependency folders", () => {
     const dir = folder({
       "package-lock.json": JSON.stringify({ packages: { "node_modules/lodash": { version: "4.17.20" }, "node_modules/vitest": { version: "5.1.0", dev: true } } }),
       "services/api/go.mod": "module x\nrequire github.com/gin-gonic/gin v1.9.1\n",
       "node_modules/leftover/package-lock.json": JSON.stringify({ packages: { "node_modules/ignored": { version: "1.0.0" } } }),
     });
     const { bom, lockfiles } = generateSbom(dir, { name: "app", toolVersion: "0.0.0", now: new Date("2026-01-01T00:00:00Z") });
-    expect(bom).toMatchObject({ bomFormat: "CycloneDX", specVersion: "1.5", version: 1, metadata: { timestamp: "2026-01-01T00:00:00.000Z", component: { name: "app" } } });
+    expect(bom).toMatchObject({ bomFormat: "CycloneDX", specVersion: "1.6", version: 1, metadata: { timestamp: "2026-01-01T00:00:00.000Z", component: { name: "app" } } });
     expect(bom.serialNumber).toMatch(/^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-8[0-9a-f]{3}-[0-9a-f]{12}$/);
     expect(bom.components.map(component => component.purl)).toEqual(["pkg:golang/github.com/gin-gonic/gin@v1.9.1", "pkg:npm/lodash@4.17.20", "pkg:npm/vitest@5.1.0"]);
     expect(bom.components.find(component => component.name === "vitest")?.scope).toBe("excluded");

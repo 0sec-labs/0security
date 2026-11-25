@@ -1307,7 +1307,7 @@ Subcommands: [generate](#sbom-generate) · [check](#sbom-check) · [licenses](#s
 
 #### sbom generate
 
-Write a CycloneDX 1.5 SBOM from the lockfiles in a folder (npm, pnpm, yarn, Cargo, Go, Python, Ruby, PHP, .NET, Maven, Gradle, Dart, Elixir)
+Write a CycloneDX 1.6 SBOM from the lockfiles in a folder (npm, pnpm, yarn, Cargo, Go, Python, Ruby, PHP, .NET, Maven, Gradle, Dart, Elixir)
 
 ```text
 0security sbom generate [options] [folder]
@@ -1339,7 +1339,7 @@ Without `--resolve` this is a declaration reader, not a build. It does not resol
 | `-o, --output <file>` | — | Write the SBOM to a file instead of stdout |
 | `--name <name>` | — | Name of the application the SBOM describes (default: the folder's name) |
 | `--generator <tool>` | `builtin` | Who writes the SBOM: builtin (reads lockfiles; default), syft, cdxgen, trivy (run the installed tool; exit 2 if it is missing) |
-| `--format <format>` | `cyclonedx` | Output format: cyclonedx (1.5, default) or spdx (2.3 JSON; builtin generator only) |
+| `--format <format>` | `cyclonedx` | Output format: cyclonedx (1.6, default) or spdx (2.3 JSON; builtin generator only) |
 | `--image <reference-or-archive>` | — | Describe a container image instead of a folder: a reference such as nginx:1.25, or the path of a docker save archive or OCI layout. Needs --generator syft or trivy, which pulls the image |
 | `--resolve` | — | Maven and Gradle: run the project's own mvn or gradle to resolve the full dependency tree (runs build scripts, downloads from the network; needs --allow-build-tools or a yes at the prompt) |
 | `--allow-build-tools` | — | Confirm --resolve without the prompt: you trust this project to run its build |
@@ -1347,7 +1347,7 @@ Without `--resolve` this is a declaration reader, not a build. It does not resol
 | `--resolve-from <file>` | `[]` | Maven and Gradle: read the output of mvn dependency:tree (text) or gradle dependencies that you already ran; repeat for more files. Nothing runs or downloads, so it works offline and under ZERO_ENTERPRISE |
 | `--maven-settings <file>` | — | With --resolve, pass this settings.xml to mvn (-s): your mirror, proxy and credentials |
 | `--gradle-init-script <file>` | — | With --resolve, pass this init script to gradle (-I): your mirror and proxy |
-| `--ai` | — | Also list the AI in the folder: models, datasets, hosted model ids and MCP servers, found by reading files as text |
+| `--ai` | — | Also list the AI in the folder as an ML-BOM: model files, datasets, Hub references, hosted model ids and MCP servers, found by reading files |
 
 ##### Resolve Maven and Gradle dependencies
 
@@ -1400,14 +1400,27 @@ Beyond name and version, the SBOM carries the following, only where the lockfile
 
 The supplier of each component is not recorded.
 
-Add `--ai` to also list the AI in the folder as CycloneDX components:
+Add `--ai` to also list the AI in the folder as CycloneDX 1.6 components. It lists what it saw. It does not check where anything came from.
 
-- model files (`.gguf`, `.safetensors`, `.onnx`, `.pt`, `.pth`, `.ckpt`, `.pkl` and others), with pickle-based formats flagged
-- hub references in code (`from_pretrained`, `pipeline(..., model=)`, `hf_hub_download`, `load_dataset`)
-- hosted model ids passed to provider SDKs, with the provider
-- MCP servers from `.mcp.json` and similar files, with an unpinned launcher such as `npx -y` flagged
+Local model files (`.gguf`, `.safetensors`, `.onnx`, `.pt`, `.pth`, `.ckpt`, `.pkl`, `.h5`, `.keras`, `.tflite`, `pytorch_model*.bin` and others) become `machine-learning-model` components with:
 
-The scan reads files as text and downloads nothing. A reference the patterns do not recognise is missed, so treat the list as what was seen, not a complete inventory.
+- a SHA-256 hash of the file, the format and the size in bytes
+- tensor count, parameter count and data types for safetensors; architecture name, tensor count and context length for GGUF; IR version, producer and opset for ONNX. Only the file header is read, as data.
+- the licence, only when a `README.md` front matter `license:` or a `LICENSE` file sits in the same folder and is a recognised licence. A front matter value that is not an SPDX id is written as a name, unchanged.
+- a `modelCard` with `task` from the front matter `pipeline_tag`, `architectureFamily` from the `model_type` in `config.json` or the GGUF architecture, `modelArchitecture` from `config.json` `architectures`, and the front matter `datasets` as references. A field with no source is left out.
+- a risk property on pickle-based formats, which run code when loaded
+
+A file over 2 GiB, or past 4 GiB hashed in one run, gets a `0:hash-skipped` property instead of a hash. Pickle and Keras files are hashed but never loaded.
+
+References in code (`from_pretrained`, `pipeline(..., model=)`, `hf_hub_download`, `load_dataset`) become components with a Hugging Face Hub URL as an external reference. A commit hash in `revision=` is recorded as the version. Without one, the component has a `0:unpinned-revision` property. The URL is built from the text in the code. 0 does not contact the Hub, so the model or dataset may not exist.
+
+Local data files (`.csv`, `.tsv`, `.jsonl`, `.parquet`, `.arrow`, `.npy` and a few more) become `data` components with a SHA-256 hash when the file is under 256 MiB. At most 200 are listed.
+
+Hosted model ids passed to provider SDKs are listed with the provider. MCP servers from `.mcp.json` and similar files, including those under `.claude`, `.codex` and `.github`, become services, with an unpinned launcher such as `npx -y` flagged.
+
+These fields are not filled: inputs and outputs, quantitative analysis, considerations, data governance and classification, and any provenance or signature check. The result is not a complete AI inventory and does not show compliance with any regulation.
+
+The scan reads files as text and downloads nothing. It never follows a symlink, opens a device or FIFO, loads a model or runs code. It stops at 8000 files or 4000 folders and says so in a `0:ai-note` metadata property. A reference the patterns do not recognise is missed. It works with `ZERO_ENTERPRISE` set.
 
 The builtin generator does not read CocoaPods, SwiftPM, C and C++ package managers, operating-system packages or compiled binaries. Use `--generator` for those, and `--generator` with `--image` for container images.
 

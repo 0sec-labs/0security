@@ -1376,7 +1376,7 @@ Options:
   -h, --help                                display help for command
 
 Commands:
-  generate [options] [folder]               Write an SBOM (CycloneDX 1.5 or SPDX 2.3) from the
+  generate [options] [folder]               Write an SBOM (CycloneDX 1.6 or SPDX 2.3) from the
                                             lockfiles in a folder (npm, pnpm, yarn, Cargo, Go,
                                             Python, Ruby, PHP, .NET, Maven, Gradle, Dart, Elixir)
   check [options] <file>                    Look every component of an SBOM up in the public OSV
@@ -1428,7 +1428,7 @@ Options:
 ### 0security sbom generate
 Usage: 0security sbom generate [options] [folder]
 
-Write an SBOM (CycloneDX 1.5 or SPDX 2.3) from the lockfiles in a folder (npm, pnpm, yarn, Cargo,
+Write an SBOM (CycloneDX 1.6 or SPDX 2.3) from the lockfiles in a folder (npm, pnpm, yarn, Cargo,
 Go, Python, Ruby, PHP, .NET, Maven, Gradle, Dart, Elixir)
 
 Arguments:
@@ -1441,7 +1441,7 @@ Options:
   --generator <tool>              Who writes the SBOM: builtin (reads lockfiles; default), syft,
                                   cdxgen, trivy (run the installed tool; exit 2 if it is missing)
                                   (default: "builtin")
-  --format <format>               Output format: cyclonedx (1.5, default) or spdx (2.3 JSON; builtin
+  --format <format>               Output format: cyclonedx (1.6, default) or spdx (2.3 JSON; builtin
                                   generator only) (default: "cyclonedx")
   --image <reference-or-archive>  Describe a container image instead of a folder: a reference such
                                   as nginx:1.25, or the path of a docker save archive or OCI layout.
@@ -1461,8 +1461,9 @@ Options:
                                   proxy and credentials
   --gradle-init-script <file>     With --resolve, pass this init script to gradle (-I): your mirror
                                   and proxy
-  --ai                            Also list the AI in the folder: models, datasets, hosted model ids
-                                  and MCP servers, found by reading files as text
+  --ai                            Also list the AI in the folder as an ML-BOM: model files,
+                                  datasets, Hub references, hosted model ids and MCP servers, found
+                                  by reading files
   -h, --help                      display help for command
 
 ### 0security sbom java-usage (hidden)

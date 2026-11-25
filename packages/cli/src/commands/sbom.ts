@@ -231,12 +231,12 @@ export function runJavaUsage(file: string, folder: string, options: { format?: s
 export function registerSbomCommand(program: Command, deps: SbomDeps = defaults): void {
   const sbom = program.command("sbom").description("Generate an SBOM from lockfiles, check one against known advisories, and scan model files and agent configuration");
   sbom.command("generate")
-    .description("Write an SBOM (CycloneDX 1.5 or SPDX 2.3) from the lockfiles in a folder (npm, pnpm, yarn, Cargo, Go, Python, Ruby, PHP, .NET, Maven, Gradle, Dart, Elixir)")
+    .description("Write an SBOM (CycloneDX 1.6 or SPDX 2.3) from the lockfiles in a folder (npm, pnpm, yarn, Cargo, Go, Python, Ruby, PHP, .NET, Maven, Gradle, Dart, Elixir)")
     .argument("[folder]", "Folder to read lockfiles from (default: .)")
     .option("-o, --output <file>", "Write the SBOM to a file instead of stdout")
     .option("--name <name>", "Name of the application the SBOM describes (default: the folder's name)")
     .option("--generator <tool>", `Who writes the SBOM: builtin (reads lockfiles; default), ${EXTERNAL_GENERATORS.join(", ")} (run the installed tool; exit 2 if it is missing)`, "builtin")
-    .option("--format <format>", "Output format: cyclonedx (1.5, default) or spdx (2.3 JSON; builtin generator only)", "cyclonedx")
+    .option("--format <format>", "Output format: cyclonedx (1.6, default) or spdx (2.3 JSON; builtin generator only)", "cyclonedx")
     .option("--image <reference-or-archive>", `Describe a container image instead of a folder: a reference such as nginx:1.25, or the path of a docker save archive or OCI layout. Needs --generator ${IMAGE_GENERATORS.join(" or ")}, which pulls the image`)
     .option("--resolve", "Maven and Gradle: run the project's own mvn or gradle to resolve the full dependency tree (runs build scripts, downloads from the network; needs --allow-build-tools or a yes at the prompt)")
     .option("--allow-build-tools", "Confirm --resolve without the prompt: you trust this project to run its build")
@@ -244,7 +244,7 @@ export function registerSbomCommand(program: Command, deps: SbomDeps = defaults)
     .option("--resolve-from <file>", "Maven and Gradle: read the output of mvn dependency:tree (text) or gradle dependencies that you already ran; repeat for more files. Nothing runs or downloads, so it works offline and under ZERO_ENTERPRISE", (value: string, previous: string[]) => [...previous, value], [] as string[])
     .option("--maven-settings <file>", "With --resolve, pass this settings.xml to mvn (-s): your mirror, proxy and credentials")
     .option("--gradle-init-script <file>", "With --resolve, pass this init script to gradle (-I): your mirror and proxy")
-    .option("--ai", "Also list the AI in the folder: models, datasets, hosted model ids and MCP servers, found by reading files as text")
+    .option("--ai", "Also list the AI in the folder as an ML-BOM: model files, datasets, Hub references, hosted model ids and MCP servers, found by reading files")
     .addHelpText("after", "\nWith the builtin generator nothing is installed or run; lockfiles are read as text. --resolve is the exception: it runs mvn or gradle from your PATH (never a wrapper script from the project) with a restricted environment and a ten minute limit, and is refused when ZERO_ENTERPRISE is set. Exit 2 when the folder has no supported lockfile, or the chosen external tool is not installed.")
     .action(async (folder: string, options: GenerateOptions) => {
       try { await runGenerateWith(folder, options, deps); } catch (error) { finishWithError(error, { err: deps.err }, false); }
