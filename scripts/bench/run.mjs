@@ -43,7 +43,7 @@ export function parseArgs(argv) {
 }
 
 export function loadFixtures(only, root = FIXTURES) {
-  const names = readdirSync(root, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name).sort();
+  const names = readdirSync(root, { withFileTypes: true }).filter((d) => d.isDirectory() && existsSync(join(root, d.name, "answer.json"))).map((d) => d.name).sort();
   const picked = only ?? names;
   for (const n of picked) if (!names.includes(n)) throw new Error(`unknown fixture ${n} (known: ${names.join(", ")})`);
   return picked.map((name) => {

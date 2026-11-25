@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "search-api": {
+      "command": "node",
+      "args": ["./tools/search-server.js"],
+      "disabled": true,
+      "env": {
+        "OPENAI_API_KEY": "${OPENAI_API_KEY}",
+        "LOG_LEVEL": "debug"
+      }
+    }
+  }
+}

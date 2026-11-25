@@ -1,0 +1,23 @@
+{
+  "fixture": "llm-app-2",
+  "skill": "llm-app-review",
+  "items": [
+    { "id": "llm2-injection", "path": "app.py", "startLine": 12, "endLine": 19, "category": "prompt-injection", "description": "text fetched from web pages is returned to the model as a tool result in a loop where the model can call run_shell and run_python, so a page can steer them" },
+    { "id": "llm2-agency-shell", "path": "tools.py", "startLine": 22, "endLine": 24, "category": ["prompt-injection", "command-injection"], "description": "run_shell hands the model a shell with no approval and no allow-list (excessive agency)" },
+    { "id": "llm2-exec", "path": "tools.py", "startLine": 27, "endLine": 31, "category": ["command-injection", "output-handling"], "description": "model-written Python is run with exec on the host" },
+    { "id": "llm2-output-html", "path": "app.py", "startLine": 23, "endLine": 25, "category": ["output-handling", "xss"], "description": "model output is put into HTML without escaping" },
+    { "id": "llm2-rag", "path": "rag.py", "startLine": 15, "endLine": 21, "category": "prompt-injection", "alsoAt": [{ "path": "app.py", "startLine": 11, "endLine": 11 }], "description": "notes uploaded by any community account are concatenated into the system prompt" },
+    { "id": "llm2-prompt-secrets", "path": "rag.py", "startLine": 6, "endLine": 9, "category": "secret", "description": "admin password and a database URL with credentials in the system prompt" },
+    { "id": "llm2-unpinned-download", "path": "model_loader.py", "startLine": 6, "endLine": 12, "category": ["vuln-dependency", "iac-supply"], "description": "model weights are downloaded from a moving latest path with no version, hash or signature check" },
+    { "id": "llm2-pickle", "path": "model_loader.py", "startLine": 15, "endLine": 17, "category": "deserialization", "description": "the downloaded weights are loaded with pickle, which runs code from the file" },
+    { "id": "llm2-ssrf", "path": "tools.py", "startLine": 9, "endLine": 12, "category": "ssrf", "description": "fetch_page opens any URL the model gives it, including internal addresses" }
+  ],
+  "decoys": [
+    { "id": "llm2-decoy-diagnostic", "path": "tools.py", "startLine": 7, "endLine": 7, "description": "diagnostics are an allow-list of fixed argument lists" },
+    { "id": "llm2-decoy-diagnostic-run", "path": "tools.py", "startLine": 15, "endLine": 19, "description": "run_diagnostic looks the name up in the allow-list and runs a fixed list without a shell" },
+    { "id": "llm2-decoy-escape", "path": "app.py", "startLine": 28, "endLine": 29, "description": "the page title is escaped with html.escape" },
+    { "id": "llm2-decoy-public-prompt", "path": "rag.py", "startLine": 11, "endLine": 12, "description": "a system prompt with no secrets and no uploaded text" },
+    { "id": "llm2-decoy-env-key", "path": "llm.py", "startLine": 4, "endLine": 4, "description": "the model key is read from the environment" },
+    { "id": "llm2-decoy-config", "path": "model_loader.py", "startLine": 20, "endLine": 22, "description": "configuration is parsed as JSON, which runs no code" }
+  ]
+}
