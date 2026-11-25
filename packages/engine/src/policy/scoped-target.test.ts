@@ -20,15 +20,29 @@ describe("parseScopeFile", () => {
     expect(parseScopeFile("# staging\nStaging.Example.com\n\n127.0.0.1:8080 # local\n[::1]:9000\n")).toEqual(["staging.example.com", "127.0.0.1:8080", "[::1]:9000"]);
   });
   it("refuses a scheme, a path or a wildcard", () => {
-    for (const line of ["https://a.test", "a.test/x", "*.a.test", "a b", "a.test:99999999"]) expect(() => parseScopeFile(line)).toThrow(ScopedTargetError);
+    for (const line of ["https://a.test", "a.test/x", "*.a.test", "a b", "a.test:99999999", "::1", "[::1"]) expect(() => parseScopeFile(line)).toThrow(ScopedTargetError);
   });
 });
 
 describe("assertScopedTarget", () => {
   it("allows loopback and private hosts that the scope file lists or the operator typed", async () => {
     expect(await assertScopedTarget("http://127.0.0.1:8080/app", { scopeHosts: ["127.0.0.1:8080"], resolve: never })).toMatchObject({ network: "loopback", host: "127.0.0.1:8080", authorisedBy: ["scope-file"] });
+    expect(await assertScopedTarget("http://127.0.0.1:8080/", { scopeHosts: parseScopeFile("127.0.0.1\n"), resolve: never })).toMatchObject({ network: "loopback", host: "127.0.0.1:8080", authorisedBy: ["scope-file"] });
     expect(await assertScopedTarget("http://localhost:3000", { acknowledge: "localhost", resolve: dns("127.0.0.1", "::1") })).toMatchObject({ network: "loopback", authorisedBy: ["acknowledged"] });
     expect(await assertScopedTarget("http://192.168.1.20/", { scopeHosts: ["192.168.1.20"], resolve: never })).toMatchObject({ network: "private" });
+  });
+  it("matches host-only and port-specific IPv6 entries consistently with IPv4 and DNS", async () => {
+    const hostOnly = parseScopeFile("[::1]\n");
+    expect(await assertScopedTarget("http://[::1]:8080/api", { scopeHosts: hostOnly, resolve: never })).toMatchObject({ network: "loopback", host: "[::1]:8080", hostname: "::1", authorisedBy: ["scope-file"] });
+    expect(await assertScopedTarget("http://[::1]:8080/api", { acknowledge: "[::1]", resolve: never })).toMatchObject({ network: "loopback", host: "[::1]:8080", hostname: "::1", authorisedBy: ["acknowledged"] });
+
+    const withPort = parseScopeFile("[::1]:8080\n");
+    expect(await assertScopedTarget("http://[::1]:8080/api", { scopeHosts: withPort, resolve: never })).toMatchObject({ network: "loopback", host: "[::1]:8080", authorisedBy: ["scope-file"] });
+    await expect(assertScopedTarget("http://[::1]:9090/api", { scopeHosts: withPort, resolve: never })).rejects.toThrow("not listed in the scope file");
+    await expect(assertScopedTarget("http://[::1]:8080/api", { acknowledge: "[::1]:9090", resolve: never })).rejects.toThrow("exactly");
+    await expect(assertScopedTarget("http://[fd12::2]:8080/api", { scopeHosts: hostOnly, resolve: never })).rejects.toThrow("not listed in the scope file");
+
+    expect(await assertScopedTarget("https://example.com:8443/api", { scopeHosts: parseScopeFile("example.com\n"), acknowledge: "example.com", resolve: dns("203.0.113.9") })).toMatchObject({ network: "public", host: "example.com:8443", authorisedBy: ["scope-file", "acknowledged"] });
   });
   it("refuses a target nobody named, and a host not in the scope file", async () => {
     await expect(assertScopedTarget("http://127.0.0.1:8080", { resolve: never })).rejects.toThrow("--scope-file");

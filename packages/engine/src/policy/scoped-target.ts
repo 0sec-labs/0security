@@ -128,9 +128,11 @@ export async function assertScopedTarget(input: URL | string, options: ScopedTar
   if (url.username || url.password) throw new ScopedTargetError("The target URL must not contain a user name or password.");
   url.hash = "";
   const hostname = bareHost(url.hostname);
+  const bracketedHost = url.hostname.toLowerCase().replace(/\.+$/, "");
   const host = url.host.toLowerCase();
+  const matchesHost = (entry: string): boolean => entry === host || entry === hostname || entry === bracketedHost;
   const typed = options.acknowledge === undefined ? undefined : options.acknowledge.trim().toLowerCase();
-  if (typed !== undefined && typed !== host && typed !== hostname) throw new ScopedTargetError(`The acknowledged host must be exactly the host being tested (${host}), not '${options.acknowledge}'.`);
+  if (typed !== undefined && !matchesHost(typed)) throw new ScopedTargetError(`The acknowledged host must be exactly the host being tested (${host}), not '${options.acknowledge}'.`);
 
   let addresses: string[];
   if (isIP(hostname)) addresses = [hostname];
@@ -148,7 +150,7 @@ export async function assertScopedTarget(input: URL | string, options: ScopedTar
   // The operator-named-destination rule: ZERO_ENTERPRISE keeps traffic on this machine.
   if (network !== "loopback") assertEgressAllowed(host, options.env);
 
-  const listed = options.scopeHosts?.some(entry => entry === host || entry === hostname) ?? false;
+  const listed = options.scopeHosts?.some(matchesHost) ?? false;
   if (options.scopeHosts && !listed && network === "public") throw new ScopedTargetError(`Refused: ${host} is not listed in the scope file.`);
   if (network === "public" && typed === undefined) throw new ScopedTargetError(`Refused: ${hostname} is a public host (${addresses.join(", ")}). Test only systems you own or are authorised to test. If that is you, add --acknowledge-host ${host}.`);
   if (!listed && typed === undefined) throw new ScopedTargetError(options.scopeHosts ? `Refused: ${host} is not listed in the scope file. Add it, or pass --acknowledge-host ${host}.` : `Refused: name the systems you may test. Pass --scope-file with a line for ${host}, or --acknowledge-host ${host}.`);
