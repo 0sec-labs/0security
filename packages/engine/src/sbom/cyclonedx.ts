@@ -106,7 +106,8 @@ const GRADLE_SCRIPTS = new Set(["build.gradle", "build.gradle.kts"]);
 /** Fold what a second lockfile says about the same package into the first: edges are unioned, a hash is kept only where lockfiles agree, licenses come from the first that states them. */
 function mergeFacts(into: Component, from: Component): void {
   if (from.dependsOn) into.dependsOn = [...(into.dependsOn ?? []), ...from.dependsOn];
-  if (into.local && !from.local) delete into.local;
+  // A package any lockfile resolves from a private source stays private: its name must not reach a public registry.
+  if (!into.local && from.local) into.local = from.local;
   if (!into.licenses?.length && from.licenses?.length) into.licenses = from.licenses;
   if (from.hashes) {
     const kept = [...(into.hashes ?? [])];

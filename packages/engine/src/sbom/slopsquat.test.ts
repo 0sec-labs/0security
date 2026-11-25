@@ -248,3 +248,21 @@ describe("other lockfiles mark private sources", () => {
     expect(local(parseRequirements("--extra-index-url https://pypi.corp.test/simple\na==1.0\n"))).toEqual([["a", "private-registry"]]);
   });
 });
+
+describe("untrusted SBOM text", () => {
+  it("prints skipped package URLs without control characters", async () => {
+    const result = await run(bomOf(component("pkg:npm/%40acme/x@1.0.0\u001b[2J\u0007")));
+    const text = slopsquatToText(result);
+    expect(text).toContain("1 skipped: private or local");
+    // eslint-disable-next-line no-control-regex
+    expect(/[\u0000-\u0008\u000b-\u001f\u007f]/.test(text)).toBe(false);
+  });
+});
+
+describe("one name, several components", () => {
+  it("never looks a name up when any component of that name is private", async () => {
+    const result = await run(bomOf(component("pkg:npm/shared-name@1.0.0"), component("pkg:npm/shared-name@2.0.0", [{ name: "0:local", value: "private-registry" }])));
+    expect(result.checked).toBe(0);
+    expect(hits).toEqual([]);
+  });
+});

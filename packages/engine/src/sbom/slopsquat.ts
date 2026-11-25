@@ -198,6 +198,7 @@ export async function checkSlopsquat(bom: unknown, options: SlopOptions = {}): P
 
   const wanted = new Map<string, { purl: string; ecosystem: "npm" | "pypi"; name: string; version: string }>();
   const skipped: SlopSkip[] = [];
+  const privateKeys = new Set<string>();
   let unsupported = 0;
   for (const component of ordered) {
     const purl = typeof component.purl === "string" && /^pkg:[a-z]+\/\S{1,380}$/.test(component.purl) ? component.purl : undefined;
@@ -205,14 +206,14 @@ export async function checkSlopsquat(bom: unknown, options: SlopOptions = {}): P
     const found = target(purl);
     if (!found) { unsupported += 1; continue; }
     const key = `${found.ecosystem}:${found.name}`;
-    if (wanted.has(key) || skipped.some(item => item.purl === purl)) continue;
+    if (skipped.some(item => item.purl === purl)) continue;
     const properties = Array.isArray(component.properties) ? component.properties.filter(isObject) : [];
     const local = properties.some(property => property.name === "0:local");
     const scope = found.name.startsWith("@") ? found.name.slice(1, found.name.indexOf("/")) : "";
     const valid = found.ecosystem === "npm" ? NPM_NAME.test(found.name) : PYPI_NAME.test(found.name);
-    if (local || found.qualified || (projectName && found.name === projectName) || privateByPattern(found.name, patterns) || (scope && !PUBLIC_SCOPES.has(scope)) || /^(file|link|git|https?|workspace):/.test(found.version)) { skipped.push({ purl, reason: "skipped: private or local" }); continue; }
+    if (local || found.qualified || (projectName && found.name === projectName) || privateByPattern(found.name, patterns) || (scope && !PUBLIC_SCOPES.has(scope)) || /^(file|link|git|https?|workspace):/.test(found.version)) { skipped.push({ purl, reason: "skipped: private or local" }); wanted.delete(key); privateKeys.add(key); continue; }
     if (!valid) { skipped.push({ purl, reason: "skipped: not a public registry name" }); continue; }
-    wanted.set(key, { purl, ...found });
+    if (!privateKeys.has(key)) wanted.set(key, { purl, ...found });
   }
   const chosen = [...wanted.values()].slice(0, cap);
 
@@ -305,7 +306,7 @@ export function slopsquatToText(result: SlopResult): string {
   for (const finding of result.findings) lines.push(`  ${finding.severity}  ${finding.ruleId}  ${finding.message}`, `    ${finding.url}`);
   if (result.skipped.length) {
     lines.push(`  ${result.skipped.length} skipped: private or local:`);
-    for (const item of result.skipped.slice(0, 20)) lines.push(`    ${item.purl}`);
+    for (const item of result.skipped.slice(0, 20)) lines.push(`    ${item.purl.replace(/[^\x20-\x7e]/g, "?").slice(0, 200)}`);
     if (result.skipped.length > 20) lines.push(`    and ${result.skipped.length - 20} more`);
   }
   if (result.overCap) lines.push(`  Looked up the first ${result.cap} of ${result.checked + result.overCap} public packages; ${result.overCap} were not checked.`);
