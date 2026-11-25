@@ -72,16 +72,21 @@ Windows, Docker and source installs are in the [docs](https://docs.0.security/).
 ## What it does
 
 - **Reviews code.** A fast scanner pass, then a model reads the code. Large repositories are reviewed in batches you can resume.
-- **Keeps one list of findings.** Import SARIF or GitHub alerts from other scanners, then triage, suppress and export.
-- **Fixes findings as pull requests.** One branch and PR per finding. It never pushes to your base branch.
-- **Produces evidence.** SBOMs, license and advisory checks, and CRA report drafts.
-- **Reviews AI apps.** LLM apps, MCP servers and live model endpoints.
+- **Keeps one list of findings.** Import SARIF or GitHub alerts from other scanners, then triage, accept a risk with an expiry, and export.
+- **Fixes findings as pull requests.** One branch and PR per finding, with your tests run first. It never pushes to your base branch.
+- **Audits dependencies.** Generate an SBOM, then check it for advisories, malicious packages, newer versions and license problems. See [Dependency audit](https://docs.0.security/dependency-audit/).
+- **Produces evidence.** One folder of findings, SARIF and SBOM, signed with an enterprise key, and CRA report drafts.
+- **Checks AI apps and agent files.** LLM apps, MCP servers, model files, AI coding tool configuration and live model endpoints. See [AI security](https://docs.0.security/ai-security/).
+- **Checks pull requests.** A GitHub Action, plus templates for GitLab, Bitbucket, Jenkins and Azure Pipelines. Sentinels run standing jobs on a schedule or webhook.
+- **Runs for teams.** A server mode with OIDC, and an enterprise license for shared findings, SAML, SCIM and audit logs. It can run with no outbound network except your model.
+
+See [everything 0 can do](https://docs.0.security/features/).
 
 It is one binary and uses your own model keys. Run `0security` for an optional web console.
 
 ## Learn more
 
-[Documentation](https://docs.0.security/) · [Command reference](https://docs.0.security/commands/) · [Models](https://docs.0.security/models/) · [Extensions](https://docs.0.security/extensions/) · [Security research](https://0.security/research/) · [Enterprise](https://0.security/enterprise/)
+[Documentation](https://docs.0.security/) · [What 0 can do](https://docs.0.security/features/) · [Command reference](https://docs.0.security/commands/) · [Models](https://docs.0.security/models/) · [Extensions](https://docs.0.security/extensions/) · [Security research](https://0.security/research/) · [Enterprise](https://0.security/enterprise/)
 
 ## Contributing
 

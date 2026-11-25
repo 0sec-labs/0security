@@ -95,11 +95,22 @@ export OPENAI_API_KEY=...
 
 To export findings, add `--format sarif` or `--format json` to `0security findings list`. To scan only what a branch changed, see [Pull request checks](/ci/). The [CLI reference](/commands/) lists every command.
 
+To check your dependencies instead, run:
+
+```bash
+0security sbom generate . -o sbom.cdx.json
+0security sbom check sbom.cdx.json
+```
+
+See [Dependency audit](/dependency-audit/).
+
 ## What 0 does and does not do
 
-0 reads your code and runs your tests. It does not attack running applications. It does not scan live web apps or APIs for you.
+0 reads your code, checks your dependencies and configuration, and runs your tests. It does not attack running applications on its own.
 
-The one command that sends traffic to a live target is `0security probe`. It tests model and agent endpoints, not websites. See [probe](/commands/#probe).
+Two things send traffic to a live target, and only to one you name. `0security probe` tests model and agent endpoints. `0security scan --scanner nuclei --target-url` runs Nuclei, which you installed, against one app. Both refuse hosts you have not confirmed. See [probe](/commands/#probe) and [Use Nuclei, ZAP or Strix](/use-dynamic-scanners/).
+
+For the full list of what 0 can do, see [What 0 can do](/features/).
 
 ## The words 0 uses
 
@@ -166,6 +177,9 @@ Run `0security config doctor` and [open an issue](https://github.com/0sec-labs/0
 ## What next
 
 <CardGrid>
+  <LinkCard title="What 0 can do" description="Every command family in one list." href="/features/" />
+  <LinkCard title="Dependency audit" description="Advisories, malicious packages, licenses and SBOMs." href="/dependency-audit/" />
+  <LinkCard title="AI security" description="Model files, agent configuration, LLM apps and endpoints." href="/ai-security/" />
   <LinkCard title="Threads" description="Run a job in the browser app or headless." href="/threads/" />
   <LinkCard title="Findings" description="Review, verify and export." href="/findings/" />
   <LinkCard title="Sentinels" description="Standing jobs on a schedule or pull request." href="/sentinels/" />

@@ -14,8 +14,10 @@ New to 0? Read the [Quickstart](/) first. Settings and environment variables are
 
 | Task | Commands | Guide |
 | --- | --- | --- |
-| Scan code | [scan](#scan) | [Findings](/findings/) |
-| Review findings and threads | [findings](#findings) · [findings update](#findings-update) · [threads](#threads) | [Findings](/findings/), [Threads](/threads/) |
+| Scan code | [scan](#scan) · [threat-model](#threat-model) | [Findings](/findings/), [Threat model and policies](/threat-model-and-policy/) |
+| Audit dependencies | [sbom](#sbom) · [sbom check](#sbom-check) · [sbom licenses](#sbom-licenses) | [Dependency audit](/dependency-audit/) |
+| Check AI apps and agent files | [probe](#probe) · [sbom agent-config](#sbom-agent-config) · [sbom scan-models](#sbom-scan-models) | [AI security](/ai-security/) |
+| Review, fix and prove findings | [findings](#findings) · [findings update](#findings-update) · [findings fix](#findings-fix) · [evidence](#evidence) · [threads](#threads) | [Findings](/findings/), [Threads](/threads/) |
 | Automate | [sentinels](#sentinels) · [api](#api) | [Sentinels](/sentinels/) |
 | Set up and extend | [config](#config) · [config doctor](#config-doctor) · [models](#models) · [models connect](#models-connect) · [skills](#skills) · [computers](#computers) | [Models](/models/), [Extensions](/extensions/), [Computers](/computers/) |
 
@@ -28,8 +30,8 @@ New to 0? Read the [Quickstart](/) first. Settings and environment variables are
 | `0security scan` | Scan a folder or git repository for security bugs; prints the findings as a report. | none |
 | `0security threat-model` | Draft the repository's threat model as a file for people to review (optionally as a pull request). | none |
 | `0security probe` | Send adversarial messages to a live model or agent endpoint and report the ones it obeys. | none |
-| `0security sbom` | Generate an SBOM from lockfiles, check one against known advisories, and check its licenses against a policy. | `generate`, `check`, `licenses` |
-| `0security findings` | Browse findings and change their status. `--format` exports, `--import` loads a report. | `list`, `show`, `update`, `import`, `fix` |
+| `0security sbom` | Generate an SBOM from lockfiles, check one against known advisories, and scan model files and agent configuration. | `generate`, `check`, `licenses`, `scan-models`, `agent-config`, `java-usage` |
+| `0security findings` | Browse findings and change their status. `--format` exports, `--import` loads a report. | `list`, `show`, `update`, `import`, `fix`, `burndown`, `verify`, `metrics`, `rollup`, `evidence`, `export-fixes`, `report-draft` |
 | `0security evidence` | Check that an evidence folder was signed with your key and is unchanged. | `verify` |
 | `0security threads` | Start, follow and stop threads. | `list`, `show`, `send`, `start`, `stop` |
 | `0security sentinels` | Create, run and change Sentinels. | `list`, `run`, `set` |
@@ -50,7 +52,7 @@ Option tables show the default each flag is registered with. A dash means no def
 
 - With no arguments, `0security` opens the browser app. No account is needed. See [Browser app](/threads/).
 - `0security -p "<prompt>"` runs one headless chat prompt. `0security -c` continues the last chat and `0security --resume <id>` a saved one.
-- `0security --help` lists the eleven commands.
+- `0security --help` lists the twelve commands.
 - Use explicit commands in automation. 0 routes a recognizable bare target to a command and refuses ambiguous input.
 - With the SmolVM workbench profile on, the whole CLI runs inside an online Kali guest. `workbench` and `config` stay on the host, and a failure never falls back to host execution.
 
