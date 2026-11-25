@@ -35,6 +35,27 @@ describe("parseSarif", () => {
     expect(parsed.findings.map(f => [f.ruleId, f.severity])).toEqual([["a", "medium"], ["b", "low"]]);
   });
 
+  it("retains findings with rejected, empty, or malformed suppressions while filtering accepted and underReview ones", () => {
+    const parsed = parseSarif(log([
+      { ruleId: "r-rejected", level: "error", message: { text: "keep 1" }, suppressions: [{ kind: "inSource", status: "rejected" }] },
+      { ruleId: "r-accepted", level: "error", message: { text: "drop 1" }, suppressions: [{ kind: "inSource", status: "accepted" }] },
+      { ruleId: "r-omitted", level: "error", message: { text: "drop 2" }, suppressions: [{ kind: "inSource" }] },
+      { ruleId: "r-review", level: "error", message: { text: "drop 3" }, suppressions: [{ kind: "external", status: "underReview" }] },
+      { ruleId: "r-multi-rejected", level: "warning", message: { text: "keep 2" }, suppressions: [{ kind: "inSource", status: "rejected" }, { kind: "external", status: "rejected" }] },
+      { ruleId: "r-mixed", level: "error", message: { text: "drop 4" }, suppressions: [{ kind: "inSource", status: "rejected" }, { kind: "external", status: "accepted" }] },
+      { ruleId: "r-malformed-str", level: "error", message: { text: "keep 3" }, suppressions: ["bad"] },
+      { ruleId: "r-malformed-status", level: "note", message: { text: "keep 4" }, suppressions: [null, { status: 123 }] },
+      { ruleId: "r-empty", level: "error", message: { text: "keep 5" }, suppressions: [] },
+    ]));
+    expect(parsed.findings.map(f => ({ ruleId: f.ruleId, severity: f.severity, title: f.title }))).toEqual([
+      { ruleId: "r-rejected", severity: "high", title: "keep 1" },
+      { ruleId: "r-multi-rejected", severity: "medium", title: "keep 2" },
+      { ruleId: "r-malformed-str", severity: "high", title: "keep 3" },
+      { ruleId: "r-malformed-status", severity: "low", title: "keep 4" },
+      { ruleId: "r-empty", severity: "high", title: "keep 5" },
+    ]);
+  });
+
   it("lets --tool override the label", () => {
     expect(parseSarif(log([{ ruleId: "r", message: { text: "m" } }]), { tool: "ci-sast" }).findings[0]!.tool).toBe("ci-sast");
   });
