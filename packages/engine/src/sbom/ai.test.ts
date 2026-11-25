@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { detectAi, generateSbom } from "./index.js";
+import { openRegular } from "./ai-files.js";
 
 const dirs: string[] = [];
 afterEach(() => dirs.splice(0).forEach(dir => rmSync(dir, { recursive: true, force: true })));
@@ -198,5 +199,14 @@ describe("AI inventory: pickle scan budget", () => {
     const component = detectAi(dir, { maxModelHashBytes: 1 }).components[0]!;
     expect(prop(component, "0:pickle-scan-skipped")).toContain("too large");
     expect(prop(component, "0:risk")).toContain("pickle");
+  });
+});
+
+describe("AI inventory: folder swapped for a symlink", () => {
+  it("refuses files whose parent folder resolves outside the root", () => {
+    const outside = mkdtempSync(join(tmpdir(), "0-aibom-")); dirs.push(outside); writeFileSync(join(outside, "w.gguf"), "x");
+    const root = mkdtempSync(join(tmpdir(), "0-aibom-")); dirs.push(root); symlinkSync(outside, join(root, "swapped"));
+    expect(openRegular(join(root, "swapped", "w.gguf"), realpathSync(root))).toBeUndefined();
+    expect(openRegular(join(outside, "w.gguf"), realpathSync(outside))?.size).toBe(1);
   });
 });

@@ -3,7 +3,8 @@
  * a file is opened only if it is a regular file (never through a symlink, never a device or FIFO), reads are capped,
  * and model files are never loaded, only their first bytes are parsed as data. Nothing is executed.
  */
-import { constants, closeSync, fstatSync, lstatSync, openSync, readSync } from "node:fs";
+import { constants, closeSync, fstatSync, lstatSync, openSync, readSync, realpathSync } from "node:fs";
+import { dirname, sep } from "node:path";
 import { createHash } from "node:crypto";
 import { SPDX_LICENSE_IDS } from "./spdx-ids.js";
 
@@ -21,8 +22,14 @@ export const MAX_TOTAL_TEXT_BYTES = 64 * 1024 ** 2;
 
 const OPEN_FLAGS = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0);
 
+/** True when the file's real parent folder is still under the real root (a folder swapped for a symlink since the walk is refused). */
+export function insideRoot(path: string, root: string): boolean {
+  try { const parent = realpathSync(dirname(path)); return parent === root || parent.startsWith(root.endsWith(sep) ? root : root + sep); } catch { return false; }
+}
+
 /** Open a regular file for reading: refuse symlinks, devices, FIFOs and anything that changed between the check and the open. */
-export function openRegular(path: string): { fd: number; size: number } | undefined {
+export function openRegular(path: string, root?: string): { fd: number; size: number } | undefined {
+  if (root !== undefined && !insideRoot(path, root)) return undefined;
   let before; try { before = lstatSync(path); } catch { return undefined; }
   if (!before.isFile()) return undefined;
   let fd: number; try { fd = openSync(path, OPEN_FLAGS); } catch { return undefined; }
@@ -46,8 +53,8 @@ export function readAt(fd: number, position: number, length: number): Buffer {
 }
 
 /** The text of a regular file no larger than `max` bytes, or nothing. */
-export function readTextSafe(path: string, max: number): string | undefined {
-  const file = openRegular(path);
+export function readTextSafe(path: string, max: number, root?: string): string | undefined {
+  const file = openRegular(path, root);
   if (!file) return undefined;
   try { return file.size > max ? undefined : readAt(file.fd, 0, file.size).toString("utf8"); } catch { return undefined; } finally { try { closeSync(file.fd); } catch { /* ignore */ } }
 }

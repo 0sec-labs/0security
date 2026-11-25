@@ -5,13 +5,13 @@
  * up to a size limit and, for safetensors, GGUF and ONNX, their header is read as data. Nothing is checked against the
  * Hugging Face Hub: a Hub reference is a URL built from the id written in the code.
  */
-import { closeSync, lstatSync, opendirSync, type Dirent } from "node:fs";
+import { closeSync, lstatSync, opendirSync, realpathSync, type Dirent } from "node:fs";
 import { extname, join, relative, resolve, sep } from "node:path";
 import { extractMcpServers } from "../agentconfig/mcp.js";
 import { launcherIssues } from "../agentconfig/launchers.js";
 import { parseJsonc } from "../agentconfig/util.js";
 import { scanModelFile } from "../modelscan/index.js";
-import { cardFacts, clean, configFacts, licenseFileId, MAX_DATA_HASH_BYTES, MAX_MODEL_HASH_BYTES, MAX_TOTAL_HASH_BYTES, MAX_TOTAL_TEXT_BYTES, modelFacts, openRegular, readTextSafe, sha256Of, spdxId, type Props } from "./ai-files.js";
+import { cardFacts, clean, configFacts, insideRoot, licenseFileId, MAX_DATA_HASH_BYTES, MAX_MODEL_HASH_BYTES, MAX_TOTAL_HASH_BYTES, MAX_TOTAL_TEXT_BYTES, modelFacts, openRegular, readTextSafe, sha256Of, spdxId, type Props } from "./ai-files.js";
 
 type Property = { name: string; value: string };
 export interface AiLicense { license: { id: string; acknowledgement: "declared" } | { name: string; acknowledgement: "declared" } }
@@ -89,8 +89,11 @@ interface Entry { path: string; rel: string; name: string; size: number }
 function listFiles(folder: string, notes: string[]): Entry[] {
   const found: Entry[] = [];
   let dirs = 0; let cut = false;
+  let realRoot = resolve(folder); try { realRoot = realpathSync(realRoot); } catch { /* keep the given path */ }
   const walk = (dir: string, depth: number): void => {
     if (cut) return;
+    // A folder swapped for a symlink after it was listed must not lead out of the root.
+    if (depth > 0 && !insideRoot(join(dir, "x"), realRoot)) return;
     let entries: Dirent[];
     try {
       // Read the folder in a stream and stop at the limit, so a folder with millions of entries costs bounded memory.
@@ -158,11 +161,12 @@ export function detectAi(folder: string, options: AiOptions = {}): AiInventory {
   const components = new Map<string, AiComponent>();
   const services = new Map<string, AiService>();
   const root = resolve(folder);
+  let realRoot = root; try { realRoot = realpathSync(root); } catch { /* keep the given path */ }
   let pickleLeft = MAX_TOTAL_PICKLE_SCAN_BYTES;
   const pickleRisk = (path: string, size: number): Property[] => {
     if (size > MAX_PICKLE_SCAN_BYTES || size > pickleLeft) return [{ name: "0:pickle-scan-skipped", value: `too large: ${size} bytes is over the ${MAX_PICKLE_SCAN_BYTES} byte file limit or the ${MAX_TOTAL_PICKLE_SCAN_BYTES} byte limit for one run` }];
     pickleLeft -= size;
-    return pickleScanRisk(path);
+    return insideRoot(path, realRoot) ? pickleScanRisk(path) : [];
   };
   let textLeft = MAX_TOTAL_TEXT_BYTES; let hashLeft = MAX_TOTAL_HASH_BYTES;
   const add = (component: AiComponent): void => {
@@ -177,7 +181,7 @@ export function detectAi(folder: string, options: AiOptions = {}): AiInventory {
   };
   const text = (path: string, max: number, size: number): string | undefined => {
     if (size > max || size > textLeft) { if (size <= max) notes.push("AI inventory read-size limit reached; some files were not read"); return undefined; }
-    const body = readTextSafe(path, max);
+    const body = readTextSafe(path, max, realRoot);
     if (body !== undefined) textLeft -= size;
     return body;
   };
@@ -228,7 +232,7 @@ export function detectAi(folder: string, options: AiOptions = {}): AiInventory {
     const extension = extname(name).toLowerCase();
     const model = MODEL_FILES[extension] ?? (extension === ".bin" && BIN_MODEL.test(name) ? { format: "pytorch-bin", pickle: true } : undefined);
     if (model) {
-      const open = openRegular(path);
+      const open = openRegular(path, realRoot);
       const dir = rel.includes("/") ? rel.slice(0, rel.lastIndexOf("/")) : "";
       const side = beside(dir);
       let hash: ReturnType<typeof hashed> = {}; let facts: ReturnType<typeof modelFacts>; let size = file.size;
@@ -254,7 +258,7 @@ export function detectAi(folder: string, options: AiOptions = {}): AiInventory {
     if (DATA_FILES.has(extension)) {
       if (dataFiles < MAX_DATA_COMPONENTS) {
         dataFiles += 1;
-        const open = openRegular(path);
+        const open = openRegular(path, realRoot);
         let hash: ReturnType<typeof hashed> = { note: { name: "0:hash-skipped", value: "the file could not be opened as a regular file" } };
         if (open) { try { hash = hashed(open.fd, open.size, dataCap); } finally { try { closeSync(open.fd); } catch { /* ignore */ } } }
         add({ type: "data", "bom-ref": `data-file:${rel}`, name, ...(hash.hashes ? { hashes: hash.hashes } : {}), evidence: { occurrences: [{ location: rel }] }, data: [{ type: "dataset", name }],
