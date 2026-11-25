@@ -75,7 +75,7 @@ Windows, Docker and source installs are in the [docs](https://docs.0.security/).
 - **Keeps one list of findings.** Import SARIF or GitHub alerts from other scanners, then triage, accept a risk with an expiry, and export.
 - **Fixes findings as pull requests.** One branch and PR per finding, with your tests run first. It never pushes to your base branch.
 - **Audits dependencies.** Generate an SBOM, then check it for advisories, malicious packages, newer versions and license problems. See [Dependency audit](https://docs.0.security/dependency-audit/).
-- **Produces evidence.** One folder of findings, SARIF and SBOM, signed with an enterprise key, and CRA report drafts.
+- **Produces evidence.** One folder of findings, SARIF and SBOM, optionally signed with your own key (enterprise license), and CRA report drafts.
 - **Checks AI apps and agent files.** LLM apps, MCP servers, model files, AI coding tool configuration and live model endpoints. See [AI security](https://docs.0.security/ai-security/).
 - **Checks pull requests.** A GitHub Action, plus templates for GitLab, Bitbucket, Jenkins and Azure Pipelines. Sentinels run standing jobs on a schedule or webhook.
 - **Runs for teams.** A server mode with OIDC, and an enterprise license for shared findings, SAML, SCIM and audit logs. It can run with no outbound network except your model.
