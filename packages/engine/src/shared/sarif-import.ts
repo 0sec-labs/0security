@@ -177,6 +177,9 @@ export function locationLabel(item: Pick<ImportedFinding, "path" | "startLine" |
 
 const sha = (value: string): string => createHash("sha256").update(value).digest("hex").slice(0, 24);
 
+const isActiveSuppression = (entry: unknown): boolean =>
+  isObject(entry) && (entry.status === undefined || (typeof entry.status === "string" && clean(entry.status, 20) !== "rejected"));
+
 /** Parse a SARIF log. Throws a short message when the document is not SARIF 2.1.0 or is too large. */
 export function parseSarif(text: string, options: { tool?: string; roots?: readonly string[] } = {}): SarifImport {
   let log: unknown;
@@ -203,7 +206,7 @@ export function parseSarif(text: string, options: { tool?: string; roots?: reado
     for (const raw of list(run.results)) {
       if (!isObject(raw)) continue;
       if (findings.length >= MAX_SARIF_RESULTS) throw new Error(`The log has more than ${MAX_SARIF_RESULTS} results; split it and import the parts.`);
-      if (raw.suppressions && list(raw.suppressions).length) continue;
+      if (list(raw.suppressions).some(isActiveSuppression)) continue;
       // Coverage and not-applicable entries (Strix writes them beside its findings) are not findings.
       const kind = clean(raw.kind, 20);
       if (kind === "pass" || kind === "notApplicable" || (kind && kind !== "fail" && (raw.level === undefined || raw.level === "none"))) continue;
