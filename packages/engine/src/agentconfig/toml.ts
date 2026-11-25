@@ -22,6 +22,22 @@ function value(raw: string): unknown {
   return undefined;
 }
 
+function stripComment(raw: string): string {
+  let quote = "";
+  for (let i = 0; i < raw.length; i++) {
+    const ch = raw[i]!;
+    if (quote) {
+      if (ch === "\\" && quote === "\"") i++;
+      else if (ch === quote) quote = "";
+    } else if (ch === "\"" || ch === "'") {
+      quote = ch;
+    } else if (ch === "#") {
+      return raw.slice(0, i);
+    }
+  }
+  return raw;
+}
+
 const path = (header: string): string[] => [...header.matchAll(/"([^"]*)"|'([^']*)'|([A-Za-z0-9_-]+)/g)].map(match => match[1] ?? match[2] ?? match[3]!);
 
 export function parseSimpleToml(text: string): Record<string, unknown> {
@@ -39,7 +55,7 @@ export function parseSimpleToml(text: string): Record<string, unknown> {
     }
     const pair = /^("[^"]+"|[A-Za-z0-9_.-]+)\s*=\s*(.*)$/.exec(line);
     if (!pair) continue;
-    const parsed = value(pair[2]!.replace(/\s+#[^"']*$/, ""));
+    const parsed = value(stripComment(pair[2]!));
     if (parsed !== undefined && !UNSAFE.has(pair[1]!.replace(/^"|"$/g, ""))) table[pair[1]!.replace(/^"|"$/g, "")] = parsed;
   }
   return root;
