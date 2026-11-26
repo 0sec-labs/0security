@@ -91,6 +91,7 @@ done_step "base $base_sha, head $head_sha"
 tiers="$work/tiers.json"
 printf '%s\n' '{"default":"standard","tiers":{"standard":{"prepassOnly":true}}}' > "$tiers"
 
+scan_seconds_head=0 scan_seconds_base=0
 scan_commit() { # label sha
   git -C "$src" checkout -q --detach "$2" || die "checkout of $2 failed"
   local started=$SECONDS
