@@ -511,7 +511,7 @@ fn parse_pipfile_lock(source: &str, path: &Path) -> Vec<PackageRef> {
 }
 
 fn parse_pnpm_lock(source: &str, path: &Path) -> Vec<PackageRef> {
-    let Ok(doc) = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(source) else {
+    let Ok(doc) = yaml_serde::from_str::<yaml_serde::Value>(source) else {
         return Vec::new();
     };
     let Some(packages) = doc.get("packages").and_then(|value| value.as_mapping()) else {

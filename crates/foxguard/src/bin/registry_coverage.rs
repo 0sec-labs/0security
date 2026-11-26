@@ -42,7 +42,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use foxguard::rules::semgrep_compat::parse_semgrep_str;
-use serde_yaml_ng::Value as Yaml;
+use yaml_serde::Value as Yaml;
 
 /// Top-level / structural keys that do not affect whether foxguard can match a
 /// rule. Their presence never makes a rule "unsupported".
@@ -437,14 +437,14 @@ fn classify_rule(rule: &Yaml) -> Outcome {
 fn ground_truth(rule: &Yaml, fallback_reason: &str) -> Outcome {
     // Wrap the single rule in a fresh `rules:` document.
     let doc = Yaml::Mapping({
-        let mut m = serde_yaml_ng::Mapping::new();
+        let mut m = yaml_serde::Mapping::new();
         m.insert(
             Yaml::String("rules".into()),
             Yaml::Sequence(vec![rule.clone()]),
         );
         m
     });
-    let content = match serde_yaml_ng::to_string(&doc) {
+    let content = match yaml_serde::to_string(&doc) {
         Ok(c) => c,
         Err(_) => return Outcome::Skipped(fallback_reason.to_string()),
     };
@@ -546,7 +546,7 @@ fn main() {
             Ok(c) => c,
             Err(_) => continue,
         };
-        let doc: Yaml = match serde_yaml_ng::from_str(&content) {
+        let doc: Yaml = match yaml_serde::from_str(&content) {
             Ok(d) => d,
             Err(_) => {
                 stats.files_total += 1;
@@ -836,7 +836,7 @@ mod tests {
         // `#[cfg(test)]` exclusion in `rs/no-unwrap-in-lib` — from flagging
         // these test-only expects.)
         // foxguard: ignore[rs/no-unwrap-in-lib]
-        let doc: Yaml = serde_yaml_ng::from_str(yaml).expect("test fixture is valid YAML");
+        let doc: Yaml = yaml_serde::from_str(yaml).expect("test fixture is valid YAML");
         // foxguard: ignore[rs/no-unwrap-in-lib]
         let rules = doc
             .get("rules")

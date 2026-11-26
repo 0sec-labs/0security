@@ -77,7 +77,7 @@ use crate::rules::solidity_taint;
 use crate::rules::swift_taint;
 use crate::rules::{FileContext, Rule};
 use crate::{Finding, Language, Severity};
-use serde_yaml_ng::Value as YamlValue;
+use yaml_serde::Value as YamlValue;
 
 macro_rules! warn_import_reduction {
     ($($arg:tt)*) => {{
@@ -10168,7 +10168,7 @@ pattern-sources:
 pattern-sinks:
   - pattern: pickle.loads($X)
 "#;
-        let v: YamlValue = serde_yaml_ng::from_str(yaml).unwrap();
+        let v: YamlValue = yaml_serde::from_str(yaml).unwrap();
         match parse_taint_rule(&v) {
             TaintRuleParse::Compiled(r) => {
                 assert_eq!(r.id, "semgrep/semgrep-pickle-taint");
@@ -10191,7 +10191,7 @@ message: x
 severity: ERROR
 languages: [python]
 "#;
-        let v: YamlValue = serde_yaml_ng::from_str(yaml).unwrap();
+        let v: YamlValue = yaml_serde::from_str(yaml).unwrap();
         assert!(matches!(parse_taint_rule(&v), TaintRuleParse::NotTaint));
     }
 
@@ -10206,7 +10206,7 @@ message: m
 pattern-sources: [{pattern: req}]
 pattern-sinks: [{pattern: eval($X)}]
 "#;
-        let v: YamlValue = serde_yaml_ng::from_str(yaml).unwrap();
+        let v: YamlValue = yaml_serde::from_str(yaml).unwrap();
         assert!(matches!(parse_taint_rule(&v), TaintRuleParse::Skip(_)));
     }
 
@@ -10221,7 +10221,7 @@ message: m
 pattern-sources: [{pattern: gets($X)}]
 pattern-sinks: [{pattern: system($X)}]
 "#;
-        let v: YamlValue = serde_yaml_ng::from_str(yaml).unwrap();
+        let v: YamlValue = yaml_serde::from_str(yaml).unwrap();
         match parse_taint_rule(&v) {
             TaintRuleParse::Compiled(r) => {
                 assert_eq!(r.lang, Language::Ruby);
@@ -10244,7 +10244,7 @@ message: m
 pattern-sources: [{pattern: gets($X)}]
 pattern-sinks: [{pattern: eval($X)}]
 "#;
-        let v: YamlValue = serde_yaml_ng::from_str(yaml).unwrap();
+        let v: YamlValue = yaml_serde::from_str(yaml).unwrap();
         match parse_taint_rule(&v) {
             TaintRuleParse::Compiled(r) => assert_eq!(r.lang, Language::Ruby),
             TaintRuleParse::Skip(msg) => panic!("unexpected skip: {}", msg),
@@ -10930,7 +10930,7 @@ message: m
 pattern-sources: [{pattern: getenv($X)}]
 pattern-sinks: [{pattern: system($X)}]
 "#;
-        let v: YamlValue = serde_yaml_ng::from_str(yaml).unwrap();
+        let v: YamlValue = yaml_serde::from_str(yaml).unwrap();
         match parse_taint_rule(&v) {
             TaintRuleParse::Compiled(r) => {
                 assert_eq!(r.lang, Language::C);
@@ -10953,7 +10953,7 @@ message: m
 pattern-sources: [{pattern: request.getParameter($X)}]
 pattern-sinks: [{pattern: Runtime.exec($X)}]
 "#;
-        let v: YamlValue = serde_yaml_ng::from_str(yaml).unwrap();
+        let v: YamlValue = yaml_serde::from_str(yaml).unwrap();
         match parse_taint_rule(&v) {
             TaintRuleParse::Compiled(r) => {
                 assert_eq!(r.lang, Language::Kotlin);
@@ -10976,7 +10976,7 @@ message: m
 pattern-sources: [{pattern: call.receiveText($X)}]
 pattern-sinks: [{pattern: Runtime.exec($X)}]
 "#;
-        let v: YamlValue = serde_yaml_ng::from_str(yaml).unwrap();
+        let v: YamlValue = yaml_serde::from_str(yaml).unwrap();
         match parse_taint_rule(&v) {
             TaintRuleParse::Compiled(r) => assert_eq!(r.lang, Language::Kotlin),
             TaintRuleParse::Skip(msg) => panic!("unexpected skip: {}", msg),
@@ -10995,7 +10995,7 @@ message: m
 pattern-sources: [{pattern: req.query}]
 pattern-sinks: [{pattern: eval($X)}]
 "#;
-        let v: YamlValue = serde_yaml_ng::from_str(yaml).unwrap();
+        let v: YamlValue = yaml_serde::from_str(yaml).unwrap();
         match parse_taint_rule(&v) {
             TaintRuleParse::Compiled(r) => {
                 assert_eq!(r.lang, Language::JavaScript);
@@ -11018,7 +11018,7 @@ message: m
 pattern-sources: [{pattern: req.body}]
 pattern-sinks: [{pattern: eval($X)}]
 "#;
-        let v: YamlValue = serde_yaml_ng::from_str(yaml).unwrap();
+        let v: YamlValue = yaml_serde::from_str(yaml).unwrap();
         match parse_taint_rule(&v) {
             TaintRuleParse::Compiled(r) => assert_eq!(r.lang, Language::JavaScript),
             TaintRuleParse::Skip(msg) => panic!("unexpected skip: {}", msg),
@@ -11037,7 +11037,7 @@ message: m
 pattern-sources: [{pattern: c.Query($X)}]
 pattern-sinks: [{pattern: exec.Command($X)}]
 "#;
-        let v: YamlValue = serde_yaml_ng::from_str(yaml).unwrap();
+        let v: YamlValue = yaml_serde::from_str(yaml).unwrap();
         match parse_taint_rule(&v) {
             TaintRuleParse::Compiled(r) => {
                 assert_eq!(r.lang, Language::Go);
@@ -11060,7 +11060,7 @@ message: m
 pattern-sources: [{pattern: request.getParameter($X)}]
 pattern-sinks: [{pattern: Runtime.exec($X)}]
 "#;
-        let v: YamlValue = serde_yaml_ng::from_str(yaml).unwrap();
+        let v: YamlValue = yaml_serde::from_str(yaml).unwrap();
         match parse_taint_rule(&v) {
             TaintRuleParse::Compiled(r) => {
                 assert_eq!(r.lang, Language::Java);
@@ -11336,7 +11336,7 @@ fun handler(call: ApplicationCall) {
     }
 
     fn compiled(yaml: &str) -> SemgrepTaintRule {
-        let v: YamlValue = serde_yaml_ng::from_str(yaml).unwrap();
+        let v: YamlValue = yaml_serde::from_str(yaml).unwrap();
         match parse_taint_rule(&v) {
             TaintRuleParse::Compiled(r) => r,
             TaintRuleParse::Skip(msg) => panic!("unexpected skip: {}", msg),
@@ -11631,7 +11631,7 @@ pattern-sources:
 pattern-sinks:
   - pattern: pickle.loads($X)
 "#;
-        let v: YamlValue = serde_yaml_ng::from_str(yaml).unwrap();
+        let v: YamlValue = yaml_serde::from_str(yaml).unwrap();
         match parse_taint_rule(&v) {
             TaintRuleParse::Skip(msg) => assert!(msg.contains("pattern-sources")),
             other => panic!(
@@ -11682,7 +11682,7 @@ pattern-sources:
 pattern-sinks:
   - pattern: pickle.loads($X)
 "#;
-        let v2: YamlValue = serde_yaml_ng::from_str(yaml2).unwrap();
+        let v2: YamlValue = yaml_serde::from_str(yaml2).unwrap();
         assert!(matches!(parse_taint_rule(&v2), TaintRuleParse::Skip(_)));
 
         // A mix where one entry is an unsupported key and another is a plain
@@ -12629,7 +12629,7 @@ pattern-sources:
 pattern-sinks:
   - pattern: pickle.loads($X)
 "#;
-        let v: YamlValue = serde_yaml_ng::from_str(yaml).unwrap();
+        let v: YamlValue = yaml_serde::from_str(yaml).unwrap();
         match parse_taint_rule(&v) {
             TaintRuleParse::Skip(msg) => {
                 assert!(
@@ -12761,7 +12761,7 @@ message: m
 pattern-sources: [{pattern: $_GET}]
 pattern-sinks: [{pattern: system($X)}]
 "#;
-        let v: YamlValue = serde_yaml_ng::from_str(yaml).unwrap();
+        let v: YamlValue = yaml_serde::from_str(yaml).unwrap();
         match parse_taint_rule(&v) {
             TaintRuleParse::Compiled(r) => {
                 assert_eq!(r.lang, Language::Php);
@@ -12919,7 +12919,7 @@ message: m
 pattern-sources: [{pattern: Request.QueryString}]
 pattern-sinks: [{pattern: Process.Start($X)}]
 "#;
-        let v: YamlValue = serde_yaml_ng::from_str(yaml).unwrap();
+        let v: YamlValue = yaml_serde::from_str(yaml).unwrap();
         match parse_taint_rule(&v) {
             TaintRuleParse::Compiled(r) => {
                 assert_eq!(r.lang, Language::CSharp);
@@ -12943,7 +12943,7 @@ message: m
 pattern-sources: [{pattern: Request.QueryString}]
 pattern-sinks: [{pattern: Process.Start($X)}]
 "#;
-        let v: YamlValue = serde_yaml_ng::from_str(yaml).unwrap();
+        let v: YamlValue = yaml_serde::from_str(yaml).unwrap();
         match parse_taint_rule(&v) {
             TaintRuleParse::Compiled(r) => assert_eq!(r.lang, Language::CSharp),
             TaintRuleParse::Skip(msg) => panic!("unexpected skip: {}", msg),
@@ -14947,7 +14947,7 @@ def handler(event, context):
     /// any-parameter wildcard (guards against over-broad seeding).
     #[test]
     fn non_param_focus_block_is_not_treated_as_param_source() {
-        let v: YamlValue = serde_yaml_ng::from_str(
+        let v: YamlValue = yaml_serde::from_str(
             r#"
 id: not-a-param-source
 mode: taint
@@ -15418,7 +15418,7 @@ function run(req, pool) {
     /// name), so the rule is rejected rather than producing an any-call sink.
     #[test]
     fn unpinned_metavar_callee_sink_is_not_compiled() {
-        let v: YamlValue = serde_yaml_ng::from_str(
+        let v: YamlValue = yaml_serde::from_str(
             r#"
 id: js-unpinned-callee
 mode: taint
@@ -15621,7 +15621,7 @@ end
     /// universal-callee refusal.
     #[test]
     fn bare_metavar_callee_sink_without_pin_still_compiles_to_nothing() {
-        let v: YamlValue = serde_yaml_ng::from_str(
+        let v: YamlValue = yaml_serde::from_str(
             r#"
 id: py-unpinned-callee-sink
 mode: taint
@@ -16828,7 +16828,7 @@ pattern-sinks:
           regex: ^(putValue|setAttribute)$
       - focus-metavariable: $VALUE
 "#;
-        let v: YamlValue = serde_yaml_ng::from_str(yaml).unwrap();
+        let v: YamlValue = yaml_serde::from_str(yaml).unwrap();
         match parse_taint_rule(&v) {
             TaintRuleParse::Skip(_) => {}
             TaintRuleParse::Compiled(r) => {
@@ -17281,7 +17281,7 @@ pattern-sinks:
   - pattern: sink(...)
     requires: EXPRESS or EXPRESSTS
 "#;
-        let v: YamlValue = serde_yaml_ng::from_str(yaml).unwrap();
+        let v: YamlValue = yaml_serde::from_str(yaml).unwrap();
         assert!(
             matches!(parse_taint_rule(&v), TaintRuleParse::Skip(_)),
             "two distinct primary labels must stay skipped, not over-match"
@@ -18260,7 +18260,7 @@ pattern-sinks:
 
         // The recognizer compiles ONLY when the focus names the class-name
         // metavariable — a focus on a constructor ARGUMENT does not.
-        let classname_focus: YamlValue = serde_yaml_ng::from_str(
+        let classname_focus: YamlValue = yaml_serde::from_str(
             "- pattern-either:\n    - pattern-inside: new $SINK(...)\n- pattern: $SINK\n",
         )
         .unwrap();
@@ -18273,7 +18273,7 @@ pattern-sinks:
         assert!(matches!(out[0], GenericMatcher::TaintedCallee { .. }));
 
         let arg_focus: YamlValue =
-            serde_yaml_ng::from_str("- pattern-inside: new SafeClass($ARG)\n- pattern: $ARG\n")
+            yaml_serde::from_str("- pattern-inside: new SafeClass($ARG)\n- pattern: $ARG\n")
                 .unwrap();
         let mut out2 = Vec::new();
         assert!(
@@ -18409,7 +18409,7 @@ pattern-sinks:
 
         // The recognizer compiles ONLY when the focus names the KEY metavariable.
         let key_focus: YamlValue =
-            serde_yaml_ng::from_str("- pattern-inside: $_SESSION[$KEY] = $VAL;\n- pattern: $KEY\n")
+            yaml_serde::from_str("- pattern-inside: $_SESSION[$KEY] = $VAL;\n- pattern: $KEY\n")
                 .unwrap();
         let mut out = Vec::new();
         assert!(try_compile_subscript_key_sink_block(
@@ -18424,7 +18424,7 @@ pattern-sinks:
 
         // A focus on the assigned VALUE must NOT compile a TaintedSubscriptKey.
         let val_focus: YamlValue =
-            serde_yaml_ng::from_str("- pattern-inside: $_SESSION[$KEY] = $VAL;\n- pattern: $VAL\n")
+            yaml_serde::from_str("- pattern-inside: $_SESSION[$KEY] = $VAL;\n- pattern: $VAL\n")
                 .unwrap();
         let mut out2 = Vec::new();
         assert!(
