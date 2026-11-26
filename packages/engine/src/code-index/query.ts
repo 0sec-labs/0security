@@ -153,17 +153,19 @@ export function calleesOf(index: CodeIndex, ref: string, depth: number, limit: n
   return { targets: targets.map((t) => siteOf(t)), callees: out, truncated };
 }
 
-export interface AuthSignal { name: string; where: "middleware" | "handler" | "callee"; file?: string; line?: number }
+export interface AuthSignal { name: string; where: "middleware" | "handler" | "callee"; file?: string; line?: number; /** The URL rule, `web.xml` entry or filter that gave the signal. */ source?: string }
 export interface RouteView {
   method: string; path: string; file: string; line: number; handler: string; framework: string;
   middleware: string[]; auth_signals: AuthSignal[]; auth_signal_missing: boolean; sinks_reachable: SinkCategory[];
+  /** An explicit permitAll, @PermitAll or unrestricted web.xml constraint covers the route: it is open on purpose, not unguarded by oversight. */
+  public: boolean; public_source?: string;
 }
 
 /** Auth-like names on a route: its middleware and the calls its handler makes within `depth` hops. */
 function signalsFor(lk: Lookup, route: IndexRoute, depth: number): { signals: AuthSignal[]; sinks: Set<SinkCategory> } {
   const signals: AuthSignal[] = route.middleware.filter((m) => authName(m)).map((name) => ({ name, where: "middleware" as const }));
   // Guard annotations the extractor recognised (for example @Secured), which the name pattern alone would miss.
-  for (const name of route.authSignals ?? []) if (!signals.some((s) => s.name === name)) signals.push({ name, where: "middleware" });
+  for (const name of route.authSignals ?? []) if (!signals.some((s) => s.name === name)) signals.push({ name, where: "middleware", ...(route.authSources?.find((a) => a.signal === name) ? { source: route.authSources.find((a) => a.signal === name)!.source } : {}) });
   const sinks = new Set<SinkCategory>();
   const start = lk.byId.get(route.handler);
   if (!start) return { signals, sinks };
@@ -188,7 +190,7 @@ export function routesOf(index: CodeIndex, filter: { pathContains?: string; meth
     .map((r): RouteView => {
       const { signals, sinks } = signalsFor(lk, r, 3);
       const handler = lk.byId.get(r.handler);
-      return { method: r.method, path: r.path, file: r.file, line: r.line, handler: handler ? `${handler.file}:${handler.line} ${handler.qualified}` : r.handler, framework: r.framework, middleware: r.middleware, auth_signals: signals, auth_signal_missing: signals.length === 0, sinks_reachable: [...sinks] };
+      return { method: r.method, path: r.path, file: r.file, line: r.line, handler: handler ? `${handler.file}:${handler.line} ${handler.qualified}` : r.handler, framework: r.framework, middleware: r.middleware, auth_signals: signals, auth_signal_missing: signals.length === 0, sinks_reachable: [...sinks], public: r.public === true, ...(r.public ? { public_source: r.authSources?.find((a) => a.access === "public")?.source } : {}) };
     })
     .filter((r) => !filter.withoutAuthSignal || r.auth_signal_missing);
   return { routes: all.slice(0, limit), total: all.length, truncated: all.length > limit };
@@ -242,7 +244,7 @@ export function traceToSink(index: CodeIndex, from: string, sinkFilter: SinkCate
 }
 
 /** What the index covers, for the model to judge how far to trust an empty answer. */
-export function coverageOf(index: CodeIndex): { files: number; symbols: number; routes: number; commit: string; engine: string; languages: string[]; unsupported: Record<string, number>; truncated: boolean } {
+export function coverageOf(index: CodeIndex): { files: number; symbols: number; routes: number; commit: string; engine: string; languages: string[]; unsupported: Record<string, number>; truncated: boolean; dropped_calls?: number; notes?: string[] } {
   const langs = new Set(index.symbols.map((s) => s.language));
-  return { files: index.files, symbols: index.symbols.length, routes: index.routes.length, commit: index.commit, engine: index.engine ?? "builtin", languages: [...langs], unsupported: index.unsupported, truncated: index.truncated };
+  return { files: index.files, symbols: index.symbols.length, routes: index.routes.length, commit: index.commit, engine: index.engine ?? "builtin", languages: [...langs], unsupported: index.unsupported, truncated: index.truncated, ...(index.droppedCalls !== undefined ? { dropped_calls: index.droppedCalls } : {}), ...(index.notes?.length ? { notes: index.notes } : {}) };
 }

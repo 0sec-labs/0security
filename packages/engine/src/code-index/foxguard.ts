@@ -23,7 +23,7 @@ export const graphV1 = z.object({
   files: z.number().int().min(0),
   symbols: z.array(z.object({
     id: bounded(600), name: bounded(300), qualified: bounded(400), kind: z.enum(["function", "method", "route-handler", "module"]),
-    file: bounded(600), line: z.number().int().min(1), endLine: z.number().int().min(1), language: z.enum(["javascript", "python", "java"]),
+    file: bounded(600), line: z.number().int().min(1), endLine: z.number().int().min(1), language: z.enum(["javascript", "python", "java", "kotlin"]),
   })).max(400_000),
   calls: z.array(z.object({
     from: bounded(600), name: bounded(300), text: bounded(400), file: bounded(600), line: z.number().int().min(1), sink: sink.optional(), auth: z.boolean().optional(), receiverType: bounded(200).optional(),
@@ -31,9 +31,15 @@ export const graphV1 = z.object({
   routes: z.array(z.object({
     method: bounded(12), path: bounded(500), file: bounded(600), line: z.number().int().min(1), handler: bounded(600),
     middleware: z.array(bounded(300)).max(100), framework: bounded(40), authSignals: z.array(bounded(300)).max(100).optional(),
+    authSources: z.array(z.object({
+      signal: bounded(300), source: bounded(400), access: z.enum(["public", "authenticated", "role", "denied", "filter", "annotation"]),
+    })).max(100).optional(),
+    public: z.boolean().optional(),
   })).max(100_000),
   unsupported: z.record(z.string(), z.number().int().min(0)).default({}),
   truncated: z.boolean().default(false),
+  droppedCalls: z.number().int().min(0).optional(),
+  notes: z.array(bounded(600)).max(50).optional(),
 });
 
 const probed = new Map<string, boolean>();
@@ -73,7 +79,7 @@ export async function foxguardGraph(root: string, commit: string, fingerprint: s
     const parsed = graphV1.safeParse(JSON.parse(stdout));
     if (!parsed.success) return undefined;
     const g = parsed.data;
-    return { version: 1, root, commit, fingerprint, files: g.files, symbols: g.symbols, calls: g.calls, routes: g.routes, unsupported: g.unsupported, truncated: g.truncated, engine: "foxguard" };
+    return { version: 1, root, commit, fingerprint, files: g.files, symbols: g.symbols, calls: g.calls, routes: g.routes, unsupported: g.unsupported, truncated: g.truncated, engine: "foxguard", ...(g.droppedCalls !== undefined ? { droppedCalls: g.droppedCalls } : {}), ...(g.notes?.length ? { notes: g.notes } : {}) };
   } catch {
     return undefined;
   }

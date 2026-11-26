@@ -2,7 +2,7 @@
  * Data model of the per-repo code index. The JSON shape is deliberately plain so a Foxguard
  * `index` export (see the proposal in the PR for #659) can be loaded into the same structure.
  */
-export type IndexLanguage = "javascript" | "python" | "java";
+export type IndexLanguage = "javascript" | "python" | "java" | "kotlin";
 
 export type SinkCategory = "command" | "code-eval" | "sql" | "file" | "network" | "deserialize" | "template" | "redirect";
 
@@ -49,6 +49,17 @@ export interface IndexRoute {
   framework: string;
   /** Guard annotations or auth-like middleware on the route itself (Foxguard graph). */
   authSignals?: string[];
+  /** Where a signal that is not on the handler came from: a URL rule, `web.xml` or a filter (Foxguard graph). */
+  authSources?: AuthSource[];
+  /** An explicit `permitAll`, `@PermitAll` or unrestricted `web.xml` constraint opens the route (Foxguard graph). */
+  public?: boolean;
+}
+
+export interface AuthSource {
+  signal: string;
+  /** `file:line` and the rule as written. */
+  source: string;
+  access: "public" | "authenticated" | "role" | "denied" | "filter" | "annotation";
 }
 
 export interface CodeIndex {
@@ -69,6 +80,10 @@ export interface CodeIndex {
   skippedSlow?: number;
   /** Which extractor produced it. */
   engine?: "builtin" | "foxguard";
+  /** Foxguard graph: Java and Kotlin calls left out because their name was too ambiguous to follow. */
+  droppedCalls?: number;
+  /** Foxguard graph: caveats to show next to an answer (security rules it could not resolve). */
+  notes?: string[];
 }
 
 export interface FileExtract {

@@ -20,6 +20,7 @@ import type { ToolContext } from "../agent/types.js";
 
 const REPO = fileURLToPath(new URL("../../../../", import.meta.url));
 const FIXTURE = join(REPO, "crates/foxguard/tests/fixtures/java_graph_app");
+const SECURITY_FIXTURE = join(REPO, "crates/foxguard/tests/fixtures/java_graph_security_app");
 
 function supportsGraph(bin: string): boolean {
   try {
@@ -29,12 +30,12 @@ function supportsGraph(bin: string): boolean {
 }
 
 function findBinary(): string | undefined {
-  const candidates = [
-    process.env["ZERO_FOXGUARD_TEST_BIN"],
-    join(REPO, "target/release/foxguard"),
-    join(REPO, "target/debug/foxguard"),
-    ...(process.env["PATH"] ?? "").split(delimiter).filter(Boolean).map((d) => join(d, "foxguard")),
-  ].filter((c): c is string => Boolean(c));
+  const onPath = (process.env["PATH"] ?? "").split(delimiter).filter(Boolean).map((d) => join(d, "foxguard"));
+  const local = [join(REPO, "target/release/foxguard"), join(REPO, "target/debug/foxguard")];
+  // In CI the setup action puts the freshly built binary on PATH; a target/ directory left in a persistent
+  // workspace by an earlier run can be stale, so PATH goes first there.
+  const ordered = process.env["CI"] ? [...onPath, ...local] : [...local, ...onPath];
+  const candidates = [process.env["ZERO_FOXGUARD_TEST_BIN"], ...ordered].filter((c): c is string => Boolean(c));
   return candidates.find(supportsGraph);
 }
 
@@ -119,6 +120,73 @@ describe("Java code index through the real foxguard binary", () => {
       const first = await getIndex(root);
       expect((await getIndex(root)).cached).toBe(true);
       appendFileSync(join(root, "src/main/java/com/example/notes/Note.java"), "// edited\n");
+      const second = await getIndex(root);
+      expect(second.cached).toBe(false);
+      expect(second.index.fingerprint).not.toBe(first.index.fingerprint);
+    });
+  });
+
+  run("security configuration outside annotations, interfaces and Kotlin", () => {
+    let root: string;
+    let saved: string | undefined;
+    beforeAll(() => { saved = process.env["ZERO_FOXGUARD_PATH"]; });
+    afterAll(() => { if (saved === undefined) delete process.env["ZERO_FOXGUARD_PATH"]; else process.env["ZERO_FOXGUARD_PATH"] = saved; });
+    beforeEach(() => {
+      root = mkdtempSync(join(tmpdir(), "java-security-index-"));
+      cpSync(SECURITY_FIXTURE, root, { recursive: true });
+      clearIndexCache(); clearFoxguardProbe();
+      process.env["ZERO_FOXGUARD_PATH"] = binary!;
+    });
+    afterEach(() => rmSync(root, { recursive: true, force: true }));
+
+    const ctx = (): ToolContext => ({ target: "https://example.com", scanId: "java-security-index", findings: [], attackResults: [], targetInfo: {}, role: "review", scopePath: root });
+    const call = async (name: string, args: Record<string, unknown>): Promise<Record<string, any>> => {
+      const result = await new ToolExecutor(ctx(), null).execute({ name, arguments: args });
+      expect(result.success, result.error).toBe(true);
+      return result.output as Record<string, any>;
+    };
+
+    it("indexes Java, Kotlin and web.xml routes and reports coverage", async () => {
+      const { index } = await getIndex(root);
+      expect(index.engine).toBe("foxguard");
+      expect(index.unsupported).toEqual({});
+      expect(index.droppedCalls).toBe(0);
+      expect(new Set(index.symbols.map((s) => s.language))).toEqual(new Set(["java", "kotlin"]));
+      expect(index.routes.map((r) => `${r.method} ${r.path}`).sort()).toEqual([
+        "DELETE /shop/orders/{id}", "GET /admin/export", "GET /kt/health", "GET /kt/me", "GET /legacy/report", "GET /public/search", "GET /shop/orders/{id}",
+      ]);
+    });
+
+    it("URL rules count as auth signals with their source, so only open routes lack one", async () => {
+      const out = await call("routes", {});
+      const byRoute = Object.fromEntries(out["routes"].map((r: { method: string; path: string }) => [`${r.method} ${r.path}`, r]));
+      const order = byRoute["GET /shop/orders/{id}"];
+      expect(order.auth_signal_missing).toBe(false);
+      expect(order.auth_signals.map((s: { name: string }) => s.name)).toContain("url-rule:authenticated");
+      expect(order.auth_signals.find((s: { name: string }) => s.name === "url-rule:authenticated").source).toMatch(/SecurityConfig\.java:\d+/);
+      expect(byRoute["GET /admin/export"].auth_signals.map((s: { name: string }) => s.name)).toContain("url-rule:hasAuthority(ADMIN)");
+      expect(byRoute["GET /legacy/report"].auth_signals.map((s: { name: string }) => s.name)).toContain("web.xml:auth-constraint(auditor)");
+      expect(byRoute["GET /kt/me"].auth_signals.map((s: { name: string }) => s.name)).toContain("authenticate(jwt)");
+      const open = await call("routes", { without_auth_signal: true });
+      expect(open["routes"].map((r: { path: string }) => r.path).sort()).toEqual(["/kt/health", "/public/search"]);
+      const search = open["routes"].find((r: { path: string }) => r.path === "/public/search");
+      expect(search.public).toBe(true);
+      expect(search.public_source).toMatch(/requestMatchers/);
+      expect(search.sinks_reachable).toEqual(["sql"]);
+    });
+
+    it("an interface-typed field reaches the single implementor, so the trace crosses it", async () => {
+      const trace = await call("trace_to_sink", { from: "GET /public/search", sink: "sql" });
+      expect(trace["paths"].length).toBeGreaterThan(0);
+      const hops = trace["paths"][0].hops.map((h: { symbol: string }) => h.symbol);
+      expect(hops).toContain("OrderServiceImpl.search");
+      const callers = await call("callers_of", { symbol: "OrderServiceImpl.load", depth: 2 });
+      expect([...new Set(callers["entryRoutes"].map((r: { route: string }) => r.route))]).toEqual(["GET /shop/orders/{id}"]);
+    });
+
+    it("an edit to web.xml gives a new index", async () => {
+      const first = await getIndex(root);
+      appendFileSync(join(root, "src/main/webapp/WEB-INF/web.xml"), "<!-- edited -->\n");
       const second = await getIndex(root);
       expect(second.cached).toBe(false);
       expect(second.index.fingerprint).not.toBe(first.index.fingerprint);

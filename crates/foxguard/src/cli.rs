@@ -888,6 +888,11 @@ pub struct GraphArgs {
     #[arg(long, default_value_t = false)]
     pub taint_summaries: bool,
 
+    /// Resolve calls by name and declared receiver type only (the first version's behavior), to
+    /// compare against the type-aware resolver
+    #[arg(long, default_value_t = false, hide = true)]
+    pub legacy_resolution: bool,
+
     /// Per-file time budget in seconds; 0 disables (default: 120). A file over it is skipped and
     /// the graph is marked `truncated`.
     #[arg(long, default_value_t = crate::engine::budget::DEFAULT_FILE_TIMEOUT_SECS)]
