@@ -16,6 +16,7 @@ import path from "node:path";
 import { bwrapArgs } from "./bwrap.js";
 import { DEFAULT_DECL, describeSandbox, resolveSandbox, WORKSPACE_TOKEN, type ResolvedSandbox, type SandboxDecl } from "./policy.js";
 import { detectNodePermission, isNodeProgram, nodePermissionArgs, type NodePermissionSupport } from "./node-permission.js";
+import { resolveLaunch } from "./launcher.js";
 import { seatbeltArgs, seatbeltProfile } from "./seatbelt.js";
 
 export type SandboxMode = "auto" | "require" | "off";
@@ -139,7 +140,10 @@ export interface PlanOptions { env?: Readonly<Record<string, string | undefined>
 /** ZERO_SANDBOX_NODE_PERMISSION=off leaves node's permission flags out (an extension that needs a native addon, for example). */
 const nodePermissionWanted = (env: Readonly<Record<string, string | undefined>>): boolean => env.ZERO_SANDBOX_NODE_PERMISSION?.trim().toLowerCase() !== "off";
 
-const NODE_WIDENING_FLAG = /^--(?:allow[-_]|no[-_](?:experimental[-_])?permission|env[-_]file)/i;
+/** Flags that would widen or replace node's own permissions. Quotes in NODE_OPTIONS are ignored. `--require` and `--import` are allowed: node applies its permissions before it loads them. */
+const NODE_WIDENING_FLAG = /^["']?--(?:allow[-_]|no[-_](?:experimental[-_])?permission|env[-_]file|(?:no[-_])?experimental[-_]config[-_]file|(?:no[-_])?experimental[-_]default[-_]config[-_]file|config[-_]file)/i;
+/** Variables that make the system loader put code into a process before node starts. */
+const LOADER_ENV = /^(?:LD_|DYLD_)/;
 
 const resolveProgram = (name: string, pathEnv: string): string => (name.includes("/") ? name : whichIn(name, pathEnv) ?? name);
 const real = (p: string): string => { try { return fs.realpathSync(p); } catch { return p; } };
@@ -153,13 +157,15 @@ export function planSandbox(req: SandboxRequest, options: PlanOptions = {}): San
   const detected = options.status ?? detectSandbox(undefined, env);
   const pathEnv = req.env.PATH ?? process.env.PATH ?? "";
   const rawProgram = resolveProgram(req.argv[0] ?? "", pathEnv);
-  const envWrappedNode =
-    rawProgram && path.isAbsolute(rawProgram) && /^env(?:\.exe)?$/i.test(path.basename(rawProgram)) && req.argv[1] && !req.argv[1].startsWith("-")
-      ? resolveProgram(req.argv[1], pathEnv)
-      : undefined;
-  const usesEnvNode = Boolean(envWrappedNode && path.isAbsolute(envWrappedNode) && isNodeProgram(envWrappedNode, real(envWrappedNode)));
-  const program = usesEnvNode ? envWrappedNode! : rawProgram;
-  const programArgs = usesEnvNode ? req.argv.slice(2) : req.argv.slice(1);
+  // Look through `env`, and refuse launchers that could hide node, so the node layer is applied or the run is refused (see launcher.ts).
+  const launch = nodePermissionWanted(env) && req.argv[0]
+    ? resolveLaunch(req.argv, req.env, { resolve: resolveProgram, real, isNode: p => path.isAbsolute(p) && isNodeProgram(p, real(p)) }, req.label)
+    : undefined;
+  if (launch && !launch.ok) return { kind: "refused", error: launch.error };
+  const usesEnvNode = Boolean(launch?.ok && launch.unwrapped);
+  const program = usesEnvNode && launch?.ok ? launch.program : rawProgram;
+  const programArgs = usesEnvNode && launch?.ok ? launch.args : req.argv.slice(1);
+  const childEnv: Record<string, string> = usesEnvNode && launch?.ok ? launch.env : { ...req.env };
   // Node's permission model: a layer for programs started with node, and the only one where no OS sandbox works.
   const nodeSupport = nodePermissionWanted(env) && program && path.isAbsolute(program) && isNodeProgram(program, real(program)) ? (options.nodeSupport ?? detectNodePermission(program)) : undefined;
   if (!detected.backend) {
@@ -189,16 +195,18 @@ export function planSandbox(req: SandboxRequest, options: PlanOptions = {}): San
     const flags = nodePermissionArgs(policy, nodeSupport);
     if (flags.ok) {
       // Flags that widen node's own permissions would win over ours, from the arguments, an env file or NODE_OPTIONS: refuse them.
-      const widens = programArgs.find(arg => NODE_WIDENING_FLAG.test(arg)) ?? (req.env.NODE_OPTIONS?.split(/\s+/).find(arg => NODE_WIDENING_FLAG.test(arg)));
+      const widens = programArgs.find(arg => NODE_WIDENING_FLAG.test(arg)) ?? childEnv.NODE_OPTIONS?.split(/\s+/).find(arg => NODE_WIDENING_FLAG.test(arg));
       if (widens) { cleanup(); return { kind: "refused", error: `cannot start ${req.label} in a sandbox: ${widens.slice(0, 60)} would change node's permissions` }; }
+      const loader = Object.keys(childEnv).find(k => LOADER_ENV.test(k));
+      if (loader) { cleanup(); return { kind: "refused", error: `cannot start ${req.label} in a sandbox: ${loader} would load code into node before its permissions apply` }; }
       argv = [program, ...flags.args, ...programArgs]; nodeNote = `${nodeSupport.flag}: folders, child programs, workers`; }
     else if (!detected.backend) { cleanup(); return { kind: "unsandboxed", status: `sandbox: not available (${detected.reason}; ${flags.error}); ran without it` }; }
   }
   const limitNote = policy.limits.cpuSeconds || policy.limits.memoryMb ? `, limits ${[policy.limits.cpuSeconds ? `${policy.limits.cpuSeconds}s cpu` : "", policy.limits.memoryMb ? `${policy.limits.memoryMb} MB memory` : ""].filter(Boolean).join(" ")}` : "";
   if (!detected.backend) {
     const alone = withLimits(argv[0]!, argv.slice(1), policy.limits);
-    return { kind: "sandboxed", ...alone, cwd, env: { ...req.env, TMPDIR: scratch, ZERO_SANDBOX_ACTIVE: "1" }, status: `sandbox: applied (${nodeNote}; writes only to a scratch folder${policy.writePaths.length ? " and declared paths" : ""}; the network is NOT restricted by this layer${limitNote})`, cleanup };
+    return { kind: "sandboxed", ...alone, cwd, env: { ...childEnv, TMPDIR: scratch, ZERO_SANDBOX_ACTIVE: "1" }, status: `sandbox: applied (${nodeNote}; writes only to a scratch folder${policy.writePaths.length ? " and declared paths" : ""}; the network is NOT restricted by this layer${limitNote})`, cleanup };
   }
   const cmd = sandboxedCommand(detected.backend, policy, argv, cwd, backendPath);
-  return { kind: "sandboxed", ...cmd, cwd, env: { ...req.env, TMPDIR: scratch, ZERO_SANDBOX_ACTIVE: "1" }, status: `sandbox: applied (${describeSandbox(detected.backend, policy)}${nodeNote ? `; ${nodeNote}` : ""}${limitNote})`, cleanup };
+  return { kind: "sandboxed", ...cmd, cwd, env: { ...childEnv, TMPDIR: scratch, ZERO_SANDBOX_ACTIVE: "1" }, status: `sandbox: applied (${describeSandbox(detected.backend, policy)}${nodeNote ? `; ${nodeNote}` : ""}${limitNote})`, cleanup };
 }
