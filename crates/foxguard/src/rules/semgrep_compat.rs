@@ -5,12 +5,12 @@ use crate::{Finding, Language, Severity};
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use regex::Regex;
 use serde::Deserialize;
-use yaml_serde::Value as YamlValue;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 use std::path::Path;
 use std::sync::OnceLock;
+use yaml_serde::Value as YamlValue;
 
 const RESERVED_RULE_ID_NAMESPACES: &[&str] = &[
     "py", "js", "go", "java", "php", "ruby", "cs", "csharp", "swift", "kotlin", "rs", "rust",

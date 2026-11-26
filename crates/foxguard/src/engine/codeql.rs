@@ -2,13 +2,13 @@ use crate::diff::{diff_findings, DiffResult};
 use crate::{Finding, Severity};
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
-use yaml_serde::Value as YamlValue;
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 use tempfile::TempDir;
+use yaml_serde::Value as YamlValue;
 
 #[derive(Debug, Clone)]
 pub struct CodeQlRule {

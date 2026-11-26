@@ -4,10 +4,10 @@ use crate::rules::common::SecretScanThresholds;
 use crate::{Finding, Severity};
 use regex::Regex;
 use serde::Deserialize;
-use yaml_serde::{Mapping, Sequence, Value};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use yaml_serde::{Mapping, Sequence, Value};
 
 const CONFIG_NAMES: [&str; 4] = [
     ".foxguard.yml",

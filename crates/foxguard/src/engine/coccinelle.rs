@@ -4,13 +4,13 @@ use crate::{Finding, Severity};
 use ignore::WalkBuilder;
 use regex::Regex;
 use serde::Deserialize;
-use yaml_serde::Value as YamlValue;
 use std::collections::HashSet;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{LazyLock, OnceLock};
 use std::time::Duration;
+use yaml_serde::Value as YamlValue;
 
 #[derive(Debug, Clone)]
 pub struct CoccinelleRule {
