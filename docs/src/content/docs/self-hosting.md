@@ -401,6 +401,8 @@ cosign verify-blob --bundle checksums.txt.sigstore.json \
 
 The install script runs this check when `cosign` is installed and the release has a bundle. It stops on a bad signature. Set `INSTALL_SIGNATURE=require` to stop when `cosign` or the bundle is missing, or `INSTALL_SIGNATURE=0` to skip it on an air-gapped host or an internal mirror. Releases made before signing began have no bundle. Release v0.45.0 and later are signed.
 
+We ran the install script with `INSTALL_SIGNATURE=require` against the published v0.45.0 release with cosign installed. It verified the signature and installed the binary. We ran it again against a copy of `checksums.txt` with one line added. It refused to install and left the install folder empty. We did not run it with the signature check on a Windows or Linux host.
+
 ### Verify the container image
 
 Each image pushed to `ghcr.io/0sec-labs/0security` is signed by digest, with a CycloneDX SBOM attached as a signed attestation. Verify both before you pull by tag:
