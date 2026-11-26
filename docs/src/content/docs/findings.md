@@ -22,6 +22,13 @@ Select a finding to open its detail panel. It shows the evidence (request, respo
 
 Each finding has a stable link at `/findings/<fingerprint>`.
 
+The finding page also has a **Code location** and a **Fix** section:
+
+- **Code location** shows the file and lines the scan cited, as `path:line` you can copy, and the replacement the scan suggested when it gave one. It reads the stored citation and never opens the file.
+- **Fix** lists the fixes that `0security findings fix` recorded for the finding: the branch, the pull request link, whether it was opened as a draft, the result of your local `--test` checks and, when the branch is on this machine, the diff. A pull request is only recorded as draft or ready. Without a recorded fix, the section shows the command to run.
+- **Code-host CI** is the check status the code host reported for the pull request, with the time it was read. **Refresh CI** reads it again. It is separate from your local checks, and the status can be unavailable.
+- **Re-verify** opens a new verification thread for the finding. It does not change the finding's status. Review the thread's result before you do.
+
 ## List and inspect findings
 
 ```bash

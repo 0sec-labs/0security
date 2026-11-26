@@ -37,6 +37,7 @@ on the GitHub Release tag.
 - Anonymous lifecycle events go to PostHog: `first_run`, `command_invoked` (a command name from a fixed list, otherwise `other`), `update` (the two versions) and `error_exit` (an error category only). They go straight to PostHog from the CLI. `DO_NOT_TRACK=1` turns them off. They are not sent for help, version, shell completion, CI or machine-output runs unless `analyticsLevel usage` is set explicitly.
 - The `usage` event has `finding_class_counts`, findings counted by a fixed list of vulnerability classes. Titles, descriptions, evidence and targets are still never sent.
 - Owners can make, list and revoke SCIM tokens from the Members page in the web console.
+- The findings guide now describes the finding page's code location, recorded fix, diff, pull request, code-host CI and Re-verify sections.
 - The finding page shows the code location (with a copyable `path:line`) and the fix that `0security findings fix` recorded: branch, pull request link, draft or ready, local checks, and the diff when the branch is on this machine.
 - Spend limits for Sentinels and triggers, and usage by Sentinel. Code index tools give the agent callers, callees, routes and a trace to a sink. A Jira export, fix explanations and a threat map were added, and Jira leaves info-level findings out by default.
 
