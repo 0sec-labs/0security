@@ -28,6 +28,10 @@ describe("report export", () => {
     expect(second.file_path).toBeUndefined();
     expect(second).toMatchObject({ active: false, false_p: true });
     expect(decode(artifact.body)).not.toContain("root:x:0:0");
+    const lapsed = await exportReport({ ...report, findings: [{ ...report.findings[0]!, triageStatus: "accepted", triageExpiresAt: "2020-01-01T00:00:00Z" }, { ...report.findings[0]!, id: "finding-3", triageStatus: "accepted" }] }, "defectdojo");
+    const [expired, accepted] = JSON.parse(decode(lapsed.body)).findings;
+    expect(expired).toMatchObject({ active: true, risk_accepted: false });
+    expect(accepted).toMatchObject({ active: false, risk_accepted: true });
   });
   it("renders readable Markdown and escapes report HTML", async () => {
     expect(decode((await exportReport(report, "markdown")).body)).toContain("Unsafe file access");

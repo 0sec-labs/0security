@@ -1,3 +1,4 @@
+import { effectiveTriageStatus } from "../shared/triage-expiry.js";
 import type { Finding, ScanReport, Severity } from "../shared/index.js";
 
 const SEVERITY: Record<Severity, string> = { critical: "Critical", high: "High", medium: "Medium", low: "Low", info: "Info" };
@@ -12,7 +13,8 @@ function toDojoFinding(finding: Finding, report: ScanReport): Record<string, unk
   const annotation = finding.reviewAnnotation;
   const path = relativePath(annotation?.path);
   const line = path && Number.isInteger(annotation?.startLine) && annotation!.startLine >= 1 ? annotation!.startLine : undefined;
-  const triage = finding.triageStatus;
+  // An acceptance past its expiry is open again, so it is not exported as an accepted risk.
+  const triage = effectiveTriageStatus(finding);
   const mitigation = finding.remediation
     ? [finding.remediation.summary, ...finding.remediation.steps].filter(Boolean).join("\n")
     : annotation?.fixExplanation;
