@@ -72,9 +72,8 @@ describe.skipIf(!hasContainerRuntime)("executed PoC with the real OciRunner (nee
     expect(offline).toMatchObject({ outcome: "executed-proven", run: { isolation: "container" } });
   }, 180_000);
 
-  it("leaves no container behind and does not change the host folder", () => {
-    const left = ["docker", "podman"].map((bin) => spawnSync(bin, ["ps", "-aq", "--filter", "label=0.verify=1"], { encoding: "utf8" })).find((r) => r.status === 0);
-    expect(left?.stdout.trim() ?? "").toBe("");
+  it("does not change the host folder", () => {
+    // Container leaks are covered by docker-runner.integration.test.ts; a global `ps` here would race with the other Docker tests running in parallel.
     expect(execFileSync("git", ["status", "--porcelain"], { cwd: folder, encoding: "utf8" })).toBe("");
   });
 });
