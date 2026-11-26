@@ -13,7 +13,7 @@ const MIN = 60_000;
 const dirs: string[] = [];
 const P = "/api/console/sentinels";
 
-function fixture(options: { unavailable?: "cancel" | "subscribe" | "usage"; gh?: { run: (args: string[]) => Promise<{ stdout: string }> }; profile?: "local" | "smolvm"; checkouts?: Record<string, string>; persistent?: boolean } = {}) {
+function fixture(options: { mayPoll?: () => boolean; unavailable?: "cancel" | "subscribe" | "usage"; gh?: { run: (args: string[]) => Promise<{ stdout: string }> }; profile?: "local" | "smolvm"; checkouts?: Record<string, string>; persistent?: boolean } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "zero-sentinel-run-"));
   dirs.push(dir);
   const dbPath = join(dir, "control.db");
@@ -35,7 +35,7 @@ function fixture(options: { unavailable?: "cancel" | "subscribe" | "usage"; gh?:
     removeQueued: vi.fn((_id: string, _messageId: string) => ({})),
     resumeQueue: vi.fn((_id: string, _messageId: string) => ({})),
   };
-  const service = new WebSentinelService({ dbPath, missions: options.unavailable ? { ...missions, [options.unavailable]: undefined } : missions, metrics, executionProfile: () => options.profile ?? "local", checkout: async repo => options.checkouts?.[repo], persistentThread: () => options.persistent === true, ...(options.gh ? { gh: options.gh } : {}) });
+  const service = new WebSentinelService({ ...(options.mayPoll ? { mayPoll: options.mayPoll } : {}), dbPath, missions: options.unavailable ? { ...missions, [options.unavailable]: undefined } : missions, metrics, executionProfile: () => options.profile ?? "local", checkout: async repo => options.checkouts?.[repo], persistentThread: () => options.persistent === true, ...(options.gh ? { gh: options.gh } : {}) });
   const workflows = new SecurityWorkflowStore(dbPath);
   const store = new SentinelStore(dbPath);
   const call = async (method: string, path: string, body?: unknown, actor?: SentinelActor) => {
@@ -61,6 +61,18 @@ beforeEach(() => { vi.useFakeTimers({ now: T0 }); });
 afterEach(() => { vi.useRealTimers(); for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 
 describe("Sentinel scheduler", () => {
+  it("skips due triggers while this replica is not the leader and fires them once it is", async () => {
+    let leader = false;
+    const f = fixture({ mayPoll: () => leader });
+    await f.armed();
+    vi.setSystemTime(T0 + 5 * MIN + 5_000);
+    await f.service.tick();
+    expect(f.missions.create).not.toHaveBeenCalled();
+    leader = true;
+    await f.service.tick();
+    expect(f.missions.create).toHaveBeenCalledTimes(2);
+  });
+
   it("fires a due schedule trigger, links the activation thread to the home thread and enforces the skill allow-list", async () => {
     const f = fixture();
     const { id, automation, triggerId } = await f.armed();

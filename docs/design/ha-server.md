@@ -213,3 +213,12 @@ The remaining work shipped as small steps in this order: durable job queue, lead
 - `JobWorker` in `enterprise/src/ha/job-worker.ts` runs handlers by kind with a concurrency limit, renews each lease, aborts a handler whose lease was lost and drops its result. `stop` waits, then returns unfinished jobs to the queue without using an attempt.
 - `openHaJobs` in `packages/cli/src/ha-bridge.ts` checks the license and returns the queue and a worker factory. The server does not enqueue anything yet: Sentinel and workflow runs move onto it when their stores move to the database.
 - Tests: a worker against an in-memory queue, and the Postgres queue with competing claimers, dedupe races, lapsed leases and purge. The Postgres tests run only where `ZERO_TEST_POSTGRES_URL` is set.
+
+### Leader election as built
+
+- `LeaderElector` in `enterprise/src/ha/leader.ts` holds one dedicated connection and calls `pg_try_advisory_lock` on it every 5 seconds. A leader checks the same connection with `SELECT 1`. A connection that fails or does not answer within two intervals ends leadership at once, and the server releases the lock when the session ends.
+- `HaRuntime` in `enterprise/src/ha/runtime.ts` owns the pool, the queue, the workers and the election for the `scheduler` role. `openHaRuntime` in the bridge opens it.
+- Server mode opens the runtime when a shared database is named. A named database that cannot be used stops the start.
+- The Sentinel scheduler fires due triggers only on the leader. Every replica still reconciles and observes its own state. Because Sentinel stores are still local SQLite files, a standby replica does not run the triggers in its own file. This is why the docs do not call the server highly available yet.
+- Not gated yet: the audit sink and retention, because the audit log is still a local file per replica.
+- Tests: a fake server for takeover, connection loss and hangs; real PostgreSQL for five competing replicas, a killed leader session and a handover on stop.

@@ -2,6 +2,7 @@
 // Call sites outside this file are plain `if (!hasHighAvailability())` checks.
 import {
   HaConfigError,
+  HaRuntime,
   JobWorker,
   PostgresJobQueue,
   PostgresSessionStore,
@@ -14,7 +15,7 @@ import {
   setHaSchema,
 } from "@0/enterprise";
 import type { SessionStore } from "@0/engine/storage";
-import type { Job, JobHandler, JobQueue, JobWorkerOptions, StopResult } from "@0/enterprise";
+import type { HaRuntimeOptions, Job, JobHandler, JobQueue, JobWorkerOptions, StopResult } from "@0/enterprise";
 
 export { HaConfigError };
 export type { Job, JobHandler, JobQueue, StopResult };
@@ -94,4 +95,17 @@ export async function openHaJobs(env: NodeJS.ProcessEnv = process.env, options: 
     migrated: opened.migrated,
     close: () => opened.pool.end(),
   };
+}
+
+export type HaRuntimeHandle = HaRuntime;
+
+/**
+ * Open what a server replica runs against the shared database: the job queue and the scheduler election.
+ * Returns null when no shared database is named. The caller calls `start()` and later `close()`.
+ */
+export async function openHaRuntime(env: NodeJS.ProcessEnv = process.env, options: { schema?: string } & Pick<HaRuntimeOptions, "instanceId" | "leaderIntervalMs" | "schedulerKey" | "onLeaderChange" | "onError"> = {}): Promise<HaRuntimeHandle | null> {
+  const { schema, ...runtimeOptions } = options;
+  const opened = await openPool(env, schema ? { schema } : {});
+  if (!opened) return null;
+  return new HaRuntime(opened.pool, { label: opened.label, migrated: opened.migrated, ...runtimeOptions });
 }

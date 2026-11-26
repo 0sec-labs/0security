@@ -2,7 +2,7 @@
 // and a throwaway `ha` license made in the test.
 import { randomBytes } from "node:crypto";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
-import { dropTestSchema, openHaJobs } from "./ha-bridge.js";
+import { dropTestSchema, openHaJobs, openHaRuntime } from "./ha-bridge.js";
 import { applyTestLicense } from "./web/__fixtures__/test-license.js";
 
 const POSTGRES_URL = process.env.ZERO_TEST_POSTGRES_URL;
@@ -12,6 +12,12 @@ afterEach(() => { for (const restore of restores.splice(0)) restore(); });
 describe("job queue gate", () => {
   it("names no database, so no queue opens", async () => {
     expect(await openHaJobs({})).toBeNull();
+    expect(await openHaRuntime({})).toBeNull();
+  });
+
+  it("refuses a named database for the runtime when the license lacks the feature", async () => {
+    restores.push(applyTestLicense(["rbac"]));
+    await expect(openHaRuntime({ ...process.env, ZERO_HA_DATABASE_URL: "postgres://u:p@127.0.0.1:1/zero" })).rejects.toThrow(/high availability/i);
   });
 
   it("refuses a named database when the license lacks the feature", async () => {
@@ -39,5 +45,23 @@ describe.skipIf(!POSTGRES_URL)("job queue through the bridge (needs ZERO_TEST_PO
       expect(seen).toEqual([{ ok: true }]);
       expect(await jobs.queue.stats()).toMatchObject({ done: 1, queued: 0 });
     } finally { await jobs.close(); }
+  });
+
+  it("elects one leader among replicas and passes the role on when the leader closes", async () => {
+    restores.push(applyTestLicense(["ha"]));
+    const key = 900_000_000 + Math.floor(Math.random() * 1_000_000_000);
+    const open = async () => (await openHaRuntime(env(), { schema, schedulerKey: key, leaderIntervalMs: 40 }))!;
+    const a = await open(); const b = await open(); const c = await open();
+    try {
+      await Promise.all([a.start(), b.start(), c.start()]);
+      const replicas = [a, b, c];
+      expect(replicas.filter(r => r.isLeader())).toHaveLength(1);
+      const leader = replicas.find(r => r.isLeader())!;
+      await leader.close();
+      const rest = replicas.filter(r => r !== leader);
+      const end = Date.now() + 5000;
+      while (rest.filter(r => r.isLeader()).length !== 1 && Date.now() < end) await new Promise(r => setTimeout(r, 20));
+      expect(rest.filter(r => r.isLeader())).toHaveLength(1);
+    } finally { await Promise.all([a, b, c].map(r => r.close())); }
   });
 });

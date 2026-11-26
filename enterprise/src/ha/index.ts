@@ -11,3 +11,7 @@ export { JobQueueError, PostgresJobQueue } from "./job-queue.js";
 export type { EnqueueOptions, FailOutcome, Job, JobQueue, QueueStats } from "./job-queue.js";
 export { JobWorker } from "./job-worker.js";
 export type { JobHandler, JobWorkerOptions, StopResult } from "./job-worker.js";
+export { LEADER_KEYS, LeaderElector } from "./leader.js";
+export type { LeaderElectorOptions, LeaderRole } from "./leader.js";
+export { HaRuntime } from "./runtime.js";
+export type { HaRuntimeOptions } from "./runtime.js";
