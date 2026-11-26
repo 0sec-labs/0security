@@ -212,6 +212,7 @@ describe("helpers", () => {
     const record = { verdict: "false-positive" as const, reasoning: "see x.ts:1", control: "x.ts:1" };
     expect(applyRefusal({ severity: "low" }, record, "/w", () => false)).toMatch(/not in the folder/);
     expect(applyRefusal({ severity: "low" }, record, "/w", () => true)).toBeUndefined();
+    expect(applyRefusal({ severity: "medium", variantOf: "parent" }, record, "/w", () => true)).toMatch(/variant found by a hunt/);
   });
 });
 

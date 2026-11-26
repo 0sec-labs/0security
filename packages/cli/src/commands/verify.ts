@@ -165,12 +165,14 @@ export function firstSentence(text: string, max = 200): string {
 }
 
 /** Why `--apply` may not suppress this finding on this verdict, or undefined when it may. */
-export function applyRefusal(candidate: Pick<VerifyCandidate, "severity">, record: Pick<FindingModelVerification, "verdict" | "reasoning" | "control">, folder: string, exists: VerifyDeps["exists"]): string | undefined {
+export function applyRefusal(candidate: Pick<VerifyCandidate, "severity"> & { variantOf?: string }, record: Pick<FindingModelVerification, "verdict" | "reasoning" | "control">, folder: string, exists: VerifyDeps["exists"]): string | undefined {
   if (record.verdict !== "false-positive") return "the verdict is not false-positive";
   const control = firstCitation(record.control);
   if (!control) return "no control is cited at path:line";
   if (!firstCitation(record.reasoning)) return "the reasoning cites no path:line";
   if (!exists(folder, control.path)) return `the cited control ${control.path} is not in the folder`;
+  // A hunt caps the severity of a variant it records, so the severity above says little about how serious the site may be.
+  if (candidate.variantOf) return "the finding is a variant found by a hunt, whose severity is capped; a person decides that";
   if (APPLY_BLOCKED_SEVERITIES.has(candidate.severity.toLowerCase())) return `the finding is ${candidate.severity}; a person decides that`;
   return undefined;
 }
