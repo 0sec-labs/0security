@@ -1,7 +1,7 @@
 # Build from the repository root:
-# docker build -f ci/bitbucket-pipe/Dockerfile -t 0security-pipe:0.45.0 .
+# docker build -f ci/bitbucket-pipe/Dockerfile -t 0security-pipe:0.46.0 .
 FROM debian:bookworm-slim
-ARG VERSION=0.45.0
+ARG VERSION=0.46.0
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl git && rm -rf /var/lib/apt/lists/*
 COPY install.sh /opt/zero/install.sh
 COPY ci/scripts/ /opt/zero/ci/scripts/

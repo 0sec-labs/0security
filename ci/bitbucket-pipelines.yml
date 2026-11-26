@@ -6,7 +6,7 @@ image: node:22
 definitions:
   scripts:
     - &install |
-      VERSION=0.45.0 # Pin the CLI
+      VERSION=0.46.0 # Pin the CLI
       RAW="https://raw.githubusercontent.com/0sec-labs/0security/v${VERSION}"
       tools="$(mktemp -d)" && export INSTALL_DIR="$tools" PATH="$tools:$PATH"
       curl -fsSL -o "$tools/install.sh" "$RAW/install.sh"

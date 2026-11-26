@@ -8,6 +8,18 @@ export const RELEASES_URL = "https://github.com/0sec-labs/0security/releases";
 
 export const RELEASES: readonly Release[] = [
   {
+    version: "0.46.0",
+    date: "2026-11-26",
+    title: "Proof for findings, AI-security checks, and one product",
+    summary: "Findings can carry an honest proof, and 0security checks the files AI coding tools read, models and look-alike packages. Foxguard now ships from this repository, and the cloud connection is gone.",
+    highlights: [
+      { icon: "Bug", title: "Proof and variants", text: "A finding can carry proposed steps labelled not run, or a result only when a harness ran it in a container. Verified findings record a root cause and seed a hunt for the same bug elsewhere. Results from ZAP, Strix and Nuclei import as findings." },
+      { icon: "ShieldAlert", title: "AI-security checks", text: "0security sbom agent-config checks rules, MCP and settings files for hidden text, unpinned launchers and broad permissions. sbom generate --ai writes a CycloneDX ML-BOM, and sbom check --registry flags invented or planted packages." },
+      { icon: "Plug", title: "Sentinels and Bitbucket", text: "Sentinels review Bitbucket pull requests, send findings to GitHub code scanning or a pull request comment, and have spend limits. Findings can be ranked by business context in every command that orders them." },
+      { icon: "ShieldCheck", title: "Safer by default", text: "Probe refuses public and metadata targets unless you confirm the host. Fixes close gaps in SCIM tokens, role checks, the node permission layer and scanned-folder config. DO_NOT_TRACK=1 is the one telemetry switch, and Foxguard is built into the signed release." },
+    ],
+  },
+  {
     version: "0.45.0",
     date: "2026-11-24",
     title: "Java projects, team sign-in, and signed releases",
