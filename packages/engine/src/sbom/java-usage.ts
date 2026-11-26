@@ -18,7 +18,7 @@ export interface JavaSymbolHit { symbol: string; path: string; line: number; tes
 export interface JavaUsageReport { usage: JavaUsage[]; filesScanned: number; truncated: boolean; /** Source files or links that were not read: over the size cap, unreadable, or a symbolic link. */ skipped: number; symbolHits?: JavaSymbolHit[] }
 export interface JavaUsageOptions {
   /** Fully qualified classes or symbols to look for in imports and in fully qualified uses. */ symbols?: string[];
-  /** Lower limits than the defaults, for tests of a hostile tree. */ limits?: { maxFiles?: number; maxTotalBytes?: number; maxSymbols?: number };
+  /** Lower limits than the defaults, for tests of a hostile tree. */ limits?: { maxFiles?: number; maxTotalBytes?: number; maxSymbols?: number; maxEntries?: number };
 }
 
 const SOURCE = /\.(?:java|kt|kts|scala|groovy)$/;
@@ -74,9 +74,10 @@ export function parseImports(text: string): Array<{ line: number; name: string }
   return found;
 }
 
-function walk(folder: string, limit: { left: number; truncated: boolean; skipped: number; entries: number }): string[] {
+function walk(folder: string, limit: { left: number; truncated: boolean; skipped: number; entries: number }, maxEntries: number): string[] {
   const files: string[] = [];
   const visit = (dir: string, depth = 0): void => {
+    if (limit.entries > maxEntries) { limit.truncated = true; return; }
     if (depth > MAX_DEPTH) { limit.truncated = true; limit.skipped += 1; return; }
     const entries: Dirent[] = [];
     try {
@@ -84,13 +85,14 @@ function walk(folder: string, limit: { left: number; truncated: boolean; skipped
       try {
         for (let entry = handle.readSync(); entry; entry = handle.readSync()) {
           limit.entries += 1;
-          if (limit.entries > MAX_ENTRIES) { limit.truncated = true; break; }
+          if (limit.entries > maxEntries) { limit.truncated = true; break; }
           entries.push(entry);
         }
       } finally { handle.closeSync(); }
     } catch { limit.truncated = true; limit.skipped += 1; }
     entries.sort((a, b) => (a.name < b.name ? -1 : 1));
     for (const entry of entries) {
+      if (limit.entries > maxEntries) { limit.truncated = true; return; }
       if (entry.isSymbolicLink()) { limit.skipped += 1; continue; }
       if (entry.isDirectory()) { if (!SKIP.has(entry.name) && !entry.name.startsWith(".")) visit(join(dir, entry.name), depth + 1); continue; }
       if (!entry.isFile() || !SOURCE.test(entry.name)) continue;
@@ -134,7 +136,7 @@ const importNames = (name: string, symbol: string): boolean => name === symbol |
 /** Match the Maven components (`group/artifact` names) against the imports of the sources under `folder`, and optionally look for fully qualified symbols. */
 export function scanJavaUsage(folder: string, components: Array<{ name: string; version: string; purl: string }>, options: JavaUsageOptions = {}): JavaUsageReport {
   const limit = { left: options.limits?.maxFiles ?? MAX_FILES, truncated: false, skipped: 0, entries: 0 };
-  const files = walk(folder, limit);
+  const files = walk(folder, limit, options.limits?.maxEntries ?? MAX_ENTRIES);
   const wanted = [...new Set(options.symbols ?? [])];
   // Symbols beyond the cap are never searched, so the scan cannot call their advisories not imported.
   const maxSymbols = options.limits?.maxSymbols ?? MAX_SYMBOLS;

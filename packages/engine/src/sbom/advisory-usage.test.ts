@@ -300,4 +300,11 @@ describe("a scan that hit a limit never says not-imported", () => {
     expect(report.skipped).toBe(1900);
     expect(Date.now() - started).toBeLessThan(5000);
   });
+  it("stops walking once the directory-entry limit is reached", () => {
+    const dir = mkdtempSync(join(tmpdir(), "0-usage-entries-"));
+    for (let index = 0; index < 40; index += 1) { mkdirSync(join(dir, `d${String(index).padStart(2, "0")}`)); writeFileSync(join(dir, `d${String(index).padStart(2, "0")}`, "A.java"), "class A {}\n"); }
+    const report = scanJavaUsage(dir, [], { limits: { maxEntries: 10 } });
+    expect(report.truncated).toBe(true);
+    expect(report.filesScanned).toBeLessThan(10);
+  });
 });
