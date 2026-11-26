@@ -256,7 +256,7 @@ describe("code index: Foxguard graph backend", () => {
 
   it("uses a graph from a Foxguard binary that supports it", async () => {
     write(root, NOTES_APP);
-    process.env["ZERO_FOXGUARD_PATH"] = fake("Export ... (schema version 1)", JSON.stringify(graph));
+    process.env["ZERO_FOXGUARD_PATH"] = fake("Export ... (schema version 1) --file-timeout <N>", JSON.stringify(graph));
     const { index } = await getIndex(root);
     expect(index.engine).toBe("foxguard");
     expect(index.routes.map((r) => r.path)).toEqual(["/x"]);
@@ -267,7 +267,7 @@ describe("code index: Foxguard graph backend", () => {
     process.env["ZERO_FOXGUARD_PATH"] = fake("scan help", "not json");
     expect((await getIndex(root)).index.engine).toBe("builtin");
     clearIndexCache(); clearFoxguardProbe();
-    process.env["ZERO_FOXGUARD_PATH"] = fake("(schema version 1)", JSON.stringify({ ...graph, version: 2 }));
+    process.env["ZERO_FOXGUARD_PATH"] = fake("(schema version 1) --file-timeout <N>", JSON.stringify({ ...graph, version: 2 }));
     expect((await getIndex(root)).index.engine).toBe("builtin");
   });
 });

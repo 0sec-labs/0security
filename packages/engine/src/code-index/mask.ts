@@ -44,19 +44,30 @@ export function maskSource(src: string, lang: "javascript" | "python"): string {
   return out.join("");
 }
 
-/** Offset of the bracket that closes the one at `open`, or -1. Works on masked text. */
-export function matchClose(masked: string, open: number): number {
-  const pairs: Record<string, string> = { "(": ")", "{": "}", "[": "]" };
-  const o = masked[open]!;
-  const c = pairs[o];
-  if (!c) return -1;
-  let depth = 0;
-  for (let k = open; k < masked.length; k++) {
-    const ch = masked[k];
-    if (ch === o) depth++;
-    else if (ch === c && --depth === 0) return k;
+let matchedFor: string | undefined;
+let matched: Int32Array | undefined;
+
+/** For every opening bracket of a masked text, the offset of its partner (-1 when unbalanced). One pass, cached for the last text. */
+function bracketPairs(masked: string): Int32Array {
+  if (matched && matchedFor === masked) return matched;
+  const out = new Int32Array(masked.length).fill(-1);
+  const stacks: Record<string, number[]> = { "(": [], "{": [], "[": [] };
+  const opener: Record<string, string> = { ")": "(", "}": "{", "]": "[" };
+  for (let k = 0; k < masked.length; k++) {
+    const ch = masked[k]!;
+    const stack = stacks[ch];
+    if (stack) { stack.push(k); continue; }
+    const open = opener[ch];
+    if (open) { const at = stacks[open]!.pop(); if (at !== undefined) out[at] = k; }
   }
-  return -1;
+  matchedFor = masked; matched = out;
+  return out;
+}
+
+/** Offset of the bracket that closes the one at `open`, or -1. Works on masked text, in constant time after one pass. */
+export function matchClose(masked: string, open: number): number {
+  if (open < 0 || open >= masked.length || !"({[".includes(masked[open]!)) return -1;
+  return bracketPairs(masked)[open]!;
 }
 
 export function lineStarts(src: string): number[] {

@@ -9,6 +9,7 @@
  */
 import { z } from "zod";
 import { getIndex } from "../../code-index/build.js";
+import { cleanDeep, UNTRUSTED_NOTE } from "../../code-index/sanitize.js";
 import { callersOf, calleesOf, coverageOf, routesOf, traceToSink } from "../../code-index/query.js";
 import type { SinkCategory } from "../../code-index/types.js";
 import type { ToolDefinition, ToolResult } from "../types.js";
@@ -129,8 +130,8 @@ export async function runCodeIndexTool(tool: string, args: unknown, root: string
     const got = await indexFor(root);
     if (!got.ok) return got.result;
     const out = fn(got.index);
-    if ("error" in out && typeof out.error === "string") return { success: true, output: { found: false, message: out.error, fallback: FALLBACK } };
-    return { success: true, output: { ...out, index: { ...coverageOf(got.index), cached: got.cached }, note: "Name-based index: confirm each hop by reading the code." } };
+    if ("error" in out && typeof out.error === "string") return { success: true, output: { found: false, message: cleanDeep(out.error), fallback: FALLBACK } };
+    return { success: true, output: { untrusted_repository_content: UNTRUSTED_NOTE, ...cleanDeep(out), index: { ...coverageOf(got.index), cached: got.cached }, note: "Name-based index: confirm each hop by reading the code." } };
   };
   switch (tool) {
     case "callers_of": {

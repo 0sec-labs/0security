@@ -5,6 +5,7 @@ import { extname, join } from "node:path";
 import { SKIP_DIRS, SKIP_FILE, isIgnored, parseGitignore } from "../inventory/index.js";
 import { SOURCE_EXTENSIONS } from "../inventory/matchers.js";
 import type { IgnoreRule } from "../inventory/gitignore.js";
+import { IndexBudgetExceeded, appendAll, withDeadline } from "./budget.js";
 import { extractJs } from "./extract-js.js";
 import { extractPy } from "./extract-py.js";
 import { foxguardGraph } from "./foxguard.js";
@@ -15,11 +16,11 @@ const PY_EXT = new Set(["py"]);
 /** Parsed only by the Foxguard graph. They are `unsupported` for the built-in extractor but still key the cache. */
 const GRAPH_ONLY_EXT = new Set(["java"]);
 
-export interface BuildLimits { maxFiles: number; maxFileBytes: number; maxTotalBytes: number }
+export interface BuildLimits { maxFiles: number; maxFileBytes: number; maxTotalBytes: number; /** Wall-clock limit for one file, ms. */ fileBudgetMs: number; /** Wall-clock limit for all files, ms. */ totalBudgetMs: number }
 /** Most Java files stat-ed for the cache key. */
 const GRAPH_ONLY_MAX = 300_000;
 
-export const DEFAULT_LIMITS: BuildLimits = { maxFiles: 5000, maxFileBytes: 400 * 1024, maxTotalBytes: 48 * 1024 * 1024 };
+export const DEFAULT_LIMITS: BuildLimits = { maxFiles: 5000, maxFileBytes: 400 * 1024, maxTotalBytes: 48 * 1024 * 1024, fileBudgetMs: 2_000, totalBudgetMs: 20_000 };
 
 function git(root: string, args: string[]): string | undefined {
   try {
@@ -84,7 +85,8 @@ function resolveRefs(index: CodeIndex): void {
   const byName = new Map<string, string[]>();
   for (const s of index.symbols) {
     if (s.kind === "module" || s.kind === "route-handler") continue;
-    byName.set(s.name, [...(byName.get(s.name) ?? []), s.id]);
+    const list = byName.get(s.name);
+    if (list) list.push(s.id); else byName.set(s.name, [s.id]);
   }
   for (const r of index.routes) {
     if (!r.handler.startsWith("ref:")) continue;
@@ -95,24 +97,35 @@ function resolveRefs(index: CodeIndex): void {
   }
 }
 
-function buildFrom(root: string, walked: ReturnType<typeof walk>, commit: string, fingerprint: string, limits: BuildLimits): CodeIndex {
+async function buildFrom(root: string, walked: ReturnType<typeof walk>, commit: string, fingerprint: string, limits: BuildLimits): Promise<CodeIndex> {
   const index: CodeIndex = {
     version: 1, root, commit, fingerprint,
     files: 0, symbols: [], calls: [], routes: [], unsupported: walked.unsupported, truncated: walked.truncated, engine: "builtin",
   };
   let total = 0;
+  const startedAt = Date.now();
+  let yielded = startedAt;
   for (const f of walked.files) {
+    // Extraction is synchronous: give the event loop a turn every 50 ms, and stop when the total budget is spent.
+    if (Date.now() - yielded > 50) { await new Promise<void>((resolve) => setImmediate(resolve)); yielded = Date.now(); }
+    const left = limits.totalBudgetMs - (Date.now() - startedAt);
+    if (left <= 0) { index.truncated = true; index.skippedSlow = (index.skippedSlow ?? 0) + 1; continue; }
     total += f.size;
     if (total > limits.maxTotalBytes) { index.truncated = true; break; }
     let src: string;
     try { src = readFileSync(join(root, f.path), "utf8"); } catch { continue; }
     const ext = extname(f.path).slice(1).toLowerCase();
     let extract: FileExtract;
-    try { extract = JS_EXT.has(ext) ? extractJs(f.path, src) : extractPy(f.path, src); } catch { continue; }
+    try {
+      extract = withDeadline(Math.min(limits.fileBudgetMs, left), () => (JS_EXT.has(ext) ? extractJs(f.path, src) : extractPy(f.path, src)));
+    } catch (error) {
+      if (error instanceof IndexBudgetExceeded) { index.truncated = true; index.skippedSlow = (index.skippedSlow ?? 0) + 1; }
+      continue;
+    }
     index.files++;
-    index.symbols.push(...extract.symbols);
-    index.calls.push(...extract.calls);
-    index.routes.push(...extract.routes);
+    appendAll(index.symbols, extract.symbols);
+    appendAll(index.calls, extract.calls);
+    appendAll(index.routes, extract.routes);
   }
   resolveRefs(index);
   return index;
@@ -131,7 +144,7 @@ export async function getIndex(rootInput: string, limits: BuildLimits = DEFAULT_
   const hit = cache.get(id);
   if (hit) { cache.delete(id); cache.set(id, hit); return { index: hit, cached: true }; }
   // A Foxguard graph, when its binary supports it, replaces the built-in extractor; the key still follows the commit and tree.
-  const index = (options.foxguard === false ? undefined : await foxguardGraph(root, commit, fingerprint)) ?? buildFrom(root, walked, commit, fingerprint, limits);
+  const index = (options.foxguard === false ? undefined : await foxguardGraph(root, commit, fingerprint)) ?? await buildFrom(root, walked, commit, fingerprint, limits);
   cache.set(id, index);
   while (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value as string);
   return { index, cached: false };

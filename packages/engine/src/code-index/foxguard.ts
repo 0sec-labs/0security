@@ -47,7 +47,15 @@ function findBinary(env: NodeJS.ProcessEnv): string | undefined {
   return undefined;
 }
 
+/** Most bytes of graph JSON read from the child; over it the child is killed and the built-in index is used. */
+export const GRAPH_MAX_BYTES = 128 * 1024 * 1024;
+/** Per-file time budget passed to `foxguard graph`, seconds. */
+const GRAPH_FILE_TIMEOUT_SEC = "30";
+
 const SAFE_ENV = (env: NodeJS.ProcessEnv): NodeJS.ProcessEnv => ({ PATH: env["PATH"] ?? "", HOME: env["HOME"] ?? "", DO_NOT_TRACK: "1" });
+
+/** `foxguard graph` reads no config file from the scanned folder (it takes only the folder and these flags), so no empty-config argument applies. */
+export function graphArgs(root: string): string[] { return ["graph", "--file-timeout", GRAPH_FILE_TIMEOUT_SEC, root]; }
 
 export async function foxguardGraph(root: string, commit: string, fingerprint: string, env: NodeJS.ProcessEnv = process.env): Promise<CodeIndex | undefined> {
   const bin = findBinary(env);
@@ -57,11 +65,11 @@ export async function foxguardGraph(root: string, commit: string, fingerprint: s
     if (ok === undefined) {
       // An older binary has no `graph` subcommand and would treat the word as a scan path, so ask for help first.
       const help = await run(bin, ["graph", "--help"], { timeout: 10_000, env: SAFE_ENV(env), maxBuffer: 256 * 1024 });
-      ok = /schema version 1/i.test(help.stdout);
+      ok = /schema version 1/i.test(help.stdout) && help.stdout.includes("--file-timeout");
       probed.set(bin, ok);
     }
     if (!ok) return undefined;
-    const { stdout } = await run(bin, ["graph", root], { timeout: 180_000, env: SAFE_ENV(env), maxBuffer: 512 * 1024 * 1024 });
+    const { stdout } = await run(bin, graphArgs(root), { timeout: 180_000, env: SAFE_ENV(env), maxBuffer: GRAPH_MAX_BYTES });
     const parsed = graphV1.safeParse(JSON.parse(stdout));
     if (!parsed.success) return undefined;
     const g = parsed.data;
