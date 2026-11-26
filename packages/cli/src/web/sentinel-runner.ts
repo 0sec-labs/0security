@@ -29,7 +29,7 @@ const MISSED_GRACE_MS = 60_000;
 const MAX_PR_LAUNCHES_PER_POLL = 3;
 const MAX_PR_DIFF_CHARS = 14_000;
 const MAX_EVENT_LAUNCHES_PER_POLL = 3;
-/** The trigger cursor keeps 200 entries. A poll that returns more could not be remembered, so it is refused instead of replayed. */
+/** Release, tag and check polls: the cursor could not remember more than this many, so a poll that returns more is refused instead of replayed. */
 const MAX_POLLED_EVENTS = 190;
 /** Pull request comments: at most one per pull request per minute and 30 per hour for the whole engine. */
 const prCommentMinGapMs = () => { const value = Number(process.env.ZERO_PR_COMMENT_MIN_GAP_MS); return Number.isFinite(value) && value >= 0 ? value : 60_000; };
@@ -416,33 +416,36 @@ export class SentinelRunner {
   async #pollPullRequests(trigger: SentinelTrigger, sentinel: Sentinel, automation: SecurityWorkflow, release: (update: { lastStatus?: string; lastError?: string; lastActivationId?: string; cursor?: Record<string, string> }) => unknown, via: string): Promise<void> {
     const github = trigger.github!;
     const isEnabled = () => this.#store.getTrigger(trigger.id)?.enabled === true;
+    let truncated = false;
     let prs: Array<{ number: number; headRefOid: string; title: string; url: string; baseRefName: string; headRefName: string; isCrossRepository: boolean; isDraft?: boolean; state?: string }>;
     try {
       const { stdout } = await this.#gh.run(["pr", "list", "--repo", github.repo, "--state", "open", "--limit", String(MAX_POLLED_PULL_REQUESTS), "--json", "number,headRefOid,title,url,baseRefName,headRefName,isCrossRepository,isDraft,state", ...(github.baseBranch ? ["--base", github.baseBranch] : [])]);
       const parsed: unknown = JSON.parse(stdout);
       if (!Array.isArray(parsed)) throw new Error("Unexpected gh output.");
       // `gh pr list --limit` cuts the list without saying so. A full page means there may be more, so say that instead of baselining a partial list.
-      if (parsed.length >= MAX_POLLED_PULL_REQUESTS) throw new Error(`${MAX_POLLED_PULL_REQUESTS.toLocaleString("en-US")} or more open pull requests: gh stops reading at ${MAX_POLLED_PULL_REQUESTS.toLocaleString("en-US")}. Use a base-branch filter.`);
+      truncated = parsed.length >= MAX_POLLED_PULL_REQUESTS;
       prs = parsed.filter((pr): pr is (typeof prs)[number] => !!pr && typeof pr.number === "number" && typeof pr.headRefOid === "string")
         .filter(pr => pr.state === undefined || String(pr.state).toUpperCase() === "OPEN");
-      if (prs.length > MAX_POLLED_EVENTS) throw new Error(`More than ${MAX_POLLED_EVENTS} matching open pull requests. Use a base-branch filter.`);
     } catch (error) {
       // Typically gh missing or unauthenticated: surfaced on the trigger, retried at the next poll.
       release({ lastStatus: "blocked", lastError: `GitHub could not be read with the connected gh account: ${message(error)}`.slice(0, 1000) });
       return;
     }
     if (!isEnabled()) { release({}); return; }
-    // Prune closed pull requests so historical PR numbers cannot push open PRs past the 200-entry cursor limit.
+    // `gh` stops at the newest 1,000 open pull requests and does not say so. The ones past that are not reviewed; the trigger says so.
+    const truncation = truncated ? `Read only the newest ${MAX_POLLED_PULL_REQUESTS.toLocaleString("en-US")} open pull requests; older ones are not reviewed. Set a base branch to narrow the list.` : undefined;
+    // Prune closed pull requests so historical PR numbers do not fill the cursor. When the list was cut, keep every entry: an older
+    // pull request outside the window must not look new when it comes back into view. The cursor drops its oldest entries first.
     const openKeys = new Set(prs.map(pr => String(pr.number)));
     const seen: Record<string, string> = {};
     for (const [k, v] of Object.entries(trigger.cursor ?? {})) {
-      if (openKeys.has(k)) seen[k] = v;
+      if (truncated || openKeys.has(k)) seen[k] = v;
     }
     if (!trigger.cursor) {
       // First poll only records what is already open; it never launches a review for old PRs. A draft is recorded as a
       // draft so that marking it ready for review later still starts one review.
       for (const pr of prs) seen[String(pr.number)] = pr.isDraft === true ? `${pr.headRefOid}:draft` : pr.headRefOid;
-      release({ lastStatus: "baseline", cursor: seen });
+      release({ lastStatus: "baseline", ...(truncation ? { lastError: truncation } : {}), cursor: seen });
       return;
     }
     let launched = 0; let lastActivationId: string | undefined; let lastError: string | undefined; let lastStatus = "idle";
@@ -507,8 +510,8 @@ export class SentinelRunner {
     ));
     release(
       preserveTurnOutcome
-        ? { cursor: seen }
-        : { lastStatus, ...(lastError ? { lastError } : { lastError: undefined }), ...(lastActivationId ? { lastActivationId } : {}), cursor: seen },
+        ? { cursor: seen, ...(truncation ? { lastError: truncation } : {}) }
+        : { lastStatus, ...(lastError ?? truncation ? { lastError: lastError ?? truncation } : { lastError: undefined }), ...(lastActivationId ? { lastActivationId } : {}), cursor: seen },
     );
   }
 

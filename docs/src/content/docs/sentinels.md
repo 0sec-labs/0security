@@ -85,7 +85,7 @@ There is no trigger for a branch push or a new finding.
 
 `github-pr` polls for new and updated pull requests. The first poll only records pull requests that are already open and never reviews them. If `gh` is missing or signed out, the trigger shows a blocked status and retries on the next poll.
 
-The poll reads up to 1,000 open pull requests through `gh`, which pages through the API itself. A trigger remembers at most 190 open pull requests. If more are open, or `gh` stops at 1,000, the trigger shows a blocked status and says so, and no pull request is reviewed. Set a base branch to narrow the list.
+The poll reads up to 1,000 open pull requests through `gh`, which pages through the API itself. A trigger remembers up to 3,000 pull requests, oldest first out. If more than 1,000 are open, the poll reads the newest 1,000, the trigger shows that older ones are not reviewed, and a base branch narrows the list.
 
 A new commit on an open pull request wakes the Sentinel in its thread with one turn, recorded in its activity. If an older commit of the same pull request is still waiting, the newer one replaces it. Reviews run one at a time, in the order they arrive. Closed and merged pull requests are ignored.
 

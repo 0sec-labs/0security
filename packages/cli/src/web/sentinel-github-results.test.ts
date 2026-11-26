@@ -302,25 +302,37 @@ describe("open pull request poll at scale", () => {
     expect(runs[0]).toMatchObject({ trigger: { event: { pr: 61 } } });
   });
 
-  it("reports more than 190 open pull requests on the trigger instead of dropping any silently", async () => {
-    const f = fixture(listOf(500), []);
+  it("keeps a cursor for 500 open pull requests and reviews only the new one", async () => {
+    let total = 500;
+    const f = fixture(args => listOf(total)(args), []);
     const { id, triggerId } = await f.armed("github-pr", {});
     await f.poll(0);
-    const trigger = f.store.getTrigger(triggerId)!;
-    expect(trigger.lastStatus).toBe("blocked");
-    expect(trigger.lastError).toMatch(/More than 190 matching open pull requests/);
-    expect(await f.activations(id)).toHaveLength(0);
+    expect(f.store.getTrigger(triggerId)).toMatchObject({ lastStatus: "baseline" });
+    expect(f.store.getTrigger(triggerId)!.lastError).toBeUndefined();
+    expect(Object.keys(f.store.getTrigger(triggerId)!.cursor!)).toHaveLength(500);
+    total = 501;
+    await f.poll(2);
+    expect((await f.activations(id)).map(run => run.trigger.event.pr)).toEqual([501]);
   });
 
-  it("says plainly when gh stopped at 1,000 open pull requests", async () => {
-    const f = fixture(listOf(1500), []);
+  it("reads the newest 1,000 of 1,500 open pull requests, reports the cut, and never re-reviews older ones", async () => {
+    let total = 1500;
+    const f = fixture(args => listOf(total)(args), []);
     const { id, triggerId } = await f.armed("github-pr", {});
     await f.poll(0);
-    const trigger = f.store.getTrigger(triggerId)!;
-    expect(trigger.lastStatus).toBe("blocked");
-    expect(trigger.lastError).toMatch(/1,000 or more open pull requests/);
-    expect(trigger.lastError).toMatch(/base-branch filter/);
-    expect(trigger.cursor).toBeUndefined();
+    let trigger = f.store.getTrigger(triggerId)!;
+    expect(trigger.lastStatus).toBe("baseline");
+    expect(trigger.lastError).toMatch(/newest 1,000 open pull requests; older ones are not reviewed/);
+    expect(Object.keys(trigger.cursor!)).toHaveLength(1000);
+    // Nothing changed: nothing is reviewed, and the report stays.
+    await f.poll(2);
     expect(await f.activations(id)).toHaveLength(0);
+    expect(f.store.getTrigger(triggerId)!.lastError).toMatch(/newest 1,000/);
+    // A new pull request is reviewed once.
+    total = 1501;
+    await f.poll(4);
+    expect((await f.activations(id)).map(run => run.trigger.event.pr)).toEqual([1501]);
+    trigger = f.store.getTrigger(triggerId)!;
+    expect(Object.keys(trigger.cursor!)).toHaveLength(1001);
   });
 });
