@@ -18,6 +18,9 @@ mod types;
 #[cfg(test)]
 mod security_tests;
 
+#[cfg(test)]
+mod resolve_tests;
+
 use crate::engine::parser::parse_path;
 use crate::engine::scanner::detect_language;
 use crate::Language;

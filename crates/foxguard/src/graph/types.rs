@@ -395,7 +395,11 @@ impl TypeTable {
             .copied()
             .filter(|&ci| self.classes[ci].component)
             .collect();
-        let pool = if beans.is_empty() { impls } else { beans };
+        // Without a single stereotype class there is no bean wiring to apply.
+        if beans.is_empty() {
+            return impls;
+        }
+        let pool = beans;
         if pool.len() <= 1 {
             return pool;
         }
