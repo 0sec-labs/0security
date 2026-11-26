@@ -40,12 +40,15 @@ export const VISIBLE_SUBCOMMANDS: Readonly<Record<string, readonly string[]>> = 
   evidence: ["verify"],
   findings: ["list", "show", "update", "import", "fix", "burndown", "verify", "metrics", "rollup", "evidence", "export-fixes", "report-draft", "reproduce", "context"],
   threads: ["list", "show", "send", "start", "stop"],
-  sentinels: ["list", "run", "set"],
+  sentinels: ["list", "run", "set", "bitbucket"],
   skills: ["list", "add"],
   models: ["list", "set", "connect"],
   computers: ["list", "add", "stop"],
   config: ["get", "set", "doctor"],
 };
+
+/** Visible subcommands that are groups of their own: their subcommands stay visible too. Every other subcommand's children are hidden. */
+export const VISIBLE_NESTED_GROUPS: readonly string[] = ["sentinels bitbucket"];
 
 export const TOP_LEVEL_COMMANDS: readonly TopLevelCommand[] = [
   { name: "scan", aliases: [], description: GROUP_DESCRIPTIONS["scan"]!, options: true, arguments: "[target]" },
