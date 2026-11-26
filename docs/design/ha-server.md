@@ -229,3 +229,18 @@ The remaining work shipped as small steps in this order: durable job queue, lead
 - In server mode `/readyz` returns 503 when this replica's own database or the shared database is unhealthy. `/healthz` stays a liveness check and does not look at the database, so an outage does not make the platform restart every replica.
 - The first failure is reported once on stderr, not on every check.
 - Tests: a fake pool for failure, recovery and hangs; real PostgreSQL for a dropped schema.
+
+### Graceful drain as built
+
+On SIGTERM a replica with a shared database runs these steps at once, inside the `--shutdown-timeout` deadline:
+
+1. `/readyz` returns 503, so the load balancer stops sending new requests.
+2. The replica resigns the scheduler role. Another replica takes it on its next round, within about 5 seconds. This replica starts no more Sentinel triggers.
+3. Job workers stop claiming. Running jobs get the rest of the deadline. A job still running at the deadline is aborted and returned to the queue without using an attempt, so another replica runs it from the start.
+4. After requests and services finish, the connection pool closes.
+
+A process that is killed instead, or exits after the failsafe, leaves its jobs with a lease that lapses. The next reaper returns them with the attempt counted.
+
+The platform should wait before it sends SIGTERM, so the load balancer sees the 503 first. The Helm chart does this with a preStop delay.
+
+Tests: a fake pool for resignation and repeated calls; real PostgreSQL for a drain that finishes one job, returns another and hands the scheduler role to a second replica. The shutdown order in the server itself has no test of its own.

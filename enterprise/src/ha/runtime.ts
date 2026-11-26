@@ -10,6 +10,13 @@ import { LEADER_KEYS, LeaderElector } from "./leader.js";
 
 const PROBE_TIMEOUT_MS = 2_000;
 
+export interface DrainResult {
+  /** Jobs that finished while the replica drained. */
+  finished: number;
+  /** Jobs still running at the deadline, returned to the queue for another replica. */
+  released: number;
+}
+
 export interface HaRuntimeOptions {
   /** Where the database is, safe to print. */
   label: string;
@@ -39,6 +46,7 @@ export class HaRuntime {
   #healthTimer: ReturnType<typeof setInterval> | undefined;
   #probing = false;
   #closed = false;
+  #draining: Promise<DrainResult> | undefined;
 
   constructor(pool: Pool, options: HaRuntimeOptions) {
     this.#pool = pool;
@@ -72,7 +80,7 @@ export class HaRuntime {
    * readiness probe returns at once even when the database hangs. A check that stops completing counts as a failure.
    */
   healthy(): boolean {
-    return !this.#closed && this.#health.ok && Date.now() - this.#health.at <= this.#healthIntervalMs * 3 + PROBE_TIMEOUT_MS;
+    return !this.#closed && !this.#draining && this.#health.ok && Date.now() - this.#health.at <= this.#healthIntervalMs * 3 + PROBE_TIMEOUT_MS;
   }
 
   async #probe(): Promise<void> {
@@ -99,6 +107,21 @@ export class HaRuntime {
     const worker = new JobWorker({ onError: this.#onError, ...options, owner: options.owner ?? this.instanceId, queue: this.queue });
     this.#workers.add(worker);
     return worker;
+  }
+
+  /**
+   * Leave the cluster without dropping work. Resign leadership first, so another replica takes the scheduler
+   * role while this one finishes. Then stop claiming jobs, wait up to `graceMs` for the running ones, and
+   * return the rest to the queue without using an attempt. After this, `healthy()` is false. Calling it again
+   * returns the first result.
+   */
+  drain(options: { graceMs: number }): Promise<DrainResult> {
+    this.#draining ??= (async () => {
+      await this.#scheduler.stop();
+      const results = await Promise.all([...this.#workers].map(worker => worker.stop(options.graceMs)));
+      return { finished: results.reduce((n, r) => n + r.finished, 0), released: results.reduce((n, r) => n + r.released, 0) };
+    })();
+    return this.#draining;
   }
 
   /** Resign leadership, stop the workers, then close the pool. Safe to call twice. */

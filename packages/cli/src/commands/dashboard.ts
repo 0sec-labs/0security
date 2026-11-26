@@ -733,6 +733,8 @@ export function registerDashboardCommand(program: Command): void {
           // Stop accepting, end long-lived streams, let ordinary requests finish within the deadline, then dispose and exit 0.
           const drainMs = shutdownSeconds * 1000;
           const failsafe = setTimeout(() => { console.error("0: shutdown deadline exceeded; exiting."); process.exit(1); }, drainMs + 10_000); failsafe.unref();
+          // Shared database: resign the scheduler role and return unfinished jobs while this replica finishes its requests.
+          const haDrain = ha ? ha.drain({ graceMs: drainMs }).then(result => { if (result.released > 0) console.log(chalk.gray(`  Returned ${result.released} unfinished job${result.released === 1 ? "" : "s"} to the queue.`)); }, () => undefined) : undefined;
           const closed = new Promise<void>(resolveClosed => server.close(() => resolveClosed()));
           server.closeIdleConnections();
           for (const response of activeResponses) if (String(response.getHeader("content-type") ?? "").includes("text/event-stream")) response.end();
@@ -744,7 +746,7 @@ export function registerDashboardCommand(program: Command): void {
           void drained.then(() => {
           stopHostReconnect?.(); hostRepairAbort.abort();
           services.remoteProviderRelays.dispose();
-          void localProviderSessions.dispose().then(() => { modelBackends.dispose(); backends.dispose(); return engine?.dispose(); }).then(() => sentinels.dispose()).then(() => auditSink?.stop()).then(() => ha?.close()).then(() => consoleGateway.closeAll()).then(() => workflows.dispose()).finally(() => {
+          void localProviderSessions.dispose().then(() => { modelBackends.dispose(); backends.dispose(); return engine?.dispose(); }).then(() => sentinels.dispose()).then(() => auditSink?.stop()).then(() => haDrain).then(() => ha?.close()).then(() => consoleGateway.closeAll()).then(() => workflows.dispose()).finally(() => {
             operator.dispose();
             closeSharedDbs();
             github.dispose();

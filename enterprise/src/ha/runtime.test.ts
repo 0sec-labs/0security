@@ -66,3 +66,20 @@ describe("HaRuntime health", () => {
     expect(() => new HaRuntime(fakePool().pool, { label: "x", migrated: [], healthIntervalMs: 1 })).toThrow(/health interval/);
   });
 });
+
+describe("HaRuntime drain", () => {
+  it("resigns leadership, turns unready and returns the same result when called twice", async () => {
+    const { pool } = fakePool();
+    const changes: boolean[] = [];
+    const r = new HaRuntime(pool, { label: "db/zero", migrated: [], healthIntervalMs: 20, leaderIntervalMs: 50, onLeaderChange: v => changes.push(v) });
+    open.push(r);
+    await r.start();
+    expect(r.isLeader()).toBe(true);
+    const first = r.drain({ graceMs: 10 });
+    expect(r.drain({ graceMs: 10 })).toBe(first);
+    expect(await first).toEqual({ finished: 0, released: 0 });
+    expect(r.isLeader()).toBe(false);
+    expect(r.healthy()).toBe(false);
+    expect(changes).toEqual([true, false]);
+  });
+});

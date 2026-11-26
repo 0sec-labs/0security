@@ -14,4 +14,5 @@ export type { JobHandler, JobWorkerOptions, StopResult } from "./job-worker.js";
 export { LEADER_KEYS, LeaderElector } from "./leader.js";
 export type { LeaderElectorOptions, LeaderRole } from "./leader.js";
 export { HaRuntime } from "./runtime.js";
+export type { DrainResult } from "./runtime.js";
 export type { HaRuntimeOptions } from "./runtime.js";
