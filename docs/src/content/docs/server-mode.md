@@ -322,7 +322,7 @@ After a license expires, reading and exporting with proof and every check keep w
 
 ### Not supported
 
-- High availability, failover, or more than one replica.
+- High availability, failover, or more than one replica. A [preview](/high-availability/) shares the scheduler role and the job queue between replicas, not findings or accounts.
 - Sharing the volume between containers or hosts.
 - Webhooks other than the optional GitHub pull request webhook. Pull request triggers poll without it.
 - Shared sandboxes or per-customer isolation inside one container. Everyone who signs in shares the same computer and data.
