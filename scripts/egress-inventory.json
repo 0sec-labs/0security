@@ -539,6 +539,20 @@
       "disable": "Leave ZERO_AUDIT_SINK_URL unset."
     },
     {
+      "id": "ha-shared-database",
+      "class": "operator",
+      "enterprise": "allowed",
+      "destinations": [
+        "the PostgreSQL server you set in ZERO_HA_DATABASE_URL or ZERO_HA_DATABASE_URL_FILE"
+      ],
+      "files": [
+        "enterprise/src/ha/postgres.ts"
+      ],
+      "when": "Server mode with the ha license feature, only when ZERO_HA_DATABASE_URL or ZERO_HA_DATABASE_URL_FILE is set in the process environment. Off by default. Never read from a repository, a project file or the database.",
+      "sent": "SQL over a connection to your database: server sign-in sessions as hashed keys, account ids, roles and expiry times, and the schema migration table. A server on another machine must use TLS (sslmode require, verify-ca or verify-full). The connection string holds a password and is never logged or sent anywhere else.",
+      "disable": "Leave both variables unset."
+    },
+    {
       "id": "findings-server-upload",
       "class": "operator",
       "enterprise": "allowed",

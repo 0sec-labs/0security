@@ -18,6 +18,7 @@ export const ENTERPRISE_FEATURES = [
   "evidence-signing",
   "audit-chain",
   "retention",
+  "ha",
 ] as const;
 
 export type EnterpriseFeature = (typeof ENTERPRISE_FEATURES)[number];
@@ -246,6 +247,7 @@ const FEATURE_LABELS: Record<EnterpriseFeature, string> = {
   "evidence-signing": "evidence signing",
   "audit-chain": "the tamper-evident audit log",
   retention: "retention policies",
+  ha: "high availability with a shared database",
 };
 
 /** User-facing message for a feature that is not available, or null when it is. */

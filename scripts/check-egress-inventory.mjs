@@ -30,6 +30,8 @@ export const OUTBOUND_PATTERNS = {
   process: /(?:spawn|execFile|execFileSync|spawnSync|execute|run|exec)\w*\(\s*"(?:gh|curl|wget|ssh|scp|mvn|gradle|docker)"/,
   gitNetwork: /"(?:clone|ls-remote|fetch|push|pull)"/,
   scannerProcess: /\bnucleiArguments\(/,
+  // A connection to a database server the operator names (enterprise/src/ha).
+  database: /import\s+(?!type)[^;]*from "pg"/,
 };
 
 const isSource = path => /\.(ts|tsx|mjs)$/.test(path) && !/\.test\.|\.d\.ts|\.generated\.|[\\/](?:__tests__|test|tests|scripts)[\\/]/.test(path);
@@ -49,12 +51,17 @@ export function sourceFiles(root = ROOT) {
   return PACKAGES.flatMap(pkg => walk(join(root, "packages", pkg, "src"))).map(path => relative(root, path).split(sep).join("/"));
 }
 
+/** Outbound calls are also looked for in the key-gated folder. Its XML namespace URLs are not hosts that are contacted, so hosts are not scanned there. */
+function outboundFiles(root = ROOT) {
+  return [...sourceFiles(root), ...walk(join(root, "enterprise", "src")).map(path => relative(root, path).split(sep).join("/"))];
+}
+
 const strip = text => text.split("\n").filter(line => !/^\s*(?:\/\/|\*|\/\*)/.test(line)).join("\n");
 
 /** Files with an outbound pattern, mapped to the pattern names that matched. */
 export function scanOutbound(root = ROOT) {
   const found = new Map();
-  for (const file of sourceFiles(root)) {
+  for (const file of outboundFiles(root)) {
     const text = strip(readFileSync(join(root, file), "utf8"));
     const hits = Object.entries(OUTBOUND_PATTERNS).filter(([, re]) => re.test(text)).map(([name]) => name);
     if (hits.length) found.set(file, hits);

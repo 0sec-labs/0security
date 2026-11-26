@@ -76,3 +76,4 @@ export { type AuditChainRow } from "./audit-chain.js";
 export { AUDIT_GENESIS_HASH, auditRowHash, checkAuditChain, type AuditChainBreak, type AuditChainReport } from "./audit-chain.js";
 export { AUDIT_EXPORT_FORMATS, AUDIT_EXPORT_SCHEMA, SYSLOG_SD_ID, formatAuditEvent, parseAuditTime, toExportEvent, type AuditExportEvent, type AuditExportFormat, type AuditFormatContext } from "./audit-format.js";
 export { AUDIT_SINK_FORMAT_ENV, AUDIT_SINK_TOKEN_ENV, AUDIT_SINK_URL_ENV, AuditSinkConfigError, createAuditSink, parseAuditSinkConfig, startAuditSinkFromEnv, type AuditSink, type AuditSinkConfig, type AuditSinkOptions, type AuditSinkStatus } from "./audit-sink.js";
+export { SessionConflictError, SqliteSessionStore, sessionKey, type NewSession, type SessionRecord, type SessionStore } from "./session-store.js";

@@ -38,6 +38,7 @@ export const ALLOWED_BRIDGES = [
   "packages/cli/vitest.setup.ts", // test setup: mocks the enterprise module so tests can trust throwaway keys
   "packages/cli/src/enterprise-bridge.test.ts", // checks the real module trusts only its compiled-in keys
   "packages/cli/src/findings-server-bridge.ts", // the shared findings server: ingest, write keys, org dashboard
+  "packages/cli/src/ha-bridge.ts", // high availability: the shared database for server replicas
 ];
 
 /** The only environment variables the license code reads, plus the unrelated no-egress switch. */
