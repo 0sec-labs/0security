@@ -343,4 +343,23 @@ describe("a scan that hit a limit never says not-imported", () => {
     expect(vulnerableSymbolsWithLimit(many, "pkg:maven/a/b@1").more).toBe(true);
     expect(vulnerableSymbolsWithLimit([{ ecosystem_specific: { imports: [{ path: "p.q", symbols: ["One"] }] } }], "pkg:maven/a/b@1")).toEqual({ symbols: ["p.q.One"], more: false });
   });
+  it("reads hidden source folders and reports a build-named folder that holds a src tree", () => {
+    const dir = mkdtempSync(join(tmpdir(), "0-usage-hidden-"));
+    mkdirSync(join(dir, ".hidden/src/main/java"), { recursive: true });
+    writeFileSync(join(dir, ".hidden/src/main/java/H.java"), "import org.yaml.snakeyaml.Yaml;\n");
+    expect(attachJavaUsage([advisory()], dir).advisories[0]!.usage!.status).toBe("imported");
+    const other = mkdtempSync(join(tmpdir(), "0-usage-build-"));
+    mkdirSync(join(other, "build/src/main/java"), { recursive: true });
+    writeFileSync(join(other, "build/src/main/java/B.java"), "import org.yaml.snakeyaml.Yaml;\n");
+    const result = attachJavaUsage([advisory()], other);
+    expect(result.scan.skipped).toBe(1);
+    expect(result.advisories[0]!.usage!.status).toBe("unknown");
+  });
+  it("bounds the imports-by-components cross product before it runs", () => {
+    const dir = mkdtempSync(join(tmpdir(), "0-usage-cross-"));
+    mkdirSync(join(dir, "src"), { recursive: true });
+    writeFileSync(join(dir, "src/X.java"), Array.from({ length: 100 }, (_, index) => `import q.r.C${index};`).join("\n"));
+    const components = Array.from({ length: 200 }, (_, index) => ({ name: `g${index}/a`, version: "1", purl: `pkg:maven/g${index}/a@1` }));
+    expect(scanJavaUsage(dir, components, { limits: { maxMatchWork: 1000 } }).truncated).toBe(true);
+  });
 });

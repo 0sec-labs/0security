@@ -22,7 +22,11 @@ export interface JavaUsageOptions {
 }
 
 const SOURCE = /\.(?:java|kt|kts|scala|groovy)$/;
-const SKIP = new Set(["node_modules", ".git", "dist", "build", "target", "vendor", ".gradle", ".idea", "out"]);
+/** Folders of tools and dependencies: never application source. */
+const TOOL_FOLDERS = new Set(["node_modules", ".git", ".gradle", ".idea", ".mvn"]);
+/** Build output and vendored folders: not read, and reported when one holds a `src` tree. Hidden folders are read. */
+const SKIP = new Set(["dist", "build", "target", "vendor", "out"]);
+function hasSourceTree(dir: string): boolean { try { return statSync(join(dir, "src")).isDirectory(); } catch { return false; } }
 const MAX_FILES = 20000;
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 const MAX_IMPORTS_PER_COMPONENT = 50;
@@ -98,7 +102,13 @@ function walk(folder: string, limit: { left: number; truncated: boolean; skipped
     for (const entry of entries) {
       if (limit.entries > maxEntries) { limit.truncated = true; return; }
       if (entry.isSymbolicLink()) { limit.skipped += 1; continue; }
-      if (entry.isDirectory()) { if (!SKIP.has(entry.name) && !entry.name.startsWith(".")) visit(join(dir, entry.name), depth + 1); continue; }
+      if (entry.isDirectory()) {
+        if (TOOL_FOLDERS.has(entry.name)) continue;
+        // Build output and dependency folders are not application source, but a folder named like one that holds a src tree is reported as not read.
+        if (SKIP.has(entry.name)) { if (hasSourceTree(join(dir, entry.name))) limit.skipped += 1; continue; }
+        visit(join(dir, entry.name), depth + 1);
+        continue;
+      }
       if (!entry.isFile() || !SOURCE.test(entry.name)) continue;
       if (limit.left <= 0) { limit.truncated = true; limit.skipped += 1; continue; }
       limit.left -= 1;
@@ -205,11 +215,14 @@ export function scanJavaUsage(folder: string, components: Array<{ name: string; 
   }
   const artifactPrefixes = components.flatMap(component => prefixes(component.name).artifact);
   // Do not credit an exact artifact import to every sibling with the same Maven group.
-  const groupCandidates = imports.filter(item => !artifactPrefixes.some(prefix => startsWithPackage(item.import, prefix)));
   const maxWork = options.limits?.maxMatchWork ?? MAX_MATCH_WORK;
-  let work = 0;
+  // The cross product of imports and component prefixes is bounded before it runs.
+  const crossWork = imports.length * (artifactPrefixes.length + components.length * 4);
+  if (crossWork > maxWork) limit.truncated = true;
+  const groupCandidates = crossWork > maxWork ? [] : imports.filter(item => !artifactPrefixes.some(prefix => startsWithPackage(item.import, prefix)));
+  let work = Math.min(crossWork, maxWork);
   const usage = components.map((component): JavaUsage => {
-    work += imports.length * 3;
+    work += imports.length * 8;
     if (work > maxWork) {
       limit.truncated = true;
       return { purl: component.purl, name: component.name, version: component.version, verdict: "no-import-found", imports: [] };
