@@ -67,6 +67,31 @@ describe("core toolset in the console", () => {
     } finally { await session.cleanup(); }
   });
 
+  it.each(["seedless-depth-review", "verify-finding"])("keeps the default list at the core tools, and %s alone adds the code-index pack", async (skill) => {
+    const packed = ["callees_of", "callers_of", "routes", "trace_to_sink"];
+    const runtime = new ScriptedRuntime([call("load_skill", { skill_id: skill }), end("loaded"), end("again")]);
+    const session = createConsoleSession({ runtime, refineObjective: false });
+    try {
+      await session.send("review the repo");
+      await session.send("go on");
+      expect(names(runtime.calls[0]!.tools).sort()).toEqual([...CORE_TOOL_NAMES].sort());
+      for (const name of packed) expect(names(runtime.calls[0]!.tools)).not.toContain(name);
+      // The tools appear on the turn after the skill loads, and nothing else changes.
+      const after = names(runtime.calls[runtime.calls.length - 1]!.tools);
+      for (const name of packed) expect(after).toContain(name);
+      expect(after.filter(name => !packed.includes(name)).sort()).toEqual([...CORE_TOOL_NAMES].sort());
+    } finally { await session.cleanup(); }
+  });
+
+  it("does not advertise the pack for a plain session or for a skill that does not declare it", async () => {
+    const runtime = new ScriptedRuntime([end("a")]);
+    const session = createConsoleSession({ runtime, refineObjective: false });
+    try {
+      await session.send("hello");
+      expect(names(runtime.calls[0]!.tools).sort()).toEqual([...CORE_TOOL_NAMES].sort());
+    } finally { await session.cleanup(); }
+  });
+
   it("lists skills when load_skill gets no id", async () => {
     const runtime = new ScriptedRuntime([call("load_skill", {}), end("done")]);
     const session = createConsoleSession({ runtime, refineObjective: false });

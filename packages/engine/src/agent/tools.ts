@@ -46,7 +46,7 @@ import { extractPocStepsFromProse } from "./poc-steps-from-prose.js";
 import { computeFindingConfidence } from "./finding-confidence.js";
 import { validateFindingDraft, type FindingDraft } from "./finding-validator.js";
 import { findMatchingFindingCandidate } from "./tools-helpers.js";
-import { resolvePacks } from "./toolset.js";
+import { packToolNames, resolvePacks } from "./toolset.js";
 import { listSkillSummaries, getSkillById, matchTriggers, loadSkillRegistry } from "./skills/index.js";
 import type { SkillDefinition } from "./skills/index.js";
 import { loadSkillBundleFromManifest } from "./skills/markdown-bundle.js";
@@ -3120,7 +3120,15 @@ export class ToolExecutor {
 /** The one tool list every thread, child run and sentinel turn gets: all registered tools. */
 export function getToolsForRole(opts?: { webSearchEnabled?: boolean }): ToolDefinition[] {
   const webSearch = opts?.webSearchEnabled ?? featureFlags.webSearch;
+  const packTools = packToolNames();
   return filterWorkflowAgentTools(Object.keys(TOOL_DEFINITIONS)
     .filter((name) => webSearch || name !== "web_search")
+    // Pack tools (code-index) are never in the default list; a loaded skill that declares the pack adds them.
+    .filter((name) => !packTools.has(name))
     .map((name) => TOOL_DEFINITIONS[name]));
+}
+
+/** Definitions of every tool that only a skill pack can advertise. */
+export function getPackToolDefinitions(): ToolDefinition[] {
+  return [...packToolNames()].filter((name) => Object.hasOwn(TOOL_DEFINITIONS, name)).map((name) => TOOL_DEFINITIONS[name]!);
 }

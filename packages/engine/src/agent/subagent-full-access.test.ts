@@ -25,6 +25,20 @@ it("every tool list is the same whatever the role or folder: one mode", () => {
   expect(getToolsForRole({ webSearchEnabled: false }).map(tool => tool.name)).not.toContain("web_search");
 });
 
+it("the pack tools are never in the default list, and a spawned child does not get them either", async () => {
+  const packed = ["callees_of", "callers_of", "routes", "trace_to_sink"];
+  expect(getToolsForRole({ webSearchEnabled: true }).map(tool => tool.name)).not.toEqual(expect.arrayContaining(packed));
+  const folder = mkdtempSync(join(tmpdir(), "0-full-access-"));
+  const seen: string[][] = [];
+  const executor = new ToolExecutor(context(folder), null, undefined, async () => child(seen));
+  try {
+    const result = await executor.execute({ name: "spawn_agent", arguments: { task: "Audit the folder", wait: true } });
+    expect(result.success).toBe(true);
+    for (const name of ["bash", "finding", "load_skill", "str_replace", "spawn_agent"]) expect(seen[0]).toContain(name);
+    for (const name of packed) expect(seen[0]).not.toContain(name);
+  } finally { await executor.cleanup(); rmSync(folder, { recursive: true, force: true }); }
+});
+
 it("a child spawned in a folder, even with read_only passed, gets bash and every tool", async () => {
   const folder = mkdtempSync(join(tmpdir(), "0-full-access-"));
   const seen: string[][] = [];
