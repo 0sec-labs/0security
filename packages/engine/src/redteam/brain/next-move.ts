@@ -33,9 +33,16 @@ export interface NextMoveInput {
 const clip = (text: string, max: number): string => (text.length > max ? text.slice(0, max) : text);
 const asText = (value: unknown): string => (typeof value === "string" ? value : (JSON.stringify(value) ?? ""));
 
-/** Builds the exact request: the newest 40 history entries with texts clipped to 2000 characters, and call arguments clipped to 200. */
+/**
+ * The most a request may weigh. The service reads anonymous requests only up to 64 KiB, so the client keeps well inside that:
+ * a long conversation sends its newest entries and drops the oldest, instead of being refused.
+ */
+export const MAX_REQUEST_BYTES = 60_000;
+const byteLength = (value: unknown): number => new TextEncoder().encode(JSON.stringify(value)).length;
+
+/** Builds the exact request: the newest 40 history entries with texts clipped to 2000 characters, call arguments clipped to 200, and the oldest entries dropped until the request fits MAX_REQUEST_BYTES (the newest is always kept, clipped if it alone is too big). */
 export function buildNextMoveRequest(input: NextMoveInput): NextMoveRequest {
-  return {
+  const request: NextMoveRequest = {
     v: 1, task: "next-move", objective: input.objective, turn: input.turn, maxTurns: input.maxTurns,
     history: input.history.slice(-MAX_HISTORY_ENTRIES).map(entry => ({ role: entry.role, text: clip(entry.text, MAX_HISTORY_TEXT) })),
     calls: input.calls.slice(-MAX_CALLS).map(call => ({
@@ -43,6 +50,10 @@ export function buildNextMoveRequest(input: NextMoveInput): NextMoveRequest {
       args: Object.fromEntries(Object.entries(call.args).map(([key, value]) => [key, clip(asText(value), MAX_CALL_ARG)])),
     })),
   };
+  while (request.history.length > 1 && byteLength(request) > MAX_REQUEST_BYTES) request.history.shift();
+  const last = request.history[request.history.length - 1];
+  if (last && byteLength(request) > MAX_REQUEST_BYTES) last.text = clip(last.text, 500);
+  return request;
 }
 
 // eslint-disable-next-line no-control-regex

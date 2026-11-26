@@ -42,11 +42,14 @@ describe("validateNextMoveResponse", () => {
 });
 
 describe("buildNextMoveRequest", () => {
-  it("clips texts and arguments and keeps the newest 40 entries", () => {
+  it("clips texts and arguments and keeps the newest entries that fit the size budget (at most 40)", () => {
     const history = Array.from({ length: 50 }, (_, i) => ({ role: (i % 2 ? "agent" : "attacker") as "agent" | "attacker", text: `${i}:${"x".repeat(3000)}` }));
     const built = buildNextMoveRequest({ objective: { goal: "g" }, turn: 5, maxTurns: 8, history, calls: [{ tool: "t", privilege: "network-out", args: { a: "y".repeat(500), n: 5, o: { k: 1 } } }] });
-    expect(built.history).toHaveLength(40);
-    expect(built.history[0]!.text.startsWith("10:")).toBe(true);
+    // 40 entries of 2000 characters weigh about 80 KB, more than the budget, so the oldest of the newest 40 are dropped too.
+    expect(built.history.length).toBeLessThanOrEqual(40);
+    expect(built.history.length).toBeGreaterThan(20);
+    expect(built.history[built.history.length - 1]!.text.startsWith("49:")).toBe(true);
+    expect(Number(built.history[0]!.text.split(":")[0])).toBeGreaterThanOrEqual(10);
     expect(built.history.every(h => h.text.length <= 2000)).toBe(true);
     expect(built.calls[0]!.args["a"]).toHaveLength(200);
     expect(built.calls[0]!.args["n"]).toBe("5");
