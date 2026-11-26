@@ -12,6 +12,7 @@ import { Option, type Command } from "commander";
 import { osecDB } from "@0/engine/storage";
 import { findingDatabasePaths } from "../finding-focus.js";
 import { shortFindingId } from "../finding-id.js";
+import { settleVariantsOfMergedFix } from "../finding-variants.js";
 import { runGh } from "../host/gh.js";
 import { selectHost, type Host } from "../host/index.js";
 import { fileStore, type FindingRecord, type StateStore } from "./burndown.js";
@@ -59,6 +60,8 @@ export interface ExportFixesDeps {
   /** The code host; only asked for with --check-merged. */
   host(): Host;
   repoRoot(dir: string): Promise<string>;
+  /** Called with a finding id when its fix pull request was observed merged; flips its fixed-pending-merge variants to fixed. */
+  settleVariants?(findingId: string): number;
   /** The owner/name of the git remote of a folder; only asked for when the context has per-repository rules. */
   repositoryOf?(dir: string): Promise<string | undefined>;
   now(): Date;
@@ -133,6 +136,7 @@ export async function buildFixReport(options: ExportFixesOptions, deps: ExportFi
       try {
         const state = await host.pullRequestState(row.pullRequestUrl);
         row.pullRequest = { state: state.state, draft: state.draft, commits: state.commits, editedAfterOpening: state.commits > 1 };
+        if (state.state === "merged") { const settled = deps.settleVariants?.(row.finding) ?? 0; if (settled) deps.err(`${shortFindingId(row.finding)}: fix merged, ${settled} variant${settled === 1 ? "" : "s"} marked fixed`); }
       } catch (error) {
         deps.err(`could not read ${row.pullRequestUrl}: ${line(error instanceof Error ? error.message : String(error)).slice(0, 120)}`);
         row.pullRequest = { state: "unknown", draft: null, commits: null, editedAfterOpening: null };
@@ -190,6 +194,7 @@ function lookupFromDatabases(): Map<string, FixLookup> {
 const defaults: ExportFixesDeps = {
   store: fileStore(),
   lookup: lookupFromDatabases,
+  settleVariants: findingId => settleVariantsOfMergedFix(findingId, findingDatabasePaths()),
   host: () => selectHost({ run: runGh }),
   repoRoot: async dir => (await exec("git", ["-C", dir, "rev-parse", "--show-toplevel"])).stdout.trim(),
   now: () => new Date(),
@@ -217,7 +222,7 @@ export function registerFindingsExportFixesCommand(parent: Command, deps: Export
     .description("Report what happened to the fixes 0 proposed, per repository: counts, pull requests, checks, cost and, on request, merged or closed")
     .option("--repo <dir>", "Only fixes recorded for this git repository (default: all)")
     .option("--since <date>", "Only fixes recorded on or after this date, like 2026-01-31")
-    .option("--check-merged", "Ask the code host whether each pull request was merged, closed or edited (one request each)")
+    .option("--check-merged", "Ask the code host whether each pull request was merged, closed or edited (one request each); a merged fix also turns its variants from fixed-pending-merge to fixed")
     .option("--context <file>", CONTEXT_FLAG_HELP)
     .option("--repository <name>", REPOSITORY_FLAG_HELP)
     .option("-o, --output <dir>", "Write fix-outcomes.md and fix-outcomes.json into this folder instead of printing")

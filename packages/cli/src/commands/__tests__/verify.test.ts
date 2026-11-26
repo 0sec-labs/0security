@@ -42,7 +42,7 @@ const idIn = (message: string) => /"id": "([^"]+)"/.exec(message)![1]!;
 describe("runVerify", () => {
   it("stops new verification and variant threads when the base receipt is unavailable", async () => {
     const h = harness([cand("a"), cand("b")], m => block({ finding: idIn(m), verdict: "true-positive", reasoning: "src/a.ts:3" }), { costs: [undefined] });
-    h.deps.variants = { variantsOf: () => [], saveRootCause: () => {}, saveVariant: () => "new", markFixed: () => {} };
+    h.deps.variants = { variantsOf: () => [], saveRootCause: () => {}, saveVariant: () => "new", markFixedPendingMerge: () => {} };
     const report = await runVerify([], options({ budget: "0.5" }), h.deps);
     expect(h.caps).toHaveLength(1);
     expect(report.costUsd).toBeNull();
@@ -52,7 +52,7 @@ describe("runVerify", () => {
 
   it.each([false, true])("bounds variant hunts by the global remaining receipt budget (unknown=%s)", async unknown => {
     const h = harness([cand("a"), cand("b")], m => m.includes("<seed>") ? block({ variants: [] }) : block({ finding: idIn(m), verdict: "true-positive", reasoning: "Unsafe sink src/a.ts:3." }), { costs: [0.1, 0.1, unknown ? undefined : 0.3] });
-    h.deps.variants = { variantsOf: () => [], saveRootCause: () => {}, saveVariant: () => "new", markFixed: () => {} };
+    h.deps.variants = { variantsOf: () => [], saveRootCause: () => {}, saveVariant: () => "new", markFixedPendingMerge: () => {} };
     const report = await runVerify([], options({ budget: "0.5" }), h.deps);
     expect(h.caps).toHaveLength(3);
     expect(h.caps[2]).toBeCloseTo(0.3);

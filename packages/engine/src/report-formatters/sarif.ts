@@ -213,7 +213,14 @@ function findingToResult(finding: Finding, target: string, suppressOutOfScope = 
     };
   }
   const executedPoc = executedPocFor(finding, finding.executedPoc);
-  if (executedPoc) result.properties["executedPoc"] = { outcome: executedPoc.outcome, reason: executedPoc.reason, label: executedPocLine(executedPoc), ...(executedPoc.run ? { run: executedPoc.run } : {}) };
+  // The stored record in full (so a reader can parse it with the same rules), plus the sentence. A derived "not attempted" record has no times and stays short.
+  if (executedPoc) result.properties["executedPoc"] = {
+    outcome: executedPoc.outcome, reason: executedPoc.reason, label: executedPocLine(executedPoc),
+    ...(executedPoc.startedAt ? { schemaVersion: executedPoc.schemaVersion, harness: executedPoc.harness, stepIds: executedPoc.stepIds, startedAt: executedPoc.startedAt, finishedAt: executedPoc.finishedAt } : {}),
+    ...(executedPoc.run ? { run: executedPoc.run } : {}),
+  };
+  if (finding.rootCause) result.properties["rootCause"] = finding.rootCause;
+  if (finding.variantOf) result.properties["variantOf"] = finding.variantOf;
   if (finding.inlineValidation) result.properties["inlineValidation"] = finding.inlineValidation;
   if (finding.supplyChain) result.properties["supplyChain"] = finding.supplyChain;
   if (finding.kernelExploit) result.properties["kernelExploit"] = finding.kernelExploit;

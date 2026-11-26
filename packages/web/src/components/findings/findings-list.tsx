@@ -13,6 +13,7 @@ import { SeverityIcon, StatusIcon } from "./finding-icons";
 import {
   ROW_HEIGHT, SETTABLE_STATUSES, REVIEW_LOCK_NOTE, statusLockedByReview, STATUS_LABEL, findingCode, findingPath, findingStatus, titleClickIntent, layoutRows, missionName, normalizeSeverity, visibleRange, type ListRow, type MissionLabels,
 } from "./findings-model";
+import { ExecutedPocChip } from "./finding-executed-poc-view";
 import { useMissionHrefs } from "./use-mission-href";
 import { listMemory } from "./use-findings-view";
 
@@ -241,6 +242,7 @@ const FindingRow = memo(function FindingRow({ group, style, thread, threadHref, 
       </span>
       {latest.tool ? <span className="max-w-32 shrink-0 truncate rounded-md border-[0.5px] border-border-2 px-1.5 py-px text-xs text-muted-foreground-1 @max-2xl/list:hidden">{latest.tool}</span> : null}
       {latest.category ? <span className="max-w-40 shrink-0 truncate rounded-md border-[0.5px] border-border-2 px-1.5 py-px text-xs text-muted-foreground-1 @max-2xl/list:hidden">{latest.category}</span> : null}
+      <ExecutedPocChip executedPoc={latest.executedPoc} />
       {isAcceptedFinding(group) ? <span className="shrink-0 rounded-md border-[0.5px] border-border-2 px-1.5 py-px text-xs text-muted-foreground-1">Accepted</span> : null}
       {group.count > 1 ? <span className="inline-flex shrink-0 items-center gap-0.5 text-xs tabular-nums text-muted-foreground-2" title={`Seen ${group.count} times`}><Repeat2 aria-hidden="true" className="size-3" />{group.count}</span> : null}
       <span className="grid w-5 shrink-0 place-items-center"><SeverityIcon severity={normalizeSeverity(latest.severity)} /></span>

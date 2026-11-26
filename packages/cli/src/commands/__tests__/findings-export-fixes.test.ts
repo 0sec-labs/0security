@@ -67,6 +67,21 @@ describe("0 findings export-fixes", () => {
     expect(renderFixReportMarkdown(report)).toContain("67%");
   });
 
+  it("settles variants only for fixes seen merged, and only with --check-merged", async () => {
+    const states = {
+      "https://github.com/o/r/pull/1": { state: "merged", draft: false, commits: 1 },
+      "https://github.com/o/r/pull/2": { state: "open", draft: true, commits: 1 },
+      "https://github.com/o/r/pull/3": { state: "closed", draft: false, commits: 1 },
+      "https://github.com/o/s/pull/9": new Error("rate limited"),
+    } as Record<string, PullRequestState | Error>;
+    const settled: string[] = [];
+    const settleVariants = (id: string) => { settled.push(id); return 1; };
+    await buildFixReport({}, { ...deps({ states }), settleVariants });
+    expect(settled).toEqual([]);
+    await buildFixReport({ checkMerged: true }, { ...deps({ states }), settleVariants });
+    expect(settled).toEqual(["f-aaaaaaaaaaaa"]);
+  });
+
   it("filters by repository and date", async () => {
     expect((await buildFixReport({ repo: "/other" }, deps())).fixes.map(r => r.finding)).toEqual(["f-ffffffffffff"]);
     expect((await buildFixReport({ since: "2026-03-03" }, deps())).summary.attempted).toBe(4);

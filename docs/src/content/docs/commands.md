@@ -196,6 +196,7 @@ Add `--allow-partial` when a partial scan should not fail the job. The exit code
 | `--scope-sarif <mode>` | `label` | With --scope: label (default) writes the scope as result properties; suppress also marks out-of-scope results suppressed, which GitHub code scanning then dismisses |
 | `--repo-context` | — | Also read .0/threat-model.md from the scanned folder as context. Off by default: a change under review can edit that file; in CI pass the base branch's copy with --context instead |
 | `--repo-ignores` | — | Also let the pre-pass scanners read their configuration and ignore files from the scanned folder (.foxguard.yml, .semgrepignore, .gitleaks.toml, .gitleaksignore, .trivyignore, osv-scanner.toml, .checkov.yaml). Off by default: a change under review can use them to hide findings. Inline suppressions such as nosemgrep always apply |
+| `--poc-image <image>` | — | Run the proof of concept of each high or critical finding in this container image, network off, and label the finding executed-proven, executed-failed or static-only. Must be pinned by digest (name@sha256:...). Default: the ZERO_POC_IMAGE variable or `0security config set executedPocImage`; otherwise off. Needs Docker or podman |
 | `--skill <id>` | `scan` | Skill that holds the scan method |
 | `--model <model>` | — | Model for the scan thread (default: gpt-6-luna) |
 | `--provider <id>` | — | Explicit model provider for this scan (use with --model) |
@@ -340,6 +341,7 @@ A hit from your rules is a lead like any other. The scan checks it against the c
 | `--org-policy <folder>` | — | An organisation's policy folder: evaluated first, and wins when a --policy says otherwise or uses the same id; repeat for several |
 | `--repo-context` | — | Also read .0/threat-model.md from the scanned folder as context. Off by default: a change under review can edit that file; in CI pass the base branch's copy with --context instead |
 | `--repo-ignores` | — | Also let the pre-pass scanners read their configuration and ignore files from the scanned folder (.foxguard.yml, .semgrepignore, .gitleaks.toml, .gitleaksignore, .trivyignore, osv-scanner.toml, .checkov.yaml). Off by default: a change under review can use them to hide findings. Inline suppressions such as nosemgrep always apply |
+| `--poc-image <image>` | — | Run the proof of concept of each high or critical finding in this container image, network off, and label the finding executed-proven, executed-failed or static-only. Must be pinned by digest (name@sha256:...). Default: the ZERO_POC_IMAGE variable or `0security config set executedPocImage`; otherwise off. Needs Docker or podman |
 | `--skill <id>` | `scan` | Skill that holds the scan method |
 | `--model <model>` | — | Model for the scan thread (default: gpt-6-luna) |
 | `--batches <mode>` | `auto` | auto reviews a large folder in batches, one thread per group of entry points, and records what each batch covered; on always does; off keeps one thread |
@@ -486,6 +488,7 @@ You can pass 0's own earlier SARIF report as the known set. Paths written as the
 | `--org-policy <folder>` | — | An organisation's policy folder: evaluated first, and wins when a --policy says otherwise or uses the same id; repeat for several |
 | `--repo-context` | — | Also read .0/threat-model.md from the scanned folder as context. Off by default: a change under review can edit that file; in CI pass the base branch's copy with --context instead |
 | `--repo-ignores` | — | Also honor ignore files and scanner configuration from the scanned folder (.gitleaks.toml, .gitleaksignore, .trivyignore). Off by default: a change under review can use them to hide secrets or misconfigurations |
+| `--poc-image <image>` | — | Run the proof of concept of each high or critical finding in this container image, network off, and label the finding executed-proven, executed-failed or static-only. Must be pinned by digest (name@sha256:...). Default: the ZERO_POC_IMAGE variable or `0security config set executedPocImage`; otherwise off. Needs Docker or podman |
 | `--skill <id>` | `scan` | Skill that holds the scan method |
 | `--model <model>` | — | Model for the scan thread (default: gpt-6-luna) |
 | `--batches <mode>` | `auto` | auto reviews a large folder in batches, one thread per group of entry points, and records what each batch covered; on always does; off keeps one thread |
@@ -2188,7 +2191,7 @@ The JSON has the schema `0.fix-outcomes.v1`. A field the run could not know is `
 | --- | --- | --- |
 | `--repo <dir>` | — | Only fixes recorded for this git repository (default: all) |
 | `--since <date>` | — | Only fixes recorded on or after this date, like 2026-01-31 |
-| `--check-merged` | — | Ask the code host whether each pull request was merged, closed or edited (one request each) |
+| `--check-merged` | — | Ask the code host whether each pull request was merged, closed or edited (one request each); a merged fix also turns its variants from fixed-pending-merge to fixed |
 | `--context <file>` | — | Business context file (JSON): order findings by what matters to you, with the reason shown. Defaults to the file set with `0security config set findingsContext` |
 | `--repository <name>` | — | Repository name the context rules are matched against (default: the git remote of the current folder) |
 | `-o, --output <dir>` | — | Write fix-outcomes.md and fix-outcomes.json into this folder instead of printing |
@@ -2552,7 +2555,7 @@ A fix closes one site; the same mistake is often at others. A finding can carry 
 
 The command starts a thread that follows the `variant-hunting` skill, seeded from that record. It searches the folder for the same sink shape, checks every hit and answers with the sites that still have the bug. Each site becomes a finding with a `variantOf` link to this one, so [findings show](#findings-show) lists the variants and [findings list](#findings-list) marks them. A site already recorded, or on the finding's own lines, is not recorded again. A finding that is itself a variant cannot start a hunt. The thread edits nothing.
 
-`--rescan` hunts for no new variants. It checks the variants already recorded again and marks each one fixed, or leaves it open when the bug is still there or the thread cannot tell. A fixed variant is not checked again. `0security findings fix` does this on the fixed work tree after it commits, then hunts, so the result shows next to the pull request; `0security findings verify` hunts after each true-positive verdict. Both take `--no-variants` to skip it and `--variant-budget` to cap each thread. Fix, verification and their follow-ups share the command’s `--budget`; each new thread is limited to the remaining allowance. Missing cost receipts stop further paid work and leave the total unknown. These are receipt-based estimates: in-flight requests can overshoot, so use a provider limit for a hard billing cap. Cross-repository search is not part of this.
+`--rescan` hunts for no new variants. It checks the variants already recorded again. A variant the thread finds fixed is marked `fixed-pending-merge`, not `fixed`: it is fixed in the fix work tree, and that branch may never merge. It becomes `fixed` only when the fix pull request is seen merged, which `--rescan` and `0security findings export-fixes --check-merged` ask the code host. A variant is left open when the bug is still there or the thread cannot tell. A `fixed` variant is not checked again. `0security findings fix` does this on the fixed work tree after it commits, then hunts, so the result shows next to the pull request; `0security findings verify` hunts after each true-positive verdict. Both take `--no-variants` to skip it and `--variant-budget` to cap each thread. Fix, verification and their follow-ups share the command’s `--budget`; each new thread is limited to the remaining allowance. Missing cost receipts stop further paid work and leave the total unknown. These are receipt-based estimates: in-flight requests can overshoot, so use a provider limit for a hard billing cap. Cross-repository search is not part of this.
 
 Pass the folder that was scanned with `--folder` (default: the current directory). This command reads files on this machine, so it needs the local console and rejects `--computer` and `--engine-url`.
 

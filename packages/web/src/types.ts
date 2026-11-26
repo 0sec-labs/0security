@@ -86,6 +86,8 @@ export type FindingRecord = {
   businessContext?: import("@0/engine/shared").FindingBusinessContext | null;
   /** Proposed recipe (never run) and the harness result, when there is one. */
   reproduction?: FindingReproduction | null;
+  /** Executed-PoC record for a high or critical finding; a derived static-only record when none was attempted. Absent for lower severities. */
+  executedPoc?: import("@0/engine/shared/executed-poc").ExecutedPoc | null;
 };
 
 export type FindingWorkflowSummary = {

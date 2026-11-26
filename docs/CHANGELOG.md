@@ -20,6 +20,10 @@ on the GitHub Release tag.
 - Anonymous lifecycle events go to PostHog: `first_run`, `command_invoked` (a command name from a fixed list, otherwise `other`), `update` (the two versions) and `error_exit` (an error category only). They go straight to PostHog from the CLI. `DO_NOT_TRACK=1` turns them off.
 - The `usage` event has `finding_class_counts`, findings counted by a fixed list of vulnerability classes. Titles, descriptions, evidence and targets are still never sent.
 
+- Executed PoC opt-in is easier: `0security scan --poc-image <image@sha256:...>` or `0security config set executedPocImage <image@sha256:...>` (the `ZERO_POC_IMAGE` variable still works). The image must be pinned by digest and a tag is refused with a message. The web findings list and detail now show the PoC outcome: proven, failed or static only. A gated test runs the real container path when Docker or podman is available.
+- A variant that a rescan finds fixed in the fix work tree is now `fixed-pending-merge`. It becomes `fixed` when its fix pull request is seen merged, by `findings variants --rescan` or `findings export-fixes --check-merged`.
+- `findings export` in JSON and SARIF now includes a finding's `rootCause` and `variantOf`, and SARIF carries the full executed-PoC record. Importing a 0 JSON report restores the root cause and variant links inside the file, never an executed result. Older reports still import.
+
 ### Changed
 
 - The security policy is one file, `.github/SECURITY.md`. It no longer says extensions and MCP servers are never sandboxed or mentions the removed `save_workflow` operation, and it now says an extension can declare an OS sandbox.

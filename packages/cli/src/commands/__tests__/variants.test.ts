@@ -12,7 +12,8 @@ import type { Finding } from "@0/engine/shared";
 import { osecDB } from "@0/engine/storage";
 import { registerFindingsCommand } from "../findings.js";
 import { defaultVerifyDeps, runVerify, type VerifyDeps, type VerifyOptions } from "../verify.js";
-import { defaultVariantDeps, renderVariantsReport, runVariants, type VariantDeps, type VariantsOptions } from "../variants.js";
+import { settleVariantsOfMergedFix } from "../../finding-variants.js";
+import { defaultVariantDeps, renderVariantsReport, runVariants, settleMergedFix, type VariantDeps, type VariantsOptions } from "../variants.js";
 
 vi.mock("../../state/runtime.js", () => ({ isBunRuntime: () => false, canUseOpenTui: () => false }));
 
@@ -113,7 +114,7 @@ function verifyDeps(model: ReturnType<typeof modelClient>): VerifyDeps {
   return { ...defaultVerifyDeps, open: async () => model.client as never, err: () => {}, sleep: async () => {}, startConsole: async () => () => {}, out: () => {}, metrics: undefined, now: () => new Date("2026-11-25T00:00:00Z") };
 }
 function variantDeps(model: ReturnType<typeof modelClient>): VariantDeps {
-  return { ...defaultVariantDeps, open: async () => model.client as never, err: () => {}, sleep: async () => {}, startConsole: async () => () => {}, out: () => {} };
+  return { ...defaultVariantDeps, open: async () => model.client as never, err: () => {}, sleep: async () => {}, startConsole: async () => () => {}, out: () => {}, settle: async () => ({ settled: 0, merged: false }) };
 }
 
 function withDb<T>(use: (db: osecDB) => T): T {
@@ -210,14 +211,56 @@ describe("rescan of variants after a fix", () => {
     expect(renderVariantsReport(report)).toContain("still open");
     withDb(db => {
       const status = Object.fromEntries(db.listVariantsOf(parentId).map(v => [v.title, v.status]));
-      expect(status).toEqual({ "SQL injection in src/invoices.ts": "discovered", "SQL injection in src/orders.ts": "fixed" });
+      expect(status).toEqual({ "SQL injection in src/invoices.ts": "discovered", "SQL injection in src/orders.ts": "fixed-pending-merge" });
     });
 
-    // A fixed variant is not checked again; the one still open is.
+    // Fixed only in the fix work tree: not `fixed` until the fix pull request is seen merged. It is still re-checked.
     const next = await runVariants(parentId, variantsOptions({ rescan: true }), variantDeps(model));
-    expect(next.rescan!.items).toHaveLength(1);
+    expect(next.rescan!.items).toHaveLength(2);
     const detail = await cli(["findings", "show", parentId, "--db-path", dbPath]);
-    expect(detail).toContain("Variants: 2 (1 open, 1 fixed)");
+    expect(detail).toContain("Variants: 2 (1 open, 1 fixed pending merge, 0 fixed)");
+    expect(await cli(["findings", "list", "--all", "--db-path", dbPath])).toContain("1 open, 1 fixed pending merge, 0 fixed");
+    expect(await cli(["findings", "list", "--all", "--status", "fixed", "--db-path", dbPath])).not.toContain("src/orders.ts");
+  });
+
+  describe("settling on merge", () => {
+    const record = { finding: "finding-parent", pullRequestUrl: "https://github.com/acme/app/pull/7", result: "pr-opened", runId: "r", updatedAt: "2026-11-25T00:00:00Z" };
+    const store = (records: unknown[]) => ({ load: () => ({ version: 1 as const, findings: Object.fromEntries(records.map((r, i) => [`k${i}`, r])), runs: [] }), save: () => {} });
+    const host = (state: "open" | "merged" | "closed") => ({ pullRequestState: async () => ({ state, draft: false, commits: 1 }) });
+    const withSettle = (model: ReturnType<typeof modelClient>, state: "open" | "merged" | "closed", records: unknown[] = [record]): VariantDeps =>
+      ({ ...variantDeps(model), settle: parent => settleMergedFix(parent, store(records) as never, () => host(state)) });
+
+    async function pendingSetup() {
+      const model = modelClient();
+      await runVerify([parentId], verifyOptions(), verifyDeps(model));
+      writeFileSync(join(folder, "src", "orders.ts"), "export function load(db, id) {\n  return db.query(\"SELECT * FROM orders WHERE id = ?\", [id]);\n}\n");
+      await runVariants(parentId, variantsOptions({ rescan: true }), variantDeps(model));
+      return model;
+    }
+    const statuses = () => withDb(db => Object.fromEntries(db.listVariantsOf(parentId).map(v => [v.title, v.status])));
+
+    it("stays fixed-pending-merge while the fix pull request is open, closed or unknown", async () => {
+      const model = await pendingSetup();
+      for (const state of ["open", "closed"] as const) await runVariants(parentId, variantsOptions({ rescan: true }), withSettle(model, state));
+      await runVariants(parentId, variantsOptions({ rescan: true }), withSettle(model, "merged", []));
+      expect(statuses()["SQL injection in src/orders.ts"]).toBe("fixed-pending-merge");
+    });
+
+    it("flips to fixed once the fix pull request is observed merged, and not before", async () => {
+      const model = await pendingSetup();
+      const report = await runVariants(parentId, variantsOptions({ rescan: true }), withSettle(model, "merged"));
+      expect(report.rescan!.settled).toBe(1);
+      expect(renderVariantsReport(report)).toContain("1 variant marked fixed");
+      expect(statuses()).toEqual({ "SQL injection in src/invoices.ts": "discovered", "SQL injection in src/orders.ts": "fixed" });
+      expect(await cli(["findings", "show", parentId, "--db-path", dbPath])).toContain("Variants: 2 (1 open, 1 fixed)");
+    });
+
+    it("findings export-fixes --check-merged settles through the same merged read", async () => {
+      await pendingSetup();
+      expect(settleVariantsOfMergedFix(parentId, [dbPath])).toBe(1);
+      expect(statuses()["SQL injection in src/orders.ts"]).toBe("fixed");
+      expect(settleVariantsOfMergedFix(parentId, [dbPath])).toBe(0);
+    });
   });
 
   it("leaves a variant as it was when the thread does not answer for it", async () => {

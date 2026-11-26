@@ -162,12 +162,14 @@ export interface TuiSettings {
   archiveIdleDays: number;
   /** Path of the business context file that orders findings by what matters to you. Operator-only: a project never sets it. */
   findingsContext: string;
+  /** Digest-pinned image (name@sha256:...) that turns on the executed PoC for high and critical findings. Operator-only; `ZERO_POC_IMAGE` and `scan --poc-image` win. */
+  executedPocImage: string;
 }
 
 /** Keys of `TuiSettings` holding a bounded integer. */
 type NumberKey = "subagentConcurrency" | "subagentMaxDepth" | "subagentFanOut" | "archiveIdleDays";
 /** Keys of `TuiSettings` holding free text. */
-type TextKey = "titleInstructions" | "findingsContext";
+type TextKey = "titleInstructions" | "findingsContext" | "executedPocImage";
 export const MAX_TITLE_INSTRUCTIONS = 500;
 /** Higher values are the sensitive direction: a project checkout may only lower these. */
 const LIMIT_KEYS: readonly NumberKey[] = ["subagentConcurrency", "subagentMaxDepth", "subagentFanOut"];
@@ -460,6 +462,15 @@ const DEFS: readonly TuiSettingDef[] = [
     group: "Findings",
   },
   {
+    key: "executedPocImage",
+    label: "Executed PoC image",
+    description: "Digest-pinned container image (name@sha256:...) in which the proof of concept of a high or critical finding is run, network off. Empty keeps the feature off. The ZERO_POC_IMAGE environment variable and scan --poc-image win. Global only.",
+    kind: "text",
+    default: "",
+    maxLength: 300,
+    group: "Findings",
+  },
+  {
     key: "archiveIdleDays",
     label: "Archive idle conversations",
     description: "At startup, archive saved conversations idle for more than this many days. Set to 0 to keep everything. Applies to this computer.",
@@ -507,6 +518,7 @@ export const DEFAULT_SETTINGS: TuiSettings = {
   titleInstructions: "",
   archiveIdleDays: 0,
   findingsContext: "",
+  executedPocImage: "",
 };
 
 /** Basename of the settings file inside the 0 state directory. */
@@ -648,6 +660,7 @@ export function isOperatorSetting(key: keyof TuiSettings): boolean {
     || key === "approvals"
     || key === "archiveIdleDays"
     || key === "findingsContext"
+    || key === "executedPocImage"
     || key === "modelPreference"
     || key === "workflows";
 }
@@ -818,6 +831,7 @@ export function normalizeSettings(raw: unknown): TuiSettings {
     titleInstructions: strictValueAt(raw, "titleInstructions") ?? DEFAULT_SETTINGS.titleInstructions,
     archiveIdleDays: numberAt(raw, "archiveIdleDays"),
     findingsContext: strictValueAt(raw, "findingsContext") ?? DEFAULT_SETTINGS.findingsContext,
+    executedPocImage: strictValueAt(raw, "executedPocImage") ?? DEFAULT_SETTINGS.executedPocImage,
   };
 }
 

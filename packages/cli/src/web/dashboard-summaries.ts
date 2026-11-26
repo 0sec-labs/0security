@@ -2,7 +2,7 @@ import { ciReportProvenance } from '../ci-report-provenance.js';
 // Database row shapes and pure summarizers that build the dashboard API payloads.
 import { parseFindingBusinessContext } from "@0/engine/shared";
 import { ImpactAssessmentSchema } from "@0/engine/shared";
-import { rowReproduction } from "../finding-reproduction.js";
+import { rowExecutedPoc, rowReproduction } from "../finding-reproduction.js";
 import { createPresentationEvent, type FindingTriageStatus, type PresentationEvent, type PresentationSource } from "@0/engine/shared";
 import { readToolCallNames } from "@0/engine";
 
@@ -34,6 +34,8 @@ export type DBFindingRow = {
   pocSteps?: unknown;
   /** Stored text on the way in; the parsed record after normalizeFinding. */
   reproduction?: unknown;
+  /** Stored text on the way in; the parsed record (or a derived static-only one) after normalizeFinding. */
+  executedPoc?: unknown;
 };
 
 export type DBScanRow = {
@@ -357,6 +359,8 @@ export function normalizeFinding(row: DBFindingRow) {
     impactAssessment: parsedImpact.success ? parsedImpact.data : null,
     businessContext: parseFindingBusinessContext(row.businessContext) ?? null,
     reproduction: rowReproduction(row) ?? null,
+    // Parsed by the harness's own parser: a stored value that is not a complete record never shows as executed. High and critical findings with no record show static-only.
+    executedPoc: rowExecutedPoc(row) ?? null,
     triageStatus: normalizeTriageStatus(row.triageStatus),
     workflowStatus: normalizeWorkflowStatus(row.workflowStatus, row),
     workflowAssignee: row.workflowAssignee ?? null,

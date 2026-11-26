@@ -251,6 +251,35 @@ The harness starts your app, then plants a fresh canary file outside the folder 
 
 Only path traversal on an HTTP GET route is supported. The request goes to the loopback inside the container, never to a live address. The container step is untested against a real runtime. Tests start the fixture app on the host with a stand-in for the container.
 
+## Executed proof of concept
+
+For a high or critical finding, 0 can run the finding's own proof-of-concept steps in a container and record what happened. The harness does this after the finding is saved, not the model, and the model cannot set the result. It is off unless you name an image.
+
+Turn it on for one scan, or for every scan:
+
+```bash
+0security scan ~/code/app --poc-image alpine@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc
+0security config set executedPocImage alpine@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc
+```
+
+The `ZERO_POC_IMAGE` environment variable does the same. The flag wins over the variable, and the variable wins over the setting. The image must be pinned by digest (`name@sha256:<64 hex digits>`); a tag is refused, because a tag can change under you. Pull the image once so you know the digest: `docker pull alpine:3.20`, then `docker image inspect alpine:3.20 --format '{{index .RepoDigests 0}}'`. The image needs a shell and whatever the PoC calls. It needs Docker or podman on the machine that runs the scan.
+
+Each high or critical finding shows one of three labels in `findings list`, `findings show`, the web findings list and detail, and the JSON, Markdown, HTML and SARIF exports:
+
+- `executed-proven`: the PoC ran in a container with the network off, and its expected output appeared.
+- `executed-failed`: it ran and the expected output did not appear. That does not mean the issue is absent.
+- `static-only`: nothing was proven by execution. The reason is shown: no image, no runnable steps, the budget was spent, or the run could not finish. A finding that was never attempted shows as static-only, never as proven.
+
+Only `shell` steps run, on a copy of the scanned folder, with the network off, memory and process limits and no environment variables. A step needs an expected output that is not written into the command itself. HTTP steps are static-only because they need a running app. A scan runs at most `ZERO_POC_MAX_RUNS` PoCs (default 3), each for at most `ZERO_POC_TIMEOUT_SEC` seconds (default 60, at most 300), and `ZERO_POC_MAX_TOTAL_SEC` seconds in all (default 300).
+
+An export carries the record. Importing 0's own JSON report back in restores the root cause and the variant link, but never an executed result: a file cannot confer one, and only a new run can.
+
+To check the real container path on your machine, run the gated test, which skips itself when no runtime answers:
+
+```bash
+pnpm --filter @0/engine exec vitest run src/executed-poc/executed-poc.docker.integration.test.ts
+```
+
 ## Scan a folder
 
 ```bash

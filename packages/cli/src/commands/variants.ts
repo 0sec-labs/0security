@@ -17,6 +17,11 @@ import {
 import { listOsecRunDatabasePaths, osecDB, resolveOsecDbPath } from "@0/engine/storage";
 import { consoleTransportOptions, type ConsoleClient, type ConsoleTransportOptions } from "../console-client.js";
 import { resolveFindingId, shortFindingId } from "../finding-id.js";
+import { settleFromFixPullRequests, VARIANT_FIXED_PENDING_MERGE } from "../finding-variants.js";
+import { findingDatabasePaths } from "../finding-focus.js";
+import type { StateStore } from "./burndown.js";
+import { runGh } from "../host/gh.js";
+import { selectHost, type Host } from "../host/index.js";
 import { connect, DEFAULT_SCAN_MODEL, defaultScanDeps, waitForThread, type ScanDeps } from "./scan.js";
 import { finishWithError, UsageError } from "./output.js";
 import { asJson, finishedThread } from "./thread-output.js";
@@ -55,7 +60,11 @@ export interface VariantStore {
   saveRootCause(parent: VariantParent, rootCause: RootCause): void;
   /** Store one variant as a finding linked to the parent and return its id. Saving the same site again updates it. */
   saveVariant(parent: VariantParent, variant: ParsedVariant, rootCause: RootCause | undefined): string;
-  markFixed(parent: VariantParent, variantId: string): void;
+  /**
+   * The variant is fixed in the fix work tree. That is not `fixed`: the branch may never merge. It is recorded as
+   * `fixed-pending-merge` and flips to `fixed` only when the fix pull request is observed merged.
+   */
+  markFixedPendingMerge(parent: VariantParent, variantId: string): void;
 }
 
 export interface VariantDeps extends Pick<ScanDeps, "open" | "err" | "sleep" | "startConsole"> {
@@ -64,6 +73,8 @@ export interface VariantDeps extends Pick<ScanDeps, "open" | "err" | "sleep" | "
   loadParent(id: string, dbPath: string | undefined): VariantParent;
   exists(folder: string): boolean;
   now(): number;
+  /** Flip this finding's `fixed-pending-merge` variants to `fixed` when its fix pull request was merged. Asks the code host. */
+  settle?(parent: VariantParent): Promise<{ settled: number; merged: boolean }>;
 }
 
 export interface VariantRunOptions { model?: string; timeout: string; budget: string }
@@ -72,7 +83,7 @@ export interface HuntResult {
   threadId?: string; costUsd?: number; tokens?: number; created: string[]; skipped: number; rootCause?: RootCause; rootCauseSource?: "stored" | "derived"; error?: string;
 }
 export interface RescanItem { id: string; title: string; state: RescanState | "unchecked"; reasoning?: string }
-export interface RescanResult { threadId?: string; costUsd?: number; tokens?: number; items: RescanItem[]; error?: string }
+export interface RescanResult { threadId?: string; costUsd?: number; tokens?: number; items: RescanItem[]; /** Variants moved from fixed-pending-merge to fixed because the fix pull request was merged. */ settled?: number; error?: string }
 
 interface PromptThread { id: string; reply?: string; error?: string; costUsd?: number; tokens?: number; failed: boolean }
 
@@ -140,7 +151,7 @@ export async function rescanVariants(client: ConsoleClient, deps: Pick<VariantDe
   const items = pending.map((v): RescanItem => {
     const answer = answers.get(v.id);
     if (!answer) return { id: v.id, title: v.title, state: "unchecked" };
-    if (answer.state === "fixed") deps.store.markFixed(parent, v.id);
+    if (answer.state === "fixed") deps.store.markFixedPendingMerge(parent, v.id);
     return { id: v.id, title: v.title, state: answer.state, ...(answer.reasoning ? { reasoning: answer.reasoning } : {}) };
   });
   return { ...base, items, ...(!thread.reply ? { error: thread.error ?? "the thread returned no answer" } : {}) };
@@ -187,9 +198,13 @@ export const defaultVariantStore = (now: () => number = Date.now): VariantStore 
       return id;
     } finally { db.close(); }
   },
-  markFixed(parent, variantId) {
+  markFixedPendingMerge(parent, variantId) {
     const db = new osecDB(parent.dbPath);
-    try { db.updateFindingStatus(variantId, DONE_STATUS); } finally { db.close(); }
+    try {
+      // A merged fix stays fixed: only an open variant moves to pending.
+      const current = db.listVariantsOf(parent.id).find(row => row.id === variantId);
+      if (current?.status !== DONE_STATUS) db.updateFindingStatus(variantId, VARIANT_FIXED_PENDING_MERGE);
+    } finally { db.close(); }
   },
 });
 
@@ -229,7 +244,15 @@ export const defaultVariantDeps: VariantDeps = {
   loadParent,
   exists: folder => existsSync(folder),
   now: () => Date.now(),
+  settle: parent => settleMergedFix(parent),
 };
+
+/** Reads the fix records the fix command keeps and asks the code host (as `findings export-fixes --check-merged` does) whether the fix merged. */
+export async function settleMergedFix(parent: VariantParent, store?: StateStore, host: () => Pick<Host, "pullRequestState"> = () => selectHost({ run: runGh })): Promise<{ settled: number; merged: boolean }> {
+  const records = Object.values((store ?? (await import("./burndown.js")).fileStore()).load().findings).filter(record => record.finding === parent.id && record.pullRequestUrl);
+  if (!records.length) return { settled: 0, merged: false };
+  return settleFromFixPullRequests(parent.id, records, host(), findingDatabasePaths(parent.dbPath));
+}
 
 export interface VariantsOptions extends ConsoleTransportOptions {
   folder?: string; rescan?: boolean; budget: string; model?: string; timeout: string; format?: string;
@@ -251,7 +274,13 @@ export async function runVariants(id: string, options: VariantsOptions, deps: Va
   let stop: (() => void) | undefined;
   if (!client) { const connection = await connect(options, deps); client = connection.client; stop = connection.stop; }
   try {
-    if (options.rescan) return { finding: parent.id, folder, mode: "rescan", rescan: await rescanVariants(client, deps, folder, parent, run) };
+    if (options.rescan) {
+      // A merged fix pull request settles the variants that were fixed pending merge, before they are checked again.
+      let settled = 0;
+      try { settled = (await deps.settle?.(parent))?.settled ?? 0; } catch { /* no code host: the variants stay pending */ }
+      const rescan = await rescanVariants(client, deps, folder, parent, run);
+      return { finding: parent.id, folder, mode: "rescan", rescan: { ...rescan, ...(settled ? { settled } : {}) } };
+    }
     return { finding: parent.id, folder, mode: "hunt", hunt: await huntVariants(client, deps, folder, parent, run) };
   } finally { stop?.(); }
 }
@@ -272,8 +301,9 @@ export function renderVariantsReport(report: VariantsReport): string {
   }
   if (report.rescan) {
     const r = report.rescan;
+    if (r.settled) lines.push(`The fix pull request was merged: ${r.settled} variant${r.settled === 1 ? "" : "s"} marked fixed.`);
     if (!r.items.length && !r.error) lines.push("No open variants are recorded for this finding.");
-    for (const item of r.items) lines.push(`  ${(item.state === "open" ? "still open" : item.state).padEnd(10)} ${shortFindingId(item.id)} ${item.title.slice(0, 70)}`);
+    for (const item of r.items) lines.push(`  ${(item.state === "open" ? "still open" : item.state === "fixed" ? "fixed, pending merge" : item.state).padEnd(10)} ${shortFindingId(item.id)} ${item.title.slice(0, 70)}`);
     if (r.error) lines.push(`Rescan problem: ${r.error}`);
   }
   return lines.join("\n");

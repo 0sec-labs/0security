@@ -335,7 +335,7 @@ describe("0 findings fix records its outcome for export-fixes", () => {
         variantsOf: () => variants.filter(v => !fixed.includes(v.id)).concat(saved.map(v => ({ id: v.id, title: "new", status: "discovered", path: v.path, startLine: 2 }))),
         saveRootCause: () => {},
         saveVariant: (parent, variant) => { const id = `new-${saved.length + 1}`; saved.push({ id, variantOf: parent.id, path: variant.path }); return id; },
-        markFixed: (_parent, id) => { fixed.push(id); },
+        markFixedPendingMerge: (_parent, id) => { fixed.push(id); },
       };
       return { store, saved, fixed };
     };
