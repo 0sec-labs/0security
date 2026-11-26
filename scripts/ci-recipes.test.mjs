@@ -268,7 +268,8 @@ test("the rehearsal passes when Bitbucket answers as documented, and fails when 
   const pass = rehearse(rehearsalEnv);
   assert.equal(pass.result.status, 0, pass.result.stdout + pass.result.stderr);
   assert.match(pass.result.stdout, /Automatic checks: 5 passed, 0 failed/);
-  assert.match(pass.result.stdout, /not yet run against a live workspace/);
+  assert.match(pass.result.stdout, /^Bitbucket Cloud rehearsal$/m);
+  assert.doesNotMatch(pass.result.stdout, /not yet run against a live workspace/, "the script was validated against Bitbucket Cloud, so it must not claim otherwise");
   assert.match(pass.log, /findings upload .*fixture-scan.json --to bitbucket-cloud --repo ws\/test --commit d{40} --report-id 0-rehearsal/);
   assert.ok(!pass.result.stdout.includes("r".repeat(20)) && !pass.log.split("\n").filter((line) => !line.startsWith("token=")).join("\n").includes("r".repeat(20)), "the token is never printed or put in an argument");
   for (const annotations of [0, 6]) assert.equal(rehearse(rehearsalEnv, [], { annotations }).result.status, 1, `${annotations} annotations`);

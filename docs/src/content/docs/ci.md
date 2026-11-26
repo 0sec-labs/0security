@@ -649,7 +649,7 @@ export REHEARSAL_COMMIT=...   # head commit of a test pull request
 sh ci/rehearsal/bitbucket-cloud.sh
 ```
 
-Run it with `--dry-run` to see the plan without sending anything. The script has not been run against a live workspace. Record the date and the Bitbucket plan in the issue when you do.
+Run it with `--dry-run` to see the plan without sending anything. The script was run against one Bitbucket Cloud test repository on 2026-11-25 and its five automatic checks passed. That is one workspace; Data Center is not covered. Record the date and the Bitbucket plan in the issue when you run it.
 
 ## Create Jira issues from findings
 
