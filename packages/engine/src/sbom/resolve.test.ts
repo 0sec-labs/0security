@@ -127,9 +127,26 @@ describe("resolveJvmDependencies with fake tools", () => {
     const dir = project({ "build.gradle": "", "app/build.gradle.kts": "", "docs/readme.md": "x" });
     const result = await resolveJvmDependencies(dir, { env: { PATH: `${bin}:/usr/bin:/bin` } });
     expect(result.tools).toEqual(["gradle (.)", "gradle (app)"]);
-    expect(readFileSync(log, "utf8").trim().split("\n")).toHaveLength(2);
+    expect(readFileSync(log, "utf8").trim().split("\n")).toHaveLength(4);
     expect(readFileSync(log, "utf8")).toContain("dependencies --configuration runtimeClasspath");
+    expect(readFileSync(log, "utf8")).toContain("dependencies --configuration testRuntimeClasspath");
     expect(result.components.filter(component => component.name === "org.slf4j/slf4j-api")).toHaveLength(1);
+  });
+  it("marks packages only on the Gradle test classpath as dev, and warns when that report fails", async () => {
+    const script = (testFails: boolean) => `#!/bin/sh
+case "$*" in
+  *testRuntimeClasspath*) ${testFails ? `echo "[ERROR] Configuration 'testRuntimeClasspath' not found" >&2; exit 1` : `echo "+--- org.slf4j:slf4j-api:2.0.12"; echo "+--- junit:junit:4.13.2"`};;
+  *) echo "+--- org.slf4j:slf4j-api:2.0.12";;
+esac
+`;
+    const ok = fakeTools({ gradle: script(false) });
+    const result = await resolveJvmDependencies(project({ "build.gradle": "" }), { env: { PATH: `${ok.bin}:/usr/bin:/bin` } });
+    expect(result.components.find(c => c.name === "junit/junit")?.dev).toBe(true);
+    expect(result.components.find(c => c.name === "org.slf4j/slf4j-api")?.dev).toBeUndefined();
+    const bad = fakeTools({ gradle: script(true) });
+    const partial = await resolveJvmDependencies(project({ "build.gradle": "" }), { env: { PATH: `${bad.bin}:/usr/bin:/bin` } });
+    expect(partial.components.map(c => c.name)).toEqual(["org.slf4j/slf4j-api"]);
+    expect(partial.warnings[0]).toContain("test dependencies");
   });
   it("never runs a wrapper script from the project", async () => {
     const { bin } = fakeTools();

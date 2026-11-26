@@ -1327,13 +1327,13 @@ Add `--resolve` to run your own build tool and get the full dependency tree, inc
 0security sbom generate . --resolve --allow-build-tools -o sbom.cdx.json
 ```
 
-With a `pom.xml`, 0 runs `mvn dependency:tree`. With `build.gradle` or `build.gradle.kts` files, 0 runs `gradle dependencies --configuration runtimeClasspath` once for each project folder, up to 25. It reads the trees, adds the transitive graph to the SBOM, and marks each component the tool resolved with the property `0:resolved` set to `true`. A resolved version replaces a declared version of the same package. Declared packages the tool did not report stay in the SBOM without the mark.
+With a `pom.xml`, 0 runs `mvn dependency:tree`. With `build.gradle` or `build.gradle.kts` files, 0 runs `gradle dependencies --configuration runtimeClasspath` and then `testRuntimeClasspath` once for each project folder, up to 25. It reads the trees, adds the transitive graph to the SBOM, and marks each component the tool resolved with the property `0:resolved` set to `true`. A resolved version replaces a declared version of the same package. Declared packages the tool did not report stay in the SBOM without the mark.
 
 This runs the project's build, so it is off by default. The build tool evaluates the project's build files, which can run arbitrary code, and it downloads from the repositories the project names. 0 prints a warning, then asks for a yes at a terminal. Without a terminal, or in CI, pass `--allow-build-tools` to confirm. Run it only on a project you trust.
 
 0 starts `mvn` or `gradle` from your `PATH`, without a shell, with a 10 minute limit and a 16 MB output limit. It never runs `mvnw` or `gradlew` from the project. The tool gets your `PATH`, `HOME`, `JAVA_HOME`, `MAVEN_*`, `GRADLE_*` and proxy variables, and no other variable, so your API keys stay out of the build. `--resolve-offline` adds `-o` to Maven and `--offline` to Gradle, so only cached artifacts resolve. `ZERO_ENTERPRISE` refuses `--resolve`.
 
-If a tool is missing or the build fails, 0 exits with 2 and prints the tool's error lines. Gradle test dependencies are not listed, because only the runtime classpath is read. Maven test and provided scopes are marked `excluded`.
+If a tool is missing or the build fails, 0 exits with 2 and prints the tool's error lines. Packages only on the Gradle test classpath are marked `excluded`, like Maven test and provided scopes. If a project has no test classpath, 0 warns and keeps the runtime packages.
 
 Parent POMs and BOMs outside the repository resolve only as far as your Maven or Gradle settings let them.
 
