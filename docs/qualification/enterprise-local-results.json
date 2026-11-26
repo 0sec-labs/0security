@@ -214,11 +214,11 @@
   "providerSelection": "Bitbucket review jobs preserve the explicit provider, model and reasoning through the CLI into the console runtime, including inherited Sentinel defaults.",
   "originalImplementationState": "Local implementation; uncommitted working tree, not published or deployed",
   "postMergeValidation": {
-    "sourceRevision": "dd022e8ad plus post-merge working-tree verification fixes",
-    "integratedMain": "d6cff04c1",
+    "sourceRevision": "de690cd87",
+    "integratedMain": "df885101736ad5055b48049eaceca394413715ea",
     "scope": "Reconciled local working tree; does not qualify paid model execution, live vendor integrations, cloud deployment, a release or remote CI.",
     "globalBuild": {
-      "result": "passed",
+      "result": "passed after frozen-lockfile dependency installation and final reconciliation",
       "command": "pnpm build",
       "artifactVersion": "0.45.0"
     },
@@ -252,6 +252,76 @@
       "completedAt": "2026-11-26T02:41:22.246Z",
       "outcome": "passed"
     },
-    "regressionScopeNote": "The earlier regression groups remain historical, overlapping scopes. Final reconciled suite counts are recorded separately when complete."
+    "regressionScopeNote": "The earlier regression groups remain historical, overlapping scopes. Final reconciled suite counts are recorded separately when complete.",
+    "regressions": {
+      "web": {
+        "result": "passed",
+        "files": 142,
+        "tests": 977
+      },
+      "enterprisePreHa": {
+        "result": "passed",
+        "files": 6,
+        "tests": 106
+      },
+      "publicScripts": {
+        "result": "passed",
+        "checks": 23
+      },
+      "engineFullRun": {
+        "passedTests": 4934,
+        "failedTests": 5,
+        "skippedTests": 10,
+        "result": "Initial full run exposed three stale Java-skill registry expectations, an inherited telemetry opt-out in a pricing fixture, and a mailbox-poll boundary race. All failures corrected and corresponding focused suites passed; full suite not repeated."
+      },
+      "engineFixReruns": {
+        "skillsTestsPassed": 180,
+        "runtimeAndCleanupTestsPassed": 174,
+        "backgroundLifecycleTestsPassed": 48
+      },
+      "upstreamTelemetryAndSessionStore": {
+        "result": "passed",
+        "testsPassed": 289,
+        "postgresTestsSkipped": 15,
+        "scope": "Source tests with minimal environment and isolated homes; local SQLite exercised, no live PostgreSQL configured."
+      },
+      "metricsPermissions": {
+        "result": "passed",
+        "tests": 8,
+        "scope": "Metrics reads and explicit host refresh require settings.write; generic collection writes remain denied."
+      },
+      "static": {
+        "result": "passed",
+        "checks": 19,
+        "scope": "18 checks passed in the final group; lint passed after dependencies and declaration outputs were rebuilt."
+      },
+      "cli": {
+        "result": "passed across disjoint completed-file groups",
+        "files": 254,
+        "testsPassed": 3289,
+        "testsSkipped": 28,
+        "testsTotal": 3317,
+        "scope": "158 completed files from initial run plus 96 disjoint files after fixing the canonical provider import and metrics permissions test and stabilizing dependencies/build outputs. Initial run was interrupted by dependency relinking; it is not reported as a clean full-suite invocation. Eleven rerun skips require live PostgreSQL."
+      },
+      "browser": {
+        "result": "passed",
+        "checks": 11,
+        "scope": "Local real-browser/native-process workflows with loopback model and host fixtures, including artifact import, rendering, roles, sidebar, twelve-route CLI parity, PR agent, webhooks, telemetry and dashboard. Does not qualify live customer hosts or paid model behavior."
+      }
+    },
+    "credentialValueAudit": {
+      "changedFiles": 202,
+      "matches": 0,
+      "scope": "Compared current environment secret values against changed source contents; no values recorded."
+    },
+    "builtCli": {
+      "result": "passed",
+      "checks": [
+        "Bundled CLI help",
+        "Three command smoke checks",
+        "Bun worker orchestration with 28 loopback requests, real owned-child edits, force-stop and cleanup"
+      ],
+      "scope": "Local built artifacts with mocked model/loopback endpoints; no paid model or live host writes."
+    }
   }
 }
