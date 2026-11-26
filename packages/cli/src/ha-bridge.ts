@@ -103,7 +103,7 @@ export type HaRuntimeHandle = HaRuntime;
  * Open what a server replica runs against the shared database: the job queue and the scheduler election.
  * Returns null when no shared database is named. The caller calls `start()` and later `close()`.
  */
-export async function openHaRuntime(env: NodeJS.ProcessEnv = process.env, options: { schema?: string } & Pick<HaRuntimeOptions, "instanceId" | "leaderIntervalMs" | "schedulerKey" | "onLeaderChange" | "onError"> = {}): Promise<HaRuntimeHandle | null> {
+export async function openHaRuntime(env: NodeJS.ProcessEnv = process.env, options: { schema?: string } & Pick<HaRuntimeOptions, "instanceId" | "leaderIntervalMs" | "healthIntervalMs" | "schedulerKey" | "onLeaderChange" | "onError"> = {}): Promise<HaRuntimeHandle | null> {
   const { schema, ...runtimeOptions } = options;
   const opened = await openPool(env, schema ? { schema } : {});
   if (!opened) return null;

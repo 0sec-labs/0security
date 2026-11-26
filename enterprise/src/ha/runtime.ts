@@ -8,6 +8,8 @@ import { PostgresJobQueue, type JobQueue } from "./job-queue.js";
 import { JobWorker, type JobWorkerOptions } from "./job-worker.js";
 import { LEADER_KEYS, LeaderElector } from "./leader.js";
 
+const PROBE_TIMEOUT_MS = 2_000;
+
 export interface HaRuntimeOptions {
   /** Where the database is, safe to print. */
   label: string;
@@ -15,6 +17,8 @@ export interface HaRuntimeOptions {
   /** Names this replica in job owners. Defaults to a random id. */
   instanceId?: string;
   leaderIntervalMs?: number;
+  /** How often to check that the database answers. */
+  healthIntervalMs?: number;
   /** Tests use their own lock key so they do not contend with a running server. */
   schedulerKey?: number;
   onLeaderChange?: (leader: boolean) => void;
@@ -30,6 +34,11 @@ export class HaRuntime {
   readonly #scheduler: LeaderElector;
   readonly #workers = new Set<JobWorker>();
   readonly #onError: ((error: unknown) => void) | undefined;
+  readonly #healthIntervalMs: number;
+  #health = { ok: true, at: Date.now() };
+  #healthTimer: ReturnType<typeof setInterval> | undefined;
+  #probing = false;
+  #closed = false;
 
   constructor(pool: Pool, options: HaRuntimeOptions) {
     this.#pool = pool;
@@ -38,6 +47,8 @@ export class HaRuntime {
     this.instanceId = options.instanceId ?? `replica-${randomUUID()}`;
     this.queue = new PostgresJobQueue(pool);
     this.#onError = options.onError;
+    this.#healthIntervalMs = options.healthIntervalMs ?? 2_000;
+    if (this.#healthIntervalMs < 20) throw new Error("The health interval must be at least 20 milliseconds.");
     this.#scheduler = new LeaderElector({
       pool,
       key: options.schedulerKey ?? LEADER_KEYS.scheduler,
@@ -47,8 +58,39 @@ export class HaRuntime {
     });
   }
 
-  /** Begin the election. Resolves after the first round. */
-  start(): Promise<void> { return this.#scheduler.start(); }
+  /** Begin the health checks and the election. Resolves after the first round. */
+  async start(): Promise<void> {
+    if (this.#healthTimer || this.#closed) return;
+    this.#healthTimer = setInterval(() => void this.#probe(), this.#healthIntervalMs);
+    this.#healthTimer.unref();
+    await this.#probe();
+    await this.#scheduler.start();
+  }
+
+  /**
+   * Whether the database answered the last check, and the check is recent. It answers from memory, so a
+   * readiness probe returns at once even when the database hangs. A check that stops completing counts as a failure.
+   */
+  healthy(): boolean {
+    return !this.#closed && this.#health.ok && Date.now() - this.#health.at <= this.#healthIntervalMs * 3 + PROBE_TIMEOUT_MS;
+  }
+
+  async #probe(): Promise<void> {
+    if (this.#probing || this.#closed) return;
+    this.#probing = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      // Reading the migration table proves the connection, the credentials and the schema.
+      await Promise.race([
+        this.#pool.query("SELECT MAX(version) AS v FROM zero_schema_migrations"),
+        new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("The shared database did not answer in time.")), PROBE_TIMEOUT_MS); }),
+      ]);
+      this.#health = { ok: true, at: Date.now() };
+    } catch (error) {
+      if (this.#health.ok) this.#onError?.(error);
+      this.#health = { ok: false, at: Date.now() };
+    } finally { clearTimeout(timer); this.#probing = false; }
+  }
 
   /** True while this replica holds the scheduler lock. Gate work that must run on one replica at a time. */
   isLeader(): boolean { return this.#scheduler.isLeader(); }
@@ -61,6 +103,8 @@ export class HaRuntime {
 
   /** Resign leadership, stop the workers, then close the pool. Safe to call twice. */
   async close(options: { graceMs?: number } = {}): Promise<void> {
+    this.#closed = true;
+    if (this.#healthTimer) clearInterval(this.#healthTimer);
     await this.#scheduler.stop();
     await Promise.all([...this.#workers].map(worker => worker.stop(options.graceMs ?? 0)));
     this.#workers.clear();

@@ -193,7 +193,10 @@ export function registerDashboardCommand(program: Command): void {
       const webhookConsole = webhook ? { receiver: webhook, ...(signedWebhookSecrets ? { signed: { secrets: signedWebhookSecrets, isWebhookTrigger: (id: string) => webhookSentinels()?.isWebhookTrigger(id) ?? false, ...(publicUrl ? { baseUrl: publicUrl.toString() } : {}) } } : {}), ...(publicUrl ? { payloadUrl: new URL(GITHUB_WEBHOOK_PATH, publicUrl).toString() } : {}) } : undefined;
       let phase: ServerPhase = "starting";
       let dbProbe = { at: 0, ok: false };
+      // The shared database, when one is named. Ready means this replica's own database and the shared one both answer.
+      let haHealthy: () => boolean = () => true;
       const dbOk = () => {
+        if (!haHealthy()) return false;
         if (Date.now() - dbProbe.at < 5_000) return dbProbe.ok;
         let ok = true; try { listAudit({ limit: 1 }, { dbPath: opts.dbPath ?? undefined }); } catch { ok = false; }
         dbProbe = { at: Date.now(), ok }; return ok;
@@ -230,6 +233,8 @@ export function registerDashboardCommand(program: Command): void {
             onError: error => console.error(chalk.dim(`  Shared database: ${error instanceof Error ? error.message : "error"}`)),
           });
           if (ha) {
+            const runtime = ha;
+            haHealthy = () => runtime.healthy();
             await ha.start();
             console.log(chalk.gray(`  Shared database: ${ha.label}, ${ha.isLeader() ? "this replica leads" : "another replica leads"}`));
           }

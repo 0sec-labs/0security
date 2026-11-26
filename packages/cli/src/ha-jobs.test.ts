@@ -64,4 +64,18 @@ describe.skipIf(!POSTGRES_URL)("job queue through the bridge (needs ZERO_TEST_PO
       expect(rest.filter(r => r.isLeader())).toHaveLength(1);
     } finally { await Promise.all([a, b, c].map(r => r.close())); }
   });
+
+  it("reports unhealthy when the schema is gone, so readiness can drop the replica", async () => {
+    restores.push(applyTestLicense(["ha"]));
+    const own = `t_${randomBytes(6).toString("hex")}`;
+    const r = (await openHaRuntime(env(), { schema: own, schedulerKey: 900_000_000 + Math.floor(Math.random() * 1_000_000_000), healthIntervalMs: 50, leaderIntervalMs: 200 }))!;
+    try {
+      await r.start();
+      expect(r.healthy()).toBe(true);
+      await dropTestSchema(env(), own);
+      const end = Date.now() + 5000;
+      while (r.healthy() && Date.now() < end) await new Promise(res => setTimeout(res, 20));
+      expect(r.healthy()).toBe(false);
+    } finally { await r.close(); }
+  });
 });
