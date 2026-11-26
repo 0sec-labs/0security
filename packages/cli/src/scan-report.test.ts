@@ -1,4 +1,6 @@
 import type { Finding, ScanReport } from "@0/engine/shared";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { exportReport } from "@0/engine";
 import { locationKey, mergePasses, repoRelativePath, scanExitCode, scanJson, toScanReport, type MergedFinding, type ScanOutcome } from "./scan-report.js";
@@ -185,6 +187,16 @@ describe("mergePasses", () => {
     expect(mergePasses([[dep("a", "GHSA-3mc7-4q67-w48m"), dep("b", "GHSA-98wm-3w3q-mw94")]])).toHaveLength(2);
     expect(mergePasses([[dep("a", "GHSA-3mc7-4q67-w48m")], [dep("b", "GHSA-98wm-3w3q-mw94")]])).toHaveLength(2);
     expect(mergePasses([[dep("a", "GHSA-3mc7-4q67-w48m")], [dep("b", "GHSA-3mc7-4q67-w48m")]])).toHaveLength(1);
+  });
+  it("keeps every record of the dependency-reachability regression fixture, in one pass and across passes", () => {
+    const fixture = join(import.meta.dirname, "../../engine/src/sbom/fixtures/reachability-skill/expected-findings.json");
+    const expected = (JSON.parse(readFileSync(fixture, "utf8")) as { findings: Array<{ id: string; title: string; severity: Finding["severity"]; path: string; line: number }> }).findings;
+    const all = expected.map(item => f(item.id, item.path, item.line, { title: item.title, category: "supply-chain", severity: item.severity, reviewAnnotation: { path: item.path, startLine: item.line } }));
+    expect(all).toHaveLength(8);
+    expect(mergePasses([all])).toHaveLength(8);
+    expect(mergePasses(all.map(item => [item]))).toHaveLength(8);
+    // The same advisory found again in a second pass is still one record.
+    expect(mergePasses([all, [{ ...all[2]!, id: "again" }]])).toHaveLength(8);
   });
   it("files an old finding under the same category rules as a new one", () => {
     const [only] = mergePasses([[f("a", "api_views/users.py", 60, { title: "Public registration accepts an admin flag and grants administrator privileges", category: "missing-validation" })]]);
