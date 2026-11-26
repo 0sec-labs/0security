@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import type { Command } from "commander";
-import { buildInventory, discoverAgentSkills, exportReport, getSkillById, isReportExportFormat, resolveAgentSkillName, type Batch } from "@0/engine";
+import { UNTRUSTED_GIT_BASE_CONFIG, buildInventory, discoverAgentSkills, exportReport, getSkillById, isReportExportFormat, resolveAgentSkillName, untrustedGitConfig, type Batch } from "@0/engine";
 import { CoverageLedger, coverageSentence, listOsecRunDatabasePaths, osecDB, resolveOsecDbPath, summarizeCoverage } from "@0/engine/storage";
 import { consoleTransportOptions, openConsole, type ConsoleClient, type ConsoleTransportOptions } from "../console-client.js";
 import { homeStateDir, parseSarif, parseScannerList, scanPrompt, scannerArguments, scannerById, scannerTakesRules, SCANNERS, type KnownItem, type PrePassLeads, type BatchPromptInfo, type ScanFileCoverage, type ScanReport } from "@0/engine/shared";
@@ -166,9 +166,10 @@ export const defaultScanDeps: ScanDeps = {
     if (!Array.isArray(report.findings)) throw new Error("The engine returned no report for this scan.");
     return report as unknown as ScanReport;
   },
+  // The folder is untrusted: its own .git/config must not run fsmonitor or filter commands while 0 looks at it.
   async changedFiles(folder) {
     try {
-      const { stdout } = await exec("git", ["-C", folder, "status", "--porcelain", "--untracked-files=all"], { maxBuffer: 16 * 1024 * 1024 });
+      const { stdout } = await exec("git", ["-C", folder, ...untrustedGitConfig(folder), "status", "--porcelain", "--untracked-files=all", "--ignore-submodules=all"], { maxBuffer: 16 * 1024 * 1024 });
       return new Set(stdout.split("\n").filter(Boolean));
     } catch { return undefined; }
   },
@@ -189,7 +190,7 @@ export const defaultScanDeps: ScanDeps = {
   prePass: (folder, scanners, rules = [], options) => runPrePass(folder, scanners, rules, { note: text => process.stderr.write(`${text}\n`), repoIgnores: options?.repoIgnores }),
   resolveSkill: resolveSkillId,
   async diffFiles(folder, ref) {
-    const { stdout } = await exec("git", ["-C", folder, "diff", "--name-only", "--relative", "--diff-filter=ACMR", ref, "--"], { maxBuffer: 16 * 1024 * 1024 });
+    const { stdout } = await exec("git", ["-C", folder, ...untrustedGitConfig(folder), "diff", "--no-ext-diff", "--no-textconv", "--ignore-submodules=all", "--name-only", "--relative", "--diff-filter=ACMR", ref, "--"], { maxBuffer: 16 * 1024 * 1024 });
     return stdout.split("\n").map(line => line.trim()).filter(Boolean);
   },
   async clone(url) {
@@ -200,10 +201,10 @@ export const defaultScanDeps: ScanDeps = {
   },
   openLedger: dbPath => new CoverageLedger(dbPath),
   async gitHead(folder) {
-    try { return (await exec("git", ["-C", folder, "rev-parse", "HEAD"])).stdout.trim() || undefined; } catch { return undefined; }
+    try { return (await exec("git", ["-C", folder, ...UNTRUSTED_GIT_BASE_CONFIG, "rev-parse", "HEAD"])).stdout.trim() || undefined; } catch { return undefined; }
   },
   async gitRemote(folder) {
-    try { return (await exec("git", ["-C", folder, "remote", "get-url", "origin"])).stdout.trim() || undefined; } catch { return undefined; }
+    try { return (await exec("git", ["-C", folder, ...UNTRUSTED_GIT_BASE_CONFIG, "remote", "get-url", "origin"])).stdout.trim() || undefined; } catch { return undefined; }
   },
 };
 
