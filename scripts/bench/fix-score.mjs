@@ -35,9 +35,10 @@ export function parseArgs(argv) {
     else throw new Error(`unknown option ${a}`);
   }
   if (o.run === o.dryRun) throw new Error("pass exactly one of --run (spends model money) or --dry-run (free)");
-  if (!Number.isInteger(o.repeat) || o.repeat < 1) throw new Error("--repeat must be a positive integer");
-  if (!(o.budget > 0)) throw new Error("--budget must be a positive number of USD");
-  if (o.totalBudget !== undefined && !(o.totalBudget > 0)) throw new Error("--total-budget must be a positive number of USD");
+  if (!Number.isSafeInteger(o.repeat) || o.repeat < 1) throw new Error("--repeat must be a positive integer");
+  if (!Number.isFinite(o.budget) || !(o.budget > 0)) throw new Error("--budget must be a finite positive number of USD");
+  if (o.totalBudget !== undefined && (!Number.isFinite(o.totalBudget) || !(o.totalBudget > 0))) throw new Error("--total-budget must be a finite positive number of USD");
+  if (!Number.isFinite(o.timeout) || !(o.timeout > 0)) throw new Error("--timeout must be a finite positive number of seconds");
   return o;
 }
 
@@ -157,7 +158,7 @@ function dryRun(o) {
     for (const p of problems) console.log(`     ${p}`);
     bad += problems.length;
   }
-  console.log(`\n${cases.length} cases x ${o.repeat} repeat(s) = ${cases.length * o.repeat} fixes; worst-case cost $${(cases.length * o.repeat * o.budget).toFixed(2)} at --budget ${o.budget}`);
+  console.log(`\n${cases.length} cases x ${o.repeat} repeat(s) = ${cases.length * o.repeat} fixes; nominal sum of per-fix ceilings $${(cases.length * o.repeat * o.budget).toFixed(2)} at --budget ${o.budget} (receipts can arrive after an in-flight overshoot)`);
   if (bad) { console.error(`\n${bad} problem(s)`); process.exit(1); }
   console.log("\ndry run passed: every case fails its exploit check before the fix and passes it with the reference fix. No model was called.");
 }
@@ -200,22 +201,46 @@ function fixOne(c, repeatIndex, o) {
   return { ...base, ...scoreCase({ answer: c.answer, committed: true, compiles, testsPass, exploitCode: exploit.status, rescan, rescanNew, numstat, costUsd, seconds, status }), branch: outcome.branch, exploitOutput: (exploit.stderr || exploit.stdout).trim().slice(-200) };
 }
 
+/** Sequential receipt-based gate. It cannot bound requests already in flight at the provider. */
+export function runCasesWithBudget(cases, o, fix = fixOne, log = console.log) {
+  const runs = [];
+  let knownCostUsd = 0, unknownCostAttempts = 0, stoppedReason = null;
+  for (let rep = 0; rep < o.repeat && !stoppedReason; rep++) for (const c of cases) {
+    const remaining = o.totalBudget === undefined ? undefined : Math.max(0, o.totalBudget - knownCostUsd);
+    if (remaining !== undefined && remaining <= Number.EPSILON * Math.max(1, o.totalBudget)) {
+      stoppedReason = "total-budget-reached";
+      log(`Receipt-based total budget $${o.totalBudget} reached; no further fixes will start.`);
+      break;
+    }
+    const budget = remaining === undefined ? o.budget : Math.min(o.budget, remaining);
+    const result = fix(c, rep, { ...o, budget });
+    const known = typeof result.costUsd === "number" && Number.isFinite(result.costUsd) && result.costUsd >= 0;
+    const row = { ...result, budgetUsd: budget, costUsd: known ? result.costUsd : null };
+    runs.push(row);
+    if (known) knownCostUsd += result.costUsd;
+    else unknownCostAttempts++;
+    log(`${c.name} / repeat ${rep + 1}: ${row.fixed ? "FIXED" : "not fixed"} (${row.status}; committed ${row.committed}, compiles ${row.compiles}, tests ${row.testsPass}, rescan ${row.rescan}, exploit ${row.exploitBlocked}${row.exploitExit ? ` exit ${row.exploitExit}` : ""}), ${row.files} files, ${row.linesAdded + row.linesRemoved} lines, ${usd(row.costUsd)}, ${row.seconds.toFixed(0)}s`);
+    if (!known && o.totalBudget !== undefined) {
+      stoppedReason = "cost-unavailable";
+      log("Cost receipt missing or invalid; total spend is unknown. No further fixes will start under --total-budget.");
+      break;
+    }
+  }
+  return { runs, accounting: {
+    knownCostUsd, costComplete: unknownCostAttempts === 0, unknownCostAttempts, stoppedReason,
+    totalBudgetUsd: o.totalBudget ?? null,
+    remainingBudgetUsd: o.totalBudget === undefined || unknownCostAttempts ? null : Math.max(0, o.totalBudget - knownCostUsd),
+    gate: "receipt-based token-cost estimates, not invoices; in-flight requests can overshoot",
+  } };
+}
+
 function realRun(o) {
   const cases = loadCases(o.cases);
   const problems = cases.flatMap((c) => validateCase(c).map((p) => `${c.name}: ${p}`));
   if (problems.length) throw new Error(`cases are invalid, run --dry-run:\n${problems.join("\n")}`);
   if (!existsSync(o.cli)) throw new Error(`${o.cli} not found: build it with pnpm --filter @0/engine build && pnpm --filter @0/cli build`);
-  console.log(`${cases.length} cases x ${o.repeat} repeat(s) = ${cases.length * o.repeat} fixes; worst case $${(cases.length * o.repeat * o.budget).toFixed(2)} at --budget ${o.budget}${o.totalBudget ? `; stops starting new fixes at $${o.totalBudget} total` : ""}`);
-  const runs = []; let spent = 0;
-  outer: for (let rep = 0; rep < o.repeat; rep++) for (const c of cases) {
-    if (o.totalBudget !== undefined && spent >= o.totalBudget) { console.log(`total budget $${o.totalBudget} reached; stopping`); break outer; }
-    process.stdout.write(`fix ${c.name} / repeat ${rep + 1} ... `);
-    const r = fixOne(c, rep, o);
-    spent += r.costUsd ?? 0;
-    runs.push(r);
-    console.log(`${r.fixed ? "FIXED" : "not fixed"} (${r.status}; committed ${r.committed}, compiles ${r.compiles}, tests ${r.testsPass}, rescan ${r.rescan}, exploit ${r.exploitBlocked}${r.exploitExit ? ` exit ${r.exploitExit}` : ""}), ${r.files} files, ${r.linesAdded + r.linesRemoved} lines, ${usd(r.costUsd)}, ${r.seconds.toFixed(0)}s`);
-  }
-  return runs;
+  console.log(`${cases.length} cases x ${o.repeat} repeat(s) = ${cases.length * o.repeat} fixes; per-fix ceiling $${o.budget}${o.totalBudget !== undefined ? `; receipt-based total gate $${o.totalBudget} clamps each new fix to the remaining allowance` : ""}. In-flight requests can overshoot; this is not a hard provider billing limit.`);
+  return runCasesWithBudget(cases, o);
 }
 
 if (isMain(import.meta.url)) {
@@ -224,14 +249,14 @@ if (isMain(import.meta.url)) {
   try {
     if (o.dryRun) dryRun(o);
     else {
-      const runs = realRun(o);
+      const { runs, accounting } = realRun(o);
       const rows = summarizeCases(runs);
       const total = aggregate(runs, o.repeat);
       const meta = { date: new Date().toISOString().slice(0, 10), model: o.model ?? "default (gpt-6-luna)", repeat: o.repeat, budget: o.budget };
       mkdirSync(o.out, { recursive: true });
       const stamp = `fix-${new Date().toISOString().replace(/[:.]/g, "-")}`;
-      const md = renderFixMarkdown(rows, total, meta);
-      writeFileSync(join(o.out, `${stamp}.json`), `${JSON.stringify({ meta, total, rows, runs: runs.map(({ workdir, ...r }) => r) }, null, 2)}\n`);
+      const md = `${renderFixMarkdown(rows, total, meta)}\nBudget accounting: ${accounting.gate}. Known receipt subtotal ${usd(accounting.knownCostUsd)}; ${accounting.costComplete ? "all receipts available" : "total cost unknown"}${accounting.stoppedReason ? `; stopped: ${accounting.stoppedReason}` : ""}.\n`;
+      writeFileSync(join(o.out, `${stamp}.json`), `${JSON.stringify({ meta, total, accounting, rows, runs: runs.map(({ workdir, ...r }) => r) }, null, 2)}\n`);
       writeFileSync(join(o.out, `${stamp}.md`), md);
       console.log(`\n${md}\nwrote ${join(o.out, stamp)}.{md,json}`);
     }

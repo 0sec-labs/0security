@@ -54,6 +54,8 @@ export function scoreCase({ answer, committed, compiles = null, testsPass, explo
   };
 }
 
+const knownCost = value => typeof value === "number" && Number.isFinite(value) && value >= 0;
+
 const share = (runs, pick) => (runs.length ? runs.filter(pick).length / runs.length : null);
 
 /** One row per case with rates and min/max over the repeats. */
@@ -61,7 +63,8 @@ export function summarizeCases(runs) {
   const byCase = new Map();
   for (const r of runs) { if (!byCase.has(r.case)) byCase.set(r.case, []); byCase.get(r.case).push(r); }
   return [...byCase.entries()].map(([name, rs]) => {
-    const costs = rs.map((r) => r.costUsd).filter((x) => x !== null && x !== undefined);
+    const costs = rs.map((r) => r.costUsd).filter(knownCost);
+    const costComplete = costs.length === rs.length;
     const lines = rs.filter((r) => r.committed).map((r) => r.linesAdded + r.linesRemoved);
     return {
       case: name, repeats: rs.length,
@@ -77,7 +80,8 @@ export function summarizeCases(runs) {
       testsTouched: rs.filter((r) => r.testFilesChanged.length > 0).length,
       filesSpread: spread(rs.filter((r) => r.committed).map((r) => r.files)),
       linesMean: mean(lines), linesSpread: spread(lines),
-      costMean: mean(costs), costSpread: spread(costs), costTotal: costs.reduce((a, b) => a + b, 0),
+      costMean: costComplete ? mean(costs) : null, costSpread: costComplete ? spread(costs) : null, costTotal: costComplete ? costs.reduce((a, b) => a + b, 0) : null,
+      knownCostUsd: costs.reduce((a, b) => a + b, 0), costComplete,
       secondsMean: mean(rs.map((r) => r.seconds)), secondsSpread: spread(rs.map((r) => r.seconds)),
       failed: rs.filter((r) => r.status !== "complete").map((r) => r.status),
     };
@@ -94,8 +98,9 @@ export function aggregate(runs, repeats) {
     const rs = runs.filter((r) => r.repeat === i);
     if (rs.length) perRepeat.push(share(rs, (r) => r.fixed));
   }
-  const costs = runs.map((r) => r.costUsd).filter((x) => x !== null && x !== undefined);
-  const fixedCosts = runs.filter((r) => r.fixed).map((r) => r.costUsd).filter((x) => x !== null && x !== undefined);
+  const costs = runs.map((r) => r.costUsd).filter(knownCost);
+  const costComplete = costs.length === runs.length;
+  const fixed = runs.filter((r) => r.fixed).length;
   return {
     attempts: runs.length,
     fixRate: share(runs, (r) => r.fixed), fixRateSpread: spread(perRepeat),
@@ -105,8 +110,9 @@ export function aggregate(runs, repeats) {
     testsPassRate: share(runs, (r) => r.testsPass),
     exploitBlockedRate: share(runs, (r) => r.exploitBlocked),
     onlyExpectedRate: share(runs.filter((r) => r.committed), (r) => r.onlyExpectedFiles),
-    costTotal: costs.reduce((a, b) => a + b, 0),
-    costPerFix: fixedCosts.length ? costs.reduce((a, b) => a + b, 0) / fixedCosts.length : null,
+    costTotal: costComplete ? costs.reduce((a, b) => a + b, 0) : null,
+    knownCostUsd: costs.reduce((a, b) => a + b, 0), costComplete,
+    costPerFix: costComplete && fixed ? costs.reduce((a, b) => a + b, 0) / fixed : null,
     secondsMean: mean(runs.map((r) => r.seconds)),
   };
 }

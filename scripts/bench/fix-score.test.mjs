@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { aggregate, parseNumstat, renderFixMarkdown, rescanVerdict, scoreCase, summarizeCases } from "./fix-score-lib.mjs";
-import { parseArgs } from "./fix-score.mjs";
+import { parseArgs, runCasesWithBudget } from "./fix-score.mjs";
 
 const answer = { id: "sqli", expectedFiles: ["src/users.js"] };
 const numstat = parseNumstat("3\t1\tsrc/users.js\n10\t0\ttest/users.test.js\n-\t-\tlogo.png\n");
@@ -110,4 +115,102 @@ test("the markdown shows compile and rescan columns", () => {
   assert.match(text, /\| a \| 2\/2 \| 2\/2 \| 2\/2 \|/);
   assert.match(text, /compiles 100%/);
   assert.match(text, /rescan clean 100%/);
+});
+
+const options = extra => ({ repeat: 1, budget: 0.5, ...extra });
+const cases = ["a", "b", "c", "d"].map(name => ({ name }));
+
+test("the total-budget gate clamps the final new fix to remaining receipts and starts no extra case", () => {
+  const allowances = [];
+  const { runs, accounting } = runCasesWithBudget(cases, options({ totalBudget: 0.8 }), (c, rep, o) => {
+    allowances.push(o.budget);
+    return run(rep + 1, c.name, true, o.budget);
+  }, () => {});
+  assert.equal(runs.length, 2);
+  assert.equal(allowances[0], 0.5);
+  assert.ok(Math.abs(allowances[1] - 0.3) < 1e-12);
+  assert.equal(accounting.stoppedReason, "total-budget-reached");
+  assert.equal(accounting.remainingBudgetUsd, 0);
+  assert.equal(accounting.costComplete, true);
+});
+
+test("the gate accounts for actual returned spend and stops after an in-flight overshoot", () => {
+  const allowances = [], messages = [];
+  const result = runCasesWithBudget(cases, options({ totalBudget: 1 }), (c, rep, o) => {
+    allowances.push(o.budget);
+    return run(rep + 1, c.name, true, allowances.length === 1 ? 0.8 : 0.25);
+  }, text => messages.push(text));
+  assert.equal(allowances.length, 2);
+  assert.ok(Math.abs(allowances[1] - 0.2) < 1e-12);
+  assert.equal(result.accounting.knownCostUsd, 1.05);
+  assert.equal(result.accounting.remainingBudgetUsd, 0);
+  assert.match(result.accounting.gate, /in-flight requests can overshoot/);
+});
+
+test("a missing or invalid receipt stops total-budget runs without becoming zero spend", () => {
+  for (const missing of [undefined, null, Number.NaN, Number.POSITIVE_INFINITY, -0.1, "0.1"]) {
+    let called = 0;
+    const result = runCasesWithBudget(cases, options({ totalBudget: 1 }), (c, rep) => {
+      called++;
+      return run(rep + 1, c.name, false, missing);
+    }, () => {});
+    assert.equal(called, 1);
+    assert.equal(result.runs[0].costUsd, null);
+    assert.equal(result.accounting.costComplete, false);
+    assert.equal(result.accounting.remainingBudgetUsd, null);
+    assert.equal(result.accounting.stoppedReason, "cost-unavailable");
+  }
+});
+
+test("without a total gate unknown receipts do not alter attempt scheduling or masquerade as a total", () => {
+  const allowances = [];
+  const result = runCasesWithBudget(cases.slice(0, 2), options({ repeat: 2 }), (c, rep, o) => {
+    allowances.push(o.budget);
+    return run(rep + 1, c.name, true, allowances.length === 1 ? null : 0.1);
+  }, () => {});
+  assert.deepEqual(allowances, [0.5, 0.5, 0.5, 0.5]);
+  assert.equal(result.accounting.stoppedReason, null);
+  const total = aggregate(result.runs, 2);
+  assert.equal(total.costComplete, false);
+  assert.equal(total.costTotal, null);
+  assert.equal(total.costPerFix, null);
+  assert.ok(Math.abs(total.knownCostUsd - 0.3) < 1e-12);
+  const row = summarizeCases(result.runs).find(row => row.case === "a");
+  assert.equal(row.costMean, null);
+  assert.equal(row.costTotal, null);
+  const md = renderFixMarkdown(summarizeCases(result.runs), total, { date: "test", model: "m", repeat: 2, budget: 0.5 });
+  assert.match(md, /Total cost: n\/a/);
+});
+
+test("budget, total budget, timeout and repeats reject nonfinite or nonpositive parameters", () => {
+  for (const flag of ["--budget", "--total-budget", "--timeout", "--repeat"]) {
+    for (const value of ["Infinity", "NaN", "0", "-1"]) assert.throws(() => parseArgs(["--run", flag, value]), /positive/);
+  }
+});
+
+
+test("the actual harness forwards a clamped budget to child CLI processes and writes honest accounting", t => {
+  const dir = mkdtempSync(join(tmpdir(), "0-fixscore-budget-test-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const cli = join(dir, "cli.mjs"), log = join(dir, "budgets.jsonl"), out = join(dir, "out");
+  writeFileSync(cli, `import { appendFileSync } from "node:fs";
+const args = process.argv.slice(2);
+if (args[1] === "list") console.log(JSON.stringify({ findings: [{ id: "fixture-finding" }] }));
+else if (args[1] === "fix") { const budget = Number(args[args.indexOf("--budget") + 1]); appendFileSync(${JSON.stringify(log)}, JSON.stringify(budget) + "\\n"); console.log(JSON.stringify({ committed: false, costUsd: budget })); }
+else console.log("{}");
+`);
+  const env = Object.fromEntries(["PATH", "HOME", "TMPDIR", "LANG"].filter(key => process.env[key] !== undefined).map(key => [key, process.env[key]]));
+  env.DO_NOT_TRACK = "1"; env.GIT_CONFIG_GLOBAL = "/dev/null"; env.GIT_CONFIG_SYSTEM = "/dev/null";
+  const result = spawnSync(process.execPath, [fileURLToPath(new URL("./fix-score.mjs", import.meta.url)), "--run", "--cases", "sqli,unsafe-eval,prototype-pollution", "--budget", "0.5", "--total-budget", "0.8", "--cli", cli, "--out", out], { env, encoding: "utf8", timeout: 120_000 });
+  assert.equal(result.status, 0, result.stderr);
+  const budgets = readFileSync(log, "utf8").trim().split("\n").map(JSON.parse);
+  assert.equal(budgets.length, 2);
+  assert.equal(budgets[0], 0.5);
+  assert.ok(Math.abs(budgets[1] - 0.3) < 1e-12);
+  const report = JSON.parse(readFileSync(join(out, readdirSync(out).find(name => name.endsWith(".json"))), "utf8"));
+  assert.equal(report.accounting.costComplete, true);
+  assert.equal(report.accounting.stoppedReason, "total-budget-reached");
+  assert.equal(report.total.costTotal, 0.8);
+  assert.match(result.stdout, /not a hard provider billing limit/);
+  assert.doesNotMatch(result.stdout, /worst.case/i);
 });
