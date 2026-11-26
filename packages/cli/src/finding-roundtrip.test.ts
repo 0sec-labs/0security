@@ -18,7 +18,7 @@ const tempDb = () => { const d = mkdtempSync(join(tmpdir(), "0-roundtrip-")); di
 
 const ROOT_CAUSE = { bugClass: "SQL injection", unsafePattern: { sink: "db.query with a template literal", source: "the id parameter" }, missingGuard: "a bound parameter", designOrigin: "a shared query helper" };
 const EXECUTED = {
-  schemaVersion: 1 as const, harness: "0security-executed-poc/1" as const, outcome: "executed-proven" as const, reason: "expectation-met", stepIds: ["p1"],
+  schemaVersion: 1 as const, harness: "0security-executed-poc/1" as const, outcome: "script-matched" as const, reason: "expectation-met", stepIds: ["p1"],
   run: { status: "pass" as const, reason: "ok", command: "sh app.sh", isolation: "container" as const, imageDigest: `sha256:${"a".repeat(64)}`, durationMs: 1200, logTail: "TOP-SECRET" },
   startedAt: "2026-01-01T00:00:00.000Z", finishedAt: "2026-01-01T00:00:02.000Z",
 };
@@ -51,7 +51,7 @@ describe("findings export carries root cause, variantOf and the executed PoC", (
   it("JSON", async () => {
     const report = await exportAs(seed(), "json");
     const byId = new Map<string, Finding>(report.findings.map((f: Finding) => [f.id, f]));
-    expect(byId.get("parent")).toMatchObject({ rootCause: ROOT_CAUSE, executedPoc: { outcome: "executed-proven", run: { isolation: "container" } } });
+    expect(byId.get("parent")).toMatchObject({ rootCause: ROOT_CAUSE, executedPoc: { outcome: "script-matched", run: { isolation: "container" } } });
     expect(byId.get("parent")!.variantOf).toBeUndefined();
     expect(byId.get("variant")).toMatchObject({ rootCause: ROOT_CAUSE, variantOf: "parent" });
   });
@@ -61,7 +61,7 @@ describe("findings export carries root cause, variantOf and the executed PoC", (
     const props = (title: string) => sarif.runs[0].results.find((r: { message: { text: string }; properties: unknown }) => r.message.text.includes(`Description of ${title}`)).properties;
     const parent = props("parent");
     expect(parent.rootCause).toEqual(ROOT_CAUSE);
-    expect(parent.executedPoc).toMatchObject({ outcome: "executed-proven", schemaVersion: 1, harness: "0security-executed-poc/1", stepIds: ["p1"], startedAt: EXECUTED.startedAt, run: { imageDigest: EXECUTED.run.imageDigest } });
+    expect(parent.executedPoc).toMatchObject({ outcome: "script-matched", schemaVersion: 1, harness: "0security-executed-poc/1", stepIds: ["p1"], startedAt: EXECUTED.startedAt, run: { imageDigest: EXECUTED.run.imageDigest } });
     const variant = props("variant");
     expect(variant.variantOf).toBe("parent");
     expect(variant.executedPoc).toMatchObject({ outcome: "static-only", reason: "not-attempted" });

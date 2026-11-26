@@ -11,14 +11,14 @@ export type ExecutedPocView = {
 };
 
 const LABELS: Record<ExecutedPocOutcome, string> = {
-  "executed-proven": "PoC proven",
-  "executed-failed": "PoC failed",
+  "script-matched": "Script matched",
+  "script-unmatched": "Script unmatched",
   "static-only": "Static only",
 };
 
 /**
  * What the dashboard shows for a finding's executed-PoC record. Only a complete harness record of a container run can
- * be shown as proven or failed: anything the parser refuses is not shown as an executed result. The server derives a
+ * be shown as script matched or unmatched: anything the parser refuses is not shown as an executed result. The server derives a
  * `static-only` record (with no timestamps) for a high or critical finding that was never attempted; that one is
  * accepted as static-only and nothing else is.
  */

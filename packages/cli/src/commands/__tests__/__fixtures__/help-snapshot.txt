@@ -1764,8 +1764,8 @@ Options:
                              .checkov.yaml). Off by default: a change under review can use them to
                              hide findings. Inline suppressions such as nosemgrep always apply
   --poc-image <image>        Run the proof of concept of each high or critical finding in this
-                             container image, network off, and label the finding executed-proven,
-                             executed-failed or static-only. Must be pinned by digest
+                             container image, network off, and label the finding script-matched,
+                             script-unmatched or static-only. Must be pinned by digest
                              (name@sha256:...). Default: the ZERO_POC_IMAGE variable or `0security
                              config set executedPocImage`; otherwise off. Needs Docker or podman
   --skill <id>               Skill that holds the scan method (default: "scan")

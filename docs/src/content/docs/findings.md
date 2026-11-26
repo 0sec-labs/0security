@@ -266,9 +266,9 @@ The `ZERO_POC_IMAGE` environment variable does the same. The flag wins over the 
 
 Each high or critical finding shows one of three labels in `findings list`, `findings show`, the web findings list and detail, and the JSON, Markdown, HTML and SARIF exports:
 
-- `executed-proven`: the PoC ran in a container with the network off, and its expected output appeared.
-- `executed-failed`: it ran and the expected output did not appear. That does not mean the issue is absent.
-- `static-only`: nothing was proven by execution. The reason is shown: no image, no runnable steps, the budget was spent, or the run could not finish. A finding that was never attempted shows as static-only, never as proven.
+- `script-matched`: a script written by the model ran in a container with the network off, and its expected output appeared. The script may not have touched the vulnerable code, so this is not a reproduction.
+- `script-unmatched`: it ran and the expected output did not appear. That does not mean the issue is absent.
+- `static-only`: nothing ran to a verdict. The reason is shown: no image, no runnable steps, the budget was spent, or the run could not finish. A finding that was never attempted shows as static-only, never as a script result.
 
 Only `shell` steps run, on a copy of the scanned folder, with the network off, memory and process limits and no environment variables. A step needs an expected output that is not written into the command itself. HTTP steps are static-only because they need a running app. A scan runs at most `ZERO_POC_MAX_RUNS` PoCs (default 3), each for at most `ZERO_POC_TIMEOUT_SEC` seconds (default 60, at most 300), and `ZERO_POC_MAX_TOTAL_SEC` seconds in all (default 300).
 
