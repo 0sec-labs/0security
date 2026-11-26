@@ -122,7 +122,7 @@ Only this file sets the defaults. A project settings file cannot, so a repositor
 
 Settings resolve in layers, highest first: project, global, default. When settings load, 0 drops unknown keys and resets invalid values to the default.
 
-A project cannot change these settings: `analyticsLevel`, `diagnosticReporting`, `updatePolicy`, onboarding state, development source updates, `executionProfile` and `approvals`.
+A project cannot change these settings: `analyticsLevel`, `diagnosticReporting`, `updatePolicy`, onboarding state, development source updates, `executionProfile`, `approvals`, `archiveIdleDays` and `findingsContext`.
 
 `0security config set --from-file <file>` refuses to change these security-sensitive settings unless you pass `--yes`: `executionProfile`, `allowModelSelfExtension`, `allowDevSourceUpdates`, `allowSubagentPeerMessaging` and `allowSubagentOperatorMessaging`. It prints each rejected change.
 
@@ -130,6 +130,7 @@ Two conversation settings are worth knowing:
 
 - `titleInstructions` guides automatic thread titles, for example a language or style. It takes up to 500 characters.
 - `archiveIdleDays` archives saved threads idle for that many days when the app starts. Use `0` for off and at most `365`. It is global only.
+- `findingsContext` is the path of your business context file. Commands that order findings use it unless you pass `--context`. It is global only. See [Rank findings by what matters to you](/findings/#rank-findings-by-what-matters-to-you).
 
 ### Ask before running commands
 

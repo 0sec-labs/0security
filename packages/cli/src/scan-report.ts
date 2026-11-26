@@ -23,6 +23,8 @@ export interface ScanOutcome {
   target: string;
   /** Explicit operator declarations, used for work ordering only. */
   businessContext?: BusinessContext;
+  /** The repository its per-repository rules were matched against. */
+  businessRepository?: string;
   /** Where the scanned code was on this machine (the folder, and its real path); finding paths are made relative to it. */
   roots?: readonly string[];
   threadId: string;
@@ -186,7 +188,7 @@ const compareRank = (a: Finding, b: Finding): number => rank(a.severity) - rank(
 const byRank = (findings: readonly Finding[]): Finding[] => orderByScope(findings, (a, b) => compareFindingsByBusinessContext(a, b) || compareRank(a, b));
 
 export function applyBusinessContext<T extends Finding>(outcome: ScanOutcome, findings: readonly T[]): T[] {
-  return outcome.businessContext ? findings.map(finding => labelBusinessContext(finding, outcome.businessContext!, outcome.target)) : [...findings];
+  return outcome.businessContext ? findings.map(finding => labelBusinessContext(finding, outcome.businessContext!, outcome.target, outcome.businessRepository)) : [...findings];
 }
 
 /** The shared report type the exporter understands (md, sarif, html, pdf), with this scan's facts on top of the stored rows. */

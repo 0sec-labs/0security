@@ -187,6 +187,7 @@ Add `--allow-partial` when a partial scan should not fail the job. The exit code
 | `--templates <path>` | — | With --target-url: a Nuclei template file or folder to run instead of the templates Nuclei has installed. 0 never downloads templates |
 | `--rules <file-or-folder>` | — | Semgrep or OpenGrep rules for the pre-pass (a file or a folder); repeat for several. Replaces the default rules and needs --scanner semgrep or opengrep. Rules are never read from the scanned folder unless you name them |
 | `--business-context <file>` | — | Operator-owned JSON tags and notes for investigation and work ordering; keeps technical severity unchanged |
+| `--repository <name>` | — | Repository name the business context rules are matched against (default: the git remote of the scanned folder) |
 | `--context <file>` | — | Give the scan this file (a threat model, notes on who may do what) as lower-priority background; repeat for several. It can steer what the scan weighs but cannot change how it works |
 | `--policy <file-or-folder>` | — | Check the code against these Markdown policies (a file or a folder of .md files) and report pass or fail for each; repeat for several. Runs the policy-check skill |
 | `--org-policy <folder>` | — | An organisation's policy folder: evaluated first, and wins when a --policy says otherwise or uses the same id; repeat for several |
@@ -668,6 +669,8 @@ Free-text descriptions are left out unless you pass `--include-description`. The
 | --- | --- | --- |
 | `--include-description` | — | Include each finding's free-text description (can quote code or secrets) |
 | `--output <path>` | — | Write the share-safe report to a file instead of stdout |
+| `--context <file>` | — | Business context file (JSON): order the findings by what matters to you. The reasons are not written to the share-safe copy. Defaults to the file set with `0security config set findingsContext` |
+| `--repository <name>` | — | Repository name the context rules are matched against (default: the git remote of the current folder) |
 
 ### doctor
 
@@ -1778,7 +1781,7 @@ Browse and manage persisted findings
 
 Triage (`new`, `accepted`, `suppressed`) and verification are separate states. Accepting a finding records your decision; reproduction and fix verification are separate steps.
 
-Subcommands: [list](#findings-list) · [show](#findings-show) · [update](#findings-update) · [import](#findings-import) · [fix](#findings-fix) · [burndown](#findings-burndown) · [verify](#findings-verify) · [metrics](#findings-metrics) · [rollup](#findings-rollup) · [evidence](#findings-evidence) · [export-fixes](#findings-export-fixes) · [report-draft](#findings-report-draft) · [reproduce](#findings-reproduce) · [accept](#findings-accept) · [suppress](#findings-suppress) · [reopen](#findings-reopen) · [export](#findings-export) · [keys](#findings-keys) · [upload](#findings-upload) · [issues](#findings-issues) · [reports](#findings-reports).
+Subcommands: [list](#findings-list) · [show](#findings-show) · [update](#findings-update) · [import](#findings-import) · [fix](#findings-fix) · [burndown](#findings-burndown) · [verify](#findings-verify) · [metrics](#findings-metrics) · [rollup](#findings-rollup) · [evidence](#findings-evidence) · [export-fixes](#findings-export-fixes) · [report-draft](#findings-report-draft) · [reproduce](#findings-reproduce) · [context](#findings-context) · [accept](#findings-accept) · [suppress](#findings-suppress) · [reopen](#findings-reopen) · [export](#findings-export) · [keys](#findings-keys) · [upload](#findings-upload) · [issues](#findings-issues) · [reports](#findings-reports).
 
 | Option | Registered default | Description |
 | --- | --- | --- |
@@ -1789,7 +1792,8 @@ Subcommands: [list](#findings-list) · [show](#findings-show) · [update](#findi
 | `--status <status>` | — | Filter by status: discovered, verified, confirmed, scored, reported, fixed, false-positive |
 | `--triage <triage>` | — | Filter by triage: new, accepted, suppressed |
 | `--expiring <days>` | — | Only accepted risks that expire within this many days |
-| `--context <file>` | — | Business context file (JSON): order findings by what matters to you, with the reason shown. See the docs |
+| `--context <file>` | — | Business context file (JSON): order findings by what matters to you, with the reason shown. Defaults to the file set with `0security config set findingsContext` |
+| `--repository <name>` | — | Repository name the context rules are matched against (default: the git remote of the current folder) |
 | `--scope <scope>` | — | in: findings not labelled out of scope; out: only those the declared scope (0security scan --scope) labelled out of scope; all (default): both, each labelled |
 | `--limit <n>` | `50` | Max findings/groups to show |
 | `--all` | `false` | Show raw finding rows instead of grouped fingerprints |
@@ -1818,7 +1822,8 @@ An accepted risk shows `accepted until <date>`. Once that date passes, the findi
 | `--status <status>` | — | Filter by status: discovered, verified, confirmed, scored, reported, fixed, false-positive |
 | `--triage <triage>` | — | Filter by triage: new, accepted, suppressed |
 | `--expiring <days>` | — | Only accepted risks that expire within this many days |
-| `--context <file>` | — | Business context file (JSON): order findings by what matters to you, with the reason shown. See the docs |
+| `--context <file>` | — | Business context file (JSON): order findings by what matters to you, with the reason shown. Defaults to the file set with `0security config set findingsContext` |
+| `--repository <name>` | — | Repository name the context rules are matched against (default: the git remote of the current folder) |
 | `--scope <scope>` | — | in: findings not labelled out of scope; out: only those the declared scope (0security scan --scope) labelled out of scope; all (default): both, each labelled |
 | `--limit <n>` | — | Max findings/groups to show |
 
@@ -1859,7 +1864,7 @@ A matching finding shows `Operator business context (unverified): ranked higher 
 
 `scan --business-context context.json` passes the declarations as labelled background, orders JSON/Markdown/HTML/PDF/SARIF reports within scope groups, and stores the separate declaration with each local finding. The JSON finding and SARIF result property are named `businessContext` and include `provenance: "operator"`, repository, tags, notes, shift, work score and rationale. Later list, burndown and retained exports use the stored labels without reopening the file. The console shows the declaration separately and offers a **Business priority** sort; **Severity** still sorts technical severity. A scan's ordinary model finding saves cannot set the operator declaration field.
 
-0 reads context only from the path explicitly passed. The file is limited to 64 KB; it is never discovered automatically in a scanned repository. Use one file per scanned repository. Stored labels carry that scan's repository label; they do not establish a global multi-repository policy. Without a stored declaration or an explicit list context, ordering remains technical severity. `scan --context` continues to mean prose background and is a separate option.
+0 reads context only from the path explicitly passed. The file is limited to 64 KB; it is never discovered automatically in a scanned repository. One file can hold rules for several repositories under `repositories`. Stored labels carry that scan's repository label. A file you pass to `findings list` or another command, or set with `findingsContext`, is applied when you run the command and overrides a stored label. See [Rank findings by what matters to you](/findings/#rank-findings-by-what-matters-to-you). Without a stored declaration or an explicit list context, ordering remains technical severity. `scan --context` continues to mean prose background and is a separate option.
 
 | Option | Registered default | Description |
 | --- | --- | --- |
@@ -1890,6 +1895,8 @@ Show detailed information about a finding
 | Option | Registered default | Description |
 | --- | --- | --- |
 | `--db-path <path>` | — | Path to SQLite database |
+| `--context <file>` | — | Business context file (JSON): order findings by what matters to you, with the reason shown. Defaults to the file set with `0security config set findingsContext` |
+| `--repository <name>` | — | Repository name the context rules are matched against (default: the git remote of the current folder) |
 | `--json` | — | Print JSON |
 | `--format <format>` | — | Output: text or json Choices: text, json. |
 
@@ -2170,6 +2177,8 @@ The JSON has the schema `0.fix-outcomes.v1`. A field the run could not know is `
 | `--repo <dir>` | — | Only fixes recorded for this git repository (default: all) |
 | `--since <date>` | — | Only fixes recorded on or after this date, like 2026-01-31 |
 | `--check-merged` | — | Ask the code host whether each pull request was merged, closed or edited (one request each) |
+| `--context <file>` | — | Business context file (JSON): order findings by what matters to you, with the reason shown. Defaults to the file set with `0security config set findingsContext` |
+| `--repository <name>` | — | Repository name the context rules are matched against (default: the git remote of the current folder) |
 | `-o, --output <dir>` | — | Write fix-outcomes.md and fix-outcomes.json into this folder instead of printing |
 | `--format <format>` | `markdown` | Printed output: markdown or json Choices: markdown, json. |
 
@@ -2212,6 +2221,8 @@ The draft says that a person must review it and submit it through the authority'
 | `--facts <file>` | — | JSON file with the same facts (camelCase keys, for example affectedVersions); flags win |
 | `-o, --output <file>` | — | Write to a file instead of stdout |
 | `--db-path <path>` | — | Path to SQLite database |
+| `--context <file>` | — | Business context file (JSON): add why the finding ranks where it does. Defaults to the file set with `0security config set findingsContext` |
+| `--repository <name>` | — | Repository name the context rules are matched against (default: the git remote of the current folder) |
 
 #### findings evidence
 
@@ -2294,6 +2305,8 @@ Exit codes:
 | `--fingerprint <prefix>` | — | Only findings whose fingerprint or id starts with this |
 | `--limit <n>` | — | Attempt at most this many findings in this run; the next run continues with the rest |
 | `--repo <dir>` | — | Git repository the findings are in (default: the current directory) |
+| `--context <file>` | — | Business context file (JSON): fix what matters most to you first, with the reason shown. Defaults to the file set with `0security config set findingsContext` |
+| `--repository <name>` | — | Repository name the context rules are matched against (default: the git remote of the current folder) |
 | `--base <branch>` | — | Branch to start from and open pull requests against (default: the remote's default branch) |
 | `--test <command>` | — | Check to run after each change; repeat for several. A failing check makes the pull request a draft |
 | `--ready` | — | Open pull requests ready for review even when no --test ran. Without it, a pull request with no checks is a draft |
@@ -2412,6 +2425,8 @@ The JSON report keeps the `--since` comparison in `trend` and adds a chronologic
 CSV is a stable long-form table: `schema,snapshot_at,scope,dimension,label,count,repositories,sources`. `scope=current` means the view assembled from the latest snapshot per repository; `scope=snapshot` means an actual captured timestamp. The final two columns contain JSON arrays. These JSON/CSV exports do not establish a remote dashboard connection. Verify DefectDojo or Dependency-Track importers separately using their supported scanner formats.
 
 
+With a business context (`--context` or the `findingsContext` setting) the rollup adds a list of the open findings to look at first. It matches rules for a repository against the repository name of each row, so pass `--repository acme/api` to name a database's repository in full. The counts by severity stay real. Rollup export files carry no file paths, so only findings read from a database or a SARIF file match rules that have a `match`.
+
 | Argument | Required | Description |
 | --- | --- | --- |
 | `inputs` | No |  |
@@ -2423,9 +2438,53 @@ CSV is a stable long-form table: `schema,snapshot_at,scope,dimension,label,count
 | `--owners <file>` | — | JSON file mapping repository names to owners, used when a finding has no assignee |
 | `--labels <file>` | — | JSON or YAML file mapping repository names or globs (or path: globs) to a team and tier, shown as extra breakdowns |
 | `--since <file>` | — | An earlier rollup export to compare with: shows findings opened and fixed since then |
-| `--repository <name>` | — | Repository name for findings read from a database or a SARIF file (default: the scan target's folder name, or the SARIF's repository) |
+| `--repository <name>` | — | Repository name for findings read from a database or a SARIF file (default: the scan target's folder name, or the SARIF's repository). Rules for a repository in the context file match this name |
+| `--context <file>` | — | Business context file (JSON): also list the open findings to look at first, ordered with it. Defaults to the file set with `0security config set findingsContext` |
 | `--format <format>` | — | Output: text, json, html or csv Choices: text, json, html, csv. |
 | `-o, --output <file>` | — | Write the rollup to a file instead of stdout |
+
+#### findings context
+
+Work with the business context file that orders findings
+
+```text
+0security findings context
+```
+
+```bash
+0security findings context check context.json
+```
+
+Subcommands: [check](#findings-context-check).
+
+#### findings context check
+
+List which rules of a context file match which current findings, and which match nothing
+
+```text
+0security findings context check [options] <file>
+```
+
+```bash
+0security findings context check context.json
+0security findings context check context.json --repository acme/api --json
+```
+
+Run it after you write or change a business context file. It reads the file you name and the findings in your databases, and changes nothing. For each rule it shows how many current findings match and gives up to three examples. Findings that are fixed, marked false positive, accepted or suppressed are left out.
+
+It exits 0 when every rule that applies matches a finding, 1 when a rule matches nothing, and 2 when the file is not valid. A rule under a repository that is not the current one is listed as not applied, and is not counted as matching nothing. The file format is in [Rank findings by what matters to you](/findings/#rank-findings-by-what-matters-to-you).
+
+| Argument | Required | Description |
+| --- | --- | --- |
+| `file` | Yes |  |
+
+| Option | Registered default | Description |
+| --- | --- | --- |
+| `--db-path <path>` | — | Path to SQLite database |
+| `--scan <scanId>` | — | Only the findings of this scan |
+| `--repository <name>` | — | Repository name the context rules are matched against (default: the git remote of the current folder) |
+| `--json` | — | Print JSON |
+| `--format <format>` | — | Output: text or json Choices: text, json. |
 
 #### findings reproduce
 
@@ -2631,6 +2690,8 @@ Export selected findings, or a whole scan, as `json`, `md`, `sarif`, `html` or `
 | `--status <status>` | — | With no IDs: only this status |
 | `--triage <triage>` | — | With no IDs: only this triage state |
 | `--db-path <path>` | — | Path to SQLite database |
+| `--context <file>` | — | Business context file (JSON): order findings by what matters to you, with the reason shown. Defaults to the file set with `0security config set findingsContext` |
+| `--repository <name>` | — | Repository name the context rules are matched against (default: the git remote of the current folder) |
 | `--json` | — | Print the result of writing a file as JSON |
 
 #### findings keys

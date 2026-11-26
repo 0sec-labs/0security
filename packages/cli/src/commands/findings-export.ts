@@ -5,12 +5,16 @@ import { osecDB, resolveOsecRunStorage } from "@0/engine/storage";
 import { findingDatabasePaths } from "../finding-focus.js";
 import { emptyFindingSnapshot, mergeFindingSnapshots, retainedFindingSnapshot, retainedScanSnapshot } from "../web/report-artifacts.js";
 import { finishWithError, UsageError } from "./output.js";
+import { compareFindingsByBusinessContext } from "@0/engine/shared";
+import { CONTEXT_FLAG_HELP, contextOptionsOf, loadContextFor, REPOSITORY_FLAG_HELP, withBusinessContext, type LoadDeps } from "../business-context-load.js";
 
 export interface FindingsExportDeps {
   out(text: string): void;
   err(text: string): void;
   writeBytes(path: string, bytes: Uint8Array): void;
   writeStdout(bytes: Uint8Array): void;
+  /** Where settings and the git remote come from; tests replace it. */
+  contextLoad?: LoadDeps;
 }
 const defaults: FindingsExportDeps = {
   out: text => process.stdout.write(`${text}\n`),
@@ -18,7 +22,7 @@ const defaults: FindingsExportDeps = {
   writeBytes: (path, bytes) => writeFileSync(path, bytes, { mode: 0o600 }),
   writeStdout: bytes => { process.stdout.write(bytes); },
 };
-interface ExportOptions { severity?: string; category?: string; status?: string; triage?: string; limit?: string; scan?: string; format: string; output?: string; dbPath?: string; json?: boolean }
+interface ExportOptions { severity?: string; category?: string; status?: string; triage?: string; limit?: string; scan?: string; format: string; output?: string; dbPath?: string; json?: boolean; context?: string; repository?: string }
 
 export async function runFindingsExport(ids: string[], options: ExportOptions, deps: FindingsExportDeps = defaults): Promise<void> {
   try {
@@ -26,6 +30,8 @@ export async function runFindingsExport(ids: string[], options: ExportOptions, d
     if (!isReportExportFormat(format)) throw new UsageError("--format must be one of: json, md, sarif, html, pdf.");
     if (ids.length && options.scan) throw new UsageError("Use finding IDs or --scan, not both.");
     if (format === "pdf" && !options.output) throw new UsageError("PDF is binary; supply -o <file>.");
+    // Read the context before any database is opened: a bad file changes nothing.
+    const loaded = await loadContextFor(options, deps.contextLoad);
     const dbPath = options.dbPath ?? (options.scan ? resolveOsecRunStorage({ runId: options.scan, resume: true }).dbPath : undefined);
     let report;
     if (options.scan) report = retainedScanSnapshot(options.scan, dbPath);
@@ -57,6 +63,8 @@ export async function runFindingsExport(ids: string[], options: ExportOptions, d
       if (!snapshots.length && ids.length) throw new Error("No findings to export.");
       report = !snapshots.length ? emptyFindingSnapshot() : snapshots.length === 1 ? snapshots[0]! : mergeFindingSnapshots(snapshots);
     }
+    // Order by what matters to you and say why, in every format. Severity is never changed.
+    if (loaded) report = { ...report, findings: withBusinessContext(report.findings, loaded).sort(compareFindingsByBusinessContext) };
     const artifact = await exportReport(report, format, options.scan ? `0-scan-${options.scan}` : "0-findings");
     if (options.output) {
       deps.writeBytes(options.output, artifact.body);
@@ -76,10 +84,12 @@ export function registerFindingsExportCommand(parent: Command, deps: FindingsExp
     .option("--status <status>", "With no IDs: only this status")
     .option("--triage <triage>", "With no IDs: only this triage state")
     .option("--db-path <path>", "Path to SQLite database")
+    .option("--context <file>", CONTEXT_FLAG_HELP)
+    .option("--repository <name>", REPOSITORY_FLAG_HELP)
     .option("--json", "Print the result of writing a file as JSON")
     .action(async (ids: string[], options: ExportOptions, command: Command) => {
       // `findings` declares --db-path and --scan too; Commander may bind them to the parent.
       const merged = { ...command.parent?.opts(), ...command.opts() } as ExportOptions;
-      await runFindingsExport(ids, { ...options, scan: options.scan ?? merged.scan, dbPath: options.dbPath ?? merged.dbPath }, deps);
+      await runFindingsExport(ids, { ...options, ...contextOptionsOf(options, command), scan: options.scan ?? merged.scan, dbPath: options.dbPath ?? merged.dbPath }, deps);
     });
 }

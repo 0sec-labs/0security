@@ -43,6 +43,82 @@ Each finding has a stable link at `/findings/<fingerprint>`.
 
 A group is one flaw. Groups that cite the same file, the same category and overlapping lines are shown as one, with a count of how many were merged. Groups with a different triage state stay apart.
 
+## Rank findings by what matters to you
+
+A business context file tells 0 which code matters most to you. Commands use it to order findings and to say why. A scan cannot know your business, so you write the file.
+
+Create a JSON file anywhere outside the repository you scan:
+
+```json
+{
+  "entries": [
+    { "match": "src/payments/**", "tags": ["payments", "personal-data"], "note": "card checkout" },
+    { "match": "services/admin/**", "tags": ["internal-only"] },
+    { "match": "examples/**", "tags": ["non-production"] }
+  ],
+  "repositories": {
+    "acme/api": [{ "match": "src/auth/**", "tags": ["internet-facing"] }],
+    "acme/docs-*": [{ "tags": ["non-production"] }]
+  }
+}
+```
+
+Pass it with `--context`, or set it once for every command:
+
+```bash
+0security findings list --context context.json
+0security config set findingsContext ~/security/context.json
+```
+
+`--context` wins over the setting. A project cannot set `findingsContext`, only you can, and the web console shows no field for it.
+
+### What the file says
+
+An entry has a `match`, a list of `tags` and an optional `note`. The `match` is a path or glob such as `src/payments/**` or `services/billing`, tested against the file the finding cites. An entry with no `match` covers every finding. A finding with no file gets only entries with no `match`.
+
+The `repositories` object holds rules for named repositories. A key is a name or glob such as `acme/api` or `acme/docs-*`. Its rules apply when the repository matches. The repository is the `--repository` value, or else the name in the git remote of the current folder. For `0security scan` it is the git remote of the scanned folder. For `findings rollup` it is the repository of each row. Without a known repository only the top-level `entries` apply.
+
+Each tag moves a finding by steps of severity:
+
+| Tag | Steps |
+| --- | --- |
+| `internet-facing` | +1 |
+| `payments` | +1 |
+| `personal-data` | +1 |
+| `operationally-critical` | +1 |
+| `internal-only` | -1 |
+| `non-production` | -2 |
+
+Steps add up and the total stays between -2 and +2. A medium finding with `payments` and `personal-data` ranks with the critical ones. Set `weights`, for example `"weights": { "payments": 2 }`, to change a tag. A weight is a whole number from -2 to 2.
+
+### Where it applies
+
+These use the file and print or store why each finding moved:
+
+- `findings list` and `findings show`. A file you name overrides a label a scan stored.
+- `findings export` in every format, and `reports export`
+- `findings burndown`, which fixes in the new order
+- `findings export-fixes` and `findings report-draft`
+- `findings rollup`, which adds a list of the open findings to look at first
+- `scan`, with `--business-context <file>`, because `scan --context` is already the threat model. The scan stores a `businessContext` label with each finding. The file is also given to the scan as background, so a file set with `findingsContext` reaches the scan too.
+- The Findings page, which shows the declaration on a finding and offers the **Business priority** sort
+
+### What it does not do
+
+The context changes the order and adds an explanation. It never changes a finding's severity, hides a finding, changes what a fix may do, or changes `--fail-on` and the exit code of a scan. Those use the real severity. Counts by severity are real counts. A share-safe copy from `reports export` is ordered, but it leaves out the reasons, because they describe your business.
+
+0 reads the file only from the path you name, never from a repository you scan. The file is at most 64 KB, with at most 500 entries. Matching uses globs only, never regular expressions.
+
+0 does not match on service names, assets or finding categories, only on paths and repository names. The Findings page ordering is checked by model tests, not by a browser run.
+
+### Check the file
+
+```bash
+0security findings context check context.json
+```
+
+This lists which rule matches which current findings and which rules match nothing. It exits 0 when every rule that applies matches a finding, 1 when a rule matches nothing and 2 when the file is not valid. A rule for another repository is shown but not counted. Pass `--repository` to check one repository's rules.
+
 ## Finding categories
 
 Each finding has one category. It names the kind of flaw, not where it showed up. The category is the SARIF rule id, the value `--category` filters on, and part of the issue label.

@@ -19,6 +19,7 @@ import { connect, DEFAULT_SCAN_MODEL } from "./scan.js";
 import { defaultFixDeps, runFix, type FixDeps, type FixOptions, type FixOutcome } from "./fix.js";
 import { shortFindingId } from "../finding-id.js";
 import { finishWithError, UsageError } from "./output.js";
+import { contextOptionsOf, labelFor, loadContextFor, REPOSITORY_FLAG_HELP, type LoadDeps } from "../business-context-load.js";
 
 const exec = promisify(execFile);
 const SEVERITIES = ["critical", "high", "medium", "low", "info"] as const;
@@ -59,6 +60,8 @@ export interface BurndownDeps {
   store: StateStore;
   now(): number;
   err(text: string): void;
+  /** Where settings and the git remote come from; tests replace it. */
+  contextLoad?: LoadDeps;
 }
 
 export interface BurndownOptions extends ConsoleTransportOptions {
@@ -66,6 +69,8 @@ export interface BurndownOptions extends ConsoleTransportOptions {
   severity?: string; category?: string; tool?: string; source?: string; scan?: string; limit?: string; fingerprint?: string;
   concurrency: string; budget: string; perFix: string; maxConsecutiveFailures: string; maxFailureRate: string; minAttempts?: string;
   dryRun?: boolean; history?: boolean; retry?: boolean;
+  /** Business context file and the repository name its per-repository rules are matched against. */
+  context?: string; repository?: string;
 }
 
 export interface BurndownReport {
@@ -171,7 +176,10 @@ export async function runBurndown(options: BurndownOptions, deps: BurndownDeps):
   let repo: string;
   try { repo = await deps.repoRoot(resolve(options.repo ?? process.cwd())); }
   catch { throw new UsageError("Run this inside the git repository the findings are in, or pass --repo."); }
-  const selected = selectCandidates(deps.listCandidates(options.dbPath), options);
+  // Read the context before any finding: a bad file changes nothing. It overrides a label stored by an earlier scan.
+  const loaded = await loadContextFor(options, { folder: repo, ...deps.contextLoad });
+  const candidates = deps.listCandidates(options.dbPath).map(c => (loaded ? { ...c, businessContext: labelFor(loaded, c) } : c));
+  const selected = selectCandidates(candidates, options);
   const state = deps.store.load();
   const started = deps.now();
   const runId = randomUUID();
@@ -302,6 +310,8 @@ export function registerBurndownCommand(program: Command, fixDeps: FixDeps = def
     .option("--fingerprint <prefix>", "Only findings whose fingerprint or id starts with this")
     .option("--limit <n>", "Attempt at most this many findings in this run; the next run continues with the rest")
     .option("--repo <dir>", "Git repository the findings are in (default: the current directory)")
+    .option("--context <file>", "Business context file (JSON): fix what matters most to you first, with the reason shown. Defaults to the file set with `0security config set findingsContext`")
+    .option("--repository <name>", REPOSITORY_FLAG_HELP)
     .option("--base <branch>", "Branch to start from and open pull requests against (default: the remote's default branch)")
     .option("--test <command>", "Check to run after each change; repeat for several. A failing check makes the pull request a draft", collect)
     .option("--ready", "Open pull requests ready for review even when no --test ran. Without it, a pull request with no checks is a draft")
@@ -321,7 +331,9 @@ export function registerBurndownCommand(program: Command, fixDeps: FixDeps = def
     .option("--history", "List the metrics row of each earlier run and exit")
     .addOption(new Option("--format <format>", "Output: text or json").choices(["text", "json"])))
     .addHelpText("after", "\nNothing is pushed to the base branch and nothing is merged. The outcome per finding is kept in ~/.0/burndown.json: running it again skips findings that already have a pull request and continues with the rest.\nExit codes: 0 every attempted fix is verified (or nothing to do), 1 a fix failed or the run stopped on failures, 2 usage error, 3 the total budget ran out.")
-    .action(async (options: BurndownOptions) => {
+    .action(async (raw: BurndownOptions, command: Command) => {
+      // `findings` declares --context and --repository too, and Commander may bind them to the parent.
+      const options = { ...raw, ...contextOptionsOf(raw, command) };
       const json = options.format === "json";
       const err = (text: string) => process.stderr.write(`${text}\n`);
       try {

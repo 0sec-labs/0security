@@ -674,7 +674,10 @@ Options:
   --triage <triage>                 Filter by triage: new, accepted, suppressed
   --expiring <days>                 Only accepted risks that expire within this many days
   --context <file>                  Business context file (JSON): order findings by what matters to
-                                    you, with the reason shown. See the docs
+                                    you, with the reason shown. Defaults to the file set with
+                                    `0security config set findingsContext`
+  --repository <name>               Repository name the context rules are matched against (default:
+                                    the git remote of the current folder)
   --scope <scope>                   in: findings not labelled out of scope; out: only those the
                                     declared scope (0security scan --scope) labelled out of scope;
                                     all (default): both, each labelled
@@ -712,6 +715,7 @@ Commands:
   reproduce [options] <id>          Experimental: run a finding's proposed steps against a local
                                     copy of the app in a container with the network off, and record
                                     the result
+  context                           Work with the business context file that orders findings
   help [command]                    display help for command
 
 ### 0security findings accept (hidden)
@@ -747,6 +751,11 @@ Options:
                                   continues with the rest
   --repo <dir>                    Git repository the findings are in (default: the current
                                   directory)
+  --context <file>                Business context file (JSON): fix what matters most to you first,
+                                  with the reason shown. Defaults to the file set with `0security
+                                  config set findingsContext`
+  --repository <name>             Repository name the context rules are matched against (default:
+                                  the git remote of the current folder)
   --base <branch>                 Branch to start from and open pull requests against (default: the
                                   remote's default branch)
   --test <command>                Check to run after each change; repeat for several. A failing
@@ -783,6 +792,29 @@ Options:
   --db-path <path>                Control database of the local engine to attach to
   -h, --help                      display help for command
 
+### 0security findings context
+Usage: 0security findings context [options] [command]
+
+Work with the business context file that orders findings
+
+Options:
+  -h, --help      display help for command
+
+Commands:
+  help [command]  display help for command
+
+### 0security findings context check (hidden)
+Usage: 0security findings context check [options] <file>
+
+List which rules of a context file match which current findings, and which match nothing
+
+Options:
+  --db-path <path>     Path to SQLite database
+  --repository <name>  Repository name the context rules are matched against (default: the git
+                       remote of the current folder)
+  --format <format>    Output: text or json (choices: "text", "json")
+  -h, --help           display help for command
+
 ### 0security findings evidence
 Usage: 0security findings evidence [options] <folder>
 
@@ -816,6 +848,11 @@ Options:
   --status <status>      With no IDs: only this status
   --triage <triage>      With no IDs: only this triage state
   --db-path <path>       Path to SQLite database
+  --context <file>       Business context file (JSON): order findings by what matters to you, with
+                         the reason shown. Defaults to the file set with `0security config set
+                         findingsContext`
+  --repository <name>    Repository name the context rules are matched against (default: the git
+                         remote of the current folder)
   --json                 Print the result of writing a file as JSON
   -h, --help             display help for command
 
@@ -826,15 +863,20 @@ Report what happened to the fixes 0 proposed, per repository: counts, pull reque
 and, on request, merged or closed
 
 Options:
-  --repo <dir>        Only fixes recorded for this git repository (default: all)
-  --since <date>      Only fixes recorded on or after this date, like 2026-01-31
-  --check-merged      Ask the code host whether each pull request was merged, closed or edited (one
-                      request each)
-  -o, --output <dir>  Write fix-outcomes.md and fix-outcomes.json into this folder instead of
-                      printing
-  --format <format>   Printed output: markdown or json (choices: "markdown", "json", default:
-                      "markdown")
-  -h, --help          display help for command
+  --repo <dir>         Only fixes recorded for this git repository (default: all)
+  --since <date>       Only fixes recorded on or after this date, like 2026-01-31
+  --check-merged       Ask the code host whether each pull request was merged, closed or edited (one
+                       request each)
+  --context <file>     Business context file (JSON): order findings by what matters to you, with the
+                       reason shown. Defaults to the file set with `0security config set
+                       findingsContext`
+  --repository <name>  Repository name the context rules are matched against (default: the git
+                       remote of the current folder)
+  -o, --output <dir>   Write fix-outcomes.md and fix-outcomes.json into this folder instead of
+                       printing
+  --format <format>    Printed output: markdown or json (choices: "markdown", "json", default:
+                       "markdown")
+  -h, --help           display help for command
 
 ### 0security findings fix
 Usage: 0security findings fix [options] <finding>
@@ -992,7 +1034,10 @@ Options:
   --triage <triage>      Filter by triage: new, accepted, suppressed
   --expiring <days>      Only accepted risks that expire within this many days
   --context <file>       Business context file (JSON): order findings by what matters to you, with
-                         the reason shown. See the docs
+                         the reason shown. Defaults to the file set with `0security config set
+                         findingsContext`
+  --repository <name>    Repository name the context rules are matched against (default: the git
+                         remote of the current folder)
   --scope <scope>        in: findings not labelled out of scope; out: only those the declared scope
                          (0security scan --scope) labelled out of scope; all (default): both, each
                          labelled
@@ -1056,6 +1101,11 @@ Options:
                                     affectedVersions); flags win
   -o, --output <file>               Write to a file instead of stdout
   --db-path <path>                  Path to SQLite database
+  --context <file>                  Business context file (JSON): add why the finding ranks where it
+                                    does. Defaults to the file set with `0security config set
+                                    findingsContext`
+  --repository <name>               Repository name the context rules are matched against (default:
+                                    the git remote of the current folder)
   -h, --help                        display help for command
 
 ### 0security findings reports (hidden)
@@ -1081,6 +1131,11 @@ Arguments:
 Options:
   --include-description  Include each finding's free-text description (can quote code or secrets)
   --output <path>        Write the share-safe report to a file instead of stdout
+  --context <file>       Business context file (JSON): order the findings by what matters to you.
+                         The reasons are not written to the share-safe copy. Defaults to the file
+                         set with `0security config set findingsContext`
+  --repository <name>    Repository name the context rules are matched against (default: the git
+                         remote of the current folder)
   -h, --help             display help for command
 
 ### 0security findings reports import (hidden)
@@ -1134,7 +1189,11 @@ Options:
   --since <file>       An earlier rollup export to compare with: shows findings opened and fixed
                        since then
   --repository <name>  Repository name for findings read from a database or a SARIF file (default:
-                       the scan target's folder name, or the SARIF's repository)
+                       the scan target's folder name, or the SARIF's repository). Rules for a
+                       repository in the context file match this name
+  --context <file>     Business context file (JSON): also list the open findings to look at first,
+                       ordered with it. Defaults to the file set with `0security config set
+                       findingsContext`
   --format <format>    Output: text, json, html or csv (choices: "text", "json", "html", "csv")
   -o, --output <file>  Write the rollup to a file instead of stdout
   -h, --help           display help for command
@@ -1145,12 +1204,17 @@ Usage: 0security findings show [options] <id>
 Show detailed information about a finding
 
 Arguments:
-  id                 Finding ID (full or prefix)
+  id                   Finding ID (full or prefix)
 
 Options:
-  --db-path <path>   Path to SQLite database
-  --format <format>  Output: text or json (choices: "text", "json")
-  -h, --help         display help for command
+  --db-path <path>     Path to SQLite database
+  --context <file>     Business context file (JSON): order findings by what matters to you, with the
+                       reason shown. Defaults to the file set with `0security config set
+                       findingsContext`
+  --repository <name>  Repository name the context rules are matched against (default: the git
+                       remote of the current folder)
+  --format <format>    Output: text or json (choices: "text", "json")
+  -h, --help           display help for command
 
 ### 0security findings suppress (hidden)
 Usage: 0security findings suppress [options] <id>
@@ -1631,6 +1695,8 @@ Options:
                              them
   --business-context <file>  Operator-owned JSON tags and notes for investigation and work ordering;
                              keeps technical severity unchanged
+  --repository <name>        Repository name the business context rules are matched against
+                             (default: the git remote of the scanned folder)
   --context <file>           Give the scan this file (a threat model, notes on who may do what) as
                              lower-priority background; repeat for several. It can steer what the
                              scan weighs but cannot change how it works

@@ -38,7 +38,7 @@ export const GROUP_DESCRIPTIONS: Readonly<Record<string, string>> = {
 export const VISIBLE_SUBCOMMANDS: Readonly<Record<string, readonly string[]>> = {
   sbom: ["generate", "check", "licenses", "scan-models", "agent-config", "java-usage", "reachability"],
   evidence: ["verify"],
-  findings: ["list", "show", "update", "import", "fix", "burndown", "verify", "metrics", "rollup", "evidence", "export-fixes", "report-draft", "reproduce"],
+  findings: ["list", "show", "update", "import", "fix", "burndown", "verify", "metrics", "rollup", "evidence", "export-fixes", "report-draft", "reproduce", "context"],
   threads: ["list", "show", "send", "start", "stop"],
   sentinels: ["list", "run", "set"],
   skills: ["list", "add"],
