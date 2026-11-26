@@ -1,6 +1,6 @@
 ---
 title: Plan the cost of a large estate
-description: Cover many repositories with three layers: the pattern scanner everywhere, a model review of each pull request, and a full model audit for chosen repositories. Includes measured cost and time.
+description: "Cover many repositories with three layers: the pattern scanner everywhere, a model review of each pull request, and a full model audit for chosen repositories. Includes measured cost and time."
 ---
 
 Three layers keep the cost of a large estate predictable. The pattern scanner runs on everything. A model reviews the diff of each pull request. A full model audit runs only on the repositories you choose. This page shows how to set each up and what each cost in our measurements.

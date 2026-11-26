@@ -1,6 +1,6 @@
 ---
 title: Self-hosted trial guide
-description: Install 0 from this repository on Docker or Helm, connect Amazon Bedrock, check it with a five-minute smoke test, wire Bitbucket and GitHub, and run a 40,000-line benchmark.
+description: "Install 0 from this repository on Docker or Helm, connect Amazon Bedrock, check it with a five-minute smoke test, wire Bitbucket and GitHub, and run a 40,000-line benchmark."
 ---
 
 This guide takes an engineer from an empty machine to a working self-hosted 0 and a first benchmark. It covers Docker, Helm, Amazon Bedrock, Bitbucket and GitHub. It links to the full pages for each part and states what is not tested.
