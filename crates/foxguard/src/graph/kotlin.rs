@@ -34,7 +34,11 @@ fn first_kind<'t>(n: Node<'t>, kind: &str) -> Option<Node<'t>> {
 fn is_type_node(kind: &str) -> bool {
     matches!(
         kind,
-        "user_type" | "nullable_type" | "not_nullable_type" | "parenthesized_type"
+        "user_type"
+            | "nullable_type"
+            | "not_nullable_type"
+            | "parenthesized_type"
+            | "receiver_type"
     )
 }
 
