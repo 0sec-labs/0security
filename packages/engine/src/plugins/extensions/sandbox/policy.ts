@@ -26,6 +26,8 @@ export interface SandboxDecl {
   network: boolean;
   /** The extension may start programs from the system binary folders, not only the interpreter allowlist. */
   process: boolean;
+  /** Names of programs (not paths) the extension may start, resolved from PATH at launch. Narrower than `process`. */
+  programs: string[];
   readPaths: string[];
   writePaths: string[];
 }
@@ -41,10 +43,21 @@ const entry = z.string().min(1).max(256).superRefine((value, ctx) => {
 }).transform(value => value === WORKSPACE_TOKEN ? value : path.posix.normalize(value).replace(/^\.\//, "").replace(/\/$/, ""));
 const entries = z.array(entry).max(MAX_PATHS).default([]).transform(list => [...new Set(list)].sort());
 
+const programName = z.string().min(1).max(64).regex(/^[A-Za-z0-9][A-Za-z0-9._+-]*$/, "must be a bare program name such as curl, not a path");
+const programs = z.array(programName).max(MAX_PATHS).default([]).transform(list => [...new Set(list)].sort());
+
 /** Strict: an unknown key is an error, so a typo never silently widens or narrows a policy. */
-export const sandboxShape = z.object({ network: z.boolean().default(false), process: z.boolean().default(false), readPaths: entries, writePaths: entries }).strict();
+export const sandboxShape = z.object({ network: z.boolean().default(false), process: z.boolean().default(false), programs, readPaths: entries, writePaths: entries }).strict();
+
+/** Keys people reach for to limit the network by host. The OS layers cannot enforce them, so they are refused by name. */
+const HOST_FILTER_KEYS = new Set(["hosts", "allowHosts", "allowedHosts", "networkHosts", "domains", "allowDomains", "allowedDomains"]);
 
 export function parseSandboxDecl(raw: unknown): { ok: true; value: SandboxDecl } | { ok: false; error: string } {
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    const o = raw as Record<string, unknown>;
+    const hostKey = Object.keys(o).find(k => HOST_FILTER_KEYS.has(k));
+    if (hostKey || (o.network !== undefined && typeof o.network === "object" && o.network !== null)) return { ok: false, error: `sandbox: filtering the network by host is not supported (neither macOS Seatbelt nor Linux bubblewrap can enforce it). Set network to true or false` };
+  }
   const parsed = sandboxShape.safeParse(raw);
   if (parsed.success) return { ok: true, value: parsed.data };
   return { ok: false, error: parsed.error.issues.slice(0, 3).map(i => `sandbox${i.path.length ? `.${i.path.join(".")}` : ""}: ${i.message}`).join("; ") };
@@ -52,7 +65,7 @@ export function parseSandboxDecl(raw: unknown): { ok: true; value: SandboxDecl }
 
 /** One stable line per declaration: part of the approval, so a changed block asks the operator again. */
 export const sandboxLine = (s: SandboxDecl): string =>
-  `sandbox: network ${s.network ? "ON" : "off"}, programs ${s.process ? "system folders" : "interpreters only"}, read ${s.readPaths.join(",") || "-"}, write ${s.writePaths.join(",") || "-"}`;
+  `sandbox: network ${s.network ? "ON" : "off"}, programs ${s.process ? "system folders" : s.programs.length ? `interpreters + ${s.programs.join(",")}` : "interpreters only"}, read ${s.readPaths.join(",") || "-"}, write ${s.writePaths.join(",") || "-"}`;
 
 export interface ResolvedSandbox {
   extensionDir: string;
@@ -60,6 +73,8 @@ export interface ResolvedSandbox {
   workspace: string | null;
   network: boolean;
   process: boolean;
+  /** Names of the extra programs that may start (already resolved to execAllow). */
+  programs: string[];
   /** Absolute, symlink-resolved, inside the extension folder (or the workspace). */
   readPaths: string[];
   writePaths: string[];
@@ -111,16 +126,16 @@ export function resolveSandbox(input: ResolveInput): { ok: true; value: Resolved
     }
   }
   const execAllow = [...new Set(input.execAllow.filter(p => path.isAbsolute(p)))].sort();
-  return { ok: true, value: { extensionDir, scratchDir, workspace: input.workspace, network: input.decl.network, process: input.decl.process, readPaths: [...new Set(lists.readPaths)].sort(), writePaths: [...new Set(lists.writePaths)].sort(), execAllow, limits: input.limits ?? {}, ...homeOf(input.home) } };
+  return { ok: true, value: { extensionDir, scratchDir, workspace: input.workspace, network: input.decl.network, process: input.decl.process, programs: input.decl.programs, readPaths: [...new Set(lists.readPaths)].sort(), writePaths: [...new Set(lists.writePaths)].sort(), execAllow, limits: input.limits ?? {}, ...homeOf(input.home) } };
 }
 
 const homeOf = (home: string | undefined): { home?: string } => { try { return { home: fs.realpathSync(home ?? os.homedir()) }; } catch { return {}; } };
 
 /** The sandbox a run gets when the extension declares nothing (used by `ZERO_SANDBOX=require`): the strictest defaults. */
-export const DEFAULT_DECL: SandboxDecl = { network: false, process: false, readPaths: [], writePaths: [] };
+export const DEFAULT_DECL: SandboxDecl = { network: false, process: false, programs: [], readPaths: [], writePaths: [] };
 
 /** A short description for the per-run status line. */
 export function describeSandbox(backend: string, s: ResolvedSandbox): string {
   const extra = [s.readPaths.length ? `${s.readPaths.length} extra read path${s.readPaths.length === 1 ? "" : "s"}` : "", s.writePaths.length ? `${s.writePaths.length} extra write path${s.writePaths.length === 1 ? "" : "s"}` : ""].filter(Boolean);
-  return `${backend}, network ${s.network ? "ON" : "off"}, programs ${s.process ? "system folders" : "interpreters only"}, writes to a scratch folder${s.writePaths.length ? " and declared paths" : " only"}${extra.length ? `, ${extra.join(", ")}` : ""}`;
+  return `${backend}, network ${s.network ? "ON" : "off"}, programs ${s.process ? "system folders" : s.programs.length ? `interpreters + ${s.programs.join(", ")}` : "interpreters only"}, writes to a scratch folder${s.writePaths.length ? " and declared paths" : " only"}${extra.length ? `, ${extra.join(", ")}` : ""}`;
 }

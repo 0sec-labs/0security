@@ -62,6 +62,7 @@ export function nodePermissionArgs(policy: ResolvedSandbox, support: NodePermiss
   const args: string[] = [support.flag];
   for (const p of reads) args.push(`--allow-fs-read=${p}`);
   for (const p of writes) args.push(`--allow-fs-write=${p}`);
-  if (policy.process) args.push("--allow-child-process");
+  // Node cannot limit child programs by name. With a named list the OS layer does (the caller refuses the list when none exists), so node must let the child start.
+  if (policy.process || policy.programs.length) args.push("--allow-child-process");
   return { ok: true, args };
 }

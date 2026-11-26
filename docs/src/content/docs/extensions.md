@@ -127,14 +127,17 @@ Declare the block in `extension.json`, next to `connector` (or under `"0"` when 
 | --- | --- | --- |
 | `network` | `false` | Allow network connections. |
 | `process` | `false` | Allow starting programs from the system folders. By default only interpreters (`sh`, `bash`, `zsh`, `python`, `python3`, `node`, `bun`) and the extension's own files can start. |
+| `programs` | `[]` | Names of programs that may start in addition to the interpreters, such as `["jq", "curl"]`. 0 finds each in `PATH` when the run starts and refuses the run if one is missing. Use it instead of `process` when you know which programs are needed. |
 | `readPaths` | `[]` | Extra read-only paths, relative to the extension folder. `$WORKSPACE` adds the folder you run the extension in. |
 | `writePaths` | `[]` | Extra writable paths, in the same form. |
 
-An unknown key, an absolute path, `~` or `..` makes the manifest invalid. A path must exist inside the extension folder. A symlink that leaves the folder is refused.
+An unknown key, an absolute path, `~` or `..` makes the manifest invalid. A program name must be a bare name, not a path. A host list for `network` (for example `"network": ["example.com"]`) is refused, because the operating system layers cannot enforce it. A path must exist inside the extension folder. A symlink that leaves the folder is refused.
 
 Inside the sandbox a process can read the system, its own folder and the extension's declared paths. It can write only to a scratch folder (its `TMPDIR`) and to declared `writePaths`. It cannot read your home folder, `~/.0`, `~/.ssh`, `~/.aws`, other repositories or the scanned folder, and it has no network. The scratch folder is deleted when the run ends. Its working folder is the extension folder, or the workspace when `$WORKSPACE` is declared.
 
-The block is part of what you approve. Adding network access, widening a path list or turning on `process` in a new revision asks again.
+The block is part of what you approve. Adding network access, widening a path list, naming another program or turning on `process` in a new revision asks again.
+
+When 0 starts an MCP server, it checks the extension folder against its approved hash again. If a file changed since the extension loaded, the server does not start. The check and the start are separate steps, so it does not stop a change made in between.
 
 ### Choose when it applies
 
@@ -205,6 +208,7 @@ A sandboxed entry needs `cwd`, which becomes its read-only folder. Paths in a de
 - On macOS, `process` allows programs from `/bin`, `/usr/bin`, `/usr/local` and `/opt/homebrew`. The macOS profile always lets a process read `/opt/homebrew` and `/usr/local`, because interpreters from Homebrew load libraries from there.
 - Windows has no sandbox backend. `ZERO_SANDBOX=require` refuses to run extensions there.
 - Network is all or nothing. 0 does not filter by host.
+- `programs` is enforced by the macOS and Linux sandboxes only. Where node's own permission layer is the only layer, such as on Windows, a run that declares `programs` is refused. Tested on macOS: a named program starts and another one is denied. Not tested on Linux.
 - The sandbox does not stop a script from misusing what you declared: a script with network access can send out anything it can read.
 - The sandbox covers the scripts an extension ships and the MCP servers it declares. It does not cover commands the model writes itself.
 - Tested: macOS Seatbelt (reads, writes, program starts and loopback network, with `curl` and `node`) and Linux bubblewrap inside a privileged Linux container. Not tested: other Linux distributions, kernels with user namespaces disabled, and Windows.

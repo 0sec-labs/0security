@@ -20,18 +20,18 @@ const ext = path.join(tmp, "ext"); const scratch = path.join(tmp, "scratch"); co
 beforeAll(() => { for (const d of [ext, scratch, outside, path.join(ext, "data"), path.join(ext, "scripts")]) fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(outside, "secret.txt"), "top-secret"); fs.writeFileSync(path.join(ext, "data", "in.txt"), "own-data"); });
 afterAll(() => { fs.rmSync(tmp, { recursive: true, force: true }); });
 
-const policy = (over: Partial<ResolvedSandbox> = {}): ResolvedSandbox => ({ extensionDir: ext, scratchDir: scratch, workspace: null, network: false, process: false, readPaths: [], writePaths: [], execAllow: ["/bin/sh", "/usr/bin/env"], limits: {}, ...over });
-const decl = (over: Partial<SandboxDecl> = {}): SandboxDecl => ({ network: false, process: false, readPaths: [], writePaths: [], ...over });
+const policy = (over: Partial<ResolvedSandbox> = {}): ResolvedSandbox => ({ extensionDir: ext, scratchDir: scratch, workspace: null, network: false, process: false, programs: [], readPaths: [], writePaths: [], execAllow: ["/bin/sh", "/usr/bin/env"], limits: {}, ...over });
+const decl = (over: Partial<SandboxDecl> = {}): SandboxDecl => ({ network: false, process: false, programs: [], readPaths: [], writePaths: [], ...over });
 
 describe("sandbox declaration", () => {
   it("defaults to everything off and strict keys", () => {
-    expect(parseSandboxDecl({})).toEqual({ ok: true, value: { network: false, process: false, readPaths: [], writePaths: [] } });
+    expect(parseSandboxDecl({})).toEqual({ ok: true, value: { network: false, process: false, programs: [], readPaths: [], writePaths: [] } });
     expect(parseSandboxDecl({ network: true, hosts: ["x"] }).ok).toBe(false);
     expect(parseSandboxDecl({ network: "yes" }).ok).toBe(false);
   });
   it("normalises, de-duplicates and sorts paths", () => {
     const r = parseSandboxDecl({ readPaths: ["./data/", "data", "c//d", WORKSPACE_TOKEN] });
-    expect(r).toEqual({ ok: true, value: { network: false, process: false, readPaths: ["$WORKSPACE", "c/d", "data"], writePaths: [] } });
+    expect(r).toEqual({ ok: true, value: { network: false, process: false, programs: [], readPaths: ["$WORKSPACE", "c/d", "data"], writePaths: [] } });
   });
   it.each(["../x", "a/../../x", "/etc/passwd", "~/.ssh", "C:\\x", "a\\b", "..", ".", "a\0b", 'a"b', "b/../c", ""])("rejects path %j", p => {
     expect(parseSandboxDecl({ readPaths: [p] }).ok).toBe(false);
@@ -187,7 +187,7 @@ describe("manifest and approval", () => {
   const f = (files: Record<string, string>): FolderFile[] => Object.entries(files).map(([p, c]) => { const bytes = Buffer.from(c); return { path: p, size: bytes.length, executable: false, bytes }; });
   const parse = (sandbox: unknown) => parseManifest(f({ "extension.json": JSON.stringify({ name: "demo", version: "1.0.0", sandbox }), "scripts/run.sh": "echo hi" }));
   it("reads a sandbox block from extension.json and from the 0 block", () => {
-    const a = parse({ network: true, readPaths: ["data"] }); expect(a.ok && a.value.sandbox).toEqual({ network: true, process: false, readPaths: ["data"], writePaths: [] });
+    const a = parse({ network: true, readPaths: ["data"] }); expect(a.ok && a.value.sandbox).toEqual({ network: true, process: false, programs: [], readPaths: ["data"], writePaths: [] });
     const b = parseManifest(f({ "plugin.json": JSON.stringify({ name: "demo", "0": { sandbox: { writePaths: ["out"] } } }) })); expect(b.ok).toBe(true);
   });
   it("is null when absent and rejects an invalid block", () => {
@@ -272,5 +272,52 @@ describe.skipIf(!macReal)("real macOS sandbox-exec", () => {
     const r = await exec(js, decl(), { PATH: `${path.dirname(process.execPath)}:/usr/bin:/bin` }, [process.execPath]);
     console.log("[macOS] node:", r.stdout.trim().replace(/\n/g, " | "), r.stderr.slice(0, 200));
     expect(r.stdout).toContain("own=own-data"); expect(r.stdout).toContain("node-home-denied"); expect(r.stdout).not.toContain("LEAK");
+  });
+});
+
+describe("per-binary program allowlist and host filtering", () => {
+  const ok: SandboxStatus = { platform: "linux", seatbelt: { present: false, detail: "" }, bwrap: { present: true, path: "/usr/bin/bwrap", usable: true, detail: "works" }, docker: { present: false, detail: "" }, backend: "bwrap", reason: "" };
+  const noOs: SandboxStatus = { ...ok, backend: null, bwrap: { present: false, detail: "none" }, reason: "none" };
+  const bin = path.join(tmp, "bin");
+  const fake = (name: string) => { fs.mkdirSync(bin, { recursive: true }); const f = path.join(bin, name); fs.writeFileSync(f, "#!/bin/sh\n", { mode: 0o755 }); return fs.realpathSync(f); };
+  const req = (d: SandboxDecl, argv: string[] = ["/bin/sh", path.join(ext, "scripts", "x.sh")]) => ({ decl: d, extensionDir: ext, workspace: null, argv, interpreters: ["sh"], env: { PATH: `${bin}:/usr/bin:/bin` }, cwd: tmp, label: "script x of extension demo" });
+
+  it("parses, sorts and dedupes program names, and rejects paths", () => {
+    expect(parseSandboxDecl({ programs: ["jq", "curl", "jq"] })).toMatchObject({ ok: true, value: { programs: ["curl", "jq"] } });
+    for (const bad of ["/usr/bin/curl", "../curl", "a b", "", "-x"]) expect(parseSandboxDecl({ programs: [bad] }).ok, bad).toBe(false);
+  });
+  it("puts the programs in the approval, so naming one more asks again", () => {
+    const key = (programs: string[]) => { const r = parseManifest([{ path: "extension.json", size: 1, executable: false, bytes: Buffer.from(JSON.stringify({ name: "demo", version: "1.0.0", sandbox: { programs } })) }]); if (!r.ok) throw new Error(r.error.message); return capabilityKey(capabilitiesOf(r.value)); };
+    expect(key(["curl"])).not.toBe(key([])); expect(key(["curl"])).not.toBe(key(["curl", "jq"])); expect(key(["jq", "curl"])).toBe(key(["curl", "jq"]));
+  });
+  it("refuses to filter the network by host, in every spelling, and says why", () => {
+    for (const bad of [{ network: ["example.com"] }, { network: { hosts: ["example.com"] } }, { hosts: ["example.com"] }, { allowedHosts: ["example.com"] }, { network: true, domains: ["example.com"] }]) {
+      const r = parseSandboxDecl(bad); expect(r.ok, JSON.stringify(bad)).toBe(false);
+      if (!r.ok) expect(r.error).toMatch(/by host is not supported.*true or false/);
+    }
+    expect(parseSandboxDecl({ network: true }).ok).toBe(true);
+  });
+  it("mounts only the named program besides interpreters (bubblewrap)", () => {
+    const jq = fake("jq"); const p = planSandbox(req(decl({ programs: ["jq"] })), { env: {}, status: ok });
+    expect(p.kind).toBe("sandboxed");
+    if (p.kind === "sandboxed") { p.cleanup(); expect(p.args).toContain(jq); expect(p.args.join(" ")).not.toMatch(/--ro-bind \/usr \/usr/); }
+  });
+  it("allows exec of the named program in the Seatbelt profile and nothing wider", () => {
+    const jq = fake("jq"); const { profile, params } = seatbeltProfile(policy({ programs: ["jq"], execAllow: ["/bin/sh", jq] }));
+    expect(Object.values(params)).toContain(jq); expect(profile).not.toContain('(subpath "/usr/bin")');
+  });
+  it("refuses a run that names a program that is not on PATH", () => {
+    const p = planSandbox(req(decl({ programs: ["no-such-tool-xyz"] })), { env: {}, status: ok });
+    expect(p.kind).toBe("refused"); if (p.kind === "refused") expect(p.error).toMatch(/declares the program "no-such-tool-xyz".*not found in PATH/);
+  });
+  it("refuses a node run with named programs when only node's layer exists, because it cannot limit programs by name", () => {
+    fake("jq");
+    const p = planSandbox(req(decl({ programs: ["jq"] }), [process.execPath, path.join(ext, "scripts", "x.mjs")]), { env: {}, status: noOs, nodeSupport: { supported: true, flag: "--permission", detail: "" } });
+    expect(p.kind).toBe("refused"); if (p.kind === "refused") expect(p.error).toMatch(/needs an OS sandbox/);
+  });
+  it("lets node start children only when programs are named, with the OS layer limiting which", () => {
+    fake("jq");
+    const p = planSandbox(req(decl({ programs: ["jq"] }), [process.execPath, path.join(ext, "scripts", "x.mjs")]), { env: {}, status: ok, nodeSupport: { supported: true, flag: "--permission", detail: "" } });
+    expect(p.kind).toBe("sandboxed"); if (p.kind === "sandboxed") { p.cleanup(); expect(p.args).toContain("--allow-child-process"); }
   });
 });
