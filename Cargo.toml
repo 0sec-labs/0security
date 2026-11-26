@@ -3,3 +3,4 @@
 [workspace]
 resolver = "2"
 members = ["crates/foxguard"]
+exclude = ["0verse/native/windows-token-capture", "0verse/rust"]
