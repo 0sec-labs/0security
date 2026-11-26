@@ -4,6 +4,8 @@ import { basename, join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_SCAN_MODEL, headlessConsoleArgs, resolveScanTarget, resolveSkillId, runScan, withoutCredentials, type ScanDeps } from "../scan.js";
 import { UsageError } from "../output.js";
+import { ConsoleGateway } from "../../web/console-gateway.js";
+import { loadSession } from "../../state/session-store.js";
 
 const dirs: string[] = [];
 const folder = () => { const dir = mkdtempSync(join(tmpdir(), "scan-test-")); dirs.push(dir); return dir; };
@@ -46,10 +48,27 @@ describe("scan run metrics", () => {
   });
 });
 
-it("passes the explicit provider and reasoning to the real console creation contract", async () => {
+it.each(["openai", "azure"])("passes provider %s and reasoning through the actual console creation validator", async provider => {
   const f = fakes(finishedSnapshot());
-  await runScan(folder(), options({ provider: "azure", model: "gpt-6-luna", reasoning: "high" }), f.deps);
-  expect(f.requests.find(([method, path]) => method === "POST" && path === "/api/console/sessions")?.[2]).toMatchObject({ runtime: { providerId: "azure", model: "gpt-6-luna", reasoning: "high" } });
+  const home = folder();
+  const gateway = new ConsoleGateway({ homeDir: home, projectPath: folder(), createId: () => "scan-contract-1" });
+  const request = f.client.request.getMockImplementation()!;
+  f.client.request.mockImplementation(async (method, path, body) => {
+    if (method === "POST" && path === "/api/console/sessions") {
+      f.requests.push([method, path, body]);
+      // Exercise runtimeSelection's real allowed-keys validation and persistence;
+      // the remaining transport is deterministic and never starts a model session.
+      return { session: gateway.create(body) };
+    }
+    return request(method, path, body);
+  });
+  try {
+    await runScan(folder(), options({ provider, model: "gpt-6-luna", reasoning: "medium" }), f.deps);
+    expect(process.exitCode).toBeUndefined();
+    const runtime = loadSession("scan-contract-1", home)?.consoleState?.configuration?.runtime;
+    expect(runtime).toMatchObject({ providerId: provider, model: "gpt-6-luna", reasoningEffort: "medium" });
+    expect(runtime).not.toHaveProperty("reasoning");
+  } finally { await gateway.closeAll(); }
 });
 
 describe("scan status polling", () => {
