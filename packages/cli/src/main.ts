@@ -25,7 +25,7 @@ import {
 import { launchConfiguredWorkbench } from "./workbench.js";
 import { remoteBackendClientId } from "./backend-client-mode.js";
 import { savedConnectionEnvPatch } from "./connection-env.js";
-import { commandPathsOf, setCrashCommandPaths } from "./crash-capture.js";
+import { commandPathsOf, crashCommandFromArgv, setCrashCommandPaths } from "./crash-capture.js";
 import { surfaceFromArgv } from "./surface.js";
 import { createRootProgram } from "./program.js";
 import { invokedProgramName } from "./program-name.js";
@@ -139,6 +139,7 @@ async function showWebConsole(): Promise<void> {
   const { registerDashboardCommand } = await import("./commands/dashboard.js");
   const program = new Command();
   registerDashboardCommand(program);
+  analyticsPipeline.recordStartup({ command: "web" });
   await program.parseAsync(["web"], { from: "user" });
 }
 
@@ -151,10 +152,18 @@ process.once("beforeExit", () => {
 // A rejected command action prints its message and exits 2, not a Node stack trace.
 // The stack prints only with ZERO_DEBUG, for debugging.
 // Exit at once: a failed action can leave a server or database handle open.
-function exitWithCommandError(err: unknown): never {
+// The anonymous `error_exit` event carries a finite category only (never the message) and is
+// flushed within a short budget so the exit is never held up.
+function exitWithCommandError(err: unknown): void {
   console.error(chalk.red(err instanceof Error ? err.message : String(err)));
   if (process.env["ZERO_DEBUG"] && err instanceof Error) console.error(err.stack);
-  process.exit(2);
+  try {
+    analyticsPipeline.recordLifecycle({ event: "error_exit", error: err, command: crashCommandFromArgv(process.argv) });
+  } catch { /* telemetry never changes the exit */ }
+  const exit = () => process.exit(2);
+  // Nothing to send (opted out, no destination, source build): exit at once, as before.
+  if (!analyticsPipeline.hasPending()) return exit();
+  void Promise.race([analyticsPipeline.flushNow().catch(() => {}), new Promise<void>((resolve) => setTimeout(resolve, 1500).unref?.())]).then(exit, exit);
 }
 
 // ── Entry point ──
@@ -178,6 +187,7 @@ process.argv = [process.argv[0], process.argv[1], ...userArgs];
 /** The headless prompt, `-c` and `--resume` run the console command, which is not part of the command tree. */
 async function runConsole(args: string[]): Promise<void> {
   process.argv = [process.argv[0], process.argv[1], "console", ...args];
+  analyticsPipeline.recordStartup({ command: "console" });
   const { registerConsoleCommand } = await import("./commands/console.js");
   const program = new Command().name(invokedProgramName()).enablePositionalOptions();
   registerConsoleCommand(program);
@@ -188,6 +198,9 @@ async function runConsole(args: string[]): Promise<void> {
 async function runProgram(args: string[]): Promise<void> {
   process.argv = [process.argv[0], process.argv[1], ...args];
   const program = await buildProgram(args);
+  // Only commands in the registered tree can name themselves in the anonymous start event.
+  analyticsPipeline.configure({ knownCommandNames: commandPathsOf(program) });
+  analyticsPipeline.recordStartup({ command: crashCommandFromArgv(process.argv) });
   program.parseAsync().catch(exitWithCommandError);
 }
 

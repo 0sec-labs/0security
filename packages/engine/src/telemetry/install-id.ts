@@ -28,16 +28,17 @@ function installIdPath(homeDir?: string): string {
 }
 
 /**
- * Return the persistent random install id, minting and persisting one on
- * first call. The file is created 0o600 under a 0o700 state dir. If a stored
- * value is missing or malformed it is regenerated.
+ * Return the persistent random install id and whether THIS call minted it
+ * (a fresh install). The file is created 0o600 under a 0o700 state dir. If a
+ * stored value is missing or malformed it is regenerated, which also counts as
+ * minted.
  */
-export function getInstallId(opts: InstallIdOptions = {}): string {
+export function getInstallIdInfo(opts: InstallIdOptions = {}): { id: string; minted: boolean } {
   const path = installIdPath(opts.homeDir);
 
   try {
     const existing = readFileSync(path, "utf8").trim();
-    if (UUID_RE.test(existing)) return existing;
+    if (UUID_RE.test(existing)) return { id: existing, minted: false };
   } catch {
     // Not yet created (or unreadable) — fall through and mint a new one.
   }
@@ -45,7 +46,12 @@ export function getInstallId(opts: InstallIdOptions = {}): string {
   const id = randomUUID();
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   writeFileSync(path, `${id}\n`, { mode: 0o600 });
-  return id;
+  return { id, minted: true };
+}
+
+/** Return the persistent random install id, minting and persisting one on first call. */
+export function getInstallId(opts: InstallIdOptions = {}): string {
+  return getInstallIdInfo(opts).id;
 }
 
 /**

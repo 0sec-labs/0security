@@ -32,7 +32,7 @@ describe("first-run telemetry notice", () => {
     const h = home();
     const first = run(h);
     expect(first.printed).toBe(true);
-    expect(first.text).toContain("usage counts, crash reports and update checks");
+    expect(first.text).toContain("usage counts, command names, crash reports and update checks");
     expect(first.text).toContain("never code or findings");
     expect(first.text).toContain(TELEMETRY_DOCS_URL);
     expect(first.text).toContain("ZERO_OFFLINE=1");

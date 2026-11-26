@@ -47,7 +47,7 @@
  */
 
 import { homeStateDir, VERSION } from "../shared/index.js";
-import { mkdirSync, appendFileSync } from "node:fs";
+import { mkdirSync, appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { eventBus, type EventSink, type EventType } from "../events/bus.js";
 import { loadCloudCredentials } from "../cloud/credentials.js";
@@ -59,7 +59,7 @@ import {
   resolveAnalyticsLevel,
   type AnalyticsLevel,
 } from "./analytics-level.js";
-import { getInstallId, newSessionId } from "./install-id.js";
+import { getInstallIdInfo, newSessionId } from "./install-id.js";
 import { MAX_CONTENT_BYTES, redactContent, type RedactContext } from "./redaction.js";
 import type {
   AnalyticsEnvelope,
@@ -102,11 +102,39 @@ const MAX_POSTHOG_LABELS = 64;
  * listed here cannot be sent; adding a field is a deliberate, reviewed change.
  */
 export const POSTHOG_PROPERTY_KEYS = [
-  "tool_counts", "error_counts", "finding_severity_counts",
+  "tool_counts", "error_counts", "finding_severity_counts", "finding_class_counts",
   "turn_count", "duration_ms", "cost_usd",
   "version", "surface", "os", "arch", "runtime", "channel",
   "$lib", "$geoip_disable", "$process_person_profile", "$ip",
 ] as const;
+
+/** Common properties every PostHog event carries (usage and lifecycle alike). */
+const POSTHOG_COMMON_KEYS = [
+  "version", "surface", "os", "arch", "runtime", "channel",
+  "$lib", "$geoip_disable", "$process_person_profile", "$ip",
+] as const;
+
+/** Lifecycle events: PostHog-only, never part of the cloud wire schema. */
+export type LifecycleEventName = "first_run" | "command_invoked" | "update" | "error_exit";
+
+/**
+ * Per-event property allowlists for lifecycle events. An event can carry ONLY
+ * its own list; adding a property is a deliberate, reviewed change here.
+ */
+export const POSTHOG_LIFECYCLE_PROPERTY_KEYS: Readonly<Record<LifecycleEventName, readonly string[]>> = {
+  first_run: [...POSTHOG_COMMON_KEYS],
+  command_invoked: [...POSTHOG_COMMON_KEYS, "command"],
+  update: [...POSTHOG_COMMON_KEYS, "from_version", "to_version"],
+  error_exit: [...POSTHOG_COMMON_KEYS, "error_category", "command"],
+};
+
+/** File (under `~/.0`) holding the last version that ran, to detect an update. */
+export const ANALYTICS_LAST_VERSION_FILENAME = "analytics-last-version";
+
+/** Commands the web console and headless prompt run outside the command tree. */
+const BUILT_IN_COMMAND_NAMES = ["web", "console"] as const;
+
+const SEMVER_SHAPE = /^\d{1,4}\.\d{1,4}\.\d{1,4}(?:-[0-9A-Za-z.]{1,24})?$/;
 
 /** Debounce (ms) before a dirty usage accumulator is snapshotted + enqueued. */
 const USAGE_FLUSH_DEBOUNCE_MS = 2000;
@@ -278,6 +306,8 @@ interface UsageAccumulator {
   findingCounts: Record<string, number>;
   /** Finding severity -> count. Never serialized to the cloud record; PostHog only. */
   severityCounts: Record<string, number>;
+  /** Raw finding category -> count (collapsed to FINDING_CLASSES). PostHog only. */
+  classCounts: Record<string, number>;
   errorCategories: Record<string, number>;
   turnCount: number;
   durationMs: number;
@@ -290,6 +320,7 @@ function emptyAccumulator(): UsageAccumulator {
     featureCounts: {},
     findingCounts: {},
     severityCounts: {},
+    classCounts: {},
     errorCategories: {},
     turnCount: 0,
     durationMs: 0,
@@ -309,12 +340,46 @@ const FINITE_ERROR_CATEGORIES: ReadonlySet<string> = new Set([
   "parse", "resource", "stream-incomplete", "tool-error",
 ]);
 
+/** Fixed vulnerability-class label set for `finding_class_counts`. Anything else is "other". */
+export const FINDING_CLASSES = [
+  "sql-injection", "xss", "ssrf", "rce", "path-traversal", "auth", "crypto",
+  "secrets", "deserialization", "misconfiguration", "dependency", "other",
+] as const;
+
+const FINDING_CLASS_PATTERNS: ReadonlyArray<readonly [string, RegExp]> = [
+  ["sql-injection", /sql.?inj|sqli|nosql/],
+  ["xss", /xss|cross.?site.?script/],
+  ["ssrf", /ssrf|server.?side.?request/],
+  ["deserialization", /deseriali/],
+  ["rce", /\brce\b|remote.?code|command.?inj|code.?inj|code.?exec|os.?command/],
+  ["path-traversal", /path.?trav|directory.?trav|\blfi\b|zip.?slip/],
+  ["secrets", /secret|credential|api.?key|hardcoded|password/],
+  ["crypto", /crypto|cipher|\btls\b|weak.?hash|random/],
+  ["auth", /auth|access.?control|\bidor\b|privilege|\bjwt\b|session|csrf/],
+  ["dependency", /depend|vulnerable.?component|\bsca\b|\bcve\b|outdated/],
+  ["misconfiguration", /misconfig|\bcors\b|header|insecure.?default/],
+];
+
+/**
+ * Map a raw finding category onto the fixed class set. The input is only ever
+ * pattern-tested, never copied, so no category text can reach an event.
+ */
+export function classifyFindingClass(raw: string): string {
+  const text = raw.toLowerCase();
+  for (const [name, pattern] of FINDING_CLASS_PATTERNS) if (pattern.test(text)) return name;
+  return "other";
+}
+
+/** Finite error labels a lifecycle `error_exit` may carry. */
+const FINITE_EXIT_CATEGORIES: ReadonlySet<string> = new Set([...FINITE_ERROR_CATEGORIES, "crash", "other"]);
+
 type CountMap = Record<string, number>;
 
 /** Cumulative-to-delta bookkeeping: usage snapshots are running totals. */
 interface UsageTotals {
   tools: CountMap;
   severities: CountMap;
+  classes: CountMap;
   errors: CountMap;
   turns: number;
   durationMs: number;
@@ -325,6 +390,7 @@ interface UsageTotals {
 interface UsageDelta {
   tools: CountMap;
   severities: CountMap;
+  classes: CountMap;
   errors: CountMap;
   turns: number;
   durationMs: number;
@@ -382,6 +448,20 @@ export interface AnalyticsPipelineOptions {
    * events; MCP tools count as "mcp", everything else (plugins, unknown) as "other".
    */
   knownToolNames?: Iterable<string>;
+  /**
+   * The CLI's command paths (for example "scan", "scan web"). Only these appear
+   * as the `command` of a `command_invoked` event; anything else is "other".
+   */
+  knownCommandNames?: Iterable<string>;
+}
+
+/** Sanitized lifecycle event, already reduced to finite values (never raw input). */
+interface LifecycleEntry {
+  event: LifecycleEventName;
+  command?: string;
+  errorCategory?: string;
+  fromVersion?: string;
+  toVersion?: string;
 }
 
 /**
@@ -406,13 +486,16 @@ class AnalyticsPipeline {
    * downgrade we can purge records that are no longer permitted, and so
    * transmit can re-check each record against the live level.
    */
-  private batch: Array<{ json: string; bytes: number; requiredTier: AnalyticsLevel; ts: number; delta?: UsageDelta }> = [];
+  private batch: Array<{ json: string; bytes: number; requiredTier: AnalyticsLevel; ts: number; delta?: UsageDelta; lifecycle?: LifecycleEntry }> = [];
 
   private surface: AnalyticsSurface = "cli";
   private releaseChannel = "unknown";
   private knownTools: ReadonlySet<string> = new Set();
+  private knownCommands: ReadonlySet<string> = new Set(BUILT_IN_COMMAND_NAMES);
+  /** True once this process minted the install id and has not yet reported `first_run`. */
+  private installMinted = false;
   /** Cumulative totals already enqueued, to turn running snapshots into deltas. */
-  private lastUsage: UsageTotals = { tools: {}, severities: {}, errors: {}, turns: 0, durationMs: 0, costUsd: 0 };
+  private lastUsage: UsageTotals = { tools: {}, severities: {}, classes: {}, errors: {}, turns: 0, durationMs: 0, costUsd: 0 };
 
   private usageFlushTimer: ReturnType<typeof setTimeout> | null = null;
   private transmitTimer: ReturnType<typeof setTimeout> | null = null;
@@ -433,12 +516,13 @@ class AnalyticsPipeline {
       this.releaseChannel = /^[a-z][a-z0-9-]{0,15}$/.test(opts.releaseChannel) ? opts.releaseChannel : "unknown";
     }
     if (opts.knownToolNames !== undefined) this.knownTools = new Set(opts.knownToolNames);
+    if (opts.knownCommandNames !== undefined) this.knownCommands = new Set([...BUILT_IN_COMMAND_NAMES, ...opts.knownCommandNames]);
   }
 
   private resetUsageTotals(): void {
     this.acc = emptyAccumulator();
     this.accDirty = false;
-    this.lastUsage = { tools: {}, severities: {}, errors: {}, turns: 0, durationMs: 0, costUsd: 0 };
+    this.lastUsage = { tools: {}, severities: {}, classes: {}, errors: {}, turns: 0, durationMs: 0, costUsd: 0 };
   }
 
   /**
@@ -551,6 +635,7 @@ class AnalyticsPipeline {
               : "unknown";
           bump(this.acc.findingCounts, category);
           bump(this.acc.severityCounts, typeof payload["severity"] === "string" ? (payload["severity"] as string) : "unknown");
+          bump(this.acc.classCounts, typeof payload["category"] === "string" ? classifyFindingClass(payload["category"] as string) : "other");
           this.markDirty();
           break;
         }
@@ -609,7 +694,7 @@ class AnalyticsPipeline {
       durationMs: this.acc.durationMs,
       ...(this.acc.hasCost ? { costUsd: this.acc.costUsd } : {}),
     };
-    this.enqueue(record as unknown as Record<string, unknown>, "usage", { ...this.acc.severityCounts });
+    this.enqueue(record as unknown as Record<string, unknown>, "usage", { severities: { ...this.acc.severityCounts }, classes: { ...this.acc.classCounts } });
   }
 
   // ── Direct collectors (commands / full tiers) ─────────────────────────
@@ -714,10 +799,115 @@ class AnalyticsPipeline {
     }
   }
 
+  // ── Lifecycle events (PostHog only) ───────────────────────────────────
+  //
+  // first_run / command_invoked / update / error_exit. They are gated at the
+  // call site first (usage tier AND a resolvable PostHog destination, so
+  // nothing is queued and no install id is minted otherwise), reduced to finite
+  // values here, and drained to PostHog even when a cloud token is present:
+  // they are never part of the cloud wire body.
+
+  private lifecycleAllowed(): boolean {
+    return levelAtLeast(this.effectiveLevel(), "usage") && resolvePostHogDestination() !== null;
+  }
+
+  /**
+   * Queue one lifecycle event. `command` is collapsed to the configured command
+   * list ("other" otherwise); `error_exit` carries a finite category only (the
+   * error text is classified and dropped); versions must be semver-shaped.
+   */
+  recordLifecycle(input: {
+    event: LifecycleEventName;
+    command?: unknown;
+    error?: unknown;
+    category?: unknown;
+    fromVersion?: unknown;
+    toVersion?: unknown;
+  }): void {
+    try {
+      if (!this.lifecycleAllowed()) return;
+      const entry: LifecycleEntry = { event: input.event };
+      const command = typeof input.command === "string" ? (this.knownCommands.has(input.command) ? input.command : "other") : undefined;
+      switch (input.event) {
+        case "first_run":
+          break;
+        case "command_invoked":
+          entry.command = command ?? "other";
+          break;
+        case "update": {
+          const from = input.fromVersion;
+          const to = input.toVersion;
+          if (typeof from !== "string" || typeof to !== "string" || !SEMVER_SHAPE.test(from) || !SEMVER_SHAPE.test(to)) return;
+          entry.fromVersion = from;
+          entry.toVersion = to;
+          break;
+        }
+        case "error_exit": {
+          const text = input.error instanceof Error ? input.error.message : typeof input.error === "string" ? input.error : "";
+          const explicit = typeof input.category === "string" && FINITE_EXIT_CATEGORIES.has(input.category) ? input.category : undefined;
+          entry.errorCategory = explicit ?? classifyFailureText(text) ?? "other";
+          if (command !== undefined) entry.command = command;
+          break;
+        }
+        default:
+          return;
+      }
+      this.batch.push({ json: "", bytes: 0, requiredTier: "usage", ts: Date.now(), lifecycle: entry });
+      this.scheduleTransmit();
+    } catch {
+      // Telemetry never breaks the caller.
+    }
+  }
+
+  /**
+   * Process start: `first_run` when this process minted the install id, `update`
+   * when the version differs from the last one that ran, then `command_invoked`.
+   * Call once per process, after the consent tier is applied.
+   */
+  recordStartup(input: { command?: unknown }): void {
+    try {
+      if (!this.lifecycleAllowed()) return;
+      this.resolveInstallId();
+      if (this.installMinted) {
+        this.installMinted = false;
+        this.recordLifecycle({ event: "first_run" });
+      }
+      const current = typeof VERSION === "string" ? VERSION : "unknown";
+      const previous = this.swapLastVersion(current);
+      if (previous !== undefined && previous !== current) {
+        this.recordLifecycle({ event: "update", fromVersion: previous, toVersion: current });
+      }
+      this.recordLifecycle({ event: "command_invoked", command: input.command });
+    } catch {
+      // Telemetry never breaks the caller.
+    }
+  }
+
+  /** Return the last version that ran (if any) and persist the current one. Best-effort. */
+  private swapLastVersion(current: string): string | undefined {
+    const path = join(homeStateDir(this.homeDir), ANALYTICS_LAST_VERSION_FILENAME);
+    let previous: string | undefined;
+    try {
+      const stored = readFileSync(path, "utf8").trim();
+      if (SEMVER_SHAPE.test(stored)) previous = stored;
+    } catch {
+      // First run (or unreadable): nothing to compare.
+    }
+    if (previous !== current && SEMVER_SHAPE.test(current)) {
+      try {
+        mkdirSync(homeStateDir(this.homeDir), { recursive: true, mode: 0o700 });
+        writeFileSync(path, `${current}\n`, { mode: 0o600 });
+      } catch {
+        // A read-only home just means no update event next time.
+      }
+    }
+    return previous;
+  }
+
   // ── The choke point ───────────────────────────────────────────────────
 
   /** The only path to transmission: consent, redaction, byte limits, envelope. */
-  private enqueue(record: Record<string, unknown>, requiredTier: AnalyticsLevel, severityCounts?: CountMap): void {
+  private enqueue(record: Record<string, unknown>, requiredTier: AnalyticsLevel, extras?: { severities: CountMap; classes: CountMap }): void {
     try {
       const level = this.effectiveLevel();
       if (level === "off" || !levelAtLeast(level, requiredTier)) return;
@@ -726,7 +916,7 @@ class AnalyticsPipeline {
       if (!this.cloudCredentialsPresent() && !(requiredTier === "usage" && resolvePostHogDestination() !== null)) return;
       const redacted = redactRecordStrings(record);
       if (!redacted) return;
-      const delta = requiredTier === "usage" && redacted["kind"] === "usage" ? this.takeUsageDelta(redacted, severityCounts) : undefined;
+      const delta = requiredTier === "usage" && redacted["kind"] === "usage" ? this.takeUsageDelta(redacted, extras) : undefined;
       for (const field of CONTENT_FIELDS) {
         const content = redacted[field];
         if (typeof content !== "string") continue;
@@ -759,9 +949,10 @@ class AnalyticsPipeline {
   }
 
   /** Difference between this (redacted, cumulative) usage record and the last one enqueued. */
-  private takeUsageDelta(record: Record<string, unknown>, severityCounts: CountMap | undefined): UsageDelta {
+  private takeUsageDelta(record: Record<string, unknown>, extras: { severities: CountMap; classes: CountMap } | undefined): UsageDelta {
     const tools = numericMap(record["featureCounts"]);
-    const severities = redactRecordStrings(numericMap(severityCounts));
+    const severities = redactRecordStrings(numericMap(extras?.severities));
+    const classes = redactRecordStrings(numericMap(extras?.classes));
     const errors = numericMap(record["errorCategories"]);
     const turns = finiteNumber(record["turnCount"]);
     const durationMs = finiteNumber(record["durationMs"]);
@@ -770,12 +961,13 @@ class AnalyticsPipeline {
     const delta: UsageDelta = {
       tools: diffMaps(tools, prev.tools),
       severities: diffMaps(severities, prev.severities),
+      classes: diffMaps(classes, prev.classes),
       errors: diffMaps(errors, prev.errors),
       turns: Math.max(0, turns - prev.turns),
       durationMs: Math.max(0, durationMs - prev.durationMs),
       costUsd: Math.max(0, costUsd - prev.costUsd),
     };
-    this.lastUsage = { tools, severities, errors, turns, durationMs, costUsd };
+    this.lastUsage = { tools, severities, classes, errors, turns, durationMs, costUsd };
     return delta;
   }
 
@@ -797,17 +989,24 @@ class AnalyticsPipeline {
     }
   }
 
-  private buildEnvelope(): AnalyticsEnvelope {
+  /** Read (or mint) the install id once per process, remembering whether this process minted it. */
+  private resolveInstallId(): string {
     if (this.installId === null) {
       try {
-        this.installId = getInstallId(this.homeDir ? { homeDir: this.homeDir } : {});
+        const info = getInstallIdInfo(this.homeDir ? { homeDir: this.homeDir } : {});
+        this.installId = info.id;
+        this.installMinted = info.minted;
       } catch {
         this.installId = "unknown";
       }
     }
+    return this.installId;
+  }
+
+  private buildEnvelope(): AnalyticsEnvelope {
     return {
       schemaVersion: ANALYTICS_SCHEMA_VERSION,
-      installId: this.installId,
+      installId: this.resolveInstallId(),
       sessionId: this.sessionId,
       tier: this.effectiveLevel(),
       ts: Date.now(),
@@ -844,14 +1043,24 @@ class AnalyticsPipeline {
   private async drain(): Promise<void> {
     this.effectiveLevel();
     if (this.batch.length === 0) return;
-    let creds: { host: string; token: string };
+    // Lifecycle events are PostHog-only: take them out before anything can build a cloud body.
+    const lifecycle = this.batch.filter((entry) => entry.lifecycle !== undefined);
+    if (lifecycle.length > 0) this.batch = this.batch.filter((entry) => entry.lifecycle === undefined);
+    let creds: { host: string; token: string } | null = null;
     try {
       creds = loadCloudCredentials(this.homeDir ? { homeDir: this.homeDir } : {});
     } catch {
-      // No cloud token: the only remaining destination is the anonymous PostHog path.
-      await this.drainPostHog();
-      return;
+      // No cloud token: usage also goes to the anonymous PostHog path.
     }
+    if (creds) {
+      await this.drainCloud(creds);
+      await this.drainPostHog(lifecycle);
+    } else {
+      await this.drainPostHog(lifecycle);
+    }
+  }
+
+  private async drainCloud(creds: { host: string; token: string }): Promise<void> {
     while (this.batch.length > 0) {
       // Recheck before EACH POST. Unsent records remain in this.batch while
       // awaiting HTTP, so a downgrade purges them even if later re-enabled.
@@ -908,7 +1117,7 @@ class AnalyticsPipeline {
   private buildPostHogEvent(entry: { ts: number; delta?: UsageDelta }, distinctId: string): Record<string, unknown> | null {
     const d = entry.delta;
     if (!d) return null;
-    if (!hasEntries(d.tools) && !hasEntries(d.severities) && !hasEntries(d.errors) && d.turns === 0 && d.durationMs === 0 && d.costUsd === 0) return null;
+    if (!hasEntries(d.tools) && !hasEntries(d.severities) && !hasEntries(d.classes) && !hasEntries(d.errors) && d.turns === 0 && d.durationMs === 0 && d.costUsd === 0) return null;
     const runtime = detectRuntime();
     const properties: Record<string, unknown> = {
       tool_counts: collapseCounts(d.tools, (name) =>
@@ -918,6 +1127,7 @@ class AnalyticsPipeline {
         const lower = name.toLowerCase();
         return FINITE_SEVERITIES.has(lower) ? lower : null;
       }),
+      finding_class_counts: collapseCounts(d.classes, (name) => ((FINDING_CLASSES as readonly string[]).includes(name) ? name : null)),
       turn_count: Math.round(d.turns),
       duration_ms: Math.round(d.durationMs),
       ...(d.costUsd > 0 ? { cost_usd: Math.round(d.costUsd * 1e6) / 1e6 } : {}),
@@ -946,17 +1156,51 @@ class AnalyticsPipeline {
     };
   }
 
-  private async drainPostHog(): Promise<void> {
+  /** Build one lifecycle event with ONLY that event's allowlisted properties. */
+  private buildLifecycleEvent(entry: { ts: number; lifecycle: LifecycleEntry }, distinctId: string): Record<string, unknown> | null {
+    const l = entry.lifecycle;
+    const runtime = detectRuntime();
+    const properties: Record<string, unknown> = {
+      version: typeof VERSION === "string" ? VERSION : "unknown",
+      surface: this.surface,
+      os: finitePlatform(),
+      arch: finiteArch(),
+      runtime: runtime === "node" || runtime === "bun" ? runtime : "other",
+      channel: this.releaseChannel,
+      $lib: "0security",
+      $geoip_disable: true,
+      $process_person_profile: false,
+      $ip: null,
+      ...(l.command !== undefined ? { command: l.command } : {}),
+      ...(l.errorCategory !== undefined ? { error_category: l.errorCategory } : {}),
+      ...(l.fromVersion !== undefined ? { from_version: l.fromVersion } : {}),
+      ...(l.toVersion !== undefined ? { to_version: l.toVersion } : {}),
+    };
+    const allowed = POSTHOG_LIFECYCLE_PROPERTY_KEYS[l.event];
+    for (const key of Object.keys(properties)) {
+      if (!allowed.includes(key)) delete properties[key];
+    }
+    const safe = redactRecordStrings(properties);
+    if (!safe) return null;
+    return {
+      event: l.event,
+      distinct_id: distinctId,
+      timestamp: new Date(entry.ts).toISOString(),
+      properties: safe,
+    };
+  }
+
+  private async drainPostHog(extra: typeof this.batch = []): Promise<void> {
     const destination: PostHogDestination | null = resolvePostHogDestination();
     // Only the usage tier is ever eligible; recheck the live consent level first.
     const level = this.effectiveLevel();
-    const entries = this.batch.filter((entry) => entry.requiredTier === "usage" && levelAtLeast(level, "usage"));
+    const entries = [...this.batch, ...extra].filter((entry) => entry.requiredTier === "usage" && levelAtLeast(level, "usage"));
     this.batch = [];
     if (!destination || level === "off" || entries.length === 0) return;
     const distinctId = this.installOrSessionId();
     const events: Record<string, unknown>[] = [];
     for (const entry of entries) {
-      const event = this.buildPostHogEvent(entry, distinctId);
+      const event = entry.lifecycle ? this.buildLifecycleEvent(entry as { ts: number; lifecycle: LifecycleEntry }, distinctId) : this.buildPostHogEvent(entry, distinctId);
       if (event) events.push(event);
     }
     for (let i = 0; i < events.length; i += MAX_POSTHOG_EVENTS_PER_BATCH) {
@@ -1051,8 +1295,15 @@ class AnalyticsPipeline {
     this.surface = "cli";
     this.releaseChannel = "unknown";
     this.knownTools = new Set();
+    this.knownCommands = new Set(BUILT_IN_COMMAND_NAMES);
+    this.installMinted = false;
     this.resetUsageTotals();
     this.batch = [];
+  }
+
+  /** True when something is queued or a usage snapshot is waiting, so an exit should flush first. */
+  hasPending(): boolean {
+    return this.batch.length > 0 || this.accDirty;
   }
 
   /** Test-only: number of records currently queued. */

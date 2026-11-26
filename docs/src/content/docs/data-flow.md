@@ -7,7 +7,7 @@ This page lists every place 0 can send data off the computer it runs on. It exis
 
 ## What leaves your machine
 
-Your code stays on your machine. 0 sends what you choose to your model provider. By default it also sends anonymous usage counts, and it checks GitHub for updates. `ZERO_OFFLINE=1` turns both off, along with crash reports and the public model and price lookups. `ZERO_NO_TELEMETRY=1` (or `DO_NOT_TRACK=1`) stops the counts and crash reports, and `ZERO_NO_UPDATE_CHECK=1` stops the update check. `ZERO_ENTERPRISE=1` is the strict mode below.
+Your code stays on your machine. 0 sends what you choose to your model provider. By default it also sends anonymous usage counts and lifecycle events (first run, which command ran, an update, an error exit), and it checks GitHub for updates. `ZERO_OFFLINE=1` turns both off, along with crash reports and the public model and price lookups. `ZERO_NO_TELEMETRY=1` (or `DO_NOT_TRACK=1`) stops the counts, lifecycle events and crash reports, and `ZERO_NO_UPDATE_CHECK=1` stops the update check. `ZERO_ENTERPRISE=1` is the strict mode below.
 
 ## No-egress mode
 
@@ -43,8 +43,8 @@ For a stronger guarantee than a test, also block egress at the network: run 0 in
 
 | Entry | Destination | When | What is sent | How to disable without the switch |
 | --- | --- | --- | --- | --- |
-| `usage-analytics-posthog` | `eu.i.posthog.com` | Batched while a command or the console runs, at the `usage` level, in a release build. | Anonymous counters. The field list is under [Usage metrics](/configuration/#usage-metrics). | `analyticsLevel off`, `ZERO_NO_TELEMETRY`, `DO_NOT_TRACK`, `ZERO_OFFLINE`. |
-| `usage-analytics-cloud` | `cloud.0.security` | Only with a cloud token. | The same usage events. | The same switches. |
+| `usage-analytics-posthog` | `eu.i.posthog.com` | Batched while a command or the console runs, at the `usage` level, in a release build. | Anonymous counters, plus lifecycle events (`first_run`, `command_invoked`, `update`, `error_exit`) that name a known command or an error category and nothing else. The lifecycle events go here even with a cloud token. The field list is under [Usage metrics](/configuration/#usage-metrics). | `analyticsLevel off`, `ZERO_NO_TELEMETRY`, `DO_NOT_TRACK`, `ZERO_OFFLINE`. |
+| `usage-analytics-cloud` | `cloud.0.security` | Only with a cloud token. | The same `usage` events, instead of PostHog. Lifecycle events do not go here. | The same switches. |
 | `run-contribution` | `cloud.0.security` | Only with a cloud token and a contribution permission. | A sealed run capture. | The same switches. |
 | `crash-and-feedback` | Sentry (embedded project or `ZERO_SENTRY_DSN`), the feedback endpoint | A crash with `diagnosticReporting automatic`, or feedback you send. | A redacted crash envelope or the feedback text you reviewed. | `diagnosticReporting off`, the same switches. |
 | `update-check` | `api.github.com`, `github.com`, `raw.githubusercontent.com` | Interactive start-up, console update status, `0security doctor upgrade`. | A GET for the latest release tag; the installer on upgrade. | `updatePolicy off`, `ZERO_NO_UPDATE_CHECK`, `ZERO_OFFLINE`. |

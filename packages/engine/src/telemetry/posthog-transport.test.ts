@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { hostname, userInfo } from "node:os";
@@ -7,9 +7,14 @@ import { eventBus } from "../events/bus.js";
 import {
   analyticsPipeline,
   ANALYTICS_SENT_LOG_FILENAME,
+  ANALYTICS_LAST_VERSION_FILENAME,
+  FINDING_CLASSES,
+  POSTHOG_LIFECYCLE_PROPERTY_KEYS,
   POSTHOG_PROPERTY_KEYS,
   POSTHOG_TIMEOUT_MS,
+  classifyFindingClass,
 } from "./analytics-pipeline.js";
+import { VERSION } from "../shared/index.js";
 import { DEFAULT_POSTHOG_HOST, normalizePostHogHost, resolvePostHogDestination } from "./posthog-destination.js";
 
 const FAKE_KEY = "phc_FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE0000";
@@ -266,5 +271,163 @@ describe("anonymous usage to PostHog (no cloud token)", () => {
     expect(posts).toHaveLength(0); // debounced, not yet sent
     await analyticsPipeline.flushNow();
     expect(posts).toHaveLength(1);
+  });
+});
+
+describe("finding classes on the usage event", () => {
+  it("collapses categories onto the fixed class list and never sends category text", async () => {
+    analyticsPipeline.setLevel("usage");
+    eventBus.emit("finding_ingested", { severity: "high", category: "SQL Injection in /srv/acme/login.php" });
+    eventBus.emit("finding_ingested", { severity: "low", category: "reflected-xss" });
+    eventBus.emit("finding_ingested", { severity: "low", category: "weird-acme-internal-thing" });
+    await analyticsPipeline.flushNow();
+    const [event] = allEvents();
+    expect(event.properties.finding_class_counts).toEqual({ "sql-injection": 1, xss: 1, other: 1 });
+    expect(posts[0].body).not.toContain("acme");
+    expect(posts[0].body).not.toContain("login.php");
+    for (const name of Object.keys(event.properties.finding_class_counts as object)) expect(FINDING_CLASSES as readonly string[]).toContain(name);
+  });
+  it("classifyFindingClass only ever returns a member of the fixed list", () => {
+    for (const raw of ["ssrf", "Remote Code Execution", "path traversal", "hardcoded secret", "jwt none alg", "weak tls cipher", "unsafe deserialization", "vulnerable dependency", "cors misconfig", "???", ""]) {
+      expect(FINDING_CLASSES as readonly string[]).toContain(classifyFindingClass(raw));
+    }
+  });
+});
+
+describe("lifecycle events (PostHog only)", () => {
+  const LIFECYCLE = ["first_run", "command_invoked", "update", "error_exit"];
+
+  it("a fresh install sends first_run then command_invoked, each with only its allowlisted properties", async () => {
+    analyticsPipeline.configure({ knownCommandNames: ["scan", "scan web"] });
+    analyticsPipeline.setLevel("usage");
+    analyticsPipeline.recordStartup({ command: "scan" });
+    await analyticsPipeline.flushNow();
+    const events = allEvents();
+    expect(events.map((e) => e.event)).toEqual(["first_run", "command_invoked"]);
+    for (const event of events) {
+      const allowed = POSTHOG_LIFECYCLE_PROPERTY_KEYS[event.event as keyof typeof POSTHOG_LIFECYCLE_PROPERTY_KEYS];
+      expect(Object.keys(event.properties).every((k) => allowed.includes(k))).toBe(true);
+      expect(event.properties).toMatchObject({ surface: "web", channel: "beta", $geoip_disable: true, $process_person_profile: false, $ip: null, $lib: "0security" });
+      expect(event.distinct_id).toBe(readFileSync(join(home, ".0", "analytics-id"), "utf8").trim());
+    }
+    expect(events[1].properties.command).toBe("scan");
+    expect(events[0].properties.command).toBeUndefined();
+  });
+
+  it("first_run is sent only when this process minted the install id", async () => {
+    mkdirSync(join(home, ".0"), { recursive: true });
+    writeFileSync(join(home, ".0", "analytics-id"), "0b0f2b8e-3f6a-4c1d-9a55-2f4d6f1d7a10\n");
+    analyticsPipeline.setLevel("usage");
+    analyticsPipeline.recordStartup({ command: "web" });
+    await analyticsPipeline.flushNow();
+    expect(allEvents().map((e) => e.event)).toEqual(["command_invoked"]);
+  });
+
+  it("a command outside the configured list collapses to other", async () => {
+    analyticsPipeline.configure({ knownCommandNames: ["scan"] });
+    analyticsPipeline.setLevel("usage");
+    analyticsPipeline.recordLifecycle({ event: "command_invoked", command: "scan --target https://victim.example/admin" });
+    analyticsPipeline.recordLifecycle({ event: "command_invoked", command: undefined });
+    await analyticsPipeline.flushNow();
+    expect(allEvents().map((e) => e.properties.command)).toEqual(["other", "other"]);
+    expect(posts[0].body).not.toContain("victim.example");
+  });
+
+  it("update is sent only when the version changed, and only for semver-shaped versions", async () => {
+    mkdirSync(join(home, ".0"), { recursive: true });
+    writeFileSync(join(home, ".0", "analytics-id"), "0b0f2b8e-3f6a-4c1d-9a55-2f4d6f1d7a10\n");
+    writeFileSync(join(home, ".0", ANALYTICS_LAST_VERSION_FILENAME), "0.0.1\n");
+    analyticsPipeline.setLevel("usage");
+    analyticsPipeline.recordStartup({ command: "web" });
+    await analyticsPipeline.flushNow();
+    const update = allEvents().find((e) => e.event === "update");
+    if (VERSION === "0.0.1") {
+      expect(update).toBeUndefined();
+    } else {
+      expect(update?.properties).toMatchObject({ from_version: "0.0.1", to_version: VERSION });
+      expect(readFileSync(join(home, ".0", ANALYTICS_LAST_VERSION_FILENAME), "utf8").trim()).toBe(VERSION);
+    }
+    // Same version again: no update.
+    posts.length = 0;
+    analyticsPipeline.recordStartup({ command: "web" });
+    await analyticsPipeline.flushNow();
+    expect(allEvents().some((e) => e.event === "update")).toBe(false);
+    // A malformed version never produces an update event.
+    posts.length = 0;
+    analyticsPipeline.recordLifecycle({ event: "update", fromVersion: "1.0.0", toVersion: "/Users/alice" });
+    await analyticsPipeline.flushNow();
+    expect(posts).toHaveLength(0);
+  });
+
+  it("no stored last version (existing install before this feature) sends no update", async () => {
+    analyticsPipeline.setLevel("usage");
+    analyticsPipeline.recordStartup({ command: "web" });
+    await analyticsPipeline.flushNow();
+    expect(allEvents().some((e) => e.event === "update")).toBe(false);
+  });
+
+  it("error_exit carries a finite category only, never the error text", async () => {
+    analyticsPipeline.setLevel("usage");
+    analyticsPipeline.recordLifecycle({ event: "error_exit", error: new Error("connect ETIMEDOUT 10.1.2.3 /Users/alice/secret.txt password=hunter2") });
+    analyticsPipeline.recordLifecycle({ event: "error_exit", error: new Error("something odd at victim.example") });
+    analyticsPipeline.recordLifecycle({ event: "error_exit", category: "crash" });
+    analyticsPipeline.recordLifecycle({ event: "error_exit", category: "free text category" });
+    await analyticsPipeline.flushNow();
+    expect(allEvents().map((e) => e.properties.error_category)).toEqual(["timeout", "other", "crash", "other"]);
+    const body = posts.map((p) => p.body).join("");
+    for (const planted of ["10.1.2.3", "alice", "hunter2", "victim.example", "free text"]) expect(body).not.toContain(planted);
+  });
+
+  it("a cloud token keeps usage on the cloud path, lifecycle goes to PostHog and never into the cloud body", async () => {
+    vi.stubEnv("ZERO_CLOUD_TOKEN", "test-token");
+    vi.stubEnv("ZERO_CLOUD_HOST", "https://analytics.test");
+    analyticsPipeline.setLevel("usage");
+    emitUsage();
+    analyticsPipeline.recordStartup({ command: "web" });
+    await analyticsPipeline.flushNow();
+    const cloud = posts.filter((p) => p.url === "https://analytics.test/api/cli-analytics");
+    const ph = posts.filter((p) => p.url === `${FAKE_HOST}/batch/`);
+    expect(cloud).toHaveLength(1);
+    for (const name of LIFECYCLE) expect(cloud[0].body).not.toContain(name);
+    expect(cloud[0].body).not.toContain(FAKE_KEY);
+    expect(ph).toHaveLength(1);
+    const phEvents = (JSON.parse(ph[0].body) as { batch: Array<{ event: string }> }).batch;
+    expect(phEvents.map((e) => e.event)).toEqual(["first_run", "command_invoked"]);
+  });
+
+  for (const [name, value] of [["DO_NOT_TRACK", "1"], ["ZERO_NO_TELEMETRY", "1"], ["ZERO_OFFLINE", "1"], ["ZERO_ENTERPRISE", "1"]] as const) {
+    it(`${name} sends nothing, queues nothing and mints no install id`, async () => {
+      vi.stubEnv(name, value);
+      analyticsPipeline.setLevel("usage");
+      analyticsPipeline.recordStartup({ command: "web" });
+      analyticsPipeline.recordLifecycle({ event: "error_exit", category: "crash" });
+      expect(analyticsPipeline.__pendingCountForTests()).toBe(0);
+      await analyticsPipeline.flushNow();
+      expect(posts).toHaveLength(0);
+      expect(existsSync(join(home, ".0", "analytics-id"))).toBe(false);
+      expect(existsSync(join(home, ".0", ANALYTICS_LAST_VERSION_FILENAME))).toBe(false);
+    });
+  }
+
+  it("level off, and a missing PostHog destination, queue nothing and mint no install id", async () => {
+    analyticsPipeline.setLevel("off");
+    analyticsPipeline.recordStartup({ command: "web" });
+    expect(analyticsPipeline.__pendingCountForTests()).toBe(0);
+    vi.stubEnv("ZERO_ANALYTICS_POSTHOG_KEY", "");
+    analyticsPipeline.setLevel("usage");
+    analyticsPipeline.recordStartup({ command: "web" });
+    expect(analyticsPipeline.__pendingCountForTests()).toBe(0);
+    await analyticsPipeline.flushNow();
+    expect(posts).toHaveLength(0);
+    expect(existsSync(join(home, ".0", "analytics-id"))).toBe(false);
+  });
+
+  it("lifecycle events appear in the transparency log without the api key", async () => {
+    analyticsPipeline.setLevel("usage");
+    analyticsPipeline.recordStartup({ command: "web" });
+    await analyticsPipeline.flushNow();
+    const log = readFileSync(logPath(), "utf8");
+    expect(log).toContain("command_invoked");
+    expect(log).not.toContain(FAKE_KEY);
   });
 });
