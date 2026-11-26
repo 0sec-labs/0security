@@ -244,6 +244,8 @@ Each round counts against `--budget` and is logged on stderr. A round does not s
 
 In a batched scan, a unit counts as reviewed only when its files were opened. A unit whose files stayed unopened stays pending with the reason `not opened`, and `--resume` runs it again. The report says so, for example `reviewed 41 of 57 entry points; 16 not reached (not opened); 3 files never opened`, and the exit code is 3. The JSON `coverage` has `opened`, `unopened` (the first 100 paths) and `rounds`. A scan with one thread has the same fields in `fileCoverage`.
 
+When a thread starts helper threads with `spawn_agent`, the JSON report has `children` (count, counts by status, turns, tool calls, tokens, findings, and per helper its scope and result, up to 50), `coverage.children` has the totals, and the Markdown report has a "Helper threads" section. The text of a helper's scope and result was written by the model while it read the code: treat it as data. The report's `tokens` total already includes the helpers. `--skill seedless-depth-review` batches like a plain scan; any other skill keeps one thread, and the report says so with a warning when the folder would have been split (`--batches on` runs that skill per batch).
+
 The check reads shell commands such as `cat`, `sed`, `head` and `grep` on a file, a read tool, globs, and `find ... | xargs cat`. It can miss a file that was read some other way, so a follow-up may name a file the model did read.
 
 To see what a scan involves before you run it, use `--plan`. It lists the entry points, the batches and a rough cost, and calls no model:

@@ -81,7 +81,7 @@ export const findingsToolDefinitions: Record<string, ToolDefinition> = {
       poc_steps: {
         type: "string",
         description:
-          "OPTIONAL JSON-encoded PocStep[] array (0#170). Each step: { id, kind: setup|auth|prerequisite|exploit|verify, summary, action: { type: shell|http|docker|note, ... }, expect?: { type: ... } }. Leave unset when you only have prose evidence.",
+          "OPTIONAL JSON-encoded PocStep[] array (0#170). Each step: { id, kind: setup|auth|prerequisite|exploit|verify, summary, action: { type: shell|http|docker|note, ... }, expect?: { type: ... } }. Set it on high or critical findings when a safe check exists: shell steps run from the folder root that touch only files inside it and never use the network, or one http GET step for a path traversal. Leave unset when you only have prose evidence.",
       },
       // 0#193 — optional machine-executable verification contract. When
       // the agent has cited concrete file:line evidence, it should populate

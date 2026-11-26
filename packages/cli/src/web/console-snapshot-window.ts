@@ -124,6 +124,14 @@ export function summarizeConsoleWorker(worker: ConsoleWorker): ConsoleWorkerSumm
   for (const [key, value] of Object.entries(worker.telemetry ?? {})) {
     if (typeof value === "number" || typeof value === "boolean" || (typeof value === "string" && value.length <= 200)) telemetry[key] = value;
   }
+  // The measured usage is nested; keep its token counts as scalars so a summary still says what a worker cost.
+  const usage = worker.telemetry?.["usage"];
+  if (usage && typeof usage === "object" && !Array.isArray(usage)) {
+    for (const key of ["inputTokens", "outputTokens"] as const) {
+      const value = (usage as Record<string, unknown>)[key];
+      if (typeof value === "number" && Number.isFinite(value) && value >= 0) telemetry[key] = value;
+    }
+  }
   return {
     id: worker.id, parentId: worker.parentId, name: worker.name, status: worker.status,
     task: worker.task.length > 1_000 ? `${worker.task.slice(0, 1_000)}…` : worker.task,

@@ -64,6 +64,21 @@ export interface PlanInput {
 
 const short = (head: string | undefined): string => (head ? head.slice(0, 7) : "no git commit");
 
+/**
+ * Skills that are a review method for source code. A batch thread can follow any of them for its own units, so choosing
+ * one never costs the batches or the coverage report. Any other skill (a policy check, a migration, an installed
+ * skill) is not written for a slice of the entry points and keeps one thread unless `--batches on` is typed.
+ */
+export const BATCHABLE_SKILLS: ReadonlySet<string> = new Set(["scan", "seedless-depth-review"]);
+export const keepsOneThread = (skill: string): boolean => !BATCHABLE_SKILLS.has(skill);
+
+/** What a report says when the skill kept one thread on a folder that `--batches auto` would have split; undefined when nothing was lost. */
+export function unbatchedNote(input: { folder: string; skill: string; batchSize: number; scope?: readonly string[] }): string | undefined {
+  const inventory = buildInventory(input.folder, input.scope ? { only: new Set(input.scope) } : {});
+  if (!shouldBatch(inventory, input.batchSize) || !inventory.units.length) return undefined;
+  return `--skill ${input.skill} runs as one thread, so this folder (${inventorySummaryText(inventory.summary)}) was not reviewed in batches and the report has no batch coverage statement. Add --batches on to review it in batches with this skill.`;
+}
+
 /** Whether `auto` splits this folder: more entry points than one thread takes, or a large tree. */
 export function shouldBatch(inventory: Inventory, batchSize: number): boolean {
   return inventory.summary.entryPoints > batchSize || inventory.summary.sourceFiles > AUTO_BATCH_FILES;

@@ -47,6 +47,7 @@ const EXPECTED_SKILL_IDS = [
   "supabase-appsec",
   "python-web-appsec",
   "seedless-depth-review",
+  "code-index",
   "advisory-disclosure",
   "develop-this-app",
   // Sentinel preset skills.
@@ -217,7 +218,7 @@ describe("Skill Registry", () => {
       );
 
       const reviewSkills = listSkillSummaries({ role: "review" }, registry);
-      expect(reviewSkills.length).toBe(32);
+      expect(reviewSkills.length).toBe(33);
       const reviewIds = reviewSkills.map((s) => s.id).sort();
       expect(reviewIds).toEqual([
         "advisory-disclosure",
@@ -226,6 +227,7 @@ describe("Skill Registry", () => {
         "blind-exploitation",
         "cardano-eutxo-validators",
         "cloud-iac-review",
+        "code-index",
         "crypto-migration",
         "crypto-misuse",
         "dependency-reachability",

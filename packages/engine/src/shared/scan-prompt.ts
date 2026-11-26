@@ -220,7 +220,7 @@ export function scanPrompt(target: string, skill = "scan", prePass?: PrePassLead
     policies
       ? `Check ${target} against written policies. Load the \`${skill}\` skill with load_skill and follow it.`
       : `Scan ${target} for exploitable security bugs. Load the \`${skill}\` skill with load_skill and follow it.`,
-    "Record each confirmed issue with the finding tool, setting source_path, source_start_line and source_end_line, suggested_replacement when you can give a concrete fix, and fix_explanation (at most 600 characters, plain words: what to change and why it closes the hole) on every finding that has a fix.",
+    "Record each confirmed issue with the finding tool, setting source_path, source_start_line and source_end_line, suggested_replacement when you can give a concrete fix, and fix_explanation (at most 600 characters, plain words: what to change and why it closes the hole) on every finding that has a fix. For a high or critical finding with a safe, shell-reproducible check, also set poc_steps (never network access, nothing outside the folder).",
     ...(context ? [context] : []),
     ...(policies ? [policies] : []),
     ...(scope ? [scopeBlock(scope)] : []),

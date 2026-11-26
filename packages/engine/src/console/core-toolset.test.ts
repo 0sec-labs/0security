@@ -67,7 +67,7 @@ describe("core toolset in the console", () => {
     } finally { await session.cleanup(); }
   });
 
-  it.each(["seedless-depth-review", "verify-finding"])("keeps the default list at the core tools, and %s alone adds the code-index pack", async (skill) => {
+  it.each(["seedless-depth-review", "verify-finding", "code-index"])("keeps the default list at the core tools, and %s alone adds the code-index pack", async (skill) => {
     const packed = ["callees_of", "callers_of", "routes", "trace_to_sink"];
     const runtime = new ScriptedRuntime([call("load_skill", { skill_id: skill }), end("loaded"), end("again")]);
     const session = createConsoleSession({ runtime, refineObjective: false });
