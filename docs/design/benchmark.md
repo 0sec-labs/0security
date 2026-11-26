@@ -142,7 +142,19 @@ This run had a single noise finding, so it says almost nothing about how much no
 
 This is a first measurement, not an answer. Two noise findings cannot show a false-positive reduction. The scan found few of the 66 cases, so most real cases were never findings for verify to judge. A larger sample, repeats and a per-category breakdown are needed.
 
-A hand-labelled set from a real application uses the same script: `--labels <file> --app <folder>`, with a JSON file of `{ path, line, label }` entries where label is `real` or `noise`. No such set is committed. The 45 hand-labelled findings from a real open-source Java application that issue 448 asks for have not been made.
+A hand-labelled set from a real application uses the same script: `--labels <file> --app <folder>`. The file is `{ "app": "name and commit", "findings": [{ "path", "line", "label", "note" }] }`, where label is `real` or `noise`, the path is relative to the app folder and the note says why. A finding matches a label in the same file within 5 lines. The run report adds how many labels the scan reached, because verify only judges findings: a real label the scan never reported says nothing about triage.
+
+Check a file without a model:
+
+```bash
+node scripts/bench/triage-truth.mjs --validate-labels labels.json --app <folder>   # shape, paths, lines
+node scripts/bench/triage-truth.mjs --labels-from-fixture node-express > labels.json   # the format, from an answer key
+node scripts/bench/triage-truth.mjs --dry-run --labels labels.json --app <folder>
+```
+
+`scripts/bench/labels/node-express.labels.json` is the format example, made from that fixture's answer key (4 planted bugs, 1 decoy). It is not a real-application set. The tests score a stand-in scan and verify through the whole `--run --labels` path with a fake CLI, so the labelling, classification, coverage line and report are checked without a model.
+
+No set from a real application is committed. The 45 hand-labelled findings from a real open-source Java application that issue 448 asks for have not been made: they need a person to read a real codebase and label its scan findings, then a real model run.
 
 ## What it does not prove
 

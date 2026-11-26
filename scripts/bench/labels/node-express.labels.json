@@ -1,0 +1,35 @@
+{
+  "app": "bench fixture node-express",
+  "findings": [
+    {
+      "path": "server.js",
+      "line": 22,
+      "label": "real",
+      "note": "planted bug ne-sqli: owner query parameter concatenated into a SQL string"
+    },
+    {
+      "path": "server.js",
+      "line": 30,
+      "label": "real",
+      "note": "planted bug ne-cmdi: route parameter and format query flow into exec() through a template string"
+    },
+    {
+      "path": "server.js",
+      "line": 37,
+      "label": "real",
+      "note": "planted bug ne-traversal: name query parameter joined to the uploads directory and read without a containment check"
+    },
+    {
+      "path": "server.js",
+      "line": 10,
+      "label": "real",
+      "note": "planted bug ne-secret: hardcoded admin token in source"
+    },
+    {
+      "path": "server.js",
+      "line": 41,
+      "label": "noise",
+      "note": "decoy: delete route: integer-validated id and a parameterised query"
+    }
+  ]
+}
