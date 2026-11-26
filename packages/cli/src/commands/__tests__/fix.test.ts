@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   BRANCH_PREFIX,
+  failedCheckReports,
   fixBranchName,
   parseFixPolicy,
   fixMetric,
@@ -324,5 +325,18 @@ describe("fix metric host association", () => {
     const record = fixMetric({ finding: "f-1", committed: true, verified: true, pullRequest: { url: "https://bitbucket.org/o/r/pull-requests/8", created: true, draft: true } } as never, { budget: "1" }, 0, 1);
     expect(record.pullRequestUrl).toBe("https://bitbucket.org/o/r/pull-requests/8"); expect(record.repositoryId).toMatch(/^[a-f0-9]{64}$/);
     expect(fixMetric({ finding: "f-1", committed: true, branch: "0/fix-a" } as never, { budget: "1" }, 0, 1).pullRequestUrl).toBeUndefined();
+  });
+});
+
+describe("failed check report", () => {
+  it("names each failed check, keeps the last 15 lines and drops control characters", () => {
+    const output = Array.from({ length: 20 }, (_, i) => `line ${i + 1}`).join("\n") + "\n\u001b[31mred\u001b[0m\u0007";
+    const reports = failedCheckReports([{ command: "mvn -o test", code: 1, output }, { command: "ok", code: 0, output: "fine" }]);
+    expect(reports).toHaveLength(1);
+    expect(reports[0]).toContain("check failed (exit 1): mvn -o test");
+    expect(reports[0]).toContain("line 7");
+    expect(reports[0]).not.toContain("line 6\n");
+    expect(reports[0]).not.toMatch(/[\u001b\u0007]/);
+    expect(reports[0]).toContain("[31mred[0m");
   });
 });

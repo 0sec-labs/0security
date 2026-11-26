@@ -450,6 +450,12 @@ async function runThread(client: ConsoleClient, deps: FixDeps, folder: string, f
   return { id, reply: done.reply, error: done.error, failed: done.failed && !timedOut, ...(tokens !== undefined ? { tokens } : {}), timedOut, budgetExhausted: asJson(done.session).costCeilingExceeded === true, usage: usageLine(done.usage), ...(costUsd !== undefined ? { costUsd } : {}) };
 }
 
+/** One report per failed check: exit code, command and the last 15 lines. Check output comes from the sandboxed build, so terminal control characters (escape sequences) are dropped. */
+export function failedCheckReports(checks: CheckResult[]): string[] {
+  const plain = (text: string): string => text.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, "");
+  return checks.filter((c) => c.code !== 0).map((c) => plain(`check failed (exit ${c.code}): ${c.command}\n${c.output.trim().split("\n").slice(-15).join("\n")}`));
+}
+
 export function registerFixCommand(program: Command, deps: FixDeps = defaults): void {
   const collect = (value: string, previous: string[] = []) => [...previous, value];
   consoleTransportOptions(program.command("fix <finding>")
@@ -480,9 +486,7 @@ export function registerFixCommand(program: Command, deps: FixDeps = defaults): 
       try {
         const outcome = await runFix(finding, applyWorkflowDefaults("fix", options, command), deps);
         if (!outcome) return;
-        // Check output comes from the sandboxed build: drop terminal control characters (escape sequences) before printing it.
-        const plain = (text: string): string => text.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, "");
-        if (options.format !== "json") for (const check of outcome.checks.filter((c) => c.code !== 0)) deps.err(plain(`check failed (exit ${check.code}): ${check.command}\n${check.output.trim().split("\n").slice(-15).join("\n")}`));
+        if (options.format !== "json") for (const text of failedCheckReports(outcome.checks)) deps.err(text);
         if (options.format === "json") deps.out(JSON.stringify(outcome, null, 2));
         else if (outcome.pullRequest) deps.out(`${outcome.pullRequest.created ? "Opened" : "Updated"} ${outcome.pullRequest.draft ? "draft " : ""}pull request: ${outcome.pullRequest.url}`);
         else if (outcome.committed) deps.out(`Committed on ${outcome.branch}.`);

@@ -865,9 +865,8 @@ Options:
   --sandbox-network                Give the sandbox network access (to download dependencies). Off
                                    by default
   --sandbox-setup <command>        With --sandbox docker: run this once with the network on to
-                                   download dependencies (for example mvn -q dependency:go-offline),
-                                   then run the --test checks with the network off; repeat for
-                                   several
+                                   download dependencies (for example mvn -q test), then run the
+                                   --test checks with the network off; repeat for several
   --policy <file>                  Policy file (.json or .yaml) of approved libraries and fix rules;
                                    any path you name, relative to the current directory. Default:
                                    ~/.0/fix-policy.json|yaml|yml
