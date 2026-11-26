@@ -9,7 +9,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPOS="$ROOT/benchmarks/repos"
 RUNS="${RUNS:-3}"
 
-FOX="${FOXGUARD:-$ROOT/target/release/foxguard}"
+FOX="${FOXGUARD:-$ROOT/../../target/release/foxguard}"
 SEMGREP="${SEMGREP:-$(command -v semgrep || true)}"
 OPENGREP="${OPENGREP:-$ROOT/.bench-tools/opengrep_osx_arm64}"
 NJSSCAN="${NJSSCAN:-$(command -v njsscan || true)}"

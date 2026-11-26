@@ -8,7 +8,7 @@
 #   UPDATE_SNAPSHOT=1 ./benchmarks/parity/run.sh
 #
 # Honored env:
-#   FOXGUARD          path to foxguard binary (default: ./target/release/foxguard)
+#   FOXGUARD          path to foxguard binary (default: <workspace>/target/release/foxguard)
 #   SEMGREP           path to semgrep binary (default: $(command -v semgrep))
 #   KEEP_CLONES=1     reuse clones in benchmarks/parity/clones across runs
 #   UPDATE_SNAPSHOT=1 overwrite benchmarks/parity/expected.json with current results
@@ -16,12 +16,12 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-FOXGUARD="${FOXGUARD:-$REPO_ROOT/target/release/foxguard}"
+FOXGUARD="${FOXGUARD:-$REPO_ROOT/../../target/release/foxguard}"
 
 if [ ! -x "$FOXGUARD" ]; then
   echo "foxguard binary not found at $FOXGUARD"
-  echo "building (cargo build --release)..."
-  (cd "$REPO_ROOT" && cargo build --release)
+  echo "building (cargo build --release -p foxguard --bin foxguard)..."
+  (cd "$REPO_ROOT" && cargo build --release -p foxguard --bin foxguard)
 fi
 
 ARGS=("--foxguard" "$FOXGUARD")

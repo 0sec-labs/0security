@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPOS_DIR="$SCRIPT_DIR/repos"
-FOXGUARD="${FOXGUARD:-$(dirname "$SCRIPT_DIR")/target/release/foxguard}"
+FOXGUARD="${FOXGUARD:-$(dirname "$SCRIPT_DIR")/../../target/release/foxguard}"
 RESULTS_FILE="${RESULTS_FILE:-$SCRIPT_DIR/results-${BENCH_MODE:-default}.md}"
 SEMGREP_BIN="${SEMGREP:-}"
 OPENGREP_BIN="${OPENGREP:-}"

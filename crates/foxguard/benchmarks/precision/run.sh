@@ -5,8 +5,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 if [ -z "${FOXGUARD:-}" ]; then
-  FOXGUARD="$REPO_ROOT/target/release/foxguard"
-  cargo build --release
+  FOXGUARD="$REPO_ROOT/../../target/release/foxguard"
+  (cd "$REPO_ROOT" && cargo build --release -p foxguard --bin foxguard)
 elif [ ! -x "$FOXGUARD" ]; then
   echo "FOXGUARD does not point to an executable: $FOXGUARD" >&2
   exit 2

@@ -5,8 +5,9 @@ edition = "2021"
 rust-version = "1.88"
 description = "A security scanner as fast as a linter, written in Rust. 200+ built-in rules across 12 source languages."
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/0sec-labs/foxguard"
-homepage = "https://foxguard.dev"
+repository = "https://github.com/0sec-labs/0security"
+homepage = "https://0.security"
+publish = false
 keywords = ["security", "linter", "static-analysis", "sast", "vulnerability"]
 categories = ["command-line-utilities", "development-tools"]
 
@@ -64,19 +65,6 @@ pep440_rs = "0.7"
 x509-parser = "0.16"
 pem = "3"
 
-# Optional deps for the GitHub App webhook receiver (gated behind the
-# `github-app` feature). Off by default so the core scanner build stays
-# lean. See src/github_app/README.md and issue #246.
-base64 = { version = "0.22", optional = true }
-axum = { version = "0.7", default-features = false, features = ["http1", "tokio", "json", "macros"], optional = true }
-tokio = { version = "1", default-features = false, features = ["macros", "rt-multi-thread", "signal"], optional = true }
-hmac = { version = "0.12", optional = true }
-hex = { version = "0.4", optional = true }
-tower-http = { version = "0.6", default-features = false, features = ["trace", "limit"], optional = true }
-tracing = { version = "0.1", optional = true }
-tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter", "json"], optional = true }
-# Use AWS-LC for RS256 signing; the RustCrypto RSA backend has RUSTSEC-2023-0071.
-jsonwebtoken = { version = "10.4.0", features = ["aws_lc_rs"], optional = true }
 tree-sitter-ocaml = "0.25.0"
 tree-sitter-scala = "0.26.0"
 tree-sitter-elixir = "0.3.5"
@@ -89,11 +77,6 @@ tree-sitter-sfapex = "3.0.0"
 tree-sitter-haskell = "0.23.1"
 dekobon-tree-sitter-groovy = "0.3.0"
 
-[features]
-default = []
-# Builds the foxguard-github-app binary plus its dependency closure.
-github-app = ["dep:base64", "dep:axum", "dep:tokio", "dep:hmac", "dep:hex", "dep:tower-http", "dep:tracing", "dep:tracing-subscriber", "dep:jsonwebtoken"]
-
 [[bin]]
 name = "foxguard-mcp"
 path = "src/bin/foxguard_mcp.rs"
@@ -101,11 +84,6 @@ path = "src/bin/foxguard_mcp.rs"
 [[bin]]
 name = "foxguard-adapter"
 path = "src/bin/foxguard_adapter.rs"
-
-[[bin]]
-name = "foxguard-github-app"
-path = "src/bin/foxguard_github_app.rs"
-required-features = ["github-app"]
 
 [[bin]]
 name = "foxguard_process_test_helper"
