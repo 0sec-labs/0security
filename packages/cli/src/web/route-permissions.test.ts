@@ -85,10 +85,19 @@ describe("every API route has a permission rule", () => {
     const missing: string[] = [];
     for (const [area, file] of areas) {
       for (const [label, method] of [["read", "GET"], ["write", "POST"]] as const) {
-        if (routePermission(method, `/api/console/${area}/x`) === null && routePermission(method, `/api/console/${area}`) === null) missing.push(`${label} /api/console/${area} (named in ${file})`);
+        // Metrics has a read-only collection; its one explicit write route refreshes host receipts.
+        const representativePath = area === "run-metrics" && method === "POST" ? "/api/console/run-metrics/refresh-host" : `/api/console/${area}/x`;
+        if (routePermission(method, representativePath) === null && routePermission(method, `/api/console/${area}`) === null) missing.push(`${label} /api/console/${area} (named in ${file})`);
       }
     }
     expect(missing, "add a rule for each area to ROUTE_RULES in enterprise/src/rbac/routes.ts").toEqual([]);
+  });
+
+  it("keeps metrics reads and the explicit host refresh owner-managed without allowing collection writes", () => {
+    expect(routePermission("GET", "/api/console/run-metrics")).toBe("settings.write");
+    expect(routePermission("POST", "/api/console/run-metrics/refresh-host")).toBe("settings.write");
+    for (const method of ["POST", "PUT", "PATCH", "DELETE"]) expect(routePermission(method, "/api/console/run-metrics")).toBeNull();
+    expect(routePermission("POST", "/api/console/run-metrics/other")).toBeNull();
   });
 
   it("names a permission, never nothing, for the sensitive routes", () => {
