@@ -43,7 +43,7 @@ const GUARD_ANNOTATIONS: [&str; 14] = [
 ];
 
 /// Annotation names kept on a route next to the guards, because they are the opposite signal.
-const PUBLIC_ANNOTATIONS: [&str; 2] = ["PermitAll", "Anonymous"];
+pub(super) const PUBLIC_ANNOTATIONS: [&str; 2] = ["PermitAll", "Anonymous"];
 
 /// Case-sensitive on purpose: a case-insensitive `can` would match `scan` and `cancel`.
 pub(super) fn auth_signal(name: &str, text: &str) -> bool {
@@ -61,7 +61,7 @@ pub(super) fn auth_signal(name: &str, text: &str) -> bool {
         .is_match(text)
 }
 
-fn guard_annotation(name: &str) -> bool {
+pub(super) fn guard_annotation(name: &str) -> bool {
     GUARD_ANNOTATIONS.contains(&name)
         || (!PUBLIC_ANNOTATIONS.contains(&name)
             && re(
@@ -73,7 +73,7 @@ fn guard_annotation(name: &str) -> bool {
 static ANN_GUARD: OnceLock<Regex> = OnceLock::new();
 
 /// Sink category of a Java call, by name and receiver text only.
-fn sink_category(text: &str, name: &str) -> Option<&'static str> {
+pub(super) fn sink_category(text: &str, name: &str) -> Option<&'static str> {
     static CMD: OnceLock<Regex> = OnceLock::new();
     static EVAL: OnceLock<Regex> = OnceLock::new();
     static SQL: OnceLock<Regex> = OnceLock::new();
@@ -225,7 +225,7 @@ fn type_params(decl: Node, src: &[u8]) -> Vec<String> {
 }
 
 /// Spring stereotype annotations that make a class a bean.
-const STEREOTYPES: [&str; 8] = [
+pub(super) const STEREOTYPES: [&str; 8] = [
     "Component",
     "Service",
     "Repository",
@@ -1435,7 +1435,7 @@ impl<'a> Walker<'a> {
     }
 }
 
-fn join_path(prefix: &str, sub: &str) -> String {
+pub(super) fn join_path(prefix: &str, sub: &str) -> String {
     let joined = format!("/{}/{}", prefix.trim_matches('/'), sub.trim_matches('/'));
     let mut out = String::with_capacity(joined.len());
     for c in joined.chars() {
@@ -1468,7 +1468,7 @@ pub(super) fn extract(rel: &str, source: &str, root: Node) -> FileGraph {
 }
 
 /// Annotations that only take effect when method security is enabled.
-fn is_method_security_annotation(name: &str) -> bool {
+pub(super) fn is_method_security_annotation(name: &str) -> bool {
     matches!(
         name,
         "PreAuthorize" | "PostAuthorize" | "PreFilter" | "PostFilter" | "Secured"
@@ -1476,7 +1476,7 @@ fn is_method_security_annotation(name: &str) -> bool {
 }
 
 /// Request matcher calls of the Spring Security authorization DSL.
-const MATCHER_CALLS: [&str; 4] = ["requestMatchers", "antMatchers", "mvcMatchers", "regexMatchers"];
+pub(super) const MATCHER_CALLS: [&str; 4] = ["requestMatchers", "antMatchers", "mvcMatchers", "regexMatchers"];
 
 fn args_of<'t>(call: Node<'t>) -> Vec<Node<'t>> {
     super::args_of(call)
