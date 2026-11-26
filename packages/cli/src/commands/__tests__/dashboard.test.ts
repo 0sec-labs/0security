@@ -92,7 +92,8 @@ type RequestHandler = (
   res: import("node:http").ServerResponse,
 ) => unknown;
 
-vi.mock("../../local-engine.js", () => ({ assertLocalEngineAvailable: vi.fn(), registerLocalEngine: vi.fn(() => vi.fn()) }));
+const registerLocalEngineMock = vi.fn(() => vi.fn());
+vi.mock("../../local-engine.js", () => ({ assertLocalEngineAvailable: vi.fn(), registerLocalEngine: registerLocalEngineMock, discoverLocalEngine: vi.fn(() => null) }));
 
 const setupHttp = vi.hoisted(() => ({ pending: false, directories: [] as string[] }));
 vi.mock("../../web/team-setup.js", async importOriginal => {
@@ -614,20 +615,15 @@ async function invokeHandler(req: import("node:http").IncomingMessage): Promise<
 }
 
 async function getControlToken(): Promise<string> {
-  // The dashboard injects <meta name="0-control-token" content="…">
-  // into the served HTML. The injection only happens on the SPA-route
-  // fallback (resolveAssetPath returns null AND extname is empty),
-  // NOT on resolveAssetPath's explicit-asset branch. We request a
-  // non-existent extension-less path (`/dashboard-spa-route`) so the
-  // handler falls through to that branch.
-  const captured = await invokeHandler(
-    makeRequest({ method: "GET", url: "/dashboard-spa-route" }),
-  );
-  const m = captured.body.match(/0-control-token" content="([^"]+)"/);
-  if (!m) {
-    throw new Error(`control token not found in HTML; body=${captured.body.slice(0, 200)}`);
+  // The token is no longer embedded in the served HTML. The console registers
+  // itself (token and all) through registerLocalEngine and hands the token to
+  // the browser via the launch URL fragment; read it from that registration.
+  const call = registerLocalEngineMock.mock.calls.at(-1);
+  const token = (call?.[0] as { token?: string } | undefined)?.token;
+  if (!token) {
+    throw new Error("control token not registered — did the console start?");
   }
-  return m[1]!;
+  return token;
 }
 
 let logSpy: ReturnType<typeof vi.spyOn>;
@@ -826,27 +822,24 @@ describe("dashboard — static asset serving", () => {
     await runCli(["web", "--no-open"]);
   });
 
-  it("GET / injects the page-bound control token into index.html", async () => {
-    // The browser loads "/" before React routes to /chat. The bootstrap document
-    // therefore needs the same token as a deep-linked SPA route; otherwise the
-    // renderer can render chat but every authenticated API request is rejected.
+  it("GET / serves index.html without embedding the control token", async () => {
+    // The token is delivered to the browser through the launch URL fragment, not
+    // the page, so a tokenless fetch of the bootstrap document must not contain it.
     const captured = await invokeHandler(makeRequest({ method: "GET", url: "/" }));
     expect(captured.statusCode).toBe(200);
     expect(captured.headers["Content-Type"]).toMatch(/text\/html/);
-    expect(captured.body).toMatch(/0-control-token" content="[0-9a-f-]{8,}"/);
+    expect(captured.body).not.toContain("0-control-token");
   });
 
-  it("GET /<spa-route> serves index.html WITH the control-token <meta> injected", async () => {
-    // The SPA-fallback branch: extension-less path that resolveAssetPath
-    // misses (because we did not whitelist <assetDir>/scans/abc/index.html
-    // in fsState.existsPaths). Token injection MUST happen here so the
-    // dashboard JS can authenticate /api/control/* calls.
+  it("GET /<spa-route> serves index.html without embedding the control token", async () => {
+    // The SPA-fallback branch (extension-less path that resolveAssetPath misses)
+    // must also serve the page without the token baked in.
     const captured = await invokeHandler(
       makeRequest({ method: "GET", url: "/scans/abc" }),
     );
     expect(captured.statusCode).toBe(200);
     expect(captured.headers["Content-Type"]).toMatch(/text\/html/);
-    expect(captured.body).toMatch(/0-control-token" content="[0-9a-f-]{8,}"/);
+    expect(captured.body).not.toContain("0-control-token");
   });
 
   it("GET /plugins/plugin:foxguard.scanner (dotted id) falls back to index.html", async () => {

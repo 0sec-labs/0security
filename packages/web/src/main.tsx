@@ -8,7 +8,9 @@ import { initializeWebTheme } from "./lib/web-theme";
 import { initializeWebAppearance } from "./lib/web-appearance";
 import { AppErrorBoundary } from "./components/app-error-boundary";
 import { installCrashReporting, reportCrash } from "./lib/crash-reporting";
+import { captureLaunchControlToken } from "./api";
 
+captureLaunchControlToken();
 initializeWebTheme();
 initializeWebAppearance();
 installCrashReporting();
