@@ -288,6 +288,38 @@ test("Foxguard is installed next to 0 from the same checksums.txt unless opted o
     assert.ok(readFileSync(join(root, "curl.log"), "utf8").includes("foxguard-linux-arm64"));
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+test("an operator's own Foxguard in the install folder is kept, and INSTALL_FOXGUARD=force replaces it", () => {
+  const { root, home, env } = fixture(false, withFoxguard);
+  try {
+    const dir = join(home, ".0", "bin");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "foxguard"), "#!/bin/sh\necho mine\n", { mode: 0o755 });
+    const kept = spawnSync("bash", ["install.sh"], { env: { ...env, INSTALL_FOXGUARD: "1" }, encoding: "utf8" });
+    assert.equal(kept.status, 0, kept.stderr);
+    assert.match(kept.stderr, /keeping the Foxguard you already have/);
+    assert.match(readFileSync(join(dir, "foxguard"), "utf8"), /echo mine/);
+    assert.ok(!(existsSync(join(root, "curl.log")) && readFileSync(join(root, "curl.log"), "utf8").includes("foxguard")), "nothing was downloaded for Foxguard");
+    const forced = spawnSync("bash", ["install.sh"], { env: { ...env, INSTALL_FOXGUARD: "force" }, encoding: "utf8" });
+    assert.equal(forced.status, 0, forced.stderr);
+    assert.match(forced.stderr, /Installed verified Foxguard/);
+    assert.equal(readFileSync(join(dir, "foxguard"), "utf8"), readFileSync(join(dir, "0security"), "utf8"));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+test("a Foxguard this installer put there is replaced on the next install, unless you changed it", () => {
+  const { root, home, env } = fixture(false, withFoxguard);
+  try {
+    const dir = join(home, ".0", "bin");
+    const run = () => spawnSync("bash", ["install.sh"], { env: { ...env, INSTALL_FOXGUARD: "1" }, encoding: "utf8" });
+    assert.equal(run().status, 0);
+    const again = run();
+    assert.match(again.stderr, /Installed verified Foxguard/);
+    assert.equal((readFileSync(join(root, "curl.log"), "utf8").match(/foxguard-linux-arm64/g) ?? []).length, 2);
+    writeFileSync(join(dir, "foxguard"), "#!/bin/sh\necho edited\n", { mode: 0o755 });
+    const kept = run();
+    assert.match(kept.stderr, /keeping the Foxguard you already have/);
+    assert.match(readFileSync(join(dir, "foxguard"), "utf8"), /echo edited/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
 test("INSTALL_FOXGUARD=0 does not download or install Foxguard", () => {
   const { root, home, env } = fixture(false, withFoxguard);
   try {

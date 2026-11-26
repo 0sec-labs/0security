@@ -36,7 +36,15 @@ check_binary_install() {
     . "$HOME/.profile"
     0 --version
     0 --help >/dev/null
-    foxguard --version
+    # Foxguard is installed only from a release that lists it (the installer reads the same checksums.txt). A
+    # release published before Foxguard was bundled has no such asset, so the check applies only when it is listed.
+    case "$(uname -m)" in x86_64|amd64) platform=linux-x64 ;; aarch64|arm64) platform=linux-arm64 ;; *) platform="" ;; esac
+    checksums="$(curl -fsSL https://github.com/0sec-labs/0security/releases/latest/download/checksums.txt)"
+    if printf "%s\n" "$checksums" | awk -v asset="foxguard-$platform" "\$2 == asset || \$2 == (\"*\" asset) { found = 1 } END { exit !found }"; then
+      foxguard --version
+    else
+      echo "the latest release lists no foxguard-$platform; skipping the Foxguard check" >&2
+    fi
     ! command -v node
   '
 }

@@ -5,6 +5,7 @@
  *   node scripts/check-egress-inventory.mjs
  *
  * Fails when
+ *  - (Rust) a Rust file under the crates folders builds an HTTP client and is not listed;
  *  - a non-test source file under packages/engine, packages/cli or packages/bench matches an outbound pattern
  *    (fetch, node:http(s) request/get, gh/curl/ssh processes, git network subcommands, sockets) and is not listed
  *    under `files` in scripts/egress-inventory.json;
@@ -32,6 +33,8 @@ export const OUTBOUND_PATTERNS = {
   scannerProcess: /\bnucleiArguments\(/,
   // A connection to a database server the operator names (enterprise/src/ha).
   database: /import\s+(?!type)[^;]*from "pg"/,
+  // An HTTP client built in the Rust crates (crates/*/src).
+  rustHttp: /reqwest::(?:blocking::)?(?:Client::(?:builder|new)\(|get\()/,
 };
 
 const isSource = path => /\.(ts|tsx|mjs)$/.test(path) && !/\.test\.|\.d\.ts|\.generated\.|[\\/](?:__tests__|test|tests|scripts)[\\/]/.test(path);
@@ -52,8 +55,20 @@ export function sourceFiles(root = ROOT) {
 }
 
 /** Outbound calls are also looked for in the key-gated folder. Its XML namespace URLs are not hosts that are contacted, so hosts are not scanned there. */
+function walkRust(dir, out = []) {
+  if (!existsSync(dir)) return out;
+  for (const name of readdirSync(dir)) {
+    const path = join(dir, name);
+    if (statSync(path).isDirectory()) walkRust(path, out);
+    else if (name.endsWith(".rs")) out.push(path);
+  }
+  return out;
+}
+
 function outboundFiles(root = ROOT) {
-  return [...sourceFiles(root), ...walk(join(root, "enterprise", "src")).map(path => relative(root, path).split(sep).join("/"))];
+  const rust = existsSync(join(root, "crates")) ? readdirSync(join(root, "crates")).flatMap(crate => walkRust(join(root, "crates", crate, "src"))) : [];
+  const rel = path => relative(root, path).split(sep).join("/");
+  return [...sourceFiles(root), ...walk(join(root, "enterprise", "src")).map(rel), ...rust.map(rel)];
 }
 
 const strip = text => text.split("\n").filter(line => !/^\s*(?:\/\/|\*|\/\*)/.test(line)).join("\n");
@@ -63,7 +78,9 @@ export function scanOutbound(root = ROOT) {
   const found = new Map();
   for (const file of outboundFiles(root)) {
     const text = strip(readFileSync(join(root, file), "utf8"));
-    const hits = Object.entries(OUTBOUND_PATTERNS).filter(([, re]) => re.test(text)).map(([name]) => name);
+    // Rust files carry rule patterns written as text, so only the Rust client pattern applies to them.
+    const patterns = file.endsWith(".rs") ? Object.entries(OUTBOUND_PATTERNS).filter(([name]) => name === "rustHttp") : Object.entries(OUTBOUND_PATTERNS).filter(([name]) => name !== "rustHttp");
+    const hits = patterns.filter(([, re]) => re.test(text)).map(([name]) => name);
     if (hits.length) found.set(file, hits);
   }
   return found;

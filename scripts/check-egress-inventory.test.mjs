@@ -50,3 +50,15 @@ test("an unreviewed host literal in code fails; comments and test fixtures do no
   assert.deepEqual([...scanHosts(root).keys()], ["new-host.dev"]);
   assert.equal(scanOutbound(root).size, 0);
 });
+
+test("an HTTP client in a Rust crate must be registered; rule text that only names reqwest is not a call", () => {
+  const files = {
+    "crates/tool/src/net.rs": "fn go() { let c = reqwest::blocking::Client::builder().build(); }\n",
+    "crates/tool/src/rules/ssrf.rs": "// matches reqwest::get(url)\nconst NAME: &str = \"reqwest\";\n",
+  };
+  const missing = fixture({ files, entries: [] });
+  assert.match(checkInventory(missing).join("\n"), /crates\/tool\/src\/net\.rs makes an outbound call \(rustHttp\)/);
+  assert.doesNotMatch(checkInventory(missing).join("\n"), /ssrf\.rs/);
+  const ok = fixture({ files, entries: [entry("rust-call", "crates/tool/src/net.rs", ["api.thing.dev"])], docs: "`rust-call` reaches api.thing.dev" });
+  assert.deepEqual(checkInventory(ok), []);
+});

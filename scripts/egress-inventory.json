@@ -107,6 +107,20 @@
       "disable": "Do not run the check; ZERO_ENTERPRISE refuses the lookup."
     },
     {
+      "id": "foxguard-sca-osv",
+      "class": "feature",
+      "enterprise": "blocked",
+      "destinations": [
+        "api.osv.dev"
+      ],
+      "files": [
+        "crates/foxguard/src/deps.rs"
+      ],
+      "when": "Foxguard runs with --sca, or reads scan.sca from a .foxguard.yml (only with --repo-ignores). 0 never passes --sca.",
+      "sent": "Package names, versions and ecosystems from the lockfiles in the scanned folder.",
+      "disable": "Do not pass --sca; --sca-offline or --sca-db keep it local. ZERO_ENTERPRISE or ZERO_OFFLINE makes Foxguard skip the lookup."
+    },
+    {
       "id": "extension-git-source",
       "class": "feature",
       "enterprise": "blocked",

@@ -173,7 +173,21 @@ fi
 # in the same checksums.txt, so the attestation and signature checks above cover
 # it. INSTALL_FOXGUARD=0 opts out for pre-provisioned hosts. A release or mirror
 # that has no foxguard asset leaves 0security installed without it.
-if [ "${INSTALL_FOXGUARD:-1}" != "0" ]; then
+# A foxguard that this installer did not put there (an operator's own build) is
+# kept: the installer records the SHA-256 of the one it installs in
+# .foxguard.sha256, and replaces the file only while it still matches that
+# record. INSTALL_FOXGUARD=force replaces it anyway.
+fg_target="${INSTALL_DIR}/foxguard"
+fg_record="${INSTALL_DIR}/.foxguard.sha256"
+fg_keep=""
+if [ "${INSTALL_FOXGUARD:-1}" != "0" ] && [ "${INSTALL_FOXGUARD:-1}" != "force" ] && { [ -e "$fg_target" ] || [ -L "$fg_target" ]; }; then
+  fg_recorded="$(cat "$fg_record" 2>/dev/null || true)"
+  if [ -L "$fg_target" ] || [ -z "$fg_recorded" ] || [ "$fg_recorded" != "$(sha256_file "$fg_target" 2>/dev/null || true)" ]; then
+    fg_keep=1
+    printf '%s\n' "0 installer: keeping the Foxguard you already have at ${fg_target} (not installed by this installer). Run again with INSTALL_FOXGUARD=force to replace it." >&2
+  fi
+fi
+if [ "${INSTALL_FOXGUARD:-1}" != "0" ] && [ -z "$fg_keep" ]; then
   fg_expected="$(awk -v asset="$FG_ASSET" '$2 == asset || $2 == ("*" asset) { print $1; exit }' "$manifest")"
   if [ -z "$fg_expected" ]; then
     printf '%s\n' "0 installer: this release lists no ${FG_ASSET}; keeping 0security installed without Foxguard" >&2
@@ -184,8 +198,9 @@ if [ "${INSTALL_FOXGUARD:-1}" != "0" ]; then
       --connect-timeout 10 --max-time 60 --retry 1 --retry-delay 1 --retry-max-time 65; then
       if [ "$fg_expected" = "$(sha256_file "$fg_binary")" ]; then
         chmod 755 "$fg_binary"
-        mv -f "$fg_binary" "${INSTALL_DIR}/foxguard"
+        mv -f "$fg_binary" "$fg_target"
         fg_binary=""
+        printf '%s\n' "$fg_expected" > "$fg_record"
         printf '%s\n' "Installed verified Foxguard to ${INSTALL_DIR}/foxguard" >&2
       else
         printf '%s\n' "0 installer: ${FG_ASSET} checksum mismatch; keeping 0security installed without Foxguard" >&2
