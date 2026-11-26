@@ -17,14 +17,14 @@ Foxguard itself is available under MIT OR Apache-2.0. The tree-sitter grammars i
 | anstyle-wincon | 3.0.11 | MIT OR Apache-2.0 | https://github.com/rust-cli/anstyle.git |
 | anyhow | 1.0.104 | MIT OR Apache-2.0 | https://github.com/dtolnay/anyhow |
 | approx | 0.5.1 | Apache-2.0 | https://github.com/brendanzab/approx |
-| asn1-rs | 0.6.2 | MIT OR Apache-2.0 | https://github.com/rusticata/asn1-rs.git |
-| asn1-rs-derive | 0.5.1 | MIT OR Apache-2.0 | https://github.com/rusticata/asn1-rs.git |
+| asn1-rs | 0.7.2 | MIT OR Apache-2.0 | https://github.com/rusticata/asn1-rs.git |
+| asn1-rs-derive | 0.6.0 | MIT OR Apache-2.0 | https://github.com/rusticata/asn1-rs.git |
 | asn1-rs-impl | 0.2.0 | MIT/Apache-2.0 | https://github.com/rusticata/asn1-rs.git |
-| atomic | 0.6.1 | Apache-2.0/MIT | https://github.com/Amanieu/atomic-rs |
 | atomic-waker | 1.1.2 | Apache-2.0 OR MIT | https://github.com/smol-rs/atomic-waker |
 | aws-lc-rs | 1.19.0 | ISC AND (Apache-2.0 OR ISC) | https://github.com/aws/aws-lc-rs |
 | aws-lc-sys | 0.47.0 | ISC AND (Apache-2.0 OR ISC) AND Apache-2.0 AND MIT AND BSD-3-Clause AND (Apache-2.0 OR ISC OR MIT) AND (Apache-2.0 OR ISC OR MIT-0) | https://github.com/aws/aws-lc-rs |
 | base64 | 0.22.1 | MIT OR Apache-2.0 | https://github.com/marshallpierce/rust-base64 |
+| base64 | 0.23.1 | MIT OR Apache-2.0 | https://github.com/marshallpierce/rust-base64 |
 | bit-set | 0.5.3 | MIT/Apache-2.0 | https://github.com/contain-rs/bit-set |
 | bit-set | 0.8.0 | Apache-2.0 OR MIT | https://github.com/contain-rs/bit-set |
 | bit-vec | 0.6.3 | MIT/Apache-2.0 | https://github.com/contain-rs/bit-vec |
@@ -35,14 +35,13 @@ Foxguard itself is available under MIT OR Apache-2.0. The tree-sitter grammars i
 | bstr | 1.12.1 | MIT OR Apache-2.0 | https://github.com/BurntSushi/bstr |
 | bumpalo | 3.20.2 | MIT OR Apache-2.0 | https://github.com/fitzgen/bumpalo |
 | by_address | 1.2.1 | MIT OR Apache-2.0 | https://github.com/mbrubeck/by_address |
-| bytemuck | 1.25.0 | Zlib OR Apache-2.0 OR MIT | https://github.com/Lokathor/bytemuck |
 | bytes | 1.11.1 | MIT | https://github.com/tokio-rs/bytes |
 | castaway | 0.2.4 | MIT | https://github.com/sagebind/castaway |
 | cfg-if | 1.0.4 | MIT OR Apache-2.0 | https://github.com/rust-lang/cfg-if |
 | chacha20 | 0.10.2 | MIT OR Apache-2.0 | https://github.com/RustCrypto/stream-ciphers |
-| clap | 4.6.0 | MIT OR Apache-2.0 | https://github.com/clap-rs/clap |
-| clap_builder | 4.6.0 | MIT OR Apache-2.0 | https://github.com/clap-rs/clap |
-| clap_derive | 4.6.0 | MIT OR Apache-2.0 | https://github.com/clap-rs/clap |
+| clap | 4.6.9 | MIT OR Apache-2.0 | https://github.com/clap-rs/clap |
+| clap_builder | 4.6.7 | MIT OR Apache-2.0 | https://github.com/clap-rs/clap |
+| clap_derive | 4.6.9 | MIT OR Apache-2.0 | https://github.com/clap-rs/clap |
 | clap_lex | 1.1.0 | MIT OR Apache-2.0 | https://github.com/clap-rs/clap |
 | colorchoice | 1.0.5 | MIT OR Apache-2.0 | https://github.com/rust-cli/anstyle.git |
 | colored | 2.2.0 | MPL-2.0 | https://github.com/mackwic/colored |
@@ -67,7 +66,7 @@ Foxguard itself is available under MIT OR Apache-2.0. The tree-sitter grammars i
 | data-encoding | 2.11.0 | MIT | https://github.com/ia0/data-encoding |
 | dekobon-tree-sitter-groovy | 0.3.0 | Apache-2.0 OR MIT | https://github.com/dekobon/tree-sitter-groovy |
 | deltae | 0.3.2 | MIT | https://gitlab.com/ryanobeirne/deltae.git |
-| der-parser | 9.0.0 | MIT/Apache-2.0 | https://github.com/rusticata/der-parser.git |
+| der-parser | 10.0.0 | MIT OR Apache-2.0 | https://github.com/rusticata/der-parser.git |
 | deranged | 0.5.8 | MIT OR Apache-2.0 | https://github.com/jhpratt/deranged |
 | derive_more | 2.1.1 | MIT | https://github.com/JelteF/derive_more |
 | derive_more-impl | 2.1.1 | MIT | https://github.com/JelteF/derive_more |
@@ -99,7 +98,7 @@ Foxguard itself is available under MIT OR Apache-2.0. The tree-sitter grammars i
 | getrandom | 0.2.17 | MIT OR Apache-2.0 | https://github.com/rust-random/getrandom |
 | getrandom | 0.3.4 | MIT OR Apache-2.0 | https://github.com/rust-random/getrandom |
 | getrandom | 0.4.2 | MIT OR Apache-2.0 | https://github.com/rust-random/getrandom |
-| globset | 0.4.18 | Unlicense OR MIT | https://github.com/BurntSushi/ripgrep/tree/master/crates/globset |
+| globset | 0.4.22 | Unlicense OR MIT | https://github.com/BurntSushi/ripgrep/tree/master/crates/globset |
 | hashbrown | 0.15.5 | MIT OR Apache-2.0 | https://github.com/rust-lang/hashbrown |
 | hashbrown | 0.16.1 | MIT OR Apache-2.0 | https://github.com/rust-lang/hashbrown |
 | hashbrown | 0.17.1 | MIT OR Apache-2.0 | https://github.com/rust-lang/hashbrown |
@@ -123,7 +122,7 @@ Foxguard itself is available under MIT OR Apache-2.0. The tree-sitter grammars i
 | ident_case | 1.0.1 | MIT/Apache-2.0 | https://github.com/TedDriggs/ident_case |
 | idna | 1.1.0 | MIT OR Apache-2.0 | https://github.com/servo/rust-url/ |
 | idna_adapter | 1.2.2 | Apache-2.0 OR MIT | https://github.com/hsivonen/idna_adapter |
-| ignore | 0.4.25 | Unlicense OR MIT | https://github.com/BurntSushi/ripgrep/tree/master/crates/ignore |
+| ignore | 0.4.35 | Unlicense OR MIT | https://github.com/BurntSushi/ripgrep/tree/master/crates/ignore |
 | include_dir | 0.7.4 | MIT | https://github.com/Michael-F-Bryan/include_dir |
 | include_dir_macros | 0.7.4 | MIT | https://github.com/Michael-F-Bryan/include_dir |
 | indexmap | 2.13.0 | Apache-2.0 OR MIT | https://github.com/indexmap-rs/indexmap |
@@ -167,7 +166,7 @@ Foxguard itself is available under MIT OR Apache-2.0. The tree-sitter grammars i
 | num-derive | 0.4.2 | MIT OR Apache-2.0 | https://github.com/rust-num/num-derive |
 | num-integer | 0.1.46 | MIT OR Apache-2.0 | https://github.com/rust-num/num-integer |
 | num-traits | 0.2.19 | MIT OR Apache-2.0 | https://github.com/rust-num/num-traits |
-| oid-registry | 0.7.1 | MIT OR Apache-2.0 | https://github.com/rusticata/oid-registry.git |
+| oid-registry | 0.8.1 | MIT OR Apache-2.0 | https://github.com/rusticata/oid-registry.git |
 | once_cell | 1.21.4 | MIT OR Apache-2.0 | https://github.com/matklad/once_cell |
 | once_cell_polyfill | 1.70.2 | MIT OR Apache-2.0 | https://github.com/polyfill-rs/once_cell_polyfill |
 | openssl-probe | 0.2.1 | MIT OR Apache-2.0 | https://github.com/rustls/openssl-probe |
@@ -193,11 +192,11 @@ Foxguard itself is available under MIT OR Apache-2.0. The tree-sitter grammars i
 | potential_utf | 0.1.5 | Unicode-3.0 | https://github.com/unicode-org/icu4x |
 | powerfmt | 0.2.0 | MIT OR Apache-2.0 | https://github.com/jhpratt/powerfmt |
 | prettyplease | 0.2.37 | MIT OR Apache-2.0 | https://github.com/dtolnay/prettyplease |
-| proc-macro2 | 1.0.106 | MIT OR Apache-2.0 | https://github.com/dtolnay/proc-macro2 |
+| proc-macro2 | 1.0.107 | MIT OR Apache-2.0 | https://github.com/dtolnay/proc-macro2 |
 | quinn | 0.11.9 | MIT OR Apache-2.0 | https://github.com/quinn-rs/quinn |
 | quinn-proto | 0.11.16 | MIT OR Apache-2.0 | https://github.com/quinn-rs/quinn |
 | quinn-udp | 0.5.14 | MIT OR Apache-2.0 | https://github.com/quinn-rs/quinn |
-| quote | 1.0.45 | MIT OR Apache-2.0 | https://github.com/dtolnay/quote |
+| quote | 1.0.47 | MIT OR Apache-2.0 | https://github.com/dtolnay/quote |
 | r-efi | 5.3.0 | MIT OR Apache-2.0 OR LGPL-2.1-or-later | https://github.com/r-efi/r-efi |
 | r-efi | 6.0.0 | MIT OR Apache-2.0 OR LGPL-2.1-or-later | https://github.com/r-efi/r-efi |
 | rand | 0.10.2 | MIT OR Apache-2.0 | https://github.com/rust-random/rand |
@@ -205,19 +204,20 @@ Foxguard itself is available under MIT OR Apache-2.0. The tree-sitter grammars i
 | rand_core | 0.10.1 | MIT OR Apache-2.0 | https://github.com/rust-random/rand_core |
 | rand_core | 0.6.4 | MIT OR Apache-2.0 | https://github.com/rust-random/rand |
 | rand_pcg | 0.10.2 | MIT OR Apache-2.0 | https://github.com/rust-random/rngs |
-| ratatui | 0.30.0 | MIT | https://github.com/ratatui/ratatui |
+| ratatui | 0.30.2 | MIT | https://github.com/ratatui/ratatui |
 | ratatui-core | 0.1.2 | MIT | https://github.com/ratatui/ratatui |
-| ratatui-crossterm | 0.1.0 | MIT | https://github.com/ratatui/ratatui |
-| ratatui-macros | 0.7.0 | MIT | https://github.com/ratatui/ratatui |
-| ratatui-termwiz | 0.1.0 | MIT | https://github.com/ratatui/ratatui |
-| ratatui-widgets | 0.3.0 | MIT | https://github.com/ratatui/ratatui |
-| rayon | 1.11.0 | MIT OR Apache-2.0 | https://github.com/rayon-rs/rayon |
+| ratatui-crossterm | 0.1.2 | MIT | https://github.com/ratatui/ratatui |
+| ratatui-macros | 0.7.2 | MIT | https://github.com/ratatui/ratatui |
+| ratatui-termina | 0.1.0 | MIT | https://github.com/ratatui/ratatui |
+| ratatui-termwiz | 0.1.2 | MIT | https://github.com/ratatui/ratatui |
+| ratatui-widgets | 0.3.2 | MIT | https://github.com/ratatui/ratatui |
+| rayon | 1.12.0 | MIT OR Apache-2.0 | https://github.com/rayon-rs/rayon |
 | rayon-core | 1.13.0 | MIT OR Apache-2.0 | https://github.com/rayon-rs/rayon |
 | redox_syscall | 0.5.18 | MIT | https://gitlab.redox-os.org/redox-os/syscall |
-| regex | 1.12.3 | MIT OR Apache-2.0 | https://github.com/rust-lang/regex |
-| regex-automata | 0.4.14 | MIT OR Apache-2.0 | https://github.com/rust-lang/regex |
-| regex-syntax | 0.8.10 | MIT OR Apache-2.0 | https://github.com/rust-lang/regex |
-| reqwest | 0.13.3 | MIT OR Apache-2.0 | https://github.com/seanmonstar/reqwest |
+| regex | 1.13.2 | MIT OR Apache-2.0 | https://github.com/rust-lang/regex |
+| regex-automata | 0.4.19 | MIT OR Apache-2.0 | https://github.com/rust-lang/regex |
+| regex-syntax | 0.8.12 | MIT OR Apache-2.0 | https://github.com/rust-lang/regex |
+| reqwest | 0.13.5 | MIT OR Apache-2.0 | https://github.com/seanmonstar/reqwest |
 | ring | 0.17.14 | Apache-2.0 AND ISC | https://github.com/briansmith/ring |
 | rustc-hash | 2.1.2 | Apache-2.0 OR MIT | https://github.com/rust-lang/rustc-hash |
 | rusticata-macros | 4.1.0 | MIT/Apache-2.0 | https://github.com/rusticata/rusticata-macros.git |
@@ -235,11 +235,11 @@ Foxguard itself is available under MIT OR Apache-2.0. The tree-sitter grammars i
 | scopeguard | 1.2.0 | MIT OR Apache-2.0 | https://github.com/bluss/scopeguard |
 | security-framework | 3.7.0 | MIT OR Apache-2.0 | https://github.com/kornelski/rust-security-framework |
 | security-framework-sys | 2.17.0 | MIT OR Apache-2.0 | https://github.com/kornelski/rust-security-framework |
-| semver | 1.0.27 | MIT OR Apache-2.0 | https://github.com/dtolnay/semver |
-| serde | 1.0.228 | MIT OR Apache-2.0 | https://github.com/serde-rs/serde |
-| serde_core | 1.0.228 | MIT OR Apache-2.0 | https://github.com/serde-rs/serde |
-| serde_derive | 1.0.228 | MIT OR Apache-2.0 | https://github.com/serde-rs/serde |
-| serde_json | 1.0.149 | MIT OR Apache-2.0 | https://github.com/serde-rs/json |
+| semver | 1.0.28 | MIT OR Apache-2.0 | https://github.com/dtolnay/semver |
+| serde | 1.0.229 | MIT OR Apache-2.0 | https://github.com/serde-rs/serde |
+| serde_core | 1.0.229 | MIT OR Apache-2.0 | https://github.com/serde-rs/serde |
+| serde_derive | 1.0.229 | MIT OR Apache-2.0 | https://github.com/serde-rs/serde |
+| serde_json | 1.0.154 | MIT OR Apache-2.0 | https://github.com/serde-rs/json |
 | serde_spanned | 0.6.9 | MIT OR Apache-2.0 | https://github.com/toml-rs/toml |
 | serde_yaml_ng | 0.10.0 | MIT | https://github.com/acatton/serde-yaml-ng |
 | sha1_smol | 1.0.1 | BSD-3-Clause | https://github.com/mitsuhiko/sha1-smol |
@@ -258,16 +258,16 @@ Foxguard itself is available under MIT OR Apache-2.0. The tree-sitter grammars i
 | static_assertions | 1.1.0 | MIT OR Apache-2.0 | https://github.com/nvzqz/static-assertions-rs |
 | streaming-iterator | 0.1.9 | MIT OR Apache-2.0 | https://github.com/sfackler/streaming-iterator |
 | strsim | 0.11.1 | MIT | https://github.com/rapidfuzz/strsim-rs |
-| strum | 0.27.2 | MIT | https://github.com/Peternator7/strum |
 | strum | 0.28.0 | MIT | https://github.com/Peternator7/strum |
-| strum_macros | 0.27.2 | MIT | https://github.com/Peternator7/strum |
 | strum_macros | 0.28.0 | MIT | https://github.com/Peternator7/strum |
 | subtle | 2.6.1 | BSD-3-Clause | https://github.com/dalek-cryptography/subtle |
 | syn | 1.0.109 | MIT OR Apache-2.0 | https://github.com/dtolnay/syn |
 | syn | 2.0.117 | MIT OR Apache-2.0 | https://github.com/dtolnay/syn |
+| syn | 3.0.10 | MIT OR Apache-2.0 | https://github.com/dtolnay/syn |
 | sync_wrapper | 1.0.2 | Apache-2.0 | https://github.com/Actyx/sync_wrapper |
 | synstructure | 0.13.2 | MIT | https://github.com/mystor/synstructure |
 | tempfile | 3.27.0 | MIT OR Apache-2.0 | https://github.com/Stebalien/tempfile |
+| termina | 0.3.3 | MIT OR MPL-2.0 | https://github.com/helix-editor/termina |
 | terminfo | 0.9.0 | WTFPL | https://github.com/meh/rust-terminfo |
 | termios | 0.3.3 | MIT | https://github.com/dcuddeback/termios-rs |
 | termwiz | 0.23.3 | MIT | https://github.com/wezterm/wezterm |
@@ -295,7 +295,7 @@ Foxguard itself is available under MIT OR Apache-2.0. The tree-sitter grammars i
 | tracing-core | 0.1.36 | MIT | https://github.com/tokio-rs/tracing |
 | tree-sitter | 0.25.10 | MIT | https://github.com/tree-sitter/tree-sitter |
 | tree-sitter-c-sharp | 0.23.1 | MIT | https://github.com/tree-sitter/tree-sitter-c-sharp |
-| tree-sitter-clojure-orchard | 0.2.5 | MIT | https://codeberg.org/grammar-orchard/tree-sitter-clojure-orchard |
+| tree-sitter-clojure-orchard | 0.2.9 | CC0-1.0 | https://codeberg.org/grammar-orchard/tree-sitter-clojure-orchard |
 | tree-sitter-containerfile | 0.8.0 | MIT | https://github.com/wharflab/tree-sitter-containerfile |
 | tree-sitter-dart | 0.2.0 | MIT | https://github.com/nielsenko/tree-sitter-dart |
 | tree-sitter-elixir | 0.3.5 | Apache-2.0 | https://github.com/elixir-lang/tree-sitter-elixir |
@@ -305,26 +305,26 @@ Foxguard itself is available under MIT OR Apache-2.0. The tree-sitter grammars i
 | tree-sitter-html | 0.23.2 | MIT | https://github.com/tree-sitter/tree-sitter-html |
 | tree-sitter-java | 0.23.5 | MIT | https://github.com/tree-sitter/tree-sitter-java |
 | tree-sitter-json | 0.24.8 | MIT | https://github.com/tree-sitter/tree-sitter-json |
-| tree-sitter-kotlin-sg | 0.4.0 | MIT | https://github.com/fwcd/tree-sitter-kotlin |
-| tree-sitter-language | 0.1.7 | MIT | https://github.com/tree-sitter/tree-sitter |
+| tree-sitter-kotlin-sg | 0.4.1 | MIT | https://github.com/ast-grep/tree-sitter-kotlin |
+| tree-sitter-language | 0.1.9 | MIT | https://github.com/tree-sitter/tree-sitter |
 | tree-sitter-ocaml | 0.25.0 | MIT | https://github.com/tree-sitter/tree-sitter-ocaml |
 | tree-sitter-php | 0.24.2 | MIT | https://github.com/tree-sitter/tree-sitter-php |
 | tree-sitter-python | 0.23.6 | MIT | https://github.com/tree-sitter/tree-sitter-python |
 | tree-sitter-ruby | 0.23.1 | MIT | https://github.com/tree-sitter/tree-sitter-ruby |
 | tree-sitter-rust | 0.24.2 | MIT | https://github.com/tree-sitter/tree-sitter-rust |
-| tree-sitter-scala | 0.26.0 | MIT | https://github.com/tree-sitter/tree-sitter-scala |
-| tree-sitter-sfapex | 3.0.0 | MIT | https://github.com/aheber/tree-sitter-sfapex |
+| tree-sitter-scala | 0.26.13 | MIT | https://github.com/tree-sitter/tree-sitter-scala |
+| tree-sitter-sfapex | 3.0.2 | MIT | https://github.com/aheber/tree-sitter-sfapex |
 | tree-sitter-solidity | 1.2.13 | MIT | https://github.com/JoranHonig/tree-sitter-solidity |
-| tree-sitter-swift | 0.7.1 | MIT | https://github.com/alex-pinkus/tree-sitter-swift |
+| tree-sitter-swift | 0.7.4 | MIT | https://github.com/alex-pinkus/tree-sitter-swift |
 | tree-sitter-xml | 0.7.0 | MIT | https://github.com/tree-sitter-grammars/tree-sitter-xml |
 | tree-sitter-yaml | 0.7.2 | MIT | https://github.com/tree-sitter-grammars/tree-sitter-yaml |
 | try-lock | 0.2.5 | MIT | https://github.com/seanmonstar/try-lock |
 | typenum | 1.19.0 | MIT OR Apache-2.0 | https://github.com/paholg/typenum |
 | ucd-trie | 0.1.7 | MIT OR Apache-2.0 | https://github.com/BurntSushi/ucd-generate |
 | unicode-ident | 1.0.24 | (MIT OR Apache-2.0) AND Unicode-3.0 | https://github.com/dtolnay/unicode-ident |
-| unicode-segmentation | 1.13.2 | MIT OR Apache-2.0 | https://github.com/unicode-rs/unicode-segmentation |
+| unicode-segmentation | 1.13.3 | MIT OR Apache-2.0 | https://github.com/unicode-rs/unicode-segmentation |
 | unicode-truncate | 2.0.1 | MIT OR Apache-2.0 | https://github.com/Aetf/unicode-truncate |
-| unicode-width | 0.2.0 | MIT OR Apache-2.0 | https://github.com/unicode-rs/unicode-width |
+| unicode-width | 0.2.3 | MIT OR Apache-2.0 | https://github.com/unicode-rs/unicode-width |
 | unicode-xid | 0.2.6 | MIT OR Apache-2.0 | https://github.com/unicode-rs/unicode-xid |
 | unsafe-libyaml | 0.2.11 | MIT | https://github.com/dtolnay/unsafe-libyaml |
 | unscanny | 0.1.0 | MIT OR Apache-2.0 | https://github.com/typst/unscanny |
@@ -332,10 +332,10 @@ Foxguard itself is available under MIT OR Apache-2.0. The tree-sitter grammars i
 | url | 2.5.9 | MIT OR Apache-2.0 | https://github.com/servo/rust-url |
 | utf8_iter | 1.0.4 | Apache-2.0 OR MIT | https://github.com/hsivonen/utf8_iter |
 | utf8parse | 0.2.2 | Apache-2.0 OR MIT | https://github.com/alacritty/vte |
-| uuid | 1.23.1 | Apache-2.0 OR MIT | https://github.com/uuid-rs/uuid |
+| uuid | 1.29.3 | Apache-2.0 OR MIT | https://github.com/uuid-rs/uuid |
 | vtparse | 0.6.2 | MIT | https://github.com/wez/wezterm |
 | wait-timeout | 0.2.1 | MIT/Apache-2.0 | https://github.com/alexcrichton/wait-timeout |
-| walkdir | 2.5.0 | Unlicense/MIT | https://github.com/BurntSushi/walkdir |
+| walkdir | 2.5.1 | Unlicense/MIT | https://github.com/BurntSushi/walkdir |
 | want | 0.3.1 | MIT | https://github.com/seanmonstar/want |
 | wasi | 0.11.1+wasi-snapshot-preview1 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | https://github.com/bytecodealliance/wasi |
 | wasip2 | 1.0.2+wasi-0.2.9 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | https://github.com/bytecodealliance/wasi-rs |
@@ -382,7 +382,7 @@ Foxguard itself is available under MIT OR Apache-2.0. The tree-sitter grammars i
 | wit-component | 0.244.0 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | https://github.com/bytecodealliance/wasm-tools/tree/main/crates/wit-component |
 | wit-parser | 0.244.0 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | https://github.com/bytecodealliance/wasm-tools/tree/main/crates/wit-parser |
 | writeable | 0.6.3 | Unicode-3.0 | https://github.com/unicode-org/icu4x |
-| x509-parser | 0.16.0 | MIT OR Apache-2.0 | https://github.com/rusticata/x509-parser.git |
+| x509-parser | 0.18.1 | MIT OR Apache-2.0 | https://github.com/rusticata/x509-parser.git |
 | yoke | 0.8.2 | Unicode-3.0 | https://github.com/unicode-org/icu4x |
 | yoke-derive | 0.8.2 | Unicode-3.0 | https://github.com/unicode-org/icu4x |
 | zerofrom | 0.1.8 | Unicode-3.0 | https://github.com/unicode-org/icu4x |
