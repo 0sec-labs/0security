@@ -772,6 +772,13 @@ export interface Finding {
   /** Target-neutral research receipts attached by the shared adapter plane. */
   researchEvidence?: ResearchEvidenceEnvelope[];
   /**
+   * Structured root cause: the bug class, the unsafe pattern, the guard that is missing and where the control should
+   * live. It seeds variant hunting. Optional and additive: absent on findings that never had one.
+   */
+  rootCause?: RootCause;
+  /** Id of the finding whose root cause this finding shares (found by variant hunting). Optional and additive. */
+  variantOf?: string;
+  /**
    * Optional parent finding link for derived findings. Kernel crash ingest
    * uses this when a crash-triggered subsystem review finds sibling bugs.
    */
@@ -1903,4 +1910,16 @@ export interface ReviewReport {
   usage?: TokenUsage;
   /** Estimated USD cost from token usage at the configured model rates. */
   estimatedCostUsd?: number;
+}
+
+/** Why a finding exists, in a form that can be searched for elsewhere. */
+export interface RootCause {
+  /** The class of bug, for example "SQL injection" or "missing authorization". */
+  bugClass: string;
+  /** The shape of the unsafe code: the sink and where its input comes from. */
+  unsafePattern: { sink: string; source: string };
+  /** What check or guard is missing at the site. */
+  missingGuard: string;
+  /** Where the control should live so every site is covered (a shared helper, a middleware, a type). */
+  designOrigin: string;
 }

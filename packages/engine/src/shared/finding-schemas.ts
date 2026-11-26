@@ -110,6 +110,16 @@ export function normalizeAttackCategory(value: unknown): { category: z.infer<typ
   return unknownLabel ? { category, unknownLabel } : { category };
 }
 
+const clippedText = z.string().trim().min(1).max(500);
+
+/** The structured root cause of a finding; every part is required so a half-filled record never seeds a hunt. */
+export const rootCauseSchema = z.object({
+  bugClass: clippedText,
+  unsafePattern: z.object({ sink: clippedText, source: clippedText }),
+  missingGuard: clippedText,
+  designOrigin: clippedText,
+});
+
 export const findingSchema = z
   .object({
     id: z.string().min(1),
@@ -137,6 +147,9 @@ export const findingSchema = z
     remediation: z.unknown().optional(),
     pocSteps: pocStepArraySchema.optional(),
     verificationSpec: z.unknown().optional(),
+    // A malformed record from an older or foreign source is dropped, never a reason to reject the finding.
+    rootCause: rootCauseSchema.optional().catch(undefined),
+    variantOf: z.string().min(1).optional().catch(undefined),
     timestamp: z.number(),
   })
   .passthrough();

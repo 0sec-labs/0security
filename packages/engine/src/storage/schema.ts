@@ -205,6 +205,13 @@ export const findings = sqliteTable(
     reproduction: text("reproduction"),
     /** JSON ExecutedPoc: outcome (executed-proven, executed-failed, static-only) and the sandbox run record. NULL until a PoC attempt is recorded. */
     executedPoc: text("executedPoc"),
+    /**
+     * JSON of the structured root cause (bugClass, unsafePattern {sink, source}, missingGuard, designOrigin). NULL until
+     * a thread records one. Additive: old rows are unaffected and every reader must work without it.
+     */
+    rootCause: text("rootCause"),
+    /** Id of the finding whose root cause this one shares, set by variant hunting. NULL for every other finding. */
+    variantOf: text("variantOf"),
     /** Scanner that produced the finding when it was imported (for example `CodeQL`); NULL for findings 0 found itself. */
     tool: text("tool"),
     /** Repository a finding was sent from (`owner/name`), set only by the shared findings server's ingest. NULL otherwise. */

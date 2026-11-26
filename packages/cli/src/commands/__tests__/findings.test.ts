@@ -147,6 +147,9 @@ vi.mock("@0/engine/storage", () => {
       if (opts?.triageStatus) out = out.filter((r) => r.triageStatus === opts.triageStatus);
       return out;
     }
+    listVariantLinks(): never[] {
+      return [];
+    }
     listFindingsBySeverity(opts?: Parameters<FakeOsecDB["listFindings"]>[0]): FakeFindingRow[] {
       return this.listFindings(opts).slice(0, opts?.limit ?? 100);
     }
