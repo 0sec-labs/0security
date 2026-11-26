@@ -7,6 +7,7 @@ import {
   applySentinelPatch, dropAccessFields, dropScopeFromFingerprint, folderFromRetiredScope, parseSentinelCreate, parseSentinelPatch, sentinelReviewFingerprint,
   type AgentTurn, type AgentTurnOrigin, type AgentTurnOriginDetail, type Sentinel, type SentinelActivation, type SentinelCreateInput, type SentinelFile, type SentinelFileAuthorKind, type SentinelFileRevision, type SentinelStatus,
 } from "../shared/sentinels.js";
+import { budgetRefusal, utcDayStart, utcMonthStart } from "../shared/sentinel-budget.js";
 import {
   SentinelTriggerCreateSchema, isSentinelTriggerKind, nextSentinelFire,
   type SentinelTrigger,
@@ -343,6 +344,47 @@ export class SentinelStore {
     const when = (turn: AgentTurn) => turn.startedAt ?? turn.queuedAt ?? "";
     return [...rows, ...legacy].sort((a, b) => when(b).localeCompare(when(a))).slice(0, bounded);
   }
+  /**
+   * What a Sentinel (or one of its triggers) has spent since `sinceIso`, in USD: every turn that started at or after it, a person's messages
+   * included, plus activations the turn ledger never saw. A turn counts on the day it started.
+   */
+  spentSince(sentinelId: string, sinceIso: string, triggerId?: string): number {
+    const turns = this.#db.prepare(`SELECT COALESCE(SUM(cost_usd), 0) AS total FROM agent_turns WHERE agent_id = ? AND status != 'skipped' AND COALESCE(started_at, queued_at) >= ?${triggerId ? " AND trigger_id = ?" : ""}`)
+      .all(...(triggerId ? [sentinelId, sinceIso, triggerId] : [sentinelId, sinceIso]))[0] as { total: number };
+    const legacy = this.#db.prepare("SELECT activation_json FROM sentinel_activations a WHERE a.sentinel_id = ? AND a.started_at >= ? AND a.status != 'skipped' AND NOT EXISTS (SELECT 1 FROM agent_turns t WHERE t.legacy_activation_id = a.id)")
+      .all(sentinelId, sinceIso).map(value => parseRow<SentinelActivation>(value, "activation_json")).filter(activation => !triggerId || activation.trigger.triggerId === triggerId);
+    return Number(turns.total) + legacy.reduce((sum, activation) => sum + (activation.costUsd ?? 0), 0);
+  }
+  /**
+   * Every run since `sinceIso`, for the usage view: one row per turn that started (a person's messages included) and per activation the ledger never saw,
+   * and one row per run refused for its budget. Cost is in USD; a run that reported none counts as 0.
+   */
+  usageSince(sinceIso: string): Array<{ sentinelId: string; at: string; costUsd: number; status: string; refused: boolean }> {
+    const turns = this.#db.prepare("SELECT agent_id, COALESCE(started_at, queued_at) AS at, cost_usd, status, skipped_reason FROM agent_turns WHERE COALESCE(started_at, queued_at) >= ? ORDER BY at LIMIT 20000").all(sinceIso) as Array<Record<string, unknown>>;
+    const rows = turns.flatMap(row => {
+      const refused = row.status === "skipped" && String(row.skipped_reason ?? "").startsWith("Budget reached");
+      return row.status === "skipped" && !refused ? [] : [{ sentinelId: String(row.agent_id), at: String(row.at), costUsd: Number(row.cost_usd ?? 0), status: String(row.status), refused }];
+    });
+    const legacy = this.#db.prepare("SELECT activation_json FROM sentinel_activations a WHERE a.started_at >= ? AND a.status != 'skipped' AND NOT EXISTS (SELECT 1 FROM agent_turns t WHERE t.legacy_activation_id = a.id) ORDER BY a.started_at LIMIT 20000")
+      .all(sinceIso).map(value => parseRow<SentinelActivation>(value, "activation_json"));
+    return [...rows, ...legacy.map(activation => ({ sentinelId: activation.sentinelId, at: activation.startedAt, costUsd: activation.costUsd ?? 0, status: activation.status, refused: false }))];
+  }
+  /**
+   * Why an unattended run of this Sentinel (from this trigger, when given) must not start, or null. The Sentinel's limits are checked first, then the trigger's.
+   * A person's own messages are never refused by it.
+   */
+  budgetRefusal(sentinelId: string, triggerId: string | undefined, nowMs: number): string | null {
+    const sentinel = this.get(sentinelId);
+    if (!sentinel) return null;
+    const trigger = triggerId ? this.getTrigger(triggerId) : null;
+    const check = (subject: "Sentinel" | "trigger", caps: { dailyBudgetUsd?: number | null; monthlyBudgetUsd?: number | null }, id?: string): string | null => {
+      if (typeof caps.dailyBudgetUsd !== "number" && typeof caps.monthlyBudgetUsd !== "number") return null;
+      const dayUsd = typeof caps.dailyBudgetUsd === "number" ? this.spentSince(sentinelId, utcDayStart(nowMs), id) : 0;
+      const monthUsd = typeof caps.monthlyBudgetUsd === "number" ? this.spentSince(sentinelId, utcMonthStart(nowMs), id) : 0;
+      return budgetRefusal(subject, caps, { dayUsd, monthUsd }, nowMs) ?? null;
+    };
+    return check("Sentinel", sentinel) ?? (trigger ? check("trigger", trigger, trigger.id) : null);
+  }
   getActivation(id: string): SentinelActivation | null {
     const found = this.#db.prepare("SELECT activation_json FROM sentinel_activations WHERE id = ?").all(id)[0];
     return found ? parseRow<SentinelActivation>(found, "activation_json") : null;
@@ -456,6 +498,7 @@ export class SentinelStore {
       const stamp = new Date(nowMs).toISOString();
       const trigger: SentinelTrigger = {
         id: randomUUID(), sentinelId, automationId: input.automationId, kind: input.kind, enabled: input.enabled, version: 1,
+        ...(input.dailyBudgetUsd ? { dailyBudgetUsd: input.dailyBudgetUsd } : {}), ...(input.monthlyBudgetUsd ? { monthlyBudgetUsd: input.monthlyBudgetUsd } : {}),
         ...(input.runBudgetUsd !== undefined ? { runBudgetUsd: input.runBudgetUsd } : {}), ...(input.runModel ? { runModel: input.runModel } : {}),
         ...(input.schedule ? { schedule: input.schedule } : {}), ...(input.github ? { github: input.github } : {}),
         ...(input.release ? { release: input.release } : {}), ...(input.check ? { check: input.check } : {}), ...(input.webhook ? { webhook: input.webhook } : {}), ...(input.bitbucket ? { bitbucket: input.bitbucket } : {}),
@@ -467,18 +510,19 @@ export class SentinelStore {
     })();
   }
   /** Editing timing or source never silently keeps a trigger enabled; the caller re-enables explicitly. */
-  updateTrigger(id: string, patch: { runBudgetUsd?: number; runModel?: unknown; enabled?: boolean; schedule?: unknown; github?: unknown; release?: unknown; check?: unknown; webhook?: unknown; bitbucket?: unknown }, expectedVersion?: number, nowMs = Date.now()): SentinelTrigger {
+  updateTrigger(id: string, patch: { dailyBudgetUsd?: number | null; monthlyBudgetUsd?: number | null; runBudgetUsd?: number; runModel?: unknown; enabled?: boolean; schedule?: unknown; github?: unknown; release?: unknown; check?: unknown; webhook?: unknown; bitbucket?: unknown }, expectedVersion?: number, nowMs = Date.now()): SentinelTrigger {
     return this.#db.transaction(() => {
       const current = this.getTrigger(id);
       if (!current) throw new SentinelStoreError("Trigger not found.", 404);
       if (expectedVersion !== undefined && current.version !== expectedVersion) throw new SentinelStoreError("Trigger changed. Reload before saving.", 409);
       if (current.activeClaim) throw new SentinelStoreError("Trigger is launching a run; try again in a moment.", 409);
-      const merged = SentinelTriggerCreateSchema.safeParse({ automationId: current.automationId, kind: current.kind, schedule: patch.schedule ?? current.schedule, github: patch.github ?? current.github, release: patch.release ?? current.release, check: patch.check ?? current.check, webhook: patch.webhook ?? current.webhook, bitbucket: patch.bitbucket ?? current.bitbucket, runBudgetUsd: patch.runBudgetUsd ?? current.runBudgetUsd, runModel: patch.runModel ?? current.runModel, enabled: patch.enabled ?? current.enabled });
+      const merged = SentinelTriggerCreateSchema.safeParse({ automationId: current.automationId, kind: current.kind, schedule: patch.schedule ?? current.schedule, github: patch.github ?? current.github, release: patch.release ?? current.release, check: patch.check ?? current.check, webhook: patch.webhook ?? current.webhook, bitbucket: patch.bitbucket ?? current.bitbucket, dailyBudgetUsd: patch.dailyBudgetUsd === undefined ? current.dailyBudgetUsd : patch.dailyBudgetUsd, monthlyBudgetUsd: patch.monthlyBudgetUsd === undefined ? current.monthlyBudgetUsd : patch.monthlyBudgetUsd, runBudgetUsd: patch.runBudgetUsd ?? current.runBudgetUsd, runModel: patch.runModel ?? current.runModel, enabled: patch.enabled ?? current.enabled });
       if (!merged.success) return invalid(new Error(merged.error.issues.map(issue => issue.message).join("; ")));
       const changedSource = patch.runBudgetUsd !== undefined || patch.runModel !== undefined || patch.schedule !== undefined || patch.github !== undefined || patch.release !== undefined || patch.check !== undefined || patch.webhook !== undefined || patch.bitbucket !== undefined;
       const enabled = changedSource && patch.enabled === undefined ? false : merged.data.enabled;
+      const { dailyBudgetUsd: _oldDaily, monthlyBudgetUsd: _oldMonthly, ...kept } = current;
       const next: SentinelTrigger = {
-        ...current, ...(merged.data.runBudgetUsd !== undefined ? { runBudgetUsd: merged.data.runBudgetUsd } : {}), ...(merged.data.runModel ? { runModel: merged.data.runModel } : {}), enabled, version: current.version + 1, updatedAt: new Date(nowMs).toISOString(),
+        ...kept, ...(merged.data.dailyBudgetUsd ? { dailyBudgetUsd: merged.data.dailyBudgetUsd } : {}), ...(merged.data.monthlyBudgetUsd ? { monthlyBudgetUsd: merged.data.monthlyBudgetUsd } : {}), ...(merged.data.runBudgetUsd !== undefined ? { runBudgetUsd: merged.data.runBudgetUsd } : {}), ...(merged.data.runModel ? { runModel: merged.data.runModel } : {}), enabled, version: current.version + 1, updatedAt: new Date(nowMs).toISOString(),
         ...(merged.data.schedule ? { schedule: merged.data.schedule } : {}), ...(merged.data.github ? { github: merged.data.github } : {}),
         ...(merged.data.release ? { release: merged.data.release } : {}), ...(merged.data.check ? { check: merged.data.check } : {}), ...(merged.data.webhook ? { webhook: merged.data.webhook } : {}), ...(merged.data.bitbucket ? { bitbucket: merged.data.bitbucket } : {}),
         nextFireAt: merged.data.schedule ? new Date(nextSentinelFire(merged.data.schedule, nowMs)).toISOString() : merged.data.github || merged.data.release || merged.data.check || merged.data.bitbucket ? new Date(nowMs).toISOString() : null,

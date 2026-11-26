@@ -14,7 +14,7 @@ const webhookText = (view: WebhookView): string => !view.serverMode ? "Not avail
   : renderFields({ configured: view.configured ? "yes" : "no (run: 0security sentinels webhook secret rotate --yes)", "payload URL": view.payloadUrl ?? "set --public-url on the server", "content type": "application/json", events: "Pull requests", "last delivery": view.lastDeliveryAt ? `${view.lastDeliveryAt} ${view.lastResult}${view.lastReason ? ` (${view.lastReason})` : ""}` : "none yet", "old secret valid until": view.graceUntil })
     + (view.deliveries?.length ? `\n\n${renderTable(view.deliveries, [{ header: "TIME", value: d => d.at }, { header: "RESULT", value: d => d.result }, { header: "EVENT", value: d => d.event }, { header: "REASON", value: d => d.reason }])}` : "");
 
-interface Sentinel { id: string; name: string; mission?: string; automationIds?: string[]; status: string; version: number; attention?: { needsYou: boolean; reason?: string } }
+interface Sentinel { id: string; name: string; mission?: string; dailyBudgetUsd?: number | null; monthlyBudgetUsd?: number | null; automationIds?: string[]; status: string; version: number; attention?: { needsYou: boolean; reason?: string } }
 interface Trigger { id: string; automationId: string; kind: string; enabled: boolean; version: number; nextFireAt: string | null; summary?: string; lastStatus?: string; bitbucket?: { repo: string; platform: string }; github?: { repo: string; commentOnPr?: boolean; includeForks?: boolean; results?: string } }
 interface SentinelFile { path: string; revision: number; content?: string; updatedAt?: string }
 
@@ -23,7 +23,13 @@ async function sentinel(client: ConsoleClient, reference: string): Promise<Senti
   return resolveId(all, reference, "Sentinel");
 }
 const view = (value: { sentinel: Sentinel }) => value.sentinel;
-const detail = (item: Sentinel) => renderFields({ id: item.id, name: item.name, status: item.status, purpose: item.mission, version: item.version, "needs you": item.attention?.needsYou ? item.attention.reason ?? "yes" : undefined });
+const detail = (item: Sentinel) => renderFields({ id: item.id, name: item.name, status: item.status, purpose: item.mission, version: item.version, "daily limit": usdLimit(item.dailyBudgetUsd), "monthly limit": usdLimit(item.monthlyBudgetUsd), "needs you": item.attention?.needsYou ? item.attention.reason ?? "yes" : undefined });
+const usdLimit = (value: number | null | undefined): string | undefined => typeof value === "number" ? `$${value} (USD)` : undefined;
+/** A spend limit flag: a positive amount, or "none" to remove the limit. */
+function limitFlag(name: string, value: string | undefined): number | null | undefined {
+  if (value === undefined) return undefined;
+  return value.toLowerCase() === "none" ? null : positive(name, value);
+}
 const ignoredAccessOptions = (command: Command): Command => command
   .addOption(new Option("--access <level>").hideHelp()).addOption(new Option("--autonomy <level>").hideHelp())
   .addOption(new Option("--tool-access <level>").hideHelp()).addOption(new Option("--mode <mode>").hideHelp()).addOption(new Option("--yolo").hideHelp());
@@ -85,8 +91,10 @@ export function registerSentinelsCommand(program: Command, deps: ConsoleCommandD
   ignoredAccessOptions(consoleFlags(group.command("set <id>").description("Create a Sentinel (--create), or change one: name, purpose, state, triggers, files")
     .option("--name <name>", "Name").option("--purpose <text>", "One-line purpose").addOption(new Option("--mission <text>").hideHelp())
     .option("--file <path>", "Patch JSON object").option("--version <n>", "Reviewed version (default: the current one)")
+    .option("--daily-budget <usd>", "Most the Sentinel may spend per UTC day; runs are refused after that (none removes the limit)")
+    .option("--monthly-budget <usd>", "Most the Sentinel may spend per UTC month; runs are refused after that (none removes the limit)")
     .option("--state <state>", "active, paused, acknowledged, archived or deleted")))
-    .action((id: string, options: ConsoleFlags & { state?: string; name?: string; purpose?: string; mission?: string; access?: string; autonomy?: string; toolAccess?: string; file?: string; version?: string }) => withConsole(options, deps, async client => {
+    .action((id: string, options: ConsoleFlags & { state?: string; name?: string; purpose?: string; mission?: string; access?: string; autonomy?: string; toolAccess?: string; file?: string; version?: string; dailyBudget?: string; monthlyBudget?: string }) => withConsole(options, deps, async client => {
       // A valid --state is rewritten to pause, resume, ... before parsing (command-grammar.ts); only a bad value arrives here.
       if (options.state !== undefined) throw new UsageError(`Unknown state "${options.state}". Use active, paused, acknowledged, archived or deleted.`);
       noteIgnoredAccessFlags(givenAccessOption(options as Record<string, unknown>), { json: options.json });
@@ -94,6 +102,8 @@ export function registerSentinelsCommand(program: Command, deps: ConsoleCommandD
       const patch: Record<string, unknown> = {
         ...(options.file ? await readJsonObject(options.file, "Sentinel patch") : {}),
         ...(options.name !== undefined ? { name: options.name } : {}), ...((options.purpose ?? options.mission) !== undefined ? { mission: options.purpose ?? options.mission } : {}),
+        ...(limitFlag("--daily-budget", options.dailyBudget) !== undefined ? { dailyBudgetUsd: limitFlag("--daily-budget", options.dailyBudget) } : {}),
+        ...(limitFlag("--monthly-budget", options.monthlyBudget) !== undefined ? { monthlyBudgetUsd: limitFlag("--monthly-budget", options.monthlyBudget) } : {}),
       };
       if (!Object.keys(patch).length) throw new UsageError("Nothing to change: pass a setting flag or --file.");
       const version = positive("--version", options.version) ?? current.version;
@@ -188,8 +198,10 @@ export function registerSentinelsCommand(program: Command, deps: ConsoleCommandD
     .option("--token-env <name>", "bitbucket-pr: name of the environment variable that holds the token (default: BITBUCKET_TOKEN)")
     .option("--events <list>", "bitbucket-pr: opened, updated or opened,updated (default: both)")
     .option("--max-files <n>", "bitbucket-pr: skip a pull request that changes more files than this (default: 50)")
-    .option("--budget <usd>", "bitbucket-pr: spend limit for one pull request scan (default: 2)"))
-    .action((id: string, options: ConsoleFlags & { automation?: string; kind?: string; file?: string; enable?: boolean; yes?: boolean; repo?: string; baseBranch?: string; comment?: boolean; includeForks?: boolean; results?: string; label?: string; platform?: string; url?: string; checkout?: string; tokenEnv?: string; events?: string; maxFiles?: string; budget?: string; frequency?: string; every?: string; at?: string; weekday?: string; cron?: string; timezone?: string }) => withConsole(options, deps, async client => {
+    .option("--budget <usd>", "bitbucket-pr: spend limit for one pull request scan (default: 2)")
+    .option("--daily-budget <usd>", "Most this trigger may spend per UTC day; its runs are refused after that")
+    .option("--monthly-budget <usd>", "Most this trigger may spend per UTC month; its runs are refused after that"))
+    .action((id: string, options: ConsoleFlags & { dailyBudget?: string; monthlyBudget?: string; automation?: string; kind?: string; file?: string; enable?: boolean; yes?: boolean; repo?: string; baseBranch?: string; comment?: boolean; includeForks?: boolean; results?: string; label?: string; platform?: string; url?: string; checkout?: string; tokenEnv?: string; events?: string; maxFiles?: string; budget?: string; frequency?: string; every?: string; at?: string; weekday?: string; cron?: string; timezone?: string }) => withConsole(options, deps, async client => {
       const fromFile = options.file ? await readJsonObject(options.file, "Trigger definition") : {};
       const flags = { ...(options.repo ? { repo: options.repo } : {}), ...(options.baseBranch ? { baseBranch: options.baseBranch } : {}), ...(options.comment ? { commentOnPr: true } : {}), ...(options.includeForks ? { includeForks: true } : {}) };
       const scheduled = [options.frequency, options.every, options.at, options.weekday, options.cron, options.timezone].some(value => value !== undefined);
@@ -214,7 +226,8 @@ export function registerSentinelsCommand(program: Command, deps: ConsoleCommandD
       const automationId = options.automation ?? (typeof fromFile.automationId === "string" ? fromFile.automationId : owned.length === 1 ? owned[0] : undefined);
       if (options.label !== undefined && kind !== "webhook") throw new UsageError("--label applies to --kind webhook.");
       const webhookSettings = kind === "webhook" ? { webhook: { ...(fromFile.webhook && typeof fromFile.webhook === "object" ? fromFile.webhook : {}), ...(options.label !== undefined ? { label: options.label } : {}) } } : {};
-      const body = { ...fromFile, ...github, ...eventResults, ...bitbucket, ...schedule, ...webhookSettings, ...(automationId ? { automationId } : {}), ...(kind ? { kind } : {}) };
+      const triggerLimits = { ...(positive("--daily-budget", options.dailyBudget) !== undefined ? { dailyBudgetUsd: positive("--daily-budget", options.dailyBudget) } : {}), ...(positive("--monthly-budget", options.monthlyBudget) !== undefined ? { monthlyBudgetUsd: positive("--monthly-budget", options.monthlyBudget) } : {}) };
+      const body = { ...fromFile, ...triggerLimits, ...github, ...eventResults, ...bitbucket, ...schedule, ...webhookSettings, ...(automationId ? { automationId } : {}), ...(kind ? { kind } : {}) };
       if (!body.kind) throw new UsageError("Say what kind: --kind schedule | manual | github-pr | bitbucket-pr | release | check-completed | webhook (a schedule also needs --frequency; bitbucket-pr needs --platform, --repo and --checkout; release and check-completed take their settings with --file).");
       if (!body.automationId) throw new UsageError(owned.length ? `This Sentinel owns ${owned.length} things a trigger can start. Pick one with --automation <id>: ${owned.join(", ")}.` : "A trigger needs something to start, and this Sentinel owns nothing yet that the CLI can list. Create it from a YAML file with `0security sentinels sync <folder> --apply`, which can include a schedule, or add the automation in the console and pass its full id with --automation <id>.");
       if (options.enable) requireYes(options.yes, "Enabling a trigger lets the Sentinel start runs unattended.");

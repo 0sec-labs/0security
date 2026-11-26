@@ -27,6 +27,7 @@ export * from "./slash-commands.js";
 export * from "./security-workflows.js";
 export * from "./security-workflow-templates.js";
 export * from "./sentinels.js";
+export * from "./sentinel-budget.js";
 export * from "./sentinel-presets.js";
 export * from "./sentinel-triggers.js";
 

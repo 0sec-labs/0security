@@ -55,7 +55,7 @@ export interface TurnContext {
   postSummary?(sentinel: Sentinel, comment: NonNullable<TurnRequest["comment"]>, missionId: string, turnId: string, exclude: ReadonlySet<string>): Promise<void>;
 }
 
-interface Tracked { cancellation?: ReturnType<typeof cancellationRetry>; cap?: number; stopping?: boolean; tokenBase?: number | null; startedAt?: string; turnId: string; sentinel: Sentinel; text: string; triggerId?: string; messageId?: string; base: number; /** A person's message: never capped. */ person?: boolean; comment?: TurnRequest["comment"]; baseline?: ReadonlySet<string> }
+interface Tracked { /** Why the turn was stopped for a spend limit. */ budgetStop?: string; cancellation?: ReturnType<typeof cancellationRetry>; cap?: number; stopping?: boolean; tokenBase?: number | null; startedAt?: string; turnId: string; sentinel: Sentinel; text: string; triggerId?: string; messageId?: string; base: number; /** A person's message: never capped. */ person?: boolean; comment?: TurnRequest["comment"]; baseline?: ReadonlySet<string> }
 /** `home` threads are watched for as long as the engine lives, so a person's messages in them are recorded as turns. */
 interface ThreadWatch { missionId: string; agentId?: string; home?: boolean; unsubscribe?: () => void; queued: Tracked[]; running?: Tracked; inQueue?: Set<string> }
 /** Messages the engine sends on its own (not typed by the person) must not be recorded as the person's turns. */
@@ -126,6 +126,12 @@ export class AgentTurnDelivery {
       ...(request.event ? { event: request.event } : {}),
     };
     const base = { agentId: sentinel.id, origin: request.origin, detail, triggerId: request.trigger.id, nowIso } as const;
+    // A spend limit that is reached refuses the turn before a thread is touched. It is recorded, once per cause, and offered again after the limit resets.
+    const refusal = ctx.store.budgetRefusal(sentinel.id, request.trigger.id, nowMs);
+    if (refusal) {
+      const turn = ctx.store.recordSkippedTurn({ ...base, reason: refusal, idempotencyKey: `${request.idempotencyKey}:budget` });
+      return { status: "skipped", turn, reason: refusal, consumed: false };
+    }
     let home: Awaited<ReturnType<TurnContext["ensureHome"]>>;
     try { home = await ctx.ensureHome(sentinel); }
     catch (error) { return { status: "refused", kind: "failed", reason: message(error) }; }
@@ -285,6 +291,19 @@ export class AgentTurnDelivery {
         if (next.comment) { try { next.baseline = new Set((this.#ctx.missions.findings?.(watch.missionId) ?? []).flatMap(finding => finding.id ? [finding.id] : [])); } catch { next.baseline = new Set(); } }
         watch.running = next;
         try { this.#ctx.store.updateTurn(next.turnId, { status: "running", startedAt: isoAt(this.#ctx.now()), sessionId: watch.missionId }); } catch { /* The Sentinel was deleted. */ }
+        // A turn that waited in the queue starts later than it was checked: the limits are checked again, and a turn over a limit is stopped before it spends.
+        try {
+          const refusal = this.#ctx.store.budgetRefusal(next.sentinel.id, next.triggerId, this.#ctx.now());
+          if (refusal) {
+            next.budgetStop = refusal; next.stopping = true;
+            next.cancellation ??= cancellationRetry({
+              cancel: async () => { if (!this.#ctx.missions.cancel) throw new Error("Cancellation unavailable"); return this.#ctx.missions.cancel(watch.missionId); },
+              active: () => watch.running === next,
+              pending: note => { try { this.#ctx.store.updateTurn(next.turnId, { note }); } catch { /* deleted */ } },
+            });
+            void next.cancellation.request();
+          }
+        } catch { /* The Sentinel was deleted. */ }
       } else if (event.type === "error") {
         // A message that was taken off the queue and could not start is dropped by the gateway (scheduled work is not retried).
         // Only a message that was queued (it has an id) and has left the queue without starting can be the one that failed.
@@ -298,7 +317,7 @@ export class AgentTurnDelivery {
     else if (event.type === "turn-complete") {
       const reason = typeof event.stopReason === "string" ? event.stopReason : "end_turn";
       if (reason === "end_turn") this.#finish(watch, running, "completed");
-      else if (reason === "cancelled") this.#finish(watch, running, "cancelled", "Cancelled.");
+      else if (reason === "cancelled") this.#finish(watch, running, "cancelled", running.budgetStop ?? "Cancelled.");
       else this.#finish(watch, running, "failed", reason === "error" && typeof event.error === "string" && event.error.trim() ? `Stopped: ${event.error.trim().slice(0, 500)}` : `Stopped: ${reason.replaceAll("_", " ")}.`);
     } else if (event.type === "error") this.#finish(watch, running, "failed", typeof event.message === "string" ? event.message.slice(0, 2_000) : "The turn failed.");
   }

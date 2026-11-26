@@ -177,6 +177,42 @@ automations:
     s.close();
   });
 
+  it("syncs spend limits of a Sentinel and its triggers, edits them in place and round trips through export", () => {
+    const s = setup();
+    const withLimits = `${reviewer.replace("automations:", "dailyBudgetUsd: 5\nmonthlyBudgetUsd: 60\nautomations:")}`.replace("      - kind: github-pr", "      - kind: github-pr\n        dailyBudgetUsd: 2\n        monthlyBudgetUsd: 20");
+    s.write("pr.yaml", withLimits);
+    expect(planSync(loadDefinitions(s.defs), s.stores)[0]!.changes).toEqual(expect.arrayContaining(["new Sentinel (paused)"]));
+    applySync(loadDefinitions(s.defs), s.stores, { enable: true });
+    const created = s.stores.sentinels.list()[0]!;
+    expect(created).toMatchObject({ dailyBudgetUsd: 5, monthlyBudgetUsd: 60 });
+    const trigger = s.stores.sentinels.listTriggers(created.id)[0]!;
+    expect(trigger).toMatchObject({ dailyBudgetUsd: 2, monthlyBudgetUsd: 20, enabled: true });
+    expect(planSync(loadDefinitions(s.defs), s.stores)[0]!.action).toBe("unchanged");
+
+    // A changed limit is an update; the trigger keeps its id and stays enabled.
+    s.write("pr.yaml", withLimits.replace("dailyBudgetUsd: 5", "dailyBudgetUsd: 7").replace("dailyBudgetUsd: 2", "dailyBudgetUsd: 3"));
+    expect(planSync(loadDefinitions(s.defs), s.stores)[0]!.changes).toEqual(expect.arrayContaining(["daily budget", "triggers of Review pull requests"]));
+    applySync(loadDefinitions(s.defs), s.stores);
+    expect(s.stores.sentinels.get(created.id)).toMatchObject({ dailyBudgetUsd: 7, monthlyBudgetUsd: 60 });
+    expect(s.stores.sentinels.listTriggers(created.id)).toEqual([expect.objectContaining({ id: trigger.id, dailyBudgetUsd: 3, monthlyBudgetUsd: 20, enabled: true })]);
+
+    const exported = exportDefinition(s.stores.sentinels.get(created.id)!, s.stores);
+    expect(exported).toContain("dailyBudgetUsd: 7");
+    expect(exported).toContain("monthlyBudgetUsd: 20");
+    s.write("pr.yaml", exported);
+    expect(planSync(loadDefinitions(s.defs), s.stores)[0]!.action).toBe("unchanged");
+    s.close();
+  });
+
+  it("rejects a limit that is not a positive amount", () => {
+    const s = setup();
+    s.write("pr.yaml", reviewer.replace("automations:", "dailyBudgetUsd: 0\nautomations:"));
+    expect(() => loadDefinitions(s.defs)).toThrow(/dailyBudgetUsd/);
+    s.write("pr.yaml", reviewer.replace("          repo: o/r", "          repo: o/r").replace("      - kind: github-pr", "      - kind: github-pr\n        monthlyBudgetUsd: -1"));
+    expect(() => loadDefinitions(s.defs)).toThrow(/monthlyBudgetUsd/);
+    s.close();
+  });
+
   it("rejects a release trigger with an unknown reporting mode or a stray key", () => {
     const s = setup();
     const file = (body: string) => `name: X\nautomations:\n  - name: A\n    template: repository-review\n    triggers:\n      - kind: release\n        release: { repo: o/r${body} }\n`;

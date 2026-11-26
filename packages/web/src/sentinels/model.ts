@@ -18,6 +18,15 @@ export interface SentinelAttention {
   reason?: string;
   pendingDecisions: number;
 }
+/** Spend by Sentinel, model and week over the last 12 weeks (UTC), as the engine reports it. A limit is null when none is set. */
+export interface SentinelUsage {
+  since: string;
+  generatedAt: string;
+  sentinels: Array<{ id: string; name: string; model: string | null; runs: number; refused: number; costUsd: number; dayUsd: number; monthUsd: number; dailyBudgetUsd: number | null; monthlyBudgetUsd: number | null }>;
+  models: Array<{ model: string; runs: number; refused: number; costUsd: number }>;
+  weeks: Array<{ week: string; runs: number; refused: number; costUsd: number }>;
+}
+
 export interface Sentinel {
   id: string;
   name: string;
@@ -30,6 +39,9 @@ export interface Sentinel {
   hostId?: string | null;
   model?: SentinelModelChoice | null;
   runBudgetUsd?: number | null;
+  /** Spend limits in USD per UTC day and per UTC month. Null or absent: no limit. */
+  dailyBudgetUsd?: number | null;
+  monthlyBudgetUsd?: number | null;
   notifications: SentinelNotifications;
   status: SentinelStatus;
   automationIds: string[];
