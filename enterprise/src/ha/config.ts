@@ -5,6 +5,7 @@
 // (ZERO_HA_DATABASE_URL_FILE). A repository, a project file or the database itself cannot supply it.
 // A connection to another machine must use TLS. The string holds a password and is never logged.
 import { readFileSync, statSync } from "node:fs";
+import { isIPv4 } from "node:net";
 
 export const HA_DATABASE_URL_ENV = "ZERO_HA_DATABASE_URL";
 export const HA_DATABASE_URL_FILE_ENV = "ZERO_HA_DATABASE_URL_FILE";
@@ -26,7 +27,8 @@ export interface HaDatabaseConfig {
 
 function isLoopback(host: string): boolean {
   const name = host.replace(/^\[|\]$/g, "").toLowerCase();
-  return name === "localhost" || name === "::1" || /^127\./.test(name);
+  // A name such as 127.db.example is a DNS name, not an address, so only an IPv4 literal counts.
+  return name === "localhost" || name === "::1" || (isIPv4(name) && name.startsWith("127."));
 }
 
 /** The shared database, or null when none is named. Throws HaConfigError for a value that is refused. */
@@ -54,6 +56,10 @@ export function parseHaDatabaseConfig(env: NodeJS.ProcessEnv = process.env): HaD
   try { url = new URL(raw); } catch { throw new HaConfigError("The database URL is not a valid URL."); }
   if (url.protocol !== "postgres:" && url.protocol !== "postgresql:") throw new HaConfigError("The database URL must start with postgres:// or postgresql://.");
   if (!url.hostname) throw new HaConfigError("The database URL names no host. Unix sockets are not supported.");
+  // The driver lets these query parameters replace the host or switch TLS off, which would bypass the checks here.
+  for (const name of ["host", "hostaddr", "ssl"]) {
+    if (url.searchParams.has(name)) throw new HaConfigError(`The database URL may not set ${name}. Put the host in the URL and use sslmode.`);
+  }
   const mode = url.searchParams.get("sslmode");
   if (!isLoopback(url.hostname) && !(mode && TLS_MODES.has(mode))) {
     throw new HaConfigError(`The database is on another machine, so the URL must set sslmode to require, verify-ca or verify-full.`);

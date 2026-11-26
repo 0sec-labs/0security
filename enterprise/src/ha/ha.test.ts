@@ -28,6 +28,19 @@ describe("parseHaDatabaseConfig", () => {
     expect(parseHaDatabaseConfig({ [HA_DATABASE_URL_ENV]: "postgres://u:p@db.internal/zero?sslmode=verify-full" })?.label).toBe("db.internal/zero");
   });
 
+  it("treats only a real loopback address as local, not a name that starts with 127.", () => {
+    expect(() => parseHaDatabaseConfig({ [HA_DATABASE_URL_ENV]: "postgres://u:p@127.db.example.com/zero" })).toThrow(/sslmode/);
+    expect(() => parseHaDatabaseConfig({ [HA_DATABASE_URL_ENV]: "postgres://u:p@127.0.0.1.nip.example.com/zero" })).toThrow(/sslmode/);
+    expect(parseHaDatabaseConfig({ [HA_DATABASE_URL_ENV]: "postgres://u:p@127.0.0.1/zero" })).not.toBeNull();
+    expect(parseHaDatabaseConfig({ [HA_DATABASE_URL_ENV]: "postgres://u:p@[::1]/zero" })).not.toBeNull();
+  });
+
+  it("refuses query parameters that move the host or turn TLS off", () => {
+    for (const query of ["host=db.example.com", "hostaddr=10.0.0.5", "ssl=false"]) {
+      expect(() => parseHaDatabaseConfig({ [HA_DATABASE_URL_ENV]: `postgres://u:p@127.0.0.1/zero?${query}` })).toThrow(/may not set/);
+    }
+  });
+
   it("refuses other schemes, a missing host and a malformed value, without echoing the value", () => {
     for (const value of ["mysql://u:p@h/db", "postgres:///zero", "not a url with secret-pw"]) {
       let message = "";
