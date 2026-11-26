@@ -10,7 +10,7 @@ Server mode can run several replicas that share one PostgreSQL database. This pa
 With a shared database, the replicas share:
 
 - One scheduler role. One replica leads and starts Sentinel triggers. The others stand by.
-- A durable job queue. A job that a replica leaves unfinished goes back to the queue for another replica.
+- A durable job queue. A job that a replica leaves unfinished goes back to the queue for another replica. No server feature enqueues work yet, so today this changes nothing you can see.
 - Readiness. A replica that cannot reach the database answers 503 on `/readyz`, so the load balancer stops sending it requests.
 - A sign-in session store. The store is built and tested. The server does not use it yet.
 
