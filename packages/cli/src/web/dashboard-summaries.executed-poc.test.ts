@@ -6,14 +6,14 @@ const row = (extra: Record<string, unknown>): DBFindingRow => ({
 } as unknown as DBFindingRow);
 
 const stored = {
-  schemaVersion: 1, harness: "0security-executed-poc/1", outcome: "executed-proven", reason: "expectation-met", stepIds: ["p1"],
+  schemaVersion: 1, harness: "0security-executed-poc/1", outcome: "script-matched", reason: "expectation-met", stepIds: ["p1"],
   run: { status: "pass", reason: "ok", command: "sh app.sh", isolation: "container", durationMs: 10, logTail: "x", imageDigest: `sha256:${"a".repeat(64)}` },
   startedAt: "2026-01-01T00:00:00.000Z", finishedAt: "2026-01-01T00:00:01.000Z",
 };
 
 describe("dashboard findings carry the executed PoC record", () => {
   it("parses the stored text into the record", () => {
-    expect(normalizeFinding(row({ executedPoc: JSON.stringify(stored) })).executedPoc).toMatchObject({ outcome: "executed-proven", run: { isolation: "container" } });
+    expect(normalizeFinding(row({ executedPoc: JSON.stringify(stored) })).executedPoc).toMatchObject({ outcome: "script-matched", run: { isolation: "container" } });
   });
   it("shows a high or critical finding with no record as static-only, never proven", () => {
     for (const severity of ["high", "critical"]) expect(normalizeFinding(row({ severity })).executedPoc).toMatchObject({ outcome: "static-only", reason: "not-attempted" });

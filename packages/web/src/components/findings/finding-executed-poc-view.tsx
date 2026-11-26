@@ -1,7 +1,7 @@
 import { cn } from "@/lib/utils";
 import { executedPocView } from "./finding-executed-poc";
 
-/** Chip for a list row: PoC proven, PoC failed or Static only, with the full sentence on hover. */
+/** Chip for a list row: Script matched, Script unmatched or Static only, with the full sentence on hover. */
 export function ExecutedPocChip({ executedPoc }: { executedPoc: unknown }) {
   const view = executedPocView(executedPoc);
   if (!view) return null;
@@ -9,12 +9,12 @@ export function ExecutedPocChip({ executedPoc }: { executedPoc: unknown }) {
     <span
       data-executed-poc={view.outcome}
       title={view.line}
-      className={cn("shrink-0 rounded-md border-[0.5px] px-1.5 py-px text-xs @max-2xl/list:hidden", view.outcome === "executed-proven" ? "border-border-3 text-foreground" : "border-border-2 text-muted-foreground-1")}
+      className={cn("shrink-0 rounded-md border-[0.5px] px-1.5 py-px text-xs @max-2xl/list:hidden", view.outcome === "script-matched" ? "border-border-3 text-foreground" : "border-border-2 text-muted-foreground-1")}
     >{view.label}</span>
   );
 }
 
-/** Detail section: the outcome in words, then the run facts. Never says proven without a complete container run record. */
+/** Detail section: the outcome in words, then the run facts. Never implies a reproduction, and shows a result only with a complete container run record. */
 export function ExecutedPocSection({ executedPoc }: { executedPoc: unknown }) {
   const view = executedPocView(executedPoc);
   if (!view) return null;

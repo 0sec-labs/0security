@@ -203,7 +203,7 @@ export const findings = sqliteTable(
      * `0 findings reproduce`. NULL until either exists. Additive: old rows are unaffected.
      */
     reproduction: text("reproduction"),
-    /** JSON ExecutedPoc: outcome (executed-proven, executed-failed, static-only) and the sandbox run record. NULL until a PoC attempt is recorded. */
+    /** JSON ExecutedPoc: outcome (script-matched, script-unmatched, static-only) and the sandbox run record. NULL until a PoC attempt is recorded. */
     executedPoc: text("executedPoc"),
     /**
      * JSON of the structured root cause (bugClass, unsafePattern {sink, source}, missingGuard, designOrigin). NULL until

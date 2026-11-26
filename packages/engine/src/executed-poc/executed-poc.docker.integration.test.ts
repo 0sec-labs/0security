@@ -54,22 +54,22 @@ describe.skipIf(!hasContainerRuntime)("executed PoC with the real OciRunner (nee
   const folder = hasContainerRuntime ? fixtureApp() : "";
   const runtime = () => createExecutedPoc({ image: IMAGE, maxRuns: 5 }, new OciRunner());
 
-  it("proves a real path traversal inside a container with the network off", async () => {
+  it("runs a real path traversal script inside a container with the network off (script-matched, not a reproduction)", async () => {
     const record = await executePocForFinding({ finding: { severity: "high", pocSteps: [shell("p1", "sh app.sh read ../data/secret.txt", SECRET)] }, folder, runtime: runtime() });
-    expect(record).toMatchObject({ outcome: "executed-proven", reason: "expectation-met", stepIds: ["p1"], run: { status: "pass", isolation: "container", imageDigest: ALPINE_DIGEST } });
+    expect(record).toMatchObject({ outcome: "script-matched", reason: "expectation-met", stepIds: ["p1"], run: { status: "pass", isolation: "container", imageDigest: ALPINE_DIGEST } });
     expect(record!.run!.logTail).toContain(SECRET);
   }, 180_000);
 
-  it("reports executed-failed for the guarded twin, and proves the network is off from inside", async () => {
+  it("reports script-unmatched for the guarded twin, and proves the network is off from inside", async () => {
     const failed = await executePocForFinding({ finding: { severity: "critical", pocSteps: [shell("f1", "sh app.sh safe-read ../data/secret.txt", SECRET)] }, folder, runtime: runtime() });
-    expect(failed).toMatchObject({ outcome: "executed-failed", reason: "expectation-not-met", run: { status: "fail", isolation: "container" } });
+    expect(failed).toMatchObject({ outcome: "script-unmatched", reason: "expectation-not-met", run: { status: "fail", isolation: "container" } });
     expect(failed!.run!.logTail).toContain("denied");
 
     // The expected text is assembled at run time, so it is not "written into the command". It only appears if the fetch failed.
     const offline = await executePocForFinding({
       finding: { severity: "high", pocSteps: [shell("n1", "wget -T 3 -q -O- http://1.1.1.1/ || printf '%s-%s' OFFLINE CONFIRMED", "OFFLINE-CONFIRMED")] }, folder, runtime: runtime(),
     });
-    expect(offline).toMatchObject({ outcome: "executed-proven", run: { isolation: "container" } });
+    expect(offline).toMatchObject({ outcome: "script-matched", run: { isolation: "container" } });
   }, 180_000);
 
   it("does not change the host folder", () => {
