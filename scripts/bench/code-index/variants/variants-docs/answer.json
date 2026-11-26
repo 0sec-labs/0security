@@ -1,0 +1,21 @@
+{
+  "fixture": "variants-docs",
+  "skill": null,
+  "seed": { "path": "routes/docs.js", "startLine": 16, "endLine": 20, "title": "Any signed-in user can read any document by id", "category": "broken-access-control", "severity": "high", "description": "GET /docs/:id returned any document to any signed-in user because the route never compared the document's owner with the caller. The fix added assertDocOwner(req, doc) to the route." },
+  "items": [
+    { "id": "vd-put", "path": "routes/docs.js", "startLine": 22, "endLine": 28, "category": "authz", "description": "update by id without an owner check" },
+    { "id": "vd-delete", "path": "routes/docs.js", "startLine": 30, "endLine": 33, "category": "authz", "description": "delete by id without an owner check" },
+    { "id": "vd-export", "path": "routes/docs.js", "startLine": 35, "endLine": 39, "category": "authz", "description": "export by id without an owner check" },
+    { "id": "vd-versions", "path": "routes/docs.js", "startLine": 41, "endLine": 45, "category": "authz", "description": "version history by id without an owner check" },
+    { "id": "vd-bulk", "path": "routes/docs.js", "startLine": 52, "endLine": 55, "category": "authz", "description": "bulk delete of ids taken from the body without an owner check" },
+    { "id": "vd-share", "path": "routes/collab.js", "startLine": 5, "endLine": 10, "category": "authz", "description": "sharing a document by id without an owner check, in a second router" }
+  ],
+  "decoys": [
+    { "id": "vd-decoy-list", "path": "routes/docs.js", "startLine": 5, "endLine": 7, "description": "list filters on the caller" },
+    { "id": "vd-decoy-create", "path": "routes/docs.js", "startLine": 9, "endLine": 13, "description": "create sets the owner from the caller" },
+    { "id": "vd-decoy-title", "path": "routes/docs.js", "startLine": 47, "endLine": 50, "description": "guarded by requireDocOwner middleware" },
+    { "id": "vd-decoy-comments-get", "path": "routes/collab.js", "startLine": 13, "endLine": 16, "description": "inline owner-or-shared check" },
+    { "id": "vd-decoy-comments-post", "path": "routes/collab.js", "startLine": 19, "endLine": 23, "description": "inline owner-or-shared check" },
+    { "id": "vd-decoy-public", "path": "routes/public.js", "startLine": 5, "endLine": 9, "description": "intentionally public published documents" }
+  ]
+}

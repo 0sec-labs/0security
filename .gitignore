@@ -22,6 +22,7 @@ pnpm-publish-summary.json
 services/
 # The benchmark fixtures include a services folder of their own
 !scripts/bench/fixtures/**/services/
+!scripts/bench/code-index/fixtures/**/services/
 # Local build artifacts
 *.tgz
 !vendor/tree-sitter-0.21.1-node24.tgz

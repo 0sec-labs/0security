@@ -165,3 +165,9 @@ test("the engine's web categories map to families without needing the title", ()
   for (const c of ["csrf", "open-redirect", "xxe"]) assert.ok(fam(c).has(c));
   assert.ok(familiesOf({ category: "code-injection", title: "MongoDB $where JavaScript injection" }).has("sqli"));
 });
+
+test("missing-validation maps to the business-logic family, which an item can name next to authz", () => {
+  const key = { fixture: "f", items: [{ id: "r", path: "a.ts", startLine: 5, endLine: 8, category: ["authz", "business-logic"] }], decoys: [] };
+  const s = scoreFindings(key, [{ id: "x", title: "Refund amount not checked against paid total", category: "missing-validation", location: { path: "a.ts", startLine: 6 } }]);
+  assert.equal(s.found, 1);
+});
