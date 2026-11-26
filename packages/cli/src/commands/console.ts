@@ -33,6 +33,7 @@ import {
 } from "../finding-focus.js";
 
 import { createLocalConsoleSession } from "../console-session.js";
+import { errorLine } from "./output.js";
 interface ConsoleOptions {
   chat?: string;
   engine?: string;
@@ -298,7 +299,8 @@ Examples:
           if (outcome.stopReason === "error") process.exitCode = 1;
           if ((opts.format === "text" || opts.format === undefined) && outcome.stopReason !== "error") process.stdout.write("\n");
         } catch (err) {
-          console.error(chalk.red(`\nturn failed: ${err instanceof Error ? err.message : String(err)}`));
+          const json = opts.format === "json" || opts.format === "ndjson";
+          console.error(json ? errorLine(err instanceof Error ? err.message : String(err), true) : chalk.red(`\nturn failed: ${err instanceof Error ? err.message : String(err)}`));
           process.exitCode = 1;
         } finally {
           await printSession.cleanup();

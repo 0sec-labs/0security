@@ -16,7 +16,7 @@ import { rowVerification, verificationPhrase } from "../finding-verification.js"
 import { readVariantLinks, rowRootCause, rowVariantOf, variantLines, type VariantLink } from "../finding-variants.js";
 import { executedPocPhrase, rowExecutedPoc, reproductionDetail, reproductionPhrase, rowReproduction } from "../finding-reproduction.js";
 import { auditTriage, buildTriageRequest, triageLabel, type TriageFlags } from "./findings-triage.js";
-import { UsageError } from "./output.js";
+import { UsageError, errorLine } from "./output.js";
 import { foldSimilarGroups } from "./findings-dedupe.js";
 import { parseFindingBusinessContext, compareFindingsByBusinessContext } from "@0/engine/shared";
 import { adjustmentFor, contextScore, describeAdjustment, findingPath } from "../business-context.js";
@@ -478,7 +478,7 @@ export function registerFindingsCommand(program: Command): void {
         console.log(`  ${chalk.cyan(buildFindingConsoleCommand(finding, selectedDbPath))}`);
         console.log("");
       } catch (err) {
-        console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+        console.error(errorLine(err instanceof Error ? err.message : String(err), opts.json === true, chalk.red));
         process.exit(1);
       } finally {
         db.close();

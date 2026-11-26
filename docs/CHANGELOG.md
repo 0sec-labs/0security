@@ -22,6 +22,7 @@ on the GitHub Release tag.
 
 ### Changed
 
+- With `--json` or `--format json`, a failure in `findings show`, in `0security -p`, or an unexpected error now prints one `{"error": "..."}` line on standard error instead of coloured text. The exit codes are unchanged.
 - The security policy is one file, `.github/SECURITY.md`. It no longer says extensions and MCP servers are never sandboxed or mentions the removed `save_workflow` operation, and it now says an extension can declare an OS sandbox.
 - `DO_NOT_TRACK=1` is now the single telemetry switch (`ZERO_ENTERPRISE=1` also blocks telemetry and crash reports as part of no-egress mode), `ZERO_NO_TELEMETRY` and `ZERO_OFFLINE` no longer control telemetry, and the `commands` and `full` analytics levels and the cloud analytics path are removed.
 
