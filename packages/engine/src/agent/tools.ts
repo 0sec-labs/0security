@@ -1,4 +1,5 @@
 
+import { untrustedGitConfig } from "../verifier/untrusted-git.js";
 import { subagentBatchLimit, subagentConcurrency } from "./subagent-limits.js";
 import { assertExpectedWorkspace, assertWorkspaceIdentity, type ExpectedWorkspace, type WorkspaceIdentity } from "./workspace-identity.js";
 import { withWorkflowAuditExecutionPolicy, getWorkflowAuditExecutionPolicy, type WorkflowHttpMethod } from "../workflow-execution-policy.js";
@@ -771,10 +772,14 @@ export class ToolExecutor {
       // the neighbouring line may contain a different security decision.
       if (typeof args.suggested_replacement === "string" &&
           args.suggested_replacement.length > 0 && this.ctx.reviewDiffBase) {
-        const diff = spawnSync("git", [
-          "diff", "--no-ext-diff", "--no-textconv", "--unified=0",
+        // The scanned repository's own config must not run fsmonitor or filter commands; if it cannot be neutralised, git is not run.
+        let safeConfig: string[] | undefined;
+        try { safeConfig = untrustedGitConfig(this.ctx.scopePath ?? ""); } catch { safeConfig = undefined; }
+        const diff = safeConfig ? spawnSync("git", [
+          ...safeConfig, "diff", "--no-ext-diff", "--no-textconv", "--unified=0",
           `${this.ctx.reviewDiffBase}...HEAD`, "--", sourcePath,
-        ], { cwd: this.ctx.scopePath, encoding: "utf8", timeout: 30_000, maxBuffer: 256 * 1024 });
+        ], { cwd: this.ctx.scopePath, encoding: "utf8", timeout: 30_000, maxBuffer: 256 * 1024 })
+          : { status: 1, error: undefined, stdout: "" };
         const changed = new Set<number>();
         if (diff.status === 0 && !diff.error) {
           for (const line of diff.stdout.split("\n")) {

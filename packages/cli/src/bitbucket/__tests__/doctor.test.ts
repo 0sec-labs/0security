@@ -143,7 +143,9 @@ describe("bitbucket doctor", () => {
       const seen: Array<{ args: string[]; env: NodeJS.ProcessEnv }> = [];
       const exec = (origin: string, lsRemote: number): Exec => async (_file, args, options) => {
         seen.push({ args, env: options.env });
-        const sub = args[2];
+        let at = 2;
+        while (args[at] === "-c") at += 2; // the git safety overrides come first
+        const sub = args[at];
         if (sub === "rev-parse") return { stdout: "true\n", code: 0 };
         if (sub === "remote") return { stdout: `${origin}\n`, code: 0 };
         return { stdout: "", code: lsRemote };

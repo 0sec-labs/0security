@@ -4,6 +4,7 @@
  * database. It never includes evidence. With --check-merged it asks the code host, one pull request at a time,
  * whether each was merged, closed or edited; without it nothing leaves the machine.
  */
+import { UNTRUSTED_GIT_BASE_CONFIG } from "@0/engine";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { execFile } from "node:child_process";
@@ -196,7 +197,7 @@ const defaults: ExportFixesDeps = {
   lookup: lookupFromDatabases,
   settleVariants: findingId => settleVariantsOfMergedFix(findingId, findingDatabasePaths()),
   host: () => selectHost({ run: runGh }),
-  repoRoot: async dir => (await exec("git", ["-C", dir, "rev-parse", "--show-toplevel"])).stdout.trim(),
+  repoRoot: async dir => (await exec("git", ["-C", dir, ...UNTRUSTED_GIT_BASE_CONFIG, "rev-parse", "--show-toplevel"])).stdout.trim(),
   now: () => new Date(),
   out: text => process.stdout.write(`${text}\n`),
   err: text => process.stderr.write(`${text}\n`),

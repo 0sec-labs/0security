@@ -85,3 +85,15 @@ export function untrustedGitConfig(repo: string, read: GitConfigReader = default
   }
   return args;
 }
+
+/**
+ * Overrides for commands that write to the checkout or reach a remote (`worktree add`, `add`, `commit`, `push`, `fetch`):
+ * no hooks run, and a repository's `core.sshCommand` is replaced by plain `ssh`. `GIT_SSH_COMMAND` in the environment still
+ * decides the ssh command, because Git ranks it above config.
+ */
+export const UNTRUSTED_GIT_ACTION_CONFIG: readonly string[] = Object.freeze(["-c", "core.hooksPath=/dev/null", "-c", "core.sshCommand=ssh"]);
+
+/** `untrustedGitConfig` plus the action overrides. */
+export function untrustedGitActionConfig(repo: string, read: GitConfigReader = defaultReader): string[] {
+  return [...untrustedGitConfig(repo, read), ...UNTRUSTED_GIT_ACTION_CONFIG];
+}

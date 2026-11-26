@@ -1,6 +1,7 @@
 // What the finding detail page shows about where a finding is and what `findings fix` recorded for it.
 // Everything comes from stored data: the finding's own review annotation and the fix state file. The only
 // other reads are a local `git diff` and bounded, cached CI status from the configured code host.
+import { untrustedGitConfig } from "@0/engine";
 import { execFile } from "node:child_process";
 import { statSync } from "node:fs";
 import { isAbsolute } from "node:path";
@@ -57,7 +58,7 @@ export function locationOf(rows: Array<{ reviewAnnotation?: unknown }>): Finding
 
 const GIT_ENV = { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_OPTIONAL_LOCKS: "0", GIT_CONFIG_NOSYSTEM: "1" };
 const git = (repo: string, args: string[], maxBuffer = 64_000) =>
-  exec("git", ["-C", repo, "-c", "core.fsmonitor=false", "-c", "core.pager=cat", ...args], { timeout: 5_000, maxBuffer, env: GIT_ENV, encoding: "utf8" });
+  exec("git", ["-C", repo, ...untrustedGitConfig(repo), "-c", "core.pager=cat", ...args], { timeout: 5_000, maxBuffer, env: GIT_ENV, encoding: "utf8" });
 
 /** The one commit `findings fix` made on its branch, against its parent. Nothing else is read and nothing leaves the machine. */
 export async function readFixDiff(repo: string, branch: string): Promise<{ diff: string; truncated: boolean } | null> {

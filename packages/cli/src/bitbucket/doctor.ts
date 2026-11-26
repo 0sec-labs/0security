@@ -9,7 +9,7 @@
 import { randomBytes } from "node:crypto";
 import { statSync } from "node:fs";
 import { resolve } from "node:path";
-import { enterpriseMode } from "@0/engine";
+import { UNTRUSTED_GIT_BASE_CONFIG, enterpriseMode } from "@0/engine";
 import { BitbucketClient, BitbucketError, type Http, type Platform } from "./client.js";
 import type { CodeInsightsPayload } from "../code-insights.js";
 import { defaultExec, type Exec } from "./runner.js";
@@ -185,7 +185,7 @@ export async function runDoctor(options: DoctorOptions, deps: DoctorDeps = {}): 
     const dir = resolve(options.checkout);
     const exec = deps.exec ?? defaultExec;
     const clean = Object.fromEntries(Object.entries(env).filter(([name]) => !SECRET_VARIABLES.includes(name)));
-    const git = (args: string[], timeoutMs: number) => exec("git", ["-C", dir, ...args], { env: { ...clean, GIT_TERMINAL_PROMPT: "0" }, timeoutMs });
+    const git = (args: string[], timeoutMs: number) => exec("git", ["-C", dir, ...UNTRUSTED_GIT_BASE_CONFIG, ...args], { env: { ...clean, GIT_TERMINAL_PROMPT: "0" }, timeoutMs });
     let isDir = false;
     try { isDir = statSync(dir).isDirectory(); } catch { isDir = false; }
     if (!isDir) add("checkout", "Local clone matches the repository", "FAIL", `${dir} is not a folder`, "Pass --checkout <folder> with a clone of the repository.");

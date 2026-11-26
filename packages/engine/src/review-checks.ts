@@ -7,6 +7,7 @@ import type { ReviewCheckResult } from "./shared/index.js";
 import { z } from "zod";
 import { splitProjectObservationSummary } from "./secure/project-context.js";
 import type { ProposedProjectObservation } from "./secure/project-context.js";
+import { UNTRUSTED_GIT_BASE_CONFIG } from "./verifier/untrusted-git.js";
 
 export const MAX_ENABLED_REVIEW_CHECKS = 8;
 const MAX_STORE_BYTES = 1024 * 1024;
@@ -31,7 +32,7 @@ export function reviewChecksProject(projectPath: string): string {
   let project = realpathSync(resolve(projectPath));
   if (!statSync(project).isDirectory()) throw new Error("Review checks require a local project directory.");
   try {
-    project = realpathSync(execFileSync("git", ["-C", project, "rev-parse", "--show-toplevel"], {
+    project = realpathSync(execFileSync("git", ["-C", project, ...UNTRUSTED_GIT_BASE_CONFIG, "rev-parse", "--show-toplevel"], {
       encoding: "utf8", timeout: 5000, stdio: ["ignore", "pipe", "ignore"],
     }).trim());
   } catch { /* Non-Git local projects use their exact directory. */ }

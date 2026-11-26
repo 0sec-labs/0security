@@ -3,7 +3,7 @@ import { usageTokens, type MetricSink } from "../run-metrics.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { SentinelStore, type SecurityWorkflowStore } from "@0/engine/storage";
-import { assertEgressAllowed } from "@0/engine";
+import { UNTRUSTED_GIT_BASE_CONFIG, assertEgressAllowed } from "@0/engine";
 import { audit } from "./audit.js";
 import {
   CHECKS_JQ, RELEASES_JQ, TAGS_JQ, checksFromPoll, isCommitSha, isSafeRef, matchesCheck, matchesRelease, releasesFromPoll, statusContext, statusFor, tagsFromPoll,
@@ -43,7 +43,7 @@ const execute = promisify(execFile);
 async function findCheckout(repo: string): Promise<string | undefined> {
   const wanted = repo.toLowerCase();
   try {
-    const { stdout } = await execute("git", ["remote", "get-url", "origin"], { cwd: process.cwd(), timeout: 5_000 });
+    const { stdout } = await execute("git", [...UNTRUSTED_GIT_BASE_CONFIG, "remote", "get-url", "origin"], { cwd: process.cwd(), timeout: 5_000 });
     const match = /github\.com[:/]([^/]+\/[^/]+?)(?:\.git)?\s*$/i.exec(stdout.trim());
     return match?.[1]?.toLowerCase() === wanted ? process.cwd() : undefined;
   } catch { return undefined; }

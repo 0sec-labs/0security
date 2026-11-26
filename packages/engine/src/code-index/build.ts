@@ -10,6 +10,7 @@ import { extractJs } from "./extract-js.js";
 import { extractPy } from "./extract-py.js";
 import { foxguardGraph } from "./foxguard.js";
 import type { CodeIndex, FileExtract } from "./types.js";
+import { UNTRUSTED_GIT_BASE_CONFIG } from "../verifier/untrusted-git.js";
 
 const JS_EXT = new Set(["js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts"]);
 const PY_EXT = new Set(["py"]);
@@ -24,7 +25,7 @@ export const DEFAULT_LIMITS: BuildLimits = { maxFiles: 5000, maxFileBytes: 400 *
 
 function git(root: string, args: string[]): string | undefined {
   try {
-    return execFileSync("git", args, { cwd: root, encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "ignore"], maxBuffer: 8 * 1024 * 1024 });
+    return execFileSync("git", [...UNTRUSTED_GIT_BASE_CONFIG, ...args], { cwd: root, encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "ignore"], maxBuffer: 8 * 1024 * 1024 });
   } catch { return undefined; }
 }
 
