@@ -25,10 +25,10 @@ const DEFAULT_SANDBOX_SIZE = "256m";
 export function workdirFor(request: StepRequest): string { return request.limits?.readOnlyRoot ? READ_ONLY_WORKDIR : "/work"; }
 
 /** Tar the snapshot to a stream, without macOS metadata. The exit code settles when tar ends. */
-function packDir(dir: string): { stream: Readable; code: Promise<number | null> } {
+function packDir(dir: string): { stream: Readable; code: Promise<number | null>; kill(): void } {
   const child = spawn("tar", ["-cf", "-", "-C", dir, "."], { stdio: ["ignore", "pipe", "ignore"], env: { ...process.env, COPYFILE_DISABLE: "1" } });
   const code = new Promise<number | null>((resolve) => { child.on("error", () => resolve(null)); child.on("close", resolve); });
-  return { stream: child.stdout, code };
+  return { stream: child.stdout, code, kill: () => { child.stdout.destroy(); child.kill("SIGKILL"); } };
 }
 
 /** The `create` argument list for one step. Pure, so the limits can be tested without a container runtime. */
@@ -111,6 +111,7 @@ export class OciRunner implements ContainerRunner {
         // `docker cp` refuses a read-only root, so the snapshot goes in as a tar stream into the tmpfs.
         const pack = packDir(request.dir);
         const unpacked = await this.#exec(bin, ["exec", "-i", name, "sh", "-c", `mkdir -p ${workdir} && cd ${workdir} && tar -xof -`], { timeoutMs: remaining(), stdin: pack.stream, ...(request.signal ? { signal: request.signal } : {}) });
+        if (unpacked.code !== 0) pack.kill();
         if (unpacked.code !== 0 || (await pack.code) !== 0) return out({ infraError: `could not copy the snapshot: ${unpacked.output.trim().split("\n").pop() || "tar failed"}` });
       }
       if (request.setup) {
