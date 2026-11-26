@@ -192,7 +192,7 @@ With `ZERO_ENTERPRISE` set, 0 refuses the public sign-in authority unless `AZURE
 
 0 calls Bedrock directly with the AWS SDK, with no proxy in between. Authentication uses the standard AWS credential chain: environment keys, `AWS_PROFILE` (including SSO), an ECS task role, a web identity token or an instance role. You can also set `AWS_BEARER_TOKEN_BEDROCK` for a Bedrock API key. 0 stores no AWS secret.
 
-0 never picks Bedrock from ambient AWS variables. Pin it and name the model:
+0 never picks Bedrock from ambient AWS variables. Pin it. Name the model with `ZERO_MODEL`, or with `ZERO_BEDROCK_MODEL` when only Bedrock should use it:
 
 ```bash
 export AWS_PROFILE="audit-prod"
@@ -207,7 +207,24 @@ env ZERO_SELECTED_PROVIDER=bedrock \
 | Credentials | The AWS SDK chain. `AWS_BEARER_TOKEN_BEDROCK` wins when set. |
 | Region | `AWS_REGION`, then `AWS_DEFAULT_REGION`, then the profile's region, then `us-east-1`. |
 | Endpoint | `BEDROCK_BASE_URL` for a VPC endpoint or an internal proxy. Otherwise the regional `bedrock-runtime` endpoint. |
-| Model | A Bedrock model ID or cross-region inference profile ID your account can invoke. The default is `global.anthropic.claude-sonnet-4-5-20250929-v1:0`. |
+| Model | A Bedrock model ID or cross-region inference profile ID your account can invoke. `--model` wins, then `ZERO_MODEL`, then `ZERO_BEDROCK_MODEL`. The default is `global.anthropic.claude-sonnet-4-5-20250929-v1:0`. |
+
+`scan`, `findings fix`, `findings verify` and the other model commands send no model of their own when `ZERO_MODEL`, `--provider` or a pinned provider other than OpenAI is set. The engine picks the model from your settings. Against an engine you reach with `--engine-url` or `--computer`, set `ZERO_MODEL` on that engine or pass `--model`.
+
+The IAM policy needs two kinds of resource when the model ID is an inference profile (the default is one). Allow `bedrock:InvokeModel` and `bedrock:InvokeModelWithResponseStream` on the profile and on the foundation model behind it:
+
+```json
+{
+  "Effect": "Allow",
+  "Action": ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
+  "Resource": [
+    "arn:aws:bedrock:eu-central-1:111122223333:inference-profile/global.anthropic.claude-sonnet-4-5-20250929-v1:0",
+    "arn:aws:bedrock:*::foundation-model/anthropic.claude-sonnet-4-5-20250929-v1:0"
+  ]
+}
+```
+
+Replace the region and account. A `foundation-model/*` entry alone does not cover the profile ARN. This policy has not been run against a real Bedrock endpoint.
 
 The model must support tool use through the Converse API. Prices for Bedrock models show as unknown. In **Connections → AWS identity → Amazon Bedrock**, save a region and a model or inference-profile ID. The model then appears in the picker with an unknown rate. This is an operator-configured choice, not a list of models your account is entitled to invoke. AWS credentials stay on the host; the browser accepts only non-secret region, model and endpoint settings. Saving does not make an AWS request, verify access or establish that credentials have not expired. The connection badge stays **AWS chain · unverified**. Existing host region settings take precedence. CLI users can still pass `--model` or `ZERO_MODEL`. You can use `bedrock:<model>` in [`ZERO_LLM_FALLBACK`](#failover) when AWS credentials are set. To reach Bedrock through a LiteLLM proxy instead, use an [OpenAI-compatible gateway](#custom-and-local-providers).
 

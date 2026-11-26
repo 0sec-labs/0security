@@ -19,7 +19,7 @@ import { loadFixPolicyFile, type FixPolicyOptions, type LoadedFixPolicy } from "
 import { osecDB, resolveOsecDbPath } from "@0/engine/storage";
 import { consoleTransportOptions, type ConsoleClient, type ConsoleTransportOptions } from "../console-client.js";
 import { VariantBudget, defaultVariantStore, DEFAULT_VARIANT_BUDGET_USD, huntVariants, rescanSummary, rescanVariants, type VariantParent, type VariantStore } from "./variants.js";
-import { connect, DEFAULT_SCAN_MODEL, defaultScanDeps, waitForThread, type ScanDeps } from "./scan.js";
+import { connect, DEFAULT_SCAN_MODEL, scanModelField, scanModelLabel, defaultScanDeps, waitForThread, type ScanDeps } from "./scan.js";
 import { resolveFindingId, shortFindingId } from "../finding-id.js";
 import type { Host } from "../host/index.js";
 import { selectFixHost } from "../host/fix-host.js";
@@ -202,7 +202,7 @@ export function fixMetric(outcome: FixOutcome | undefined, options: Pick<FixOpti
   const status = !outcome ? "failed" : outcome.timedOut ? "timeout" : outcome.budgetExhausted ? "budget" : outcome.committed ? "ok" : "failed";
   return {
     ...(metricPullRequest(outcome?.pullRequest?.url) ?? {}),
-    at: new Date(startedAt).toISOString(), command: "fix", model: options.model ?? DEFAULT_SCAN_MODEL, budgetUsd: Number(options.budget), costUsd: outcome?.costUsd ?? null,
+    at: new Date(startedAt).toISOString(), command: "fix", model: scanModelLabel(options), budgetUsd: Number(options.budget), costUsd: outcome?.costUsd ?? null,
     durationSeconds: Math.max(0, Math.round((endedAt - startedAt) / 1000)), findingsAttempted: 1, findingsProposed: outcome?.committed ? 1 : 0, checksPassed: outcome?.committed && outcome.verified ? 1 : 0,
     tokens: outcome?.tokens ?? null, status, findingIds: outcome ? [outcome.finding] : [],
   };
@@ -505,7 +505,7 @@ export function directJavaBump(tree: string, finding: Pick<FindingToFix, "title"
 }
 
 async function runThread(client: ConsoleClient, deps: FixDeps, folder: string, finding: FindingToFix, options: FixOptions, budget: number, policy?: FixPolicy, sandboxed = false) {
-  const created = asJson(asJson(await client.request("POST", "/api/console/sessions", { runtime: { model: options.model ?? DEFAULT_SCAN_MODEL }, title: `Fix: ${finding.title}`.slice(0, 120), costCeilingUsd: budget })).session);
+  const created = asJson(asJson(await client.request("POST", "/api/console/sessions", { runtime: { ...scanModelField(options) }, title: `Fix: ${finding.title}`.slice(0, 120), costCeilingUsd: budget })).session);
   const id = String(created.id);
   const path = `/api/console/sessions/${encodeURIComponent(id)}`;
   await client.request("PATCH", `${path}/configuration`, { workspacePath: folder });
@@ -547,7 +547,7 @@ export function registerFixCommand(program: Command, deps: FixDeps = defaults): 
     .option("--variant-budget <usd>", "Spend cap for each variant thread, in USD", String(DEFAULT_VARIANT_BUDGET_USD))
     .option("--no-pr", "Commit on the fix branch but do not push or open a pull request")
     .option("--budget <usd>", "Stop when the estimated spend reaches this many USD", String(DEFAULT_BUDGET_USD))
-    .option("--model <model>", `Model for the fix thread (default: ${DEFAULT_SCAN_MODEL})`)
+    .option("--model <model>", `Model for the fix thread (default: ${DEFAULT_SCAN_MODEL}; ZERO_MODEL or a pinned provider's default when set)`)
     .option("--timeout <seconds>", "Maximum seconds to wait for the fix", String(DEFAULT_TIMEOUT_SECONDS))
     .addOption(new Option("--format <format>", "Output: text or json").choices(["text", "json"]))
     )

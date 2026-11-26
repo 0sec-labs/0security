@@ -22,7 +22,7 @@ import { findingDatabasePaths } from "../finding-focus.js";
 import type { StateStore } from "./burndown.js";
 import { runGh } from "../host/gh.js";
 import { selectHost, type Host } from "../host/index.js";
-import { connect, DEFAULT_SCAN_MODEL, defaultScanDeps, waitForThread, type ScanDeps } from "./scan.js";
+import { connect, DEFAULT_SCAN_MODEL, scanModelField, defaultScanDeps, waitForThread, type ScanDeps } from "./scan.js";
 import { finishWithError, UsageError } from "./output.js";
 import { asJson, finishedThread } from "./thread-output.js";
 
@@ -88,7 +88,7 @@ export interface RescanResult { threadId?: string; costUsd?: number; tokens?: nu
 interface PromptThread { id: string; reply?: string; error?: string; costUsd?: number; tokens?: number; failed: boolean }
 
 async function runPromptThread(client: ConsoleClient, deps: Pick<ScanDeps, "sleep" | "err">, folder: string, title: string, prompt: string, options: VariantRunOptions): Promise<PromptThread> {
-  const created = asJson(asJson(await client.request("POST", "/api/console/sessions", { runtime: { model: options.model ?? DEFAULT_SCAN_MODEL }, title: title.slice(0, 120), costCeilingUsd: Number(options.budget) })).session);
+  const created = asJson(asJson(await client.request("POST", "/api/console/sessions", { runtime: { ...scanModelField(options) }, title: title.slice(0, 120), costCeilingUsd: Number(options.budget) })).session);
   const id = String(created.id);
   const path = `/api/console/sessions/${encodeURIComponent(id)}`;
   await client.request("PATCH", `${path}/configuration`, { workspacePath: folder });
@@ -328,7 +328,7 @@ export function registerVariantsCommand(program: Command, deps: VariantDeps = de
     .option("--folder <dir>", "The folder that was scanned; the thread reads the code there (default: the current directory)")
     .option("--rescan", "Check the variants already recorded for this finding and mark each fixed or still open; hunt for no new ones")
     .option("--budget <usd>", "Spend cap for the thread, in USD", String(DEFAULT_VARIANT_BUDGET_USD))
-    .option("--model <model>", `Model for the thread (default: ${DEFAULT_SCAN_MODEL})`)
+    .option("--model <model>", `Model for the thread (default: ${DEFAULT_SCAN_MODEL}; ZERO_MODEL or a pinned provider's default when set)`)
     .option("--timeout <seconds>", "Maximum seconds to wait for the thread", String(DEFAULT_TIMEOUT_SECONDS))
     .addOption(new Option("--format <format>", "Output: text or json").choices(["text", "json"])))
     .addHelpText("after", "\nEach variant is stored as a finding with a variantOf link to this one; see it in `0security findings show` and `findings list`. `findings verify` and `findings fix` run this for you (turn it off with --no-variants). Nothing is edited.\nExit codes: 0 done, 1 the thread returned no answer, 2 usage error.")

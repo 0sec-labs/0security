@@ -198,7 +198,7 @@ Add `--allow-partial` when a partial scan should not fail the job. The exit code
 | `--repo-ignores` | — | Also let the pre-pass scanners read their configuration and ignore files from the scanned folder (.foxguard.yml, .semgrepignore, .gitleaks.toml, .gitleaksignore, .trivyignore, osv-scanner.toml, .checkov.yaml). Off by default: a change under review can use them to hide findings. Inline suppressions such as nosemgrep always apply |
 | `--poc-image <image>` | — | Run the proof of concept of each high or critical finding in this container image, network off, and label the finding script-matched, script-unmatched or static-only. Must be pinned by digest (name@sha256:...). Default: the ZERO_POC_IMAGE variable or `0security config set executedPocImage`; otherwise off. Needs Docker or podman |
 | `--skill <id>` | `scan` | Skill that holds the scan method |
-| `--model <model>` | — | Model for the scan thread (default: gpt-6-luna) |
+| `--model <model>` | — | Model for the scan thread (default: gpt-6-luna; ZERO_MODEL or a pinned provider's default when set) |
 | `--provider <id>` | — | Explicit model provider for this scan (use with --model) |
 | `--reasoning <effort>` | — | Reasoning effort for a model that supports it |
 | `--batches <mode>` | `auto` | auto reviews a large folder in batches, one thread per group of entry points, and records what each batch covered; on always does; off keeps one thread |
@@ -506,7 +506,7 @@ It writes files on this machine, so it needs the local console and rejects `--co
 | `--output <path>` | — | Where to write the threat model, relative to the folder, a .md file (default: .0/threat-model.md); for example THREAT_MODEL.md |
 | `--format <format>` | — | json prints the outcome as JSON |
 | `--budget <usd>` | `3` | Stop when the estimated spend reaches this many USD |
-| `--model <model>` | — | Model for the thread (default: gpt-6-luna) |
+| `--model <model>` | — | Model for the thread (default: gpt-6-luna; ZERO_MODEL or a pinned provider's default when set) |
 | `--timeout <seconds>` | `1800` | Maximum seconds to wait |
 | `--engine-url <url>` | — | Attach directly to a running trusted engine |
 | `--engine-token-env <name>` | — | Environment variable holding the attached engine token |
@@ -1997,7 +1997,7 @@ A policy file inside the repository being fixed is not read unless you pass `--r
 | `--variant-budget <usd>` | `1` | Spend cap for each variant thread, in USD |
 | `--no-pr` | — | Commit on the fix branch but do not push or open a pull request |
 | `--budget <usd>` | `3` | Stop when the estimated spend reaches this many USD |
-| `--model <model>` | — | Model for the fix thread (default: gpt-6-luna) |
+| `--model <model>` | — | Model for the fix thread (default: gpt-6-luna; ZERO_MODEL or a pinned provider's default when set) |
 | `--timeout <seconds>` | `1800` | Maximum seconds to wait for the fix |
 | `--format <format>` | — | Output: text or json Choices: text, json. |
 | `--engine-url <url>` | — | Attach directly to a running trusted engine |
@@ -2259,7 +2259,7 @@ Exit codes:
 | `--max-consecutive-failures <n>` | `3` | Stop after this many failed fixes in a row |
 | `--max-failure-rate <fraction>` | `0.5` | Stop when the share of failed fixes is above this (after --min-attempts) |
 | `--min-attempts <n>` | `4` | Fixes to attempt before the failure share can stop the run |
-| `--model <model>` | — | Model for the fix threads (default: gpt-6-luna) |
+| `--model <model>` | — | Model for the fix threads (default: gpt-6-luna; ZERO_MODEL or a pinned provider's default when set) |
 | `--timeout <seconds>` | `1800` | Maximum seconds to wait for one fix |
 | `--retry` | — | Work again on findings that already have a fix branch or pull request |
 | `--dry-run` | — | List what would be attempted and skipped; change nothing |
@@ -2499,7 +2499,7 @@ Exit codes:
 | `--folder <dir>` | — | The folder that was scanned; the thread reads the code there (default: the current directory) |
 | `--rescan` | — | Check the variants already recorded for this finding and mark each fixed or still open; hunt for no new ones |
 | `--budget <usd>` | `1` | Spend cap for the thread, in USD |
-| `--model <model>` | — | Model for the thread (default: gpt-6-luna) |
+| `--model <model>` | — | Model for the thread (default: gpt-6-luna; ZERO_MODEL or a pinned provider's default when set) |
 | `--timeout <seconds>` | `600` | Maximum seconds to wait for the thread |
 | `--format <format>` | — | Output: text or json Choices: text, json. |
 | `--engine-url <url>` | — | Attach directly to a running trusted engine |
@@ -2554,7 +2554,7 @@ Exit codes:
 | `--budget <usd>` | `2` | Total spend for this run in USD; no new thread starts once it is used |
 | `--per-finding <usd>` | `0.3` | Spend cap for one finding, in USD |
 | `--max-consecutive-failures <n>` | `3` | Stop after this many checks in a row that return no verdict |
-| `--model <model>` | — | Model for the threads (default: gpt-6-luna) |
+| `--model <model>` | — | Model for the threads (default: gpt-6-luna; ZERO_MODEL or a pinned provider's default when set) |
 | `--timeout <seconds>` | `600` | Maximum seconds to wait for one thread |
 | `--no-variants` | — | Do not hunt for the same bug at other sites after a true-positive verdict |
 | `--variant-budget <usd>` | `1` | Spend cap for each variant hunt, in USD |

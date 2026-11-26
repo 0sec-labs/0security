@@ -227,10 +227,10 @@ The chart does not set a read-only root file system. The volume is retained when
 cd deploy/terraform/eks
 terraform init
 terraform plan -var region=eu-central-1 -var access_token_secret_name=zero-secrets \
-  -var 'bedrock_model_arns=["arn:aws:bedrock:*::foundation-model/*"]'
+  -var 'bedrock_model_arns=["arn:aws:bedrock:eu-central-1:111122223333:inference-profile/*","arn:aws:bedrock:*::foundation-model/*"]'
 ```
 
-Read the plan, then run `terraform apply` with the same variables. Narrow the Bedrock ARNs to the models you use. Set `cluster_endpoint_public_access_cidrs` to your own ranges to open the Kubernetes API. Pass model and OIDC settings through `chart_values`.
+Read the plan, then run `terraform apply` with the same variables. The first ARN covers inference profiles, which the default Bedrock model ID is. Replace the region and account, and narrow both ARNs to the models you use. See [Amazon Bedrock](/models/#amazon-bedrock). Set `cluster_endpoint_public_access_cidrs` to your own ranges to open the Kubernetes API. Pass model and OIDC settings through `chart_values`.
 
 What is checked: `terraform validate`, `terraform fmt`, `helm lint`, and the rendered manifests against Kubernetes schemas. Nobody has applied the Terraform to a real AWS account or run the chart on a real cluster. Treat both as untested starting points, like the other AWS sections.
 

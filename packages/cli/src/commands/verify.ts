@@ -13,7 +13,7 @@ import { attackerImpactSentence, firstCitation, MAX_VERIFY_FINDINGS_PER_PROMPT, 
 import { listOsecRunDatabasePaths, osecDB, resolveOsecDbPath, type FindingModelVerification, type ModelVerdict } from "@0/engine/storage";
 import { consoleTransportOptions, type ConsoleClient, type ConsoleTransportOptions } from "../console-client.js";
 import { resolveFindingId, shortFindingId } from "../finding-id.js";
-import { connect, DEFAULT_SCAN_MODEL, defaultScanDeps, waitForThread, type ScanDeps } from "./scan.js";
+import { connect, DEFAULT_SCAN_MODEL, scanModelField, scanModelLabel, defaultScanDeps, waitForThread, type ScanDeps } from "./scan.js";
 import { finishWithError, UsageError } from "./output.js";
 import { VariantBudget, defaultVariantStore, DEFAULT_VARIANT_BUDGET_USD, huntVariants, type HuntResult, type VariantParent, type VariantStore } from "./variants.js";
 import { appendRunMetric, type RunMetric } from "../run-metrics.js";
@@ -77,7 +77,7 @@ export function verifyMetric(report: VerifyReport, options: Pick<VerifyOptions, 
   const attempted = verified.length + report.failed;
   if (report.dryRun || attempted === 0) return undefined;
   return {
-    at: new Date(startedAt).toISOString(), command: "verify", model: options.model ?? DEFAULT_SCAN_MODEL, budgetUsd: Number(options.budget), costUsd: report.costUsd,
+    at: new Date(startedAt).toISOString(), command: "verify", model: scanModelLabel(options), budgetUsd: Number(options.budget), costUsd: report.costUsd,
     durationSeconds: Math.max(0, Math.round((endedAt - startedAt) / 1000)), findingsAttempted: attempted, findingsProposed: verified.length, checksPassed: null,
     tokens: report.tokens ?? null, status: report.stoppedReason === BUDGET_SPENT ? "budget" : report.failed > 0 || report.stoppedReason ? "failed" : "ok", findingIds: verified.map(item => item.finding),
   };
@@ -229,7 +229,7 @@ interface ThreadOutcome { id?: string; reply?: string; error?: string; costUsd?:
 
 async function runThread(client: ConsoleClient, deps: VerifyDeps, folder: string, group: VerifyCandidate[], options: VerifyOptions, budget: number): Promise<ThreadOutcome> {
   const title = group.length === 1 ? `Verify: ${group[0]!.title}` : `Verify ${group.length} findings in ${group[0]!.path}`;
-  const created = asJson(asJson(await client.request("POST", "/api/console/sessions", { runtime: { model: options.model ?? DEFAULT_SCAN_MODEL }, title: title.slice(0, 120), costCeilingUsd: budget })).session);
+  const created = asJson(asJson(await client.request("POST", "/api/console/sessions", { runtime: { ...scanModelField(options) }, title: title.slice(0, 120), costCeilingUsd: budget })).session);
   const id = String(created.id);
   const path = `/api/console/sessions/${encodeURIComponent(id)}`;
   await client.request("PATCH", `${path}/configuration`, { workspacePath: folder });
@@ -300,7 +300,7 @@ async function runVerifyFlow(ids: string[], options: VerifyOptions, deps: Verify
       }
     }
     const stored: FindingModelVerification = {
-      verdict, reasoning, verifiedAt: deps.now().toISOString(), model: options.model ?? DEFAULT_SCAN_MODEL,
+      verdict, reasoning, verifiedAt: deps.now().toISOString(), model: scanModelLabel(options),
       ...(duplicateOf ? { duplicateOf } : {}), ...(control ? { control } : {}), ...(advisory ? { advisorySeverity: advisory } : {}),
       ...(thread.id ? { threadId: thread.id } : {}), ...(share !== undefined ? { costUsd: share } : {}),
     };
@@ -434,7 +434,7 @@ export function registerVerifyCommand(program: Command, deps: VerifyDeps = defau
     .option("--budget <usd>", "Total spend for this run in USD; no new thread starts once it is used", "2")
     .option("--per-finding <usd>", "Spend cap for one finding, in USD", "0.3")
     .option("--max-consecutive-failures <n>", "Stop after this many checks in a row that return no verdict", "3")
-    .option("--model <model>", `Model for the threads (default: ${DEFAULT_SCAN_MODEL})`)
+    .option("--model <model>", `Model for the threads (default: ${DEFAULT_SCAN_MODEL}; ZERO_MODEL or a pinned provider's default when set)`)
     .option("--timeout <seconds>", "Maximum seconds to wait for one thread", "600")
     .option("--no-variants", "Do not hunt for the same bug at other sites after a true-positive verdict")
     .option("--variant-budget <usd>", "Spend cap for each variant hunt, in USD", String(DEFAULT_VARIANT_BUDGET_USD))
