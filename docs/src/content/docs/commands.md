@@ -2682,6 +2682,7 @@ With `--to` set to an https URL, the findings go to your own shared findings ser
 | `--report-id <id>` | `0-security` | Bitbucket report id or key |
 | `--jira-project <key>` | — | Jira: project key for the new issues (default: JIRA_PROJECT) |
 | `--jira-issue-type <name>` | `Task` | Jira: issue type name |
+| `--jira-min-severity <level>` | `low` | Jira: lowest severity that gets an issue (critical, high, medium, low or info) |
 | `--jira-label <label>` | — | Jira: extra label on every issue (repeatable) |
 | `--dry-run` | — | Jira: print the issues that would be created and send nothing |
 | `--print` | — | Bitbucket: print the report and annotation payload instead of posting it (also the behaviour without BITBUCKET_TOKEN) |
