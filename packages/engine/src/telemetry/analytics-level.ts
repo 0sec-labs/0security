@@ -1,11 +1,11 @@
 /**
  * Analytics consent level.
  *
- * The only environment opt-out is `DO_NOT_TRACK` (the cross-tool standard); it
- * wins unconditionally and forces "off". The only other off-switch is the saved
- * `analyticsLevel: off` setting, which the CLI settings store bridges into
- * `ZERO_ANALYTICS_LEVEL`. `ZERO_OFFLINE`, `ZERO_NO_TELEMETRY` and
- * `ZERO_ENTERPRISE` do not affect analytics.
+ * Two environment variables force "off": `DO_NOT_TRACK` (the cross-tool
+ * standard) and `ZERO_ENTERPRISE` (the no-egress mode). They win unconditionally.
+ * The only other off-switch is the saved `analyticsLevel: off` setting, which
+ * the CLI settings store bridges into `ZERO_ANALYTICS_LEVEL`. `ZERO_OFFLINE`
+ * and `ZERO_NO_TELEMETRY` do not affect analytics.
  *
  * DEFAULT: usage analytics are ON for a fresh install (anonymous counters and
  * lifecycle events only; see analytics-pipeline.ts for where they may go).
@@ -19,8 +19,8 @@ const LEVEL_ORDER: Record<AnalyticsLevel, number> = {
   usage: 1,
 };
 
-/** The single env var that hard-disables analytics, regardless of `ZERO_ANALYTICS_LEVEL`. */
-export const ANALYTICS_OPT_OUT_ENV = ["DO_NOT_TRACK"] as const;
+/** The env vars that hard-disable analytics, regardless of `ZERO_ANALYTICS_LEVEL`. */
+export const ANALYTICS_OPT_OUT_ENV = ["DO_NOT_TRACK", "ZERO_ENTERPRISE"] as const;
 
 /** The env var that selects the tier when nothing opts out. */
 export const ANALYTICS_LEVEL_ENV = "ZERO_ANALYTICS_LEVEL";
@@ -54,7 +54,7 @@ export function analyticsOptedOut(env: NodeJS.ProcessEnv = process.env): boolean
 }
 
 /**
- * Resolve the effective analytics level. `DO_NOT_TRACK` forces "off"; when
+ * Resolve the effective analytics level. `DO_NOT_TRACK` or `ZERO_ENTERPRISE` forces "off"; when
  * `ZERO_ANALYTICS_LEVEL` is unset the default is usage metrics only (automatic,
  * anonymous counters; an explicit saved `off` is applied by the CLI settings
  * store before this env is bridged). An unknown/invalid

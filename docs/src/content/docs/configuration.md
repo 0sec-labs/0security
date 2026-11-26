@@ -236,7 +236,7 @@ Each setting is global to your computer, and project settings cannot change it. 
 
 ### First-run notice
 
-The first time you run the CLI or the console, 0security prints one notice to stderr. It is one line. It says that usage counts, command names, crash reports and update checks are on, that they never include code or findings, and that `DO_NOT_TRACK=1` turns them off. It links here. 0 prints it once per install, and only when stderr is a terminal. It never prints in CI, with `--format json`, `--json` or other machine formats, with `ZERO_LOG_FORMAT=json`, or when telemetry is already off. The browser app shows the same disclosure under Settings, Privacy.
+The first time you run the CLI or the console, 0security prints one notice to stderr. It is one line. It says that usage counts, command names and crash reports are on, that they never include code or findings, and that `DO_NOT_TRACK=1` turns them off. It links here. 0 prints it once per install, and only when stderr is a terminal. It never prints in CI, with `--format json`, `--json` or other machine formats, with `ZERO_LOG_FORMAT=json`, or when telemetry is already off. The browser app shows the same disclosure under Settings, Privacy.
 
 ### Usage metrics
 
@@ -276,7 +276,7 @@ PostHog discards IP addresses, and 0security disables GeoIP lookup. To get a new
 
 Lifecycle events are not sent for `--help`, `--version`, `help`, shell completion, or the `config`, `reports` and `workbench` commands. They are also not sent in CI (`CI` set) or with machine output (`--json`, `--format json`, `ZERO_LOG_FORMAT=json`), because the notice is not shown there. To send them anyway, run `0security config set analyticsLevel usage`.
 
-One switch stops every event: `DO_NOT_TRACK=1`.
+`DO_NOT_TRACK=1` stops every event. So does `ZERO_ENTERPRISE=1`.
 
 
 ### What is never collected
@@ -306,12 +306,12 @@ A report contains the error class (for example `TypeError`), the 0security versi
 
 ### Opt out of telemetry
 
-`DO_NOT_TRACK=1` is the one switch. It beats every saved setting.
+`DO_NOT_TRACK=1` is the switch. `ZERO_ENTERPRISE=1` also turns telemetry off. Both beat every saved setting.
 
 | How | Effect |
 | --- | --- |
 | `DO_NOT_TRACK=1` | Turns off usage metrics, lifecycle events and crash reports. Any value except empty, `0`, `false` or `no` counts. An organization can set it for every operator, and it overrides each person's settings. |
-| `ZERO_ENTERPRISE=1` | No-egress mode. It turns off update checks, model catalog and price lookups, web search, remote extension sources and the other third-party calls, but not telemetry, so set `DO_NOT_TRACK=1` with it. Project settings cannot change it. See [Data flow and no-egress mode](/data-flow/). |
+| `ZERO_ENTERPRISE=1` | No-egress mode. It turns off telemetry, lifecycle events, crash reports, update checks, model catalog and price lookups, web search, remote extension sources and the other third-party calls. Project settings cannot change it. See [Data flow and no-egress mode](/data-flow/). |
 | `0security config set analyticsLevel off` | Turns off usage metrics and lifecycle events. |
 | `0security config set diagnosticReporting off` | Turns off crash reports. Use `ask` to review each one first. |
 | Browser app, Settings, Privacy | The same two switches. |

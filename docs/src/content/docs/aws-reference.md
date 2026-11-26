@@ -13,7 +13,7 @@ We wrote this from the repository and the compose files. We have not applied the
 
 - One EC2 instance with a gp3 data volume mounted at `/data`.
 - An image built on the instance from a pinned tag of the repository. A build with no build secrets contains no telemetry keys.
-- `ZERO_ENTERPRISE=1`, so 0 refuses every call outside the model endpoint you configure. See [Data flow](/data-flow/).
+- `ZERO_ENTERPRISE=1` and `DO_NOT_TRACK=1`. 0 blocks every automatic outbound call, including telemetry and crash reports, except your model endpoint and the destinations you name. See [Data flow](/data-flow/).
 - Caddy for HTTPS, or an SSH tunnel with no public port.
 - OIDC sign-in, recorded in the audit log.
 

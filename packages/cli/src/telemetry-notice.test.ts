@@ -31,8 +31,9 @@ function run(h: string, over: Partial<Parameters<typeof maybePrintTelemetryNotic
 describe("first-run telemetry notice", () => {
   it("is one short line that names what is sent and DO_NOT_TRACK=1", () => {
     expect(TELEMETRY_NOTICE_TEXT).not.toContain("\n");
+    expect(TELEMETRY_NOTICE_TEXT).not.toContain("update check");
     expect(TELEMETRY_NOTICE_TEXT.length).toBeLessThan(180);
-    for (const part of ["usage counts", "command names", "crash reports", "update checks", "never code or findings", "DO_NOT_TRACK=1"]) {
+    for (const part of ["usage counts", "command names", "crash reports", "never code or findings", "DO_NOT_TRACK=1"]) {
       expect(TELEMETRY_NOTICE_TEXT).toContain(part);
     }
   });
@@ -40,7 +41,7 @@ describe("first-run telemetry notice", () => {
     const h = home();
     const first = run(h);
     expect(first.printed).toBe(true);
-    expect(first.text).toContain("usage counts, command names, crash reports and update checks");
+    expect(first.text).toContain("usage counts, command names and crash reports");
     expect(first.text).toContain("never code or findings");
     expect(first.text).toContain(TELEMETRY_DOCS_URL);
     expect(first.text).toContain("DO_NOT_TRACK=1");

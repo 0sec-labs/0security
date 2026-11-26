@@ -178,9 +178,9 @@ describe("anonymous usage to PostHog", () => {
     expect(log).not.toContain(FAKE_KEY);
   });
 
-  it("DO_NOT_TRACK wins: nothing sent, nothing queued, no install id", async () => {
+  it.each(["DO_NOT_TRACK", "ZERO_ENTERPRISE"])("%s wins: nothing sent, nothing queued, no install id", async (name) => {
     analyticsPipeline.setLevel("usage");
-    vi.stubEnv("DO_NOT_TRACK", "1");
+    vi.stubEnv(name, "1");
     emitUsage();
     analyticsPipeline.__enqueueForTests({ kind: "usage", featureCounts: { shell: 1 }, turnCount: 1, durationMs: 1 });
     expect(analyticsPipeline.__pendingCountForTests()).toBe(0);
@@ -190,7 +190,7 @@ describe("anonymous usage to PostHog", () => {
     expect(existsSync(join(home, ".0", "analytics-id"))).toBe(false);
   });
 
-  it.each(["ZERO_NO_TELEMETRY", "ZERO_OFFLINE", "ZERO_ENTERPRISE"])("%s is not an analytics switch: usage still goes to PostHog", async (name) => {
+  it.each(["ZERO_NO_TELEMETRY", "ZERO_OFFLINE"])("%s is not an analytics switch: usage still goes to PostHog", async (name) => {
     analyticsPipeline.setLevel("usage");
     vi.stubEnv(name, "1");
     emitUsage();

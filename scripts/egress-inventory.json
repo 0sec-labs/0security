@@ -4,7 +4,7 @@
     {
       "id": "usage-analytics-posthog",
       "class": "automatic",
-      "enterprise": "allowed",
+      "enterprise": "blocked",
       "destinations": [
         "eu.i.posthog.com"
       ],
@@ -13,12 +13,12 @@
       ],
       "when": "Batched while a command or the console runs, when analyticsLevel is usage and the build embeds a key. Also one small event at first run, at each command, on a version change and on an error exit; not for --help, --version, shell completion, config, or CI and machine-output runs unless analyticsLevel usage is set in a settings file.",
       "sent": "Anonymous counters and lifecycle events: version, OS, command name from a fixed list, outcome class, finding class counts.",
-      "disable": "DO_NOT_TRACK."
+      "disable": "DO_NOT_TRACK, ZERO_ENTERPRISE."
     },
     {
       "id": "crash-and-feedback",
       "class": "automatic",
-      "enterprise": "allowed",
+      "enterprise": "blocked",
       "destinations": [
         "Sentry ingest (embedded DSN or ZERO_SENTRY_DSN)",
         "ZERO_FEEDBACK_URL"
@@ -28,7 +28,7 @@
       ],
       "when": "A crash with diagnosticReporting automatic, or a feedback message the operator sends.",
       "sent": "Redacted crash envelope, or the reviewed feedback text.",
-      "disable": "diagnosticReporting off, DO_NOT_TRACK."
+      "disable": "diagnosticReporting off, DO_NOT_TRACK, ZERO_ENTERPRISE."
     },
     {
       "id": "update-check",

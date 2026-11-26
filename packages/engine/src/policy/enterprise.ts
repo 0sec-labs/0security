@@ -2,8 +2,8 @@
  * Enterprise no-egress mode.
  *
  * `ZERO_ENTERPRISE=1` keeps every automatic third-party network call off,
- * except anonymous telemetry and crash reports, which only `DO_NOT_TRACK=1`
- * controls. The only other outbound traffic left is to hosts the operator
+ * including anonymous telemetry, lifecycle events and crash reports. The only
+ * outbound traffic left is to hosts the operator
  * configured themselves: the model endpoint, a team sign-in issuer, a scan or
  * probe target they named, a remote MCP server they added.
  *

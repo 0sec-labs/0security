@@ -19,8 +19,7 @@ on the GitHub Release tag.
 
 ### Changed
 
-- `DO_NOT_TRACK=1` is now the one telemetry switch. It stops usage counts, lifecycle events and crash reports. `ZERO_NO_TELEMETRY`, `ZERO_OFFLINE` and `ZERO_ENTERPRISE` no longer control telemetry (`ZERO_OFFLINE` and `ZERO_ENTERPRISE` keep their other jobs), so a no-egress install should set `DO_NOT_TRACK=1` too. The Helm chart does this for you.
-- Usage counts go only to PostHog. The CLI no longer sends analytics to a 0security cloud account, and the `commands` and `full` levels are gone.
+- `DO_NOT_TRACK=1` is now the single telemetry switch (`ZERO_ENTERPRISE=1` also blocks telemetry and crash reports as part of no-egress mode), `ZERO_NO_TELEMETRY` and `ZERO_OFFLINE` no longer control telemetry, and the `commands` and `full` analytics levels and the cloud analytics path are removed.
 
 ### Removed
 
