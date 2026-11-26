@@ -7,7 +7,7 @@ import { contextOverflow, estimatePromptTokens, maintainContext, outputHeadroom 
 import { diag } from "../../diagnostics/channel.js";
 import { buildOperatorInstructionsBlock, parseSecurityWorkflowInput, type SecurityWorkflow, type TokenUsageForPricing } from "../../shared/index.js";
 import type { NativeContentBlock, NativeMessage, NativeRuntime, NativeRuntimeResult, NativeStreamCallbacks, NativeToolDef } from "../../runtime/types.js";
-import { ToolExecutor, getToolsForRole, TOOL_DEFINITIONS } from "../../agent/tools.js";
+import { ToolExecutor, getToolsForRole, getPackToolDefinitions, TOOL_DEFINITIONS } from "../../agent/tools.js";
 import type { McpToolHost } from "../../agent/mcp-host.js";
 import { toNativeToolDef } from "../../agent/native-tooldef.js";
 import { partitionForToolset, resolveToolset } from "../../agent/toolset.js";
@@ -179,12 +179,13 @@ export function createConsoleSession(config: ConsoleSessionConfig): ConsoleSessi
   const executor = new ToolExecutor(toolContext, config.db ?? null, undefined, runtime.forkForSubagent?.bind(runtime), cp?.executor);
 
   const roleTools = config.tools ?? getToolsForRole({ webSearchEnabled: true });
-  const tools = roleTools;
   // Core toolset: advertise the small core; every other built-in tool is held back
   // and can only be added by a loaded skill that declares its pack. Explicit
   // `config.tools` overrides keep their exact list.
   const toolset = config.tools === undefined ? resolveToolset({ explicit: config.toolset, surfaceDefault: "core" }) : "full";
-  const corePartition = toolset === "core" ? partitionForToolset(tools, "core") : undefined;
+  // Pack tools are not in the default list: core holds them back until a skill loads the pack, full (opt-in) advertises them.
+  const tools = toolset === "full" && config.tools === undefined ? [...roleTools, ...getPackToolDefinitions()] : roleTools;
+  const corePartition = toolset === "core" ? partitionForToolset([...roleTools, ...getPackToolDefinitions()], "core") : undefined;
   // Pack tools live in their own registry so list_tools/load_tool can never reach them.
   const packTools = new DeferredToolRegistry();
   if (corePartition) {

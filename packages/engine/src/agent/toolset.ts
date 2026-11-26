@@ -31,7 +31,10 @@ export const CORE_TOOL_NAMES: readonly string[] = [
  * skill declares them (`tools: [pack]` in skill frontmatter). A pack holds the
  * canonical name for each capability; the aliases below stay dispatchable.
  */
-export const TOOL_PACKS: Readonly<Record<string, readonly string[]>> = Object.freeze({});
+export const TOOL_PACKS: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  // Offline call graph, routes and source-to-sink paths for TypeScript, JavaScript and Python (0#659).
+  "code-index": ["callers_of", "callees_of", "routes", "trace_to_sink"],
+});
 
 /**
  * Old name -> canonical name. Aliases stay registered and dispatchable so stored

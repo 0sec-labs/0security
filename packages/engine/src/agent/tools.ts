@@ -46,7 +46,7 @@ import { extractPocStepsFromProse } from "./poc-steps-from-prose.js";
 import { computeFindingConfidence } from "./finding-confidence.js";
 import { validateFindingDraft, type FindingDraft } from "./finding-validator.js";
 import { findMatchingFindingCandidate } from "./tools-helpers.js";
-import { resolvePacks } from "./toolset.js";
+import { packToolNames, resolvePacks } from "./toolset.js";
 import { listSkillSummaries, getSkillById, matchTriggers, loadSkillRegistry } from "./skills/index.js";
 import type { SkillDefinition } from "./skills/index.js";
 import { loadSkillBundleFromManifest } from "./skills/markdown-bundle.js";
@@ -60,6 +60,7 @@ import { LIST_TOOLS_NAME, LOAD_TOOL_NAME, formatToolCatalog, formatLoadResult } 
 import { resolveFolderPath } from "./tools/folder-path.js";
 import { TOOL_DEFINITIONS } from "./tools/index.js";
 import { TOOL_DISPATCH } from "./tools/dispatch.js";
+import { runCodeIndexTool } from "./tools/code-index.js";
 import { nonEmptyString, buildOperatorQuestionRequest, type ToolExecutorCheckpoint, inlineImpactAssessmentSchema } from "./tools/agent-args.js";
 import { resolveBashWallclockCeilingMs, runBashWithWallclock, buildStrReplaceMeta } from "./tools/exec-helpers.js";
 import { parseVerificationSpecArg, autoVerificationSpec, evaluateSourceVerification, parsePocStepsArg, parseEvidencePathsArg, buildValidationFailureResult } from "./tools/verification.js";
@@ -1665,6 +1666,12 @@ export class ToolExecutor {
     };
   }
 
+  // Code index tools (0#659): validated and run in tools/code-index.ts against the granted folder.
+  private async callersOfTool(args: Record<string, unknown>): Promise<ToolResult> { return runCodeIndexTool("callers_of", args, this.ctx.scopePath ?? this.ctx.workspaceRoot); }
+  private async calleesOfTool(args: Record<string, unknown>): Promise<ToolResult> { return runCodeIndexTool("callees_of", args, this.ctx.scopePath ?? this.ctx.workspaceRoot); }
+  private async routesTool(args: Record<string, unknown>): Promise<ToolResult> { return runCodeIndexTool("routes", args, this.ctx.scopePath ?? this.ctx.workspaceRoot); }
+  private async traceToSinkTool(args: Record<string, unknown>): Promise<ToolResult> { return runCodeIndexTool("trace_to_sink", args, this.ctx.scopePath ?? this.ctx.workspaceRoot); }
+
   /**
    * `ask_operator` — pause mid-turn and put a STRUCTURED question to the human
    * operator, blocking until it is answered.
@@ -1866,8 +1873,10 @@ export class ToolExecutor {
 
   private subagentTools(messaging: MessagingRuntime | undefined, childId?: string): ToolDefinition[] {
     const inherited = this.ctx.delegationTools ?? getToolsForRole({ webSearchEnabled: this.ctx.webSearchEnabled });
+    const packNames = packToolNames();
     return filterWorkflowAgentTools(inherited.filter(tool =>
       Object.hasOwn(TOOL_DEFINITIONS, tool.name) &&
+      !packNames.has(tool.name) && // a child loads the pack itself through a skill; it never inherits it
       (this.ctx.webSearchEnabled !== false || tool.name !== "web_search") &&
       (tool.name !== "spawn_agent" || childId === undefined || this._workerTree.canDelegate(childId)),
     ).concat(REPORT_STATUS_TOOL, buildSendMessageTool(messaging), CHECK_MESSAGES_TOOL));
@@ -3113,7 +3122,15 @@ export class ToolExecutor {
 /** The one tool list every thread, child run and sentinel turn gets: all registered tools. */
 export function getToolsForRole(opts?: { webSearchEnabled?: boolean }): ToolDefinition[] {
   const webSearch = opts?.webSearchEnabled ?? featureFlags.webSearch;
+  const packTools = packToolNames();
   return filterWorkflowAgentTools(Object.keys(TOOL_DEFINITIONS)
     .filter((name) => webSearch || name !== "web_search")
+    // Pack tools (code-index) are never in the default list; a loaded skill that declares the pack adds them.
+    .filter((name) => !packTools.has(name))
     .map((name) => TOOL_DEFINITIONS[name]));
+}
+
+/** Definitions of every tool that only a skill pack can advertise. */
+export function getPackToolDefinitions(): ToolDefinition[] {
+  return [...packToolNames()].filter((name) => Object.hasOwn(TOOL_DEFINITIONS, name)).map((name) => TOOL_DEFINITIONS[name]!);
 }

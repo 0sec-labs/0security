@@ -67,6 +67,46 @@ describe("core toolset in the console", () => {
     } finally { await session.cleanup(); }
   });
 
+  it.each(["seedless-depth-review", "verify-finding"])("keeps the default list at the core tools, and %s alone adds the code-index pack", async (skill) => {
+    const packed = ["callees_of", "callers_of", "routes", "trace_to_sink"];
+    const runtime = new ScriptedRuntime([call("load_skill", { skill_id: skill }), end("loaded"), end("again")]);
+    const session = createConsoleSession({ runtime, refineObjective: false });
+    try {
+      await session.send("review the repo");
+      await session.send("go on");
+      expect(names(runtime.calls[0]!.tools).sort()).toEqual([...CORE_TOOL_NAMES].sort());
+      for (const name of packed) expect(names(runtime.calls[0]!.tools)).not.toContain(name);
+      // The tools appear on the turn after the skill loads, and nothing else changes.
+      const after = names(runtime.calls[runtime.calls.length - 1]!.tools);
+      for (const name of packed) expect(after).toContain(name);
+      expect(after.filter(name => !packed.includes(name)).sort()).toEqual([...CORE_TOOL_NAMES].sort());
+    } finally { await session.cleanup(); }
+  });
+
+  it("does not advertise the pack for a plain session or for a skill that does not declare it", async () => {
+    const runtime = new ScriptedRuntime([end("a")]);
+    const session = createConsoleSession({ runtime, refineObjective: false });
+    try {
+      await session.send("hello");
+      expect(names(runtime.calls[0]!.tools).sort()).toEqual([...CORE_TOOL_NAMES].sort());
+    } finally { await session.cleanup(); }
+  });
+
+  it("ZERO_TOOLSET=full is the opt-in everything list and does advertise the pack tools up front", async () => {
+    const prior = process.env["ZERO_TOOLSET"];
+    process.env["ZERO_TOOLSET"] = "full";
+    const runtime = new ScriptedRuntime([end("a")]);
+    const session = createConsoleSession({ runtime, refineObjective: false });
+    try {
+      await session.send("hello");
+      const first = names(runtime.calls[0]!.tools);
+      for (const name of ["callees_of", "callers_of", "routes", "trace_to_sink", ...CORE_TOOL_NAMES]) expect(first).toContain(name);
+    } finally {
+      await session.cleanup();
+      if (prior === undefined) delete process.env["ZERO_TOOLSET"]; else process.env["ZERO_TOOLSET"] = prior;
+    }
+  });
+
   it("lists skills when load_skill gets no id", async () => {
     const runtime = new ScriptedRuntime([call("load_skill", {}), end("done")]);
     const session = createConsoleSession({ runtime, refineObjective: false });

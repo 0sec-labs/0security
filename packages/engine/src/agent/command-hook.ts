@@ -35,6 +35,8 @@ export const DELEGATING_TOOLS: ReadonlySet<string> = new Set(["spawn_agent"]);
 export const INERT_TOOLS: ReadonlySet<string> = new Set([
   "finding", "load_skill",
   "ask_operator",
+  // Read the granted folder through an offline index; no process, write or network (0#659).
+  "callers_of", "callees_of", "routes", "trace_to_sink",
 ]);
 
 export const classifyTool = (name: string): "executing" | "network" | "delegating" | "inert" | "unclassified" =>

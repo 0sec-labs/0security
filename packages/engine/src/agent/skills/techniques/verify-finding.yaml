@@ -3,7 +3,9 @@ name: "Re-check a reported finding from the code alone"
 description: "Experimental. Re-check reported security findings with fresh eyes: read the code yourself, follow the input from an entry point to the sink, look for a real control, try to construct a concrete attack, and answer true-positive, false-positive, fixed, uncertain or duplicate. Use when asked to verify, re-validate or triage whether a finding is real."
 summary: "Re-check a finding from the code and give a verdict with a cited reason."
 category: "Code review"
-version: 1
+version: 2
+tools:
+  - code-index
 applicable_roles:
   - attack
   - audit
@@ -31,7 +33,7 @@ content: |
 
   ### 2. Trace from an entry point to the sink
 
-  Name the entry point that reaches the cited code: the route, handler, command, consumer or exported function an outsider can call. Write the chain as hops with `path:line` for each: where the input enters, what transforms it, where it reaches the sink (query, command, path, URL, template, deserializer, token check, crypto call). A sink that no outsider input reaches is not a vulnerability, but check dead-looking code against its callers and its registration (routes are often registered somewhere else) before you call it unreachable.
+  Name the entry point that reaches the cited code: the route, handler, command, consumer or exported function an outsider can call. Write the chain as hops with `path:line` for each: where the input enters, what transforms it, where it reaches the sink (query, command, path, URL, template, deserializer, token check, crypto call). When the code is TypeScript, JavaScript or Python, use `routes`, `callers_of` and `trace_to_sink` (loaded with this skill, available from the next turn) to find the entry points that reach the cited function and the call path to the sink, then read each hop yourself with `cat -n`. They are offline and match by name, so a path they show is a lead and a path they do not show is not proof of unreachability: fall back to `rg` when a tool says the language is unsupported or the symbol is missing. A sink that no outsider input reaches is not a vulnerability, but check dead-looking code against its callers and its registration (routes are often registered somewhere else) before you call it unreachable.
 
   ### 3. Look for a real control
 

@@ -54,9 +54,9 @@ beforeEach(() => {
 // ── Tool Registry ──
 
 describe("TOOL_DEFINITIONS", () => {
-  it("registers exactly the minimal toolset", () => {
+  it("registers the core tools plus the code-index pack (loaded only by skills)", () => {
     expect(Object.keys(TOOL_DEFINITIONS).sort()).toEqual([
-      "ask_operator", "bash", "finding", "load_skill", "spawn_agent", "str_replace", "web_search",
+      "ask_operator", "bash", "callees_of", "callers_of", "finding", "load_skill", "routes", "spawn_agent", "str_replace", "trace_to_sink", "web_search",
     ]);
   });
 });
