@@ -24,6 +24,13 @@ const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh", "mksh", "ash", "fish
 /** `node` or `nodejs` as a word in a command or a shell string. `node-x`, `node_modules` and `/node/dir` do not match. */
 const MENTIONS_NODE = /(?:^|[\s/;&|()'"`=<>{}!$])node(?:js)?(?:\.exe)?(?=$|[\s;&|()'"`<>{}])/i;
 
+/** What env searches when PATH is unset. */
+const DEFAULT_PATH = "/usr/local/bin:/usr/bin:/bin";
+/** A shell string we can read: words, paths and flags, with no quoting, expansion, globbing, pipes or chaining. */
+const PLAIN_SHELL_WORDS = /^[A-Za-z0-9 _.\/:=@%+,\t-]*$/;
+/** A word that is node, another launcher or a shell, or that names node. It could start node, so a wrapper with it is refused. */
+const riskyWord = (a: string): boolean => { const n = NAME(a); return n === "node" || n === "nodejs" || n === "env" || SHELLS.has(n) || WRAPPERS.has(n) || NODE_CHOOSERS.has(n) || MENTIONS_NODE.test(a); };
+
 export interface LaunchResolved { ok: true; unwrapped: boolean; program: string; args: string[]; env: Record<string, string> }
 export interface LaunchRefused { ok: false; error: string }
 
@@ -123,7 +130,13 @@ export function resolveLaunch(argv: readonly string[], env: Readonly<Record<stri
   const refuse = (why: string): LaunchRefused => ({ ok: false, error: `cannot start ${label} in a sandbox: ${why}. Start node directly, or set ZERO_SANDBOX_NODE_PERMISSION=off to run it without the node layer` });
   for (let depth = 0; depth < 5; depth++) {
     const first = args[0] ?? "";
-    const program = host.resolve(first, cur.PATH ?? env.PATH ?? "");
+    // After an env call the PATH is the one env passes on. env finds programs in it, so it must be one we can search the same way.
+    if (unwrapped) {
+      const entries = (cur.PATH ?? DEFAULT_PATH).split(path.delimiter);
+      if (entries.some(d => !path.isAbsolute(d))) return refuse("the PATH after env has a relative or empty entry, so 0 cannot tell which program env would start");
+    }
+    const program = host.resolve(first, unwrapped ? cur.PATH ?? DEFAULT_PATH : env.PATH ?? "");
+    if (unwrapped && !path.isAbsolute(program)) return refuse(`env would start ${JSON.stringify(first.slice(0, 60))}, which was not found in PATH`);
     const name = NAME(program); const realName = NAME(host.real(program));
     if (host.isNode(program)) return { ok: true, unwrapped, program, args: args.slice(1), env: cur };
     if (name === "env" || realName === "env") {
@@ -134,8 +147,11 @@ export function resolveLaunch(argv: readonly string[], env: Readonly<Record<stri
     }
     const rest = args.slice(1);
     if (NODE_CHOOSERS.has(name) || NODE_CHOOSERS.has(realName)) return refuse(`${name} picks the node program itself`);
-    if (WRAPPERS.has(name) || WRAPPERS.has(realName)) { if (rest.some(a => MENTIONS_NODE.test(a))) return refuse(`${name} wraps another program and may start node`); }
-    if ((SHELLS.has(name) || SHELLS.has(realName)) && rest.some(a => /^-[a-z]*c[a-z]*$/i.test(a)) && rest.some(a => MENTIONS_NODE.test(a))) return refuse(`${name} -c runs a command string that starts node`);
+    if (WRAPPERS.has(name) || WRAPPERS.has(realName)) { if (rest.some(riskyWord)) return refuse(`${name} wraps another program and may start node`); }
+    if ((SHELLS.has(name) || SHELLS.has(realName)) && rest.some(a => /^-[a-z]*c[a-z]*$/i.test(a))) {
+      const cmd = rest.filter(a => !a.startsWith("-"));
+      if (cmd.some(a => !PLAIN_SHELL_WORDS.test(a) || a.split(/\s+/).some(riskyWord))) return refuse(`${name} -c runs a command string that starts node or that 0 cannot read completely`);
+    }
     if (unwrapped) return { ok: true, unwrapped: false, program: host.resolve(argv[0] ?? "", env.PATH ?? ""), args: argv.slice(1), env: { ...env } };
     return { ok: true, unwrapped: false, program, args: rest, env: cur };
   }

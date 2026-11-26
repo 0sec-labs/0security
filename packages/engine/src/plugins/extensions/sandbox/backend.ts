@@ -143,7 +143,7 @@ const nodePermissionWanted = (env: Readonly<Record<string, string | undefined>>)
 /** Flags that would widen or replace node's own permissions. Quotes in NODE_OPTIONS are ignored. `--require` and `--import` are allowed: node applies its permissions before it loads them. */
 const NODE_WIDENING_FLAG = /^["']?--(?:allow[-_]|no[-_](?:experimental[-_])?permission|env[-_]file|(?:no[-_])?experimental[-_]config[-_]file|(?:no[-_])?experimental[-_]default[-_]config[-_]file|config[-_]file)/i;
 /** Variables that make the system loader put code into a process before node starts. */
-const LOADER_ENV = /^(?:LD_|DYLD_)/;
+const LOADER_ENV = /^(?:LD_|DYLD_)/i;
 
 const resolveProgram = (name: string, pathEnv: string): string => (name.includes("/") ? name : whichIn(name, pathEnv) ?? name);
 const real = (p: string): string => { try { return fs.realpathSync(p); } catch { return p; } };
@@ -195,7 +195,7 @@ export function planSandbox(req: SandboxRequest, options: PlanOptions = {}): San
     const flags = nodePermissionArgs(policy, nodeSupport);
     if (flags.ok) {
       // Flags that widen node's own permissions would win over ours, from the arguments, an env file or NODE_OPTIONS: refuse them.
-      const widens = programArgs.find(arg => NODE_WIDENING_FLAG.test(arg)) ?? childEnv.NODE_OPTIONS?.split(/\s+/).find(arg => NODE_WIDENING_FLAG.test(arg));
+      const widens = programArgs.find(arg => NODE_WIDENING_FLAG.test(arg)) ?? Object.entries(childEnv).filter(([k]) => /^NODE_OPTIONS$/i.test(k)).flatMap(([, v]) => v.split(/\s+/)).find(arg => NODE_WIDENING_FLAG.test(arg));
       if (widens) { cleanup(); return { kind: "refused", error: `cannot start ${req.label} in a sandbox: ${widens.slice(0, 60)} would change node's permissions` }; }
       const loader = Object.keys(childEnv).find(k => LOADER_ENV.test(k));
       if (loader) { cleanup(); return { kind: "refused", error: `cannot start ${req.label} in a sandbox: ${loader} would load code into node before its permissions apply` }; }
