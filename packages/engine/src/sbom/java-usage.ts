@@ -18,7 +18,7 @@ export interface JavaSymbolHit { symbol: string; path: string; line: number; tes
 export interface JavaUsageReport { usage: JavaUsage[]; filesScanned: number; truncated: boolean; /** Source files or links that were not read: over the size cap, unreadable, or a symbolic link. */ skipped: number; symbolHits?: JavaSymbolHit[] }
 export interface JavaUsageOptions {
   /** Fully qualified classes or symbols to look for in imports and in fully qualified uses. */ symbols?: string[];
-  /** Lower limits than the defaults, for tests of a hostile tree. */ limits?: { maxFiles?: number; maxTotalBytes?: number; maxSymbols?: number; maxEntries?: number; maxSymbolChecks?: number };
+  /** Lower limits than the defaults, for tests of a hostile tree. */ limits?: { maxFiles?: number; maxTotalBytes?: number; maxSymbols?: number; maxEntries?: number; maxSymbolChecks?: number; maxMatchWork?: number };
 }
 
 const SOURCE = /\.(?:java|kt|kts|scala|groovy)$/;
@@ -36,6 +36,8 @@ const MAX_IMPORTS_TOTAL = 400_000;
 const MAX_IMPORTS_PER_FILE = 5000;
 /** Line-by-symbol comparisons in one scan (lines times symbols), so many symbols over a large tree cannot run unbounded. */
 const MAX_SYMBOL_CHECKS = 50_000_000;
+/** Imports compared with components (and sorted) in one scan; a component past this gets no answer and the scan is incomplete. */
+const MAX_MATCH_WORK = 200_000_000;
 /** A line longer than this is minified or hostile text: it is not searched for symbols. */
 const MAX_LINE_CHARS = 4000;
 
@@ -204,11 +206,19 @@ export function scanJavaUsage(folder: string, components: Array<{ name: string; 
   const artifactPrefixes = components.flatMap(component => prefixes(component.name).artifact);
   // Do not credit an exact artifact import to every sibling with the same Maven group.
   const groupCandidates = imports.filter(item => !artifactPrefixes.some(prefix => startsWithPackage(item.import, prefix)));
+  const maxWork = options.limits?.maxMatchWork ?? MAX_MATCH_WORK;
+  let work = 0;
   const usage = components.map((component): JavaUsage => {
+    work += imports.length * 3;
+    if (work > maxWork) {
+      limit.truncated = true;
+      return { purl: component.purl, name: component.name, version: component.version, verdict: "no-import-found", imports: [] };
+    }
     const { artifact, group } = prefixes(component.name);
     const exact = imports.filter(item => artifact.some(prefix => startsWithPackage(item.import, prefix)));
     const byGroup = exact.length || KNOWN_PACKAGES[component.name] ? [] : groupCandidates.filter(item => startsWithPackage(item.import, group));
     // Application code first, so the cap never hides the lines that matter behind test imports.
+    work += (exact.length || byGroup.length) * 8;
     const hits = [...(exact.length ? exact : byGroup)].sort((a, b) => Number(a.test) - Number(b.test));
     return {
       purl: component.purl, name: component.name, version: component.version,

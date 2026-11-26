@@ -322,4 +322,17 @@ describe("a scan that hit a limit never says not-imported", () => {
     const report = scanJavaUsage(dir, [], { symbols: ["a.b.C", "a.b.D"], limits: { maxSymbolChecks: 20 } });
     expect(report.truncated).toBe(true);
   });
+  it("gives up matching components past the work budget and calls the scan incomplete", () => {
+    const dir = tree(5);
+    const report = scanJavaUsage(dir, Array.from({ length: 50 }, (_, index) => ({ name: `g${index}/a`, version: "1", purl: `pkg:maven/g${index}/a@1` })), { limits: { maxMatchWork: 20 } });
+    expect(report.truncated).toBe(true);
+    expect(report.usage).toHaveLength(50);
+  });
+  it("bounds the symbols copied out of a crafted OSV record", () => {
+    const symbols = Array.from({ length: 5000 }, (_, index) => `a.b.C${index}`);
+    const affected = [{ ecosystem_specific: { imports: Array.from({ length: 200 }, () => ({ path: "x".repeat(300), symbols })) } }];
+    expect(vulnerableSymbolsFor(affected, "pkg:maven/a/b@1").length).toBeLessThanOrEqual(100);
+    const ok = [{ ecosystem_specific: { imports: Array.from({ length: 200 }, () => ({ path: "p.q", symbols })) } }];
+    expect(vulnerableSymbolsFor(ok, "pkg:maven/a/b@1").length).toBeLessThanOrEqual(100);
+  });
 });

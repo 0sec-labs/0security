@@ -116,13 +116,17 @@ const SYMBOL = /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+$/;
  */
 export function vulnerableSymbolsFor(affected: unknown[], purl: string): string[] {
   const found = new Set<string>();
+  // Stops at 100 names and 10000 looks: the caller keeps 20 and reports that there were more.
+  let looks = 0;
   for (const entry of matching(affected, purl)) {
     for (const holder of [entry.ecosystem_specific, entry.database_specific]) {
       if (!isObject(holder) || !Array.isArray(holder.imports)) continue;
       for (const item of holder.imports.slice(0, 200)) {
         if (!isObject(item)) continue;
-        const path = typeof item.path === "string" ? item.path.trim() : "";
+        const path = typeof item.path === "string" && item.path.length <= 200 ? item.path.trim() : "";
         for (const symbol of (Array.isArray(item.symbols) ? item.symbols : []).slice(0, 200)) {
+          looks += 1;
+          if (looks > 10_000 || found.size >= 100) return [...found].sort();
           if (typeof symbol !== "string" || symbol.length > 200) continue;
           const bare = symbol.trim();
           // `Server.Serve` is a class and method under the path; `a.b.C` is already qualified.
