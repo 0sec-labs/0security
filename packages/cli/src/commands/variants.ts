@@ -331,7 +331,7 @@ export function registerVariantsCommand(program: Command, deps: VariantDeps = de
     .option("--model <model>", `Model for the thread (default: ${DEFAULT_SCAN_MODEL}; ZERO_MODEL or a pinned provider's default when set)`)
     .option("--timeout <seconds>", "Maximum seconds to wait for the thread", String(DEFAULT_TIMEOUT_SECONDS))
     .addOption(new Option("--format <format>", "Output: text or json").choices(["text", "json"])))
-    .addHelpText("after", "\nEach variant is stored as a finding with a variantOf link to this one; see it in `0security findings show` and `findings list`. `findings verify` and `findings fix` run this for you (turn it off with --no-variants). Nothing is edited.\nExit codes: 0 done, 1 the thread returned no answer, 2 usage error.")
+    .addHelpText("after", "\nEach variant is stored as a finding with a variantOf link to this one; see it in `0security findings show` and `findings list`. `findings verify` and `findings fix` run this for you (turn it off with --no-variants). The thread is told not to edit files; that instruction is the only limit.\nExit codes: 0 done, 1 the thread returned no answer, 2 usage error.")
     .action(async (finding: string, options: VariantsOptions) => {
       const json = options.format === "json";
       try {
