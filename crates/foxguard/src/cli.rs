@@ -863,9 +863,35 @@ pub enum Command {
     /// Report migration readiness for an imported Semgrep rule pack
     #[command(name = "semgrep-readiness")]
     SemgrepReadiness(SemgrepReadinessArgs),
+    /// Export symbols, call edges, HTTP routes and sink calls as JSON (schema version 1)
+    Graph(GraphArgs),
     /// Internal machine-facing helpers used by editor integrations.
     #[command(hide = true, name = "internal")]
     Internal(InternalArgs),
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct GraphArgs {
+    /// Folder to index
+    #[arg(default_value = ".")]
+    pub path: String,
+
+    /// Also mark each route with `missingGuard` (reaches a data sink with no auth signal on the route or its call tree)
+    #[arg(long, default_value_t = false)]
+    pub missing_guard: bool,
+
+    /// Write JSON output to a file instead of stdout
+    #[arg(long)]
+    pub output: Option<String>,
+
+    /// Fill `taintSummaries` with Java per-method taint summaries (slower on large trees)
+    #[arg(long, default_value_t = false)]
+    pub taint_summaries: bool,
+
+    /// Per-file time budget in seconds; 0 disables (default: 120). A file over it is skipped and
+    /// the graph is marked `truncated`.
+    #[arg(long, default_value_t = crate::engine::budget::DEFAULT_FILE_TIMEOUT_SECS)]
+    pub file_timeout: u64,
 }
 
 #[derive(Parser, Debug)]

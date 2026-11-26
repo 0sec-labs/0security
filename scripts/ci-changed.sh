@@ -35,6 +35,10 @@ while IFS= read -r f; do
     *) code=true; engine=true ;;                                   # engine, cli, root, scripts, workflows: everything
   esac
   case "$f" in
+    # The code-index tools run the real `foxguard graph` binary in the engine suite (foxguard-java.test.ts).
+    crates/foxguard/src/graph/*|crates/foxguard/src/cli.rs|crates/foxguard/src/main.rs|crates/foxguard/tests/fixtures/java_graph_app/*) engine=true ;;
+  esac
+  case "$f" in
     docs/*|README.md|packages/cli/*|packages/engine/*|scripts/check-docs-site.mjs|scripts/sync-cli-docs.mjs|scripts/check-docs-commands*|package.json|pnpm-lock.yaml) docs=true ;;
   esac
   case "$f" in

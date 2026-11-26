@@ -12,8 +12,13 @@ import type { CodeIndex, FileExtract } from "./types.js";
 
 const JS_EXT = new Set(["js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts"]);
 const PY_EXT = new Set(["py"]);
+/** Parsed only by the Foxguard graph. They are `unsupported` for the built-in extractor but still key the cache. */
+const GRAPH_ONLY_EXT = new Set(["java"]);
 
 export interface BuildLimits { maxFiles: number; maxFileBytes: number; maxTotalBytes: number }
+/** Most Java files stat-ed for the cache key. */
+const GRAPH_ONLY_MAX = 300_000;
+
 export const DEFAULT_LIMITS: BuildLimits = { maxFiles: 5000, maxFileBytes: 400 * 1024, maxTotalBytes: 48 * 1024 * 1024 };
 
 function git(root: string, args: string[]): string | undefined {
@@ -24,8 +29,9 @@ function git(root: string, args: string[]): string | undefined {
 
 interface SourceFile { path: string; size: number; mtimeMs: number }
 
-function walk(root: string, limits: BuildLimits): { files: SourceFile[]; unsupported: Record<string, number>; truncated: boolean } {
+function walk(root: string, limits: BuildLimits): { files: SourceFile[]; graphOnly: SourceFile[]; unsupported: Record<string, number>; truncated: boolean } {
   const files: SourceFile[] = [];
+  const graphOnly: SourceFile[] = [];
   const unsupported: Record<string, number> = {};
   let truncated = false;
   const visit = (rel: string, inherited: readonly IgnoreRule[]): void => {
@@ -47,7 +53,13 @@ function walk(root: string, limits: BuildLimits): { files: SourceFile[]; unsuppo
       if (!entry.isFile()) continue;
       const ext = extname(entry.name).slice(1).toLowerCase();
       if (!SOURCE_EXTENSIONS.has(ext) || SKIP_FILE.test(entry.name) || isIgnored(rules, path, false)) continue;
-      if (!JS_EXT.has(ext) && !PY_EXT.has(ext)) { unsupported[ext] = (unsupported[ext] ?? 0) + 1; continue; }
+      if (!JS_EXT.has(ext) && !PY_EXT.has(ext)) {
+        unsupported[ext] = (unsupported[ext] ?? 0) + 1;
+        if (GRAPH_ONLY_EXT.has(ext) && graphOnly.length < GRAPH_ONLY_MAX) {
+          try { const st = lstatSync(join(root, path)); graphOnly.push({ path, size: st.size, mtimeMs: st.mtimeMs }); } catch { /* vanished */ }
+        }
+        continue;
+      }
       if (files.length >= limits.maxFiles) { truncated = true; return; }
       try {
         const st = lstatSync(join(root, path));
@@ -57,13 +69,14 @@ function walk(root: string, limits: BuildLimits): { files: SourceFile[]; unsuppo
     }
   };
   visit("", []);
-  return { files, unsupported, truncated };
+  return { files, graphOnly, unsupported, truncated };
 }
 
-function fingerprintOf(commit: string, files: readonly SourceFile[]): string {
+function fingerprintOf(commit: string, files: readonly SourceFile[], graphOnly: readonly SourceFile[] = []): string {
   // Commit plus the stat of every indexed file: a new commit or any edit, committed or not, gives a new key.
   const h = createHash("sha256").update(commit);
   for (const f of files) h.update(`\0${f.path}\0${f.size}\0${f.mtimeMs}`);
+  for (const f of graphOnly) h.update(`\0${f.path}\0${f.size}\0${f.mtimeMs}`);
   return h.digest("hex").slice(0, 16);
 }
 
@@ -113,7 +126,7 @@ export async function getIndex(rootInput: string, limits: BuildLimits = DEFAULT_
   const root = realpathSync(rootInput);
   const walked = walk(root, limits);
   const commit = git(root, ["rev-parse", "HEAD"])?.trim() ?? "none";
-  const fingerprint = fingerprintOf(commit, walked.files);
+  const fingerprint = fingerprintOf(commit, walked.files, walked.graphOnly);
   const id = `${root}@${fingerprint}`;
   const hit = cache.get(id);
   if (hit) { cache.delete(id); cache.set(id, hit); return { index: hit, cached: true }; }

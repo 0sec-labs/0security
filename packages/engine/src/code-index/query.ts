@@ -9,6 +9,12 @@ export interface Site { symbol: string; file: string; line: number }
 
 function siteOf(s: IndexSymbol, line = s.line): Site { return { symbol: s.qualified, file: s.file, line } }
 
+/** Append without copying: a large Java tree has thousands of symbols and calls under one name. */
+function push<T>(map: Map<string, T[]>, key: string, value: T): void {
+  const list = map.get(key);
+  if (list) list.push(value); else map.set(key, [value]);
+}
+
 class Lookup {
   readonly byId = new Map<string, IndexSymbol>();
   readonly byName = new Map<string, IndexSymbol[]>();
@@ -18,17 +24,36 @@ class Lookup {
   constructor(readonly index: CodeIndex) {
     for (const s of index.symbols) {
       this.byId.set(s.id, s);
-      if (s.kind !== "module" && s.kind !== "route-handler") this.byName.set(s.name, [...(this.byName.get(s.name) ?? []), s]);
+      if (s.kind !== "module" && s.kind !== "route-handler") push(this.byName, s.name, s);
     }
     for (const c of index.calls) {
-      this.callsFrom.set(c.from, [...(this.callsFrom.get(c.from) ?? []), c]);
-      this.callsTo.set(c.name, [...(this.callsTo.get(c.name) ?? []), c]);
+      push(this.callsFrom, c.from, c);
+      push(this.callsTo, c.name, c);
     }
-    for (const r of index.routes) this.routesByHandler.set(r.handler, [...(this.routesByHandler.get(r.handler) ?? []), r]);
+    for (const r of index.routes) push(this.routesByHandler, r.handler, r);
+  }
+  /** A Java call with a known receiver type reaches that class (exact), else a class named like it (`UserService`, `UserServiceImpl`), else every symbol of the name. */
+  private narrowByReceiver(all: IndexSymbol[], call: IndexCall): IndexSymbol[] {
+    const t = call.receiverType;
+    if (!t || all.length <= 1) return all;
+    const key = `${call.name}\0${t}`;
+    let hit = this.narrowed.get(key);
+    if (!hit) { hit = this.narrow(all, t); this.narrowed.set(key, hit); }
+    return hit;
+  }
+  private readonly narrowed = new Map<string, IndexSymbol[]>();
+  private narrow(all: IndexSymbol[], t: string): IndexSymbol[] {
+    const exact = all.filter((s) => classOf(s) === t);
+    if (exact.length > 0) return exact;
+    if (t.length >= 4) {
+      const fuzzy = all.filter((s) => { const c = classOf(s); return c.startsWith(t) || c.endsWith(t); });
+      if (fuzzy.length > 0) return fuzzy;
+    }
+    return all;
   }
   /** Symbols a call can reach: every symbol of that name (an over-approximation when names repeat). */
   targets(call: IndexCall): IndexSymbol[] {
-    const all = this.byName.get(call.name) ?? [];
+    const all = this.narrowByReceiver(this.byName.get(call.name) ?? [], call);
     if (all.length <= 1) return all;
     const sameFile = all.filter((s) => s.file === call.file);
     if (sameFile.length > 0 && !call.text.includes(".")) return sameFile;
@@ -38,6 +63,17 @@ class Lookup {
     return narrowed.length > 0 ? narrowed : all;
   }
 }
+
+/** AUTH_NAME on a name, remembered: a large tree repeats the same few thousand names millions of times. */
+const authMemo = new Map<string, boolean>();
+function authName(name: string): boolean {
+  let v = authMemo.get(name);
+  if (v === undefined) { v = AUTH_NAME.test(name); if (authMemo.size < 200_000) authMemo.set(name, v); }
+  return v;
+}
+
+/** The class a method symbol belongs to: `A.B.m` gives `B`. */
+function classOf(s: IndexSymbol): string { const parts = s.qualified.split("."); return parts.length >= 2 ? parts[parts.length - 2]! : ""; }
 
 const lookups = new WeakMap<CodeIndex, Lookup>();
 function lookupOf(index: CodeIndex): Lookup {
@@ -125,7 +161,9 @@ export interface RouteView {
 
 /** Auth-like names on a route: its middleware and the calls its handler makes within `depth` hops. */
 function signalsFor(lk: Lookup, route: IndexRoute, depth: number): { signals: AuthSignal[]; sinks: Set<SinkCategory> } {
-  const signals: AuthSignal[] = route.middleware.filter((m) => AUTH_NAME.test(m)).map((name) => ({ name, where: "middleware" as const }));
+  const signals: AuthSignal[] = route.middleware.filter((m) => authName(m)).map((name) => ({ name, where: "middleware" as const }));
+  // Guard annotations the extractor recognised (for example @Secured), which the name pattern alone would miss.
+  for (const name of route.authSignals ?? []) if (!signals.some((s) => s.name === name)) signals.push({ name, where: "middleware" });
   const sinks = new Set<SinkCategory>();
   const start = lk.byId.get(route.handler);
   if (!start) return { signals, sinks };
@@ -135,7 +173,7 @@ function signalsFor(lk: Lookup, route: IndexRoute, depth: number): { signals: Au
     const next: IndexSymbol[] = [];
     for (const sym of frontier) for (const call of lk.callsFrom.get(sym.id) ?? []) {
       if (call.sink) sinks.add(call.sink.category);
-      if (AUTH_NAME.test(call.name)) signals.push({ name: call.text, where: d === 0 ? "handler" : "callee", file: call.file, line: call.line });
+      if (call.auth || authName(call.name)) signals.push({ name: call.text, where: d === 0 ? "handler" : "callee", file: call.file, line: call.line });
       for (const t of lk.targets(call)) if (!seen.has(t.id)) { seen.add(t.id); next.push(t); }
     }
     frontier = next;
@@ -163,12 +201,13 @@ export function traceToSink(index: CodeIndex, from: string, sinkFilter: SinkCate
   const routeMatch = /^([A-Za-z]+)\s+(\/\S*|\*)$/.exec(from.trim());
   let starts: IndexSymbol[] = [];
   let routeMw: string[] = [];
+  let routeAuth: string[] = [];
   if (routeMatch) {
     const method = routeMatch[1]!.toUpperCase();
     const route = index.routes.find((r) => r.path === routeMatch[2] && (r.method === method || r.method === "ANY"));
     const h = route && lk.byId.get(route.handler);
     if (!route || !h) return { error: `No route "${from}" in the index (see the routes tool for the exact spelling).` };
-    starts = [h]; routeMw = route.middleware;
+    starts = [h]; routeMw = route.middleware; routeAuth = route.authSignals ?? [];
   } else {
     starts = resolveSymbol(index, from);
     if (starts.length === 0) return { error: `No symbol or route "${from}" in the index.` };
@@ -182,8 +221,8 @@ export function traceToSink(index: CodeIndex, from: string, sinkFilter: SinkCate
       if (call.sink && (!sinkFilter || call.sink.category === sinkFilter)) {
         if (paths.length >= maxPaths) { truncated = true; return; }
         const chain = [...trail, sym];
-        const names = new Set<string>(routeMw.filter((m) => AUTH_NAME.test(m)));
-        for (const s of chain) for (const c of lk.callsFrom.get(s.id) ?? []) if (AUTH_NAME.test(c.name)) names.add(c.text);
+        const names = new Set<string>([...routeMw.filter((m) => authName(m)), ...routeAuth]);
+        for (const s of chain) for (const c of lk.callsFrom.get(s.id) ?? []) if (c.auth || authName(c.name)) names.add(c.text);
         paths.push({ hops: chain.map((s, i) => siteOf(s)), sink: { category: call.sink.category, call: call.text, file: call.file, line: call.line }, auth_signals_on_path: [...names] });
       }
     }

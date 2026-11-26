@@ -5,7 +5,7 @@ use foxguard::app::{
 };
 use foxguard::baseline::write_baseline_at_root;
 use foxguard::cli::{
-    BaselineArgs, BaselineScanArgs, ChangeModeArgs, Cli, Command, DiffArgs, InitArgs,
+    BaselineArgs, BaselineScanArgs, ChangeModeArgs, Cli, Command, DiffArgs, GraphArgs, InitArgs,
     InternalAddScanIgnoreRuleArgs, InternalArgs, InternalCommand, OutputFormat, PqcArgs, ScaArgs,
     ScanArgs, SecretsArgs, SemgrepReadinessArgs, SemgrepReadinessFormat, TuiArgs,
 };
@@ -35,11 +35,48 @@ fn main() {
         Some(Command::Pqc(args)) => run_pqc(&args),
         Some(Command::Sca(args)) => run_sca(&args),
         Some(Command::SemgrepReadiness(args)) => run_semgrep_readiness(&args),
+        Some(Command::Graph(args)) => run_graph(&args),
         Some(Command::Internal(args)) => run_internal(&args),
         None => run_scan(&cli.scan),
     };
 
     std::process::exit(exit_code);
+}
+
+fn run_graph(args: &GraphArgs) -> i32 {
+    let root = Path::new(&args.path);
+    if !root.is_dir() {
+        eprintln!("Error: {} is not a folder", args.path);
+        return 2;
+    }
+    foxguard::engine::budget::set_file_timeout(
+        (args.file_timeout > 0).then(|| std::time::Duration::from_secs(args.file_timeout)),
+    );
+    let mut graph = foxguard::graph::build_graph_with(
+        root,
+        &foxguard::graph::GraphOptions {
+            taint_summaries: args.taint_summaries,
+        },
+    );
+    if args.missing_guard {
+        foxguard::graph::mark_missing_guards(&mut graph);
+    }
+    let output = match serde_json::to_string(&graph) {
+        Ok(output) => output,
+        Err(error) => {
+            eprintln!("Error: failed to serialize graph: {}", error);
+            return 2;
+        }
+    };
+    if let Some(path) = &args.output {
+        if let Err(error) = std::fs::write(path, format!("{}\n", output)) {
+            eprintln!("Error: failed to write {}: {}", path, error);
+            return 2;
+        }
+    } else {
+        println!("{}", output);
+    }
+    0
 }
 
 fn run_pqc(args: &PqcArgs) -> i32 {

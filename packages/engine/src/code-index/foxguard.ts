@@ -23,14 +23,14 @@ export const graphV1 = z.object({
   files: z.number().int().min(0),
   symbols: z.array(z.object({
     id: bounded(600), name: bounded(300), qualified: bounded(400), kind: z.enum(["function", "method", "route-handler", "module"]),
-    file: bounded(600), line: z.number().int().min(1), endLine: z.number().int().min(1), language: z.enum(["javascript", "python"]),
+    file: bounded(600), line: z.number().int().min(1), endLine: z.number().int().min(1), language: z.enum(["javascript", "python", "java"]),
   })).max(400_000),
   calls: z.array(z.object({
-    from: bounded(600), name: bounded(300), text: bounded(400), file: bounded(600), line: z.number().int().min(1), sink: sink.optional(),
+    from: bounded(600), name: bounded(300), text: bounded(400), file: bounded(600), line: z.number().int().min(1), sink: sink.optional(), auth: z.boolean().optional(), receiverType: bounded(200).optional(),
   })).max(2_000_000),
   routes: z.array(z.object({
     method: bounded(12), path: bounded(500), file: bounded(600), line: z.number().int().min(1), handler: bounded(600),
-    middleware: z.array(bounded(300)).max(100), framework: bounded(40),
+    middleware: z.array(bounded(300)).max(100), framework: bounded(40), authSignals: z.array(bounded(300)).max(100).optional(),
   })).max(100_000),
   unsupported: z.record(z.string(), z.number().int().min(0)).default({}),
   truncated: z.boolean().default(false),
@@ -61,7 +61,7 @@ export async function foxguardGraph(root: string, commit: string, fingerprint: s
       probed.set(bin, ok);
     }
     if (!ok) return undefined;
-    const { stdout } = await run(bin, ["graph", root], { timeout: 60_000, env: SAFE_ENV(env), maxBuffer: 256 * 1024 * 1024 });
+    const { stdout } = await run(bin, ["graph", root], { timeout: 180_000, env: SAFE_ENV(env), maxBuffer: 512 * 1024 * 1024 });
     const parsed = graphV1.safeParse(JSON.parse(stdout));
     if (!parsed.success) return undefined;
     const g = parsed.data;
