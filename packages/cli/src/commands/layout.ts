@@ -4,7 +4,7 @@
  * print `0 --help` without loading any command module or the engine.
  */
 import { Option, type Command, type Help } from "commander";
-import { GROUP_DESCRIPTIONS, TOP_LEVEL_COMMANDS, VISIBLE_SUBCOMMANDS } from "./manifest.js";
+import { GROUP_DESCRIPTIONS, TOP_LEVEL_COMMANDS, VISIBLE_NESTED_GROUPS, VISIBLE_SUBCOMMANDS } from "./manifest.js";
 
 export type Registrar = (parent: Command) => void;
 
@@ -247,7 +247,7 @@ export function applyNewSurface(top: Command): void {
     const keep = visible.includes(command.name());
     setHidden(command, !keep);
     const hide = (node: Command): void => { for (const child of node.commands) { setHidden(child, true); hide(child); } };
-    hide(command);
+    if (!(keep && VISIBLE_NESTED_GROUPS.includes(`${top.name()} ${command.name()}`))) hide(command);
     const extra = NEW_FORM_HELP[`${top.name()} ${command.name()}`];
     if (extra && keep) command.addHelpText("after", `\n${extra}\n`);
   }

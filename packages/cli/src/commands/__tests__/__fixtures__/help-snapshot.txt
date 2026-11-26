@@ -1846,6 +1846,7 @@ Commands:
   run [options] <id>  Run a Sentinel now; starts a thread (needs a running engine)
   set [options] <id>  Create a Sentinel (--create), or change one: name, purpose, state, triggers,
                       files
+  bitbucket           Review Bitbucket pull requests from this machine (Cloud and Data Center)
   help [command]      display help for command
 
 ### 0security sentinels acknowledge (hidden)
@@ -1879,18 +1880,22 @@ Options:
   --format <format>  Output: text or json (choices: "text", "json")
   -h, --help         display help for command
 
-### 0security sentinels bitbucket (hidden)
+### 0security sentinels bitbucket
 Usage: 0security sentinels bitbucket [options] [command]
 
 Review Bitbucket pull requests from this machine (Cloud and Data Center)
 
 Options:
-  -h, --help      display help for command
+  -h, --help        display help for command
 
 Commands:
-  help [command]  display help for command
+  review [options]  Review one pull request now
+  watch [options]   Review pull requests as they open or change: poll, a signed webhook, or both
+  doctor [options]  Check that a Bitbucket Sentinel will work: token, scopes, Code Insights, clone,
+                    model key and webhook settings
+  help [command]    display help for command
 
-### 0security sentinels bitbucket doctor (hidden)
+### 0security sentinels bitbucket doctor
 Usage: 0security sentinels bitbucket doctor [options]
 
 Check that a Bitbucket Sentinel will work: token, scopes, Code Insights, clone, model key and
@@ -1910,7 +1915,7 @@ Options:
   --format <format>      Output: text or json (choices: "text", "json")
   -h, --help             display help for command
 
-### 0security sentinels bitbucket review (hidden)
+### 0security sentinels bitbucket review
 Usage: 0security sentinels bitbucket review [options]
 
 Review one pull request now
@@ -1935,7 +1940,7 @@ Options:
   --no-insights          Post comments only; publish no Code Insights report
   -h, --help             display help for command
 
-### 0security sentinels bitbucket watch (hidden)
+### 0security sentinels bitbucket watch
 Usage: 0security sentinels bitbucket watch [options]
 
 Review pull requests as they open or change: poll, a signed webhook, or both
