@@ -14,11 +14,13 @@ on the GitHub Release tag.
 
 ### Added
 
+- A docs page, "Use 0 from Claude Code or Codex", shows how another coding agent drives 0 through its shell: scan, read findings, ask a question, exit codes. 0 has no MCP server for this; the CLI does the job.
 - Anonymous lifecycle events go to PostHog: `first_run`, `command_invoked` (a command name from a fixed list, otherwise `other`), `update` (the two versions) and `error_exit` (an error category only). They go straight to PostHog from the CLI. `DO_NOT_TRACK=1` turns them off.
 - The `usage` event has `finding_class_counts`, findings counted by a fixed list of vulnerability classes. Titles, descriptions, evidence and targets are still never sent.
 
 ### Changed
 
+- The security policy is one file, `.github/SECURITY.md`. It no longer says extensions and MCP servers are never sandboxed or mentions the removed `save_workflow` operation, and it now says an extension can declare an OS sandbox.
 - `DO_NOT_TRACK=1` is now the single telemetry switch (`ZERO_ENTERPRISE=1` also blocks telemetry and crash reports as part of no-egress mode), `ZERO_NO_TELEMETRY` and `ZERO_OFFLINE` no longer control telemetry, and the `commands` and `full` analytics levels and the cloud analytics path are removed.
 
 ### Removed
