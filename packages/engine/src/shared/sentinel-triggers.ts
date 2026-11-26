@@ -5,7 +5,7 @@ import { DAY_MS } from "./units.js";
  * Triggers for Sentinel-owned automations. A trigger starts a run of one automation (workflow definition)
  * on behalf of its owner Sentinel. Schedules use wall-clock time in an IANA timezone.
  */
-export const SENTINEL_TRIGGER_KINDS = ["schedule", "manual", "github-pr", "release", "check-completed", "webhook"] as const;
+export const SENTINEL_TRIGGER_KINDS = ["schedule", "manual", "github-pr", "release", "check-completed", "webhook", "bitbucket-pr"] as const;
 export type SentinelTriggerKind = (typeof SENTINEL_TRIGGER_KINDS)[number];
 /** Older records may hold kinds that were removed (push, webhook, finding events); they are kept disabled and hidden. */
 export const isSentinelTriggerKind = (kind: string): kind is SentinelTriggerKind => (SENTINEL_TRIGGER_KINDS as readonly string[]).includes(kind);
@@ -110,6 +110,42 @@ export const SentinelWebhookConfigSchema = z.strictObject({
 });
 export type SentinelWebhookConfig = z.output<typeof SentinelWebhookConfigSchema>;
 
+const bitbucketSlug = "[A-Za-z0-9._~-]{1,100}";
+/**
+ * A Bitbucket pull request review (Cloud or Data Center). The credential is the NAME of an environment variable on the machine that
+ * runs the engine, never the token. The name must start with BITBUCKET_ so a trigger cannot point at an unrelated secret.
+ * `checkout` is a local clone the operator names; the pull request's commit is fetched into a temporary worktree, never into the clone.
+ * Draft pull requests and pull requests from forks are always skipped.
+ */
+export const SentinelBitbucketPrConfigSchema = z.strictObject({
+  platform: z.enum(["cloud", "dc"]),
+  /** Cloud: workspace/repo. Data Center: PROJECT/repo. */
+  repo: z.string().trim().regex(new RegExp(`^(?!\\.{1,2}/)${bitbucketSlug}/(?!\\.{1,2}$)${bitbucketSlug}$`), "Use workspace/repo (Cloud) or PROJECT/repo (Data Center)."),
+  /** Data Center server, for example https://bitbucket.example.com. Required for Data Center, ignored by Cloud. */
+  baseUrl: z.string().trim().max(300).url().refine(value => /^https?:\/\//i.test(value) && !/^[a-z]+:\/\/[^/]*@/i.test(value), "Use an https:// URL without credentials.").optional(),
+  /** Send the token over plain http:// to a machine other than this one. Off by default. */
+  allowInsecureHttp: z.boolean().default(false),
+  /** Name of the environment variable that holds the token. */
+  tokenEnv: z.string().trim().regex(/^BITBUCKET_[A-Z0-9_]{1,50}$/, "Use the name of an environment variable that starts with BITBUCKET_, not the token.").default("BITBUCKET_TOKEN"),
+  /** Absolute path of a local clone whose origin is the Bitbucket repository. */
+  checkout: z.string().trim().min(1).max(500).refine(value => (value.startsWith("/") || /^[A-Za-z]:[\\/]/.test(value)) && !value.includes("\0"), "Use the absolute path of a local clone."),
+  /** `opened`: a pull request the poll or webhook sees for the first time. `updated`: new commits on one already seen. */
+  events: z.array(z.enum(["opened", "updated"])).min(1).max(2).default(["opened", "updated"]),
+  pollMs: z.number().int().min(MIN_GITHUB_POLL_MS).max(3_600_000).default(120_000),
+  /** Skip a pull request that changes more files than this. */
+  maxFiles: z.number().int().min(1).max(500).default(50),
+  maxInline: z.number().int().min(1).max(50).default(10),
+  /** Spend limit for one pull request scan, in USD. */
+  budgetUsd: z.number().min(0.01).max(100).default(2),
+  model: z.string().trim().min(1).max(256).optional(),
+  reportId: z.string().regex(/^[A-Za-z0-9._-]{1,100}$/, "Use letters, digits, dots, dashes and underscores.").default("0-security"),
+  comments: z.boolean().default(true),
+  insights: z.boolean().default(true),
+}).superRefine((value, context) => {
+  if (value.platform === "dc" && !value.baseUrl) context.addIssue({ code: "custom", path: ["baseUrl"], message: "Data Center needs the server URL." });
+});
+export type SentinelBitbucketPrConfig = z.output<typeof SentinelBitbucketPrConfigSchema>;
+
 export const SentinelTriggerCreateSchema = z.strictObject({
   automationId: z.string().min(1).max(128).regex(/^[A-Za-z0-9_-]+$/),
   kind: z.enum(SENTINEL_TRIGGER_KINDS),
@@ -118,6 +154,7 @@ export const SentinelTriggerCreateSchema = z.strictObject({
   release: SentinelReleaseConfigSchema.optional(),
   check: SentinelCheckConfigSchema.optional(),
   webhook: SentinelWebhookConfigSchema.optional(),
+  bitbucket: SentinelBitbucketPrConfigSchema.optional(),
   enabled: z.boolean().default(false),
 });
 export type SentinelTriggerCreate = z.output<typeof SentinelTriggerCreateSchema>;
@@ -132,10 +169,11 @@ export interface SentinelTrigger {
   release?: SentinelReleaseConfig;
   check?: SentinelCheckConfig;
   webhook?: SentinelWebhookConfig;
+  bitbucket?: SentinelBitbucketPrConfig;
   enabled: boolean;
   version: number;
   nextFireAt: string | null;
-  /** github-pr: PR number -> last handled head SHA; release: tag or release id -> commit; check-completed: check id -> head SHA. Bounded. Absent until the first (baseline) poll. */
+  /** github-pr and bitbucket-pr: PR number -> last handled head SHA; release: tag or release id -> commit; check-completed: check id -> head SHA. Bounded. Absent until the first (baseline) poll. */
   cursor?: Record<string, string>;
   lastStatus?: string;
   lastError?: string;
@@ -147,8 +185,8 @@ export interface SentinelTrigger {
   updatedAt: string;
 }
 
-/** The poll interval of a trigger that watches GitHub, or undefined for other kinds. */
-export const sentinelPollMs = (trigger: Pick<SentinelTrigger, "github" | "release" | "check">): number | undefined => (trigger.github ?? trigger.release ?? trigger.check)?.pollMs;
+/** The poll interval of a trigger that watches GitHub or Bitbucket, or undefined for other kinds. */
+export const sentinelPollMs = (trigger: Pick<SentinelTrigger, "github" | "release" | "check" | "bitbucket">): number | undefined => (trigger.github ?? trigger.release ?? trigger.check ?? trigger.bitbucket)?.pollMs;
 
 // ---------- cron / wall-clock arithmetic ----------
 

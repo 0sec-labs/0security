@@ -2,18 +2,18 @@ import type { AgentTurn, AgentTurnOrigin } from "./model";
 
 /** The first line of every trigger turn the engine sends into a Sentinel's thread: `[Turn from <source> · turn <8 hex>]`. */
 const HEADER = /^\s*\[Turn from (.+?) · turn ([0-9a-f]{8})\]/;
-export interface WakeHeader { source: string; nonce: string; origin: Extract<AgentTurnOrigin, "schedule" | "github" | "webhook"> | undefined }
+export interface WakeHeader { source: string; nonce: string; origin: Extract<AgentTurnOrigin, "schedule" | "github" | "bitbucket" | "webhook"> | undefined }
 
 /** Reads the header of a trigger turn's message. Anything else (a person's message, a reply) is not a wake-up. */
 export function parseWakeHeader(text: string): WakeHeader | null {
   const match = HEADER.exec(text);
   if (!match) return null;
   const source = match[1]!;
-  return { source, nonce: match[2]!, origin: source.startsWith("schedule") ? "schedule" : source.startsWith("GitHub") ? "github" : source.startsWith("webhook") ? "webhook" : undefined };
+  return { source, nonce: match[2]!, origin: source.startsWith("schedule") ? "schedule" : source.startsWith("GitHub") ? "github" : source.startsWith("Bitbucket") ? "bitbucket" : source.startsWith("webhook") ? "webhook" : undefined };
 }
 
 /** The cause chip shown on a wake-up line and in the activity list. */
-export const CAUSE_LABEL: Record<AgentTurnOrigin, string> = { schedule: "Schedule", github: "GitHub", webhook: "Webhook", user: "You", promote: "Promoted", legacy: "Earlier" };
+export const CAUSE_LABEL: Record<AgentTurnOrigin, string> = { schedule: "Schedule", github: "GitHub", bitbucket: "Bitbucket pull request", webhook: "Webhook", user: "You", promote: "Promoted", legacy: "Earlier" };
 
 /** "54s", "1m 8s", "2h 5m". */
 export function workedFor(ms: number): string {
@@ -27,7 +27,7 @@ export function workedFor(ms: number): string {
 export interface WakeSummary { text: string; failed: boolean; working: boolean }
 /** One quiet line: "Woke on schedule, worked for 54s". Without the turn row (an older thread or a page without the ledger) it only says what woke it. */
 export function wakeSummary(header: WakeHeader, turn: AgentTurn | undefined, now = Date.now()): WakeSummary {
-  const lead = header.origin === "schedule" ? "Woke on schedule" : header.origin === "github" ? "Woke on a pull request" : header.origin === "webhook" ? "Woke on a webhook call" : "Woke up";
+  const lead = header.origin === "schedule" ? "Woke on schedule" : header.origin === "github" ? "Woke on a pull request" : header.origin === "bitbucket" ? "Woke on a Bitbucket pull request" : header.origin === "webhook" ? "Woke on a webhook call" : "Woke up";
   if (!turn) return { text: lead, failed: false, working: false };
   const started = turn.startedAt ? Date.parse(turn.startedAt) : undefined;
   if (turn.status === "queued") return { text: `${lead}, waiting its turn`, failed: false, working: false };
@@ -45,6 +45,10 @@ export function turnLabel(turn: Pick<AgentTurn, "origin" | "detail">): string {
   if (turn.origin === "github") {
     const event = turn.detail.event;
     return event?.pr !== undefined ? `Pull request #${event.pr}${event.repo ? ` on ${event.repo}` : ""}` : "Pull request";
+  }
+  if (turn.origin === "bitbucket") {
+    const event = turn.detail.event;
+    return event?.pr !== undefined ? `Bitbucket pull request #${event.pr}${event.repo ? ` on ${event.repo}` : ""}` : "Bitbucket pull request";
   }
   if (turn.origin === "webhook") return "Webhook call";
   if (turn.origin === "schedule") return "Scheduled turn";

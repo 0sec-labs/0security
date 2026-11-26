@@ -21,9 +21,11 @@ describe("wake-up lines", () => {
     expect(wakeSummary(parseWakeHeader("[Turn from GitHub pull request a/b#3 · turn abcdef12]")!, turn({ origin: "github" })).text).toBe("Woke on a pull request, worked for 54s");
   });
   test("cause chips and labels use the product words", () => {
-    expect(CAUSE_LABEL).toEqual({ schedule: "Schedule", github: "GitHub", webhook: "Webhook", user: "You", promote: "Promoted", legacy: "Earlier" });
+    expect(CAUSE_LABEL).toEqual({ schedule: "Schedule", github: "GitHub", bitbucket: "Bitbucket pull request", webhook: "Webhook", user: "You", promote: "Promoted", legacy: "Earlier" });
     expect(turnLabel({ origin: "github", detail: { event: { pr: 7, repo: "acme/app" } } })).toBe("Pull request #7 on acme/app");
     expect(turnLabel({ origin: "webhook", detail: {} })).toBe("Webhook call");
+    expect(turnLabel({ origin: "bitbucket", detail: { event: { pr: 7, repo: "ws/repo" } } })).toBe("Bitbucket pull request #7 on ws/repo");
+    expect(turnLabel({ origin: "bitbucket", detail: {} })).toBe("Bitbucket pull request");
     expect(wakeSummary(parseWakeHeader("[Turn from webhook ci · turn abcdef12]")!, undefined).text).toBe("Woke on a webhook call");
     expect(turnLabel({ origin: "user", detail: {} })).toBe("Your message");
     expect(Object.values(CAUSE_LABEL).join(" ") + turnLabel({ origin: "schedule", detail: {} })).not.toMatch(/\brun/i);

@@ -2,9 +2,9 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PullRequest } from "../client.js";
-import { fileState, gitScanRunner, headRefspec } from "../runner.js";
+import { defaultExec, fileState, gitScanRunner, headRefspec } from "../runner.js";
 
 const run = (cwd: string, ...args: string[]) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@example.com", "-c", "commit.gpgsign=false", ...args], { cwd, encoding: "utf8", env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null" } }).trim();
 
@@ -67,6 +67,17 @@ describe("git scan runner", () => {
     expect(run(clone, "for-each-ref", "refs/0")).toBe("");
     expect(existsSync(join(clone, "new.txt"))).toBe(false);
     expect(run(clone, "rev-parse", "--abbrev-ref", "HEAD")).toBe("main");
+  });
+
+  it("also hides the variable a trigger names for its token", async () => {
+    process.env["BITBUCKET_TEAM_TOKEN"] = "team-token-value-1234";
+    try {
+      const seenEnv = vi.fn();
+      const result = await gitScanRunner({ checkout: clone, scanCommand: [process.execPath, fakeScan], secretVariables: ["BITBUCKET_TEAM_TOKEN"], exec: async (file, args, options) => { seenEnv(options.env["BITBUCKET_TEAM_TOKEN"]); return defaultExec(file, args, options); } }).scan(pr());
+      expect(result.exitCode).toBe(0);
+      expect(seenEnv).toHaveBeenCalled();
+      expect(seenEnv.mock.calls.every(call => call[0] === undefined)).toBe(true);
+    } finally { delete process.env["BITBUCKET_TEAM_TOKEN"]; }
   });
 
   it("fetches the Data Center pull request ref", async () => {

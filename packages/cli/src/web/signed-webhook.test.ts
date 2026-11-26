@@ -119,7 +119,7 @@ describe("receiver", () => {
     const body = JSON.stringify({ message: "deploy done", ref: "main" });
     expect((await f.own(body, { "x-0-delivery": "delivery-0001" })).status).toBe(202);
     await f.receiver.settled();
-    expect(f.delivered).toEqual([{ id: ID, key: "id-delivery-0001", fields: { event: "webhook called", sender: "own", message: "deploy done", ref: "main" } }]);
+    expect(f.delivered).toEqual([{ id: ID, key: "id-delivery-0001", fields: { event: "webhook called", sender: "own", message: "deploy done", ref: "main" }, payload: { message: "deploy done", ref: "main" } }]);
     // The same delivery id again is acknowledged and ignored.
     expect((await f.own(body, { "x-0-delivery": "delivery-0001" })).status).toBe(202);
     await f.receiver.settled();

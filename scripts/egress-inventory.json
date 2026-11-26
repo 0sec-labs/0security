@@ -562,7 +562,7 @@
         "packages/cli/src/bitbucket/client.ts",
         "packages/cli/src/bitbucket/runner.ts"
       ],
-      "when": "Explicit `0 sentinels bitbucket review` or `watch`, with BITBUCKET_TOKEN set. The webhook server only listens; it sends nothing.",
+      "when": "Explicit `0 sentinels bitbucket review` or `watch`, with BITBUCKET_TOKEN set, or an enabled `bitbucket-pr` Sentinel trigger whose token variable is set. The webhook server and the signed webhook route only listen; they send nothing.",
       "sent": "Reads of pull requests, diffs and comments; comments, a Code Insights report and its annotations, with the token as a bearer header. The scan fetches the pull request's commit from the clone's git remote. A plain http:// URL is refused unless the host is this machine or --allow-insecure-http is passed. ZERO_ENTERPRISE refuses all of it.",
       "disable": "Do not run the commands, or set ZERO_ENTERPRISE."
     },

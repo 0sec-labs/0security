@@ -72,6 +72,7 @@ A Sentinel has shell access, like a thread. An optional sandbox (SmolVM or Docke
 | `schedule` | Every N minutes (5 or more), hourly, daily, weekdays, weekly or cron, in an IANA timezone. The default is UTC. |
 | `manual` | Run it now. |
 | `github-pr` | Polls open pull requests through the connected `gh` account, at least every 60 seconds. |
+| `bitbucket-pr` | Reviews Bitbucket Cloud and Data Center pull requests when they open or change. Polls, and accepts a signed webhook in server mode. |
 | `release` | A published GitHub release, or a pushed tag that starts with a prefix such as `v`. |
 | `check-completed` | A check run or check suite that finished, optionally only when it failed. |
 | `webhook` | A signed call from another system, such as GitLab, Bitbucket or your own script. Server mode only. |
@@ -143,6 +144,49 @@ Rotate the secret from the card or the CLI:
 ```
 
 The old secret works for 5 minutes, so you can update GitHub without losing deliveries.
+
+### Bitbucket pull request trigger
+
+A `bitbucket-pr` trigger reviews Bitbucket pull requests on Bitbucket Cloud and Data Center. It runs the same review as [`0security sentinels bitbucket`](/ci/#review-bitbucket-pull-requests-on-your-own-machine). It scans only the files the pull request changes, publishes a Code Insights report, keeps one summary comment up to date and adds inline comments on changed lines. Each review is recorded in the Sentinel's activity as one run. The scan has its own spend limit and starts no model turn in the Sentinel's thread.
+
+Set the token in an environment variable on the machine that runs 0, and name that variable in the trigger. The trigger stores the name, never the token. The name must start with `BITBUCKET_`. The default is `BITBUCKET_TOKEN`. The scan does not see that variable.
+
+```bash
+export BITBUCKET_TOKEN=...
+0security sentinels triggers add <sentinel> --kind bitbucket-pr --platform cloud --repo workspace/repo --checkout ~/code/repo
+0security sentinels triggers add <sentinel> --kind bitbucket-pr --platform dc --repo PROJECT/repo --url https://bitbucket.example.com --checkout ~/code/repo
+```
+
+The checkout is the absolute path of a local clone whose `origin` is the Bitbucket repository. 0 fetches the pull request into a temporary worktree and never changes your clone.
+
+| Setting | Meaning |
+| --- | --- |
+| `platform` | `cloud` or `dc`. |
+| `repo` | `workspace/repo` on Cloud, `PROJECT/repo` on Data Center. |
+| `baseUrl` | Data Center server URL. A plain `http://` URL to another machine is refused unless `allowInsecureHttp` is true. |
+| `tokenEnv` | Name of the variable that holds the token. |
+| `events` | `opened`, `updated` or both. `updated` means new commits on a pull request. |
+| `pollMs` | Poll interval, at least 60000. The default is 120000. |
+| `maxFiles` | Skip a pull request that changes more files. The default is 50. |
+| `maxInline` | Most inline comments per pull request. The default is 10. |
+| `budgetUsd` | Spend limit for one scan. The default is 2. |
+| `model`, `reportId`, `comments`, `insights` | The model for the scan, the Code Insights report id, and whether to post comments or the report. |
+
+The first poll only records the pull requests that are already open. Draft pull requests and pull requests from forks are skipped and recorded once. A draft is reviewed when it is marked ready. A commit is reviewed once. A review that fails is not retried until the pull request changes. A poll starts at most three reviews. Use `0security sentinels triggers check <sentinel> <trigger-id>` to poll now.
+
+In YAML, use `kind: bitbucket-pr` with a `bitbucket:` block holding the same settings. See [Sentinels as files](#sentinels-as-files).
+
+For faster reviews in [server mode](/server-mode/), create the trigger's secret and add a webhook in Bitbucket. Polling still runs, so a missed delivery is caught on the next poll.
+
+```bash
+0security sentinels triggers secret <sentinel> <trigger-id> --yes
+```
+
+Point the webhook at `https://<your server>/api/webhooks/trigger/<trigger-id>` and use the secret as the webhook secret. On Cloud, turn on **Pull request created** and **Pull request updated**. On Data Center, turn on **Opened** and **Source branch updated**. Bitbucket signs each body with `X-Hub-Signature`, and 0 checks it with the limits in the [webhook trigger](#webhook-trigger). A delivery only names a pull request in the repository the trigger watches. Everything else comes from the trigger's settings.
+
+Every request to Bitbucket and every git fetch is refused when `ZERO_ENTERPRISE` is set. The trigger then shows a blocked status. The scan reads code written by the pull request's author, so run 0 on a machine that holds nothing you cannot lose, and use a model key with a spend cap.
+
+This trigger was tested against Atlassian's published API descriptions and webhook payload examples, with fake servers. It has not run against a live Bitbucket Cloud workspace or Data Center server.
 
 ### Release trigger
 
@@ -309,7 +353,7 @@ automations:
           conclusion: failure
 ```
 
-A trigger takes the settings for its kind: `schedule`, `github` (pull requests), `release` or `check`. The fields are the ones in the JSON examples above. Unknown fields and values outside the limits are refused.
+A trigger takes the settings for its kind: `schedule`, `github` (pull requests), `bitbucket` (pull requests), `release`, `check` or `webhook`. The fields are the ones in the JSON examples above. Unknown fields and values outside the limits are refused.
 
 Preview the changes, apply them, or start from an existing Sentinel:
 

@@ -12,7 +12,7 @@ import { AddTriggerDialog } from "./add-trigger-dialog";
 import { ScheduleFields } from "./schedule-fields";
 import { SentinelDocument } from "./sentinel-document";
 
-const KIND_ICON = { schedule: Clock, "github-pr": GitPullRequest, manual: Play, release: Tag, "check-completed": CircleCheck, webhook: Webhook } as const;
+const KIND_ICON = { schedule: Clock, "github-pr": GitPullRequest, manual: Play, release: Tag, "check-completed": CircleCheck, webhook: Webhook, "bitbucket-pr": GitPullRequest } as const;
 const WEEK = 7 * 86_400_000;
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
