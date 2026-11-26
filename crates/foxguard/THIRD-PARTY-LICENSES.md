@@ -149,6 +149,7 @@ Foxguard itself is available under MIT OR Apache-2.0. The tree-sitter grammars i
 | leb128fmt | 0.1.0 | MIT OR Apache-2.0 | https://github.com/bluk/leb128fmt |
 | libc | 0.2.183 | MIT OR Apache-2.0 | https://github.com/rust-lang/libc |
 | libm | 0.2.16 | MIT | https://github.com/rust-lang/compiler-builtins |
+| libyaml-rs | 0.3.0 | MIT | https://github.com/yaml/libyaml-rs |
 | line-clipping | 0.3.7 | MIT OR Apache-2.0 | https://github.com/ratatui/line-clipping |
 | linux-raw-sys | 0.12.1 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | https://github.com/sunfishcode/linux-raw-sys |
 | litemap | 0.8.2 | Unicode-3.0 | https://github.com/unicode-org/icu4x |
@@ -246,7 +247,6 @@ Foxguard itself is available under MIT OR Apache-2.0. The tree-sitter grammars i
 | serde_derive | 1.0.229 | MIT OR Apache-2.0 | https://github.com/serde-rs/serde |
 | serde_json | 1.0.154 | MIT OR Apache-2.0 | https://github.com/serde-rs/json |
 | serde_spanned | 0.6.9 | MIT OR Apache-2.0 | https://github.com/toml-rs/toml |
-| serde_yaml_ng | 0.10.0 | MIT | https://github.com/acatton/serde-yaml-ng |
 | sha1_smol | 1.0.1 | BSD-3-Clause | https://github.com/mitsuhiko/sha1-smol |
 | sha2 | 0.10.9 | MIT OR Apache-2.0 | https://github.com/RustCrypto/hashes |
 | sha2 | 0.11.1 | MIT OR Apache-2.0 | https://github.com/RustCrypto/hashes |
@@ -332,7 +332,6 @@ Foxguard itself is available under MIT OR Apache-2.0. The tree-sitter grammars i
 | unicode-truncate | 2.0.1 | MIT OR Apache-2.0 | https://github.com/Aetf/unicode-truncate |
 | unicode-width | 0.2.3 | MIT OR Apache-2.0 | https://github.com/unicode-rs/unicode-width |
 | unicode-xid | 0.2.6 | MIT OR Apache-2.0 | https://github.com/unicode-rs/unicode-xid |
-| unsafe-libyaml | 0.2.11 | MIT | https://github.com/dtolnay/unsafe-libyaml |
 | unscanny | 0.1.0 | MIT OR Apache-2.0 | https://github.com/typst/unscanny |
 | untrusted | 0.9.0 | ISC | https://github.com/briansmith/untrusted |
 | url | 2.5.9 | MIT OR Apache-2.0 | https://github.com/servo/rust-url |
@@ -389,6 +388,7 @@ Foxguard itself is available under MIT OR Apache-2.0. The tree-sitter grammars i
 | wit-parser | 0.244.0 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT | https://github.com/bytecodealliance/wasm-tools/tree/main/crates/wit-parser |
 | writeable | 0.6.3 | Unicode-3.0 | https://github.com/unicode-org/icu4x |
 | x509-parser | 0.18.1 | MIT OR Apache-2.0 | https://github.com/rusticata/x509-parser.git |
+| yaml_serde | 0.10.7 | MIT OR Apache-2.0 | https://github.com/yaml/yaml-serde |
 | yoke | 0.8.2 | Unicode-3.0 | https://github.com/unicode-org/icu4x |
 | yoke-derive | 0.8.2 | Unicode-3.0 | https://github.com/unicode-org/icu4x |
 | zerofrom | 0.1.8 | Unicode-3.0 | https://github.com/unicode-org/icu4x |

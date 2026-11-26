@@ -4,10 +4,10 @@ use crate::rules::common::SecretScanThresholds;
 use crate::{Finding, Severity};
 use regex::Regex;
 use serde::Deserialize;
-use serde_yaml_ng::{Mapping, Sequence, Value};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use yaml_serde::{Mapping, Sequence, Value};
 
 const CONFIG_NAMES: [&str; 4] = [
     ".foxguard.yml",
@@ -54,7 +54,7 @@ pub struct ScanConfig {
     /// Per-rule option map passed to `Rule::configure` at registry build
     /// time. Keys are rule IDs, values are opaque YAML that each rule
     /// parses itself. Unknown rule IDs surface as stderr warnings.
-    pub rule_options: HashMap<String, serde_yaml_ng::Value>,
+    pub rule_options: HashMap<String, yaml_serde::Value>,
     /// Enable CNSA 2.0 compliance annotations and summary in terminal
     /// output. Mirrors the `--cnsa2` CLI flag. See issue #241 and
     /// [`crate::compliance`].
@@ -176,7 +176,7 @@ struct RawScanConfig {
     #[serde(default)]
     min_confidence: Option<f32>,
     #[serde(default)]
-    rule_options: HashMap<String, serde_yaml_ng::Value>,
+    rule_options: HashMap<String, yaml_serde::Value>,
     #[serde(default)]
     cnsa2: Option<bool>,
     #[serde(default)]
@@ -251,7 +251,7 @@ pub fn load_for_scan(
 
     let content = std::fs::read_to_string(&path)
         .map_err(|e| format!("Failed to read config {}: {}", path.display(), e))?;
-    let raw: RawFoxguardConfig = serde_yaml_ng::from_str(&content)
+    let raw: RawFoxguardConfig = yaml_serde::from_str(&content)
         .map_err(|e| format!("Failed to parse config {}: {}", path.display(), e))?;
 
     Ok(Some(FoxguardConfig::from_raw(
@@ -649,7 +649,7 @@ pub fn add_scan_ignore_rule(
         if content.trim().is_empty() {
             Value::Mapping(Mapping::new())
         } else {
-            serde_yaml_ng::from_str(&content)
+            yaml_serde::from_str(&content)
                 .map_err(|e| format!("failed to parse config '{}': {}", config_path.display(), e))?
         }
     } else {
@@ -735,7 +735,7 @@ pub fn add_scan_ignore_rule(
         return Ok((config_path, false));
     }
 
-    let content = serde_yaml_ng::to_string(&root).map_err(|e| {
+    let content = yaml_serde::to_string(&root).map_err(|e| {
         format!(
             "failed to serialize config '{}': {}",
             config_path.display(),
@@ -784,7 +784,7 @@ pub fn add_severity_override_to_config(
         if content.trim().is_empty() {
             Value::Mapping(Mapping::new())
         } else {
-            serde_yaml_ng::from_str(&content)
+            yaml_serde::from_str(&content)
                 .map_err(|e| format!("failed to parse config '{}': {}", config_path.display(), e))?
         }
     } else {
@@ -824,7 +824,7 @@ pub fn add_severity_override_to_config(
     }
     overrides_mapping.insert(key, new_value);
 
-    let content = serde_yaml_ng::to_string(&root).map_err(|e| {
+    let content = yaml_serde::to_string(&root).map_err(|e| {
         format!(
             "failed to serialize config '{}': {}",
             config_path.display(),
@@ -864,7 +864,7 @@ pub fn add_disabled_rule_to_config(
         if content.trim().is_empty() {
             Value::Mapping(Mapping::new())
         } else {
-            serde_yaml_ng::from_str(&content)
+            yaml_serde::from_str(&content)
                 .map_err(|e| format!("failed to parse config '{}': {}", config_path.display(), e))?
         }
     } else {
@@ -899,7 +899,7 @@ pub fn add_disabled_rule_to_config(
 
     sequence.push(Value::String(rule_id.to_string()));
 
-    let content = serde_yaml_ng::to_string(&root).map_err(|e| {
+    let content = yaml_serde::to_string(&root).map_err(|e| {
         format!(
             "failed to serialize config '{}': {}",
             config_path.display(),
@@ -929,7 +929,7 @@ pub fn is_rule_disabled_in_config(
     if content.trim().is_empty() {
         return Ok(false);
     }
-    let value: Value = serde_yaml_ng::from_str(&content)
+    let value: Value = yaml_serde::from_str(&content)
         .map_err(|e| format!("failed to parse config '{}': {}", path.display(), e))?;
     let Some(disable_rules) = value
         .get("scan")
@@ -959,7 +959,7 @@ pub fn current_severity_override(
     if content.trim().is_empty() {
         return Ok(None);
     }
-    let value: Value = serde_yaml_ng::from_str(&content)
+    let value: Value = yaml_serde::from_str(&content)
         .map_err(|e| format!("failed to parse config '{}': {}", path.display(), e))?;
     Ok(value
         .get("scan")
@@ -1011,7 +1011,7 @@ pub fn add_secrets_ignored_rule(
         if content.trim().is_empty() {
             Value::Mapping(Mapping::new())
         } else {
-            serde_yaml_ng::from_str(&content)
+            yaml_serde::from_str(&content)
                 .map_err(|e| format!("failed to parse config '{}': {}", config_path.display(), e))?
         }
     } else {
@@ -1047,7 +1047,7 @@ pub fn add_secrets_ignored_rule(
         true
     };
 
-    let content = serde_yaml_ng::to_string(&root).map_err(|e| {
+    let content = yaml_serde::to_string(&root).map_err(|e| {
         format!(
             "failed to serialize config '{}': {}",
             config_path.display(),
@@ -1395,7 +1395,7 @@ mod tests {
         assert!(added);
         let content =
             fs::read_to_string(repo.path().join(".foxguard.yml")).expect("failed to read config");
-        let value: Value = serde_yaml_ng::from_str(&content).expect("failed to parse config");
+        let value: Value = yaml_serde::from_str(&content).expect("failed to parse config");
         let ignore_rules = value
             .get("scan")
             .and_then(|scan| scan.get("ignore_rules"))
@@ -1897,7 +1897,7 @@ mod tests {
         assert!(loaded.scan.rule_options.contains_key("js/no-eval"));
         // Values are opaque YAML — verify they survived the round-trip.
         let py_opts = &loaded.scan.rule_options["py/no-eval"];
-        assert_eq!(py_opts["max_depth"], serde_yaml_ng::Value::from(5));
+        assert_eq!(py_opts["max_depth"], yaml_serde::Value::from(5));
     }
 
     #[test]

@@ -5,12 +5,12 @@ use crate::{Finding, Language, Severity};
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use regex::Regex;
 use serde::Deserialize;
-use serde_yaml_ng::Value as YamlValue;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt;
 use std::path::Path;
 use std::sync::OnceLock;
+use yaml_serde::Value as YamlValue;
 
 const RESERVED_RULE_ID_NAMESPACES: &[&str] = &[
     "py", "js", "go", "java", "php", "ruby", "cs", "csharp", "swift", "kotlin", "rs", "rust",
@@ -113,7 +113,7 @@ pub enum PatternOrBlock {
     Literal(String),
     /// Complex block — accept any map/sequence so the YAML deserializes
     /// without error; we extract a usable `pattern:` string from it, if any.
-    Block(serde_yaml_ng::Value),
+    Block(yaml_serde::Value),
 }
 
 impl PatternOrBlock {
@@ -228,7 +228,7 @@ pub struct PatternEntry {
     /// nested shapes — e.g. a `pattern-not:` whose value is itself a block —
     /// never break deserialization of an unrelated rule).
     #[serde(default)]
-    pub patterns: Option<serde_yaml_ng::Value>,
+    pub patterns: Option<yaml_serde::Value>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -2669,7 +2669,7 @@ fn build_generic_mode_rules(
         // does not fit our `PatternClause` shape (e.g. an AST-only nested form),
         // the arm is reduced to its `pattern`/`pattern-regex` portion.
         let patterns = match entry.patterns.as_ref() {
-            Some(value) => match serde_yaml_ng::from_value::<Vec<PatternClause>>(value.clone()) {
+            Some(value) => match yaml_serde::from_value::<Vec<PatternClause>>(value.clone()) {
                 Ok(clauses) => clauses
                     .iter()
                     .filter_map(|clause| map_clause(clause, "<pattern-either arm>", true))
@@ -3393,7 +3393,7 @@ fn semgrep_source_language_bucket(language: &str) -> String {
 /// This is the transaction boundary used by both [`load_semgrep_rules`] and
 /// migration readiness: a strict failure leaves every source node un-emitted.
 pub fn import_semgrep_str(content: &str, source_label: &str) -> SemgrepImportOutcome {
-    let raw_doc: YamlValue = match serde_yaml_ng::from_str(content) {
+    let raw_doc: YamlValue = match yaml_serde::from_str(content) {
         Ok(document) => document,
         Err(error) => {
             return SemgrepImportOutcome {
@@ -3522,7 +3522,7 @@ pub fn parse_semgrep_file(path: &Path) -> Result<Vec<Box<dyn Rule>>, String> {
 /// purely for error messages — pass the embedded path or any human-readable
 /// identifier.
 pub fn parse_semgrep_str(content: &str, source_label: &str) -> Result<Vec<Box<dyn Rule>>, String> {
-    let raw_doc: YamlValue = serde_yaml_ng::from_str(content)
+    let raw_doc: YamlValue = yaml_serde::from_str(content)
         .map_err(|error| format!("Failed to parse YAML {}: {}", source_label, error))?;
     parse_semgrep_document(raw_doc, source_label)
 }
@@ -3586,7 +3586,7 @@ fn parse_semgrep_rule_node(
         TaintRuleParse::NotTaint => {}
     }
 
-    let yaml_rule: SemgrepRuleYaml = serde_yaml_ng::from_value(raw_rule.clone())
+    let yaml_rule: SemgrepRuleYaml = yaml_serde::from_value(raw_rule.clone())
         .map_err(|error| format!("Failed to parse YAML {}: {}", source_label, error))?;
     let cwe = extract_cwe(&yaml_rule);
     let severity = map_severity(&yaml_rule.severity);
@@ -3794,7 +3794,7 @@ rules:
     severity: ERROR
     languages: [python]
 "#;
-        let parsed: SemgrepFile = serde_yaml_ng::from_str(yaml).unwrap();
+        let parsed: SemgrepFile = yaml_serde::from_str(yaml).unwrap();
         let matcher = build_matcher(&parsed.rules[0], Language::Python).unwrap();
 
         match matcher {

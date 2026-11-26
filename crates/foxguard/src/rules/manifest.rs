@@ -747,7 +747,7 @@ impl_rule! {
     fn check(_self, source, _tree) {
         // pnpm-lock.yaml has a `packages` mapping. Keys are package
         // specifiers like "/elliptic@6.5.4" (v6) or "elliptic@6.5.4" (v9).
-        let Ok(doc) = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(source) else {
+        let Ok(doc) = yaml_serde::from_str::<yaml_serde::Value>(source) else {
             return Vec::new();
         };
 

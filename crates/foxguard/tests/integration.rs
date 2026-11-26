@@ -4060,7 +4060,7 @@ rules:
         let config = fs::read_to_string(repo.path().join(".foxguard.yml"))
             .expect("failed to read rewritten config");
         let value: serde_json::Value =
-            serde_yaml_ng::from_str(&config).expect("rewritten config should stay valid YAML");
+            yaml_serde::from_str(&config).expect("rewritten config should stay valid YAML");
 
         assert_eq!(value["scan"]["ignore_rules"][0]["path"], "src/app.js");
         assert_eq!(value["scan"]["ignore_rules"][0]["rules"][0], "js/no-eval");
@@ -4112,7 +4112,7 @@ rules:
             config, original_config,
             "duplicate write should not rewrite config content"
         );
-        let ignore_rules = serde_yaml_ng::from_str::<serde_json::Value>(&config)
+        let ignore_rules = yaml_serde::from_str::<serde_json::Value>(&config)
             .expect("config should stay valid YAML")["scan"]["ignore_rules"]
             .as_array()
             .expect("ignore_rules should be a list")

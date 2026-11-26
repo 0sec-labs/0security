@@ -2,13 +2,13 @@ use crate::diff::{diff_findings, DiffResult};
 use crate::{Finding, Severity};
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
-use serde_yaml_ng::Value as YamlValue;
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
 use tempfile::TempDir;
+use yaml_serde::Value as YamlValue;
 
 #[derive(Debug, Clone)]
 pub struct CodeQlRule {
@@ -247,7 +247,7 @@ fn strict_codeql_rule_files(path: &Path) -> Result<Vec<PathBuf>, String> {
 pub fn parse_codeql_file(path: &Path) -> Result<(Vec<CodeQlRule>, Vec<String>), String> {
     let content = std::fs::read_to_string(path)
         .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
-    let raw_doc: YamlValue = serde_yaml_ng::from_str(&content)
+    let raw_doc: YamlValue = yaml_serde::from_str(&content)
         .map_err(|e| format!("Failed to parse YAML {}: {}", path.display(), e))?;
 
     let Some(raw_rules) = raw_doc.get("rules").and_then(YamlValue::as_sequence) else {
@@ -266,7 +266,7 @@ pub fn parse_codeql_file(path: &Path) -> Result<(Vec<CodeQlRule>, Vec<String>), 
             .get("id")
             .and_then(YamlValue::as_str)
             .unwrap_or("<unknown>");
-        let yaml: CodeQlRuleYaml = match serde_yaml_ng::from_value(raw_rule.clone()) {
+        let yaml: CodeQlRuleYaml = match yaml_serde::from_value(raw_rule.clone()) {
             Ok(yaml) => yaml,
             Err(error) => {
                 notices.push(format!(
@@ -1059,7 +1059,7 @@ fn codeql_database_source_roots(database: &Path) -> Result<Vec<PathBuf>, String>
             metadata_path.display()
         )
     })?;
-    let metadata: YamlValue = serde_yaml_ng::from_str(&content).map_err(|error| {
+    let metadata: YamlValue = yaml_serde::from_str(&content).map_err(|error| {
         format!(
             "failed to parse CodeQL database metadata {}: {error}",
             metadata_path.display()

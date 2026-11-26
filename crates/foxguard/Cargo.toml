@@ -41,7 +41,7 @@ rayon = "1"
 ignore = "0.4"
 regex = "1"
 fancy-regex = "0.16"
-serde_yaml_ng = "0.10"
+yaml_serde = "0.10"
 sha2 = "0.11"
 uuid = { version = "1", features = ["v5"] }
 globset = "0.4"

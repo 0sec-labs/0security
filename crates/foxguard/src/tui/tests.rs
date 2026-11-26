@@ -2562,8 +2562,8 @@ fn batch_config_partial_failure_preserves_success_and_failed_selection() {
     review_keys(&mut app, std::iter::repeat_n(KeyCode::Down, 5));
     review_keys(&mut app, [KeyCode::Enter, KeyCode::Char('y')]);
 
-    let saved: serde_yaml_ng::Value =
-        serde_yaml_ng::from_str(&std::fs::read_to_string(&config).unwrap()).unwrap();
+    let saved: yaml_serde::Value =
+        yaml_serde::from_str(&std::fs::read_to_string(&config).unwrap()).unwrap();
     let ignores = saved["scan"]["ignore_rules"].as_sequence().unwrap();
     assert!(ignores
         .iter()
