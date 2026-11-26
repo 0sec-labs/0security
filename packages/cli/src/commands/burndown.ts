@@ -19,6 +19,7 @@ import { connect, DEFAULT_SCAN_MODEL, scanModelLabel } from "./scan.js";
 import { defaultFixDeps, runFix, type FixDeps, type FixOptions, type FixOutcome } from "./fix.js";
 import { shortFindingId } from "../finding-id.js";
 import { finishWithError, UsageError } from "./output.js";
+import { applyBurndownWorkflowDefaults } from "../workflow-defaults.js";
 import { contextOptionsOf, labelFor, loadContextFor, REPOSITORY_FLAG_HELP, type LoadDeps } from "../business-context-load.js";
 
 const exec = promisify(execFile);
@@ -333,7 +334,7 @@ export function registerBurndownCommand(program: Command, fixDeps: FixDeps = def
     .addHelpText("after", "\nNothing is pushed to the base branch and nothing is merged. The outcome per finding is kept in ~/.0/burndown.json: running it again skips findings that already have a pull request and continues with the rest.\nExit codes: 0 every attempted fix is verified (or nothing to do), 1 a fix failed or the run stopped on failures, 2 usage error, 3 the total budget ran out.")
     .action(async (raw: BurndownOptions, command: Command) => {
       // `findings` declares --context and --repository too, and Commander may bind them to the parent.
-      const options = { ...raw, ...contextOptionsOf(raw, command) };
+      const options = applyBurndownWorkflowDefaults({ ...raw, ...contextOptionsOf(raw, command) }, command);
       const json = options.format === "json";
       const err = (text: string) => process.stderr.write(`${text}\n`);
       try {
