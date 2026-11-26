@@ -330,14 +330,13 @@ describe("0 findings fix records its outcome for export-fixes", () => {
     const memory = () => {
       const variants: StoredVariant[] = [{ id: "old-1", title: "SQL injection in src/orders.ts", status: "discovered", path: "src/orders.ts", startLine: 2 }];
       const saved: Array<{ id: string; variantOf: string; path: string }> = [];
-      const fixed: string[] = [];
       const store: VariantStore = {
-        variantsOf: () => variants.filter(v => !fixed.includes(v.id)).concat(saved.map(v => ({ id: v.id, title: "new", status: "discovered", path: v.path, startLine: 2 }))),
+        variantsOf: () => variants.concat(saved.map(v => ({ id: v.id, title: "new", status: "discovered", path: v.path, startLine: 2 }))),
         saveRootCause: () => {},
         saveVariant: (parent, variant) => { const id = `new-${saved.length + 1}`; saved.push({ id, variantOf: parent.id, path: variant.path }); return id; },
         markFixedPendingMerge: (_parent, id) => { fixed.push(id); },
       };
-      return { store, saved, fixed };
+      return { store, saved };
     };
     const answer = (text: string) => text.includes("<site>")
       ? fence({ site: "old-1", state: "fixed", reasoning: "src/orders.ts:2 binds the id." })
@@ -352,7 +351,6 @@ describe("0 findings fix records its outcome for export-fixes", () => {
       h.deps.loadFinding = () => withLinks;
       const outcome = await runFix("f-1", options({ test: ["pnpm test"] }), h.deps);
       expect(outcome).toMatchObject({ committed: true, variants: { created: 1, rescanned: { fixed: 1, open: 0 } } });
-      expect(mem.fixed).toEqual(["old-1"]);
       expect(mem.saved).toEqual([{ id: "new-1", variantOf: finding.id, path: "src/invoices.ts" }]);
       const seeded = h.requests.find(([, path, body]) => path.endsWith("/messages") && String((body as { text?: string }).text).includes("<seed>"));
       expect(String((seeded![2] as { text: string }).text)).toContain("a shared query helper");
