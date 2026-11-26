@@ -488,7 +488,7 @@ A re-run skips findings that already have a verdict. Add `--force` to check them
 
 ## Fix a finding
 
-0 fixes a finding in a separate git work tree, so your checkout is never touched. It runs your checks, commits on a branch named `0/fix-<id>` and opens a pull request. The pull request is a draft when a check fails or when you gave no `--test`. Add `--ready` to open it ready for review without checks.
+0 fixes a finding in a separate git work tree, so your checkout is never touched. It runs your checks, commits on a branch named `0/fix-<id>` and opens a pull request. The pull request is a draft when a check fails or when you gave no `--test`. A draft means the change is not verified. Add `--ready` to open it ready for review without checks. The command exits 0 when a change was committed and no check failed, so with no `--test` exit code 0 does not mean the change was checked.
 
 ```bash
 0security findings fix 3f2a --test "npm test"
