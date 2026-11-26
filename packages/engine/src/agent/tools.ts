@@ -60,6 +60,7 @@ import { LIST_TOOLS_NAME, LOAD_TOOL_NAME, formatToolCatalog, formatLoadResult } 
 import { resolveFolderPath } from "./tools/folder-path.js";
 import { TOOL_DEFINITIONS } from "./tools/index.js";
 import { TOOL_DISPATCH } from "./tools/dispatch.js";
+import { runCodeIndexTool } from "./tools/code-index.js";
 import { nonEmptyString, buildOperatorQuestionRequest, type ToolExecutorCheckpoint, inlineImpactAssessmentSchema } from "./tools/agent-args.js";
 import { resolveBashWallclockCeilingMs, runBashWithWallclock, buildStrReplaceMeta } from "./tools/exec-helpers.js";
 import { parseVerificationSpecArg, autoVerificationSpec, evaluateSourceVerification, parsePocStepsArg, parseEvidencePathsArg, buildValidationFailureResult } from "./tools/verification.js";
@@ -1664,6 +1665,12 @@ export class ToolExecutor {
       },
     };
   }
+
+  // Code index tools (0#659): validated and run in tools/code-index.ts against the granted folder.
+  private async callersOfTool(args: Record<string, unknown>): Promise<ToolResult> { return runCodeIndexTool("callers_of", args, this.ctx.scopePath ?? this.ctx.workspaceRoot); }
+  private async calleesOfTool(args: Record<string, unknown>): Promise<ToolResult> { return runCodeIndexTool("callees_of", args, this.ctx.scopePath ?? this.ctx.workspaceRoot); }
+  private async routesTool(args: Record<string, unknown>): Promise<ToolResult> { return runCodeIndexTool("routes", args, this.ctx.scopePath ?? this.ctx.workspaceRoot); }
+  private async traceToSinkTool(args: Record<string, unknown>): Promise<ToolResult> { return runCodeIndexTool("trace_to_sink", args, this.ctx.scopePath ?? this.ctx.workspaceRoot); }
 
   /**
    * `ask_operator` — pause mid-turn and put a STRUCTURED question to the human

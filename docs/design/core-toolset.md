@@ -8,6 +8,11 @@ Seven tools: `bash`, `str_replace`, `finding`, `ask_operator`, `load_skill`, `we
 and `spawn_agent`. Files are read through the shell. `str_replace`
 creates a file when `old_string` is empty. A reply with no tool call ends the turn.
 
+Tool packs load only when a built-in skill declares them. The `code-index` pack (`callers_of`,
+`callees_of`, `routes`, `trace_to_sink`) is loaded by the source-review and verify-finding skills. It answers from an
+offline, per-commit index of TypeScript, JavaScript and Python (`packages/engine/src/code-index/`), and reports an
+unsupported language or an unknown symbol as a soft result that points back to `rg`.
+
 Code: `packages/engine/src/agent/toolset.ts`, wiring in `console/turn-engine/session.ts`.
 
 ## Safety with the shell as the main action tool
