@@ -100,7 +100,7 @@ function baseEnv(label, enterprise) {
     ZERO_MODEL: "stub",
     CI: "1",
   };
-  if (enterprise) env.ZERO_ENTERPRISE = "1";
+  if (enterprise) { env.ZERO_ENTERPRISE = "1"; env.DO_NOT_TRACK = "1"; }
   return env;
 }
 

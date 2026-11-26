@@ -96,7 +96,7 @@ async function fetchCatalog(impl: PricingDiscoveryFetch): Promise<Map<string, Mo
  * add a shared -> telemetry edge to the engine directory cycle. Keep in sync.
  */
 function networkOptedOut(env: NodeJS.ProcessEnv = process.env): boolean {
-  return ["ZERO_OFFLINE", "ZERO_NO_TELEMETRY", "DO_NOT_TRACK", "ZERO_ENTERPRISE"].some(name => {
+  return ["ZERO_OFFLINE", "DO_NOT_TRACK", "ZERO_ENTERPRISE"].some(name => {
     const v = env[name]?.trim().toLowerCase();
     return v !== undefined && v !== "" && v !== "0" && v !== "false" && v !== "no";
   });
@@ -109,7 +109,7 @@ export async function discoverAndRegisterPricing(model: string, fetchImpl?: Pric
   try {
     if (!model || hasKnownPricing(model)) return;
     // The public OpenRouter catalog is a third-party lookup. With an opt-out
-    // set (ZERO_OFFLINE, ZERO_NO_TELEMETRY, DO_NOT_TRACK) nothing may leave
+    // set (ZERO_OFFLINE, DO_NOT_TRACK) nothing may leave
     // for it, so an enterprise gateway sees the only outbound model traffic.
     // An injected fetch is a caller's own transport and is not gated.
     if (!isFetch(fetchImpl) && !configuredFetch && networkOptedOut()) return;

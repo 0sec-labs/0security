@@ -1,16 +1,15 @@
 /**
  * Enterprise no-egress mode.
  *
- * `ZERO_ENTERPRISE=1` is the one switch that keeps every automatic or
- * third-party network call off. The only outbound traffic left is to hosts the
- * operator configured themselves: the model endpoint, a team sign-in issuer, a
- * scan or probe target they named, a remote MCP server they added.
+ * `ZERO_ENTERPRISE=1` keeps every automatic third-party network call off,
+ * except anonymous telemetry and crash reports, which only `DO_NOT_TRACK=1`
+ * controls. The only other outbound traffic left is to hosts the operator
+ * configured themselves: the model endpoint, a team sign-in issuer, a scan or
+ * probe target they named, a remote MCP server they added.
  *
  * The switch is read from the process environment only. Project files
  * (`.0/tui-settings.json`, `.0/config`) have no path to the environment, so a
- * checked-out repository cannot turn it off. It also feeds the existing hard
- * opt-out list (`ANALYTICS_OPT_OUT_ENV`), so every gate that already honours
- * `ZERO_OFFLINE` honours it too.
+ * checked-out repository cannot turn it off.
  *
  * This module is a leaf on purpose: it imports nothing, so any directory may
  * import it without adding an edge to the engine import-cycle baseline.

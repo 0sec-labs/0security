@@ -236,11 +236,11 @@ Each setting is global to your computer, and project settings cannot change it. 
 
 ### First-run notice
 
-The first time you run the CLI or the console, 0security prints one notice to stderr. It is one line. It says that usage counts, command names, crash reports and update checks are on, that they never include code or findings, and that `ZERO_OFFLINE=1` turns them off. It links here for the other switches. 0 prints it once per install, and only when stderr is a terminal. It never prints in CI, with `--format json`, `--json` or other machine formats, with `ZERO_LOG_FORMAT=json`, or when telemetry is already off. The browser app shows the same disclosure under Settings, Privacy.
+The first time you run the CLI or the console, 0security prints one notice to stderr. It is one line. It says that usage counts, command names, crash reports and update checks are on, that they never include code or findings, and that `DO_NOT_TRACK=1` turns them off. It links here. 0 prints it once per install, and only when stderr is a terminal. It never prints in CI, with `--format json`, `--json` or other machine formats, with `ZERO_LOG_FORMAT=json`, or when telemetry is already off. The browser app shows the same disclosure under Settings, Privacy.
 
 ### Usage metrics
 
-When `analyticsLevel` is `usage`, a release build sends anonymous events directly to 0security's PostHog project in the EU (`https://eu.i.posthog.com`). You need no account or cloud token. There are five event types, and each carries only the fields listed for it.
+When `analyticsLevel` is `usage`, a release build sends anonymous events directly to 0security's PostHog project in the EU (`https://eu.i.posthog.com`). You need no account. There are five event types, and each carries only the fields listed for it.
 
 Every event also carries these common fields:
 
@@ -274,11 +274,10 @@ Each event also has a timestamp and a `distinct_id`, which is a random UUID (the
 
 PostHog discards IP addresses, and 0security disables GeoIP lookup. To get a new install ID, delete `~/.0/analytics-id`. `~/.0/analytics-sent.log` records every payload sent, without the project key.
 
-Lifecycle events are not sent for `--help`, `--version`, `help`, shell completion, or the `config`, `reports` and `workbench` commands. They are also not sent in CI (`CI` set) or with machine output (`--json`, `--format json`, `ZERO_LOG_FORMAT=json`), because the notice is not shown there. To send them anyway, run `0security config set analyticsLevel usage`. That explicit choice applies to CI and machine output, not to the commands above.
+Lifecycle events are not sent for `--help`, `--version`, `help`, shell completion, or the `config`, `reports` and `workbench` commands. They are also not sent in CI (`CI` set) or with machine output (`--json`, `--format json`, `ZERO_LOG_FORMAT=json`), because the notice is not shown there. To send them anyway, run `0security config set analyticsLevel usage`.
 
-The opt-outs are the same for every event: `analyticsLevel off`, `ZERO_NO_TELEMETRY`, `DO_NOT_TRACK`, `ZERO_OFFLINE` and `ZERO_ENTERPRISE`.
+One switch stops every event: `DO_NOT_TRACK=1`.
 
-If you are signed in with a 0security cloud token (`ZERO_CLOUD_TOKEN` or `~/.0/cloud.env`), `usage` goes to the authenticated cloud endpoint instead of PostHog, so it is not counted twice. The lifecycle events have no cloud counterpart and still go to PostHog, so a signed-in install is counted too. The `commands` and `full` levels of `ZERO_ANALYTICS_LEVEL` exist only for the cloud path.
 
 ### What is never collected
 
@@ -307,18 +306,18 @@ A report contains the error class (for example `TypeError`), the 0security versi
 
 ### Opt out of telemetry
 
-Any one of these turns telemetry off. Environment variables beat every saved setting.
+`DO_NOT_TRACK=1` is the one switch. It beats every saved setting.
 
 | How | Effect |
 | --- | --- |
-| `ZERO_NO_TELEMETRY=1`, `DO_NOT_TRACK=1` or `ZERO_OFFLINE=1` | Turns off usage metrics and crash reports. Any value except empty, `0`, `false` or `no` counts. An organization can set one for every operator, and it overrides each person's settings. |
-| `ZERO_ENTERPRISE=1` | No-egress mode. Does everything the row above does, and also turns off update checks, model catalog and price lookups, web search, remote extension sources and the other third-party calls. Only the model endpoint you configured, and destinations you name yourself, stay. Project settings cannot change it. See [Data flow and no-egress mode](/data-flow/). |
-| `0security config set analyticsLevel off` | Turns off usage metrics. `ZERO_ANALYTICS_LEVEL=off` does the same for one process. |
+| `DO_NOT_TRACK=1` | Turns off usage metrics, lifecycle events and crash reports. Any value except empty, `0`, `false` or `no` counts. An organization can set it for every operator, and it overrides each person's settings. |
+| `ZERO_ENTERPRISE=1` | No-egress mode. It turns off update checks, model catalog and price lookups, web search, remote extension sources and the other third-party calls, but not telemetry, so set `DO_NOT_TRACK=1` with it. Project settings cannot change it. See [Data flow and no-egress mode](/data-flow/). |
+| `0security config set analyticsLevel off` | Turns off usage metrics and lifecycle events. |
 | `0security config set diagnosticReporting off` | Turns off crash reports. Use `ask` to review each one first. |
 | Browser app, Settings, Privacy | The same two switches. |
 
 ```bash
-export ZERO_NO_TELEMETRY=1
+export DO_NOT_TRACK=1
 0security config set analyticsLevel off
 0security config set diagnosticReporting off
 ```

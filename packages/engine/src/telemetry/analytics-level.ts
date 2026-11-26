@@ -1,40 +1,31 @@
 /**
- * Analytics consent tier resolution.
+ * Analytics consent level.
  *
- * The tier is read from `ZERO_ANALYTICS_LEVEL`, but any opt-out signal wins
- * unconditionally and forces "off". The opt-out env names mirror the CLI's
- * `FEEDBACK_OPT_OUT_ENV` (packages/cli/src/state/feedback.ts): `ZERO_OFFLINE`
- * (the repo's pre-existing offline convention), `ZERO_NO_TELEMETRY` (the name
- * people reach for), and `DO_NOT_TRACK` (the cross-tool standard). That module
- * lives in `@0/cli`, which core must not depend on, so the names and the
- * "set and not explicitly falsy" semantics are re-declared here — keep them in
- * sync.
+ * The only environment opt-out is `DO_NOT_TRACK` (the cross-tool standard); it
+ * wins unconditionally and forces "off". The only other off-switch is the saved
+ * `analyticsLevel: off` setting, which the CLI settings store bridges into
+ * `ZERO_ANALYTICS_LEVEL`. `ZERO_OFFLINE`, `ZERO_NO_TELEMETRY` and
+ * `ZERO_ENTERPRISE` do not affect analytics.
  *
- * DEFAULT: usage-tier analytics are ON for a fresh install (anonymous counters
- * only; see analytics-pipeline.ts for where they may go). That default is the
- * product decision that 0security's telemetry is automatic; it is bounded by
- * the hard opt-outs below, which always win, and by an explicit saved
- * `analyticsLevel: off`, which is preserved. `commands` and `full` are never
- * a default and are never sent to the direct PostHog destination.
+ * DEFAULT: usage analytics are ON for a fresh install (anonymous counters and
+ * lifecycle events only; see analytics-pipeline.ts for where they may go).
  */
 
-/** Consent tiers, in increasing order of what may be transmitted. */
-export type AnalyticsLevel = "off" | "usage" | "commands" | "full";
+/** Consent levels, in increasing order of what may be transmitted. */
+export type AnalyticsLevel = "off" | "usage";
 
 const LEVEL_ORDER: Record<AnalyticsLevel, number> = {
   off: 0,
   usage: 1,
-  commands: 2,
-  full: 3,
 };
 
-/** Env vars that hard-disable analytics regardless of `ZERO_ANALYTICS_LEVEL`. */
-export const ANALYTICS_OPT_OUT_ENV = ["ZERO_OFFLINE", "ZERO_NO_TELEMETRY", "DO_NOT_TRACK", "ZERO_ENTERPRISE"] as const;
+/** The single env var that hard-disables analytics, regardless of `ZERO_ANALYTICS_LEVEL`. */
+export const ANALYTICS_OPT_OUT_ENV = ["DO_NOT_TRACK"] as const;
 
 /** The env var that selects the tier when nothing opts out. */
 export const ANALYTICS_LEVEL_ENV = "ZERO_ANALYTICS_LEVEL";
 
-/** True when `current` is at least `required` (off < usage < commands < full). */
+/** True when `current` is at least `required` (off < usage). */
 export function levelAtLeast(current: AnalyticsLevel, required: AnalyticsLevel): boolean {
   return LEVEL_ORDER[current] >= LEVEL_ORDER[required];
 }
@@ -46,7 +37,7 @@ export function levelAtLeast(current: AnalyticsLevel, required: AnalyticsLevel):
  * client data cross a boundary someone explicitly tried to close — so this is
  * deliberately permissive.
  */
-function isOptOutSet(value: string | undefined): boolean {
+export function isOptOutSet(value: string | undefined): boolean {
   if (value === undefined) return false;
   const normalized = value.trim().toLowerCase();
   if (normalized === "") return false;
@@ -54,7 +45,7 @@ function isOptOutSet(value: string | undefined): boolean {
 }
 
 function isAnalyticsLevel(value: string): value is AnalyticsLevel {
-  return value === "off" || value === "usage" || value === "commands" || value === "full";
+  return value === "off" || value === "usage";
 }
 
 /** Shared hard opt-out gate for analytics and separately permissioned contributions. */
@@ -63,7 +54,7 @@ export function analyticsOptedOut(env: NodeJS.ProcessEnv = process.env): boolean
 }
 
 /**
- * Resolve the effective analytics tier. Any opt-out env forces "off"; when
+ * Resolve the effective analytics level. `DO_NOT_TRACK` forces "off"; when
  * `ZERO_ANALYTICS_LEVEL` is unset the default is usage metrics only (automatic,
  * anonymous counters; an explicit saved `off` is applied by the CLI settings
  * store before this env is bridged). An unknown/invalid

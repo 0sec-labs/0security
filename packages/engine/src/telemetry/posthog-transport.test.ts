@@ -101,7 +101,7 @@ describe("PostHog destination resolution", () => {
   });
 });
 
-describe("anonymous usage to PostHog (no cloud token)", () => {
+describe("anonymous usage to PostHog", () => {
   it("sends exactly the allowlisted property set, with anonymity flags and a random install id", async () => {
     analyticsPipeline.setLevel("usage");
     emitUsage();
@@ -148,7 +148,7 @@ describe("anonymous usage to PostHog (no cloud token)", () => {
       errorCategories: { "ECONNREFUSED 10.9.9.9": 1, "/Users/alice/.ssh/id_rsa": 1 },
       turnCount: 1, durationMs: 1,
       targetUrl: "https://victim.example", message: "hello secret message", path: "/Users/alice/x",
-    }, "usage");
+    });
     await analyticsPipeline.flushNow();
     const wire = posts.map((p) => p.body).join("\n");
     for (const planted of ["victim.example", "hunter2", "10.1.2.3", "10.9.9.9", "/Users/alice", "acme", "my_secret_plugin", "sk-ABCDEF", "hello secret", "targetUrl", "token=zzz", "Admin panel", "args_preview", "ssrf-at-victim", "spawn failed"]) {
@@ -178,13 +178,11 @@ describe("anonymous usage to PostHog (no cloud token)", () => {
     expect(log).not.toContain(FAKE_KEY);
   });
 
-  it.each([
-    ["DO_NOT_TRACK", "1"], ["ZERO_NO_TELEMETRY", "1"], ["ZERO_OFFLINE", "1"],
-  ])("%s wins: nothing sent, nothing queued, no install id", async (name, value) => {
+  it("DO_NOT_TRACK wins: nothing sent, nothing queued, no install id", async () => {
     analyticsPipeline.setLevel("usage");
-    vi.stubEnv(name, value);
+    vi.stubEnv("DO_NOT_TRACK", "1");
     emitUsage();
-    analyticsPipeline.__enqueueForTests({ kind: "usage", featureCounts: { shell: 1 }, turnCount: 1, durationMs: 1 }, "usage");
+    analyticsPipeline.__enqueueForTests({ kind: "usage", featureCounts: { shell: 1 }, turnCount: 1, durationMs: 1 });
     expect(analyticsPipeline.__pendingCountForTests()).toBe(0);
     await analyticsPipeline.flushNow();
     expect(posts).toHaveLength(0);
@@ -192,10 +190,19 @@ describe("anonymous usage to PostHog (no cloud token)", () => {
     expect(existsSync(join(home, ".0", "analytics-id"))).toBe(false);
   });
 
+  it.each(["ZERO_NO_TELEMETRY", "ZERO_OFFLINE", "ZERO_ENTERPRISE"])("%s is not an analytics switch: usage still goes to PostHog", async (name) => {
+    analyticsPipeline.setLevel("usage");
+    vi.stubEnv(name, "1");
+    emitUsage();
+    await analyticsPipeline.flushNow();
+    expect(posts).toHaveLength(1);
+    expect(posts[0].url).toBe(`${FAKE_HOST}/batch/`);
+  });
+
   it("a late opt-out drops already-queued records before they are sent", async () => {
     analyticsPipeline.setLevel("usage");
     emitUsage();
-    analyticsPipeline.__enqueueForTests({ kind: "usage", featureCounts: { shell: 1 }, turnCount: 1, durationMs: 1 }, "usage");
+    analyticsPipeline.__enqueueForTests({ kind: "usage", featureCounts: { shell: 1 }, turnCount: 1, durationMs: 1 });
     expect(analyticsPipeline.__pendingCountForTests()).toBe(1);
     vi.stubEnv("DO_NOT_TRACK", "1");
     await analyticsPipeline.flushNow();
@@ -205,7 +212,7 @@ describe("anonymous usage to PostHog (no cloud token)", () => {
   it("level off sends nothing and queues nothing", async () => {
     analyticsPipeline.setLevel("off");
     emitUsage();
-    analyticsPipeline.__enqueueForTests({ kind: "usage", featureCounts: { shell: 1 }, turnCount: 1, durationMs: 1 }, "usage");
+    analyticsPipeline.__enqueueForTests({ kind: "usage", featureCounts: { shell: 1 }, turnCount: 1, durationMs: 1 });
     expect(analyticsPipeline.__pendingCountForTests()).toBe(0);
     await analyticsPipeline.flushNow();
     expect(posts).toHaveLength(0);
@@ -216,33 +223,22 @@ describe("anonymous usage to PostHog (no cloud token)", () => {
     for (const key of [undefined, ""]) {
       vi.stubEnv("ZERO_ANALYTICS_POSTHOG_KEY", key);
       emitUsage();
-      analyticsPipeline.__enqueueForTests({ kind: "usage", featureCounts: { shell: 1 }, turnCount: 1, durationMs: 1 }, "usage");
+      analyticsPipeline.__enqueueForTests({ kind: "usage", featureCounts: { shell: 1 }, turnCount: 1, durationMs: 1 });
       expect(analyticsPipeline.__pendingCountForTests()).toBe(0);
       await analyticsPipeline.flushNow();
     }
     expect(posts).toHaveLength(0);
   });
 
-  it("commands and full tier records never reach PostHog", async () => {
-    analyticsPipeline.setLevel("full");
-    analyticsPipeline.recordCommand({ tool: "shell", args: "curl https://victim.example", output: "root:x:0", status: "ok", durationMs: 1, turn: 0 });
-    analyticsPipeline.recordCode({ lang: "py", source: "print(1)", origin: "model" });
-    analyticsPipeline.recordScope({ target: "https://victim.example", kind: "target" });
-    analyticsPipeline.recordFinding({ severity: "high", category: "x", title: "t", description: "d", evidence: "e", confidence: 1 });
-    expect(analyticsPipeline.__pendingCountForTests()).toBe(0);
-    await analyticsPipeline.flushNow();
-    expect(posts).toHaveLength(0);
-  });
-
-  it("a cloud token keeps the authenticated cloud path only: no PostHog, no double counting", async () => {
+  it("a cloud token changes nothing: usage goes to PostHog and never to a cloud endpoint", async () => {
     vi.stubEnv("ZERO_CLOUD_TOKEN", "test-token");
     vi.stubEnv("ZERO_CLOUD_HOST", "https://analytics.test");
     analyticsPipeline.setLevel("usage");
     emitUsage();
     await analyticsPipeline.flushNow();
     expect(posts).toHaveLength(1);
-    expect(posts[0].url).toBe("https://analytics.test/api/cli-analytics");
-    expect(posts.some((p) => p.url.includes("/batch/") || p.body.includes(FAKE_KEY))).toBe(false);
+    expect(posts[0].url).toBe(`${FAKE_HOST}/batch/`);
+    expect(posts.some((p) => p.url.includes("analytics.test"))).toBe(false);
   });
 
   it("failure and timeout are silent and never throw", async () => {
@@ -255,7 +251,7 @@ describe("anonymous usage to PostHog (no cloud token)", () => {
     vi.useFakeTimers();
     try {
       analyticsPipeline.configure({ fetchImpl: fakeFetch("hang") });
-      analyticsPipeline.__enqueueForTests({ kind: "usage", featureCounts: { shell: 1 }, turnCount: 1, durationMs: 1 }, "usage");
+      analyticsPipeline.__enqueueForTests({ kind: "usage", featureCounts: { shell: 1 }, turnCount: 1, durationMs: 1 });
       const flushed = analyticsPipeline.flushNow();
       await vi.advanceTimersByTimeAsync(POSTHOG_TIMEOUT_MS + 10);
       await expect(flushed).resolves.toBeUndefined();
@@ -407,24 +403,19 @@ describe("lifecycle events (PostHog only)", () => {
     for (const planted of ["10.1.2.3", "alice", "hunter2", "victim.example", "free text"]) expect(body).not.toContain(planted);
   });
 
-  it("a cloud token keeps usage on the cloud path, lifecycle goes to PostHog and never into the cloud body", async () => {
+  it("with a cloud token everything still goes to PostHog only", async () => {
     vi.stubEnv("ZERO_CLOUD_TOKEN", "test-token");
     vi.stubEnv("ZERO_CLOUD_HOST", "https://analytics.test");
     analyticsPipeline.setLevel("usage");
     emitUsage();
     analyticsPipeline.recordStartup({ command: "web" });
     await analyticsPipeline.flushNow();
-    const cloud = posts.filter((p) => p.url === "https://analytics.test/api/cli-analytics");
-    const ph = posts.filter((p) => p.url === `${FAKE_HOST}/batch/`);
-    expect(cloud).toHaveLength(1);
-    for (const name of LIFECYCLE) expect(cloud[0].body).not.toContain(name);
-    expect(cloud[0].body).not.toContain(FAKE_KEY);
-    expect(ph).toHaveLength(1);
-    const phEvents = (JSON.parse(ph[0].body) as { batch: Array<{ event: string }> }).batch;
-    expect(phEvents.map((e) => e.event)).toEqual(["first_run", "command_invoked"]);
+    expect(posts.every((p) => p.url === `${FAKE_HOST}/batch/`)).toBe(true);
+    const names = posts.flatMap((p) => (JSON.parse(p.body) as { batch: Array<{ event: string }> }).batch.map((e) => e.event));
+    expect(names).toEqual(expect.arrayContaining(["usage", "first_run", "command_invoked"]));
   });
 
-  for (const [name, value] of [["DO_NOT_TRACK", "1"], ["ZERO_NO_TELEMETRY", "1"], ["ZERO_OFFLINE", "1"], ["ZERO_ENTERPRISE", "1"]] as const) {
+  for (const [name, value] of [["DO_NOT_TRACK", "1"]] as const) {
     it(`${name} sends nothing, queues nothing and mints no install id`, async () => {
       vi.stubEnv(name, value);
       analyticsPipeline.setLevel("usage");

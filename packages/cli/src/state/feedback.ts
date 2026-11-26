@@ -283,16 +283,10 @@ function resolveFeedbackTarget(
 }
 
 /**
- * Env vars that hard-disable submission.
- *
- * `ZERO_OFFLINE` is the pre-existing convention in this repo (see
- * `../utils/update-check.ts`, which uses it to suppress the update ping), so
- * an operator who already sets it to keep 0 off the network gets the
- * behaviour they asked for without learning a second knob. `ZERO_NO_TELEMETRY`
- * is added as the name people reach for, and `DO_NOT_TRACK` is honoured
- * because it is the cross-tool standard.
+ * The env var that hard-disables submission. `DO_NOT_TRACK` is the one telemetry
+ * opt-out (the cross-tool standard); it also stops analytics and crash reports.
  */
-export const FEEDBACK_OPT_OUT_ENV = ["ZERO_OFFLINE", "ZERO_NO_TELEMETRY", "DO_NOT_TRACK", "ZERO_ENTERPRISE"] as const;
+export const FEEDBACK_OPT_OUT_ENV = ["DO_NOT_TRACK"] as const;
 
 /** Request timeout. Short: this is a courtesy call behind a human keystroke. */
 const FEEDBACK_TIMEOUT_MS = 5000;

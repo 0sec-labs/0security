@@ -14,8 +14,13 @@ on the GitHub Release tag.
 
 ### Added
 
-- Anonymous lifecycle events go to PostHog: `first_run`, `command_invoked` (a command name from a fixed list, otherwise `other`), `update` (the two versions) and `error_exit` (an error category only). They are sent even with a cloud token, so signed-in installs are counted, and the same opt-outs turn them off.
+- Anonymous lifecycle events go to PostHog: `first_run`, `command_invoked` (a command name from a fixed list, otherwise `other`), `update` (the two versions) and `error_exit` (an error category only). They go straight to PostHog from the CLI. `DO_NOT_TRACK=1` turns them off.
 - The `usage` event has `finding_class_counts`, findings counted by a fixed list of vulnerability classes. Titles, descriptions, evidence and targets are still never sent.
+
+### Changed
+
+- `DO_NOT_TRACK=1` is now the one telemetry switch. It stops usage counts, lifecycle events and crash reports. `ZERO_NO_TELEMETRY`, `ZERO_OFFLINE` and `ZERO_ENTERPRISE` no longer control telemetry (`ZERO_OFFLINE` and `ZERO_ENTERPRISE` keep their other jobs), so a no-egress install should set `DO_NOT_TRACK=1` too. The Helm chart does this for you.
+- Usage counts go only to PostHog. The CLI no longer sends analytics to a 0security cloud account, and the `commands` and `full` levels are gone.
 
 ## [0.45.0] - 2026-11-24
 

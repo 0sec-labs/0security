@@ -2,55 +2,44 @@
  * The single analytics CHOKE POINT.
  *
  * This module owns the ONLY code path in the engine that may transmit
- * analytics. Every record — regardless of source — must pass through the
- * private `enqueue` step, which unconditionally:
+ * analytics. Every record, regardless of source, must pass through the
+ * private `enqueue` step (or the lifecycle path), which unconditionally:
  *
- *   1. Gates on the resolved consent tier (`levelAtLeast`). Below the tier a
- *      record needs, it is dropped and nothing is transmitted or logged.
+ *   1. Gates on the consent level. The only opt-outs are `DO_NOT_TRACK` and a
+ *      saved `analyticsLevel: off`; below "usage" nothing is queued, sent or
+ *      logged.
  *   2. Runs `redactContent` over EVERY string in the record (keys included),
- *      so a secret that reached a counter label or free-text field is scrubbed
- *      before it can leave the process.
- *   3. Attaches random install/session identifiers and finite runtime metadata.
- *      Authenticated delivery is attributable; the identifiers are not a
- *      guarantee of anonymity.
- *   4. Batches and transmits fire-and-forget. Destination, chosen at drain time:
- *        - a cloud token is present -> the authenticated `/api/cli-analytics`
- *          path, unchanged, and NOTHING goes to PostHog (no double counting);
- *        - otherwise, if a PostHog destination resolves (release-embedded key,
- *          or an operator override; see ./posthog-destination.ts) -> anonymous
- *          USAGE-tier events only, built from an explicit property ALLOWLIST,
- *          POSTed to `<host>/batch/`. The `commands` and `full` tiers never go
- *          to PostHog, and a record with no possible destination is not queued.
+ *      so a secret that reached a counter label is scrubbed before it can
+ *      leave the process.
+ *   3. Builds events from an explicit property ALLOWLIST and sends them
+ *      fire-and-forget, directly to PostHog (release-embedded key or an
+ *      operator override; see ./posthog-destination.ts) at `<host>/batch/`.
+ *      There is no other destination: a build without a key sends nothing.
  *
  * SAFETY CONTRACT:
  *   - No other module may POST analytics. If a second transmit path ever
- *     appears, the consent gate and the redaction boundary are defeated. The
- *     PostHog transport lives HERE for that reason.
- *   - PostHog properties are an ALLOWLIST (`POSTHOG_PROPERTY_KEYS`). A new field
- *     must be added there deliberately; counter keys are collapsed to finite
- *     label sets (known tool names, severities, error categories), everything
+ *     appears, the consent gate and the redaction boundary are defeated.
+ *   - PostHog properties are an ALLOWLIST (`POSTHOG_PROPERTY_KEYS` and
+ *     `POSTHOG_LIFECYCLE_PROPERTY_KEYS`). A new field must be added there
+ *     deliberately; counter keys are collapsed to finite label sets (known
+ *     tool names, severities, finding classes, error categories), everything
  *     else becomes "other". Targets, URLs, hostnames, paths, finding text,
  *     prompts, tool arguments/outputs and error message text never qualify.
  *   - Telemetry must NEVER block or break an audit: every path is wrapped in
  *     try/catch, transmission is fire-and-forget with a short timeout, and a
- *     failure (offline, DNS, 500, no credentials) is a silent no-op.
- *   - USAGE tier: the bus sink derives aggregate COUNTERS (tool names, counts,
- *     error categories, durations, cost) from the event bus. It never reads raw
- *     content — the bus only carries a bounded preview and this sink
- *     deliberately ignores it.
- *   - COMMANDS tier: tool call records (command, args, output) and code snippets.
- *   - FULL tier: scope entries and findings.
+ *     failure (offline, DNS, 500) is a silent no-op.
+ *   - The bus sink derives aggregate COUNTERS (tool names, counts, error
+ *     categories, finding severities and classes, durations, cost). It never
+ *     reads raw content.
  *
- * On a level downgrade, disallowed pending records are purged. Explicit off
- * unsubscribes the bus sink; environment opt-outs also gate accumulation.
- * Every POST re-checks each record's required tier against the live level.
+ * Turning the level off unsubscribes the bus sink and purges anything queued.
+ * Every POST re-checks the live level.
  */
 
 import { homeStateDir, VERSION } from "../shared/index.js";
 import { mkdirSync, appendFileSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { eventBus, type EventSink, type EventType } from "../events/bus.js";
-import { loadCloudCredentials } from "../cloud/credentials.js";
 import { resolvePostHogDestination, type PostHogDestination } from "./posthog-destination.js";
 import {
   ANALYTICS_LEVEL_ENV,
@@ -60,30 +49,11 @@ import {
   type AnalyticsLevel,
 } from "./analytics-level.js";
 import { getInstallIdInfo, newSessionId } from "./install-id.js";
-import { MAX_CONTENT_BYTES, redactContent, type RedactContext } from "./redaction.js";
-import type {
-  AnalyticsEnvelope,
-  CodeRecord,
-  CommandRecord,
-  FindingRecord,
-  FiniteArch,
-  FinitePlatform,
-  FiniteRuntime,
-  ScopeRecord,
-  UsageRecord,
-} from "./schema.js";
-
-/** Wire schema version for the analytics payload. */
-export const ANALYTICS_SCHEMA_VERSION = 1;
-
-/** Endpoint (relative to the resolved cloud host) that receives batches. */
-export const ANALYTICS_ENDPOINT = "/api/cli-analytics";
+import { redactContent, type RedactContext } from "./redaction.js";
+import type { FiniteArch, FinitePlatform, FiniteRuntime, UsageRecord } from "./schema.js";
 
 /** Transparency log filename under `~/.0`. */
 export const ANALYTICS_SENT_LOG_FILENAME = "analytics-sent.log";
-
-/** Short transmit timeout (ms) — telemetry never blocks an audit. */
-const TRANSMIT_TIMEOUT_MS = 4000;
 
 /** Even shorter budget for the direct PostHog path (a fresh install must never feel it). */
 export const POSTHOG_TIMEOUT_MS = 3000;
@@ -114,7 +84,7 @@ const POSTHOG_COMMON_KEYS = [
   "$lib", "$geoip_disable", "$process_person_profile", "$ip",
 ] as const;
 
-/** Lifecycle events: PostHog-only, never part of the cloud wire schema. */
+/** Lifecycle events sent to PostHog. */
 export type LifecycleEventName = "first_run" | "command_invoked" | "update" | "error_exit";
 
 /**
@@ -143,14 +113,7 @@ const USAGE_FLUSH_DEBOUNCE_MS = 2000;
 const TRANSMIT_DEBOUNCE_MS = 500;
 
 /**
- * Maximum records in a single POST body (receiver limit).
- * Encoded JSON body must also fit within {@link MAX_BODY_BYTES}.
- */
-const MAX_RECORDS_PER_BATCH = 100;
-
-/**
- * Maximum encoded POST body size in bytes (receiver limit).
- * Includes the `{"records":[…]}` wrapper.
+ * Maximum encoded PostHog POST body size in bytes.
  */
 export const MAX_BODY_BYTES = 1_048_576;
 
@@ -226,9 +189,6 @@ function classifyFailureText(text: string): string | null {
 const SENSITIVE_FIELD = /^(?:password|passwd|pwd|secret|client[_-]?secret|token|api[_-]?key|access[_-]?token|refresh[_-]?token|authorization|proxy[_-]?authorization|cookie|set[_-]?cookie|credentials?|x[-_].*(?:key|auth|token|secret))$/i;
 
 const CONTENT_FIELDS = ["argsRedacted", "outputRedacted", "sourceRedacted"] as const;
-const BODY_PREFIX = '{"records":[';
-const BODY_SUFFIX = "]}";
-const BODY_OVERHEAD_BYTES = BODY_PREFIX.length + BODY_SUFFIX.length;
 
 /**
  * Recursively run {@link redactContent} over every string in a record —
@@ -304,7 +264,7 @@ function label(value: unknown): string {
 interface UsageAccumulator {
   featureCounts: Record<string, number>;
   findingCounts: Record<string, number>;
-  /** Finding severity -> count. Never serialized to the cloud record; PostHog only. */
+  /** Finding severity -> count. Sent to PostHog only. */
   severityCounts: Record<string, number>;
   /** Raw finding category -> count (collapsed to FINDING_CLASSES). PostHog only. */
   classCounts: Record<string, number>;
@@ -486,7 +446,7 @@ class AnalyticsPipeline {
    * downgrade we can purge records that are no longer permitted, and so
    * transmit can re-check each record against the live level.
    */
-  private batch: Array<{ json: string; bytes: number; requiredTier: AnalyticsLevel; ts: number; delta?: UsageDelta; lifecycle?: LifecycleEntry }> = [];
+  private batch: Array<{ ts: number; delta?: UsageDelta; lifecycle?: LifecycleEntry }> = [];
 
   private surface: AnalyticsSurface = "cli";
   private releaseChannel = "unknown";
@@ -537,14 +497,6 @@ class AnalyticsPipeline {
   setLevel(level: AnalyticsLevel): void {
     const wasOff = this.level === "off";
 
-    // ── Purge queued records that exceed the new level ──────────────────
-    if (!levelAtLeast(level, this.level)) {
-      // Downgrade: drop records above the new tier.
-      this.batch = this.batch.filter((entry) =>
-        levelAtLeast(level, entry.requiredTier),
-      );
-    }
-
     this.level = level;
     this.effectiveLevel();
 
@@ -572,17 +524,17 @@ class AnalyticsPipeline {
    * The effective consent tier: minimum of the stored (saved/configured) tier
    * and the environment-resolved tier. This ensures an explicit env override
    * (e.g. `ZERO_ANALYTICS_LEVEL=off` in the parent shell) can never be
-   * bypassed by a cached "full" pipeline. Also re-checks opt-out env vars
-   * at every call, so a late-set `ZERO_OFFLINE` still takes effect.
+   * bypassed by a cached level. Also re-checks opt-out env vars
+   * at every call, so a late-set `DO_NOT_TRACK` still takes effect.
    */
   private effectiveLevel(): AnalyticsLevel {
     const envLevel = process.env[ANALYTICS_LEVEL_ENV] === undefined && !analyticsOptedOut()
       ? this.level
       : resolveAnalyticsLevel();
     const level = levelAtLeast(this.level, envLevel) ? envLevel : this.level;
-    if (!levelAtLeast(level, this.observedLevel)) {
-      this.batch = this.batch.filter((entry) => levelAtLeast(level, entry.requiredTier));
-      if (level === "off") this.resetUsageTotals();
+    if (level === "off" && this.observedLevel !== "off") {
+      this.batch = [];
+      this.resetUsageTotals();
     }
     this.observedLevel = level;
     return level;
@@ -694,118 +646,15 @@ class AnalyticsPipeline {
       durationMs: this.acc.durationMs,
       ...(this.acc.hasCost ? { costUsd: this.acc.costUsd } : {}),
     };
-    this.enqueue(record as unknown as Record<string, unknown>, "usage", { severities: { ...this.acc.severityCounts }, classes: { ...this.acc.classCounts } });
-  }
-
-  // ── Direct collectors (commands / full tiers) ─────────────────────────
-  //
-  // Every collector below GATES AT THE CALL SITE FIRST: it checks
-  // `levelAtLeast(this.level, requiredTier)` and returns before it assembles
-  // the record, so the raw args / output / source / target / finding fields
-  // are never even copied out of the caller — let alone redacted, enveloped,
-  // or queued — below the consented tier. The subsequent `enqueue` gate is a
-  // redundant second boundary. These records go DIRECT to the pipeline: they
-  // are never placed on the shared event bus, so the bus payloads stay narrow.
-  // Every method is no-throw and a no-op when the pipeline is "off".
-
-  /**
-   * "commands" tier: record one executed tool call. `args` / `output` are the
-   * caller's raw values; they are stringified here and redacted in `enqueue`.
-   */
-  recordCommand(input: {
-    tool: unknown;
-    args: unknown;
-    output: unknown;
-    status: unknown;
-    durationMs: unknown;
-    turn: unknown;
-  }): void {
-    try {
-      if (!levelAtLeast(this.effectiveLevel(), "commands")) return;
-      const record: CommandRecord = {
-        tool: label(input.tool),
-        argsRedacted: toText(input.args),
-        outputRedacted: toText(input.output),
-        status: label(input.status),
-        durationMs: finiteNumber(input.durationMs),
-        turn: finiteNumber(input.turn),
-      };
-      this.enqueue(record as unknown as Record<string, unknown>, "commands");
-    } catch {
-      // Fail-soft: telemetry must never break the caller.
-    }
-  }
-
-  /**
-   * "commands" tier: record a model-authored code snippet. `source` is raw
-   * here and redacted in `enqueue`.
-   */
-  recordCode(input: { lang: unknown; source: unknown; origin: unknown }): void {
-    try {
-      if (!levelAtLeast(this.effectiveLevel(), "commands")) return;
-      const record: CodeRecord = {
-        lang: label(input.lang),
-        sourceRedacted: toText(input.source),
-        origin: label(input.origin),
-      };
-      this.enqueue(record as unknown as Record<string, unknown>, "commands");
-    } catch {
-      // Fail-soft.
-    }
-  }
-
-  /**
-   * "full" tier: record an engagement scope / target entry. `target` is raw
-   * here and redacted in `enqueue`.
-   */
-  recordScope(input: { target: unknown; kind: unknown }): void {
-    try {
-      if (!levelAtLeast(this.effectiveLevel(), "full")) return;
-      const record: ScopeRecord = {
-        targetRedacted: toText(input.target),
-        kind: label(input.kind),
-      };
-      this.enqueue(record as unknown as Record<string, unknown>, "full");
-    } catch {
-      // Fail-soft.
-    }
-  }
-
-  /**
-   * "full" tier: record a finding. Every free-text field is raw here and
-   * redacted in `enqueue`.
-   */
-  recordFinding(input: {
-    severity: unknown;
-    category: unknown;
-    title: unknown;
-    description: unknown;
-    evidence: unknown;
-    confidence: unknown;
-  }): void {
-    try {
-      if (!levelAtLeast(this.effectiveLevel(), "full")) return;
-      const record: FindingRecord = {
-        severity: label(input.severity),
-        category: label(input.category),
-        titleRedacted: toText(input.title),
-        descriptionRedacted: toText(input.description),
-        evidenceRedacted: toText(input.evidence),
-        confidence: finiteNumber(input.confidence),
-      };
-      this.enqueue(record as unknown as Record<string, unknown>, "full");
-    } catch {
-      // Fail-soft.
-    }
+    this.enqueue(record as unknown as Record<string, unknown>, { severities: { ...this.acc.severityCounts }, classes: { ...this.acc.classCounts } });
   }
 
   // ── Lifecycle events (PostHog only) ───────────────────────────────────
   //
   // first_run / command_invoked / update / error_exit. They are gated at the
-  // call site first (usage tier AND a resolvable PostHog destination, so
-  // nothing is queued and no install id is minted otherwise), reduced to finite
-  // values here, and drained to PostHog even when a cloud token is present:
-  // they are never part of the cloud wire body.
+  // call site first (usage level AND a resolvable PostHog destination, so
+  // nothing is queued and no install id is minted otherwise) and reduced to
+  // finite values here.
 
   private lifecycleSuppressed = false;
 
@@ -864,7 +713,7 @@ class AnalyticsPipeline {
         default:
           return;
       }
-      this.batch.push({ json: "", bytes: 0, requiredTier: "usage", ts: Date.now(), lifecycle: entry });
+      this.batch.push({ ts: Date.now(), lifecycle: entry });
       this.scheduleTransmit();
     } catch {
       // Telemetry never breaks the caller.
@@ -918,45 +767,20 @@ class AnalyticsPipeline {
 
   // ── The choke point ───────────────────────────────────────────────────
 
-  /** The only path to transmission: consent, redaction, byte limits, envelope. */
-  private enqueue(record: Record<string, unknown>, requiredTier: AnalyticsLevel, extras?: { severities: CountMap; classes: CountMap }): void {
+  /** The only path for usage counters: consent, destination, redaction. */
+  private enqueue(record: Record<string, unknown>, extras?: { severities: CountMap; classes: CountMap }): void {
     try {
       const level = this.effectiveLevel();
-      if (level === "off" || !levelAtLeast(level, requiredTier)) return;
-      // No possible destination -> do not queue (and mint no install id). A cloud
-      // token accepts every tier; the direct PostHog path accepts usage only.
-      if (!this.cloudCredentialsPresent() && !(requiredTier === "usage" && resolvePostHogDestination() !== null)) return;
+      if (level === "off") return;
+      // No destination -> do not queue (and mint no install id).
+      if (resolvePostHogDestination() === null) return;
       const redacted = redactRecordStrings(record);
       if (!redacted) return;
-      const delta = requiredTier === "usage" && redacted["kind"] === "usage" ? this.takeUsageDelta(redacted, extras) : undefined;
-      for (const field of CONTENT_FIELDS) {
-        const content = redacted[field];
-        if (typeof content !== "string") continue;
-        const bytes = Buffer.byteLength(content, "utf8");
-        if (bytes > MAX_CONTENT_BYTES) {
-          this.reportOversize(field, bytes, MAX_CONTENT_BYTES);
-          return;
-        }
-      }
-      const json = JSON.stringify({ ...this.buildEnvelope(), ...redacted });
-      const bytes = Buffer.byteLength(json, "utf8");
-      if (bytes + BODY_OVERHEAD_BYTES > MAX_BODY_BYTES) {
-        this.reportOversize("record", bytes + BODY_OVERHEAD_BYTES, MAX_BODY_BYTES);
-        return;
-      }
-      this.batch.push({ json, bytes, requiredTier, ts: Date.now(), ...(delta ? { delta } : {}) });
+      const delta = redacted["kind"] === "usage" ? this.takeUsageDelta(redacted, extras) : undefined;
+      this.batch.push({ ts: Date.now(), ...(delta ? { delta } : {}) });
       this.scheduleTransmit();
     } catch {
       // Default-deny: malformed collector input never reaches the wire.
-    }
-  }
-
-  private cloudCredentialsPresent(): boolean {
-    try {
-      loadCloudCredentials({ ...(this.homeDir ? { homeDir: this.homeDir } : {}), warn: () => {} });
-      return true;
-    } catch {
-      return false;
     }
   }
 
@@ -983,24 +807,6 @@ class AnalyticsPipeline {
     return delta;
   }
 
-  private reportOversize(field: typeof CONTENT_FIELDS[number] | "record", bytes: number, maxBytes: number): void {
-    const filename = "analytics-outcomes.log";
-    try {
-      const dir = homeStateDir(this.homeDir);
-      mkdirSync(dir, { recursive: true, mode: 0o700 });
-      appendFileSync(join(dir, filename),
-        `${JSON.stringify({ ts: Date.now(), outcome: "oversize", field, bytes, maxBytes })}\n`,
-        { mode: 0o600 });
-    } catch {
-      // A read-only home must not break the tool or hide the stderr outcome.
-    }
-    try {
-      process.stderr.write(`[0 analytics] Skipped oversized ${field}: ${bytes} UTF-8 bytes exceeds ${maxBytes}; not truncated or uploaded. Details: ${filename}.\n`);
-    } catch {
-      // Telemetry never breaks the caller.
-    }
-  }
-
   /** Read (or mint) the install id once per process, remembering whether this process minted it. */
   private resolveInstallId(): string {
     if (this.installId === null) {
@@ -1013,20 +819,6 @@ class AnalyticsPipeline {
       }
     }
     return this.installId;
-  }
-
-  private buildEnvelope(): AnalyticsEnvelope {
-    return {
-      schemaVersion: ANALYTICS_SCHEMA_VERSION,
-      installId: this.resolveInstallId(),
-      sessionId: this.sessionId,
-      tier: this.effectiveLevel(),
-      ts: Date.now(),
-      cliVersion: typeof VERSION === "string" ? VERSION : "unknown",
-      platform: finitePlatform(),
-      arch: finiteArch(),
-      runtime: detectRuntime(),
-    };
   }
 
   private scheduleTransmit(): void {
@@ -1055,69 +847,13 @@ class AnalyticsPipeline {
   private async drain(): Promise<void> {
     this.effectiveLevel();
     if (this.batch.length === 0) return;
-    // Lifecycle events are PostHog-only: take them out before anything can build a cloud body.
-    const lifecycle = this.batch.filter((entry) => entry.lifecycle !== undefined);
-    if (lifecycle.length > 0) this.batch = this.batch.filter((entry) => entry.lifecycle === undefined);
-    let creds: { host: string; token: string } | null = null;
-    try {
-      creds = loadCloudCredentials(this.homeDir ? { homeDir: this.homeDir } : {});
-    } catch {
-      // No cloud token: usage also goes to the anonymous PostHog path.
-    }
-    if (creds) {
-      await this.drainCloud(creds);
-      await this.drainPostHog(lifecycle);
-    } else {
-      await this.drainPostHog(lifecycle);
-    }
+    await this.drainPostHog();
   }
 
-  private async drainCloud(creds: { host: string; token: string }): Promise<void> {
-    while (this.batch.length > 0) {
-      // Recheck before EACH POST. Unsent records remain in this.batch while
-      // awaiting HTTP, so a downgrade purges them even if later re-enabled.
-      const level = this.effectiveLevel();
-      this.batch = this.batch.filter((entry) => levelAtLeast(level, entry.requiredTier));
-      if (this.batch.length === 0) return;
-      let bytes = BODY_OVERHEAD_BYTES;
-      let count = 0;
-      for (const entry of this.batch) {
-        const nextBytes = bytes + entry.bytes + (count === 0 ? 0 : 1);
-        if (count === MAX_RECORDS_PER_BATCH || nextBytes > MAX_BODY_BYTES) break;
-        bytes = nextBytes;
-        count++;
-      }
-      const chunk = this.batch.splice(0, count);
-      const body = BODY_PREFIX + chunk.map((entry) => entry.json).join(",") + BODY_SUFFIX;
-      for (const entry of chunk) this.appendTransparencyLog(entry.json);
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), TRANSMIT_TIMEOUT_MS);
-      timer.unref?.();
-      try {
-        const doFetch = this.fetchImpl ?? fetch;
-        await doFetch(`${creds.host}${ANALYTICS_ENDPOINT}`, {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${creds.token}`,
-            "Content-Type": "application/json",
-            Accept: "application/json",
-            "User-Agent": `@0/cli/${typeof VERSION === "string" ? VERSION : "unknown"}`,
-          },
-          body,
-          signal: controller.signal,
-        });
-      } catch {
-        // Best-effort delivery, no retries or raw-content error reporting.
-      } finally {
-        clearTimeout(timer);
-      }
-    }
-  }
-
-  // ── Anonymous usage -> PostHog (no cloud token) ────────────────────────
+  // ── Usage and lifecycle events -> PostHog ──────────────────────────────
 
   private installOrSessionId(): string {
-    const id = this.buildEnvelope().installId;
+    const id = this.resolveInstallId();
     return id && id !== "unknown" ? id : this.sessionId;
   }
 
@@ -1202,11 +938,11 @@ class AnalyticsPipeline {
     };
   }
 
-  private async drainPostHog(extra: typeof this.batch = []): Promise<void> {
+  private async drainPostHog(): Promise<void> {
     const destination: PostHogDestination | null = resolvePostHogDestination();
-    // Only the usage tier is ever eligible; recheck the live consent level first.
+    // Recheck the live consent level first.
     const level = this.effectiveLevel();
-    const entries = [...this.batch, ...extra].filter((entry) => entry.requiredTier === "usage" && levelAtLeast(level, "usage"));
+    const entries = level === "off" ? [] : [...this.batch];
     this.batch = [];
     if (!destination || level === "off" || entries.length === 0) return;
     const distinctId = this.installOrSessionId();
@@ -1281,8 +1017,8 @@ class AnalyticsPipeline {
   }
 
   /** Test-only: drive the choke path directly with an arbitrary record. */
-  __enqueueForTests(record: Record<string, unknown>, requiredTier: AnalyticsLevel = "usage"): void {
-    this.enqueue(record, requiredTier);
+  __enqueueForTests(record: Record<string, unknown>): void {
+    this.enqueue(record);
   }
 
   /** Test-only: reset all state to a fresh pipeline. */

@@ -66,4 +66,4 @@ if [ "$LOAD_IMAGE" = 1 ] && [ -f "$HERE/image.tar.gz" ]; then
   fi
 fi
 
-printf '%s\n' "Next: export ZERO_ENTERPRISE=1 and point 0 at your in-network model endpoint." >&2
+printf '%s\n' "Next: export ZERO_ENTERPRISE=1 DO_NOT_TRACK=1 and point 0 at your in-network model endpoint." >&2

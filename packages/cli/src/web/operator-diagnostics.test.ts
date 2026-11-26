@@ -19,7 +19,7 @@ beforeEach(() => {
   home = realpathSync(mkdtempSync(join(tmpdir(), "zero-operator-diag-")));
   vi.stubEnv("HOME", home);
   vi.stubEnv("ZERO_SENTRY_DSN", DSN);
-  for (const name of ["ZERO_OFFLINE", "ZERO_NO_TELEMETRY", "DO_NOT_TRACK"]) vi.stubEnv(name, undefined);
+  for (const name of ["DO_NOT_TRACK"]) vi.stubEnv(name, undefined);
   fetchMock = vi.fn(async () => new Response("{}", { status: 200 }));
   vi.stubGlobal("fetch", fetchMock);
 });
@@ -139,7 +139,7 @@ describe("pending report review", () => {
   it("refuses to preview when reporting is opted out", async () => {
     const service = new WebOperatorServices();
     const id = await stored(service);
-    vi.stubEnv("ZERO_OFFLINE", "1");
+    vi.stubEnv("DO_NOT_TRACK", "1");
     expect((await call(service, "POST", `diagnostics/pending/${id}`, { action: "preview" }))!.status).toBe(409);
   });
 

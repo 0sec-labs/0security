@@ -59,7 +59,7 @@ describe("handleDiagnosticReport consent model", () => {
     expect(JSON.stringify(payload)).not.toMatch(new RegExp(`${SECRET}|${HOST}|alice|acme|scan-output`));
   });
 
-  it.each(["ZERO_OFFLINE", "ZERO_NO_TELEMETRY", "DO_NOT_TRACK"])("%s blocks send and persistence in every mode", async (name) => {
+  it.each(["DO_NOT_TRACK"])("%s blocks send and persistence in every mode", async (name) => {
     for (const policy of ["ask", "automatic"] as const) {
       const { submit, result } = run(policy, { ZERO_SENTRY_DSN: DSN, [name]: "1" });
       expect(await result).toBe("dropped");

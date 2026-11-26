@@ -113,7 +113,7 @@ export OPENAI_BASE_URL="https://litellm.internal.example/v1"
 export OPENAI_API_KEY="your-litellm-key"
 export ZERO_SELECTED_PROVIDER="openai"
 export ZERO_MODEL="claude-bedrock"
-export ZERO_NO_TELEMETRY=1
+export DO_NOT_TRACK=1
 0security -p "Review ./authorized-repo"
 ```
 
@@ -123,7 +123,7 @@ export ZERO_NO_TELEMETRY=1
 - Leave `ZERO_LLM_FALLBACK` unset and do not export other provider keys, so no request can route elsewhere. See [Keep model traffic in one region](#keep-model-traffic-in-one-region).
 - To check the route without a scan, run `ZERO_RUNTIME_TRACE=1 0 -p "reply with ok"`. It prints the chosen provider and model on stderr.
 
-With `ZERO_NO_TELEMETRY=1`, `DO_NOT_TRACK=1` or `ZERO_OFFLINE=1`, 0 sends no usage counts, command names or crash reports. It also skips the public price and model-catalog lookups, so prices for gateway models show as unknown. To stop the update check as well, set `ZERO_NO_UPDATE_CHECK=1`, or use `ZERO_OFFLINE=1` in place of `ZERO_NO_TELEMETRY=1`. With all of these off, model requests go only to `OPENAI_BASE_URL`.
+With `DO_NOT_TRACK=1`, 0 sends no usage counts, command names or crash reports. It also skips the public price and model-catalog lookups, so prices for gateway models show as unknown. To stop the update check as well, set `ZERO_NO_UPDATE_CHECK=1`, or use `ZERO_OFFLINE=1`. With all of these off, model requests go only to `OPENAI_BASE_URL`.
 
 Some traffic stays under your control. The `web_search` tool is off unless you set `ZERO_FEATURE_WEB_SEARCH=1`. Scan targets are contacted because you point 0 at them. GitHub is contacted only when you scan a GitHub repository.
 

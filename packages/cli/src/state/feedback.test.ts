@@ -207,7 +207,7 @@ describe("submissionBlockedReason", () => {
     expect(submissionBlockedReason({ "ZERO_FEEDBACK_URL": "not a url" })).toBe("insecure-endpoint");
   });
 
-  it.each(["ZERO_OFFLINE", "ZERO_NO_TELEMETRY", "DO_NOT_TRACK"])(
+  it.each(["DO_NOT_TRACK"])(
     "%s wins over a configured endpoint",
     (name) => {
       expect(submissionBlockedReason({ ...HTTPS_ENV, [name]: "1" })).toBe("opt-out");
@@ -215,11 +215,11 @@ describe("submissionBlockedReason", () => {
   );
 
   it.each(["1", "true", "yes", "on"])("treats %s as opt-out", (value) => {
-    expect(submissionBlockedReason({ ...HTTPS_ENV, "ZERO_OFFLINE": value })).toBe("opt-out");
+    expect(submissionBlockedReason({ ...HTTPS_ENV, "DO_NOT_TRACK": value })).toBe("opt-out");
   });
 
   it.each(["0", "false", "no", "", "  "])("does not treat %s as opt-out", (value) => {
-    expect(submissionBlockedReason({ ...HTTPS_ENV, "ZERO_OFFLINE": value })).toBeNull();
+    expect(submissionBlockedReason({ ...HTTPS_ENV, "DO_NOT_TRACK": value })).toBeNull();
   });
 });
 
@@ -306,7 +306,7 @@ describe("buildSubmitPreview", () => {
 
   it("is null when submission is blocked", () => {
     expect(buildSubmitPreview(payload(), {}, NO_CLOUD)).toBeNull();
-    expect(buildSubmitPreview(payload(), { ...HTTPS_ENV, "ZERO_OFFLINE": "1" })).toBeNull();
+    expect(buildSubmitPreview(payload(), { ...HTTPS_ENV, "DO_NOT_TRACK": "1" })).toBeNull();
     expect(buildSubmitPreview(payload(), { "ZERO_FEEDBACK_URL": "http://x.test" })).toBeNull();
   });
 
@@ -375,7 +375,7 @@ describe("submitFeedback", () => {
 
   it("refuses when opted out, even though sending was explicitly requested", async () => {
     const { fn, calls } = stubFetch(() => okResponse());
-    for (const name of ["ZERO_OFFLINE", "ZERO_NO_TELEMETRY", "DO_NOT_TRACK"]) {
+    for (const name of ["DO_NOT_TRACK"]) {
       const result = await submitFeedback(payload(), { ...HTTPS_ENV, [name]: "1" }, { fetchImpl: fn });
       expect(result.ok).toBe(false);
       expect(result.skipped).toBe("opt-out");
@@ -832,7 +832,7 @@ describe("diagnostic destination and consent", () => {
   it("lets hard opt-outs beat configured Sentry and explicit confirmation", async () => {
     const report = buildDiagnosticFeedback(diagInfo());
     const { fn, calls } = stubFetch(() => okResponse());
-    for (const name of ["ZERO_OFFLINE", "ZERO_NO_TELEMETRY", "DO_NOT_TRACK"]) {
+    for (const name of ["DO_NOT_TRACK"]) {
       const env = { ...sentryEnv, [name]: "true" };
       expect(buildSubmitPreview(report, env)).toBeNull();
       expect((await submitFeedback(report, env, {
@@ -890,7 +890,7 @@ describe("diagnostic destination and consent", () => {
       vi.stubGlobal("__ZERO_BUILT_IN_SENTRY_DSN__", BUILT_IN);
       const report = buildDiagnosticFeedback(diagInfo());
       const { fn, calls } = stubFetch(() => okResponse());
-      for (const name of ["ZERO_OFFLINE", "ZERO_NO_TELEMETRY", "DO_NOT_TRACK"]) {
+      for (const name of ["DO_NOT_TRACK"]) {
         const env = { [name]: "1" };
         expect(submissionBlockedReason(env, {}, report)).toBe("opt-out");
         expect(buildSubmitPreview(report, env)).toBeNull();
