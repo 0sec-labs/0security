@@ -1,0 +1,2179 @@
+use std::sync::OnceLock;
+
+use regex::Regex;
+
+use crate::impl_rule;
+use crate::rules::common::AliasTable;
+use crate::rules::common::{
+    get_source_line, hardcoded_secret_re, is_secret_value_long_enough, make_finding,
+    make_finding_from_offsets, walk_tree,
+};
+use crate::rules::go_taint::{
+    self, go_aliases_from_tree, go_taint_sources, NodeMatcher as GoNodeMatcher,
+    TaintSpec as GoTaintSpec,
+};
+use crate::rules::FileContext;
+use crate::{Finding, Language, Severity};
+
+// ─── Static regex helpers (compiled once) ────────────────────────────────────
+
+fn go_sql_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"(?i)(SELECT\s+.{0,40}\s+FROM|INSERT\s+INTO|UPDATE\s+.{0,40}\s+SET|DELETE\s+FROM|DROP\s+TABLE|ALTER\s+TABLE|CREATE\s+TABLE|EXEC\s+)")
+            .expect("static Go SQL regex should compile")
+    })
+}
+
+fn go_insecure_skip_verify_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"InsecureSkipVerify\s*:\s*true").expect("static Go TLS regex should compile")
+    })
+}
+
+fn go_min_version_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"\bMinVersion\s*:").expect("static Go TLS MinVersion regex should compile")
+    })
+}
+
+fn go_cookie_secure_field_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"\bSecure\s*:").expect("static Go cookie Secure field regex should compile")
+    })
+}
+
+fn go_cookie_secure_false_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"\bSecure\s*:\s*false\b")
+            .expect("static Go cookie Secure false regex should compile")
+    })
+}
+
+fn go_cookie_http_only_field_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"\bHttpOnly\s*:").expect("static Go cookie HttpOnly field regex should compile")
+    })
+}
+
+fn go_cookie_http_only_false_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"\bHttpOnly\s*:\s*false\b")
+            .expect("static Go cookie HttpOnly false regex should compile")
+    })
+}
+
+fn go_hardcoded_byte_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r#"\[\]byte\(\s*"[^"]{4,}"\s*\)"#)
+            .expect("static Go JWT secret regex should compile")
+    })
+}
+
+/// Go test and benchmark files (`*_test.go`) are not production code paths and
+/// routinely use dynamic URLs against `httptest` servers or set
+/// `InsecureSkipVerify` against self-signed certs. Skip them for the
+/// network-facing FP-prone rules (`go/no-ssrf`, `go/missing-ssl-minversion`).
+fn go_is_test_file(path: &std::path::Path) -> bool {
+    let Some(name) = path.file_name().and_then(|f| f.to_str()) else {
+        return false;
+    };
+    name.ends_with("_test.go") || name.ends_with("_bench.go")
+}
+
+/// Recognize URL expressions that resolve to an `httptest` test server, which
+/// is not a real SSRF sink. Matches the common `httptest` conventions
+/// (`ts.URL`, `srv.URL`, `server.URL`). Loopback literals (`localhost`,
+/// `127.0.0.1`) are intentionally NOT treated as safe: loopback SSRF is a real
+/// vulnerability and must remain flaggable. Works on the raw argument text so
+/// it is independent of the file path (the test-file skip does not apply to
+/// fixtures named `safe.go`).
+fn go_url_arg_is_local_test_server(arg_text: &str) -> bool {
+    const NEEDLES: [&str; 3] = ["ts.URL", "srv.URL", "server.URL"];
+    NEEDLES.iter().any(|needle| arg_text.contains(needle))
+}
+
+fn go_composite_literal_type_text<'a>(
+    node: tree_sitter::Node<'_>,
+    source: &'a str,
+) -> Option<&'a str> {
+    if node.kind() != "composite_literal" {
+        return None;
+    }
+    let type_node = node.child_by_field_name("type")?;
+    Some(&source[type_node.byte_range()])
+}
+
+fn go_import_locals_for_path(
+    source: &str,
+    tree: &tree_sitter::Tree,
+    import_path: &str,
+) -> Vec<String> {
+    let mut locals = Vec::new();
+
+    walk_tree(tree.root_node(), source, &mut |node, src| {
+        if node.kind() != "import_spec" {
+            return;
+        }
+
+        let Some(path_node) = node.child_by_field_name("path") else {
+            return;
+        };
+        let raw_path = &src[path_node.byte_range()];
+        let normalized_path = raw_path.trim_matches(|c: char| c == '"' || c == '`');
+        if normalized_path != import_path {
+            return;
+        }
+
+        let local = match node.child_by_field_name("name") {
+            Some(name_node) if name_node.kind() == "package_identifier" => {
+                Some(src[name_node.byte_range()].to_string())
+            }
+            Some(name_node)
+                if name_node.kind() == "dot" || name_node.kind() == "blank_identifier" =>
+            {
+                None
+            }
+            _ => Some(
+                import_path
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or(import_path)
+                    .to_string(),
+            ),
+        };
+
+        if let Some(local) = local {
+            locals.push(local);
+        }
+    });
+
+    locals
+}
+
+// ─── Rule 1: no-sql-injection ───────────────────────────────────────────────
+
+pub struct NoSqlInjection;
+
+impl_rule! {
+    NoSqlInjection,
+    id = "go/no-sql-injection",
+    severity = Severity::Critical,
+    cwe = Some("CWE-89"),
+    description = "Potential SQL injection via string concatenation or fmt.Sprintf",
+    language = Language::Go,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+        let sql_pattern = go_sql_re();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            // Detect: "SELECT ... WHERE id = " + userId (binary_expression with +)
+            if node.kind() == "binary_expression" {
+                let text = &src[node.byte_range()];
+                if text.contains('+') {
+                    // Check if left child is a string with SQL
+                    if let Some(left) = node.child_by_field_name("left") {
+                        if left.kind() == "interpreted_string_literal"
+                            || left.kind() == "raw_string_literal"
+                        {
+                            let left_text = &src[left.byte_range()];
+                            if sql_pattern.is_match(left_text) {
+                                findings.push(make_finding(
+                                    _self.id(),
+                                    _self.severity(),
+                                    _self.cwe(),
+                                    "SQL query built with string concatenation — use parameterized queries",
+                                    node,
+                                    src,
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Detect: fmt.Sprintf("SELECT ... WHERE id = %s", userId)
+            if node.kind() == "call_expression" {
+                if let Some(func) = node.child_by_field_name("function") {
+                    let func_text = &src[func.byte_range()];
+                    if func_text == "fmt.Sprintf" {
+                        if let Some(args) = node.child_by_field_name("arguments") {
+                            if let Some(first_arg) = args.named_child(0) {
+                                if first_arg.kind() == "interpreted_string_literal"
+                                    || first_arg.kind() == "raw_string_literal"
+                                {
+                                    let arg_text = &src[first_arg.byte_range()];
+                                    if sql_pattern.is_match(arg_text) {
+                                        findings.push(make_finding(
+                                            _self.id(),
+                                            _self.severity(),
+                                            _self.cwe(),
+                                            "SQL query built with fmt.Sprintf — use parameterized queries",
+                                            node,
+                                            src,
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        findings
+
+    }
+}
+
+// ─── Rule 2: no-command-injection ───────────────────────────────────────────
+
+pub struct NoCommandInjection;
+
+impl_rule! {
+    NoCommandInjection,
+    id = "go/no-command-injection",
+    severity = Severity::Critical,
+    cwe = Some("CWE-78"),
+    description = "Potential command injection via exec.Command with dynamic input",
+    language = Language::Go,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() == "call_expression" {
+                if let Some(func) = node.child_by_field_name("function") {
+                    let func_text = &src[func.byte_range()];
+                    if func_text == "exec.Command" || func_text == "exec.CommandContext" {
+                        if let Some(args) = node.child_by_field_name("arguments") {
+                            if let Some(first_arg) = args.named_child(0) {
+                                // Flag if the first argument is not a string literal
+                                if first_arg.kind() != "interpreted_string_literal"
+                                    && first_arg.kind() != "raw_string_literal"
+                                {
+                                    findings.push(make_finding(
+                                        _self.id(),
+                                        _self.severity(),
+                                        _self.cwe(),
+                                        "exec.Command called with dynamic argument — risk of command injection",
+                                        node,
+                                        src,
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        findings
+
+    }
+}
+
+// ─── Rule 3: no-hardcoded-secret ────────────────────────────────────────────
+
+pub struct NoHardcodedSecret;
+
+impl_rule! {
+    NoHardcodedSecret,
+    id = "go/no-hardcoded-secret",
+    severity = Severity::High,
+    cwe = Some("CWE-798"),
+    description = "Hardcoded secret or credential detected",
+    language = Language::Go,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let mut findings = Vec::new();
+        let secret_pattern = hardcoded_secret_re();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            // Short variable declaration: password := "hardcoded"
+            if node.kind() == "short_var_declaration" {
+                if let (Some(left), Some(right)) = (
+                    node.child_by_field_name("left"),
+                    node.child_by_field_name("right"),
+                ) {
+                    let left_text = &src[left.byte_range()];
+                    if secret_pattern.is_match(left_text) {
+                        // Check if right side is a string literal
+                        // right is an expression_list, check its first child
+                        let value_node = right.named_child(0).unwrap_or(right);
+                        if value_node.kind() == "interpreted_string_literal"
+                            || value_node.kind() == "raw_string_literal"
+                        {
+                            let val = &src[value_node.byte_range()];
+                            let inner = val.trim_matches(|c| c == '"' || c == '`');
+                            if is_secret_value_long_enough(inner, ctx.secret_thresholds) {
+                                findings.push(make_finding(
+                                    _self.id(),
+                                    _self.severity(),
+                                    _self.cwe(),
+                                    &format!(
+                                        "Hardcoded secret in '{}' — use environment variables",
+                                        left_text.trim()
+                                    ),
+                                    node,
+                                    src,
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+
+            // var declaration: var password = "hardcoded"
+            if node.kind() == "var_spec" {
+                if let Some(name_node) = node.child_by_field_name("name") {
+                    let name = &src[name_node.byte_range()];
+                    if secret_pattern.is_match(name) {
+                        if let Some(value) = node.child_by_field_name("value") {
+                            let value_node = value.named_child(0).unwrap_or(value);
+                            if value_node.kind() == "interpreted_string_literal"
+                                || value_node.kind() == "raw_string_literal"
+                            {
+                                let val = &src[value_node.byte_range()];
+                                let inner = val.trim_matches(|c| c == '"' || c == '`');
+                                if is_secret_value_long_enough(inner, ctx.secret_thresholds) {
+                                    findings.push(make_finding(
+                                        _self.id(),
+                                        _self.severity(),
+                                        _self.cwe(),
+                                        &format!(
+                                            "Hardcoded secret in '{}' — use environment variables",
+                                            name
+                                        ),
+                                        node,
+                                        src,
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // const declaration: const apiKey = "hardcoded"
+            if node.kind() == "const_spec" {
+                if let Some(name_node) = node.child_by_field_name("name") {
+                    let name = &src[name_node.byte_range()];
+                    if secret_pattern.is_match(name) {
+                        if let Some(value) = node.child_by_field_name("value") {
+                            let value_node = value.named_child(0).unwrap_or(value);
+                            if value_node.kind() == "interpreted_string_literal"
+                                || value_node.kind() == "raw_string_literal"
+                            {
+                                let val = &src[value_node.byte_range()];
+                                let inner = val.trim_matches(|c| c == '"' || c == '`');
+                                if is_secret_value_long_enough(inner, ctx.secret_thresholds) {
+                                    findings.push(make_finding(
+                                        _self.id(),
+                                        _self.severity(),
+                                        _self.cwe(),
+                                        &format!(
+                                            "Hardcoded secret in '{}' — use environment variables",
+                                            name
+                                        ),
+                                        node,
+                                        src,
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        findings
+
+    }
+}
+
+// ─── Rule 4: no-weak-crypto ────────────────────────────────────────────────
+
+pub struct NoWeakCrypto;
+
+impl_rule! {
+    NoWeakCrypto,
+    id = "go/no-weak-crypto",
+    severity = Severity::Medium,
+    cwe = Some("CWE-327"),
+    description = "Use of weak cryptographic hash (MD5/SHA1)",
+    language = Language::Go,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            // Detect: md5.New(), md5.Sum(), sha1.New(), sha1.Sum()
+            if node.kind() == "call_expression" {
+                if let Some(func) = node.child_by_field_name("function") {
+                    let func_text = &src[func.byte_range()];
+                    if func_text == "md5.New"
+                        || func_text == "md5.Sum"
+                        || func_text == "sha1.New"
+                        || func_text == "sha1.Sum"
+                    {
+                        let algo = if func_text.starts_with("md5") {
+                            "MD5"
+                        } else {
+                            "SHA1"
+                        };
+                        findings.push(make_finding(
+                            _self.id(),
+                            _self.severity(),
+                            _self.cwe(),
+                            &format!(
+                                "{} is cryptographically weak — use SHA-256 or stronger",
+                                algo
+                            ),
+                            node,
+                            src,
+                        ));
+                    }
+                }
+            }
+
+            // Detect import of "crypto/md5" or "crypto/sha1"
+            if node.kind() == "import_spec" {
+                if let Some(path) = node.child_by_field_name("path") {
+                    let path_text = &src[path.byte_range()];
+                    if path_text == "\"crypto/md5\"" || path_text == "\"crypto/sha1\"" {
+                        let algo = if path_text.contains("md5") {
+                            "MD5"
+                        } else {
+                            "SHA1"
+                        };
+                        findings.push(make_finding(
+                            _self.id(),
+                            _self.severity(),
+                            _self.cwe(),
+                            &format!(
+                                "Import of weak crypto package {} — use crypto/sha256 or stronger",
+                                algo
+                            ),
+                            node,
+                            src,
+                        ));
+                    }
+                }
+            }
+        });
+        findings
+
+    }
+}
+
+// ─── Rule: pq-vulnerable-crypto ───────────────────────────────────────────
+
+pub struct PqVulnerableCrypto;
+
+impl_rule! {
+    PqVulnerableCrypto,
+    id = "go/pq-vulnerable-crypto",
+    severity = Severity::High,
+    cwe = Some("CWE-327"),
+    description = "Use of quantum-vulnerable cryptographic algorithm (RSA/ECDSA/ECDH/DSA/Ed25519)",
+    language = Language::Go,
+    // CNSA 2.0 class: web/cloud (exclusive-use 2033).
+    cnsa2_deadline = "2033",
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let local_aliases: Option<AliasTable> = if ctx.go_aliases.is_none() {
+            Some(go_aliases_from_tree(source, tree))
+        } else {
+            None
+        };
+        let aliases: Option<&AliasTable> = ctx.go_aliases.or(local_aliases.as_ref());
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            // Only flag calls, not imports, to avoid double-counting.
+            // Require func child to be a selector_expression (pkg.Func) to
+            // skip nested calls like ecdh.P256().GenerateKey() — the outer
+            // call's function is a call_expression, not a selector.
+            if node.kind() == "call_expression" {
+                if let Some(func) = node.child_by_field_name("function") {
+                    if func.kind() != "selector_expression" {
+                        return;
+                    }
+                    // Skip calls nested as arguments to another PQ-vulnerable call
+                    // (e.g. elliptic.P256() inside ecdsa.GenerateKey(elliptic.P256(), ...))
+                    if let Some(parent) = node.parent() {
+                        if parent.kind() == "argument_list" {
+                            if let Some(grandparent) = parent.parent() {
+                                if grandparent.kind() == "call_expression" {
+                                    if let Some(outer_func) = grandparent.child_by_field_name("function") {
+                                        if outer_func.kind() == "selector_expression" {
+                                            let outer_raw = &src[outer_func.byte_range()];
+                                            let outer_text = if let Some(al) = aliases {
+                                                al.resolve(outer_raw)
+                                            } else {
+                                                std::borrow::Cow::Borrowed(outer_raw)
+                                            };
+                                            if outer_text.as_ref().starts_with("rsa.")
+                                                || outer_text.as_ref().starts_with("ecdsa.")
+                                                || outer_text.as_ref().starts_with("ecdh.")
+                                                || outer_text.as_ref().starts_with("dsa.")
+                                                || outer_text.as_ref().starts_with("elliptic.")
+                                                || outer_text.as_ref().starts_with("ed25519.")
+                                            {
+                                                return;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    let raw = &src[func.byte_range()];
+                    let func_text = if let Some(al) = aliases {
+                        al.resolve(raw)
+                    } else {
+                        std::borrow::Cow::Borrowed(raw)
+                    };
+                    let (algo, canonical_algo, replacement) = match func_text.as_ref() {
+                        s if s.starts_with("rsa.") => ("RSA", "RSA", "General use (FIPS category III): X25519MLKEM768 hybrid KEM (or HQC for code-based diversity, draft) for encryption, ML-DSA-65 (FIPS 204) / FN-DSA (FIPS 206, draft) for signatures. CNSA 2.0 / NSS: ML-KEM-1024 for key establishment, ML-DSA-87 for signatures."),
+                        s if s.starts_with("ecdsa.") => ("ECDSA", "ECDSA", "General use (FIPS category III): ML-DSA-65 (FIPS 204) or FN-DSA (FIPS 206, draft) for smaller signatures. CNSA 2.0 / NSS: ML-DSA-87 for signatures."),
+                        s if s.starts_with("ecdh.") => ("ECDH", "ECDH", "General use (FIPS category III): X25519MLKEM768 hybrid KEM (FIPS 203) or HQC (code-based diversity hedge, draft). CNSA 2.0 / NSS: ML-KEM-1024 for key establishment."),
+                        s if s.starts_with("dsa.") => ("DSA", "DSA", "General use (FIPS category III): ML-DSA-65 (FIPS 204) or FN-DSA (FIPS 206, draft) for smaller signatures. CNSA 2.0 / NSS: ML-DSA-87 for signatures."),
+                        s if s.starts_with("elliptic.") => ("ECDH/ECDSA (elliptic)", "ECDH", "General use (FIPS category III): X25519MLKEM768 hybrid KEM / HQC (draft) or ML-DSA-65 (FIPS 204) / FN-DSA (FIPS 206, draft). CNSA 2.0 / NSS: ML-KEM-1024 for key establishment, ML-DSA-87 for signatures."),
+                        s if s.starts_with("ed25519.") => ("Ed25519", "Ed25519", "General use (FIPS category III): ML-DSA-65 (FIPS 204) or FN-DSA (FIPS 206, draft) for smaller signatures. CNSA 2.0 / NSS: ML-DSA-87 for signatures."),
+                        _ => return,
+                    };
+                    let mut f = make_finding(
+                        _self.id(),
+                        _self.severity(),
+                        _self.cwe(),
+                        &format!(
+                            "{} is quantum-vulnerable — migrate to {}",
+                            algo, replacement
+                        ),
+                        node,
+                        src,
+                    );
+                    f.tags = vec!["PQ".into()];
+                    f.crypto_algorithm = Some(canonical_algo.to_string());
+                    findings.push(f);
+                }
+            }
+        });
+        findings
+
+    }
+}
+
+// ─── Rule: pq-ready-crypto (informational) ────────────────────────────────
+
+pub struct PqReadyCrypto;
+
+impl_rule! {
+    PqReadyCrypto,
+    id = "go/pq-ready-crypto",
+    severity = Severity::Low,
+    cwe = None,
+    description = "Post-quantum / hybrid cryptographic algorithm in use (ML-KEM, ML-DSA, SLH-DSA, FN-DSA, HQC, or hybrid KEM)",
+    language = Language::Go,
+    fn check(_self, source, _tree) {
+        crate::rules::pq::pq_ready_findings(_self.id(), source, _self.language())
+    }
+}
+
+// ─── Rule 5: gin-no-trusted-proxies ────────────────────────────────────────
+
+pub struct GinNoTrustedProxies;
+
+impl_rule! {
+    GinNoTrustedProxies,
+    id = "go/gin-no-trusted-proxies",
+    severity = Severity::Medium,
+    cwe = Some("CWE-346"),
+    description = "Gin engine created without SetTrustedProxies configuration",
+    language = Language::Go,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+        // Check if gin.Default() or gin.New() is called
+        let has_gin_init = source.contains("gin.Default()") || source.contains("gin.New()");
+        let has_trusted_proxies = source.contains("SetTrustedProxies");
+
+        if has_gin_init && !has_trusted_proxies {
+            walk_tree(tree.root_node(), source, &mut |node, src| {
+                if node.kind() == "call_expression" {
+                    if let Some(func) = node.child_by_field_name("function") {
+                        let func_text = &src[func.byte_range()];
+                        if func_text == "gin.Default" || func_text == "gin.New" {
+                            findings.push(make_finding(
+                                _self.id(),
+                                _self.severity(),
+                                _self.cwe(),
+                                &format!(
+                                    "{}() called without SetTrustedProxies — configure trusted proxies to prevent IP spoofing",
+                                    func_text
+                                ),
+                                node,
+                                src,
+                            ));
+                        }
+                    }
+                }
+            });
+        }
+        findings
+
+    }
+}
+
+// ─── Rule 6: net-http-no-timeout ──────────────────────────────────────────
+
+pub struct NetHttpNoTimeout;
+
+impl_rule! {
+    NetHttpNoTimeout,
+    id = "go/net-http-no-timeout",
+    severity = Severity::Medium,
+    cwe = Some("CWE-400"),
+    description = "http.ListenAndServe without timeout configuration enables slowloris attacks",
+    language = Language::Go,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() == "call_expression" {
+                if let Some(func) = node.child_by_field_name("function") {
+                    let func_text = &src[func.byte_range()];
+                    if func_text == "http.ListenAndServe" || func_text == "http.ListenAndServeTLS" {
+                        findings.push(make_finding(
+                            _self.id(),
+                            _self.severity(),
+                            _self.cwe(),
+                            &format!(
+                                "{} used without timeout — use http.Server with ReadTimeout/WriteTimeout to prevent slowloris",
+                                func_text
+                            ),
+                            node,
+                            src,
+                        ));
+                    }
+                }
+            }
+        });
+        findings
+
+    }
+}
+
+// ─── Rule 7: no-ssrf ───────────────────────────────────────────────────────
+
+pub struct NoSsrf;
+
+impl crate::rules::Rule for NoSsrf {
+    fn id(&self) -> &str {
+        "go/no-ssrf"
+    }
+    fn severity(&self) -> Severity {
+        Severity::High
+    }
+    fn cwe(&self) -> Option<&str> {
+        Some("CWE-918")
+    }
+    fn description(&self) -> &str {
+        "Potential SSRF via http.Get/http.Post with variable URL"
+    }
+    fn language(&self) -> Language {
+        Language::Go
+    }
+
+    /// Test and benchmark files routinely fetch dynamic `httptest` server URLs;
+    /// these are not real SSRF sinks, so skip them entirely.
+    fn applies_to_path(&self, path: &std::path::Path) -> bool {
+        !go_is_test_file(path)
+    }
+
+    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() == "call_expression" {
+                if let Some(func) = node.child_by_field_name("function") {
+                    let func_text = &src[func.byte_range()];
+                    if func_text == "http.Get"
+                        || func_text == "http.Post"
+                        || func_text == "http.Head"
+                        || func_text == "http.PostForm"
+                        || func_text == "http.NewRequest"
+                        || func_text == "http.NewRequestWithContext"
+                    {
+                        if let Some(args) = node.child_by_field_name("arguments") {
+                            let url_arg = if func_text == "http.NewRequest" {
+                                args.named_child(1)
+                            } else if func_text == "http.NewRequestWithContext" {
+                                args.named_child(2)
+                            } else {
+                                args.named_child(0)
+                            };
+
+                            if let Some(first_arg) = url_arg {
+                                let arg_text = &src[first_arg.byte_range()];
+                                // Flag if URL arg is not a string literal and is
+                                // not a recognized local test-server / loopback URL.
+                                if first_arg.kind() != "interpreted_string_literal"
+                                    && first_arg.kind() != "raw_string_literal"
+                                    && !go_url_arg_is_local_test_server(arg_text)
+                                {
+                                    findings.push(make_finding(
+                                        self.id(),
+                                        self.severity(),
+                                        self.cwe(),
+                                        &format!(
+                                            "{} called with dynamic URL — validate and allowlist target hosts to prevent SSRF",
+                                            func_text
+                                        ),
+                                        node,
+                                        src,
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        findings
+    }
+}
+
+// ─── Rule 8: insecure-tls-skip-verify ──────────────────────────────────────
+
+pub struct InsecureTlsSkipVerify;
+
+impl_rule! {
+    InsecureTlsSkipVerify,
+    id = "go/insecure-tls-skip-verify",
+    severity = Severity::High,
+    cwe = Some("CWE-295"),
+    description = "TLS certificate verification disabled with InsecureSkipVerify",
+    language = Language::Go,
+    fn check(_self, source, _tree) {
+
+        let mut findings = Vec::new();
+        let pattern = go_insecure_skip_verify_re();
+
+        for matched in pattern.find_iter(source) {
+            findings.push(make_finding_from_offsets(
+                _self.id(),
+                _self.severity(),
+                _self.cwe(),
+                "InsecureSkipVerify: true disables TLS certificate verification — prefer proper CA validation",
+                source,
+                matched.start(),
+                matched.end(),
+            ));
+        }
+
+        findings
+
+    }
+}
+
+// ─── Rule: missing-ssl-minversion ─────────────────────────────────────────
+
+pub struct MissingSslMinVersion;
+
+impl crate::rules::Rule for MissingSslMinVersion {
+    fn id(&self) -> &str {
+        "go/missing-ssl-minversion"
+    }
+    fn severity(&self) -> Severity {
+        Severity::Medium
+    }
+    fn cwe(&self) -> Option<&str> {
+        Some("CWE-326")
+    }
+    fn description(&self) -> &str {
+        "tls.Config is missing an explicit MinVersion"
+    }
+    fn language(&self) -> Language {
+        Language::Go
+    }
+
+    /// Test and benchmark files commonly construct ad-hoc `tls.Config` values
+    /// (often with `InsecureSkipVerify`) against self-signed certs; these are
+    /// not production TLS configs, so skip them entirely.
+    fn applies_to_path(&self, path: &std::path::Path) -> bool {
+        !go_is_test_file(path)
+    }
+
+    fn check(&self, source: &str, tree: &tree_sitter::Tree) -> Vec<Finding> {
+        self.check_with_context(source, tree, &FileContext::default())
+    }
+
+    fn ast_analysis_requirement(&self) -> crate::rules::AstAnalysisRequirement {
+        crate::rules::AstAnalysisRequirement::FileContext
+    }
+
+    fn check_with_context(
+        &self,
+        source: &str,
+        tree: &tree_sitter::Tree,
+        ctx: &FileContext<'_>,
+    ) -> Vec<Finding> {
+        let local_aliases: Option<AliasTable> = if ctx.go_aliases.is_none() {
+            Some(go_aliases_from_tree(source, tree))
+        } else {
+            None
+        };
+        let aliases: Option<&AliasTable> = ctx.go_aliases.or(local_aliases.as_ref());
+        let min_version_re = go_min_version_re();
+        let insecure_skip_verify_re = go_insecure_skip_verify_re();
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            let Some(type_text) = go_composite_literal_type_text(node, src) else {
+                return;
+            };
+            let resolved_type = match aliases {
+                Some(a) => a.resolve(type_text),
+                None => std::borrow::Cow::Borrowed(type_text),
+            };
+            if resolved_type.as_ref() != "tls.Config" {
+                return;
+            }
+
+            let literal_text = &src[node.byte_range()];
+            if min_version_re.is_match(literal_text) {
+                return;
+            }
+
+            // `InsecureSkipVerify: true` in the same literal is a test/dev
+            // marker (already flagged by go/insecure-tls-skip-verify). Don't
+            // also flag missing MinVersion on the same config.
+            if insecure_skip_verify_re.is_match(literal_text) {
+                return;
+            }
+
+            findings.push(make_finding(
+                self.id(),
+                self.severity(),
+                self.cwe(),
+                "tls.Config without MinVersion permits legacy TLS versions — set MinVersion to tls.VersionTLS12 or higher",
+                node,
+                src,
+            ));
+        });
+
+        findings
+    }
+}
+
+// ─── Rule: cookie-missing-secure ──────────────────────────────────────────
+
+pub struct CookieMissingSecure;
+
+impl_rule! {
+    CookieMissingSecure,
+    id = "go/cookie-missing-secure",
+    severity = Severity::Medium,
+    cwe = Some("CWE-614"),
+    description = "http.Cookie missing Secure flag",
+    language = Language::Go,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let local_aliases: Option<AliasTable> = if ctx.go_aliases.is_none() {
+            Some(go_aliases_from_tree(source, tree))
+        } else {
+            None
+        };
+        let aliases: Option<&AliasTable> = ctx.go_aliases.or(local_aliases.as_ref());
+        let secure_field_re = go_cookie_secure_field_re();
+
+        let secure_false_re = go_cookie_secure_false_re();
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            let Some(type_text) = go_composite_literal_type_text(node, src) else {
+                return;
+            };
+            let resolved_type = match aliases {
+                Some(a) => a.resolve(type_text),
+                None => std::borrow::Cow::Borrowed(type_text),
+            };
+            if resolved_type.as_ref() != "http.Cookie" {
+                return;
+            }
+
+            let literal_text = &src[node.byte_range()];
+            if secure_field_re.is_match(literal_text) && !secure_false_re.is_match(literal_text) {
+                return;
+            }
+
+            findings.push(make_finding(
+                _self.id(),
+                _self.severity(),
+                _self.cwe(),
+                "http.Cookie missing Secure: true — cookies may be sent over plaintext HTTP",
+                node,
+                src,
+            ));
+        });
+
+        findings
+
+    }
+}
+
+// ─── Rule: cookie-missing-httponly ────────────────────────────────────────
+
+pub struct CookieMissingHttpOnly;
+
+impl_rule! {
+    CookieMissingHttpOnly,
+    id = "go/cookie-missing-httponly",
+    severity = Severity::Medium,
+    cwe = Some("CWE-1004"),
+    description = "http.Cookie missing HttpOnly flag",
+    language = Language::Go,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let local_aliases: Option<AliasTable> = if ctx.go_aliases.is_none() {
+            Some(go_aliases_from_tree(source, tree))
+        } else {
+            None
+        };
+        let aliases: Option<&AliasTable> = ctx.go_aliases.or(local_aliases.as_ref());
+        let http_only_field_re = go_cookie_http_only_field_re();
+
+        let http_only_false_re = go_cookie_http_only_false_re();
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            let Some(type_text) = go_composite_literal_type_text(node, src) else {
+                return;
+            };
+            let resolved_type = match aliases {
+                Some(a) => a.resolve(type_text),
+                None => std::borrow::Cow::Borrowed(type_text),
+            };
+            if resolved_type.as_ref() != "http.Cookie" {
+                return;
+            }
+
+            let literal_text = &src[node.byte_range()];
+            if http_only_field_re.is_match(literal_text)
+                && !http_only_false_re.is_match(literal_text)
+            {
+                return;
+            }
+
+            findings.push(make_finding(
+                _self.id(),
+                _self.severity(),
+                _self.cwe(),
+                "http.Cookie missing HttpOnly: true — client-side scripts can read the cookie",
+                node,
+                src,
+            ));
+        });
+
+        findings
+
+    }
+}
+
+// ─── Rule: math-random-used ───────────────────────────────────────────────
+
+pub struct MathRandomUsed;
+
+impl_rule! {
+    MathRandomUsed,
+    id = "go/math-random-used",
+    severity = Severity::Medium,
+    cwe = Some("CWE-338"),
+    description = "math/rand is not cryptographically secure",
+    language = Language::Go,
+    fn check(_self, source, tree) {
+
+        let math_rand_locals = go_import_locals_for_path(source, tree, "math/rand");
+        if math_rand_locals.is_empty() {
+            return Vec::new();
+        }
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() != "call_expression" {
+                return;
+            }
+
+            let Some(func) = node.child_by_field_name("function") else {
+                return;
+            };
+            if func.kind() != "selector_expression" {
+                return;
+            }
+
+            let func_text = &src[func.byte_range()];
+            let Some((root, _)) = func_text.split_once('.') else {
+                return;
+            };
+            if !math_rand_locals.iter().any(|local| local == root) {
+                return;
+            }
+
+            findings.push(make_finding(
+                _self.id(),
+                _self.severity(),
+                _self.cwe(),
+                "math/rand is predictable — use crypto/rand for security-sensitive randomness",
+                node,
+                src,
+            ));
+        });
+
+        findings
+
+    }
+}
+
+// ─── Rule 9: no-unsafe-deserialization ─────────────────────────────────────
+
+pub struct NoUnsafeDeserialization;
+
+impl_rule! {
+    NoUnsafeDeserialization,
+    id = "go/no-unsafe-deserialization",
+    severity = Severity::High,
+    cwe = Some("CWE-502"),
+    description = "Unsafe deserialization via gob or yaml.Unmarshal into interface{}/any",
+    language = Language::Go,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() != "call_expression" {
+                return;
+            }
+
+            let Some(func) = node.child_by_field_name("function") else {
+                return;
+            };
+            let func_text = &src[func.byte_range()];
+
+            // Flag gob.NewDecoder()
+            if func_text == "gob.NewDecoder" {
+                findings.push(make_finding(
+                    _self.id(),
+                    _self.severity(),
+                    _self.cwe(),
+                    "Use JSON instead of gob for untrusted input. Unmarshal into concrete types, not interface{}.",
+                    node,
+                    src,
+                ));
+                return;
+            }
+
+            // Flag yaml.Unmarshal into interface{} or any
+            if func_text == "yaml.Unmarshal" {
+                let call_text = &src[node.byte_range()];
+                if call_text.contains("interface{}") || call_text.contains("any") {
+                    findings.push(make_finding(
+                        _self.id(),
+                        _self.severity(),
+                        _self.cwe(),
+                        "Use JSON instead of gob for untrusted input. Unmarshal into concrete types, not interface{}.",
+                        node,
+                        src,
+                    ));
+                }
+            }
+        });
+
+        findings
+
+    }
+}
+
+// ─── Rule 10: jwt-no-verify ───────────────────────────────────────────────
+
+pub struct JwtNoVerify;
+
+impl_rule! {
+    JwtNoVerify,
+    id = "go/jwt-no-verify",
+    severity = Severity::Critical,
+    cwe = Some("CWE-347"),
+    description = "JWT parsed without signature verification",
+    language = Language::Go,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() != "call_expression" {
+                return;
+            }
+
+            let Some(func) = node.child_by_field_name("function") else {
+                return;
+            };
+            let func_text = &src[func.byte_range()];
+
+            // Flag jwt.ParseUnverified
+            if func_text == "jwt.ParseUnverified" {
+                findings.push(make_finding(
+                    _self.id(),
+                    _self.severity(),
+                    _self.cwe(),
+                    "JWT parsed without verification — use jwt.Parse with a proper key function",
+                    node,
+                    src,
+                ));
+                return;
+            }
+
+            // Flag jwt.Parse with nil key function
+            if func_text == "jwt.Parse" || func_text == "jwt.ParseWithClaims" {
+                if let Some(args) = node.child_by_field_name("arguments") {
+                    // Key function is the second argument for jwt.Parse,
+                    // third for jwt.ParseWithClaims
+                    let key_fn_idx = if func_text == "jwt.ParseWithClaims" {
+                        2
+                    } else {
+                        1
+                    };
+                    if let Some(key_fn_arg) = args.named_child(key_fn_idx) {
+                        let key_fn_text = &src[key_fn_arg.byte_range()];
+                        if key_fn_text == "nil" {
+                            findings.push(make_finding(
+                                _self.id(),
+                                _self.severity(),
+                                _self.cwe(),
+                                "JWT parsed with nil key function — provide a proper key validation function",
+                                node,
+                                src,
+                            ));
+                        }
+                    }
+                }
+            }
+        });
+
+        findings
+
+    }
+}
+
+// ─── Rule 11: jwt-hardcoded-secret ────────────────────────────────────────
+
+pub struct JwtHardcodedSecret;
+
+impl_rule! {
+    JwtHardcodedSecret,
+    id = "go/jwt-hardcoded-secret",
+    severity = Severity::High,
+    cwe = Some("CWE-798"),
+    description = "JWT key function uses a hardcoded secret",
+    language = Language::Go,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+        let hardcoded_byte_re = go_hardcoded_byte_re();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() != "call_expression" {
+                return;
+            }
+
+            let Some(func) = node.child_by_field_name("function") else {
+                return;
+            };
+            let func_text = &src[func.byte_range()];
+
+            if func_text != "jwt.Parse"
+                && func_text != "jwt.ParseWithClaims"
+                && func_text != "jwt.NewWithClaims"
+            {
+                return;
+            }
+
+            let node_text = &src[node.byte_range()];
+            if hardcoded_byte_re.is_match(node_text) {
+                findings.push(make_finding(
+                    _self.id(),
+                    _self.severity(),
+                    _self.cwe(),
+                    "JWT secret is hardcoded — load signing keys from environment or a secrets manager",
+                    node,
+                    src,
+                ));
+            }
+        });
+
+        findings
+
+    }
+}
+
+// ─── Taint rules ───────────────────────────────────────────────────────────
+//
+// These rules consume the intraprocedural taint engine in
+// `go_taint`. They coexist with the conservative `go/no-*`
+// counterparts above: the conservative rule fires on any dynamic
+// argument at the sink, the taint rule only fires when the argument
+// is provably reachable from a known untrusted source within the
+// same function / file. Higher precision, lower recall.
+//
+// Shared sources live in `go_taint::go_taint_sources()`; each rule
+// only declares its own sinks.
+
+/// Build a `Call` sink matcher where the canonical path is reused as
+/// the sink description — shorthand used by the specs below.
+fn go_call_sink(canonical: &str) -> GoNodeMatcher {
+    GoNodeMatcher::Call {
+        canonical: canonical.into(),
+        description: canonical.into(),
+    }
+}
+
+struct GoTaintRuleMeta<'a> {
+    rule_id: &'a str,
+    severity: Severity,
+    cwe: Option<&'a str>,
+    fix_suggestion: Option<&'a str>,
+}
+
+fn map_go_taint_findings(
+    meta: &GoTaintRuleMeta<'_>,
+    source: &str,
+    tree: &tree_sitter::Tree,
+    ctx: &FileContext<'_>,
+    spec: &GoTaintSpec,
+    format_description: impl Fn(&str, &str) -> String,
+) -> Vec<Finding> {
+    // If the scanner never built a per-file Go alias table (e.g.
+    // rules are invoked without FileContext), fall back to building
+    // one locally so the rule still works.
+    let local_aliases: Option<AliasTable> = if ctx.go_aliases.is_none() {
+        Some(go_aliases_from_tree(source, tree))
+    } else {
+        None
+    };
+    let aliases: Option<&AliasTable> = ctx.go_aliases.or(local_aliases.as_ref());
+
+    // Build cross-file info if both summaries and same-package paths are available.
+    let cross_file_info = match (ctx.cross_file_summaries, ctx.go_same_package_paths.as_ref()) {
+        (Some(summaries), Some(paths)) => Some(go_taint::CrossFileInfo {
+            same_package_paths: paths,
+            summaries,
+            rule_filter: go_taint::RuleFilter::Single(meta.rule_id),
+        }),
+        _ => None,
+    };
+    let raw = go_taint::analyze_tree_with_cross_file(
+        tree.root_node(),
+        source,
+        spec,
+        aliases,
+        cross_file_info.as_ref(),
+    );
+    raw.into_iter()
+        .map(|t| Finding {
+            rule_id: meta.rule_id.to_string(),
+            severity: meta.severity,
+            cwe: meta.cwe.map(|s| s.to_string()),
+            description: format_description(&t.source_description, &t.sink_description),
+            file: String::new(),
+            line: t.sink_line,
+            column: t.sink_column,
+            end_line: t.sink_end_line,
+            end_column: t.sink_end_column,
+            snippet: get_source_line(source, t.sink_start_byte),
+            source_line: Some(t.source_line),
+            source_description: Some(t.source_description),
+            sink_line: Some(t.sink_line),
+            sink_description: Some(t.sink_description),
+            fix_suggestion: meta.fix_suggestion.map(|s| s.to_string()),
+            sink_start_byte: Some(t.sink_start_byte),
+            sink_end_byte: Some(t.sink_end_byte),
+            confidence: crate::rules::common::confidence_for_hops(t.hops),
+            taint_hops: Some(t.hops),
+            tags: vec![],
+            crypto_algorithm: None,
+            cnsa2_deadline: None,
+            dep_name: None,
+            dep_version: None,
+            dep_ecosystem: None,
+            dep_purl: None,
+            dep_vulnerability_id: None,
+            dep_fixed_version: None,
+            dep_source: None,
+            dep_vulnerability_severity: None,
+            dep_path: vec![],
+            crypto_material: None,
+        })
+        .collect()
+}
+
+// ─── Rule: taint-command-injection ─────────────────────────────────────────
+
+pub struct TaintCommandInjection;
+
+impl TaintCommandInjection {
+    fn spec() -> GoTaintSpec {
+        GoTaintSpec {
+            sources: go_taint_sources(),
+            sinks: vec![
+                go_call_sink("exec.Command"),
+                go_call_sink("exec.CommandContext"),
+            ],
+            sanitizers: vec![],
+        }
+    }
+}
+
+impl_rule! {
+    TaintCommandInjection,
+    id = "go/taint-command-injection",
+    severity = Severity::Critical,
+    cwe = Some("CWE-78"),
+    description = "Untrusted input reaches os/exec command execution sink",
+    language = Language::Go,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let meta = GoTaintRuleMeta {
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
+            fix_suggestion: Some("Go has no standard shell-escape function. Pass arguments as separate elements to `exec.Command(name, arg1, arg2)` instead of building a shell string — this avoids shell interpretation entirely"),
+        };
+        map_go_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!(
+                "{} reaches {} — untrusted input can inject OS commands",
+                src, sink
+            )
+        })
+
+    }
+}
+
+// ─── Rule: taint-sql-injection ─────────────────────────────────────────────
+
+pub struct TaintSqlInjection;
+
+impl TaintSqlInjection {
+    fn spec() -> GoTaintSpec {
+        // Go DB execute APIs live on many receiver names
+        // (`db`, `conn`, `tx`, `stmt`…). Use `MethodName` matchers so
+        // any `.Query(...)`, `.Exec(...)`, `.QueryRow(...)` call with
+        // tainted input fires, regardless of the bound variable name.
+        // This matches the approach `py/taint-sql-injection` uses.
+        GoTaintSpec {
+            sources: go_taint_sources(),
+            sinks: vec![
+                GoNodeMatcher::MethodName {
+                    method: "Query".into(),
+                    description: "db/tx/stmt.Query".into(),
+                },
+                GoNodeMatcher::MethodName {
+                    method: "QueryContext".into(),
+                    description: "db/tx/stmt.QueryContext".into(),
+                },
+                GoNodeMatcher::MethodName {
+                    method: "QueryRow".into(),
+                    description: "db/tx/stmt.QueryRow".into(),
+                },
+                GoNodeMatcher::MethodName {
+                    method: "QueryRowContext".into(),
+                    description: "db/tx/stmt.QueryRowContext".into(),
+                },
+                GoNodeMatcher::MethodName {
+                    method: "Exec".into(),
+                    description: "db/tx/stmt.Exec".into(),
+                },
+                GoNodeMatcher::MethodName {
+                    method: "ExecContext".into(),
+                    description: "db/tx/stmt.ExecContext".into(),
+                },
+                GoNodeMatcher::MethodName {
+                    method: "Raw".into(),
+                    description: "gorm.DB.Raw".into(),
+                },
+            ],
+            sanitizers: vec![],
+        }
+    }
+}
+
+impl_rule! {
+    TaintSqlInjection,
+    id = "go/taint-sql-injection",
+    severity = Severity::Critical,
+    cwe = Some("CWE-89"),
+    description = "Untrusted input reaches database Query/Exec sink",
+    language = Language::Go,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let meta = GoTaintRuleMeta {
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
+            fix_suggestion: Some("Use parameterized queries: `db.Query(\"SELECT * FROM users WHERE name = $1\", name)`"),
+        };
+        map_go_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!("{} reaches {} — untrusted input can inject SQL", src, sink)
+        })
+
+    }
+}
+
+// ─── Rule: taint-ssti ─────────────────────────────────────────────────────
+
+pub struct TaintSsti;
+
+impl TaintSsti {
+    fn spec() -> GoTaintSpec {
+        GoTaintSpec {
+            sources: go_taint_sources(),
+            sinks: vec![
+                GoNodeMatcher::MethodName {
+                    method: "Parse".into(),
+                    description: "template.Parse".into(),
+                },
+                go_call_sink("template.Must"),
+                go_call_sink("template.New"),
+            ],
+            sanitizers: vec![],
+        }
+    }
+}
+
+impl_rule! {
+    TaintSsti,
+    id = "go/taint-ssti",
+    severity = Severity::Critical,
+    cwe = Some("CWE-1336"),
+    description = "Untrusted input reaches template parsing sink (potential SSTI)",
+    language = Language::Go,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let meta = GoTaintRuleMeta {
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
+            fix_suggestion: Some("Use pre-defined template files with template.ParseFiles() instead of parsing user-controlled template strings"),
+        };
+        map_go_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!(
+                "{} reaches {} — untrusted input can inject server-side templates",
+                src, sink
+            )
+        })
+
+    }
+}
+
+// ─── Rule: taint-xpath-injection ──────────────────────────────────────────
+
+pub struct TaintXpathInjection;
+
+impl TaintXpathInjection {
+    fn spec() -> GoTaintSpec {
+        GoTaintSpec {
+            sources: go_taint_sources(),
+            sinks: vec![
+                go_call_sink("xmlpath.Compile"),
+                go_call_sink("xpath.Compile"),
+                go_call_sink("xmlquery.QueryAll"),
+                go_call_sink("xmlquery.Query"),
+                go_call_sink("htmlquery.QueryAll"),
+            ],
+            sanitizers: vec![],
+        }
+    }
+}
+
+impl_rule! {
+    TaintXpathInjection,
+    id = "go/taint-xpath-injection",
+    severity = Severity::High,
+    cwe = Some("CWE-643"),
+    description = "Untrusted input reaches XPath query sink (potential XPath injection)",
+    language = Language::Go,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let meta = GoTaintRuleMeta {
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
+            fix_suggestion: Some(
+                "Validate and sanitize user input before building XPath expressions",
+            ),
+        };
+        map_go_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!(
+                "{} reaches {} — untrusted input can inject XPath queries",
+                src, sink
+            )
+        })
+
+    }
+}
+
+// ─── Rule: taint-ldap-injection ───────────────────────────────────────────
+
+pub struct TaintLdapInjection;
+
+impl TaintLdapInjection {
+    fn spec() -> GoTaintSpec {
+        GoTaintSpec {
+            sources: go_taint_sources(),
+            sinks: vec![
+                go_call_sink("ldap.NewSearchRequest"),
+                go_call_sink("ldap.SearchRequest"),
+                go_call_sink("conn.Search"),
+                go_call_sink("client.Search"),
+                go_call_sink("l.Search"),
+            ],
+            sanitizers: vec![],
+        }
+    }
+}
+
+impl_rule! {
+    TaintLdapInjection,
+    id = "go/taint-ldap-injection",
+    severity = Severity::High,
+    cwe = Some("CWE-90"),
+    description = "Untrusted input reaches LDAP search sink (potential LDAP injection)",
+    language = Language::Go,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let meta = GoTaintRuleMeta {
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
+            fix_suggestion: Some("Use ldap.EscapeFilter() to sanitize user input before building LDAP filter strings"),
+        };
+        map_go_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!(
+                "{} reaches {} — untrusted input can inject LDAP queries",
+                src, sink
+            )
+        })
+
+    }
+}
+
+// ─── Rule: taint-ssrf ──────────────────────────────────────────────────────
+
+pub struct TaintSsrf;
+
+impl TaintSsrf {
+    fn spec() -> GoTaintSpec {
+        GoTaintSpec {
+            sources: go_taint_sources(),
+            sinks: vec![
+                go_call_sink("http.Get"),
+                go_call_sink("http.Post"),
+                go_call_sink("http.PostForm"),
+                go_call_sink("http.NewRequest"),
+                go_call_sink("http.NewRequestWithContext"),
+                go_call_sink("http.Head"),
+            ],
+            sanitizers: vec![],
+        }
+    }
+}
+
+impl_rule! {
+    TaintSsrf,
+    id = "go/taint-ssrf",
+    severity = Severity::High,
+    cwe = Some("CWE-918"),
+    description = "Untrusted input reaches outbound net/http sink (potential SSRF)",
+    language = Language::Go,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let meta = GoTaintRuleMeta {
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
+            fix_suggestion: Some(
+                "Validate URLs against an allowlist of permitted hosts before making requests",
+            ),
+        };
+        map_go_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!(
+                "{} reaches {} — untrusted input can drive server-side request forgery",
+                src, sink
+            )
+        })
+
+    }
+}
+
+// ─── Rule: taint-log-injection ────────────────────────────────────────────
+
+pub struct TaintLogInjection;
+
+impl TaintLogInjection {
+    fn spec() -> GoTaintSpec {
+        GoTaintSpec {
+            sources: go_taint_sources(),
+            sinks: vec![
+                go_call_sink("log.Printf"),
+                go_call_sink("log.Println"),
+                go_call_sink("log.Print"),
+                go_call_sink("log.Fatalf"),
+                go_call_sink("fmt.Printf"),
+            ],
+            sanitizers: vec![],
+        }
+    }
+}
+
+impl_rule! {
+    TaintLogInjection,
+    id = "go/taint-log-injection",
+    severity = Severity::Medium,
+    cwe = Some("CWE-117"),
+    description = "Untrusted input reaches a logging sink — possible log injection",
+    language = Language::Go,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let meta = GoTaintRuleMeta {
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
+            fix_suggestion: Some(
+                "Sanitize user input before logging — strip newlines and control characters",
+            ),
+        };
+        map_go_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!(
+                "{} reaches {} — untrusted input can forge log entries",
+                src, sink
+            )
+        })
+
+    }
+}
+
+// ─── Rule: taint-nosql-injection ────────────────────────────────────────
+
+pub struct TaintNosqlInjection;
+
+impl TaintNosqlInjection {
+    fn spec() -> GoTaintSpec {
+        GoTaintSpec {
+            sources: go_taint_sources(),
+            sinks: vec![
+                // Use specific Call matchers for .Find() to avoid matching
+                // regexp.Find() and other non-MongoDB uses (issue #141).
+                GoNodeMatcher::Call {
+                    canonical: "collection.Find".into(),
+                    description: "MongoDB collection.Find()".into(),
+                },
+                GoNodeMatcher::Call {
+                    canonical: "db.Find".into(),
+                    description: "MongoDB db.Find()".into(),
+                },
+                GoNodeMatcher::MethodName {
+                    method: "FindOne".into(),
+                    description: "collection.FindOne".into(),
+                },
+                GoNodeMatcher::MethodName {
+                    method: "UpdateOne".into(),
+                    description: "collection.UpdateOne".into(),
+                },
+                GoNodeMatcher::MethodName {
+                    method: "UpdateMany".into(),
+                    description: "collection.UpdateMany".into(),
+                },
+                GoNodeMatcher::MethodName {
+                    method: "DeleteOne".into(),
+                    description: "collection.DeleteOne".into(),
+                },
+                GoNodeMatcher::MethodName {
+                    method: "DeleteMany".into(),
+                    description: "collection.DeleteMany".into(),
+                },
+                GoNodeMatcher::MethodName {
+                    method: "Aggregate".into(),
+                    description: "collection.Aggregate".into(),
+                },
+                GoNodeMatcher::MethodName {
+                    method: "CountDocuments".into(),
+                    description: "collection.CountDocuments".into(),
+                },
+            ],
+            sanitizers: vec![],
+        }
+    }
+}
+
+impl_rule! {
+    TaintNosqlInjection,
+    id = "go/taint-nosql-injection",
+    severity = Severity::High,
+    cwe = Some("CWE-943"),
+    description = "Untrusted input reaches a MongoDB query sink — possible NoSQL injection",
+    language = Language::Go,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let meta = GoTaintRuleMeta {
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
+            fix_suggestion: Some(
+                "Validate and sanitize user input before building MongoDB queries.",
+            ),
+        };
+        map_go_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!(
+                "{} reaches {} — untrusted input can inject NoSQL operators",
+                src, sink
+            )
+        })
+
+    }
+}
+
+// ─── Rule: taint-path-traversal ──────────────────────────────────────────
+
+pub struct TaintPathTraversal;
+
+impl TaintPathTraversal {
+    fn spec() -> GoTaintSpec {
+        GoTaintSpec {
+            sources: go_taint_sources(),
+            sinks: vec![
+                go_call_sink("os.Open"),
+                go_call_sink("os.OpenFile"),
+                go_call_sink("os.ReadFile"),
+                go_call_sink("os.WriteFile"),
+                go_call_sink("os.Remove"),
+                go_call_sink("os.Stat"),
+                go_call_sink("os.MkdirAll"),
+                go_call_sink("filepath.Join"),
+                go_call_sink("ioutil.ReadFile"),
+                go_call_sink("ioutil.WriteFile"),
+                GoNodeMatcher::MethodName {
+                    method: "Open".into(),
+                    description: "http.Dir.Open".into(),
+                },
+                GoNodeMatcher::MethodName {
+                    method: "Create".into(),
+                    description: "os.Create".into(),
+                },
+                GoNodeMatcher::MethodName {
+                    method: "ReadFile".into(),
+                    description: "afero.ReadFile".into(),
+                },
+                GoNodeMatcher::MethodName {
+                    method: "WriteFile".into(),
+                    description: "afero.WriteFile".into(),
+                },
+            ],
+            sanitizers: vec![go_call_sink("filepath.Clean"), go_call_sink("filepath.Abs")],
+        }
+    }
+}
+
+impl_rule! {
+    TaintPathTraversal,
+    id = "go/taint-path-traversal",
+    severity = Severity::High,
+    cwe = Some("CWE-22"),
+    description = "Untrusted input reaches a filesystem path sink — possible path traversal",
+    language = Language::Go,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let meta = GoTaintRuleMeta {
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
+            fix_suggestion: Some(
+                "Validate file paths with filepath.Clean() and ensure they don't escape the intended directory",
+            ),
+        };
+        map_go_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!(
+                "{} reaches {} — untrusted input can traverse the filesystem",
+                src, sink
+            )
+        })
+
+    }
+}
+
+/// All Go taint rule IDs paired with their specs.
+///
+/// Used by the scanner's pass 1 to extract cross-file summaries: each
+/// rule's sinks are tested against function bodies with synthetic
+/// per-parameter sources.
+pub fn go_taint_rule_specs() -> Vec<(&'static str, GoTaintSpec)> {
+    vec![
+        ("go/taint-command-injection", TaintCommandInjection::spec()),
+        ("go/taint-sql-injection", TaintSqlInjection::spec()),
+        ("go/taint-ssti", TaintSsti::spec()),
+        ("go/taint-xpath-injection", TaintXpathInjection::spec()),
+        ("go/taint-ldap-injection", TaintLdapInjection::spec()),
+        ("go/taint-ssrf", TaintSsrf::spec()),
+        ("go/taint-log-injection", TaintLogInjection::spec()),
+        ("go/taint-nosql-injection", TaintNosqlInjection::spec()),
+        ("go/taint-path-traversal", TaintPathTraversal::spec()),
+    ]
+}
+
+/// Per-rule metadata used by the batched Go taint runner to shape
+/// findings (severity, CWE, fix hint, description formatter).
+struct GoTaintRuleDispatch {
+    meta: GoTaintRuleMeta<'static>,
+    format_description: fn(&str, &str) -> String,
+}
+
+fn go_taint_command_injection_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can inject OS commands")
+}
+fn go_taint_sql_injection_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can inject SQL")
+}
+fn go_taint_ssti_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can inject server-side templates")
+}
+fn go_taint_xpath_injection_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can inject XPath queries")
+}
+fn go_taint_ldap_injection_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can inject LDAP queries")
+}
+fn go_taint_ssrf_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can drive server-side request forgery")
+}
+fn go_taint_log_injection_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can forge log entries")
+}
+fn go_taint_nosql_injection_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can inject NoSQL operators")
+}
+fn go_taint_path_traversal_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can traverse the filesystem")
+}
+
+fn go_taint_rule_dispatch_table() -> Vec<GoTaintRuleDispatch> {
+    vec![
+        GoTaintRuleDispatch {
+            meta: GoTaintRuleMeta {
+                rule_id: "go/taint-command-injection",
+                severity: Severity::Critical,
+                cwe: Some("CWE-78"),
+                fix_suggestion: Some("Go has no standard shell-escape function. Pass arguments as separate elements to `exec.Command(name, arg1, arg2)` instead of building a shell string — this avoids shell interpretation entirely"),
+            },
+            format_description: go_taint_command_injection_desc,
+        },
+        GoTaintRuleDispatch {
+            meta: GoTaintRuleMeta {
+                rule_id: "go/taint-sql-injection",
+                severity: Severity::Critical,
+                cwe: Some("CWE-89"),
+                fix_suggestion: Some("Use parameterized queries: `db.Query(\"SELECT * FROM users WHERE name = $1\", name)`"),
+            },
+            format_description: go_taint_sql_injection_desc,
+        },
+        GoTaintRuleDispatch {
+            meta: GoTaintRuleMeta {
+                rule_id: "go/taint-ssti",
+                severity: Severity::Critical,
+                cwe: Some("CWE-1336"),
+                fix_suggestion: Some("Use pre-defined template files with template.ParseFiles() instead of parsing user-controlled template strings"),
+            },
+            format_description: go_taint_ssti_desc,
+        },
+        GoTaintRuleDispatch {
+            meta: GoTaintRuleMeta {
+                rule_id: "go/taint-xpath-injection",
+                severity: Severity::High,
+                cwe: Some("CWE-643"),
+                fix_suggestion: Some("Validate and sanitize user input before building XPath expressions"),
+            },
+            format_description: go_taint_xpath_injection_desc,
+        },
+        GoTaintRuleDispatch {
+            meta: GoTaintRuleMeta {
+                rule_id: "go/taint-ldap-injection",
+                severity: Severity::High,
+                cwe: Some("CWE-90"),
+                fix_suggestion: Some("Use ldap.EscapeFilter() to sanitize user input before building LDAP filter strings"),
+            },
+            format_description: go_taint_ldap_injection_desc,
+        },
+        GoTaintRuleDispatch {
+            meta: GoTaintRuleMeta {
+                rule_id: "go/taint-ssrf",
+                severity: Severity::High,
+                cwe: Some("CWE-918"),
+                fix_suggestion: Some("Validate URLs against an allowlist of permitted hosts before making requests"),
+            },
+            format_description: go_taint_ssrf_desc,
+        },
+        GoTaintRuleDispatch {
+            meta: GoTaintRuleMeta {
+                rule_id: "go/taint-log-injection",
+                severity: Severity::Medium,
+                cwe: Some("CWE-117"),
+                fix_suggestion: Some("Sanitize user input before logging — strip newlines and control characters"),
+            },
+            format_description: go_taint_log_injection_desc,
+        },
+        GoTaintRuleDispatch {
+            meta: GoTaintRuleMeta {
+                rule_id: "go/taint-nosql-injection",
+                severity: Severity::High,
+                cwe: Some("CWE-943"),
+                fix_suggestion: Some("Validate and sanitize user input before building MongoDB queries."),
+            },
+            format_description: go_taint_nosql_injection_desc,
+        },
+        GoTaintRuleDispatch {
+            meta: GoTaintRuleMeta {
+                rule_id: "go/taint-path-traversal",
+                severity: Severity::High,
+                cwe: Some("CWE-22"),
+                fix_suggestion: Some("Validate file paths with filepath.Clean() and ensure they don't escape the intended directory"),
+            },
+            format_description: go_taint_path_traversal_desc,
+        },
+    ]
+}
+
+/// Run every built-in Go taint rule over `tree` in a single batched
+/// pass, returning per-rule [`Finding`]s.
+///
+/// This replaces the historical code path where each of the nine Go
+/// taint rules called [`go_taint::analyze_tree_with_cross_file`]
+/// individually — which recomputed rule-agnostic Pass 1 summaries and
+/// re-walked every function body once per rule.
+///
+/// Rules are grouped by their sanitizer profile so that rules sharing
+/// the same sanitizers collapse into a single AST walk. The default
+/// ruleset has two groups (no-sanitizer × 8 rules, path-traversal × 1
+/// rule), which means 2 walks per file instead of 9.
+pub fn run_go_taint_batched(
+    source: &str,
+    tree: &tree_sitter::Tree,
+    ctx: &FileContext<'_>,
+    enabled_rule_ids: &std::collections::HashSet<&str>,
+) -> Vec<Finding> {
+    // Resolve aliases (prefer the one from FileContext).
+    let local_aliases: Option<AliasTable> = if ctx.go_aliases.is_none() {
+        Some(go_aliases_from_tree(source, tree))
+    } else {
+        None
+    };
+    let aliases: Option<&AliasTable> = ctx.go_aliases.or(local_aliases.as_ref());
+
+    let dispatch = go_taint_rule_dispatch_table();
+    let rule_specs = go_taint_rule_specs();
+
+    // Only include rules the caller actually registered.
+    let rules: Vec<go_taint::BatchedRule<'_>> = rule_specs
+        .iter()
+        .filter(|(id, _)| enabled_rule_ids.contains(id))
+        .map(|(id, spec)| go_taint::BatchedRule { rule_id: id, spec })
+        .collect();
+
+    if rules.is_empty() {
+        return Vec::new();
+    }
+
+    let cross_file_info = match (ctx.cross_file_summaries, ctx.go_same_package_paths.as_ref()) {
+        (Some(summaries), Some(paths)) => Some(go_taint::CrossFileInfoBatched {
+            same_package_paths: paths,
+            summaries,
+        }),
+        _ => None,
+    };
+
+    let raw = go_taint::analyze_tree_batched(
+        tree.root_node(),
+        source,
+        &rules,
+        aliases,
+        cross_file_info.as_ref(),
+    );
+
+    raw.into_iter()
+        .filter_map(|(rule_id, t)| {
+            let d = dispatch.iter().find(|d| d.meta.rule_id == rule_id)?;
+            Some(Finding {
+                rule_id: d.meta.rule_id.to_string(),
+                severity: d.meta.severity,
+                cwe: d.meta.cwe.map(|s| s.to_string()),
+                description: (d.format_description)(&t.source_description, &t.sink_description),
+                file: String::new(),
+                line: t.sink_line,
+                column: t.sink_column,
+                end_line: t.sink_end_line,
+                end_column: t.sink_end_column,
+                snippet: get_source_line(source, t.sink_start_byte),
+                source_line: Some(t.source_line),
+                source_description: Some(t.source_description),
+                sink_line: Some(t.sink_line),
+                sink_description: Some(t.sink_description),
+                fix_suggestion: d.meta.fix_suggestion.map(|s| s.to_string()),
+                sink_start_byte: Some(t.sink_start_byte),
+                sink_end_byte: Some(t.sink_end_byte),
+                confidence: crate::rules::common::confidence_for_hops(t.hops),
+                taint_hops: Some(t.hops),
+                tags: vec![],
+                crypto_algorithm: None,
+                cnsa2_deadline: None,
+                dep_name: None,
+                dep_version: None,
+                dep_ecosystem: None,
+                dep_purl: None,
+                dep_vulnerability_id: None,
+                dep_fixed_version: None,
+                dep_source: None,
+                dep_vulnerability_severity: None,
+                dep_path: vec![],
+                crypto_material: None,
+            })
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod fp_tests {
+    use super::*;
+    use crate::rules::Rule;
+    use std::path::Path;
+
+    fn parse_go(source: &str) -> tree_sitter::Tree {
+        match crate::engine::parser::parse_file(source, Language::Go) {
+            Some(tree) => tree,
+            None => panic!("Go source should parse into a tree"),
+        }
+    }
+
+    // ── go/no-ssrf ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn ssrf_skips_test_files() {
+        assert!(!NoSsrf.applies_to_path(Path::new("gin_test.go")));
+        assert!(!NoSsrf.applies_to_path(Path::new("foo/bar/server_test.go")));
+        assert!(!NoSsrf.applies_to_path(Path::new("benchmarks_bench.go")));
+        assert!(NoSsrf.applies_to_path(Path::new("server.go")));
+    }
+
+    #[test]
+    fn ssrf_recognizes_local_test_servers() {
+        let src = r#"
+package main
+import "net/http"
+func f(ts T, srv T, server T) {
+    http.Get(ts.URL + "/x")
+    http.Get(srv.URL + "/y")
+    http.Get(server.URL)
+}
+"#;
+        let tree = parse_go(src);
+        assert!(
+            NoSsrf.check(src, &tree).is_empty(),
+            "httptest server URLs must not be flagged as SSRF"
+        );
+    }
+
+    #[test]
+    fn ssrf_flags_dynamic_loopback_target() {
+        // Loopback is a real SSRF target: a dynamic URL built from a loopback
+        // host must still be flagged (only httptest server URLs are exempt).
+        let src = r#"
+package main
+import "net/http"
+func f(host string) {
+    http.Get("http://" + host + ":8080/admin")
+}
+"#;
+        let tree = parse_go(src);
+        assert_eq!(
+            NoSsrf.check(src, &tree).len(),
+            1,
+            "dynamic loopback-style URL must still be flagged as SSRF"
+        );
+    }
+
+    #[test]
+    fn ssrf_still_flags_real_dynamic_url() {
+        let src = r#"
+package main
+import "net/http"
+func f(userInput string) {
+    http.Get(userInput)
+}
+"#;
+        let tree = parse_go(src);
+        assert_eq!(
+            NoSsrf.check(src, &tree).len(),
+            1,
+            "dynamic non-local URL must still be flagged as SSRF"
+        );
+    }
+
+    // ── go/missing-ssl-minversion ───────────────────────────────────────────
+
+    #[test]
+    fn min_version_skips_test_files() {
+        assert!(!MissingSslMinVersion.applies_to_path(Path::new("gin_integration_test.go")));
+        assert!(!MissingSslMinVersion.applies_to_path(Path::new("x_bench.go")));
+        assert!(MissingSslMinVersion.applies_to_path(Path::new("tls.go")));
+    }
+
+    #[test]
+    fn min_version_skips_insecure_skip_verify_literal() {
+        let src = r#"
+package main
+import "crypto/tls"
+func f() {
+    _ = &tls.Config{InsecureSkipVerify: true}
+}
+"#;
+        let tree = parse_go(src);
+        assert!(
+            MissingSslMinVersion.check(src, &tree).is_empty(),
+            "tls.Config with InsecureSkipVerify: true must not also flag missing MinVersion"
+        );
+    }
+
+    #[test]
+    fn min_version_still_flags_production_config() {
+        let src = r#"
+package main
+import "crypto/tls"
+func f() {
+    _ = &tls.Config{ServerName: "example.com"}
+}
+"#;
+        let tree = parse_go(src);
+        assert_eq!(
+            MissingSslMinVersion.check(src, &tree).len(),
+            1,
+            "production tls.Config without MinVersion must still be flagged"
+        );
+    }
+}

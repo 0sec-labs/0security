@@ -1,5 +1,5 @@
 name: setup-ci
-description: Node 24, Bun, pnpm bootstrap, FoxGuard and a frozen-lockfile install for the self-hosted runner.
+description: Node 24, Bun, pnpm bootstrap, Foxguard (built from source) and a frozen-lockfile install for the self-hosted runner.
 inputs:
   cache-maintenance:
     description: Run npm cache verify and pnpm store prune (only in the job that runs before its siblings).
@@ -20,12 +20,26 @@ runs:
       env:
         ZERO_CI_CACHE_MAINTENANCE: ${{ inputs.cache-maintenance }}
       run: bash "$GITHUB_WORKSPACE/scripts/ci-runner-bootstrap.sh"
-    - name: Provision FoxGuard binary
+    - name: Fetch the shared Foxguard build
+      id: foxguard
+      continue-on-error: true
+      uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      with:
+        name: foxguard-${{ github.run_id }}
+        path: ${{ runner.temp }}/0-tools/bin
+    - name: Provide Foxguard (built from crates/foxguard)
       shell: bash
       env:
         INSTALL_DIR: ${{ runner.temp }}/0-tools/bin
+        SHARED: ${{ steps.foxguard.outcome }}
       run: |
-        bash "$GITHUB_WORKSPACE/scripts/provision-foxguard.sh"
+        # The shared binary comes from the `foxguard` job. When it is gone
+        # (re-run of a single job, expired artifact), build it from source.
+        if [ "$SHARED" != "success" ]; then
+          bash "$GITHUB_WORKSPACE/scripts/build-foxguard.sh"
+        fi
+        chmod +x "$INSTALL_DIR/foxguard"
+        "$INSTALL_DIR/foxguard" --version
         echo "$INSTALL_DIR" >> "$GITHUB_PATH"
     - name: Install dependencies
       shell: bash

@@ -1,0 +1,1462 @@
+use crate::impl_rule;
+use crate::rules::common::{
+    confidence_for_hops, get_source_line, hardcoded_secret_re, is_secret_value_long_enough,
+    looks_like_secret_value, make_finding, walk_tree,
+};
+use crate::rules::ruby_taint;
+use crate::{Finding, Language, Severity};
+
+/// Returns `true` if a tree-sitter `string` node contains interpolation
+/// children (i.e., `#{}` segments). Plain string literals like `"ls -la"`
+/// return `false`; strings like `"#{cmd}"` return `true`.
+fn has_interpolation(string_node: tree_sitter::Node) -> bool {
+    let mut cursor = string_node.walk();
+    for child in string_node.children(&mut cursor) {
+        // tree-sitter-ruby uses "interpolation" for `#{}` segments
+        if child.kind() == "interpolation" {
+            return true;
+        }
+    }
+    false
+}
+
+/// Extracts the first argument node of a `call` or `command` node, handling
+/// both the `arguments` field and a positional `argument_list` named child
+/// (mirrors the extraction used by `rb/no-ssrf`).
+fn first_call_arg(node: tree_sitter::Node) -> Option<tree_sitter::Node> {
+    node.child_by_field_name("arguments")
+        .and_then(|a| a.named_child(0))
+        .or_else(|| {
+            node.named_child(1).and_then(|c| {
+                if c.kind() == "argument_list" {
+                    c.named_child(0)
+                } else {
+                    Some(c)
+                }
+            })
+        })
+}
+
+/// Returns `true` if a `string` node contains at least one interpolation
+/// segment whose expression references *dynamic* input (a local variable,
+/// instance/global variable, method call, or element reference such as
+/// `params[:id]`). Interpolations that only reference constants (e.g.
+/// `#{CONST}` or `#{Foo::BAR}`) are considered static/benign.
+fn interpolation_is_dynamic(string_node: tree_sitter::Node) -> bool {
+    let mut cursor = string_node.walk();
+    for child in string_node.children(&mut cursor) {
+        if child.kind() != "interpolation" {
+            continue;
+        }
+        // Inspect the interpolated expression(s). A constant-only
+        // interpolation is benign; anything else is treated as dynamic.
+        let mut inner = child.walk();
+        for expr in child.named_children(&mut inner) {
+            match expr.kind() {
+                // Constants and namespaced constants are static.
+                "constant" => {}
+                "scope_resolution" => {}
+                // Everything else (identifier, instance_variable,
+                // global_variable, element_reference, call, ...) is dynamic.
+                _ => return true,
+            }
+        }
+    }
+    false
+}
+
+/// Returns `true` if `name` is a Rails URL helper that produces a
+/// framework-controlled (non-user) URL, so passing its result to
+/// `redirect_to` is not an open-redirect risk. Recognizes `url_for` and the
+/// generated route helpers ending in `_path` / `_url` (e.g. `user_path`,
+/// `root_url`).
+fn is_url_helper(name: &str) -> bool {
+    name == "url_for" || name.ends_with("_path") || name.ends_with("_url")
+}
+
+/// Returns `true` if `name` is a Rails helper that already returns
+/// HTML-escaped / sanitized output, so wrapping it in `raw()` does not
+/// introduce XSS.
+fn is_safe_html_helper(name: &str) -> bool {
+    matches!(
+        name,
+        "sanitize" | "link_to" | "render" | "image_tag" | "content_tag"
+    )
+}
+
+// ─── Rule 1: no-eval ──────────────────────────────────────────────────────────
+
+pub struct NoEval;
+
+impl_rule! {
+    NoEval,
+    id = "rb/no-eval",
+    severity = Severity::Critical,
+    cwe = Some("CWE-95"),
+    description = "Use of eval or similar dynamic code execution",
+    language = Language::Ruby,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            let method_name = match node.kind() {
+                "call" => node
+                    .child_by_field_name("method")
+                    .map(|m| &src[m.byte_range()]),
+                "command" => node
+                    .child_by_field_name("name")
+                    .map(|m| &src[m.byte_range()]),
+                _ => None,
+            };
+
+            if let Some(name) = method_name {
+                // Only flag eval and instance_eval — class_eval/module_eval are
+                // standard Ruby metaprogramming patterns used by every framework
+                if name == "eval" || name == "instance_eval" {
+                    findings.push(make_finding(
+                        _self.id(),
+                        _self.severity(),
+                        _self.cwe(),
+                        &format!(
+                            "{} executes arbitrary code — avoid dynamic evaluation",
+                            name
+                        ),
+                        node,
+                        src,
+                    ));
+                }
+            }
+        });
+        findings
+
+    }
+}
+
+// ─── Rule 2: no-command-injection ─────────────────────────────────────────────
+
+pub struct NoCommandInjection;
+
+impl_rule! {
+    NoCommandInjection,
+    id = "rb/no-command-injection",
+    severity = Severity::Critical,
+    cwe = Some("CWE-78"),
+    description = "Potential command injection via system/exec/spawn or backtick execution",
+    language = Language::Ruby,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            // Detect backtick/subshell execution
+            if node.kind() == "subshell" {
+                findings.push(make_finding(
+                    _self.id(),
+                    _self.severity(),
+                    _self.cwe(),
+                    "Backtick/subshell command execution — risk of command injection",
+                    node,
+                    src,
+                ));
+                return;
+            }
+
+            let method_name = match node.kind() {
+                "call" => node
+                    .child_by_field_name("method")
+                    .map(|m| &src[m.byte_range()]),
+                "command" => node
+                    .child_by_field_name("name")
+                    .map(|m| &src[m.byte_range()]),
+                _ => None,
+            };
+
+            if let Some(name) = method_name {
+                if name == "system" || name == "exec" || name == "spawn" {
+                    // Check if the first argument is a plain string literal
+                    // (no interpolation). If so, skip — it's safe.
+                    let first_arg = node
+                        .child_by_field_name("arguments")
+                        .and_then(|a| a.named_child(0))
+                        .or_else(|| {
+                            // For command-style calls like `system "ls"`,
+                            // args are in an argument_list child.
+                            node.named_child(1).and_then(|c| {
+                                if c.kind() == "argument_list" {
+                                    c.named_child(0)
+                                } else {
+                                    Some(c)
+                                }
+                            })
+                        });
+
+                    let is_safe_literal = first_arg.is_some_and(|arg| {
+                        // A `string` node without any `string_content` siblings
+                        // that are interpolation is a plain literal.
+                        arg.kind() == "string" && !has_interpolation(arg)
+                    });
+
+                    if !is_safe_literal {
+                        findings.push(make_finding(
+                            _self.id(),
+                            _self.severity(),
+                            _self.cwe(),
+                            &format!(
+                                "{} called — risk of command injection with dynamic arguments",
+                                name
+                            ),
+                            node,
+                            src,
+                        ));
+                    }
+                }
+            }
+
+            // Detect %x strings (parsed as subshell or string node with %x prefix)
+            if node.kind() == "string" {
+                let text = &src[node.byte_range()];
+                if text.starts_with("%x") {
+                    findings.push(make_finding(
+                        _self.id(),
+                        _self.severity(),
+                        _self.cwe(),
+                        "%x command execution — risk of command injection",
+                        node,
+                        src,
+                    ));
+                }
+            }
+        });
+        findings
+
+    }
+}
+
+// ─── Rule 3: no-sql-injection ─────────────────────────────────────────────────
+
+pub struct NoSqlInjection;
+
+impl_rule! {
+    NoSqlInjection,
+    id = "rb/no-sql-injection",
+    severity = Severity::Critical,
+    cwe = Some("CWE-89"),
+    description = "Potential SQL injection via string interpolation in query methods",
+    language = Language::Ruby,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            let method_name = match node.kind() {
+                "call" => node
+                    .child_by_field_name("method")
+                    .map(|m| &src[m.byte_range()]),
+                "command" => node
+                    .child_by_field_name("name")
+                    .map(|m| &src[m.byte_range()]),
+                _ => None,
+            };
+
+            if let Some(name) = method_name {
+                if name == "where" || name == "find_by_sql" || name == "execute" {
+                    // Only flag when the first argument is a string literal whose
+                    // interpolation references dynamic input (variables, params,
+                    // method calls). Constant-only interpolation (e.g. a table
+                    // name from a `#{CONST}`) is treated as benign, and
+                    // parameterized calls like `where("x = ?", id)` never match.
+                    let flag = first_call_arg(node).is_some_and(|arg| {
+                        arg.kind() == "string" && interpolation_is_dynamic(arg)
+                    });
+                    if flag {
+                        findings.push(make_finding(
+                            _self.id(),
+                            _self.severity(),
+                            _self.cwe(),
+                            &format!(
+                                "String interpolation in {} — use parameterized queries to prevent SQL injection",
+                                name
+                            ),
+                            node,
+                            src,
+                        ));
+                    }
+                }
+            }
+        });
+        findings
+
+    }
+}
+
+// ─── Rule 4: no-mass-assignment ───────────────────────────────────────────────
+
+pub struct NoMassAssignment;
+
+impl_rule! {
+    NoMassAssignment,
+    id = "rb/no-mass-assignment",
+    severity = Severity::High,
+    cwe = Some("CWE-915"),
+    description = "Mass assignment via permit! allows all parameters",
+    language = Language::Ruby,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() == "call" {
+                if let Some(method) = node.child_by_field_name("method") {
+                    let name = &src[method.byte_range()];
+                    if name == "permit!" {
+                        findings.push(make_finding(
+                            _self.id(),
+                            _self.severity(),
+                            _self.cwe(),
+                            "permit! allows all parameters — use permit(:field1, :field2) to whitelist",
+                            node,
+                            src,
+                        ));
+                    }
+                }
+            }
+        });
+        findings
+
+    }
+}
+
+// ─── Rule 5: no-unsafe-deserialization ────────────────────────────────────────
+
+pub struct NoUnsafeDeserialization;
+
+impl_rule! {
+    NoUnsafeDeserialization,
+    id = "rb/no-unsafe-deserialization",
+    severity = Severity::Critical,
+    cwe = Some("CWE-502"),
+    description = "Unsafe deserialization via Marshal.load or YAML.load",
+    language = Language::Ruby,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() == "call" {
+                if let (Some(receiver), Some(method)) = (
+                    node.child_by_field_name("receiver"),
+                    node.child_by_field_name("method"),
+                ) {
+                    let recv = &src[receiver.byte_range()];
+                    let meth = &src[method.byte_range()];
+
+                    if (recv == "Marshal" && meth == "load")
+                        || (recv == "YAML" && (meth == "load" || meth == "unsafe_load"))
+                    {
+                        findings.push(make_finding(
+                            _self.id(),
+                            _self.severity(),
+                            _self.cwe(),
+                            &format!(
+                                "{}.{} can execute arbitrary code — use YAML.safe_load or safer alternatives",
+                                recv, meth
+                            ),
+                            node,
+                            src,
+                        ));
+                    }
+                }
+            }
+        });
+        findings
+
+    }
+}
+
+// ─── Rule 6: no-open-redirect ─────────────────────────────────────────────────
+
+pub struct NoOpenRedirect;
+
+impl_rule! {
+    NoOpenRedirect,
+    id = "rb/no-open-redirect",
+    severity = Severity::High,
+    cwe = Some("CWE-601"),
+    description = "Potential open redirect via redirect_to with dynamic argument",
+    language = Language::Ruby,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            let is_redirect = match node.kind() {
+                "call" => node
+                    .child_by_field_name("method")
+                    .map(|m| &src[m.byte_range()] == "redirect_to")
+                    .unwrap_or(false),
+                "command" => node
+                    .child_by_field_name("name")
+                    .map(|m| &src[m.byte_range()] == "redirect_to")
+                    .unwrap_or(false),
+                _ => false,
+            };
+
+            if is_redirect {
+                // Inspect the first argument (mirrors `rb/no-ssrf`). Safe forms:
+                //   * string literals: `redirect_to "/home"`
+                //   * a string literal whose interpolation is constant-only
+                //   * Rails URL helpers: `redirect_to url_for(...)`,
+                //     `redirect_to user_path(@u)`, `redirect_to root_url`
+                // Dynamic/user-controlled args (e.g. `redirect_to params[:url]`)
+                // are flagged.
+                let is_safe = first_call_arg(node).is_some_and(|arg| match arg.kind() {
+                    "string" => !interpolation_is_dynamic(arg),
+                    // A bare/called URL helper. The method name is the first
+                    // identifier child of the call.
+                    "call" | "identifier" => {
+                        let helper = if arg.kind() == "identifier" {
+                            Some(&src[arg.byte_range()])
+                        } else {
+                            arg.child_by_field_name("method")
+                                .or_else(|| arg.named_child(0))
+                                .map(|m| &src[m.byte_range()])
+                        };
+                        helper.is_some_and(is_url_helper)
+                    }
+                    _ => false,
+                });
+
+                if !is_safe {
+                    findings.push(make_finding(
+                        _self.id(),
+                        _self.severity(),
+                        _self.cwe(),
+                        "redirect_to with dynamic argument — validate URL to prevent open redirect",
+                        node,
+                        src,
+                    ));
+                }
+            }
+        });
+        findings
+
+    }
+}
+
+// ─── Rule 7: no-csrf-skip ────────────────────────────────────────────────────
+
+pub struct NoCsrfSkip;
+
+impl_rule! {
+    NoCsrfSkip,
+    id = "rb/no-csrf-skip",
+    severity = Severity::High,
+    cwe = Some("CWE-352"),
+    description = "CSRF protection disabled via skip_before_action",
+    language = Language::Ruby,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            let method_name = match node.kind() {
+                "call" => node
+                    .child_by_field_name("method")
+                    .map(|m| &src[m.byte_range()]),
+                "command" => node
+                    .child_by_field_name("name")
+                    .map(|m| &src[m.byte_range()]),
+                _ => None,
+            };
+
+            if let Some(name) = method_name {
+                if name == "skip_before_action" {
+                    let text = &src[node.byte_range()];
+                    if text.contains("verify_authenticity_token") {
+                        findings.push(make_finding(
+                            _self.id(),
+                            _self.severity(),
+                            _self.cwe(),
+                            "skip_before_action :verify_authenticity_token disables CSRF protection",
+                            node,
+                            src,
+                        ));
+                    }
+                }
+            }
+        });
+        findings
+
+    }
+}
+
+// ─── Rule 8: no-html-safe ─────────────────────────────────────────────────────
+
+pub struct NoHtmlSafe;
+
+impl_rule! {
+    NoHtmlSafe,
+    id = "rb/no-html-safe",
+    severity = Severity::High,
+    cwe = Some("CWE-79"),
+    description = "Potential XSS via html_safe or raw()",
+    language = Language::Ruby,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            // Detect .html_safe on non-literal receivers
+            if node.kind() == "call" {
+                if let Some(method) = node.child_by_field_name("method") {
+                    let name = &src[method.byte_range()];
+                    if name == "html_safe" {
+                        if let Some(receiver) = node.child_by_field_name("receiver") {
+                            // Only flag non-string-literal receivers
+                            if receiver.kind() != "string" {
+                                findings.push(make_finding(
+                                    _self.id(),
+                                    _self.severity(),
+                                    _self.cwe(),
+                                    ".html_safe on dynamic content — risk of XSS",
+                                    node,
+                                    src,
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Detect raw() calls
+            let is_raw = match node.kind() {
+                "call" => node
+                    .child_by_field_name("method")
+                    .map(|m| &src[m.byte_range()] == "raw")
+                    .unwrap_or(false),
+                "command" => node
+                    .child_by_field_name("name")
+                    .map(|m| &src[m.byte_range()] == "raw")
+                    .unwrap_or(false),
+                _ => false,
+            };
+
+            if is_raw {
+                // Inspect the first argument. Safe forms:
+                //   * string literals (constant-only interpolation):
+                //     `raw("<b>ok</b>")`
+                //   * known-safe helpers that already escape/sanitize:
+                //     `raw(link_to("a", "/b"))`, `raw(sanitize(html))`
+                // Dynamic content (e.g. `raw(params[:html])`) is flagged.
+                let is_safe = first_call_arg(node).is_some_and(|arg| match arg.kind() {
+                    "string" => !interpolation_is_dynamic(arg),
+                    "call" | "identifier" => {
+                        let helper = if arg.kind() == "identifier" {
+                            Some(&src[arg.byte_range()])
+                        } else {
+                            arg.child_by_field_name("method")
+                                .or_else(|| arg.named_child(0))
+                                .map(|m| &src[m.byte_range()])
+                        };
+                        helper.is_some_and(is_safe_html_helper)
+                    }
+                    _ => false,
+                });
+
+                if !is_safe {
+                    findings.push(make_finding(
+                        _self.id(),
+                        _self.severity(),
+                        _self.cwe(),
+                        "raw() bypasses HTML escaping — risk of XSS",
+                        node,
+                        src,
+                    ));
+                }
+            }
+        });
+        findings
+
+    }
+}
+
+// ─── Rule 9: no-hardcoded-secret ──────────────────────────────────────────────
+
+pub struct NoHardcodedSecret;
+
+impl_rule! {
+    NoHardcodedSecret,
+    id = "rb/no-hardcoded-secret",
+    severity = Severity::High,
+    cwe = Some("CWE-798"),
+    description = "Hardcoded secret or credential detected",
+    language = Language::Ruby,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let mut findings = Vec::new();
+        let secret_pattern = hardcoded_secret_re();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            // assignment: variable = "hardcoded"
+            if node.kind() == "assignment" {
+                if let (Some(left), Some(right)) = (
+                    node.child_by_field_name("left"),
+                    node.child_by_field_name("right"),
+                ) {
+                    let left_text = &src[left.byte_range()];
+                    if secret_pattern.is_match(left_text) && right.kind() == "string" {
+                        let val = &src[right.byte_range()];
+                        // Strip quotes and check length
+                        let inner = val
+                            .trim_start_matches(['"', '\''])
+                            .trim_end_matches(['"', '\'']);
+                        if is_secret_value_long_enough(inner, ctx.secret_thresholds)
+                            && looks_like_secret_value(inner)
+                        {
+                            findings.push(make_finding(
+                                _self.id(),
+                                _self.severity(),
+                                _self.cwe(),
+                                &format!(
+                                    "Hardcoded secret in '{}' — use environment variables",
+                                    left_text.trim()
+                                ),
+                                node,
+                                src,
+                            ));
+                        }
+                    }
+                }
+            }
+        });
+        findings
+
+    }
+}
+
+// ─── Rule 10: no-ssrf ────────────────────────────────────────────────────────
+
+pub struct NoSsrf;
+
+impl_rule! {
+    NoSsrf,
+    id = "rb/no-ssrf",
+    severity = Severity::High,
+    cwe = Some("CWE-918"),
+    description = "Potential SSRF via dynamic outbound HTTP request URL",
+    language = Language::Ruby,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            match node.kind() {
+                // Calls with a receiver: URI.open(...), Net::HTTP.get(...),
+                // HTTParty.get(...), Faraday.get(...), RestClient.get(...)
+                // Also bare calls: open(url), open url
+                "call" => {
+                    let method = node.child_by_field_name("method");
+                    let receiver = node.child_by_field_name("receiver");
+
+                    let http_methods = ["get", "post", "put", "patch", "delete", "head"];
+
+                    let (is_ssrf_call, label) = match (receiver, method) {
+                        (Some(recv_node), Some(meth_node)) => {
+                            let recv = &src[recv_node.byte_range()];
+                            let meth = &src[meth_node.byte_range()];
+                            let matched = (recv == "URI" && meth == "open")
+                                || (recv == "Net::HTTP" && http_methods.contains(&meth))
+                                || (recv == "HTTParty" && http_methods.contains(&meth))
+                                || (recv == "Faraday" && http_methods.contains(&meth))
+                                || (recv == "RestClient" && http_methods.contains(&meth));
+                            (matched, format!("{}.{}", recv, meth))
+                        }
+                        // Bare call: open url  (no receiver, method = "open")
+                        (None, Some(meth_node)) => {
+                            let meth = &src[meth_node.byte_range()];
+                            (meth == "open", "open".to_string())
+                        }
+                        _ => (false, String::new()),
+                    };
+
+                    if !is_ssrf_call {
+                        return;
+                    }
+
+                    // Check if the first argument is dynamic (not a string literal)
+                    // Arguments can be in an "arguments" field or as argument_list named child
+                    let first_arg = node
+                        .child_by_field_name("arguments")
+                        .and_then(|a| a.named_child(0))
+                        .or_else(|| {
+                            // For bare calls like `open url`, args are in an argument_list child
+                            node.named_child(1).and_then(|c| {
+                                if c.kind() == "argument_list" {
+                                    c.named_child(0)
+                                } else {
+                                    Some(c)
+                                }
+                            })
+                        });
+
+                    if let Some(arg) = first_arg {
+                        if arg.kind() != "string" {
+                            let mut finding = make_finding(
+                                _self.id(),
+                                _self.severity(),
+                                _self.cwe(),
+                                &format!(
+                                    "{} called with dynamic URL — validate against an allowlist to prevent SSRF",
+                                    label
+                                ),
+                                node,
+                                src,
+                            );
+                            finding.fix_suggestion = Some(
+                                "Validate URLs against an allowlist before making HTTP requests"
+                                    .to_string(),
+                            );
+                            findings.push(finding);
+                        }
+                    }
+                }
+
+                // Command-style bare calls (e.g. open url without parens)
+                "command" => {
+                    let Some(name_node) = node.child_by_field_name("name") else {
+                        return;
+                    };
+                    let name = &src[name_node.byte_range()];
+                    if name != "open" {
+                        return;
+                    }
+
+                    // For command nodes, check if the argument is a string literal
+                    let is_literal = if let Some(arg) = node.named_child(1) {
+                        arg.kind() == "string"
+                            || (arg.kind() == "argument_list"
+                                && arg.named_child(0).is_some_and(|a| a.kind() == "string"))
+                    } else {
+                        false
+                    };
+
+                    if !is_literal {
+                        let mut finding = make_finding(
+                            _self.id(),
+                            _self.severity(),
+                            _self.cwe(),
+                            "open called with dynamic URL — validate against an allowlist to prevent SSRF",
+                            node,
+                            src,
+                        );
+                        finding.fix_suggestion = Some(
+                            "Validate URLs against an allowlist before making HTTP requests"
+                                .to_string(),
+                        );
+                        findings.push(finding);
+                    }
+                }
+                _ => {}
+            }
+        });
+        findings
+
+    }
+}
+
+// ─── Rule 11: no-path-traversal ──────────────────────────────────────────────
+
+pub struct NoPathTraversal;
+
+impl_rule! {
+    NoPathTraversal,
+    id = "rb/no-path-traversal",
+    severity = Severity::High,
+    cwe = Some("CWE-22"),
+    description = "Potential path traversal via dynamic file path",
+    language = Language::Ruby,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            match node.kind() {
+                // Calls with a receiver: File.read(...), File.open(...),
+                // IO.read(...), File.write(...), FileUtils.cp(...)
+                // Also bare calls: send_file(path), send_file path
+                "call" => {
+                    let method = node.child_by_field_name("method");
+                    let receiver = node.child_by_field_name("receiver");
+
+                    let (is_path_sink, label) = match (receiver, method) {
+                        (Some(recv_node), Some(meth_node)) => {
+                            let recv = &src[recv_node.byte_range()];
+                            let meth = &src[meth_node.byte_range()];
+                            let matched = (recv == "File"
+                                && (meth == "read"
+                                    || meth == "open"
+                                    || meth == "write"
+                                    || meth == "delete"
+                                    || meth == "readlines"
+                                    || meth == "binread"))
+                                || (recv == "IO" && (meth == "read" || meth == "readlines"))
+                                || (recv == "FileUtils"
+                                    && (meth == "cp"
+                                        || meth == "mv"
+                                        || meth == "rm"
+                                        || meth == "mkdir_p"));
+                            (matched, format!("{}.{}", recv, meth))
+                        }
+                        // Bare call: send_file path  (no receiver)
+                        (None, Some(meth_node)) => {
+                            let meth = &src[meth_node.byte_range()];
+                            (meth == "send_file", "send_file".to_string())
+                        }
+                        _ => (false, String::new()),
+                    };
+
+                    if !is_path_sink {
+                        return;
+                    }
+
+                    // Check if the first argument is dynamic (not a string literal)
+                    let first_arg = node
+                        .child_by_field_name("arguments")
+                        .and_then(|a| a.named_child(0))
+                        .or_else(|| {
+                            node.named_child(1).and_then(|c| {
+                                if c.kind() == "argument_list" {
+                                    c.named_child(0)
+                                } else {
+                                    Some(c)
+                                }
+                            })
+                        });
+
+                    if let Some(arg) = first_arg {
+                        if arg.kind() != "string" {
+                            let mut finding = make_finding(
+                                _self.id(),
+                                _self.severity(),
+                                _self.cwe(),
+                                &format!(
+                                    "{} called with dynamic path — validate to prevent path traversal",
+                                    label
+                                ),
+                                node,
+                                src,
+                            );
+                            finding.fix_suggestion = Some(
+                                "Validate file paths and ensure they don't escape the intended directory"
+                                    .to_string(),
+                            );
+                            findings.push(finding);
+                        }
+                    }
+                }
+
+                // Command-style bare calls (e.g. send_file path without parens)
+                "command" => {
+                    let Some(name_node) = node.child_by_field_name("name") else {
+                        return;
+                    };
+                    let name = &src[name_node.byte_range()];
+                    if name != "send_file" {
+                        return;
+                    }
+
+                    let is_literal = if let Some(arg) = node.named_child(1) {
+                        arg.kind() == "string"
+                            || (arg.kind() == "argument_list"
+                                && arg.named_child(0).is_some_and(|a| a.kind() == "string"))
+                    } else {
+                        false
+                    };
+
+                    if !is_literal {
+                        let mut finding = make_finding(
+                            _self.id(),
+                            _self.severity(),
+                            _self.cwe(),
+                            "send_file called with dynamic path — validate to prevent path traversal",
+                            node,
+                            src,
+                        );
+                        finding.fix_suggestion = Some(
+                            "Validate file paths and ensure they don't escape the intended directory"
+                                .to_string(),
+                        );
+                        findings.push(finding);
+                    }
+                }
+                _ => {}
+            }
+        });
+        findings
+
+    }
+}
+
+// ─── Rule 12: no-weak-crypto ──────────────────────────────────────────────────
+
+pub struct NoWeakCrypto;
+
+impl_rule! {
+    NoWeakCrypto,
+    id = "rb/no-weak-crypto",
+    severity = Severity::Medium,
+    cwe = Some("CWE-327"),
+    description = "Use of weak cryptographic hash (MD5/SHA1)",
+    language = Language::Ruby,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            // Detect Digest::MD5, Digest::SHA1 via scope_resolution nodes
+            if node.kind() == "scope_resolution" {
+                let text = &src[node.byte_range()];
+                if text == "Digest::MD5" || text == "Digest::SHA1" {
+                    let algo = if text.contains("MD5") { "MD5" } else { "SHA1" };
+                    findings.push(make_finding(
+                        _self.id(),
+                        _self.severity(),
+                        _self.cwe(),
+                        &format!(
+                            "{} is cryptographically weak — use SHA-256 or stronger",
+                            algo
+                        ),
+                        node,
+                        src,
+                    ));
+                }
+            }
+        });
+        findings
+
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Ruby taint rules (first-party)
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Five `rb/taint-*` rules that consume the taint engine in
+// `crate::rules::ruby_taint`. Each rule's `check()` looks up the rule's
+// declarative `TaintSpec` from `ruby_taint::ruby_taint_rule_specs()`,
+// hands it to `ruby_taint::analyze_tree`, and maps returned `TaintFinding`s
+// onto the project's `Finding` type — same shape as the C#, Java, and C
+// taint rules.
+//
+// The scanner skips the rule's `check()` when the same rule id is
+// registered as a `RegistryTaintSpec` via `builtin_taint_specs_for_language`,
+// and runs the batched dispatcher `run_ruby_taint_batched` instead. The
+// `check()` path is kept working so unit tests that construct a Rule struct
+// directly continue to function.
+
+/// Per-rule metadata for Ruby taint findings.
+struct RubyTaintRuleMeta<'a> {
+    rule_id: &'a str,
+    severity: Severity,
+    cwe: Option<&'a str>,
+    fix_suggestion: Option<&'a str>,
+    format_description: fn(&str, &str) -> String,
+}
+
+fn ruby_taint_command_injection_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can inject OS commands or Ruby code")
+}
+
+fn ruby_taint_sql_injection_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can inject SQL")
+}
+
+fn ruby_taint_xss_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input reaches an HTML output sink (XSS)")
+}
+
+fn ruby_taint_unsafe_deserialization_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can trigger unsafe deserialization")
+}
+
+fn ruby_taint_open_redirect_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can drive an open redirect")
+}
+
+fn ruby_taint_meta(rule_id: &str) -> Option<RubyTaintRuleMeta<'static>> {
+    match rule_id {
+        "rb/taint-command-injection" => Some(RubyTaintRuleMeta {
+            rule_id: "rb/taint-command-injection",
+            severity: Severity::Critical,
+            cwe: Some("CWE-78"),
+            fix_suggestion: Some(
+                "Avoid invoking shell commands or eval with request-controlled data; use Shellwords.escape on validated argument arrays and avoid eval entirely",
+            ),
+            format_description: ruby_taint_command_injection_desc,
+        }),
+        "rb/taint-sql-injection" => Some(RubyTaintRuleMeta {
+            rule_id: "rb/taint-sql-injection",
+            severity: Severity::Critical,
+            cwe: Some("CWE-89"),
+            fix_suggestion: Some(
+                "Use ActiveRecord parameter binding (where(\"col = ?\", val)) instead of interpolating request input into query strings",
+            ),
+            format_description: ruby_taint_sql_injection_desc,
+        }),
+        "rb/taint-xss" => Some(RubyTaintRuleMeta {
+            rule_id: "rb/taint-xss",
+            severity: Severity::High,
+            cwe: Some("CWE-79"),
+            fix_suggestion: Some(
+                "HTML-escape untrusted values (ERB::Util.html_escape / CGI.escapeHTML) instead of marking them html_safe / passing them to raw()",
+            ),
+            format_description: ruby_taint_xss_desc,
+        }),
+        "rb/taint-unsafe-deserialization" => Some(RubyTaintRuleMeta {
+            rule_id: "rb/taint-unsafe-deserialization",
+            severity: Severity::Critical,
+            cwe: Some("CWE-502"),
+            fix_suggestion: Some(
+                "Do not Marshal.load / YAML.unsafe_load request-controlled data; prefer YAML.safe_load with an explicit permit list or a structured format",
+            ),
+            format_description: ruby_taint_unsafe_deserialization_desc,
+        }),
+        "rb/taint-open-redirect" => Some(RubyTaintRuleMeta {
+            rule_id: "rb/taint-open-redirect",
+            severity: Severity::Medium,
+            cwe: Some("CWE-601"),
+            fix_suggestion: Some(
+                "Validate redirect targets against an allowlist of permitted destinations",
+            ),
+            format_description: ruby_taint_open_redirect_desc,
+        }),
+        _ => None,
+    }
+}
+
+/// Map a single `TaintFinding` from the Ruby engine onto a `Finding`.
+fn map_ruby_taint_finding(
+    meta: &RubyTaintRuleMeta<'_>,
+    source: &str,
+    finding: ruby_taint::TaintFinding,
+) -> Finding {
+    Finding {
+        rule_id: meta.rule_id.to_string(),
+        severity: meta.severity,
+        cwe: meta.cwe.map(|s| s.to_string()),
+        description: (meta.format_description)(
+            &finding.source_description,
+            &finding.sink_description,
+        ),
+        file: String::new(),
+        line: finding.sink_line,
+        column: finding.sink_column,
+        end_line: finding.sink_end_line,
+        end_column: finding.sink_end_column,
+        snippet: get_source_line(source, finding.sink_start_byte),
+        source_line: Some(finding.source_line),
+        source_description: Some(finding.source_description),
+        sink_line: Some(finding.sink_line),
+        sink_description: Some(finding.sink_description),
+        fix_suggestion: meta.fix_suggestion.map(|s| s.to_string()),
+        sink_start_byte: Some(finding.sink_start_byte),
+        sink_end_byte: Some(finding.sink_end_byte),
+        confidence: confidence_for_hops(finding.hops),
+        taint_hops: Some(finding.hops),
+        tags: vec![],
+        crypto_algorithm: None,
+        cnsa2_deadline: None,
+        dep_name: None,
+        dep_version: None,
+        dep_ecosystem: None,
+        dep_purl: None,
+        dep_vulnerability_id: None,
+        dep_fixed_version: None,
+        dep_source: None,
+        dep_vulnerability_severity: None,
+        dep_path: vec![],
+        crypto_material: None,
+    }
+}
+
+/// Run every enabled Ruby taint rule over `tree` in a single dispatch.
+///
+/// Intra-file findings come from [`ruby_taint::analyze_tree`]. When the
+/// scanner supplied pass-1 cross-file summaries plus same-package sibling
+/// paths (multi-file Ruby scan), a second pass resolves helper-method calls
+/// to those summaries and emits cross-file findings. See `ruby_taint.rs`
+/// for the (name+arity, same-directory) resolution scope. Mirrors
+/// `run_java_taint_batched` in `java.rs`.
+pub fn run_ruby_taint_batched(
+    source: &str,
+    tree: &tree_sitter::Tree,
+    ctx: &crate::rules::FileContext<'_>,
+    enabled_rule_ids: &std::collections::HashSet<&str>,
+) -> Vec<Finding> {
+    let mut findings = Vec::new();
+    let rule_specs = ruby_taint::ruby_taint_rule_specs();
+    for (rule_id, spec) in &rule_specs {
+        if !enabled_rule_ids.contains(rule_id) {
+            continue;
+        }
+        let Some(meta) = ruby_taint_meta(rule_id) else {
+            continue;
+        };
+        let raw = ruby_taint::analyze_tree(tree.root_node(), source, spec, None);
+        for finding in raw {
+            findings.push(map_ruby_taint_finding(&meta, source, finding));
+        }
+    }
+
+    // Cross-file resolution: only when pass-1 summaries and same-package
+    // sibling paths are both available (i.e. a multi-file Ruby scan).
+    if let (Some(summaries), Some(paths)) = (
+        ctx.cross_file_summaries,
+        ctx.ruby_same_package_paths.as_ref(),
+    ) {
+        let allowed: std::collections::HashSet<String> =
+            enabled_rule_ids.iter().map(|id| id.to_string()).collect();
+        let enabled_specs: Vec<(&str, ruby_taint::TaintSpec)> = rule_specs
+            .iter()
+            .filter(|(id, _)| enabled_rule_ids.contains(id))
+            .map(|(id, spec)| (*id, spec.clone()))
+            .collect();
+        let cross = ruby_taint::CrossFileInfo {
+            same_package_paths: paths,
+            summaries,
+            allowed_rule_ids: &allowed,
+        };
+        let raw = ruby_taint::extract_cross_file_findings(
+            tree.root_node(),
+            source,
+            &enabled_specs,
+            &cross,
+        );
+        for finding in raw {
+            let Some(rule_id) = finding.rule_id_hint.as_deref() else {
+                continue;
+            };
+            let Some(meta) = ruby_taint_meta(rule_id) else {
+                continue;
+            };
+            findings.push(map_ruby_taint_finding(&meta, source, finding));
+        }
+    }
+
+    findings
+}
+
+/// Run a single Ruby taint rule over a tree. Used by the rule structs'
+/// `check()` path for direct unit tests.
+fn run_ruby_taint_single(
+    rule_id: &str,
+    source: &str,
+    tree: &tree_sitter::Tree,
+    spec: &ruby_taint::TaintSpec,
+) -> Vec<Finding> {
+    let Some(meta) = ruby_taint_meta(rule_id) else {
+        return Vec::new();
+    };
+    let raw = ruby_taint::analyze_tree(tree.root_node(), source, spec, None);
+    raw.into_iter()
+        .map(|finding| map_ruby_taint_finding(&meta, source, finding))
+        .collect()
+}
+
+// ─── Rule 1: rb/taint-command-injection ─────────────────────────────────────
+
+pub struct TaintCommandInjection;
+
+impl_rule! {
+    TaintCommandInjection,
+    id = "rb/taint-command-injection",
+    severity = Severity::Critical,
+    cwe = Some("CWE-78"),
+    description = "Untrusted Ruby input reaches a command execution or eval sink",
+    language = Language::Ruby,
+    fn check(_self, source, tree) {
+        let spec = ruby_taint::ruby_taint_rule_specs()
+            .into_iter()
+            .find(|(id, _)| *id == _self.id())
+            .map(|(_, spec)| spec)
+            .unwrap_or_default();
+        run_ruby_taint_single(_self.id(), source, tree, &spec)
+    }
+}
+
+// ─── Rule 2: rb/taint-sql-injection ─────────────────────────────────────────
+
+pub struct TaintSqlInjection;
+
+impl_rule! {
+    TaintSqlInjection,
+    id = "rb/taint-sql-injection",
+    severity = Severity::Critical,
+    cwe = Some("CWE-89"),
+    description = "Untrusted Ruby input reaches a SQL query sink",
+    language = Language::Ruby,
+    fn check(_self, source, tree) {
+        let spec = ruby_taint::ruby_taint_rule_specs()
+            .into_iter()
+            .find(|(id, _)| *id == _self.id())
+            .map(|(_, spec)| spec)
+            .unwrap_or_default();
+        run_ruby_taint_single(_self.id(), source, tree, &spec)
+    }
+}
+
+// ─── Rule 3: rb/taint-xss ───────────────────────────────────────────────────
+
+pub struct TaintXss;
+
+impl_rule! {
+    TaintXss,
+    id = "rb/taint-xss",
+    severity = Severity::High,
+    cwe = Some("CWE-79"),
+    description = "Untrusted Ruby input reaches an HTML output sink",
+    language = Language::Ruby,
+    fn check(_self, source, tree) {
+        let spec = ruby_taint::ruby_taint_rule_specs()
+            .into_iter()
+            .find(|(id, _)| *id == _self.id())
+            .map(|(_, spec)| spec)
+            .unwrap_or_default();
+        run_ruby_taint_single(_self.id(), source, tree, &spec)
+    }
+}
+
+// ─── Rule 4: rb/taint-unsafe-deserialization ────────────────────────────────
+
+pub struct TaintUnsafeDeserialization;
+
+impl_rule! {
+    TaintUnsafeDeserialization,
+    id = "rb/taint-unsafe-deserialization",
+    severity = Severity::Critical,
+    cwe = Some("CWE-502"),
+    description = "Untrusted Ruby input reaches an unsafe deserialization sink",
+    language = Language::Ruby,
+    fn check(_self, source, tree) {
+        let spec = ruby_taint::ruby_taint_rule_specs()
+            .into_iter()
+            .find(|(id, _)| *id == _self.id())
+            .map(|(_, spec)| spec)
+            .unwrap_or_default();
+        run_ruby_taint_single(_self.id(), source, tree, &spec)
+    }
+}
+
+// ─── Rule 5: rb/taint-open-redirect ─────────────────────────────────────────
+
+pub struct TaintOpenRedirect;
+
+impl_rule! {
+    TaintOpenRedirect,
+    id = "rb/taint-open-redirect",
+    severity = Severity::Medium,
+    cwe = Some("CWE-601"),
+    description = "Untrusted Ruby input reaches a redirect sink",
+    language = Language::Ruby,
+    fn check(_self, source, tree) {
+        let spec = ruby_taint::ruby_taint_rule_specs()
+            .into_iter()
+            .find(|(id, _)| *id == _self.id())
+            .map(|(_, spec)| spec)
+            .unwrap_or_default();
+        run_ruby_taint_single(_self.id(), source, tree, &spec)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::rules::Rule;
+    use tree_sitter::Parser;
+
+    fn parse_ruby(source: &str) -> tree_sitter::Tree {
+        let mut parser = Parser::new();
+        parser
+            .set_language(&tree_sitter_ruby::LANGUAGE.into())
+            .unwrap();
+        parser.parse(source, None).unwrap()
+    }
+
+    fn dump_tree(node: tree_sitter::Node, src: &str, depth: usize) {
+        let indent = "  ".repeat(depth);
+        let text = &src[node.byte_range()];
+        let short = if text.len() > 60 { &text[..60] } else { text };
+        eprintln!(
+            "{}kind={:?} named_children={} text={:?}",
+            indent,
+            node.kind(),
+            node.named_child_count(),
+            short.replace('\n', "\\n")
+        );
+        for i in 0..node.named_child_count() {
+            if let Some(c) = node.named_child(i) {
+                dump_tree(c, src, depth + 1);
+            }
+        }
+    }
+
+    #[test]
+    fn debug_open_url_tree() {
+        let source = "open url\nsend_file path\n";
+        let tree = parse_ruby(source);
+        dump_tree(tree.root_node(), source, 0);
+    }
+
+    #[test]
+    fn test_ssrf_detects_all_patterns() {
+        let source = "URI.open(user_input)\nNet::HTTP.get(user_url)\nHTTParty.get(url)\nFaraday.get(url)\nRestClient.get(url)\nopen url\n";
+        let tree = parse_ruby(source);
+        let rule = NoSsrf;
+        let findings = rule.check(source, &tree);
+        assert_eq!(
+            findings.len(),
+            6,
+            "Expected 6 SSRF findings, got {}",
+            findings.len()
+        );
+    }
+
+    #[test]
+    fn test_path_traversal_detects_all_patterns() {
+        let source = "File.read(user_input)\nFile.open(user_input)\nIO.read(user_input)\nFile.write(path, data)\nFileUtils.cp(src, dst)\nsend_file path\n";
+        let tree = parse_ruby(source);
+        let rule = NoPathTraversal;
+        let findings = rule.check(source, &tree);
+        assert_eq!(
+            findings.len(),
+            6,
+            "Expected 6 path traversal findings, got {}",
+            findings.len()
+        );
+    }
+
+    #[test]
+    fn test_command_injection_skips_plain_string_literal() {
+        let source = r#"system("ls -la")"#;
+        let tree = parse_ruby(source);
+        let rule = NoCommandInjection;
+        let findings = rule.check(source, &tree);
+        assert_eq!(
+            findings.len(),
+            0,
+            "system() with a plain string literal should NOT fire"
+        );
+    }
+
+    #[test]
+    fn test_command_injection_fires_on_variable() {
+        let source = "system(user_input)";
+        let tree = parse_ruby(source);
+        let rule = NoCommandInjection;
+        let findings = rule.check(source, &tree);
+        assert_eq!(
+            findings.len(),
+            1,
+            "system() with a variable argument should fire"
+        );
+    }
+
+    #[test]
+    fn test_command_injection_fires_on_interpolated_string() {
+        let source = r##"system("#{cmd}")"##;
+        let tree = parse_ruby(source);
+        let rule = NoCommandInjection;
+        let findings = rule.check(source, &tree);
+        assert_eq!(
+            findings.len(),
+            1,
+            "system() with an interpolated string should fire"
+        );
+    }
+
+    #[test]
+    fn test_command_injection_skips_exec_with_literal() {
+        let source = r#"exec("echo hello")"#;
+        let tree = parse_ruby(source);
+        let rule = NoCommandInjection;
+        let findings = rule.check(source, &tree);
+        assert_eq!(
+            findings.len(),
+            0,
+            "exec() with a plain string literal should NOT fire"
+        );
+    }
+
+    fn count<R: Rule>(rule: R, source: &str) -> usize {
+        let tree = parse_ruby(source);
+        rule.check(source, &tree).len()
+    }
+
+    // ── open-redirect ──
+    #[test]
+    fn test_open_redirect_safe_cases() {
+        assert_eq!(count(NoOpenRedirect, r#"redirect_to "/home""#), 0);
+        assert_eq!(count(NoOpenRedirect, "redirect_to url_for(:home)"), 0);
+        assert_eq!(count(NoOpenRedirect, "redirect_to user_path(@user)"), 0);
+        assert_eq!(count(NoOpenRedirect, "redirect_to root_url"), 0);
+    }
+
+    #[test]
+    fn test_open_redirect_flags_dynamic() {
+        assert_eq!(count(NoOpenRedirect, "redirect_to params[:url]"), 1);
+        assert_eq!(count(NoOpenRedirect, "redirect_to user_supplied"), 1);
+    }
+
+    // ── sql-injection ──
+    #[test]
+    fn test_sql_injection_safe_cases() {
+        assert_eq!(count(NoSqlInjection, r##"where("x = #{CONST}")"##), 0);
+        assert_eq!(count(NoSqlInjection, r#"where("active = ?", true)"#), 0);
+        assert_eq!(count(NoSqlInjection, r#"where(active: true)"#), 0);
+    }
+
+    #[test]
+    fn test_sql_injection_flags_dynamic() {
+        assert_eq!(count(NoSqlInjection, r##"where("x = #{params[:id]}")"##), 1);
+        assert_eq!(
+            count(
+                NoSqlInjection,
+                r##"execute("SELECT * FROM t WHERE id = #{id}")"##
+            ),
+            1
+        );
+    }
+
+    // ── raw() / html_safe ──
+    #[test]
+    fn test_raw_safe_cases() {
+        assert_eq!(count(NoHtmlSafe, r#"raw(link_to("a", "/b"))"#), 0);
+        assert_eq!(count(NoHtmlSafe, r#"raw("<b>ok</b>")"#), 0);
+        assert_eq!(count(NoHtmlSafe, "raw(sanitize(html))"), 0);
+    }
+
+    #[test]
+    fn test_raw_flags_dynamic() {
+        assert_eq!(count(NoHtmlSafe, "raw(params[:html])"), 1);
+        assert_eq!(count(NoHtmlSafe, "raw(user_content)"), 1);
+    }
+
+    // ── hardcoded-secret value gate ──
+    #[test]
+    fn test_secret_value_gate() {
+        // Secret-named var with a non-secret-shaped value must NOT fire.
+        assert_eq!(
+            count(NoHardcodedSecret, r#"api_key = "see README for setup""#),
+            0
+        );
+        // Real-looking secret still fires.
+        assert_eq!(
+            count(
+                NoHardcodedSecret,
+                r#"API_KEY = "prodkey9f8a7b6c5d4e3f2a1b0c4d5e6f""#
+            ),
+            1
+        );
+    }
+}

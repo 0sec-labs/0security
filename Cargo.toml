@@ -1,0 +1,6 @@
+# Rust workspace for the Foxguard static analysis engine that `0` calls as its
+# default scanner. The TypeScript monorepo is a pnpm workspace; this is Rust only.
+[workspace]
+resolver = "2"
+members = ["crates/foxguard"]
+exclude = ["0verse/native/windows-token-capture", "0verse/rust"]

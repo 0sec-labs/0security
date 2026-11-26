@@ -23,7 +23,7 @@ export function checkUpdateContract(root) {
   const stage = read("scripts/stage-release-assets.sh");
   const platforms = /^PLATFORMS="([^"]+)"/m.exec(stage)?.[1].split(/\s+/) ?? [];
   if (!release.includes("scripts/stage-release-assets.sh")) errors.push("release.yml must stage assets with scripts/stage-release-assets.sh");
-  if (!/sum "\$\{old\[@\]\}" "\$\{new\[@\]\}" > checksums\.txt/.test(stage)) errors.push("stage-release-assets.sh must write checksums.txt for both name sets");
+  if (!/sum "\$\{old\[@\]\}" "\$\{new\[@\]\}" "\$\{fox\[@\]\}" > checksums\.txt/.test(stage)) errors.push("stage-release-assets.sh must write checksums.txt for both name sets and the foxguard binaries");
   for (const a of assets) {
     if (!platforms.includes(a.replace(/^0-/, ""))) errors.push(`release.yml builds ${a} but stage-release-assets.sh does not stage it`);
     for (const name of [a, a.replace(/^0-/, "0security-")]) {

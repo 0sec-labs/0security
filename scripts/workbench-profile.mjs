@@ -14,7 +14,9 @@ export function immutableImageReference(value) {
 }
 
 export function assertWorkbenchFoxguardSource(metadata, expected) {
-  if (!metadata || metadata.revision !== expected.revision || metadata.archiveSha256 !== expected.archiveSha256
+  // Foxguard is built from crates/foxguard in this repository, so the receipt names
+  // that source instead of a downloaded revision and archive.
+  if (!metadata || metadata.source !== expected.source
     || !Array.isArray(metadata.policyVersions) || !metadata.policyVersions.includes("v1") || !metadata.policyVersions.includes("v2")) {
     throw new Error("FoxGuard source identity or required policy versions do not match the build pins");
   }

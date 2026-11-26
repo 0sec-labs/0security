@@ -1,0 +1,3614 @@
+use std::borrow::Cow;
+use std::sync::OnceLock;
+
+use regex::Regex;
+
+use crate::impl_rule;
+use crate::rules::common::{
+    get_source_line, hardcoded_secret_re, is_high_signal_secret_name, is_secret_value_long_enough,
+    looks_like_secret_value, make_finding, walk_tree,
+};
+use crate::rules::FileContext;
+use crate::{Finding, Language, Severity};
+
+// ─── Static regex helpers (compiled once) ────────────────────────────────────
+
+fn py_sql_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"(?i)(SELECT\s+.{0,40}\s+FROM|INSERT\s+INTO|UPDATE\s+.{0,40}\s+SET|DELETE\s+FROM|DROP\s+TABLE|ALTER\s+TABLE|CREATE\s+TABLE|EXEC\s+)")
+            .expect("static Python SQL regex should compile")
+    })
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/// Resolve a raw callee text through the per-file Python import alias table.
+/// Returns the canonical dotted path when an alias matches, otherwise the
+/// input unchanged. Falls back to the raw text when no alias table is
+/// available (e.g. under the legacy `check` entry point used by some unit
+/// tests).
+fn resolve_callee<'a>(func_text: &'a str, ctx: &'a FileContext<'_>) -> Cow<'a, str> {
+    match ctx.python_aliases {
+        Some(aliases) => aliases.resolve(func_text),
+        None => Cow::Borrowed(func_text),
+    }
+}
+
+// ─── False-positive reduction helpers ────────────────────────────────────────
+
+/// True when an expression node is a "constant" value that cannot carry
+/// untrusted input: plain (non-f) string/number/boolean/None literals.
+fn is_constant_literal(node: tree_sitter::Node, src: &str) -> bool {
+    match node.kind() {
+        "string" => {
+            let text = &src[node.byte_range()];
+            // f-strings can interpolate tainted data; treat them as dynamic.
+            !(text.starts_with("f\"")
+                || text.starts_with("f'")
+                || text.starts_with("rf\"")
+                || text.starts_with("rf'")
+                || text.starts_with("F\"")
+                || text.starts_with("F'"))
+        }
+        "concatenated_string" => {
+            // Adjacent string literals (no f-string component) are still constant.
+            let mut cursor = node.walk();
+            let all_const = node
+                .named_children(&mut cursor)
+                .all(|c| is_constant_literal(c, src));
+            all_const
+        }
+        "integer" | "float" | "true" | "false" | "none" => true,
+        _ => false,
+    }
+}
+
+/// True when a call node resolves to `os.path.join` / `pathlib.Path.joinpath`
+/// (or a bare `.joinpath(...)` method call). Results of these joins still need
+/// component sanitization in theory, but flagging them produces the documented
+/// `open_resource()`-style false positives; the conservative path-traversal
+/// rule intentionally treats them as sanitized.
+fn is_safe_join_call(node: tree_sitter::Node, src: &str) -> bool {
+    if node.kind() != "call" {
+        return false;
+    }
+    let Some(func) = node.child_by_field_name("function") else {
+        return false;
+    };
+    let func_text = &src[func.byte_range()];
+    if func_text == "os.path.join" {
+        return true;
+    }
+    // Match any `.joinpath(...)` attribute call (pathlib.Path(...).joinpath(...)).
+    if func.kind() == "attribute" {
+        if let Some(attr) = func.child_by_field_name("attribute") {
+            if &src[attr.byte_range()] == "joinpath" {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Collects names of local/module identifiers that are *only ever* assigned
+/// constant literals. Such names cannot carry tainted input, so flagging a
+/// sink that receives one is a false positive. An identifier is excluded the
+/// moment any assignment gives it a non-constant RHS, so function parameters
+/// and dynamically-reassigned names are never considered constant.
+fn collect_constant_bindings(
+    root: tree_sitter::Node,
+    src: &str,
+) -> std::collections::HashSet<String> {
+    let mut constant: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut dynamic: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    walk_tree(root, src, &mut |node, s| {
+        if node.kind() != "assignment" {
+            return;
+        }
+        let (Some(left), Some(right)) = (
+            node.child_by_field_name("left"),
+            node.child_by_field_name("right"),
+        ) else {
+            return;
+        };
+        // Only simple single-name targets (`x = ...`).
+        if left.kind() != "identifier" {
+            return;
+        }
+        let name = src[left.byte_range()].to_string();
+        if is_constant_literal(right, s) {
+            constant.insert(name);
+        } else {
+            dynamic.insert(name);
+        }
+    });
+
+    constant.retain(|n| !dynamic.contains(n));
+    constant
+}
+
+/// Visit nodes in one Python function scope without borrowing assignments or
+/// returns from nested function/class definitions.
+fn walk_python_function_scope<'tree>(
+    root: tree_sitter::Node<'tree>,
+    visit: &mut impl FnMut(tree_sitter::Node<'tree>),
+) {
+    let mut stack = vec![root];
+    while let Some(node) = stack.pop() {
+        visit(node);
+        let mut cursor = node.walk();
+        let children = node.children(&mut cursor).collect::<Vec<_>>();
+        for child in children.into_iter().rev() {
+            if child != root
+                && matches!(
+                    child.kind(),
+                    "function_definition" | "class_definition" | "lambda"
+                )
+            {
+                continue;
+            }
+            stack.push(child);
+        }
+    }
+}
+
+/// Prove that every explicit return in a typed argv builder produces a
+/// non-empty list/tuple whose executable is a local constant. A return
+/// annotation alone is not proof: `def argv(x) -> list[str]: return [x]`
+/// must remain an unsafe dynamic executable.
+fn function_returns_safe_argv(function: tree_sitter::Node, src: &str) -> bool {
+    let mut constant = std::collections::HashSet::new();
+    let mut dynamic = std::collections::HashSet::new();
+    walk_python_function_scope(function, &mut |node| {
+        if node.kind() != "assignment" {
+            return;
+        }
+        let (Some(left), Some(right)) = (
+            node.child_by_field_name("left"),
+            node.child_by_field_name("right"),
+        ) else {
+            return;
+        };
+        if left.kind() != "identifier" {
+            return;
+        }
+        let name = src[left.byte_range()].to_string();
+        if is_constant_literal(right, src) {
+            constant.insert(name);
+        } else {
+            dynamic.insert(name);
+        }
+    });
+    let parameter_names = collect_scope_parameter_names(function, src);
+    constant.retain(|name| !dynamic.contains(name) && !parameter_names.contains(name));
+
+    let mut argv_bindings = std::collections::HashSet::new();
+    let mut other_bindings = std::collections::HashSet::new();
+    walk_python_function_scope(function, &mut |node| {
+        if node.kind() != "assignment" {
+            return;
+        }
+        let (Some(left), Some(right)) = (
+            node.child_by_field_name("left"),
+            node.child_by_field_name("right"),
+        ) else {
+            return;
+        };
+        if left.kind() != "identifier" {
+            return;
+        }
+        let name = src[left.byte_range()].to_string();
+        if is_safe_argv_container(right, src, &constant) {
+            argv_bindings.insert(name);
+        } else if !is_constant_literal(right, src) {
+            other_bindings.insert(name);
+        }
+    });
+    argv_bindings.retain(|name| !other_bindings.contains(name) && !parameter_names.contains(name));
+    invalidate_non_tail_argv_mutations(function, src, &mut argv_bindings, true, None);
+
+    let mut saw_return = false;
+    let mut all_returns_safe = true;
+    walk_python_function_scope(function, &mut |node| {
+        if node.kind() != "return_statement" {
+            return;
+        }
+        saw_return = true;
+        let Some(value) = node.named_child(0) else {
+            all_returns_safe = false;
+            return;
+        };
+        let safe = is_safe_argv_container(value, src, &constant)
+            || (value.kind() == "identifier" && argv_bindings.contains(&src[value.byte_range()]));
+        all_returns_safe &= safe;
+    });
+    saw_return && all_returns_safe
+}
+
+/// Keep argv provenance only while its constant executable head cannot be
+/// replaced. `+=` and `.append`/`.extend` preserve the head; indexed writes,
+/// deletes, and other in-place mutations do not.
+fn invalidate_non_tail_argv_mutations(
+    root: tree_sitter::Node,
+    src: &str,
+    argv: &mut std::collections::HashSet<String>,
+    function_scope: bool,
+    before_byte: Option<usize>,
+) {
+    let mut invalid = std::collections::HashSet::new();
+    let mut inspect = |node: tree_sitter::Node| {
+        if before_byte.is_some_and(|cutoff| node.start_byte() >= cutoff) {
+            return;
+        }
+        match node.kind() {
+            "assignment" => {
+                if let (Some(left), Some(right)) = (
+                    node.child_by_field_name("left"),
+                    node.child_by_field_name("right"),
+                ) {
+                    if left.kind() == "subscript" {
+                        if let Some(value) = left.child_by_field_name("value") {
+                            if value.kind() == "identifier" {
+                                invalid.insert(src[value.byte_range()].to_string());
+                            }
+                        }
+                    }
+                    if right.kind() == "identifier" {
+                        let source_name = &src[right.byte_range()];
+                        if argv.contains(source_name) && &src[left.byte_range()] != source_name {
+                            invalid.insert(source_name.to_string());
+                        }
+                    }
+                }
+            }
+            "augmented_assignment" => {
+                if let Some(left) = node.child_by_field_name("left") {
+                    if left.kind() == "identifier" && !src[node.byte_range()].contains("+=") {
+                        invalid.insert(src[left.byte_range()].to_string());
+                    }
+                }
+            }
+            "delete_statement" => {
+                let text = src[node.byte_range()].trim_start_matches("del").trim();
+                if let Some((name, _)) = text.split_once('[') {
+                    invalid.insert(name.trim().to_string());
+                }
+            }
+            "call" => {
+                let Some(function) = node.child_by_field_name("function") else {
+                    return;
+                };
+                let function_text = &src[function.byte_range()];
+                let is_subprocess_sink = matches!(
+                    function_text,
+                    "subprocess.call"
+                        | "subprocess.run"
+                        | "subprocess.Popen"
+                        | "subprocess.check_output"
+                        | "subprocess.check_call"
+                );
+                if function.kind() != "attribute" {
+                    if !is_subprocess_sink {
+                        if let Some(arguments) = node.child_by_field_name("arguments") {
+                            let mut cursor = arguments.walk();
+                            for argument in arguments.named_children(&mut cursor) {
+                                if argument.kind() == "identifier"
+                                    && argv.contains(&src[argument.byte_range()])
+                                {
+                                    invalid.insert(src[argument.byte_range()].to_string());
+                                }
+                            }
+                        }
+                    }
+                    return;
+                }
+                let (Some(object), Some(attribute)) = (
+                    function.child_by_field_name("object"),
+                    function.child_by_field_name("attribute"),
+                ) else {
+                    return;
+                };
+                if object.kind() != "identifier" {
+                    if !is_subprocess_sink {
+                        if let Some(arguments) = node.child_by_field_name("arguments") {
+                            let mut cursor = arguments.walk();
+                            for argument in arguments.named_children(&mut cursor) {
+                                if argument.kind() == "identifier"
+                                    && argv.contains(&src[argument.byte_range()])
+                                {
+                                    invalid.insert(src[argument.byte_range()].to_string());
+                                }
+                            }
+                        }
+                    }
+                    return;
+                }
+                let method = &src[attribute.byte_range()];
+                if !is_subprocess_sink && !matches!(method, "append" | "extend") {
+                    invalid.insert(src[object.byte_range()].to_string());
+                }
+                if !is_subprocess_sink && !matches!(method, "append" | "extend") {
+                    if let Some(arguments) = node.child_by_field_name("arguments") {
+                        let mut cursor = arguments.walk();
+                        for argument in arguments.named_children(&mut cursor) {
+                            if argument.kind() == "identifier"
+                                && argv.contains(&src[argument.byte_range()])
+                            {
+                                invalid.insert(src[argument.byte_range()].to_string());
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    };
+    if function_scope {
+        walk_python_function_scope(root, &mut inspect);
+    } else {
+        walk_tree(root, src, &mut |node, _| inspect(node));
+    }
+    argv.retain(|name| !invalid.contains(name));
+}
+
+/// Collect in-file functions and methods whose return annotation explicitly
+/// declares a list/tuple of strings. The annotation is a static promise that
+/// callers receive an argv container rather than a shell command string.
+#[derive(Default)]
+struct ArgvBuilders {
+    methods: std::collections::HashSet<(String, String)>,
+}
+
+fn enclosing_class_name(node: tree_sitter::Node, src: &str) -> Option<String> {
+    let mut current = node.parent();
+    while let Some(parent) = current {
+        if parent.kind() == "class_definition" {
+            return parent
+                .child_by_field_name("name")
+                .map(|name| src[name.byte_range()].to_string());
+        }
+        current = parent.parent();
+    }
+    None
+}
+
+fn collect_argv_builders(root: tree_sitter::Node, src: &str) -> ArgvBuilders {
+    let mut builders = ArgvBuilders::default();
+
+    walk_tree(root, src, &mut |node, s| {
+        if node.kind() != "function_definition" {
+            return;
+        }
+        let (Some(name), Some(return_type)) = (
+            node.child_by_field_name("name"),
+            node.child_by_field_name("return_type"),
+        ) else {
+            return;
+        };
+        let annotation = s[return_type.byte_range()]
+            .chars()
+            .filter(|character| !character.is_whitespace())
+            .collect::<String>();
+        let annotation = annotation.as_str();
+        let is_argv =
+            ["list[str]", "List[str]", "tuple[str,...]", "Tuple[str,...]"].contains(&annotation);
+        if is_argv && function_returns_safe_argv(node, s) {
+            let method = s[name.byte_range()].to_string();
+            if let Some(class_name) = enclosing_class_name(node, s) {
+                builders.methods.insert((class_name, method));
+            }
+        }
+    });
+
+    builders
+}
+
+fn enclosing_function_receiver_type(
+    call: tree_sitter::Node,
+    receiver: &str,
+    src: &str,
+) -> Option<String> {
+    let mut current = call.parent();
+    let function = loop {
+        let node = current?;
+        if node.kind() == "function_definition" {
+            break node;
+        }
+        current = node.parent();
+    };
+    let parameters = function.child_by_field_name("parameters")?;
+    let mut result = None;
+    walk_tree(parameters, src, &mut |node, source| {
+        if !matches!(node.kind(), "typed_parameter" | "typed_default_parameter") {
+            return;
+        }
+        let text = &source[node.byte_range()];
+        let Some((name, annotation)) = text.split_once(':') else {
+            return;
+        };
+        let name = name.trim().trim_start_matches('*');
+        let annotation = annotation.split('=').next().unwrap_or("").trim();
+        if name == receiver
+            && !annotation.is_empty()
+            && annotation
+                .chars()
+                .all(|c| c == '_' || c == '.' || c.is_ascii_alphanumeric())
+        {
+            result = Some(annotation.to_string());
+        }
+    });
+    result
+}
+
+fn is_safe_argv_container(
+    node: tree_sitter::Node,
+    src: &str,
+    const_names: &std::collections::HashSet<String>,
+) -> bool {
+    if !matches!(node.kind(), "list" | "tuple") {
+        return false;
+    }
+    let Some(executable) = node.named_child(0) else {
+        return false;
+    };
+    is_constant_literal(executable, src)
+        || (executable.kind() == "identifier"
+            && const_names.contains(&src[executable.byte_range()]))
+}
+
+fn is_argv_builder_call(node: tree_sitter::Node, src: &str, builders: &ArgvBuilders) -> bool {
+    if node.kind() != "call" {
+        return false;
+    }
+    let Some(function) = node.child_by_field_name("function") else {
+        return false;
+    };
+    if function.kind() != "attribute" {
+        return false;
+    }
+    let (Some(object), Some(attribute)) = (
+        function.child_by_field_name("object"),
+        function.child_by_field_name("attribute"),
+    ) else {
+        return false;
+    };
+    if object.kind() != "identifier" {
+        return false;
+    }
+    let Some(receiver_type) =
+        enclosing_function_receiver_type(node, &src[object.byte_range()], src)
+    else {
+        return false;
+    };
+    builders
+        .methods
+        .contains(&(receiver_type, src[attribute.byte_range()].to_string()))
+}
+
+/// Collect identifiers whose only simple assignments are statically evident
+/// argv containers or calls to in-file argv builders. This deliberately does
+/// not bless arbitrary call results: an untyped `args = build(user_input)`
+/// remains a conservative command-injection finding.
+fn collect_argv_bindings(
+    root: tree_sitter::Node,
+    src: &str,
+    builders: &ArgvBuilders,
+    const_names: &std::collections::HashSet<String>,
+    before_byte: usize,
+) -> std::collections::HashSet<String> {
+    let mut argv = std::collections::HashSet::new();
+    let mut other = std::collections::HashSet::new();
+
+    walk_python_function_scope(root, &mut |node| {
+        if node.start_byte() >= before_byte {
+            return;
+        }
+        if node.kind() != "assignment" {
+            return;
+        }
+        let (Some(left), Some(right)) = (
+            node.child_by_field_name("left"),
+            node.child_by_field_name("right"),
+        ) else {
+            return;
+        };
+        if left.kind() != "identifier" {
+            return;
+        }
+        let name = src[left.byte_range()].to_string();
+        if is_safe_argv_container(right, src, const_names)
+            || is_argv_builder_call(right, src, builders)
+        {
+            argv.insert(name);
+        } else {
+            other.insert(name);
+        }
+    });
+
+    let parameter_names = collect_scope_parameter_names(root, src);
+    argv.retain(|name| !other.contains(name) && !parameter_names.contains(name));
+    invalidate_non_tail_argv_mutations(root, src, &mut argv, true, Some(before_byte));
+    argv
+}
+
+fn enclosing_python_scope(mut node: tree_sitter::Node) -> tree_sitter::Node {
+    loop {
+        if node.kind() == "function_definition" {
+            return node;
+        }
+        let Some(parent) = node.parent() else {
+            return node;
+        };
+        node = parent;
+    }
+}
+
+fn python_module_root(mut node: tree_sitter::Node) -> tree_sitter::Node {
+    while let Some(parent) = node.parent() {
+        node = parent;
+    }
+    node
+}
+
+fn collect_scope_constant_bindings(
+    scope: tree_sitter::Node,
+    src: &str,
+    before_byte: usize,
+) -> std::collections::HashSet<String> {
+    let mut constant = std::collections::HashSet::new();
+    let mut dynamic = std::collections::HashSet::new();
+    walk_python_function_scope(scope, &mut |node| {
+        if node.start_byte() >= before_byte {
+            return;
+        }
+        if node.kind() != "assignment" {
+            return;
+        }
+        let (Some(left), Some(right)) = (
+            node.child_by_field_name("left"),
+            node.child_by_field_name("right"),
+        ) else {
+            return;
+        };
+        if left.kind() != "identifier" {
+            return;
+        }
+        let name = src[left.byte_range()].to_string();
+        if is_constant_literal(right, src) {
+            constant.insert(name);
+        } else {
+            dynamic.insert(name);
+        }
+    });
+    let parameter_names = collect_scope_parameter_names(scope, src);
+    constant.retain(|name| !dynamic.contains(name) && !parameter_names.contains(name));
+    constant
+}
+
+fn collect_scope_parameter_names(
+    scope: tree_sitter::Node,
+    src: &str,
+) -> std::collections::HashSet<String> {
+    let mut names = std::collections::HashSet::new();
+    let Some(parameters) = scope.child_by_field_name("parameters") else {
+        return names;
+    };
+    let mut cursor = parameters.walk();
+    for parameter in parameters.named_children(&mut cursor) {
+        if parameter.kind() == "identifier" {
+            names.insert(src[parameter.byte_range()].to_string());
+        } else if let Some(name) = parameter.child_by_field_name("name") {
+            if name.kind() == "identifier" {
+                names.insert(src[name.byte_range()].to_string());
+            }
+        }
+    }
+    names
+}
+
+/// `shell` defaults to false for subprocess APIs. An explicit value is safe
+/// only when it is literally `False`; `True` and dynamic expressions remain
+/// findings even when argv is otherwise a list.
+fn subprocess_shell_is_absent_or_false(arguments: tree_sitter::Node, src: &str) -> bool {
+    let mut cursor = arguments.walk();
+    for argument in arguments.named_children(&mut cursor) {
+        if argument.kind() != "keyword_argument" {
+            continue;
+        }
+        let (Some(name), Some(value)) = (
+            argument.child_by_field_name("name"),
+            argument.child_by_field_name("value"),
+        ) else {
+            continue;
+        };
+        if &src[name.byte_range()] == "shell" {
+            return &src[value.byte_range()] == "False";
+        }
+    }
+    true
+}
+
+/// Collects names of identifiers that are *only ever* assigned the result of a
+/// safe path join (`os.path.join` / `.joinpath`). Used by the path-traversal
+/// rule to treat such identifiers as sanitized.
+fn collect_safe_join_bindings(
+    root: tree_sitter::Node,
+    src: &str,
+) -> std::collections::HashSet<String> {
+    let mut safe: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut other: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    walk_tree(root, src, &mut |node, s| {
+        if node.kind() != "assignment" {
+            return;
+        }
+        let (Some(left), Some(right)) = (
+            node.child_by_field_name("left"),
+            node.child_by_field_name("right"),
+        ) else {
+            return;
+        };
+        if left.kind() != "identifier" {
+            return;
+        }
+        let name = src[left.byte_range()].to_string();
+        if is_safe_join_call(right, s) {
+            safe.insert(name);
+        } else {
+            other.insert(name);
+        }
+    });
+
+    safe.retain(|n| !other.contains(n));
+    safe
+}
+
+/// True when `node` is contained within an `if __name__ == "__main__":` block.
+/// Walks ancestors looking for an `if_statement` whose condition compares
+/// `__name__` to `"__main__"`.
+fn is_under_main_guard(node: tree_sitter::Node, src: &str) -> bool {
+    let mut current = node.parent();
+    while let Some(n) = current {
+        if n.kind() == "if_statement" {
+            if let Some(cond) = n.child_by_field_name("condition") {
+                let cond_text = &src[cond.byte_range()];
+                if cond_text.contains("__name__") && cond_text.contains("__main__") {
+                    return true;
+                }
+            }
+        }
+        current = n.parent();
+    }
+    false
+}
+
+// ─── Rule 1: no-eval ─────────────────────────────────────────────────────────
+
+pub struct NoEval;
+
+impl_rule! {
+    NoEval,
+    id = "py/no-eval",
+    severity = Severity::Critical,
+    cwe = Some("CWE-95"),
+    description = "Use of eval()/exec() allows arbitrary code execution",
+    language = Language::Python,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() == "call" {
+                if let Some(func) = node.child_by_field_name("function") {
+                    let func_text = &src[func.byte_range()];
+                    let resolved = resolve_callee(func_text, ctx);
+                    if resolved.as_ref() == "eval" || resolved.as_ref() == "exec" {
+                        findings.push(make_finding(
+                            _self.id(),
+                            _self.severity(),
+                            _self.cwe(),
+                            &format!(
+                                "{}() allows arbitrary code execution — avoid using it with untrusted input",
+                                resolved
+                            ),
+                            node,
+                            src,
+                        ));
+                    }
+                }
+            }
+        });
+        findings
+
+    }
+}
+
+// ─── Rule 2: no-hardcoded-secret ─────────────────────────────────────────────
+
+pub struct NoHardcodedSecret;
+
+impl_rule! {
+    NoHardcodedSecret,
+    id = "py/no-hardcoded-secret",
+    severity = Severity::High,
+    cwe = Some("CWE-798"),
+    description = "Hardcoded secret or credential detected",
+    language = Language::Python,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let mut findings = Vec::new();
+        let secret_pattern = hardcoded_secret_re();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            // assignment: password = "hardcoded"
+            if node.kind() == "assignment" {
+                if let (Some(left), Some(right)) = (
+                    node.child_by_field_name("left"),
+                    node.child_by_field_name("right"),
+                ) {
+                    let left_text = &src[left.byte_range()];
+                    if secret_pattern.is_match(left_text) && right.kind() == "string" {
+                        let val = &src[right.byte_range()];
+                        // Strip quotes and check length
+                        let inner = val
+                            .trim_start_matches("f\"")
+                            .trim_start_matches("f'")
+                            .trim_matches(|c| c == '"' || c == '\'');
+                        if is_secret_value_long_enough(inner, ctx.secret_thresholds)
+                            && (looks_like_secret_value(inner)
+                                || is_high_signal_secret_name(left_text))
+                        {
+                            findings.push(make_finding(
+                                _self.id(),
+                                _self.severity(),
+                                _self.cwe(),
+                                &format!(
+                                    "Hardcoded secret in '{}' — use environment variables or a secrets manager",
+                                    left_text
+                                ),
+                                node,
+                                src,
+                            ));
+                        }
+                    }
+                }
+            }
+        });
+        findings
+
+    }
+}
+
+// ─── Rule 3: no-sql-injection ────────────────────────────────────────────────
+
+pub struct NoSqlInjection;
+
+impl_rule! {
+    NoSqlInjection,
+    id = "py/no-sql-injection",
+    severity = Severity::Critical,
+    cwe = Some("CWE-89"),
+    description = "Potential SQL injection via string formatting",
+    language = Language::Python,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+        let sql_pattern = py_sql_re();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            // Detect f-strings with SQL: f"SELECT * FROM users WHERE id = {user_id}"
+            if node.kind() == "string" {
+                let text = &src[node.byte_range()];
+                if (text.starts_with("f\"")
+                    || text.starts_with("f'")
+                    || text.starts_with("f\"\"\""))
+                    && sql_pattern.is_match(text)
+                {
+                    findings.push(make_finding(
+                        _self.id(),
+                        _self.severity(),
+                        _self.cwe(),
+                        "SQL query built with f-string — use parameterized queries",
+                        node,
+                        src,
+                    ));
+                }
+            }
+
+            // Detect: "SELECT ... WHERE id = %s" % user_id
+            if node.kind() == "binary_operator" {
+                if let Some(op) = node.child_by_field_name("operator") {
+                    if &src[op.byte_range()] == "%" {
+                        if let Some(left) = node.child_by_field_name("left") {
+                            if left.kind() == "string" {
+                                let text = &src[left.byte_range()];
+                                if sql_pattern.is_match(text) {
+                                    findings.push(make_finding(
+                                        _self.id(),
+                                        _self.severity(),
+                                        _self.cwe(),
+                                        "SQL query built with % formatting — use parameterized queries",
+                                        node,
+                                        src,
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Detect: "SELECT ... WHERE id = {}".format(user_id)
+            if node.kind() == "call" {
+                if let Some(func) = node.child_by_field_name("function") {
+                    if func.kind() == "attribute" {
+                        if let Some(attr) = func.child_by_field_name("attribute") {
+                            if &src[attr.byte_range()] == "format" {
+                                if let Some(obj) = func.child_by_field_name("object") {
+                                    if obj.kind() == "string" {
+                                        let text = &src[obj.byte_range()];
+                                        if sql_pattern.is_match(text) {
+                                            findings.push(make_finding(
+                                                _self.id(),
+                                                _self.severity(),
+                                                _self.cwe(),
+                                                "SQL query built with .format() — use parameterized queries",
+                                                node,
+                                                src,
+                                            ));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Detect string concatenation with SQL: "SELECT * FROM users WHERE id = " + user_id
+            if node.kind() == "binary_operator" {
+                if let Some(op) = node.child_by_field_name("operator") {
+                    if &src[op.byte_range()] == "+" {
+                        if let Some(left) = node.child_by_field_name("left") {
+                            if left.kind() == "string" {
+                                let text = &src[left.byte_range()];
+                                if sql_pattern.is_match(text) {
+                                    findings.push(make_finding(
+                                        _self.id(),
+                                        _self.severity(),
+                                        _self.cwe(),
+                                        "SQL query built with string concatenation — use parameterized queries",
+                                        node,
+                                        src,
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        findings
+
+    }
+}
+
+// ─── Rule 4: no-command-injection ───────────────────────────────────────────
+
+pub struct NoCommandInjection;
+
+impl_rule! {
+    NoCommandInjection,
+    id = "py/no-command-injection",
+    severity = Severity::Critical,
+    cwe = Some("CWE-78"),
+    description = "Potential command injection via os.system/subprocess with user input",
+    language = Language::Python,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let mut findings = Vec::new();
+        let dangerous_fns = [
+            "os.system",
+            "os.popen",
+            "subprocess.call",
+            "subprocess.run",
+            "subprocess.Popen",
+            "subprocess.check_output",
+            "subprocess.check_call",
+        ];
+
+        let argv_builders = collect_argv_builders(tree.root_node(), source);
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() == "call" {
+                if let Some(func) = node.child_by_field_name("function") {
+                    let func_text = &src[func.byte_range()];
+                    let resolved = resolve_callee(func_text, ctx);
+                    if dangerous_fns.contains(&resolved.as_ref()) {
+                        if let Some(args) = node.child_by_field_name("arguments") {
+                            if let Some(first_arg) = args.named_child(0) {
+                                let scope = enclosing_python_scope(node);
+                                let mut scope_const_names =
+                                    collect_scope_constant_bindings(scope, src, node.start_byte());
+                                if scope.kind() == "function_definition" {
+                                    scope_const_names.extend(collect_scope_constant_bindings(
+                                        python_module_root(node),
+                                        src,
+                                        node.start_byte(),
+                                    ));
+                                    let parameter_names = collect_scope_parameter_names(scope, src);
+                                    scope_const_names
+                                        .retain(|name| !parameter_names.contains(name));
+                                }
+                                let argv_names = collect_argv_bindings(
+                                    scope,
+                                    src,
+                                    &argv_builders,
+                                    &scope_const_names,
+                                    node.start_byte(),
+                                );
+                                let is_subprocess = resolved.starts_with("subprocess.");
+                                let shell_is_safe =
+                                    subprocess_shell_is_absent_or_false(args, src);
+                                let safe_argv = is_subprocess
+                                    && shell_is_safe
+                                    && (is_safe_argv_container(
+                                        first_arg,
+                                        src,
+                                        &scope_const_names,
+                                    )
+                                        || (first_arg.kind() == "identifier"
+                                            && argv_names.contains(&src[first_arg.byte_range()]))
+                                        || is_argv_builder_call(first_arg, src, &argv_builders));
+                                let first_arg_is_static_string = first_arg.kind() == "string"
+                                    && is_constant_literal(first_arg, src);
+                                // Flag if argument is not a plain string literal
+                                let is_dynamic = (is_subprocess
+                                    && !shell_is_safe
+                                    && !first_arg_is_static_string)
+                                    || (!safe_argv
+                                        && match first_arg.kind() {
+                                            "string" => {
+                                                let text = &src[first_arg.byte_range()];
+                                                text.starts_with("f\"") || text.starts_with("f'")
+                                            }
+                                            // Identifier folded to a constant literal is safe.
+                                            "identifier" => !scope_const_names
+                                                .contains(&src[first_arg.byte_range()]),
+                                            "concatenated_string" | "binary_operator" | "call" => {
+                                                true
+                                            }
+                                            "list" | "tuple" => true,
+                                            _ => false,
+                                        });
+                                if is_dynamic {
+                                    findings.push(make_finding(
+                                        _self.id(),
+                                        _self.severity(),
+                                        _self.cwe(),
+                                        &format!(
+                                            "{}() called with dynamic argument — risk of command injection",
+                                            resolved
+                                        ),
+                                        node,
+                                        src,
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        findings
+
+    }
+}
+
+// ─── Rule 5: no-path-traversal ──────────────────────────────────────────────
+
+pub struct NoPathTraversal;
+
+impl_rule! {
+    NoPathTraversal,
+    id = "py/no-path-traversal",
+    severity = Severity::High,
+    cwe = Some("CWE-22"),
+    description = "Potential path traversal via open() with user input",
+    language = Language::Python,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let mut findings = Vec::new();
+
+        // Identifiers proven constant, and identifiers assigned from a safe
+        // path join (os.path.join / .joinpath), are treated as sanitized.
+        let const_names = collect_constant_bindings(tree.root_node(), source);
+        let safe_join_names = collect_safe_join_bindings(tree.root_node(), source);
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() == "call" {
+                if let Some(func) = node.child_by_field_name("function") {
+                    let func_text = &src[func.byte_range()];
+                    let resolved = resolve_callee(func_text, ctx);
+                    let sink_fns = ["open", "os.remove", "os.unlink", "os.listdir", "os.scandir"];
+                    if sink_fns.contains(&resolved.as_ref()) {
+                        if let Some(args) = node.child_by_field_name("arguments") {
+                            if let Some(first_arg) = args.named_child(0) {
+                                // Flag if path uses concatenation or f-string
+                                let is_dynamic = match first_arg.kind() {
+                                    "binary_operator" | "concatenated_string" => true,
+                                    "identifier" => {
+                                        let name = &src[first_arg.byte_range()];
+                                        !const_names.contains(name)
+                                            && !safe_join_names.contains(name)
+                                    }
+                                    "string" => {
+                                        let text = &src[first_arg.byte_range()];
+                                        text.starts_with("f\"") || text.starts_with("f'")
+                                    }
+                                    _ => false,
+                                };
+                                if is_dynamic {
+                                    findings.push(make_finding(
+                                        _self.id(),
+                                        _self.severity(),
+                                        _self.cwe(),
+                                        &format!(
+                                            "{}() called with dynamic path — validate and sanitize to prevent path traversal",
+                                            resolved
+                                        ),
+                                        node,
+                                        src,
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        findings
+
+    }
+}
+
+// ─── Rule 6: no-weak-crypto ────────────────────────────────────────────────
+
+pub struct NoSsrf;
+
+impl_rule! {
+    NoSsrf,
+    id = "py/no-ssrf",
+    severity = Severity::High,
+    cwe = Some("CWE-918"),
+    description = "Potential SSRF via dynamic outbound request URL",
+    language = Language::Python,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let mut findings = Vec::new();
+        let request_fns = [
+            "requests.get",
+            "requests.post",
+            "requests.put",
+            "requests.delete",
+            "requests.head",
+            "requests.patch",
+            "requests.request",
+            "httpx.get",
+            "httpx.post",
+            "httpx.put",
+            "httpx.delete",
+            "httpx.request",
+            "urllib.request.urlopen",
+        ];
+
+        // Identifiers proven to hold only constant literals (e.g. a module-level
+        // BASE_URL) are not user-controlled.
+        let const_names = collect_constant_bindings(tree.root_node(), source);
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() != "call" {
+                return;
+            }
+
+            let Some(func) = node.child_by_field_name("function") else {
+                return;
+            };
+            let func_text = &src[func.byte_range()];
+            let resolved = resolve_callee(func_text, ctx);
+            if !request_fns.contains(&resolved.as_ref()) {
+                return;
+            }
+
+            let Some(args) = node.child_by_field_name("arguments") else {
+                return;
+            };
+
+            let url_arg = if resolved.as_ref() == "requests.request"
+                || resolved.as_ref() == "httpx.request"
+            {
+                args.named_child(1)
+            } else {
+                args.named_child(0)
+            };
+            let Some(url_arg) = url_arg else {
+                return;
+            };
+
+            let is_dynamic = match url_arg.kind() {
+                "string" => {
+                    let text = &src[url_arg.byte_range()];
+                    text.starts_with("f\"") || text.starts_with("f'")
+                }
+                "identifier" => !const_names.contains(&src[url_arg.byte_range()]),
+                "call" | "subscript" | "attribute" | "binary_operator" => true,
+                _ => false,
+            };
+
+            if is_dynamic {
+                findings.push(make_finding(
+                    _self.id(),
+                    _self.severity(),
+                    _self.cwe(),
+                    &format!(
+                        "{} called with dynamic URL — validate and allowlist outbound destinations to prevent SSRF",
+                        resolved
+                    ),
+                    node,
+                    src,
+                ));
+            }
+        });
+
+        findings
+
+    }
+}
+
+// ─── Rule 6: no-weak-crypto ────────────────────────────────────────────────
+
+pub struct NoWeakCrypto;
+
+impl_rule! {
+    NoWeakCrypto,
+    id = "py/no-weak-crypto",
+    severity = Severity::Medium,
+    cwe = Some("CWE-327"),
+    description = "Use of weak cryptographic hash (MD5/SHA1)",
+    language = Language::Python,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() == "call" {
+                if let Some(func) = node.child_by_field_name("function") {
+                    let func_text = &src[func.byte_range()];
+                    let resolved = resolve_callee(func_text, ctx);
+                    if resolved.as_ref() == "hashlib.md5" || resolved.as_ref() == "hashlib.sha1" {
+                        let algo = if resolved.as_ref().contains("md5") {
+                            "MD5"
+                        } else {
+                            "SHA1"
+                        };
+                        findings.push(make_finding(
+                            _self.id(),
+                            _self.severity(),
+                            _self.cwe(),
+                            &format!(
+                                "hashlib.{}() is cryptographically weak — use sha256 or stronger",
+                                algo.to_lowercase()
+                            ),
+                            node,
+                            src,
+                        ));
+                    }
+
+                    // hashlib.new('md5') / hashlib.new('sha1')
+                    if resolved.as_ref() == "hashlib.new" {
+                        if let Some(args) = node.child_by_field_name("arguments") {
+                            if let Some(first_arg) = args.named_child(0) {
+                                if first_arg.kind() == "string" {
+                                    let val = &src[first_arg.byte_range()];
+                                    let inner = val.trim_matches(|c| c == '"' || c == '\'');
+                                    if inner == "md5" || inner == "sha1" {
+                                        findings.push(make_finding(
+                                            _self.id(),
+                                            _self.severity(),
+                                            _self.cwe(),
+                                            &format!(
+                                                "hashlib.new('{}') is cryptographically weak — use sha256 or stronger",
+                                                inner
+                                            ),
+                                            node,
+                                            src,
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        findings
+
+    }
+}
+
+// ─── Rule: pq-vulnerable-crypto ───────────────────────────────────────────
+
+pub struct PqVulnerableCrypto;
+
+impl_rule! {
+    PqVulnerableCrypto,
+    id = "py/pq-vulnerable-crypto",
+    severity = Severity::High,
+    cwe = Some("CWE-327"),
+    description = "Use of quantum-vulnerable cryptographic algorithm (RSA/ECDSA/ECDH/DSA/Ed25519/X25519)",
+    language = Language::Python,
+    // CNSA 2.0 class: general-purpose application crypto — falls under
+    // the "web browsers/servers and cloud services" milestone (exclusive
+    // use 2033) per NSA CNSA 2.0 FAQ v2.1 (Dec 2024). Code emitting these
+    // calls is typically deployed as a web/cloud service.
+    cnsa2_deadline = "2033",
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let mut findings = Vec::new();
+
+        // Canonical prefixes for quantum-vulnerable asymmetric crypto.
+        // Tuple: (module prefix, display algo, canonical CBOM algo, replacement)
+        let pq_vulnerable: &[(&str, &str, &str, &str)] = &[
+            ("cryptography.hazmat.primitives.asymmetric.rsa", "RSA", "RSA", "General use (FIPS category III): X25519MLKEM768 hybrid KEM (or HQC for code-based diversity, draft) for encryption, ML-DSA-65 (FIPS 204) / FN-DSA (FIPS 206, draft) with hybrid cert chains for signatures. CNSA 2.0 / NSS: ML-KEM-1024 for key establishment, ML-DSA-87 for signatures."),
+            ("cryptography.hazmat.primitives.asymmetric.ec", "ECDSA/ECDH", "ECDSA", "General use (FIPS category III): X25519MLKEM768 hybrid KEM (or HQC, draft) for key exchange, ML-DSA-65 (FIPS 204) / FN-DSA (FIPS 206, draft) with hybrid cert chains for signatures. CNSA 2.0 / NSS: ML-KEM-1024 for key establishment, ML-DSA-87 for signatures."),
+            ("cryptography.hazmat.primitives.asymmetric.dsa", "DSA", "DSA", "General use (FIPS category III): ML-DSA-65 (FIPS 204) or FN-DSA (FIPS 206, draft) for smaller signatures, with hybrid certificate chains during transition. CNSA 2.0 / NSS: ML-DSA-87 for signatures."),
+            ("cryptography.hazmat.primitives.asymmetric.ed25519", "Ed25519", "Ed25519", "General use (FIPS category III): ML-DSA-65 (FIPS 204) or FN-DSA (FIPS 206, draft) for smaller signatures, with hybrid certificate chains during transition. CNSA 2.0 / NSS: ML-DSA-87 for signatures."),
+            ("cryptography.hazmat.primitives.asymmetric.x25519", "X25519", "X25519", "General use (FIPS category III): X25519MLKEM768 hybrid KEM (FIPS 203), or HQC (code-based diversity hedge, draft) as a non-lattice alternative. CNSA 2.0 / NSS: ML-KEM-1024 for key establishment."),
+            ("Crypto.PublicKey.RSA", "RSA", "RSA", "General use (FIPS category III): X25519MLKEM768 hybrid KEM (or HQC, draft) for encryption, ML-DSA-65 (FIPS 204) / FN-DSA (FIPS 206, draft) with hybrid cert chains for signatures. CNSA 2.0 / NSS: ML-KEM-1024 for key establishment, ML-DSA-87 for signatures."),
+            ("Crypto.PublicKey.DSA", "DSA", "DSA", "General use (FIPS category III): ML-DSA-65 (FIPS 204) or FN-DSA (FIPS 206, draft) for smaller signatures, with hybrid certificate chains during transition. CNSA 2.0 / NSS: ML-DSA-87 for signatures."),
+            ("Crypto.PublicKey.ECC", "ECC", "ECDSA", "General use (FIPS category III): X25519MLKEM768 hybrid KEM (or HQC, draft) or ML-DSA-65 (FIPS 204) / FN-DSA (FIPS 206, draft) with hybrid cert chains. CNSA 2.0 / NSS: ML-KEM-1024 for key establishment, ML-DSA-87 for signatures."),
+        ];
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            // Only flag calls, not imports, to avoid double-counting.
+            // Skip calls nested as arguments to another call (e.g.
+            // ec.generate_private_key(ec.SECP256R1()) — only flag the outer).
+            if node.kind() == "call" {
+                if let Some(parent) = node.parent() {
+                    if parent.kind() == "argument_list" {
+                        // Only skip if the outer call is also PQ-vulnerable
+                        // (e.g. ec.generate_private_key(ec.SECP256R1()))
+                        if let Some(grandparent) = parent.parent() {
+                            if grandparent.kind() == "call" {
+                                if let Some(outer_func) = grandparent.child_by_field_name("function") {
+                                    let outer_text = &src[outer_func.byte_range()];
+                                    let outer_resolved = resolve_callee(outer_text, ctx);
+                                    for &(prefix, _, _, _) in pq_vulnerable {
+                                        if outer_resolved.as_ref().starts_with(prefix) {
+                                            return;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if let Some(func) = node.child_by_field_name("function") {
+                    let func_text = &src[func.byte_range()];
+                    let resolved = resolve_callee(func_text, ctx);
+                    for &(prefix, algo, canonical_algo, replacement) in pq_vulnerable {
+                        if resolved.as_ref().starts_with(prefix) {
+                            let mut f = make_finding(
+                                _self.id(),
+                                _self.severity(),
+                                _self.cwe(),
+                                &format!(
+                                    "{} is quantum-vulnerable — migrate to {}",
+                                    algo, replacement
+                                ),
+                                node,
+                                src,
+                            );
+                            f.tags = vec!["PQ".into()];
+                            f.crypto_algorithm = Some(canonical_algo.to_string());
+                            findings.push(f);
+                            return;
+                        }
+                    }
+                }
+            }
+        });
+        findings
+
+    }
+}
+
+// ─── Rule: pq-ready-crypto (informational) ────────────────────────────────
+
+pub struct PqReadyCrypto;
+
+impl_rule! {
+    PqReadyCrypto,
+    id = "py/pq-ready-crypto",
+    severity = Severity::Low,
+    cwe = None,
+    description = "Post-quantum / hybrid cryptographic algorithm in use (ML-KEM, ML-DSA, SLH-DSA, FN-DSA, HQC, or hybrid KEM)",
+    language = Language::Python,
+    fn check(_self, source, _tree) {
+        crate::rules::pq::pq_ready_findings(_self.id(), source, _self.language())
+    }
+}
+
+// ─── Rule 7: no-pickle ─────────────────────────────────────────────────────
+
+pub struct NoPickle;
+
+impl_rule! {
+    NoPickle,
+    id = "py/no-pickle",
+    severity = Severity::High,
+    cwe = Some("CWE-502"),
+    description = "Deserialization of untrusted data via pickle",
+    language = Language::Python,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let mut findings = Vec::new();
+        let dangerous_fns = [
+            "pickle.loads",
+            "pickle.load",
+            "cPickle.loads",
+            "cPickle.load",
+        ];
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() == "call" {
+                if let Some(func) = node.child_by_field_name("function") {
+                    let func_text = &src[func.byte_range()];
+                    let resolved = resolve_callee(func_text, ctx);
+                    if dangerous_fns.contains(&resolved.as_ref()) {
+                        findings.push(make_finding(
+                            _self.id(),
+                            _self.severity(),
+                            _self.cwe(),
+                            &format!(
+                                "{}() deserializes untrusted data — can execute arbitrary code",
+                                resolved
+                            ),
+                            node,
+                            src,
+                        ));
+                    }
+                }
+            }
+        });
+        findings
+
+    }
+}
+
+// ─── Rule 8: no-yaml-load ──────────────────────────────────────────────────
+
+pub struct NoYamlLoad;
+
+impl_rule! {
+    NoYamlLoad,
+    id = "py/no-yaml-load",
+    severity = Severity::High,
+    cwe = Some("CWE-502"),
+    description = "yaml.load() without SafeLoader can execute arbitrary code",
+    language = Language::Python,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() == "call" {
+                if let Some(func) = node.child_by_field_name("function") {
+                    let func_text = &src[func.byte_range()];
+                    let resolved = resolve_callee(func_text, ctx);
+                    if resolved.as_ref() == "yaml.load" {
+                        // Parse the `Loader=` keyword argument via the AST and
+                        // check whether its value is a recognised safe loader,
+                        // rather than substring-matching the raw argument text.
+                        if let Some(args) = node.child_by_field_name("arguments") {
+                            let mut safe_loader = false;
+                            let mut cursor = args.walk();
+                            for arg in args.named_children(&mut cursor) {
+                                if arg.kind() != "keyword_argument" {
+                                    continue;
+                                }
+                                let (Some(name), Some(value)) = (
+                                    arg.child_by_field_name("name"),
+                                    arg.child_by_field_name("value"),
+                                ) else {
+                                    continue;
+                                };
+                                if &src[name.byte_range()] != "Loader" {
+                                    continue;
+                                }
+                                // Resolve the loader value through the alias
+                                // table and inspect its trailing attribute, so
+                                // `yaml.SafeLoader`, `SafeLoader`, and aliased
+                                // imports all resolve correctly.
+                                let value_text = &src[value.byte_range()];
+                                let resolved_loader = resolve_callee(value_text, ctx);
+                                let leaf = resolved_loader
+                                    .as_ref()
+                                    .rsplit('.')
+                                    .next()
+                                    .unwrap_or(resolved_loader.as_ref());
+                                if matches!(leaf, "SafeLoader" | "BaseLoader" | "CSafeLoader") {
+                                    safe_loader = true;
+                                    break;
+                                }
+                            }
+                            if !safe_loader {
+                                findings.push(make_finding(
+                                    _self.id(),
+                                    _self.severity(),
+                                    _self.cwe(),
+                                    "yaml.load() without SafeLoader — use yaml.safe_load() or pass Loader=SafeLoader",
+                                    node,
+                                    src,
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        findings
+
+    }
+}
+
+// ─── Rule 9: no-debug-true (Django DEBUG = True) ──────────────────────────
+
+pub struct NoDebugTrue;
+
+impl_rule! {
+    NoDebugTrue,
+    id = "py/no-debug-true",
+    severity = Severity::Medium,
+    cwe = Some("CWE-489"),
+    description = "DEBUG = True left enabled — disable in production",
+    language = Language::Python,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            // Detect: DEBUG = True (Django settings pattern)
+            if node.kind() == "assignment" {
+                if let (Some(left), Some(right)) = (
+                    node.child_by_field_name("left"),
+                    node.child_by_field_name("right"),
+                ) {
+                    let left_text = &src[left.byte_range()];
+                    let right_text = &src[right.byte_range()];
+                    if left_text == "DEBUG"
+                        && right_text == "True"
+                        && !is_under_main_guard(node, src)
+                    {
+                        findings.push(make_finding(
+                            _self.id(),
+                            _self.severity(),
+                            _self.cwe(),
+                            "DEBUG = True — ensure debug mode is disabled in production (Django CWE-489)",
+                            node,
+                            src,
+                        ));
+                    }
+                }
+            }
+        });
+        findings
+
+    }
+}
+
+// ─── Rule 12: flask-debug-mode ────────────────────────────────────────────
+
+pub struct FlaskDebugMode;
+
+impl_rule! {
+    FlaskDebugMode,
+    id = "py/flask-debug-mode",
+    severity = Severity::High,
+    cwe = Some("CWE-489"),
+    description = "Flask app.run(debug=True) exposes debugger and reloader in production",
+    language = Language::Python,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            // Detect: app.run(debug=True) specifically as a call expression
+            if node.kind() == "call" {
+                if let Some(func) = node.child_by_field_name("function") {
+                    if func.kind() == "attribute" {
+                        if let Some(attr) = func.child_by_field_name("attribute") {
+                            if &src[attr.byte_range()] == "run" {
+                                if let Some(args) = node.child_by_field_name("arguments") {
+                                    let args_text = &src[args.byte_range()];
+                                    if (args_text.contains("debug=True")
+                                        || args_text.contains("debug = True"))
+                                        && !is_under_main_guard(node, src)
+                                    {
+                                        findings.push(make_finding(
+                                            _self.id(),
+                                            _self.severity(),
+                                            _self.cwe(),
+                                            "Flask app.run(debug=True) — exposes Werkzeug debugger, disable in production",
+                                            node,
+                                            src,
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Detect: app.debug = True
+            if node.kind() == "assignment" {
+                if let (Some(left), Some(right)) = (
+                    node.child_by_field_name("left"),
+                    node.child_by_field_name("right"),
+                ) {
+                    let left_text = &src[left.byte_range()];
+                    let right_text = &src[right.byte_range()];
+                    if left_text.ends_with(".debug")
+                        && right_text == "True"
+                        && !is_under_main_guard(node, src)
+                    {
+                        findings.push(make_finding(
+                            _self.id(),
+                            _self.severity(),
+                            _self.cwe(),
+                            "app.debug = True — exposes debugger, disable in production",
+                            node,
+                            src,
+                        ));
+                    }
+                }
+            }
+        });
+        findings
+
+    }
+}
+
+// ─── Rule 13: django-secret-key-hardcoded ─────────────────────────────────
+
+pub struct DjangoSecretKeyHardcoded;
+
+impl_rule! {
+    DjangoSecretKeyHardcoded,
+    id = "py/django-secret-key-hardcoded",
+    severity = Severity::High,
+    cwe = Some("CWE-798"),
+    description = "Django SECRET_KEY hardcoded in source code",
+    language = Language::Python,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            // Detect: SECRET_KEY = "some-literal-string"
+            if node.kind() == "assignment" {
+                if let (Some(left), Some(right)) = (
+                    node.child_by_field_name("left"),
+                    node.child_by_field_name("right"),
+                ) {
+                    let left_text = &src[left.byte_range()];
+                    if left_text == "SECRET_KEY" && right.kind() == "string" {
+                        let val = &src[right.byte_range()];
+                        let inner = val.trim_matches(|c| c == '"' || c == '\'');
+                        if is_secret_value_long_enough(inner, ctx.secret_thresholds) {
+                            findings.push(make_finding(
+                                _self.id(),
+                                _self.severity(),
+                                _self.cwe(),
+                                "Django SECRET_KEY is hardcoded — use an environment variable or secrets manager",
+                                node,
+                                src,
+                            ));
+                        }
+                    }
+                }
+            }
+        });
+        findings
+
+    }
+}
+
+// ─── Rule 10: no-open-redirect ──────────────────────────────────────────────
+
+pub struct NoOpenRedirect;
+
+impl_rule! {
+    NoOpenRedirect,
+    id = "py/no-open-redirect",
+    severity = Severity::Medium,
+    cwe = Some("CWE-601"),
+    description = "Open redirect via redirect() with user-controlled input",
+    language = Language::Python,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+        let redirect_fns = ["redirect", "HttpResponseRedirect"];
+        // Framework helpers that build a safe, server-controlled URL from a
+        // route/view name. A redirect to their result is not user-controlled.
+        let safe_url_builders = [
+            "url_for",
+            "url_for_external",
+            "reverse",
+            "reverse_lazy",
+            "get_absolute_url",
+        ];
+
+        // Identifiers proven to hold only constant literals are not dynamic.
+        let const_names = collect_constant_bindings(tree.root_node(), source);
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() == "call" {
+                if let Some(func) = node.child_by_field_name("function") {
+                    let func_text = &src[func.byte_range()];
+                    let func_name = func_text.rsplit('.').next().unwrap_or(func_text);
+                    if redirect_fns.contains(&func_name) {
+                        if let Some(args) = node.child_by_field_name("arguments") {
+                            if let Some(first_arg) = args.named_child(0) {
+                                // Flag if redirect target is not a string literal
+                                let is_dynamic = match first_arg.kind() {
+                                    "string" => {
+                                        let text = &src[first_arg.byte_range()];
+                                        text.starts_with("f\"") || text.starts_with("f'")
+                                    }
+                                    "identifier" => {
+                                        !const_names.contains(&src[first_arg.byte_range()])
+                                    }
+                                    // redirect(url_for("x.y")) and friends are safe.
+                                    "call" => first_arg
+                                        .child_by_field_name("function")
+                                        .map(|inner| {
+                                            let t = &src[inner.byte_range()];
+                                            let leaf = t.rsplit('.').next().unwrap_or(t);
+                                            !safe_url_builders.contains(&leaf)
+                                        })
+                                        .unwrap_or(true),
+                                    "subscript" | "attribute" | "binary_operator" => true,
+                                    _ => false,
+                                };
+                                if is_dynamic {
+                                    findings.push(make_finding(
+                                        _self.id(),
+                                        _self.severity(),
+                                        _self.cwe(),
+                                        &format!(
+                                            "{}() with dynamic URL — validate target to prevent open redirect",
+                                            func_name
+                                        ),
+                                        node,
+                                        src,
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        findings
+
+    }
+}
+
+// ─── Rule 11: no-cors-star ─────────────────────────────────────────────────
+
+pub struct NoCorsStar;
+
+impl_rule! {
+    NoCorsStar,
+    id = "py/no-cors-star",
+    severity = Severity::Medium,
+    cwe = Some("CWE-942"),
+    description = "CORS misconfiguration allowing all origins",
+    language = Language::Python,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            // Detect: CORS_ALLOW_ALL_ORIGINS = True or CORS_ORIGIN_ALLOW_ALL = True
+            if node.kind() == "assignment" {
+                if let (Some(left), Some(right)) = (
+                    node.child_by_field_name("left"),
+                    node.child_by_field_name("right"),
+                ) {
+                    let left_text = &src[left.byte_range()];
+                    let right_text = &src[right.byte_range()];
+                    if (left_text == "CORS_ALLOW_ALL_ORIGINS"
+                        || left_text == "CORS_ORIGIN_ALLOW_ALL")
+                        && right_text == "True"
+                    {
+                        findings.push(make_finding(
+                            _self.id(),
+                            _self.severity(),
+                            _self.cwe(),
+                            &format!("{} = True — restrict CORS to specific origins", left_text),
+                            node,
+                            src,
+                        ));
+                    }
+                }
+            }
+
+            // Detect: Access-Control-Allow-Origin header set to "*"
+            if node.kind() == "call" {
+                if let Some(func) = node.child_by_field_name("function") {
+                    let func_text = &src[func.byte_range()];
+                    if func_text.contains("header") || func_text.contains("Header") {
+                        let node_text = &src[node.byte_range()];
+                        if node_text.contains("Access-Control-Allow-Origin")
+                            && node_text.contains("*")
+                        {
+                            findings.push(make_finding(
+                                _self.id(),
+                                _self.severity(),
+                                _self.cwe(),
+                                "Access-Control-Allow-Origin set to '*' — restrict to specific origins",
+                                node,
+                                src,
+                            ));
+                        }
+                    }
+                }
+            }
+
+            // Detect: allow_origins=["*"] in CORS middleware
+            if node.kind() == "keyword_argument" {
+                if let (Some(name), Some(value)) = (
+                    node.child_by_field_name("name"),
+                    node.child_by_field_name("value"),
+                ) {
+                    let name_text = &src[name.byte_range()];
+                    if name_text == "allow_origins" || name_text == "origins" {
+                        let value_text = &src[value.byte_range()];
+                        if value_text.contains("\"*\"") || value_text.contains("'*'") {
+                            findings.push(make_finding(
+                                _self.id(),
+                                _self.severity(),
+                                _self.cwe(),
+                                "CORS allow_origins includes '*' — restrict to specific origins",
+                                node,
+                                src,
+                            ));
+                        }
+                    }
+                }
+            }
+        });
+        findings
+
+    }
+}
+
+// ─── Rule 14: flask-secret-key-hardcoded ──────────────────────────────────
+
+pub struct FlaskSecretKeyHardcoded;
+
+impl_rule! {
+    FlaskSecretKeyHardcoded,
+    id = "py/flask-secret-key-hardcoded",
+    severity = Severity::High,
+    cwe = Some("CWE-798"),
+    description = "Flask SECRET_KEY hardcoded in source code",
+    language = Language::Python,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() != "assignment" {
+                return;
+            }
+
+            let (Some(left), Some(right)) = (
+                node.child_by_field_name("left"),
+                node.child_by_field_name("right"),
+            ) else {
+                return;
+            };
+
+            if right.kind() != "string" {
+                return;
+            }
+
+            let left_text = &src[left.byte_range()];
+            let is_flask_secret = left_text == "app.secret_key"
+                || (left_text.contains("config") && left_text.contains("SECRET_KEY"));
+            if !is_flask_secret {
+                return;
+            }
+
+            let val = &src[right.byte_range()];
+            let inner = val.trim_matches(|c| c == '"' || c == '\'');
+            if !is_secret_value_long_enough(inner, ctx.secret_thresholds) {
+                return;
+            }
+
+            findings.push(make_finding(
+                _self.id(),
+                _self.severity(),
+                _self.cwe(),
+                "Flask SECRET_KEY is hardcoded — use an environment variable or secrets manager",
+                node,
+                src,
+            ));
+        });
+
+        findings
+
+    }
+}
+
+// ─── Rule 15: session-cookie-secure-disabled ──────────────────────────────
+
+pub struct SessionCookieSecureDisabled;
+
+impl_rule! {
+    SessionCookieSecureDisabled,
+    id = "py/session-cookie-secure-disabled",
+    severity = Severity::Medium,
+    cwe = Some("CWE-614"),
+    description = "SESSION_COOKIE_SECURE disabled in source code",
+    language = Language::Python,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() != "assignment" {
+                return;
+            }
+
+            let (Some(left), Some(right)) = (
+                node.child_by_field_name("left"),
+                node.child_by_field_name("right"),
+            ) else {
+                return;
+            };
+
+            let left_text = &src[left.byte_range()];
+            let right_text = &src[right.byte_range()];
+            let is_session_cookie_secure =
+                left_text == "SESSION_COOKIE_SECURE" || left_text.contains("SESSION_COOKIE_SECURE");
+            if is_session_cookie_secure && right_text == "False" {
+                findings.push(make_finding(
+                    _self.id(),
+                    _self.severity(),
+                    _self.cwe(),
+                    "SESSION_COOKIE_SECURE = False — session cookies may be sent over HTTP",
+                    node,
+                    src,
+                ));
+            }
+        });
+
+        findings
+
+    }
+}
+
+// ─── Rule 16: session-cookie-httponly-disabled ────────────────────────────
+
+pub struct SessionCookieHttpOnlyDisabled;
+
+impl_rule! {
+    SessionCookieHttpOnlyDisabled,
+    id = "py/session-cookie-httponly-disabled",
+    severity = Severity::Medium,
+    cwe = Some("CWE-1004"),
+    description = "SESSION_COOKIE_HTTPONLY disabled in source code",
+    language = Language::Python,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() != "assignment" {
+                return;
+            }
+
+            let (Some(left), Some(right)) = (
+                node.child_by_field_name("left"),
+                node.child_by_field_name("right"),
+            ) else {
+                return;
+            };
+
+            let left_text = &src[left.byte_range()];
+            let right_text = &src[right.byte_range()];
+            let is_session_cookie_httponly = left_text == "SESSION_COOKIE_HTTPONLY"
+                || left_text.contains("SESSION_COOKIE_HTTPONLY");
+            if is_session_cookie_httponly && right_text == "False" {
+                findings.push(make_finding(
+                    _self.id(),
+                    _self.severity(),
+                    _self.cwe(),
+                    "SESSION_COOKIE_HTTPONLY = False — session cookies may be exposed to client-side scripts",
+                    node,
+                    src,
+                ));
+            }
+        });
+
+        findings
+
+    }
+}
+
+// ─── Rule 17: session-cookie-samesite-disabled ────────────────────────────
+
+pub struct SessionCookieSameSiteDisabled;
+
+impl_rule! {
+    SessionCookieSameSiteDisabled,
+    id = "py/session-cookie-samesite-disabled",
+    severity = Severity::Medium,
+    cwe = Some("CWE-352"),
+    description = "SESSION_COOKIE_SAMESITE disabled in source code",
+    language = Language::Python,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() != "assignment" {
+                return;
+            }
+
+            let (Some(left), Some(right)) = (
+                node.child_by_field_name("left"),
+                node.child_by_field_name("right"),
+            ) else {
+                return;
+            };
+
+            let left_text = &src[left.byte_range()];
+            let right_text = &src[right.byte_range()];
+            let is_session_cookie_samesite = left_text == "SESSION_COOKIE_SAMESITE"
+                || left_text.contains("SESSION_COOKIE_SAMESITE");
+            let disabled = right_text == "None"
+                || right_text == "\"None\""
+                || right_text == "'None'"
+                || right_text == "\"none\""
+                || right_text == "'none'"
+                || right_text == "False";
+            if is_session_cookie_samesite && disabled {
+                findings.push(make_finding(
+                    _self.id(),
+                    _self.severity(),
+                    _self.cwe(),
+                    "SESSION_COOKIE_SAMESITE disabled — set it to 'Lax' or 'Strict' to reduce CSRF risk",
+                    node,
+                    src,
+                ));
+            }
+        });
+
+        findings
+
+    }
+}
+
+// ─── Rule 18: csrf-cookie-secure-disabled ─────────────────────────────────
+
+pub struct CsrfCookieSecureDisabled;
+
+impl_rule! {
+    CsrfCookieSecureDisabled,
+    id = "py/csrf-cookie-secure-disabled",
+    severity = Severity::Medium,
+    cwe = Some("CWE-614"),
+    description = "CSRF_COOKIE_SECURE disabled in source code",
+    language = Language::Python,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() != "assignment" {
+                return;
+            }
+
+            let (Some(left), Some(right)) = (
+                node.child_by_field_name("left"),
+                node.child_by_field_name("right"),
+            ) else {
+                return;
+            };
+
+            let left_text = &src[left.byte_range()];
+            let right_text = &src[right.byte_range()];
+            let is_csrf_cookie_secure =
+                left_text == "CSRF_COOKIE_SECURE" || left_text.contains("CSRF_COOKIE_SECURE");
+            if is_csrf_cookie_secure && right_text == "False" {
+                findings.push(make_finding(
+                    _self.id(),
+                    _self.severity(),
+                    _self.cwe(),
+                    "CSRF_COOKIE_SECURE = False — CSRF cookies may be sent over HTTP",
+                    node,
+                    src,
+                ));
+            }
+        });
+
+        findings
+
+    }
+}
+
+// ─── Rule 19: csrf-cookie-httponly-disabled ───────────────────────────────
+
+pub struct CsrfCookieHttpOnlyDisabled;
+
+impl_rule! {
+    CsrfCookieHttpOnlyDisabled,
+    id = "py/csrf-cookie-httponly-disabled",
+    severity = Severity::Medium,
+    cwe = Some("CWE-1004"),
+    description = "CSRF_COOKIE_HTTPONLY disabled in source code",
+    language = Language::Python,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() != "assignment" {
+                return;
+            }
+
+            let (Some(left), Some(right)) = (
+                node.child_by_field_name("left"),
+                node.child_by_field_name("right"),
+            ) else {
+                return;
+            };
+
+            let left_text = &src[left.byte_range()];
+            let right_text = &src[right.byte_range()];
+            let is_csrf_cookie_httponly =
+                left_text == "CSRF_COOKIE_HTTPONLY" || left_text.contains("CSRF_COOKIE_HTTPONLY");
+            if is_csrf_cookie_httponly && right_text == "False" {
+                findings.push(make_finding(
+                    _self.id(),
+                    _self.severity(),
+                    _self.cwe(),
+                    "CSRF_COOKIE_HTTPONLY = False — CSRF cookies may be exposed to client-side scripts",
+                    node,
+                    src,
+                ));
+            }
+        });
+
+        findings
+
+    }
+}
+
+// ─── Rule 20: csrf-cookie-samesite-disabled ───────────────────────────────
+
+pub struct CsrfCookieSameSiteDisabled;
+
+impl_rule! {
+    CsrfCookieSameSiteDisabled,
+    id = "py/csrf-cookie-samesite-disabled",
+    severity = Severity::Medium,
+    cwe = Some("CWE-352"),
+    description = "CSRF_COOKIE_SAMESITE disabled in source code",
+    language = Language::Python,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() != "assignment" {
+                return;
+            }
+
+            let (Some(left), Some(right)) = (
+                node.child_by_field_name("left"),
+                node.child_by_field_name("right"),
+            ) else {
+                return;
+            };
+
+            let left_text = &src[left.byte_range()];
+            let right_text = &src[right.byte_range()];
+            let is_csrf_cookie_samesite =
+                left_text == "CSRF_COOKIE_SAMESITE" || left_text.contains("CSRF_COOKIE_SAMESITE");
+            let disabled = right_text == "None"
+                || right_text == "\"None\""
+                || right_text == "'None'"
+                || right_text == "\"none\""
+                || right_text == "'none'"
+                || right_text == "False";
+            if is_csrf_cookie_samesite && disabled {
+                findings.push(make_finding(
+                    _self.id(),
+                    _self.severity(),
+                    _self.cwe(),
+                    "CSRF_COOKIE_SAMESITE disabled — set it to 'Lax' or 'Strict' to reduce CSRF risk",
+                    node,
+                    src,
+                ));
+            }
+        });
+
+        findings
+
+    }
+}
+
+// ─── Rule 21: csrf-exempt ──────────────────────────────────────────────────
+
+pub struct CsrfExempt;
+
+impl_rule! {
+    CsrfExempt,
+    id = "py/csrf-exempt",
+    severity = Severity::High,
+    cwe = Some("CWE-352"),
+    description = "View marked csrf_exempt",
+    language = Language::Python,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            let text = &src[node.byte_range()];
+            if node.kind() == "decorator" && text.contains("csrf_exempt") {
+                findings.push(make_finding(
+                    _self.id(),
+                    _self.severity(),
+                    _self.cwe(),
+                    "@csrf_exempt disables CSRF protection — prefer scoped exemptions or validated alternative controls",
+                    node,
+                    src,
+                ));
+            }
+        });
+
+        findings
+
+    }
+}
+
+// ─── Rule 22: wtf-csrf-disabled ───────────────────────────────────────────
+
+pub struct WtfCsrfDisabled;
+
+impl_rule! {
+    WtfCsrfDisabled,
+    id = "py/wtf-csrf-disabled",
+    severity = Severity::High,
+    cwe = Some("CWE-352"),
+    description = "Flask-WTF CSRF protection disabled in source code",
+    language = Language::Python,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() != "assignment" {
+                return;
+            }
+
+            let (Some(left), Some(right)) = (
+                node.child_by_field_name("left"),
+                node.child_by_field_name("right"),
+            ) else {
+                return;
+            };
+
+            let left_text = &src[left.byte_range()];
+            let right_text = &src[right.byte_range()];
+            if left_text.contains("WTF_CSRF_ENABLED") && right_text == "False" {
+                findings.push(make_finding(
+                    _self.id(),
+                    _self.severity(),
+                    _self.cwe(),
+                    "Flask-WTF CSRF protection disabled — keep WTF_CSRF_ENABLED enabled",
+                    node,
+                    src,
+                ));
+            }
+        });
+
+        findings
+
+    }
+}
+
+// ─── Rule 23: wtf-csrf-check-default-disabled ─────────────────────────────
+
+pub struct WtfCsrfCheckDefaultDisabled;
+
+impl_rule! {
+    WtfCsrfCheckDefaultDisabled,
+    id = "py/wtf-csrf-check-default-disabled",
+    severity = Severity::High,
+    cwe = Some("CWE-352"),
+    description = "Flask-WTF default CSRF checks disabled in source code",
+    language = Language::Python,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() != "assignment" {
+                return;
+            }
+
+            let (Some(left), Some(right)) = (
+                node.child_by_field_name("left"),
+                node.child_by_field_name("right"),
+            ) else {
+                return;
+            };
+
+            let left_text = &src[left.byte_range()];
+            let right_text = &src[right.byte_range()];
+            if left_text.contains("WTF_CSRF_CHECK_DEFAULT") && right_text == "False" {
+                findings.push(make_finding(
+                    _self.id(),
+                    _self.severity(),
+                    _self.cwe(),
+                    "Flask-WTF default CSRF checks disabled — keep WTF_CSRF_CHECK_DEFAULT enabled",
+                    node,
+                    src,
+                ));
+            }
+        });
+
+        findings
+
+    }
+}
+
+// ─── Rule 24: django-allowed-hosts-wildcard ───────────────────────────────
+
+pub struct DjangoAllowedHostsWildcard;
+
+impl_rule! {
+    DjangoAllowedHostsWildcard,
+    id = "py/django-allowed-hosts-wildcard",
+    severity = Severity::Medium,
+    cwe = Some("CWE-346"),
+    description = "Django ALLOWED_HOSTS allows all hosts",
+    language = Language::Python,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() != "assignment" {
+                return;
+            }
+
+            let (Some(left), Some(right)) = (
+                node.child_by_field_name("left"),
+                node.child_by_field_name("right"),
+            ) else {
+                return;
+            };
+
+            let left_text = &src[left.byte_range()];
+            let right_text = &src[right.byte_range()];
+            if left_text.contains("ALLOWED_HOSTS") && right_text.contains("\"*\"") {
+                findings.push(make_finding(
+                    _self.id(),
+                    _self.severity(),
+                    _self.cwe(),
+                    "Django ALLOWED_HOSTS contains '*' — restrict hostnames explicitly to reduce host header abuse risk",
+                    node,
+                    src,
+                ));
+            }
+        });
+
+        findings
+
+    }
+}
+
+// ─── Rule 25: secure-ssl-redirect-disabled ────────────────────────────────
+
+pub struct SecureSslRedirectDisabled;
+
+impl_rule! {
+    SecureSslRedirectDisabled,
+    id = "py/secure-ssl-redirect-disabled",
+    severity = Severity::Medium,
+    cwe = Some("CWE-319"),
+    description = "Django SECURE_SSL_REDIRECT disabled in source code",
+    language = Language::Python,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() != "assignment" {
+                return;
+            }
+
+            let (Some(left), Some(right)) = (
+                node.child_by_field_name("left"),
+                node.child_by_field_name("right"),
+            ) else {
+                return;
+            };
+
+            let left_text = &src[left.byte_range()];
+            let right_text = &src[right.byte_range()];
+            if left_text.contains("SECURE_SSL_REDIRECT") && right_text == "False" {
+                findings.push(make_finding(
+                    _self.id(),
+                    _self.severity(),
+                    _self.cwe(),
+                    "SECURE_SSL_REDIRECT = False — enable HTTPS redirect in production-facing Django deployments",
+                    node,
+                    src,
+                ));
+            }
+        });
+
+        findings
+
+    }
+}
+
+// ─── Rule 26: jwt-no-verify ───────────────────────────────────────────────
+
+pub struct JwtNoVerify;
+
+impl_rule! {
+    JwtNoVerify,
+    id = "py/jwt-no-verify",
+    severity = Severity::Critical,
+    cwe = Some("CWE-347"),
+    description = "JWT decoded without signature verification",
+    language = Language::Python,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() != "call" {
+                return;
+            }
+
+            let Some(func) = node.child_by_field_name("function") else {
+                return;
+            };
+            let func_text = &src[func.byte_range()];
+            let resolved = resolve_callee(func_text, ctx);
+
+            if resolved.as_ref() != "jwt.decode" {
+                return;
+            }
+
+            let node_text = &src[node.byte_range()];
+
+            // Check for verify=False / verify_signature=False / options={"verify_signature": False}
+            let no_verify = node_text.contains("verify=False")
+                || node_text.contains("verify_signature=False")
+                || node_text.contains("\"verify_signature\": False")
+                || node_text.contains("'verify_signature': False")
+                || node_text.contains("\"verify_signature\":False")
+                || node_text.contains("'verify_signature':False");
+
+            // Check for algorithms=["none"]
+            let none_algo = node_text.contains("algorithms=[\"none\"]")
+                || node_text.contains("algorithms=['none']")
+                || node_text.contains("algorithms=[\"None\"]")
+                || node_text.contains("algorithms=['None']");
+
+            if no_verify || none_algo {
+                findings.push(make_finding(
+                    _self.id(),
+                    _self.severity(),
+                    _self.cwe(),
+                    "JWT decoded without signature verification — always verify tokens with a trusted key",
+                    node,
+                    src,
+                ));
+            }
+        });
+
+        findings
+
+    }
+}
+
+// ─── Rule 27: jwt-hardcoded-secret ────────────────────────────────────────
+
+pub struct JwtHardcodedSecret;
+
+impl_rule! {
+    JwtHardcodedSecret,
+    id = "py/jwt-hardcoded-secret",
+    severity = Severity::High,
+    cwe = Some("CWE-798"),
+    description = "JWT signing or verification with a hardcoded secret",
+    language = Language::Python,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() != "call" {
+                return;
+            }
+
+            let Some(func) = node.child_by_field_name("function") else {
+                return;
+            };
+            let func_text = &src[func.byte_range()];
+            let resolved = resolve_callee(func_text, ctx);
+
+            if resolved.as_ref() != "jwt.encode" && resolved.as_ref() != "jwt.decode" {
+                return;
+            }
+
+            let Some(args) = node.child_by_field_name("arguments") else {
+                return;
+            };
+
+            // For jwt.encode(payload, secret, ...) the secret is arg index 1
+            // For jwt.decode(token, secret, ...) the secret is arg index 1
+            let Some(secret_arg) = args.named_child(1) else {
+                return;
+            };
+
+            if secret_arg.kind() == "string" || secret_arg.kind() == "concatenated_string" {
+                let secret_text = &src[secret_arg.byte_range()];
+                let inner = secret_text.trim_matches(|c| c == '"' || c == '\'');
+                if is_secret_value_long_enough(inner, ctx.secret_thresholds) {
+                    findings.push(make_finding(
+                        _self.id(),
+                        _self.severity(),
+                        _self.cwe(),
+                        "JWT secret is hardcoded — load signing keys from environment or a secrets manager",
+                        node,
+                        src,
+                    ));
+                }
+            }
+        });
+
+        findings
+
+    }
+}
+
+// ─── Rule: hardcoded-crypto-algorithm ──────────────────────────────────────
+
+pub struct HardcodedCryptoAlgorithm;
+
+impl_rule! {
+    HardcodedCryptoAlgorithm,
+    id = "py/hardcoded-crypto-algorithm",
+    severity = Severity::Low,
+    cwe = Some("CWE-327"),
+    description = "Hardcoded algorithm string in hashlib.new() hinders crypto agility",
+    language = Language::Python,
+    // CNSA 2.0 class: web/cloud (exclusive-use 2033). Hardcoded algorithm
+    // names are a crypto-agility hazard during the CNSA 2.0 transition.
+    cnsa2_deadline = "2033",
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() == "call" {
+                if let Some(func) = node.child_by_field_name("function") {
+                    let func_text = &src[func.byte_range()];
+                    let resolved = resolve_callee(func_text, ctx);
+                    if resolved.as_ref() == "hashlib.new" {
+                        if let Some(args) = node.child_by_field_name("arguments") {
+                            if let Some(first_arg) = args.named_child(0) {
+                                // Only match plain string literals — skip f-strings
+                                // and other dynamic expressions.
+                                if first_arg.kind() == "string" {
+                                    let val = &src[first_arg.byte_range()];
+                                    let prefix = val.split(['"', '\'']).next().unwrap_or("");
+                                    // Skip f-strings (f"...", rf"...", fr"...") — they're dynamic.
+                                    let prefix_lower = prefix.to_ascii_lowercase();
+                                    if prefix_lower.contains('f') {
+                                        return;
+                                    }
+                                    // Strip optional prefix (b, r, u, ...) then quotes.
+                                    let stripped = val.trim_start_matches(|c: char| c.is_ascii_alphabetic());
+                                    let inner = stripped.trim_matches(|c| c == '"' || c == '\'');
+                                    // Skip weak algorithms — py/no-weak-crypto owns those.
+                                    if inner != "md5" && inner != "sha1" {
+                                        findings.push(make_finding(
+                                            _self.id(),
+                                            _self.severity(),
+                                            _self.cwe(),
+                                            &format!(
+                                                "hashlib.new(\"{}\") uses a hardcoded algorithm — externalize to configuration for crypto agility",
+                                                inner
+                                            ),
+                                            node,
+                                            src,
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        findings
+
+    }
+}
+
+// ─── Rule: taint-pickle-deserialization ────────────────────────────────────
+//
+// Proof-of-concept rule exercising the new per-function taint engine.
+// Fires when Flask-style untrusted input reaches a pickle deserialization
+// sink within a single function body. Coexists with `py/no-pickle`:
+//
+//   - `py/no-pickle` is the conservative direct-sink rule. It fires on any
+//     call to `pickle.loads(...)` regardless of what the argument is.
+//   - `py/taint-pickle-deserialization` fires only when the argument is
+//     provably reachable from a known untrusted source within the same
+//     function. Higher precision, lower recall.
+//
+// Scope and limitations are documented in `docs/taint-tracking.md` and in
+// the doc comment on `python_taint`. Intraprocedural only, flow-insensitive,
+// no sanitizers yet.
+
+use crate::rules::python_taint::{self, python_taint_sources, NodeMatcher, TaintSpec};
+
+/// Convenience: build a `Call` sink matcher where the canonical path and
+/// the finding description are the same string. Used by every taint rule
+/// below to keep spec definitions short.
+fn call_sink(canonical: &str) -> NodeMatcher {
+    NodeMatcher::Call {
+        canonical: canonical.into(),
+        description: canonical.into(),
+    }
+}
+
+/// Shared mapper from engine-level `TaintFinding` to the public `Finding`
+/// shape, parameterized by the rule's metadata and a description template
+/// that receives the source and sink descriptions.
+struct TaintRuleMeta<'a> {
+    rule_id: &'a str,
+    severity: Severity,
+    cwe: Option<&'a str>,
+    fix_suggestion: Option<&'a str>,
+}
+
+fn map_taint_findings(
+    meta: &TaintRuleMeta<'_>,
+    source: &str,
+    tree: &tree_sitter::Tree,
+    ctx: &FileContext<'_>,
+    spec: &TaintSpec,
+    format_description: impl Fn(&str, &str) -> String,
+) -> Vec<Finding> {
+    // Build cross-file info if both summaries and import paths are available.
+    let cross_file_info = match (ctx.cross_file_summaries, ctx.python_import_paths) {
+        (Some(summaries), Some(import_paths)) => Some(python_taint::CrossFileInfo {
+            import_to_path: import_paths,
+            summaries,
+            rule_filter: python_taint::RuleFilter::Single(meta.rule_id),
+        }),
+        _ => None,
+    };
+    let raw = python_taint::analyze_tree_with_cross_file(
+        tree.root_node(),
+        source,
+        spec,
+        ctx.python_aliases,
+        cross_file_info.as_ref(),
+    );
+    raw.into_iter()
+        .map(|t| Finding {
+            rule_id: meta.rule_id.to_string(),
+            severity: meta.severity,
+            cwe: meta.cwe.map(|s| s.to_string()),
+            description: format_description(&t.source_description, &t.sink_description),
+            file: String::new(),
+            line: t.sink_line,
+            column: t.sink_column,
+            end_line: t.sink_end_line,
+            end_column: t.sink_end_column,
+            snippet: get_source_line(source, t.sink_start_byte),
+            source_line: Some(t.source_line),
+            source_description: Some(t.source_description),
+            sink_line: Some(t.sink_line),
+            sink_description: Some(t.sink_description),
+            fix_suggestion: meta.fix_suggestion.map(|s| s.to_string()),
+            sink_start_byte: Some(t.sink_start_byte),
+            sink_end_byte: Some(t.sink_end_byte),
+            confidence: crate::rules::common::confidence_for_hops(t.hops),
+            taint_hops: Some(t.hops),
+            tags: vec![],
+            crypto_algorithm: None,
+            cnsa2_deadline: None,
+            dep_name: None,
+            dep_version: None,
+            dep_ecosystem: None,
+            dep_purl: None,
+            dep_vulnerability_id: None,
+            dep_fixed_version: None,
+            dep_source: None,
+            dep_vulnerability_severity: None,
+            dep_path: vec![],
+            crypto_material: None,
+        })
+        .collect()
+}
+
+pub struct TaintPickleDeserialization;
+
+impl TaintPickleDeserialization {
+    fn spec() -> TaintSpec {
+        TaintSpec {
+            sources: python_taint_sources(),
+            sinks: vec![
+                call_sink("pickle.loads"),
+                call_sink("pickle.load"),
+                call_sink("cPickle.loads"),
+                call_sink("cPickle.load"),
+            ],
+            sanitizers: vec![],
+        }
+    }
+}
+
+impl_rule! {
+    TaintPickleDeserialization,
+    id = "py/taint-pickle-deserialization",
+    severity = Severity::Critical,
+    cwe = Some("CWE-502"),
+    description = "Untrusted input reaches pickle deserialization sink",
+    language = Language::Python,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let meta = TaintRuleMeta {
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
+            fix_suggestion: Some(
+                "Use `json` or `msgpack` instead of pickle for untrusted data: `json.loads(data)`",
+            ),
+        };
+        map_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!(
+                "{} reaches {} — untrusted input can execute arbitrary code via pickle",
+                src, sink
+            )
+        })
+
+    }
+}
+
+// ─── py/taint-eval ────────────────────────────────────────────────────────
+pub struct TaintEvalFromRequest;
+
+impl TaintEvalFromRequest {
+    fn spec() -> TaintSpec {
+        TaintSpec {
+            sources: python_taint_sources(),
+            sinks: vec![call_sink("eval"), call_sink("exec")],
+            sanitizers: vec![],
+        }
+    }
+}
+
+impl_rule! {
+    TaintEvalFromRequest,
+    id = "py/taint-eval",
+    severity = Severity::Critical,
+    cwe = Some("CWE-95"),
+    description = "Untrusted input reaches eval/exec sink",
+    language = Language::Python,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let meta = TaintRuleMeta {
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
+            fix_suggestion: Some(
+                "Use `ast.literal_eval()` for safe evaluation, or remove eval/exec entirely",
+            ),
+        };
+        map_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!(
+                "{} reaches {} — untrusted input can execute arbitrary Python code",
+                src, sink
+            )
+        })
+
+    }
+}
+
+// ─── py/taint-command-injection ──────────────────────────────────────────
+pub struct TaintCommandInjectionFromRequest;
+
+impl TaintCommandInjectionFromRequest {
+    fn spec() -> TaintSpec {
+        TaintSpec {
+            sources: python_taint_sources(),
+            sinks: vec![
+                call_sink("os.system"),
+                call_sink("os.popen"),
+                call_sink("subprocess.run"),
+                call_sink("subprocess.Popen"),
+                call_sink("subprocess.call"),
+                call_sink("subprocess.check_call"),
+                call_sink("subprocess.check_output"),
+            ],
+            sanitizers: vec![
+                call_sink("shlex.quote"),
+                call_sink("shlex.join"),
+                call_sink("subprocess.list2cmdline"),
+            ],
+        }
+    }
+}
+
+impl_rule! {
+    TaintCommandInjectionFromRequest,
+    id = "py/taint-command-injection",
+    severity = Severity::Critical,
+    cwe = Some("CWE-78"),
+    description = "Untrusted input reaches OS command execution sink",
+    language = Language::Python,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let meta = TaintRuleMeta {
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
+            fix_suggestion: Some("Use `shlex.quote()` to escape arguments, or pass a list to `subprocess.run([...])` instead of a shell string"),
+        };
+        map_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!(
+                "{} reaches {} — untrusted input can inject OS commands",
+                src, sink
+            )
+        })
+
+    }
+}
+
+// ─── py/taint-ssrf ────────────────────────────────────────────────────────
+pub struct TaintSsrfFromRequest;
+
+impl TaintSsrfFromRequest {
+    fn spec() -> TaintSpec {
+        TaintSpec {
+            sources: python_taint_sources(),
+            sinks: vec![
+                call_sink("urllib.request.urlopen"),
+                call_sink("requests.get"),
+                call_sink("requests.post"),
+                call_sink("requests.put"),
+                call_sink("requests.delete"),
+                call_sink("requests.request"),
+                call_sink("httpx.get"),
+                call_sink("httpx.post"),
+            ],
+            sanitizers: vec![],
+        }
+    }
+}
+
+impl_rule! {
+    TaintSsrfFromRequest,
+    id = "py/taint-ssrf",
+    severity = Severity::High,
+    cwe = Some("CWE-918"),
+    description = "Untrusted input reaches outbound HTTP sink (potential SSRF)",
+    language = Language::Python,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let meta = TaintRuleMeta {
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
+            fix_suggestion: Some(
+                "Validate URLs against an allowlist of permitted hosts before making requests",
+            ),
+        };
+        map_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!(
+                "{} reaches {} — untrusted input can drive server-side request forgery",
+                src, sink
+            )
+        })
+
+    }
+}
+
+// ─── py/taint-yaml-load ──────────────────────────────────────────────────
+pub struct TaintYamlLoadFromRequest;
+
+impl TaintYamlLoadFromRequest {
+    fn spec() -> TaintSpec {
+        TaintSpec {
+            sources: python_taint_sources(),
+            sinks: vec![
+                call_sink("yaml.load"),
+                call_sink("yaml.unsafe_load"),
+                call_sink("yaml.full_load"),
+            ],
+            sanitizers: vec![],
+        }
+    }
+}
+
+impl_rule! {
+    TaintYamlLoadFromRequest,
+    id = "py/taint-yaml-load",
+    severity = Severity::Critical,
+    cwe = Some("CWE-502"),
+    description = "Untrusted input reaches unsafe YAML loader",
+    language = Language::Python,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let meta = TaintRuleMeta {
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
+            fix_suggestion: Some(
+                "Use `yaml.safe_load()` instead of `yaml.load()` for untrusted input",
+            ),
+        };
+        map_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!(
+                    "{} reaches {} — untrusted input can execute arbitrary code via YAML deserialization",
+                    src, sink
+                )
+        })
+
+    }
+}
+
+// ─── py/taint-sql-injection ──────────────────────────────────────────────
+pub struct TaintSqlInjectionFromRequest;
+
+impl TaintSqlInjectionFromRequest {
+    fn spec() -> TaintSpec {
+        TaintSpec {
+            sources: python_taint_sources(),
+            // DB execute APIs can live on any object (`cursor`, `conn`,
+            // `db`, `session`…). Rather than enumerate every plausible
+            // receiver name, match the final method name via `MethodName`.
+            // This intentionally over-approximates — any `.execute(...)`
+            // called with tainted input is flagged.
+            sinks: vec![
+                NodeMatcher::MethodName {
+                    method: "execute".into(),
+                    description: "cursor/connection.execute".into(),
+                },
+                NodeMatcher::MethodName {
+                    method: "executemany".into(),
+                    description: "cursor/connection.executemany".into(),
+                },
+                NodeMatcher::MethodName {
+                    method: "executescript".into(),
+                    description: "sqlite3.Cursor.executescript".into(),
+                },
+            ],
+            sanitizers: vec![call_sink("escape_string"), call_sink("quote_ident")],
+        }
+    }
+}
+
+impl_rule! {
+    TaintSqlInjectionFromRequest,
+    id = "py/taint-sql-injection",
+    severity = Severity::Critical,
+    cwe = Some("CWE-89"),
+    description = "Untrusted input reaches DB execute sink",
+    language = Language::Python,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let meta = TaintRuleMeta {
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
+            fix_suggestion: Some("Use parameterized queries: `cur.execute(\"SELECT * FROM users WHERE name = ?\", (name,))`"),
+        };
+        map_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!("{} reaches {} — untrusted input can inject SQL", src, sink)
+        })
+
+    }
+}
+
+// ─── py/taint-ssti ──────────────────────────────────────────────────────
+pub struct TaintSsti;
+
+impl TaintSsti {
+    fn spec() -> TaintSpec {
+        TaintSpec {
+            sources: python_taint_sources(),
+            sinks: vec![
+                call_sink("jinja2.Template"),
+                call_sink("Template"),
+                call_sink("flask.render_template_string"),
+                call_sink("render_template_string"),
+                call_sink("Template.render"),
+                call_sink("Environment.from_string"),
+                call_sink("jinja2.Environment.from_string"),
+                call_sink("mako.template.Template"),
+            ],
+            sanitizers: vec![
+                call_sink("markupsafe.escape"),
+                call_sink("jinja2.escape"),
+                call_sink("html.escape"),
+                call_sink("cgi.escape"),
+                call_sink("bleach.clean"),
+            ],
+        }
+    }
+}
+
+impl_rule! {
+    TaintSsti,
+    id = "py/taint-ssti",
+    severity = Severity::Critical,
+    cwe = Some("CWE-1336"),
+    description = "Untrusted input reaches template rendering sink (potential SSTI)",
+    language = Language::Python,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let meta = TaintRuleMeta {
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
+            fix_suggestion: Some(
+                "Use render_template() with separate template files instead of render_template_string() with user input",
+            ),
+        };
+        map_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!(
+                "{} reaches {} — untrusted input can inject server-side templates",
+                src, sink
+            )
+        })
+
+    }
+}
+
+// ─── py/taint-xpath-injection ───────────────────────────────────────────
+pub struct TaintXpathInjection;
+
+impl TaintXpathInjection {
+    fn spec() -> TaintSpec {
+        TaintSpec {
+            sources: python_taint_sources(),
+            sinks: vec![
+                call_sink("etree.XPath"),
+                call_sink("etree.xpath"),
+                call_sink("lxml.etree.XPath"),
+                NodeMatcher::MethodName {
+                    method: "xpath".into(),
+                    description: "lxml.etree.xpath".into(),
+                },
+            ],
+            sanitizers: vec![],
+        }
+    }
+}
+
+impl_rule! {
+    TaintXpathInjection,
+    id = "py/taint-xpath-injection",
+    severity = Severity::High,
+    cwe = Some("CWE-643"),
+    description = "Untrusted input reaches XPath query sink",
+    language = Language::Python,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let meta = TaintRuleMeta {
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
+            fix_suggestion: Some(
+                "Use parameterized XPath queries or validate/sanitize input before building XPath expressions",
+            ),
+        };
+        map_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!(
+                "{} reaches {} — untrusted input can inject XPath expressions",
+                src, sink
+            )
+        })
+
+    }
+}
+
+// ─── py/taint-ldap-injection ────────────────────────────────────────────
+pub struct TaintLdapInjection;
+
+impl TaintLdapInjection {
+    fn spec() -> TaintSpec {
+        TaintSpec {
+            sources: python_taint_sources(),
+            sinks: vec![
+                call_sink("ldap.search_s"),
+                call_sink("ldap.search_st"),
+                call_sink("ldap.search_ext_s"),
+                call_sink("ldap3.Connection.search"),
+                call_sink("conn.search_s"),
+                call_sink("conn.search_st"),
+                call_sink("conn.search_ext_s"),
+                call_sink("l.search_s"),
+                call_sink("l.search_st"),
+                call_sink("l.search_ext_s"),
+            ],
+            sanitizers: vec![
+                call_sink("ldap.filter.escape_filter_chars"),
+                call_sink("ldap3.utils.conv.escape_filter_chars"),
+            ],
+        }
+    }
+}
+
+impl_rule! {
+    TaintLdapInjection,
+    id = "py/taint-ldap-injection",
+    severity = Severity::High,
+    cwe = Some("CWE-90"),
+    description = "Untrusted input reaches LDAP search sink",
+    language = Language::Python,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let meta = TaintRuleMeta {
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
+            fix_suggestion: Some(
+                "Use ldap.filter.escape_filter_chars() to sanitize user input before building LDAP filters",
+            ),
+        };
+        map_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!(
+                "{} reaches {} — untrusted input can inject LDAP filters",
+                src, sink
+            )
+        })
+
+    }
+}
+
+// ─── Rule: taint-log-injection ────────────────────────────────────────────
+
+pub struct TaintLogInjection;
+
+impl TaintLogInjection {
+    fn spec() -> TaintSpec {
+        TaintSpec {
+            sources: python_taint_sources(),
+            sinks: vec![
+                call_sink("logging.info"),
+                call_sink("logging.warning"),
+                call_sink("logging.error"),
+                call_sink("logging.debug"),
+                call_sink("logging.critical"),
+                call_sink("logging.log"),
+                call_sink("print"),
+                NodeMatcher::MethodName {
+                    method: "info".into(),
+                    description: "logger.info".into(),
+                },
+                NodeMatcher::MethodName {
+                    method: "warning".into(),
+                    description: "logger.warning".into(),
+                },
+                NodeMatcher::MethodName {
+                    method: "error".into(),
+                    description: "logger.error".into(),
+                },
+                NodeMatcher::MethodName {
+                    method: "debug".into(),
+                    description: "logger.debug".into(),
+                },
+                NodeMatcher::MethodName {
+                    method: "critical".into(),
+                    description: "logger.critical".into(),
+                },
+            ],
+            sanitizers: vec![],
+        }
+    }
+}
+
+impl_rule! {
+    TaintLogInjection,
+    id = "py/taint-log-injection",
+    severity = Severity::Medium,
+    cwe = Some("CWE-117"),
+    description = "Untrusted input reaches a logging sink — possible log injection",
+    language = Language::Python,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let meta = TaintRuleMeta {
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
+            fix_suggestion: Some(
+                "Sanitize user input before logging — strip newlines and control characters (no standard sanitizer; use str.replace() or a regex to remove \\n, \\r, and ANSI escape sequences)",
+            ),
+        };
+        map_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!(
+                "{} reaches {} — untrusted input can forge log entries",
+                src, sink
+            )
+        })
+
+    }
+}
+
+// ─── py/taint-xxe ─────────────────────────────────────────────────────
+pub struct TaintXxe;
+
+impl TaintXxe {
+    fn spec() -> TaintSpec {
+        TaintSpec {
+            sources: python_taint_sources(),
+            sinks: vec![
+                call_sink("etree.parse"),
+                call_sink("etree.fromstring"),
+                call_sink("xml.etree.ElementTree.parse"),
+                call_sink("xml.etree.ElementTree.fromstring"),
+                call_sink("ElementTree.parse"),
+                call_sink("ElementTree.fromstring"),
+                call_sink("xml.sax.parseString"),
+                call_sink("sax.parseString"),
+                call_sink("minidom.parseString"),
+                call_sink("xml.dom.minidom.parseString"),
+                call_sink("pulldom.parse"),
+                call_sink("xml.dom.pulldom.parse"),
+            ],
+            sanitizers: vec![
+                call_sink("defusedxml.parse"),
+                call_sink("defusedxml.fromstring"),
+                call_sink("defusedxml.ElementTree.parse"),
+                call_sink("defusedxml.minidom.parseString"),
+            ],
+        }
+    }
+}
+
+impl_rule! {
+    TaintXxe,
+    id = "py/taint-xxe",
+    severity = Severity::High,
+    cwe = Some("CWE-611"),
+    description = "Untrusted input reaches an XML parser — possible XML External Entity (XXE) injection",
+    language = Language::Python,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let meta = TaintRuleMeta {
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
+            fix_suggestion: Some(
+                "Use defusedxml instead of xml.etree.ElementTree for untrusted XML input",
+            ),
+        };
+        map_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!(
+                "{} reaches {} — untrusted input can trigger XML External Entity processing",
+                src, sink
+            )
+        })
+
+    }
+}
+
+// ─── py/taint-nosql-injection ─────────────────────────────────────────
+pub struct TaintNosqlInjection;
+
+impl TaintNosqlInjection {
+    fn spec() -> TaintSpec {
+        TaintSpec {
+            sources: python_taint_sources(),
+            sinks: vec![
+                // Use specific Call matchers for .find() to avoid matching
+                // str.find() and other non-MongoDB uses (issue #141).
+                NodeMatcher::Call {
+                    canonical: "collection.find".into(),
+                    description: "MongoDB collection.find()".into(),
+                },
+                NodeMatcher::Call {
+                    canonical: "db.find".into(),
+                    description: "MongoDB db.find()".into(),
+                },
+                NodeMatcher::MethodName {
+                    method: "find_one".into(),
+                    description: "collection.find_one".into(),
+                },
+                NodeMatcher::MethodName {
+                    method: "update_one".into(),
+                    description: "collection.update_one".into(),
+                },
+                NodeMatcher::MethodName {
+                    method: "update_many".into(),
+                    description: "collection.update_many".into(),
+                },
+                NodeMatcher::MethodName {
+                    method: "delete_one".into(),
+                    description: "collection.delete_one".into(),
+                },
+                NodeMatcher::MethodName {
+                    method: "delete_many".into(),
+                    description: "collection.delete_many".into(),
+                },
+                NodeMatcher::MethodName {
+                    method: "aggregate".into(),
+                    description: "collection.aggregate".into(),
+                },
+                NodeMatcher::MethodName {
+                    method: "count_documents".into(),
+                    description: "collection.count_documents".into(),
+                },
+            ],
+            sanitizers: vec![],
+        }
+    }
+}
+
+impl_rule! {
+    TaintNosqlInjection,
+    id = "py/taint-nosql-injection",
+    severity = Severity::High,
+    cwe = Some("CWE-943"),
+    description = "Untrusted input reaches a MongoDB query sink — possible NoSQL injection",
+    language = Language::Python,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let meta = TaintRuleMeta {
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
+            fix_suggestion: Some("Validate and sanitize user input before using in MongoDB queries. Avoid passing raw user input as query filters."),
+        };
+        map_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!(
+                "{} reaches {} — untrusted input can inject NoSQL operators",
+                src, sink
+            )
+        })
+
+    }
+}
+
+// ─── Cross-file summary extraction ──────────────────────────────────────
+
+/// Returns all Python taint rule specs paired with their rule IDs.
+///
+/// Used by the cross-file summary extractor (pass 1) to determine which
+/// sinks a function's parameters can reach. Each spec's *sources* are
+/// replaced with synthetic `ParamName` entries by the caller — only the
+/// sinks and sanitizers are meaningful here.
+pub fn python_taint_rule_specs() -> Vec<(&'static str, TaintSpec)> {
+    vec![
+        (
+            "py/taint-pickle-deserialization",
+            TaintPickleDeserialization::spec(),
+        ),
+        ("py/taint-eval", TaintEvalFromRequest::spec()),
+        (
+            "py/taint-command-injection",
+            TaintCommandInjectionFromRequest::spec(),
+        ),
+        ("py/taint-ssrf", TaintSsrfFromRequest::spec()),
+        ("py/taint-yaml-load", TaintYamlLoadFromRequest::spec()),
+        (
+            "py/taint-sql-injection",
+            TaintSqlInjectionFromRequest::spec(),
+        ),
+        ("py/taint-ssti", TaintSsti::spec()),
+        ("py/taint-xpath-injection", TaintXpathInjection::spec()),
+        ("py/taint-ldap-injection", TaintLdapInjection::spec()),
+        ("py/taint-log-injection", TaintLogInjection::spec()),
+        ("py/taint-xxe", TaintXxe::spec()),
+        ("py/taint-nosql-injection", TaintNosqlInjection::spec()),
+    ]
+}
+
+// ─── Batched Python taint runner ────────────────────────────────────────
+//
+// Mirrors the Go taint batched runner in `rules::go::run_go_taint_batched`.
+// Historically every Python taint rule called
+// `python_taint::analyze_tree_with_cross_file` on its own, which
+// re-walked the file's AST and recomputed Pass 1 summaries once per
+// rule. The shared Pass 1 output depends only on sources and
+// sanitizers (not on sinks) and every built-in rule uses
+// `python_taint_sources()`, so rules with matching sanitizer
+// fingerprints can collapse into a single AST walk whose findings are
+// dispatched back per-rule by `rule_id_hint`.
+
+/// Per-rule metadata used by the batched Python taint runner to shape
+/// findings (severity, CWE, fix hint, description formatter).
+struct PyTaintRuleDispatch {
+    meta: TaintRuleMeta<'static>,
+    format_description: fn(&str, &str) -> String,
+}
+
+fn py_taint_pickle_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can execute arbitrary code via pickle")
+}
+fn py_taint_eval_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can execute arbitrary Python code")
+}
+fn py_taint_command_injection_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can inject OS commands")
+}
+fn py_taint_ssrf_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can drive server-side request forgery")
+}
+fn py_taint_yaml_load_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can execute arbitrary code via YAML deserialization")
+}
+fn py_taint_sql_injection_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can inject SQL")
+}
+fn py_taint_ssti_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can inject server-side templates")
+}
+fn py_taint_xpath_injection_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can inject XPath expressions")
+}
+fn py_taint_ldap_injection_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can inject LDAP filters")
+}
+fn py_taint_log_injection_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can forge log entries")
+}
+fn py_taint_xxe_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can trigger XML External Entity processing")
+}
+fn py_taint_nosql_injection_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can inject NoSQL operators")
+}
+
+fn py_taint_rule_dispatch_table() -> Vec<PyTaintRuleDispatch> {
+    vec![
+        PyTaintRuleDispatch {
+            meta: TaintRuleMeta {
+                rule_id: "py/taint-pickle-deserialization",
+                severity: Severity::Critical,
+                cwe: Some("CWE-502"),
+                fix_suggestion: Some(
+                    "Use `json` or `msgpack` instead of pickle for untrusted data: `json.loads(data)`",
+                ),
+            },
+            format_description: py_taint_pickle_desc,
+        },
+        PyTaintRuleDispatch {
+            meta: TaintRuleMeta {
+                rule_id: "py/taint-eval",
+                severity: Severity::Critical,
+                cwe: Some("CWE-95"),
+                fix_suggestion: Some(
+                    "Use `ast.literal_eval()` for safe evaluation, or remove eval/exec entirely",
+                ),
+            },
+            format_description: py_taint_eval_desc,
+        },
+        PyTaintRuleDispatch {
+            meta: TaintRuleMeta {
+                rule_id: "py/taint-command-injection",
+                severity: Severity::Critical,
+                cwe: Some("CWE-78"),
+                fix_suggestion: Some("Use `shlex.quote()` to escape arguments, or pass a list to `subprocess.run([...])` instead of a shell string"),
+            },
+            format_description: py_taint_command_injection_desc,
+        },
+        PyTaintRuleDispatch {
+            meta: TaintRuleMeta {
+                rule_id: "py/taint-ssrf",
+                severity: Severity::High,
+                cwe: Some("CWE-918"),
+                fix_suggestion: Some(
+                    "Validate URLs against an allowlist of permitted hosts before making requests",
+                ),
+            },
+            format_description: py_taint_ssrf_desc,
+        },
+        PyTaintRuleDispatch {
+            meta: TaintRuleMeta {
+                rule_id: "py/taint-yaml-load",
+                severity: Severity::Critical,
+                cwe: Some("CWE-502"),
+                fix_suggestion: Some(
+                    "Use `yaml.safe_load()` instead of `yaml.load()` for untrusted input",
+                ),
+            },
+            format_description: py_taint_yaml_load_desc,
+        },
+        PyTaintRuleDispatch {
+            meta: TaintRuleMeta {
+                rule_id: "py/taint-sql-injection",
+                severity: Severity::Critical,
+                cwe: Some("CWE-89"),
+                fix_suggestion: Some("Use parameterized queries: `cur.execute(\"SELECT * FROM users WHERE name = ?\", (name,))`"),
+            },
+            format_description: py_taint_sql_injection_desc,
+        },
+        PyTaintRuleDispatch {
+            meta: TaintRuleMeta {
+                rule_id: "py/taint-ssti",
+                severity: Severity::Critical,
+                cwe: Some("CWE-1336"),
+                fix_suggestion: Some(
+                    "Use render_template() with separate template files instead of render_template_string() with user input",
+                ),
+            },
+            format_description: py_taint_ssti_desc,
+        },
+        PyTaintRuleDispatch {
+            meta: TaintRuleMeta {
+                rule_id: "py/taint-xpath-injection",
+                severity: Severity::High,
+                cwe: Some("CWE-643"),
+                fix_suggestion: Some(
+                    "Use parameterized XPath queries or validate/sanitize input before building XPath expressions",
+                ),
+            },
+            format_description: py_taint_xpath_injection_desc,
+        },
+        PyTaintRuleDispatch {
+            meta: TaintRuleMeta {
+                rule_id: "py/taint-ldap-injection",
+                severity: Severity::High,
+                cwe: Some("CWE-90"),
+                fix_suggestion: Some(
+                    "Use ldap.filter.escape_filter_chars() to sanitize user input before building LDAP filters",
+                ),
+            },
+            format_description: py_taint_ldap_injection_desc,
+        },
+        PyTaintRuleDispatch {
+            meta: TaintRuleMeta {
+                rule_id: "py/taint-log-injection",
+                severity: Severity::Medium,
+                cwe: Some("CWE-117"),
+                fix_suggestion: Some(
+                    "Sanitize user input before logging — strip newlines and control characters (no standard sanitizer; use str.replace() or a regex to remove \\n, \\r, and ANSI escape sequences)",
+                ),
+            },
+            format_description: py_taint_log_injection_desc,
+        },
+        PyTaintRuleDispatch {
+            meta: TaintRuleMeta {
+                rule_id: "py/taint-xxe",
+                severity: Severity::High,
+                cwe: Some("CWE-611"),
+                fix_suggestion: Some(
+                    "Use defusedxml instead of xml.etree.ElementTree for untrusted XML input",
+                ),
+            },
+            format_description: py_taint_xxe_desc,
+        },
+        PyTaintRuleDispatch {
+            meta: TaintRuleMeta {
+                rule_id: "py/taint-nosql-injection",
+                severity: Severity::High,
+                cwe: Some("CWE-943"),
+                fix_suggestion: Some("Validate and sanitize user input before using in MongoDB queries. Avoid passing raw user input as query filters."),
+            },
+            format_description: py_taint_nosql_injection_desc,
+        },
+    ]
+}
+
+/// Run every built-in Python taint rule over `tree` in a single
+/// batched pass, returning per-rule [`Finding`]s.
+///
+/// This replaces the historical code path where each Python taint rule
+/// called [`python_taint::analyze_tree_with_cross_file`] individually —
+/// which recomputed rule-agnostic Pass 1 summaries and re-walked every
+/// function body once per rule.
+///
+/// Rules are grouped by their sanitizer profile so rules sharing the
+/// same sanitizers collapse into a single AST walk.
+pub fn run_py_taint_batched(
+    source: &str,
+    tree: &tree_sitter::Tree,
+    ctx: &FileContext<'_>,
+    enabled_rule_ids: &std::collections::HashSet<&str>,
+) -> Vec<Finding> {
+    let dispatch = py_taint_rule_dispatch_table();
+    let rule_specs = python_taint_rule_specs();
+
+    // Only include rules the caller actually registered.
+    let rules: Vec<python_taint::BatchedRule<'_>> = rule_specs
+        .iter()
+        .filter(|(id, _)| enabled_rule_ids.contains(id))
+        .map(|(id, spec)| python_taint::BatchedRule { rule_id: id, spec })
+        .collect();
+
+    if rules.is_empty() {
+        return Vec::new();
+    }
+
+    let cross_file_info = match (ctx.cross_file_summaries, ctx.python_import_paths) {
+        (Some(summaries), Some(import_paths)) => Some(python_taint::CrossFileInfoBatched {
+            import_to_path: import_paths,
+            summaries,
+        }),
+        _ => None,
+    };
+
+    let raw = python_taint::analyze_tree_batched(
+        tree.root_node(),
+        source,
+        &rules,
+        ctx.python_aliases,
+        cross_file_info.as_ref(),
+    );
+
+    raw.into_iter()
+        .filter_map(|(rule_id, t)| {
+            let d = dispatch.iter().find(|d| d.meta.rule_id == rule_id)?;
+            Some(Finding {
+                rule_id: d.meta.rule_id.to_string(),
+                severity: d.meta.severity,
+                cwe: d.meta.cwe.map(|s| s.to_string()),
+                description: (d.format_description)(&t.source_description, &t.sink_description),
+                file: String::new(),
+                line: t.sink_line,
+                column: t.sink_column,
+                end_line: t.sink_end_line,
+                end_column: t.sink_end_column,
+                snippet: get_source_line(source, t.sink_start_byte),
+                source_line: Some(t.source_line),
+                source_description: Some(t.source_description),
+                sink_line: Some(t.sink_line),
+                sink_description: Some(t.sink_description),
+                fix_suggestion: d.meta.fix_suggestion.map(|s| s.to_string()),
+                sink_start_byte: Some(t.sink_start_byte),
+                sink_end_byte: Some(t.sink_end_byte),
+                confidence: crate::rules::common::confidence_for_hops(t.hops),
+                taint_hops: Some(t.hops),
+                tags: vec![],
+                crypto_algorithm: None,
+                cnsa2_deadline: None,
+                dep_name: None,
+                dep_version: None,
+                dep_ecosystem: None,
+                dep_purl: None,
+                dep_vulnerability_id: None,
+                dep_fixed_version: None,
+                dep_source: None,
+                dep_vulnerability_severity: None,
+                dep_path: vec![],
+                crypto_material: None,
+            })
+        })
+        .collect()
+}

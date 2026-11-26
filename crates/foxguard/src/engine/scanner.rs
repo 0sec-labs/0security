@@ -1,0 +1,3608 @@
+use crate::rules::cross_file::{CrossFileSummaryMap, FunctionTaintSummary};
+use crate::rules::csharp_taint;
+use crate::rules::go_taint::{self, go_aliases_from_tree};
+use crate::rules::java_taint;
+use crate::rules::javascript_taint::{self, js_aliases_from_tree};
+use crate::rules::kotlin_taint;
+use crate::rules::php_taint;
+use crate::rules::python_aliases::{from_tree as py_aliases_from_tree, resolve_imports_to_paths};
+use crate::rules::python_taint;
+use crate::rules::ruby_taint;
+use crate::rules::{
+    common::AliasTable, AstAnalysisRequirement, FileContext, Rule, RuleRegistry, TaintEngine,
+};
+use crate::{Finding, Language};
+use globset::{Glob, GlobSet, GlobSetBuilder};
+use ignore::WalkBuilder;
+use rayon::prelude::*;
+use regex::Regex;
+use std::collections::{HashMap, HashSet};
+use std::path::Path;
+use std::path::PathBuf;
+use std::sync::{Mutex, OnceLock};
+use std::time::Instant;
+
+/// A normalized taint-runner signature. Every per-language batched taint
+/// dispatcher is adapted to this shape so the scanner can drive all of them
+/// from a single table (see [`TAINT_DISPATCH`]) instead of a hand-written
+/// `if !ids.is_empty() { run_<lang>_taint_batched(...) }` block per language.
+///
+/// Cross-file engines (Go/Python/JS/Java) consume `ctx` for Pass-1 summaries
+/// and import/package resolution; intra-file engines ignore it. Adapting the
+/// intra-file runners (which take no `ctx`) to this signature is a one-line
+/// wrapper below.
+type TaintRunner = fn(&str, &tree_sitter::Tree, &FileContext<'_>, &HashSet<&str>) -> Vec<Finding>;
+
+// ── Adapters for intra-file runners (no `ctx` parameter) ──────────────────────
+// These exist only so every engine shares the `TaintRunner` signature. The
+// cross-file runners already match it and are referenced directly in the table.
+fn run_c_taint(
+    s: &str,
+    t: &tree_sitter::Tree,
+    _c: &FileContext<'_>,
+    ids: &HashSet<&str>,
+) -> Vec<Finding> {
+    crate::rules::c::run_c_taint_batched(s, t, ids)
+}
+fn run_solidity_taint(
+    s: &str,
+    t: &tree_sitter::Tree,
+    _c: &FileContext<'_>,
+    ids: &HashSet<&str>,
+) -> Vec<Finding> {
+    crate::rules::solidity::run_solidity_taint_batched(s, t, ids)
+}
+fn run_bash_taint(
+    s: &str,
+    t: &tree_sitter::Tree,
+    _c: &FileContext<'_>,
+    ids: &HashSet<&str>,
+) -> Vec<Finding> {
+    crate::rules::bash::run_bash_taint_batched(s, t, ids)
+}
+fn run_apex_taint(
+    s: &str,
+    t: &tree_sitter::Tree,
+    _c: &FileContext<'_>,
+    ids: &HashSet<&str>,
+) -> Vec<Finding> {
+    crate::rules::apex::run_apex_taint_batched(s, t, ids)
+}
+fn run_swift_taint(
+    s: &str,
+    t: &tree_sitter::Tree,
+    _c: &FileContext<'_>,
+    ids: &HashSet<&str>,
+) -> Vec<Finding> {
+    crate::rules::swift::run_swift_taint_batched(s, t, ids)
+}
+fn run_scala_taint(
+    s: &str,
+    t: &tree_sitter::Tree,
+    _c: &FileContext<'_>,
+    ids: &HashSet<&str>,
+) -> Vec<Finding> {
+    crate::rules::scala::run_scala_taint_batched(s, t, ids)
+}
+
+/// All built-in taint engines, paired with their batched runner. Adding a
+/// taint-backed language is a single row here plus the usual `TaintEngine`
+/// variant and `builtin_taint_specs_for_language` arm — no new scanner block.
+///
+/// The scanner iterates this table per file: for each engine it collects the
+/// enabled rule ids whose `spec.engine` matches, and invokes the runner when
+/// that set is non-empty (so a file only pays for engines that have enabled
+/// rules for its language).
+const TAINT_DISPATCH: &[(TaintEngine, TaintRunner)] = &[
+    // Cross-file engines (consume FileContext Pass-1 summaries).
+    (TaintEngine::Go, crate::rules::go::run_go_taint_batched),
+    (
+        TaintEngine::Java,
+        crate::rules::java::run_java_taint_batched,
+    ),
+    (
+        TaintEngine::Python,
+        crate::rules::python::run_py_taint_batched,
+    ),
+    (
+        TaintEngine::JavaScript,
+        crate::rules::javascript::run_js_taint_batched,
+    ),
+    (
+        TaintEngine::Ruby,
+        crate::rules::ruby::run_ruby_taint_batched,
+    ),
+    (TaintEngine::Php, crate::rules::php::run_php_taint_batched),
+    (
+        TaintEngine::CSharp,
+        crate::rules::csharp::run_csharp_taint_batched,
+    ),
+    (
+        TaintEngine::Kotlin,
+        crate::rules::kotlin::run_kt_taint_batched,
+    ),
+    // Intra-file engines (adapted to ignore FileContext).
+    (TaintEngine::C, run_c_taint),
+    (TaintEngine::Solidity, run_solidity_taint),
+    (TaintEngine::Bash, run_bash_taint),
+    (TaintEngine::Swift, run_swift_taint),
+    (TaintEngine::Apex, run_apex_taint),
+    (TaintEngine::Scala, run_scala_taint),
+];
+
+/// Result of a scan with metadata.
+pub struct ScanResult {
+    pub findings: Vec<Finding>,
+    pub files_scanned: usize,
+    pub stats: ScanStats,
+    pub duration: std::time::Duration,
+}
+
+struct AstRuleBatch<'a> {
+    entries: Vec<AstRuleBatchEntry<'a>>,
+    syntax_tree_rules: usize,
+    context_rules: usize,
+}
+
+struct AstRuleBatchEntry<'a> {
+    rule: &'a dyn Rule,
+    requirement: AstAnalysisRequirement,
+}
+
+impl<'a> AstRuleBatch<'a> {
+    fn from_rules(rules: &[&'a dyn Rule]) -> Self {
+        let mut syntax_tree_rules = 0;
+        let mut context_rules = 0;
+        let entries = rules
+            .iter()
+            .map(|rule| {
+                let requirement = rule.ast_analysis_requirement();
+                match requirement {
+                    AstAnalysisRequirement::SyntaxTree => syntax_tree_rules += 1,
+                    AstAnalysisRequirement::FileContext => context_rules += 1,
+                }
+                AstRuleBatchEntry {
+                    rule: *rule,
+                    requirement,
+                }
+            })
+            .collect();
+
+        Self {
+            entries,
+            syntax_tree_rules,
+            context_rules,
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// Returns `None` if the per-file time budget ran out between rules.
+    fn run(
+        &self,
+        source: &str,
+        tree: &tree_sitter::Tree,
+        ctx: &FileContext<'_>,
+    ) -> Option<Vec<Finding>> {
+        let mut findings = Vec::with_capacity(self.syntax_tree_rules + self.context_rules);
+        for entry in &self.entries {
+            if super::budget::expired() {
+                return None;
+            }
+            match entry.requirement {
+                AstAnalysisRequirement::SyntaxTree => {
+                    findings.extend(entry.rule.check(source, tree));
+                }
+                AstAnalysisRequirement::FileContext => {
+                    findings.extend(entry.rule.check_with_context(source, tree, ctx));
+                }
+            }
+        }
+        Some(findings)
+    }
+}
+
+/// File accounting for a scan.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ScanStats {
+    pub files_discovered: usize,
+    pub files_scanned: usize,
+    pub files_skipped: usize,
+    pub files_ignored: usize,
+    pub unsupported_files: usize,
+    pub noise_files: usize,
+    pub too_large_files: usize,
+    pub metadata_error_files: usize,
+    pub binary_files: usize,
+    pub read_error_files: usize,
+    pub minified_files: usize,
+    pub parse_error_files: usize,
+    /// Files abandoned because they exceeded the per-file time budget.
+    pub timed_out_files: usize,
+    /// Failed traversals; the number of files hidden by them is unknown.
+    pub walk_errors: usize,
+}
+
+impl ScanStats {
+    fn record_discovered(&mut self) {
+        self.files_discovered += 1;
+    }
+
+    fn record_scanned(&mut self) {
+        self.files_scanned += 1;
+    }
+
+    fn record_skipped(&mut self, reason: ScanSkipReason) {
+        self.files_skipped += 1;
+        match reason {
+            ScanSkipReason::Ignored => self.files_ignored += 1,
+            ScanSkipReason::Unsupported => self.unsupported_files += 1,
+            ScanSkipReason::Noise => self.noise_files += 1,
+            ScanSkipReason::TooLarge => self.too_large_files += 1,
+            ScanSkipReason::MetadataError => self.metadata_error_files += 1,
+            ScanSkipReason::Binary => self.binary_files += 1,
+            ScanSkipReason::ReadError => self.read_error_files += 1,
+            ScanSkipReason::Minified => self.minified_files += 1,
+            ScanSkipReason::ParseError => self.parse_error_files += 1,
+            ScanSkipReason::Timeout => self.timed_out_files += 1,
+        }
+    }
+
+    fn extend(&mut self, other: ScanStats) {
+        self.files_discovered += other.files_discovered;
+        self.files_scanned += other.files_scanned;
+        self.files_skipped += other.files_skipped;
+        self.files_ignored += other.files_ignored;
+        self.unsupported_files += other.unsupported_files;
+        self.noise_files += other.noise_files;
+        self.too_large_files += other.too_large_files;
+        self.metadata_error_files += other.metadata_error_files;
+        self.binary_files += other.binary_files;
+        self.read_error_files += other.read_error_files;
+        self.minified_files += other.minified_files;
+        self.parse_error_files += other.parse_error_files;
+        self.timed_out_files += other.timed_out_files;
+        self.walk_errors += other.walk_errors;
+    }
+
+    pub fn skipped_summary(&self) -> Option<String> {
+        if self.files_skipped == 0 {
+            return None;
+        }
+
+        let mut parts = Vec::new();
+        push_count(&mut parts, self.files_ignored, "ignored");
+        push_count(&mut parts, self.unsupported_files, "unsupported extension");
+        push_count(&mut parts, self.noise_files, "noise path");
+        push_count(&mut parts, self.too_large_files, "too large");
+        push_count(&mut parts, self.metadata_error_files, "metadata error");
+        push_count(&mut parts, self.binary_files, "binary or non-UTF-8");
+        push_count(&mut parts, self.read_error_files, "read error");
+        push_count(&mut parts, self.minified_files, "minified");
+        push_count(&mut parts, self.parse_error_files, "parse error");
+        push_count(&mut parts, self.timed_out_files, "timed out");
+
+        Some(parts.join(", "))
+    }
+
+    pub fn error_summary(&self) -> Option<String> {
+        self.error_summary_with(true)
+    }
+
+    /// Like [`error_summary`](Self::error_summary); timed-out files count as
+    /// errors only when `timeouts_fatal` is set.
+    pub fn error_summary_with(&self, timeouts_fatal: bool) -> Option<String> {
+        let mut parts = Vec::new();
+        if timeouts_fatal {
+            push_count(&mut parts, self.timed_out_files, "file timeout");
+        }
+        push_count(&mut parts, self.read_error_files, "file read error");
+        push_count(&mut parts, self.metadata_error_files, "file metadata error");
+        push_count(&mut parts, self.walk_errors, "directory traversal error");
+        if parts.is_empty() {
+            None
+        } else {
+            Some(parts.join(", "))
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ScanSkipReason {
+    Ignored,
+    Unsupported,
+    Noise,
+    TooLarge,
+    MetadataError,
+    Binary,
+    ReadError,
+    Minified,
+    ParseError,
+    Timeout,
+}
+
+struct FileScanOutcome {
+    findings: Vec<Finding>,
+    stats: ScanStats,
+}
+
+impl FileScanOutcome {
+    fn skipped(reason: ScanSkipReason) -> Self {
+        let mut stats = ScanStats::default();
+        stats.record_skipped(reason);
+        Self {
+            findings: Vec::new(),
+            stats,
+        }
+    }
+}
+
+struct PreparedFile {
+    source: String,
+    tree: tree_sitter::Tree,
+    aliases: AliasTable,
+    canonical_path: PathBuf,
+    #[cfg(test)]
+    _tree_lease: PreparedTreeLease,
+}
+
+// Preserve the original source snapshot and compact aliases, but not every
+// tree-sitter tree until the end of a whole-repository scan. Each consumer
+// reparses the same bytes with the same path-specific grammar. In particular,
+// initial parallel collectors must return THIS type before collecting a Vec.
+struct StoredPreparedFile {
+    source: String,
+    language: Language,
+    aliases: AliasTable,
+    canonical_path: PathBuf,
+    #[cfg(test)]
+    tree_leases: Option<std::sync::Arc<std::sync::atomic::AtomicUsize>>,
+}
+
+impl StoredPreparedFile {
+    fn prepare(&self, path: &Path) -> PreparedFile {
+        // The identical immutable source/grammar parsed successfully in pass 1.
+        // Refuse to publish a partial scan if that invariant ever breaks.
+        // Re-parsing is bounded work already done once; keep the per-file
+        // budget from cancelling it.
+        let _unbudgeted = super::budget::FileBudgetGuard::start(None);
+        let tree = super::parser::parse_path(&self.source, self.language, path)
+            .expect("previously parsed immutable scanner source must reparse");
+        PreparedFile {
+            source: self.source.clone(),
+            tree,
+            aliases: self.aliases.clone(),
+            canonical_path: self.canonical_path.clone(),
+            #[cfg(test)]
+            _tree_lease: PreparedTreeLease::new(self.tree_leases.clone()),
+        }
+    }
+}
+
+#[cfg(test)]
+struct PreparedTreeLease(Option<std::sync::Arc<std::sync::atomic::AtomicUsize>>);
+#[cfg(test)]
+impl PreparedTreeLease {
+    fn new(counter: Option<std::sync::Arc<std::sync::atomic::AtomicUsize>>) -> Self {
+        if let Some(counter) = &counter {
+            counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+        Self(counter)
+    }
+}
+#[cfg(test)]
+impl Drop for PreparedTreeLease {
+    fn drop(&mut self) {
+        if let Some(counter) = &self.0 {
+            counter.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+}
+
+fn push_count(parts: &mut Vec<String>, count: usize, label: &str) {
+    if count == 0 {
+        return;
+    }
+    parts.push(format!(
+        "{} {}{}",
+        count,
+        label,
+        if count == 1 { "" } else { "s" }
+    ));
+}
+
+#[derive(Clone, Default)]
+pub struct PathExcludeMatcher {
+    prefixes: Vec<String>,
+    globset: Option<GlobSet>,
+    directory_globset: Option<GlobSet>,
+}
+
+impl PathExcludeMatcher {
+    pub fn new(patterns: &[String]) -> Result<Self, String> {
+        if patterns.is_empty() {
+            return Ok(Self::default());
+        }
+
+        let mut prefixes = Vec::new();
+        let mut builder = GlobSetBuilder::new();
+        let mut directory_builder = GlobSetBuilder::new();
+        let mut has_globs = false;
+        let mut has_directory_globs = false;
+
+        for pattern in patterns {
+            let normalized = normalize_match_path(Path::new(pattern));
+            if normalized.is_empty() {
+                continue;
+            }
+
+            if has_glob_metacharacters(pattern) {
+                let glob = Glob::new(&normalized)
+                    .map_err(|e| format!("Invalid exclude glob '{}': {}", pattern, e))?;
+                // Only prune globs that cover the entire subtree, not file-only
+                // patterns such as `**/*.js` that happen to match a directory.
+                if normalized == "*"
+                    || normalized == "**"
+                    || normalized.ends_with("/*")
+                    || normalized.ends_with("/**")
+                {
+                    directory_builder.add(glob.clone());
+                    has_directory_globs = true;
+                }
+                builder.add(glob);
+                has_globs = true;
+            } else {
+                prefixes.push(normalized.trim_end_matches('/').to_string());
+            }
+        }
+
+        let globset = if has_globs {
+            Some(
+                builder
+                    .build()
+                    .map_err(|e| format!("Failed to build exclude patterns: {}", e))?,
+            )
+        } else {
+            None
+        };
+
+        let directory_globset = if has_directory_globs {
+            Some(
+                directory_builder
+                    .build()
+                    .map_err(|e| format!("Failed to build directory exclude patterns: {}", e))?,
+            )
+        } else {
+            None
+        };
+
+        Ok(Self {
+            prefixes,
+            globset,
+            directory_globset,
+        })
+    }
+
+    pub(crate) fn is_excluded(&self, path: &Path) -> bool {
+        let normalized = normalize_match_path(path);
+        self.has_excluded_prefix(&normalized)
+            || self
+                .globset
+                .as_ref()
+                .is_some_and(|globset| globset.is_match(&normalized))
+    }
+
+    fn is_excluded_directory(&self, path: &Path) -> bool {
+        let mut normalized = normalize_match_path(path);
+        if self.has_excluded_prefix(&normalized) {
+            return true;
+        }
+        normalized.push('/');
+        self.directory_globset
+            .as_ref()
+            .is_some_and(|globset| globset.is_match(&normalized))
+    }
+
+    fn has_excluded_prefix(&self, normalized: &str) -> bool {
+        self.prefixes.iter().any(|prefix| {
+            normalized == prefix.as_str()
+                || normalized
+                    .strip_prefix(prefix.as_str())
+                    .is_some_and(|suffix| suffix.starts_with('/'))
+        })
+    }
+}
+
+#[derive(Default)]
+struct InlineIgnoreSpec {
+    all_rules: bool,
+    rule_ids: HashSet<String>,
+}
+
+impl InlineIgnoreSpec {
+    fn matches(&self, rule_id: &str) -> bool {
+        self.all_rules || self.rule_ids.contains(rule_id)
+    }
+
+    fn merge(&mut self, other: Self) {
+        self.all_rules |= other.all_rules;
+        self.rule_ids.extend(other.rule_ids);
+    }
+}
+
+/// Detect config file language from filename and parent directory heuristics.
+fn detect_config_language(path: &Path) -> Option<Language> {
+    let filename = path.file_name().and_then(|f| f.to_str())?;
+    let filename_lower = filename.to_ascii_lowercase();
+
+    // Exact filename matches
+    match filename {
+        "nginx.conf" => return Some(Language::NginxConf),
+        "httpd.conf" | "apache2.conf" => return Some(Language::ApacheConf),
+        "haproxy.cfg" => return Some(Language::HAProxyConf),
+        "Cargo.lock" | "requirements.txt" | "poetry.lock" | "Pipfile.lock" | "pnpm-lock.yaml"
+        | "package-lock.json" => return Some(Language::Manifest),
+        _ => {}
+    }
+
+    // Dockerfile variants: Dockerfile, Dockerfile.prod, dockerfile, etc.
+    if filename_lower == "dockerfile" || filename_lower.starts_with("dockerfile.") {
+        return Some(Language::Dockerfile);
+    }
+
+    // .conf files under nginx-related or Apache-related directories
+    if filename_lower.ends_with(".conf") {
+        let path_str = path.to_string_lossy();
+        let path_lower = path_str.to_ascii_lowercase();
+        if path_lower.contains("nginx") || path_lower.contains("conf.d/") {
+            return Some(Language::NginxConf);
+        }
+        if path_lower.contains("apache")
+            || path_lower.contains("httpd")
+            || path_lower.contains("sites-available/")
+            || path_lower.contains("sites-enabled/")
+            || path_lower.contains("mods-enabled/")
+        {
+            return Some(Language::ApacheConf);
+        }
+    }
+
+    // .cfg files under haproxy directories
+    if filename_lower.ends_with(".cfg") {
+        let path_str = path.to_string_lossy();
+        if path_str.to_ascii_lowercase().contains("haproxy") {
+            return Some(Language::HAProxyConf);
+        }
+    }
+
+    None
+}
+
+/// Detect language from filename or file extension.
+pub fn detect_language(path: &Path) -> Option<Language> {
+    if let Some(lang) = detect_config_language(path) {
+        return Some(lang);
+    }
+
+    // Jenkins pipelines are conventionally extensionless (`Jenkinsfile`,
+    // `Jenkinsfile.release`) but are Groovy.
+    if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+        if name == "Jenkinsfile" || name.starts_with("Jenkinsfile.") {
+            return Some(Language::Groovy);
+        }
+    }
+
+    match path.extension()?.to_str()? {
+        "js" | "jsx" | "ts" | "tsx" | "mjs" | "cjs" => Some(Language::JavaScript),
+        "py" | "pyw" => Some(Language::Python),
+        "go" => Some(Language::Go),
+        "rb" | "rake" | "gemspec" => Some(Language::Ruby),
+        "java" => Some(Language::Java),
+        "php" => Some(Language::Php),
+        "rs" => Some(Language::Rust),
+        "cs" => Some(Language::CSharp),
+        "swift" => Some(Language::Swift),
+        "kt" | "kts" => Some(Language::Kotlin),
+        "c" | "h" => Some(Language::C),
+        "tf" | "hcl" | "tfvars" => Some(Language::Hcl),
+        "sol" => Some(Language::Solidity),
+        "yaml" | "yml" => Some(Language::Yaml),
+        "dockerfile" => Some(Language::Dockerfile),
+        "sh" | "bash" => Some(Language::Bash),
+        "ml" | "mli" => Some(Language::Ocaml),
+        "scala" | "sc" => Some(Language::Scala),
+        "ex" | "exs" => Some(Language::Elixir),
+        "json" => Some(Language::Json),
+        "cls" | "trigger" => Some(Language::Apex),
+        "clj" | "cljs" | "cljc" | "edn" => Some(Language::Clojure),
+        "html" | "htm" => Some(Language::Html),
+        "xml" => Some(Language::Xml),
+        "dart" => Some(Language::Dart),
+        "hs" | "lhs" | "hsc" => Some(Language::Haskell),
+        "groovy" | "gradle" | "gvy" | "gy" | "gsh" => Some(Language::Groovy),
+        _ => None,
+    }
+}
+
+/// Scan a directory (or single file) and return findings with metadata.
+pub fn scan_directory(
+    root: &str,
+    registry: &RuleRegistry,
+    max_file_size: u64,
+    excludes: Option<&PathExcludeMatcher>,
+) -> ScanResult {
+    scan_directory_with_notices(root, registry, max_file_size, excludes).0
+}
+
+pub fn scan_directory_with_notices(
+    root: &str,
+    registry: &RuleRegistry,
+    max_file_size: u64,
+    excludes: Option<&PathExcludeMatcher>,
+) -> (ScanResult, Vec<String>) {
+    let root_path = Path::new(root);
+    let scan_root = scan_root(root_path);
+
+    let mut discovery_notices = Vec::new();
+    let mut phase = Instant::now();
+    let (files, stats) = collect_scan_files(root_path, scan_root, excludes, &mut discovery_notices);
+    timing_mark("directory walk", &mut phase);
+    let (result, mut notices) = scan_files(
+        scan_root,
+        files,
+        registry,
+        max_file_size,
+        stats,
+        super::budget::file_timeout(),
+    );
+    notices.extend(discovery_notices);
+    (result, notices)
+}
+
+/// Scan an explicit list of paths.
+pub fn scan_paths(
+    paths: &[PathBuf],
+    registry: &RuleRegistry,
+    max_file_size: u64,
+    excludes: Option<&PathExcludeMatcher>,
+) -> ScanResult {
+    scan_paths_with_root(Path::new("."), paths, registry, max_file_size, excludes)
+}
+
+/// Scan an explicit list of paths relative to a scan root.
+pub fn scan_paths_with_root(
+    root: &Path,
+    paths: &[PathBuf],
+    registry: &RuleRegistry,
+    max_file_size: u64,
+    excludes: Option<&PathExcludeMatcher>,
+) -> ScanResult {
+    scan_paths_with_root_with_notices(root, paths, registry, max_file_size, excludes).0
+}
+
+pub fn scan_paths_with_root_with_notices(
+    root: &Path,
+    paths: &[PathBuf],
+    registry: &RuleRegistry,
+    max_file_size: u64,
+    excludes: Option<&PathExcludeMatcher>,
+) -> (ScanResult, Vec<String>) {
+    let scan_root = scan_root(root);
+    let (files, stats) = collect_explicit_scan_files(scan_root, paths, excludes);
+    scan_files(
+        scan_root,
+        files,
+        registry,
+        max_file_size,
+        stats,
+        super::budget::file_timeout(),
+    )
+}
+
+fn collect_scan_files(
+    root_path: &Path,
+    scan_root: &Path,
+    excludes: Option<&PathExcludeMatcher>,
+    notices: &mut Vec<String>,
+) -> (Vec<(PathBuf, Language)>, ScanStats) {
+    let mut files = Vec::new();
+    let mut stats = ScanStats::default();
+
+    if root_path.is_file() {
+        stats.record_discovered();
+        collect_scan_file(
+            root_path.to_path_buf(),
+            scan_root,
+            excludes,
+            &mut stats,
+            &mut files,
+        );
+        return (files, stats);
+    }
+
+    let mut walker = WalkBuilder::new(root_path);
+    walker.follow_links(false).hidden(true).git_ignore(true);
+    if let Some(excludes) = excludes {
+        let excludes = excludes.clone();
+        let scan_root = scan_root.to_path_buf();
+        walker.filter_entry(move |entry| {
+            !entry.file_type().is_some_and(|kind| kind.is_dir())
+                || !excludes.is_excluded_directory(
+                    entry
+                        .path()
+                        .strip_prefix(&scan_root)
+                        .unwrap_or(entry.path()),
+                )
+        });
+    }
+
+    for entry in walker.build() {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                stats.walk_errors += 1;
+                notices.push(format!("warning: cannot traverse scan path: {error}"));
+                continue;
+            }
+        };
+        if !entry.file_type().is_some_and(|ft| ft.is_file()) {
+            continue;
+        }
+
+        stats.record_discovered();
+        collect_scan_file(
+            entry.into_path(),
+            scan_root,
+            excludes,
+            &mut stats,
+            &mut files,
+        );
+    }
+
+    (files, stats)
+}
+
+fn collect_explicit_scan_files(
+    scan_root: &Path,
+    paths: &[PathBuf],
+    excludes: Option<&PathExcludeMatcher>,
+) -> (Vec<(PathBuf, Language)>, ScanStats) {
+    let mut files = Vec::new();
+    let mut stats = ScanStats::default();
+
+    for path in paths {
+        stats.record_discovered();
+        collect_scan_file(path.clone(), scan_root, excludes, &mut stats, &mut files);
+    }
+
+    (files, stats)
+}
+
+fn collect_scan_file(
+    path: PathBuf,
+    scan_root: &Path,
+    excludes: Option<&PathExcludeMatcher>,
+    stats: &mut ScanStats,
+    files: &mut Vec<(PathBuf, Language)>,
+) {
+    if excludes.is_some_and(|matcher| matcher.is_excluded(&relative_scan_path(scan_root, &path))) {
+        stats.record_skipped(ScanSkipReason::Ignored);
+        return;
+    }
+
+    let Some(language) = detect_language(&path) else {
+        stats.record_skipped(ScanSkipReason::Unsupported);
+        return;
+    };
+
+    files.push((path, language));
+}
+
+/// Check if a file path is in a directory that typically contains
+/// test fixtures, vendored code, or generated assets.
+fn is_noise_path(path: &Path) -> bool {
+    let path_str = path.to_string_lossy();
+    let noise_dirs = [
+        "/vendor/",
+        "/node_modules/",
+        "/__fixtures__/",
+        "/__mocks__/",
+        "/__tests__/",
+        "/__snapshots__/",
+        "/dist/",
+        "/build/",
+        "/.next/",
+        "/coverage/",
+        "/.cache/",
+        "/spec/",
+        "/stubs/",
+        "/generated/",
+        "/gen/",
+    ];
+    for dir in &noise_dirs {
+        if path_str.contains(dir) {
+            return true;
+        }
+    }
+    // Skip .min.js / .min.css files
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy())
+        .unwrap_or_default();
+    if name.contains(".min.") {
+        return true;
+    }
+    false
+}
+
+const MIN_SIZE_FOR_MINIFY_CHECK: usize = 2000;
+const MAX_FIRST_LINE_LEN: usize = 1000;
+const MAX_AVG_LINE_LEN: usize = 300;
+
+fn is_minified(source: &str) -> bool {
+    if source.len() < MIN_SIZE_FOR_MINIFY_CHECK {
+        return false;
+    }
+    if let Some(first_newline) = source.find('\n') {
+        if first_newline > MAX_FIRST_LINE_LEN {
+            return true;
+        }
+    } else {
+        return source.len() > MIN_SIZE_FOR_MINIFY_CHECK;
+    }
+    let line_count = source.bytes().filter(|b| *b == b'\n').count().max(1);
+    let avg_line_len = source.len() / line_count;
+    avg_line_len > MAX_AVG_LINE_LEN
+}
+
+fn inline_ignore_regex() -> &'static Regex {
+    static INLINE_IGNORE_REGEX: OnceLock<Regex> = OnceLock::new();
+    INLINE_IGNORE_REGEX.get_or_init(|| {
+        Regex::new(r"^foxguard\s*:\s*ignore(?:\[(?P<rules>[^\]]*)\])?\s*$")
+            .expect("invalid inline ignore regex")
+    })
+}
+
+fn block_comment_ignore_regex() -> &'static Regex {
+    static BLOCK_IGNORE_REGEX: OnceLock<Regex> = OnceLock::new();
+    BLOCK_IGNORE_REGEX.get_or_init(|| {
+        Regex::new(r"/\*\s*foxguard[\s:-]*ignore(?:\[(?P<rules>[^\]]*)\])?\s*\*/")
+            .expect("invalid block comment ignore regex")
+    })
+}
+
+fn parse_block_comment_ignore(line: &str) -> Option<(bool, InlineIgnoreSpec)> {
+    let captures = block_comment_ignore_regex().captures(line)?;
+    let full_match = captures.get(0).expect("group 0 always present");
+
+    let mut spec = InlineIgnoreSpec::default();
+    match captures.name("rules").map(|rules| rules.as_str().trim()) {
+        None | Some("") => spec.all_rules = true,
+        Some(rules) => {
+            for rule_id in rules
+                .split(',')
+                .map(str::trim)
+                .filter(|rule| !rule.is_empty())
+            {
+                spec.rule_ids.insert(rule_id.to_string());
+            }
+            if spec.rule_ids.is_empty() {
+                spec.all_rules = true;
+            }
+        }
+    }
+
+    let comment_only =
+        line[..full_match.start()].trim().is_empty() && line[full_match.end()..].trim().is_empty();
+    Some((comment_only, spec))
+}
+
+fn inline_ignore_directives(source: &str, language: Language) -> HashMap<usize, InlineIgnoreSpec> {
+    if !source.contains("foxguard") {
+        return HashMap::new();
+    }
+
+    let lines: Vec<&str> = source.lines().collect();
+    let mut directives = HashMap::new();
+
+    for (index, line) in lines.iter().enumerate() {
+        let line_number = index + 1;
+        let Some((comment_only, spec)) = parse_inline_ignore(line, language) else {
+            continue;
+        };
+
+        let target_line = if comment_only {
+            next_code_line(&lines, line_number, language)
+        } else {
+            Some(line_number)
+        };
+
+        if let Some(target_line) = target_line {
+            directives
+                .entry(target_line)
+                .or_insert_with(InlineIgnoreSpec::default)
+                .merge(spec);
+        }
+    }
+
+    directives
+}
+
+fn parse_inline_ignore(line: &str, language: Language) -> Option<(bool, InlineIgnoreSpec)> {
+    let mut markers = comment_markers(language)
+        .iter()
+        .copied()
+        .flat_map(|marker| {
+            let mut positions = Vec::new();
+            let mut start = 0;
+            while let Some(offset) = line[start..].find(marker) {
+                let index = start + offset;
+                positions.push((index, marker));
+                start = index + marker.len();
+            }
+            positions
+        })
+        .collect::<Vec<_>>();
+
+    markers.sort_by_key(|(index, _)| *index);
+
+    for (index, marker) in markers {
+        let comment_text = line[index + marker.len()..].trim();
+        let Some(captures) = inline_ignore_regex().captures(comment_text) else {
+            continue;
+        };
+
+        let mut spec = InlineIgnoreSpec::default();
+        match captures.name("rules").map(|rules| rules.as_str().trim()) {
+            None | Some("") => spec.all_rules = true,
+            Some(rules) => {
+                for rule_id in rules
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|rule| !rule.is_empty())
+                {
+                    spec.rule_ids.insert(rule_id.to_string());
+                }
+                if spec.rule_ids.is_empty() {
+                    spec.all_rules = true;
+                }
+            }
+        }
+
+        let comment_only = line[..index].trim().is_empty();
+        return Some((comment_only, spec));
+    }
+
+    // Fallback: block comment /* foxguard: ignore */ — only for languages with /* */ syntax
+    if matches!(
+        language,
+        Language::JavaScript
+            | Language::Go
+            | Language::Java
+            | Language::Rust
+            | Language::CSharp
+            | Language::Swift
+            | Language::Php
+            | Language::Solidity
+            // Regex-mode rules inherit C-style block comment suppression so
+            // `/* foxguard: ignore */` works in files where that syntax is valid.
+            | Language::Regex
+    ) {
+        if let Some(result) = parse_block_comment_ignore(line) {
+            return Some(result);
+        }
+    }
+
+    None
+}
+
+fn next_code_line(lines: &[&str], line_number: usize, language: Language) -> Option<usize> {
+    for (index, line) in lines.iter().enumerate().skip(line_number) {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || is_comment_only_line(trimmed, language) {
+            continue;
+        }
+        return Some(index + 1);
+    }
+    None
+}
+
+fn is_comment_only_line(trimmed_line: &str, language: Language) -> bool {
+    comment_markers(language)
+        .iter()
+        .any(|marker| trimmed_line.starts_with(marker))
+}
+
+pub(crate) fn comment_markers(language: Language) -> &'static [&'static str] {
+    match language {
+        Language::Python | Language::Ruby | Language::Yaml => &["#"],
+        Language::Hcl => &["#", "//"],
+        Language::Solidity => &["//", "/*"],
+        Language::Php => &["//", "#"],
+        Language::JavaScript
+        | Language::Go
+        | Language::Java
+        | Language::Rust
+        | Language::CSharp
+        | Language::Swift
+        | Language::Kotlin
+        | Language::Groovy
+        | Language::C => &["//"],
+        Language::NginxConf
+        | Language::ApacheConf
+        | Language::HAProxyConf
+        | Language::Dockerfile
+        | Language::Manifest
+        | Language::Bash => &["#"],
+        Language::Ocaml => &["(*"],
+        Language::Scala => &["//"],
+        Language::Elixir => &["#"],
+        Language::Json => &[],
+        Language::Apex | Language::Dart => &["//", "/*"],
+        Language::Clojure => &[";"],
+        Language::Html | Language::Xml => &["<!--"],
+        Language::Haskell => &["--"],
+        // Regex-mode rules run against raw text with no guaranteed comment syntax.
+        // Use `#` as a safe fallback (it works for most config/script files).
+        Language::Regex => &["#"],
+    }
+}
+
+fn apply_inline_ignores(
+    findings: Vec<Finding>,
+    directives: &HashMap<usize, InlineIgnoreSpec>,
+) -> Vec<Finding> {
+    findings
+        .into_iter()
+        .filter(|finding| {
+            !(finding.line..=finding.end_line).any(|line| {
+                directives
+                    .get(&line)
+                    .is_some_and(|spec| spec.matches(&finding.rule_id))
+            })
+        })
+        .collect()
+}
+
+/// Print `label` and elapsed time to stderr when `FOXGUARD_TIMING=1`.
+fn timing_mark(label: &str, since: &mut Instant) {
+    if std::env::var_os("FOXGUARD_TIMING").is_some() {
+        eprintln!(
+            "foxguard-timing: {label}: {:.2}s",
+            since.elapsed().as_secs_f64()
+        );
+    }
+    *since = Instant::now();
+}
+
+fn scan_files(
+    scan_root: &Path,
+    files: Vec<(PathBuf, Language)>,
+    registry: &RuleRegistry,
+    max_file_size: u64,
+    mut stats: ScanStats,
+    file_budget: Option<std::time::Duration>,
+) -> (ScanResult, Vec<String>) {
+    let start = Instant::now();
+    let mut phase = Instant::now();
+    let warnings = Mutex::new(Vec::new());
+    let secret_thresholds = registry.secret_thresholds();
+
+    let mut taint_specs_by_lang: HashMap<Language, Vec<crate::rules::RegistryTaintSpec>> =
+        HashMap::new();
+    for (_, language) in &files {
+        taint_specs_by_lang
+            .entry(*language)
+            .or_insert_with(|| registry.taint_specs_for_language(*language));
+    }
+
+    let has_python_taint_rules = taint_specs_by_lang
+        .get(&Language::Python)
+        .is_some_and(|specs| !specs.is_empty());
+    let has_js_taint_rules = taint_specs_by_lang
+        .get(&Language::JavaScript)
+        .is_some_and(|specs| !specs.is_empty());
+    let has_go_taint_rules = taint_specs_by_lang
+        .get(&Language::Go)
+        .is_some_and(|specs| !specs.is_empty());
+    let has_java_taint_rules = taint_specs_by_lang
+        .get(&Language::Java)
+        .is_some_and(|specs| !specs.is_empty());
+    let has_ruby_taint_rules = taint_specs_by_lang
+        .get(&Language::Ruby)
+        .is_some_and(|specs| !specs.is_empty());
+    let has_php_taint_rules = taint_specs_by_lang
+        .get(&Language::Php)
+        .is_some_and(|specs| !specs.is_empty());
+    let has_csharp_taint_rules = taint_specs_by_lang
+        .get(&Language::CSharp)
+        .is_some_and(|specs| !specs.is_empty());
+    let has_kotlin_taint_rules = taint_specs_by_lang
+        .get(&Language::Kotlin)
+        .is_some_and(|specs| !specs.is_empty());
+    let mut prepared_files: HashMap<PathBuf, StoredPreparedFile> = HashMap::new();
+
+    // ── Pass 1: Extract cross-file taint summaries ────────────────────
+    // Run pass 1 for Python, Go, and JS files when there are multiple
+    // files of the same language — single-file scans cannot benefit from
+    // cross-file analysis.
+
+    // Build a per-language file index in a single pass over the file list.
+    let mut files_by_lang: HashMap<Language, Vec<&(PathBuf, Language)>> = HashMap::new();
+    for entry in &files {
+        if !is_noise_path(&entry.0) {
+            files_by_lang.entry(entry.1).or_default().push(entry);
+        }
+    }
+    let python_files: Vec<_> = files_by_lang.remove(&Language::Python).unwrap_or_default();
+    let go_files: Vec<_> = files_by_lang.remove(&Language::Go).unwrap_or_default();
+    let java_files: Vec<_> = files_by_lang.remove(&Language::Java).unwrap_or_default();
+    let ruby_files: Vec<_> = files_by_lang.remove(&Language::Ruby).unwrap_or_default();
+    let php_files: Vec<_> = files_by_lang.remove(&Language::Php).unwrap_or_default();
+    let csharp_files: Vec<_> = files_by_lang.remove(&Language::CSharp).unwrap_or_default();
+    let kotlin_files: Vec<_> = files_by_lang.remove(&Language::Kotlin).unwrap_or_default();
+    let js_files: Vec<_> = files_by_lang
+        .remove(&Language::JavaScript)
+        .unwrap_or_default();
+
+    let (mut cross_file_summaries, has_python_cross_file): (CrossFileSummaryMap, bool) =
+        if has_python_taint_rules && python_files.len() > 1 {
+            let rule_specs: Vec<_> = taint_specs_by_lang
+                .get(&Language::Python)
+                .into_iter()
+                .flat_map(|specs| specs.iter())
+                .filter(|spec| matches!(spec.engine, TaintEngine::Python))
+                .map(|spec| (spec.rule_id, spec.spec.clone()))
+                .collect();
+            let prepared_python: Vec<_> = python_files
+                .par_iter()
+                .filter_map(|(path, _)| {
+                    let _budget = super::budget::FileBudgetGuard::start(file_budget);
+                    let _budget = super::budget::FileBudgetGuard::start(file_budget);
+                    if std::fs::metadata(path).ok()?.len() > max_file_size {
+                        return None;
+                    }
+                    let source = std::fs::read_to_string(path).ok()?;
+                    if is_minified(&source) {
+                        return None;
+                    }
+                    let tree = super::parser::parse_file(&source, Language::Python)?;
+                    if tree.root_node().has_error() {
+                        return None;
+                    }
+                    let aliases = py_aliases_from_tree(&source, &tree);
+                    let summaries = python_taint::extract_cross_file_summaries(
+                        tree.root_node(),
+                        &source,
+                        Some(&aliases),
+                        &rule_specs,
+                    );
+                    // Canonicalize the path for consistent lookups.
+                    let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.clone());
+                    Some((
+                        path.clone(),
+                        StoredPreparedFile {
+                            source,
+                            language: Language::Python,
+                            aliases,
+                            canonical_path: canonical,
+                            #[cfg(test)]
+                            tree_leases: None,
+                        },
+                        summaries,
+                    ))
+                })
+                .collect();
+            let mut summaries = CrossFileSummaryMap::new();
+            for (path, prepared, file_summaries) in prepared_python {
+                if !file_summaries.is_empty() {
+                    summaries.insert(prepared.canonical_path.clone(), file_summaries);
+                }
+                prepared_files.insert(path, prepared);
+            }
+
+            // ── Bounded multi-hop composition (fixpoint) ──────────────────
+            // The per-file summaries above resolve a SINGLE cross-file hop.
+            // Compose them so a helper `f` whose own body calls another file's
+            // helper `g` (the chain A→f→g→sink) is captured: re-analyze each
+            // function with cross-file resolution enabled against the current
+            // summary snapshot, unioning any newly-discovered param→sink /
+            // param→return flows. Each round adds exactly one hop; the loop
+            // stops at a fixpoint (no change) and is hard-capped at
+            // MAX_MULTIHOP_ROUNDS rounds — the cycle guard that keeps
+            // mutually-recursive helpers from looping forever. Summaries grow
+            // monotonically over a finite lattice, so termination is guaranteed.
+            // See docs/taint-tracking.md, "Bounded multi-hop cross-file taint".
+            if !summaries.is_empty() {
+                const MAX_MULTIHOP_ROUNDS: usize = 5;
+                let allowed_rule_ids: std::collections::HashSet<String> =
+                    rule_specs.iter().map(|(id, _)| id.to_string()).collect();
+                // Resolve each file's import map once (canonicalized to match
+                // the summary-map keys), keyed by the file's canonical path.
+                let import_maps: HashMap<PathBuf, HashMap<String, PathBuf>> = python_files
+                    .iter()
+                    .filter_map(|(path, _)| {
+                        let _budget = super::budget::FileBudgetGuard::start(file_budget);
+                        let _budget = super::budget::FileBudgetGuard::start(file_budget);
+                        let prepared = prepared_files
+                            .get(path)
+                            .map(|stored| stored.prepare(path))?;
+                        let mut imports =
+                            resolve_imports_to_paths(&prepared.source, &prepared.tree, path);
+                        let canonical: HashMap<String, PathBuf> = imports
+                            .drain()
+                            .map(|(k, v)| {
+                                let canon = std::fs::canonicalize(&v).unwrap_or(v);
+                                (k, canon)
+                            })
+                            .collect();
+                        Some((prepared.canonical_path.clone(), canonical))
+                    })
+                    .collect();
+
+                // Canonical paths whose summaries changed in the previous round
+                // (`None` = first round, compose everything). A file's composition
+                // only reads its dependencies' summaries, so a file none of whose
+                // dependencies changed would recompute exactly what it already merged.
+                let mut dirty: Option<std::collections::HashSet<PathBuf>> = None;
+                for _round in 0..MAX_MULTIHOP_ROUNDS {
+                    // Read from an immutable snapshot so each round advances the
+                    // frontier by exactly one hop regardless of file order.
+                    let snapshot = summaries.clone();
+                    let composed_by_file: Vec<Option<(PathBuf, Vec<FunctionTaintSummary>)>> =
+                        python_files
+                            .par_iter()
+                            .map(|(path, _)| {
+                                let stored = prepared_files.get(path)?;
+                                let canonical = stored.canonical_path.clone();
+                                let import_to_path = import_maps.get(&canonical)?;
+                                if let Some(dirty) = &dirty {
+                                    if !import_to_path.values().any(|p| dirty.contains(p)) {
+                                        return None;
+                                    }
+                                }
+                                let prepared = stored.prepare(path);
+                                let composed = python_taint::compose_cross_file_summaries(
+                                    prepared.tree.root_node(),
+                                    &prepared.source,
+                                    Some(&prepared.aliases),
+                                    &rule_specs,
+                                    import_to_path,
+                                    &snapshot,
+                                    &allowed_rule_ids,
+                                );
+                                if composed.is_empty() {
+                                    None
+                                } else {
+                                    Some((canonical, composed))
+                                }
+                            })
+                            .collect();
+                    let mut changed = false;
+                    let mut next_dirty = std::collections::HashSet::new();
+                    for (canonical, composed) in composed_by_file.into_iter().flatten() {
+                        let mut entry_changed = false;
+                        let entry = summaries.entry(canonical.clone()).or_default();
+                        for new_summary in composed {
+                            match entry.iter_mut().find(|s| s.name == new_summary.name) {
+                                Some(existing) => {
+                                    if existing.merge_from(&new_summary) {
+                                        entry_changed = true;
+                                    }
+                                }
+                                None => {
+                                    entry.push(new_summary);
+                                    entry_changed = true;
+                                }
+                            }
+                        }
+                        if entry_changed {
+                            changed = true;
+                            next_dirty.insert(canonical);
+                        }
+                    }
+                    dirty = Some(next_dirty);
+                    if !changed {
+                        break;
+                    }
+                }
+            }
+
+            timing_mark("python pass1 + multi-hop compose", &mut phase);
+            let has_summaries = !summaries.is_empty();
+            (summaries, has_summaries)
+        } else {
+            (CrossFileSummaryMap::new(), false)
+        };
+
+    // JavaScript cross-file summaries: extract from all JS/TS files.
+    let mut has_js_cross_file = false;
+    if has_js_taint_rules && js_files.len() > 1 {
+        let js_rule_specs: Vec<_> = taint_specs_by_lang
+            .get(&Language::JavaScript)
+            .into_iter()
+            .flat_map(|specs| specs.iter())
+            .filter(|spec| matches!(spec.engine, TaintEngine::JavaScript))
+            .map(|spec| (spec.rule_id, spec.spec.clone()))
+            .collect();
+        let prepared_js: Vec<_> = js_files
+            .par_iter()
+            .filter_map(|(path, _)| {
+                let _budget = super::budget::FileBudgetGuard::start(file_budget);
+                if std::fs::metadata(path).ok()?.len() > max_file_size {
+                    return None;
+                }
+                let source = std::fs::read_to_string(path).ok()?;
+                if is_minified(&source) {
+                    return None;
+                }
+                let tree = super::parser::parse_path(&source, Language::JavaScript, path)?;
+                if treats_tree_errors_as_parse_failures(Language::JavaScript, path)
+                    && tree.root_node().has_error()
+                {
+                    return None;
+                }
+                let aliases = js_aliases_from_tree(&source, &tree);
+                let summaries = javascript_taint::extract_cross_file_summaries(
+                    tree.root_node(),
+                    &source,
+                    Some(&aliases),
+                    &js_rule_specs,
+                );
+                let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.clone());
+                Some((
+                    path.clone(),
+                    StoredPreparedFile {
+                        source,
+                        language: Language::JavaScript,
+                        aliases,
+                        canonical_path: canonical,
+                        #[cfg(test)]
+                        tree_leases: None,
+                    },
+                    summaries,
+                ))
+            })
+            .collect();
+        let mut js_summaries = CrossFileSummaryMap::new();
+        for (path, prepared, file_summaries) in prepared_js {
+            if !file_summaries.is_empty() {
+                js_summaries.insert(prepared.canonical_path.clone(), file_summaries);
+            }
+            prepared_files.insert(path, prepared);
+        }
+
+        // ── Bounded multi-hop composition (fixpoint) ──────────────────
+        // Mirror of the Python block above for JavaScript/TypeScript:
+        // compose per-file summaries one hop per round so a chain
+        // A→f→g→sink — where the MIDDLE helper `f` forwards its param into
+        // a cross-file helper `g` that sinks it — is captured. Resolution
+        // uses each file's import map (same as the single-hop JS pass).
+        // Summaries grow monotonically over a finite lattice, so the loop
+        // reaches a fixpoint; MAX_MULTIHOP_ROUNDS is the hard backstop.
+        // See docs/taint-tracking.md, "Bounded multi-hop cross-file taint".
+        if !js_summaries.is_empty() {
+            const MAX_MULTIHOP_ROUNDS: usize = 5;
+            let allowed_rule_ids: std::collections::HashSet<String> =
+                js_rule_specs.iter().map(|(id, _)| id.to_string()).collect();
+            // Resolve each file's import map once (canonicalized to match
+            // the summary-map keys), keyed by the file's canonical path.
+            let import_maps: HashMap<PathBuf, HashMap<String, PathBuf>> = js_files
+                .iter()
+                .filter_map(|(path, _)| {
+                    let _budget = super::budget::FileBudgetGuard::start(file_budget);
+                    let _budget = super::budget::FileBudgetGuard::start(file_budget);
+                    let prepared = prepared_files
+                        .get(path)
+                        .map(|stored| stored.prepare(path))?;
+                    let mut imports = javascript_taint::resolve_js_imports_to_paths(
+                        &prepared.source,
+                        &prepared.tree,
+                        path,
+                    );
+                    let canonical: HashMap<String, PathBuf> = imports
+                        .drain()
+                        .map(|(k, v)| {
+                            let canon = std::fs::canonicalize(&v).unwrap_or(v);
+                            (k, canon)
+                        })
+                        .collect();
+                    Some((prepared.canonical_path.clone(), canonical))
+                })
+                .collect();
+
+            // Canonical paths whose summaries changed in the previous round
+            // (`None` = first round, compose everything). A file's composition
+            // only reads its dependencies' summaries, so a file none of whose
+            // dependencies changed would recompute exactly what it already merged.
+            let mut dirty: Option<std::collections::HashSet<PathBuf>> = None;
+            for _round in 0..MAX_MULTIHOP_ROUNDS {
+                let snapshot = js_summaries.clone();
+                let composed_by_file: Vec<Option<(PathBuf, Vec<FunctionTaintSummary>)>> = js_files
+                    .par_iter()
+                    .map(|(path, _)| {
+                        let stored = prepared_files.get(path)?;
+                        let canonical = stored.canonical_path.clone();
+                        let import_to_path = import_maps.get(&canonical)?;
+                        if let Some(dirty) = &dirty {
+                            if !import_to_path.values().any(|p| dirty.contains(p)) {
+                                return None;
+                            }
+                        }
+                        let prepared = stored.prepare(path);
+                        let composed = javascript_taint::compose_cross_file_summaries(
+                            prepared.tree.root_node(),
+                            &prepared.source,
+                            Some(&prepared.aliases),
+                            &js_rule_specs,
+                            import_to_path,
+                            &snapshot,
+                            &allowed_rule_ids,
+                        );
+                        if composed.is_empty() {
+                            None
+                        } else {
+                            Some((canonical, composed))
+                        }
+                    })
+                    .collect();
+                let mut changed = false;
+                let mut next_dirty = std::collections::HashSet::new();
+                for (canonical, composed) in composed_by_file.into_iter().flatten() {
+                    let mut entry_changed = false;
+                    let entry = js_summaries.entry(canonical.clone()).or_default();
+                    for new_summary in composed {
+                        match entry.iter_mut().find(|s| s.name == new_summary.name) {
+                            Some(existing) => {
+                                if existing.merge_from(&new_summary) {
+                                    entry_changed = true;
+                                }
+                            }
+                            None => {
+                                entry.push(new_summary);
+                                entry_changed = true;
+                            }
+                        }
+                    }
+                    if entry_changed {
+                        changed = true;
+                        next_dirty.insert(canonical);
+                    }
+                }
+                dirty = Some(next_dirty);
+                if !changed {
+                    break;
+                }
+            }
+        }
+
+        timing_mark("js pass1 + multi-hop compose", &mut phase);
+        has_js_cross_file = !js_summaries.is_empty();
+        cross_file_summaries.extend(js_summaries);
+    }
+
+    // Go cross-file summaries: extract from all Go files.
+    let mut has_go_cross_file = false;
+    if has_go_taint_rules && go_files.len() > 1 {
+        let go_rule_specs: Vec<_> = taint_specs_by_lang
+            .get(&Language::Go)
+            .into_iter()
+            .flat_map(|specs| specs.iter())
+            .filter(|spec| matches!(spec.engine, TaintEngine::Go))
+            .map(|spec| (spec.rule_id, spec.spec.clone()))
+            .collect();
+        let prepared_go: Vec<_> = go_files
+            .par_iter()
+            .filter_map(|(path, _)| {
+                let _budget = super::budget::FileBudgetGuard::start(file_budget);
+                if std::fs::metadata(path).ok()?.len() > max_file_size {
+                    return None;
+                }
+                let source = std::fs::read_to_string(path).ok()?;
+                if is_minified(&source) {
+                    return None;
+                }
+                let tree = super::parser::parse_file(&source, Language::Go)?;
+                if tree.root_node().has_error() {
+                    return None;
+                }
+                let aliases = go_aliases_from_tree(&source, &tree);
+                let summaries = go_taint::extract_cross_file_summaries(
+                    tree.root_node(),
+                    &source,
+                    Some(&aliases),
+                    &go_rule_specs,
+                );
+                let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.clone());
+                Some((
+                    path.clone(),
+                    StoredPreparedFile {
+                        source,
+                        language: Language::Go,
+                        aliases,
+                        canonical_path: canonical,
+                        #[cfg(test)]
+                        tree_leases: None,
+                    },
+                    summaries,
+                ))
+            })
+            .collect();
+        let mut go_summaries = CrossFileSummaryMap::new();
+        for (path, prepared, file_summaries) in prepared_go {
+            if !file_summaries.is_empty() {
+                go_summaries.insert(prepared.canonical_path.clone(), file_summaries);
+            }
+            prepared_files.insert(path, prepared);
+        }
+
+        // ── Bounded multi-hop composition (fixpoint) ──────────────────
+        // Mirror of the Python block above for Go: compose per-file
+        // summaries one hop per round so a chain A→f→g→sink — where the
+        // MIDDLE helper `f` forwards its param into a same-package helper
+        // `g` that sinks it — is captured. Resolution is same-package
+        // (all .go files in a directory share a package), matching the
+        // single-hop Go pass. Summaries grow monotonically over a finite
+        // lattice, so the loop reaches a fixpoint; MAX_MULTIHOP_ROUNDS is
+        // the hard backstop.
+        // See docs/taint-tracking.md, "Bounded multi-hop cross-file taint".
+        if !go_summaries.is_empty() {
+            const MAX_MULTIHOP_ROUNDS: usize = 5;
+            let allowed_rule_ids: std::collections::HashSet<String> =
+                go_rule_specs.iter().map(|(id, _)| id.to_string()).collect();
+            // Build a directory→canonical-paths index: all .go files in a
+            // directory belong to the same package and resolve each other.
+            let mut dir_index: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
+            for (path, _) in &go_files {
+                if let Some(stored) = prepared_files.get(path) {
+                    if let Some(dir) = path.parent() {
+                        dir_index
+                            .entry(dir.to_path_buf())
+                            .or_default()
+                            .push(stored.canonical_path.clone());
+                    }
+                }
+            }
+
+            // Canonical paths whose summaries changed in the previous round
+            // (`None` = first round, compose everything). A file's composition
+            // only reads its dependencies' summaries, so a file none of whose
+            // dependencies changed would recompute exactly what it already merged.
+            let mut dirty: Option<std::collections::HashSet<PathBuf>> = None;
+            for _round in 0..MAX_MULTIHOP_ROUNDS {
+                let snapshot = go_summaries.clone();
+                let composed_by_file: Vec<Option<(PathBuf, Vec<FunctionTaintSummary>)>> = go_files
+                    .par_iter()
+                    .map(|(path, _)| {
+                        let stored = prepared_files.get(path)?;
+                        let canonical = stored.canonical_path.clone();
+                        // Same-package siblings (excluding self).
+                        let same_package_paths: Vec<PathBuf> = path
+                            .parent()
+                            .and_then(|dir| dir_index.get(dir))
+                            .map(|siblings| {
+                                siblings
+                                    .iter()
+                                    .filter(|p| **p != canonical)
+                                    .cloned()
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        if same_package_paths.is_empty() {
+                            return None;
+                        }
+                        if let Some(dirty) = &dirty {
+                            if !same_package_paths.iter().any(|p| dirty.contains(p)) {
+                                return None;
+                            }
+                        }
+                        let prepared = stored.prepare(path);
+                        let composed = go_taint::compose_cross_file_summaries(
+                            prepared.tree.root_node(),
+                            &prepared.source,
+                            Some(&prepared.aliases),
+                            &go_rule_specs,
+                            &same_package_paths,
+                            &snapshot,
+                            &allowed_rule_ids,
+                        );
+                        if composed.is_empty() {
+                            None
+                        } else {
+                            Some((canonical, composed))
+                        }
+                    })
+                    .collect();
+                let mut changed = false;
+                let mut next_dirty = std::collections::HashSet::new();
+                for (canonical, composed) in composed_by_file.into_iter().flatten() {
+                    let mut entry_changed = false;
+                    let entry = go_summaries.entry(canonical.clone()).or_default();
+                    for new_summary in composed {
+                        match entry.iter_mut().find(|s| s.name == new_summary.name) {
+                            Some(existing) => {
+                                if existing.merge_from(&new_summary) {
+                                    entry_changed = true;
+                                }
+                            }
+                            None => {
+                                entry.push(new_summary);
+                                entry_changed = true;
+                            }
+                        }
+                    }
+                    if entry_changed {
+                        changed = true;
+                        next_dirty.insert(canonical);
+                    }
+                }
+                dirty = Some(next_dirty);
+                if !changed {
+                    break;
+                }
+            }
+        }
+
+        timing_mark("go pass1 + multi-hop compose", &mut phase);
+        has_go_cross_file = !go_summaries.is_empty();
+        cross_file_summaries.extend(go_summaries);
+    }
+
+    // Java cross-file summaries: extract from all Java files. Java
+    // resolution is same-directory (same-package proxy) + name-based, so
+    // like Go we only run pass 1 when there are multiple Java files.
+    let mut has_java_cross_file = false;
+    if has_java_taint_rules && java_files.len() > 1 {
+        let java_rule_specs: Vec<_> = taint_specs_by_lang
+            .get(&Language::Java)
+            .into_iter()
+            .flat_map(|specs| specs.iter())
+            .filter(|spec| matches!(spec.engine, TaintEngine::Java))
+            .map(|spec| (spec.rule_id, spec.spec.clone()))
+            .collect();
+        let prepared_java: Vec<_> = java_files
+            .par_iter()
+            .filter_map(|(path, _)| {
+                let _budget = super::budget::FileBudgetGuard::start(file_budget);
+                if std::fs::metadata(path).ok()?.len() > max_file_size {
+                    return None;
+                }
+                let source = std::fs::read_to_string(path).ok()?;
+                if is_minified(&source) {
+                    return None;
+                }
+                let tree = super::parser::parse_file(&source, Language::Java)?;
+                if tree.root_node().has_error() {
+                    return None;
+                }
+                let summaries = java_taint::extract_cross_file_summaries(
+                    tree.root_node(),
+                    &source,
+                    None,
+                    &java_rule_specs,
+                );
+                let invoked = java_taint::invoked_method_names(tree.root_node(), &source);
+                let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.clone());
+                Some((
+                    path.clone(),
+                    StoredPreparedFile {
+                        source,
+                        language: Language::Java,
+                        aliases: AliasTable::default(),
+                        canonical_path: canonical,
+                        #[cfg(test)]
+                        tree_leases: None,
+                    },
+                    summaries,
+                    invoked,
+                ))
+            })
+            .collect();
+        timing_mark("java pass1 extract (parallel)", &mut phase);
+        let mut java_summaries = CrossFileSummaryMap::new();
+        let mut java_invoked: HashMap<PathBuf, std::collections::HashSet<String>> = HashMap::new();
+        for (path, prepared, file_summaries, invoked) in prepared_java {
+            java_invoked.insert(prepared.canonical_path.clone(), invoked);
+            if !file_summaries.is_empty() {
+                java_summaries.insert(prepared.canonical_path.clone(), file_summaries);
+            }
+            prepared_files.insert(path, prepared);
+        }
+
+        // ── Bounded multi-hop composition (fixpoint) ──────────────────
+        // Mirror of the Go block above for Java. Java uses its OWN
+        // name-based, same-directory summary machinery (not the shared
+        // `TaintLanguageAdapter` path), so composition lives in
+        // `java_taint::compose_cross_file_summaries` — but the scanner-side
+        // fixpoint is identical: compose per-file summaries one hop per round
+        // so a chain A→f→g→sink — where the MIDDLE helper `f` forwards its
+        // param into a same-package helper `g` that sinks it — is captured.
+        // Resolution is same-directory (all Java files in a directory are a
+        // same-package proxy), matching the single-hop Java pass. Summaries
+        // grow monotonically over a finite lattice, so the loop reaches a
+        // fixpoint; MAX_MULTIHOP_ROUNDS is the hard backstop.
+        // See docs/taint-tracking.md, "Bounded multi-hop cross-file taint".
+        if !java_summaries.is_empty() {
+            const MAX_MULTIHOP_ROUNDS: usize = 5;
+            let allowed_rule_ids: std::collections::HashSet<String> = java_rule_specs
+                .iter()
+                .map(|(id, _)| id.to_string())
+                .collect();
+            // Build a directory→canonical-paths index: all Java files in a
+            // directory are treated as the same package and resolve each other.
+            let mut dir_index: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
+            for (path, _) in &java_files {
+                if let Some(stored) = prepared_files.get(path) {
+                    if let Some(dir) = path.parent() {
+                        dir_index
+                            .entry(dir.to_path_buf())
+                            .or_default()
+                            .push(stored.canonical_path.clone());
+                    }
+                }
+            }
+
+            // Canonical paths whose summaries changed in the previous round
+            // (`None` = first round, compose everything). A file's composition
+            // only reads its dependencies' summaries, so a file none of whose
+            // dependencies changed would recompute exactly what it already merged.
+            let mut dirty: Option<std::collections::HashSet<PathBuf>> = None;
+            for _round in 0..MAX_MULTIHOP_ROUNDS {
+                let snapshot = java_summaries.clone();
+                // Per directory: summary name -> positions (in `dir_index`
+                // order) of the siblings that currently define it. A file only
+                // depends on siblings defining a name it invokes (resolution
+                // is name-based), not on every same-package sibling.
+                let mut name_index: HashMap<&Path, HashMap<&str, Vec<usize>>> = HashMap::new();
+                for (dir, siblings) in &dir_index {
+                    let mut by_name: HashMap<&str, Vec<usize>> = HashMap::new();
+                    for (pos, sibling) in siblings.iter().enumerate() {
+                        if let Some(summaries) = snapshot.get(sibling) {
+                            for s in summaries {
+                                by_name.entry(s.name.as_str()).or_default().push(pos);
+                            }
+                        }
+                    }
+                    name_index.insert(dir.as_path(), by_name);
+                }
+                // Every file composes against the immutable snapshot, so the
+                // per-file work is independent: compute it in parallel, then
+                // merge sequentially in file order (identical to the former
+                // serial loop, whose reads never saw same-round writes).
+                let composed_by_file: Vec<Option<(PathBuf, Vec<FunctionTaintSummary>)>> =
+                    java_files
+                        .par_iter()
+                        .map(|(path, _)| {
+                            let stored = prepared_files.get(path)?;
+                            let canonical = stored.canonical_path.clone();
+                            let dir = path.parent()?;
+                            let siblings = dir_index.get(dir)?;
+                            let by_name = name_index.get(dir)?;
+                            let invoked = java_invoked.get(&canonical)?;
+                            // Dependencies: siblings (excluding self) defining an
+                            // invoked name, kept in sibling order so the
+                            // first-match lookup is unchanged.
+                            let mut positions: Vec<usize> = invoked
+                                .iter()
+                                .filter_map(|name| by_name.get(name.as_str()))
+                                .flatten()
+                                .copied()
+                                .collect();
+                            positions.sort_unstable();
+                            positions.dedup();
+                            let same_package_paths: Vec<PathBuf> = positions
+                                .into_iter()
+                                .map(|pos| &siblings[pos])
+                                .filter(|p| **p != canonical)
+                                .cloned()
+                                .collect();
+                            if same_package_paths.is_empty() {
+                                return None;
+                            }
+                            if let Some(dirty) = &dirty {
+                                if !same_package_paths.iter().any(|p| dirty.contains(p)) {
+                                    return None;
+                                }
+                            }
+                            let prepared = stored.prepare(path);
+                            let composed = java_taint::compose_cross_file_summaries(
+                                prepared.tree.root_node(),
+                                &prepared.source,
+                                None,
+                                &java_rule_specs,
+                                &same_package_paths,
+                                &snapshot,
+                                &allowed_rule_ids,
+                            );
+                            if composed.is_empty() {
+                                None
+                            } else {
+                                Some((canonical, composed))
+                            }
+                        })
+                        .collect();
+                let mut changed = false;
+                let mut next_dirty = std::collections::HashSet::new();
+                for (canonical, composed) in composed_by_file.into_iter().flatten() {
+                    let mut entry_changed = false;
+                    let entry = java_summaries.entry(canonical.clone()).or_default();
+                    for new_summary in composed {
+                        match entry.iter_mut().find(|s| s.name == new_summary.name) {
+                            Some(existing) => {
+                                if existing.merge_from(&new_summary) {
+                                    entry_changed = true;
+                                }
+                            }
+                            None => {
+                                entry.push(new_summary);
+                                entry_changed = true;
+                            }
+                        }
+                    }
+                    if entry_changed {
+                        changed = true;
+                        next_dirty.insert(canonical);
+                    }
+                }
+                dirty = Some(next_dirty);
+                if !changed {
+                    break;
+                }
+            }
+        }
+
+        timing_mark("java multi-hop compose", &mut phase);
+        has_java_cross_file = !java_summaries.is_empty();
+        cross_file_summaries.extend(java_summaries);
+    }
+
+    // Ruby cross-file summaries: extract from all Ruby files. Ruby
+    // resolution is same-directory (same-package proxy) + name+arity, so
+    // like Java/Go we only run pass 1 when there are multiple Ruby files.
+    let mut has_ruby_cross_file = false;
+    if has_ruby_taint_rules && ruby_files.len() > 1 {
+        let ruby_rule_specs: Vec<_> = taint_specs_by_lang
+            .get(&Language::Ruby)
+            .into_iter()
+            .flat_map(|specs| specs.iter())
+            .filter(|spec| matches!(spec.engine, TaintEngine::Ruby))
+            .map(|spec| (spec.rule_id, spec.spec.clone()))
+            .collect();
+        let prepared_ruby: Vec<_> = ruby_files
+            .par_iter()
+            .filter_map(|(path, _)| {
+                let _budget = super::budget::FileBudgetGuard::start(file_budget);
+                if std::fs::metadata(path).ok()?.len() > max_file_size {
+                    return None;
+                }
+                let source = std::fs::read_to_string(path).ok()?;
+                if is_minified(&source) {
+                    return None;
+                }
+                let tree = super::parser::parse_file(&source, Language::Ruby)?;
+                if tree.root_node().has_error() {
+                    return None;
+                }
+                let summaries = ruby_taint::extract_cross_file_summaries(
+                    tree.root_node(),
+                    &source,
+                    None,
+                    &ruby_rule_specs,
+                );
+                let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.clone());
+                Some((
+                    path.clone(),
+                    StoredPreparedFile {
+                        source,
+                        language: Language::Ruby,
+                        aliases: AliasTable::default(),
+                        canonical_path: canonical,
+                        #[cfg(test)]
+                        tree_leases: None,
+                    },
+                    summaries,
+                ))
+            })
+            .collect();
+        let mut ruby_summaries = CrossFileSummaryMap::new();
+        for (path, prepared, file_summaries) in prepared_ruby {
+            if !file_summaries.is_empty() {
+                ruby_summaries.insert(prepared.canonical_path.clone(), file_summaries);
+            }
+            prepared_files.insert(path, prepared);
+        }
+        // ── Bounded multi-hop composition (fixpoint) ──────────────────
+        // Mirror of the Java block above for Ruby. Ruby uses its OWN
+        // name-based, same-directory summary machinery (its cross-file
+        // resolution is bespoke, not routed through the shared adapter), so
+        // composition lives in `ruby_taint::compose_cross_file_summaries` — but
+        // the scanner-side fixpoint is identical: compose per-file summaries one
+        // hop per round so a chain A→f→g→sink — where the MIDDLE helper `f`
+        // forwards its param into a same-directory helper `g` that sinks it — is
+        // captured. Resolution is same-directory (all Ruby files in a directory
+        // are a same-package proxy), matching the single-hop Ruby pass.
+        // Summaries grow monotonically over a finite lattice, so the loop
+        // reaches a fixpoint; MAX_MULTIHOP_ROUNDS is the hard backstop.
+        // See docs/taint-tracking.md, "Bounded multi-hop cross-file taint".
+        if !ruby_summaries.is_empty() {
+            const MAX_MULTIHOP_ROUNDS: usize = 5;
+            let allowed_rule_ids: std::collections::HashSet<String> = ruby_rule_specs
+                .iter()
+                .map(|(id, _)| id.to_string())
+                .collect();
+            // Build a directory→canonical-paths index: all Ruby files in a
+            // directory are treated as the same package and resolve each other.
+            let mut dir_index: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
+            for (path, _) in &ruby_files {
+                if let Some(stored) = prepared_files.get(path) {
+                    if let Some(dir) = path.parent() {
+                        dir_index
+                            .entry(dir.to_path_buf())
+                            .or_default()
+                            .push(stored.canonical_path.clone());
+                    }
+                }
+            }
+
+            // Canonical paths whose summaries changed in the previous round
+            // (`None` = first round, compose everything). A file's composition
+            // only reads its dependencies' summaries, so a file none of whose
+            // dependencies changed would recompute exactly what it already merged.
+            let mut dirty: Option<std::collections::HashSet<PathBuf>> = None;
+            for _round in 0..MAX_MULTIHOP_ROUNDS {
+                let snapshot = ruby_summaries.clone();
+                let composed_by_file: Vec<Option<(PathBuf, Vec<FunctionTaintSummary>)>> =
+                    ruby_files
+                        .par_iter()
+                        .map(|(path, _)| {
+                            let stored = prepared_files.get(path)?;
+                            let canonical = stored.canonical_path.clone();
+                            let same_package_paths: Vec<PathBuf> = path
+                                .parent()
+                                .and_then(|dir| dir_index.get(dir))
+                                .map(|siblings| {
+                                    siblings
+                                        .iter()
+                                        .filter(|p| **p != canonical)
+                                        .cloned()
+                                        .collect()
+                                })
+                                .unwrap_or_default();
+                            if same_package_paths.is_empty() {
+                                return None;
+                            }
+                            if let Some(dirty) = &dirty {
+                                if !same_package_paths.iter().any(|p| dirty.contains(p)) {
+                                    return None;
+                                }
+                            }
+                            let prepared = stored.prepare(path);
+                            let composed = ruby_taint::compose_cross_file_summaries(
+                                prepared.tree.root_node(),
+                                &prepared.source,
+                                None,
+                                &ruby_rule_specs,
+                                &same_package_paths,
+                                &snapshot,
+                                &allowed_rule_ids,
+                            );
+                            if composed.is_empty() {
+                                None
+                            } else {
+                                Some((canonical, composed))
+                            }
+                        })
+                        .collect();
+                let mut changed = false;
+                let mut next_dirty = std::collections::HashSet::new();
+                for (canonical, composed) in composed_by_file.into_iter().flatten() {
+                    let mut entry_changed = false;
+                    let entry = ruby_summaries.entry(canonical.clone()).or_default();
+                    for new_summary in composed {
+                        match entry.iter_mut().find(|s| s.name == new_summary.name) {
+                            Some(existing) => {
+                                if existing.merge_from(&new_summary) {
+                                    entry_changed = true;
+                                }
+                            }
+                            None => {
+                                entry.push(new_summary);
+                                entry_changed = true;
+                            }
+                        }
+                    }
+                    if entry_changed {
+                        changed = true;
+                        next_dirty.insert(canonical);
+                    }
+                }
+                dirty = Some(next_dirty);
+                if !changed {
+                    break;
+                }
+            }
+        }
+
+        timing_mark("ruby pass1 + multi-hop compose", &mut phase);
+        has_ruby_cross_file = !ruby_summaries.is_empty();
+        cross_file_summaries.extend(ruby_summaries);
+    }
+
+    // PHP cross-file summaries: extract from all PHP files. PHP resolution is
+    // same-directory (same-package proxy) + name-based, so like Go/Java we
+    // only run pass 1 when there are multiple PHP files.
+    let mut has_php_cross_file = false;
+    if has_php_taint_rules && php_files.len() > 1 {
+        let php_rule_specs: Vec<_> = taint_specs_by_lang
+            .get(&Language::Php)
+            .into_iter()
+            .flat_map(|specs| specs.iter())
+            .filter(|spec| matches!(spec.engine, TaintEngine::Php))
+            .map(|spec| (spec.rule_id, spec.spec.clone()))
+            .collect();
+        let prepared_php: Vec<_> = php_files
+            .par_iter()
+            .filter_map(|(path, _)| {
+                let _budget = super::budget::FileBudgetGuard::start(file_budget);
+                if std::fs::metadata(path).ok()?.len() > max_file_size {
+                    return None;
+                }
+                let source = std::fs::read_to_string(path).ok()?;
+                if is_minified(&source) {
+                    return None;
+                }
+                let tree = super::parser::parse_file(&source, Language::Php)?;
+                if tree.root_node().has_error() {
+                    return None;
+                }
+                let summaries = php_taint::extract_cross_file_summaries(
+                    tree.root_node(),
+                    &source,
+                    None,
+                    &php_rule_specs,
+                );
+                let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.clone());
+                Some((
+                    path.clone(),
+                    StoredPreparedFile {
+                        source,
+                        language: Language::Php,
+                        aliases: AliasTable::default(),
+                        canonical_path: canonical,
+                        #[cfg(test)]
+                        tree_leases: None,
+                    },
+                    summaries,
+                ))
+            })
+            .collect();
+        let mut php_summaries = CrossFileSummaryMap::new();
+        for (path, prepared, file_summaries) in prepared_php {
+            if !file_summaries.is_empty() {
+                php_summaries.insert(prepared.canonical_path.clone(), file_summaries);
+            }
+            prepared_files.insert(path, prepared);
+        }
+        // ── Bounded multi-hop composition (fixpoint) ──────────────────
+        // Mirror of the Java block above for PHP. PHP's cross-file resolution
+        // is routed through its adapter, so composition lives in
+        // `php_taint::compose_cross_file_summaries` (which reuses the shared
+        // `_cf` summary helper) — but the scanner-side fixpoint is identical:
+        // compose per-file summaries one hop per round so a chain A→f→g→sink —
+        // where the MIDDLE helper `f` forwards its param into a same-directory
+        // helper `g` that sinks it — is captured. Resolution is same-directory
+        // (all PHP files in a directory are a same-package proxy), matching the
+        // single-hop PHP pass. Summaries grow monotonically over a finite
+        // lattice, so the loop reaches a fixpoint; MAX_MULTIHOP_ROUNDS is the
+        // hard backstop.
+        // See docs/taint-tracking.md, "Bounded multi-hop cross-file taint".
+        if !php_summaries.is_empty() {
+            const MAX_MULTIHOP_ROUNDS: usize = 5;
+            let allowed_rule_ids: std::collections::HashSet<String> = php_rule_specs
+                .iter()
+                .map(|(id, _)| id.to_string())
+                .collect();
+            // Build a directory→canonical-paths index: all PHP files in a
+            // directory are treated as the same package and resolve each other.
+            let mut dir_index: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
+            for (path, _) in &php_files {
+                if let Some(stored) = prepared_files.get(path) {
+                    if let Some(dir) = path.parent() {
+                        dir_index
+                            .entry(dir.to_path_buf())
+                            .or_default()
+                            .push(stored.canonical_path.clone());
+                    }
+                }
+            }
+
+            // Canonical paths whose summaries changed in the previous round
+            // (`None` = first round, compose everything). A file's composition
+            // only reads its dependencies' summaries, so a file none of whose
+            // dependencies changed would recompute exactly what it already merged.
+            let mut dirty: Option<std::collections::HashSet<PathBuf>> = None;
+            for _round in 0..MAX_MULTIHOP_ROUNDS {
+                let snapshot = php_summaries.clone();
+                let composed_by_file: Vec<Option<(PathBuf, Vec<FunctionTaintSummary>)>> = php_files
+                    .par_iter()
+                    .map(|(path, _)| {
+                        let stored = prepared_files.get(path)?;
+                        let canonical = stored.canonical_path.clone();
+                        let same_package_paths: Vec<PathBuf> = path
+                            .parent()
+                            .and_then(|dir| dir_index.get(dir))
+                            .map(|siblings| {
+                                siblings
+                                    .iter()
+                                    .filter(|p| **p != canonical)
+                                    .cloned()
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        if same_package_paths.is_empty() {
+                            return None;
+                        }
+                        if let Some(dirty) = &dirty {
+                            if !same_package_paths.iter().any(|p| dirty.contains(p)) {
+                                return None;
+                            }
+                        }
+                        let prepared = stored.prepare(path);
+                        let composed = php_taint::compose_cross_file_summaries(
+                            prepared.tree.root_node(),
+                            &prepared.source,
+                            None,
+                            &php_rule_specs,
+                            &same_package_paths,
+                            &snapshot,
+                            &allowed_rule_ids,
+                        );
+                        if composed.is_empty() {
+                            None
+                        } else {
+                            Some((canonical, composed))
+                        }
+                    })
+                    .collect();
+                let mut changed = false;
+                let mut next_dirty = std::collections::HashSet::new();
+                for (canonical, composed) in composed_by_file.into_iter().flatten() {
+                    let mut entry_changed = false;
+                    let entry = php_summaries.entry(canonical.clone()).or_default();
+                    for new_summary in composed {
+                        match entry.iter_mut().find(|s| s.name == new_summary.name) {
+                            Some(existing) => {
+                                if existing.merge_from(&new_summary) {
+                                    entry_changed = true;
+                                }
+                            }
+                            None => {
+                                entry.push(new_summary);
+                                entry_changed = true;
+                            }
+                        }
+                    }
+                    if entry_changed {
+                        changed = true;
+                        next_dirty.insert(canonical);
+                    }
+                }
+                dirty = Some(next_dirty);
+                if !changed {
+                    break;
+                }
+            }
+        }
+
+        timing_mark("php pass1 + multi-hop compose", &mut phase);
+        has_php_cross_file = !php_summaries.is_empty();
+        cross_file_summaries.extend(php_summaries);
+    }
+
+    // C# cross-file summaries: extract from all C# files. C# resolution is
+    // same-directory (same-namespace proxy) + name-based, so like Java/Go we
+    // only run pass 1 when there are multiple C# files.
+    let mut has_csharp_cross_file = false;
+    if has_csharp_taint_rules && csharp_files.len() > 1 {
+        let csharp_rule_specs: Vec<_> = taint_specs_by_lang
+            .get(&Language::CSharp)
+            .into_iter()
+            .flat_map(|specs| specs.iter())
+            .filter(|spec| matches!(spec.engine, TaintEngine::CSharp))
+            .map(|spec| (spec.rule_id, spec.spec.clone()))
+            .collect();
+        let prepared_csharp: Vec<_> = csharp_files
+            .par_iter()
+            .filter_map(|(path, _)| {
+                let _budget = super::budget::FileBudgetGuard::start(file_budget);
+                if std::fs::metadata(path).ok()?.len() > max_file_size {
+                    return None;
+                }
+                let source = std::fs::read_to_string(path).ok()?;
+                if is_minified(&source) {
+                    return None;
+                }
+                let tree = super::parser::parse_file(&source, Language::CSharp)?;
+                if tree.root_node().has_error() {
+                    return None;
+                }
+                let summaries = csharp_taint::extract_cross_file_summaries(
+                    tree.root_node(),
+                    &source,
+                    None,
+                    &csharp_rule_specs,
+                );
+                let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.clone());
+                Some((
+                    path.clone(),
+                    StoredPreparedFile {
+                        source,
+                        language: Language::CSharp,
+                        aliases: AliasTable::default(),
+                        canonical_path: canonical,
+                        #[cfg(test)]
+                        tree_leases: None,
+                    },
+                    summaries,
+                ))
+            })
+            .collect();
+        let mut csharp_summaries = CrossFileSummaryMap::new();
+        for (path, prepared, file_summaries) in prepared_csharp {
+            if !file_summaries.is_empty() {
+                csharp_summaries.insert(prepared.canonical_path.clone(), file_summaries);
+            }
+            prepared_files.insert(path, prepared);
+        }
+        // ── Bounded multi-hop composition (fixpoint) ──────────────────
+        // Mirror of the Java block above for C#. C# uses its OWN name-based,
+        // same-directory summary machinery (not the shared adapter path), so
+        // composition lives in `csharp_taint::compose_cross_file_summaries` —
+        // but the scanner-side fixpoint is identical: compose per-file summaries
+        // one hop per round so a chain A→f→g→sink — where the MIDDLE helper `f`
+        // forwards its param into a same-directory helper `g` that sinks it — is
+        // captured. Resolution is same-directory (all C# files in a directory
+        // are a same-namespace proxy), matching the single-hop C# pass.
+        // Summaries grow monotonically over a finite lattice, so the loop
+        // reaches a fixpoint; MAX_MULTIHOP_ROUNDS is the hard backstop.
+        // See docs/taint-tracking.md, "Bounded multi-hop cross-file taint".
+        if !csharp_summaries.is_empty() {
+            const MAX_MULTIHOP_ROUNDS: usize = 5;
+            let allowed_rule_ids: std::collections::HashSet<String> = csharp_rule_specs
+                .iter()
+                .map(|(id, _)| id.to_string())
+                .collect();
+            // Build a directory→canonical-paths index: all C# files in a
+            // directory are treated as the same namespace and resolve each other.
+            let mut dir_index: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
+            for (path, _) in &csharp_files {
+                if let Some(stored) = prepared_files.get(path) {
+                    if let Some(dir) = path.parent() {
+                        dir_index
+                            .entry(dir.to_path_buf())
+                            .or_default()
+                            .push(stored.canonical_path.clone());
+                    }
+                }
+            }
+
+            // Canonical paths whose summaries changed in the previous round
+            // (`None` = first round, compose everything). A file's composition
+            // only reads its dependencies' summaries, so a file none of whose
+            // dependencies changed would recompute exactly what it already merged.
+            let mut dirty: Option<std::collections::HashSet<PathBuf>> = None;
+            for _round in 0..MAX_MULTIHOP_ROUNDS {
+                let snapshot = csharp_summaries.clone();
+                let composed_by_file: Vec<Option<(PathBuf, Vec<FunctionTaintSummary>)>> =
+                    csharp_files
+                        .par_iter()
+                        .map(|(path, _)| {
+                            let stored = prepared_files.get(path)?;
+                            let canonical = stored.canonical_path.clone();
+                            let same_package_paths: Vec<PathBuf> = path
+                                .parent()
+                                .and_then(|dir| dir_index.get(dir))
+                                .map(|siblings| {
+                                    siblings
+                                        .iter()
+                                        .filter(|p| **p != canonical)
+                                        .cloned()
+                                        .collect()
+                                })
+                                .unwrap_or_default();
+                            if same_package_paths.is_empty() {
+                                return None;
+                            }
+                            if let Some(dirty) = &dirty {
+                                if !same_package_paths.iter().any(|p| dirty.contains(p)) {
+                                    return None;
+                                }
+                            }
+                            let prepared = stored.prepare(path);
+                            let composed = csharp_taint::compose_cross_file_summaries(
+                                prepared.tree.root_node(),
+                                &prepared.source,
+                                None,
+                                &csharp_rule_specs,
+                                &same_package_paths,
+                                &snapshot,
+                                &allowed_rule_ids,
+                            );
+                            if composed.is_empty() {
+                                None
+                            } else {
+                                Some((canonical, composed))
+                            }
+                        })
+                        .collect();
+                let mut changed = false;
+                let mut next_dirty = std::collections::HashSet::new();
+                for (canonical, composed) in composed_by_file.into_iter().flatten() {
+                    let mut entry_changed = false;
+                    let entry = csharp_summaries.entry(canonical.clone()).or_default();
+                    for new_summary in composed {
+                        match entry.iter_mut().find(|s| s.name == new_summary.name) {
+                            Some(existing) => {
+                                if existing.merge_from(&new_summary) {
+                                    entry_changed = true;
+                                }
+                            }
+                            None => {
+                                entry.push(new_summary);
+                                entry_changed = true;
+                            }
+                        }
+                    }
+                    if entry_changed {
+                        changed = true;
+                        next_dirty.insert(canonical);
+                    }
+                }
+                dirty = Some(next_dirty);
+                if !changed {
+                    break;
+                }
+            }
+        }
+
+        timing_mark("csharp pass1 + multi-hop compose", &mut phase);
+        has_csharp_cross_file = !csharp_summaries.is_empty();
+        cross_file_summaries.extend(csharp_summaries);
+    }
+
+    // Kotlin cross-file summaries: extract from all Kotlin files. Kotlin
+    // resolution is same-directory (same-package proxy) + name+arity based, so
+    // like Go/Java/C# we only run pass 1 when there are multiple Kotlin files.
+    let mut has_kotlin_cross_file = false;
+    if has_kotlin_taint_rules && kotlin_files.len() > 1 {
+        let kotlin_rule_specs: Vec<_> = taint_specs_by_lang
+            .get(&Language::Kotlin)
+            .into_iter()
+            .flat_map(|specs| specs.iter())
+            .filter(|spec| matches!(spec.engine, TaintEngine::Kotlin))
+            .map(|spec| (spec.rule_id, spec.spec.clone()))
+            .collect();
+        let prepared_kotlin: Vec<_> = kotlin_files
+            .par_iter()
+            .filter_map(|(path, _)| {
+                let _budget = super::budget::FileBudgetGuard::start(file_budget);
+                if std::fs::metadata(path).ok()?.len() > max_file_size {
+                    return None;
+                }
+                let source = std::fs::read_to_string(path).ok()?;
+                if is_minified(&source) {
+                    return None;
+                }
+                let tree = super::parser::parse_file(&source, Language::Kotlin)?;
+                if tree.root_node().has_error() {
+                    return None;
+                }
+                let summaries = kotlin_taint::extract_cross_file_summaries(
+                    tree.root_node(),
+                    &source,
+                    None,
+                    &kotlin_rule_specs,
+                );
+                let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.clone());
+                Some((
+                    path.clone(),
+                    StoredPreparedFile {
+                        source,
+                        language: Language::Kotlin,
+                        aliases: AliasTable::default(),
+                        canonical_path: canonical,
+                        #[cfg(test)]
+                        tree_leases: None,
+                    },
+                    summaries,
+                ))
+            })
+            .collect();
+        let mut kotlin_summaries = CrossFileSummaryMap::new();
+        for (path, prepared, file_summaries) in prepared_kotlin {
+            if !file_summaries.is_empty() {
+                kotlin_summaries.insert(prepared.canonical_path.clone(), file_summaries);
+            }
+            prepared_files.insert(path, prepared);
+        }
+        // ── Bounded multi-hop composition (fixpoint) ──────────────────
+        // Mirror of the Java block above for Kotlin. Kotlin uses its OWN
+        // name-based, same-directory summary machinery (not the shared adapter
+        // path), so composition lives in
+        // `kotlin_taint::compose_cross_file_summaries` — but the scanner-side
+        // fixpoint is identical: compose per-file summaries one hop per round so
+        // a chain A→f→g→sink — where the MIDDLE helper `f` forwards its param
+        // into a same-directory helper `g` that sinks it — is captured.
+        // Resolution is same-directory (all Kotlin files in a directory are a
+        // same-package proxy), matching the single-hop Kotlin pass. Summaries
+        // grow monotonically over a finite lattice, so the loop reaches a
+        // fixpoint; MAX_MULTIHOP_ROUNDS is the hard backstop.
+        // See docs/taint-tracking.md, "Bounded multi-hop cross-file taint".
+        if !kotlin_summaries.is_empty() {
+            const MAX_MULTIHOP_ROUNDS: usize = 5;
+            let allowed_rule_ids: std::collections::HashSet<String> = kotlin_rule_specs
+                .iter()
+                .map(|(id, _)| id.to_string())
+                .collect();
+            // Build a directory→canonical-paths index: all Kotlin files in a
+            // directory are treated as the same package and resolve each other.
+            let mut dir_index: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
+            for (path, _) in &kotlin_files {
+                if let Some(stored) = prepared_files.get(path) {
+                    if let Some(dir) = path.parent() {
+                        dir_index
+                            .entry(dir.to_path_buf())
+                            .or_default()
+                            .push(stored.canonical_path.clone());
+                    }
+                }
+            }
+
+            // Canonical paths whose summaries changed in the previous round
+            // (`None` = first round, compose everything). A file's composition
+            // only reads its dependencies' summaries, so a file none of whose
+            // dependencies changed would recompute exactly what it already merged.
+            let mut dirty: Option<std::collections::HashSet<PathBuf>> = None;
+            for _round in 0..MAX_MULTIHOP_ROUNDS {
+                let snapshot = kotlin_summaries.clone();
+                let composed_by_file: Vec<Option<(PathBuf, Vec<FunctionTaintSummary>)>> =
+                    kotlin_files
+                        .par_iter()
+                        .map(|(path, _)| {
+                            let stored = prepared_files.get(path)?;
+                            let canonical = stored.canonical_path.clone();
+                            let same_package_paths: Vec<PathBuf> = path
+                                .parent()
+                                .and_then(|dir| dir_index.get(dir))
+                                .map(|siblings| {
+                                    siblings
+                                        .iter()
+                                        .filter(|p| **p != canonical)
+                                        .cloned()
+                                        .collect()
+                                })
+                                .unwrap_or_default();
+                            if same_package_paths.is_empty() {
+                                return None;
+                            }
+                            if let Some(dirty) = &dirty {
+                                if !same_package_paths.iter().any(|p| dirty.contains(p)) {
+                                    return None;
+                                }
+                            }
+                            let prepared = stored.prepare(path);
+                            let composed = kotlin_taint::compose_cross_file_summaries(
+                                prepared.tree.root_node(),
+                                &prepared.source,
+                                None,
+                                &kotlin_rule_specs,
+                                &same_package_paths,
+                                &snapshot,
+                                &allowed_rule_ids,
+                            );
+                            if composed.is_empty() {
+                                None
+                            } else {
+                                Some((canonical, composed))
+                            }
+                        })
+                        .collect();
+                let mut changed = false;
+                let mut next_dirty = std::collections::HashSet::new();
+                for (canonical, composed) in composed_by_file.into_iter().flatten() {
+                    let mut entry_changed = false;
+                    let entry = kotlin_summaries.entry(canonical.clone()).or_default();
+                    for new_summary in composed {
+                        match entry.iter_mut().find(|s| s.name == new_summary.name) {
+                            Some(existing) => {
+                                if existing.merge_from(&new_summary) {
+                                    entry_changed = true;
+                                }
+                            }
+                            None => {
+                                entry.push(new_summary);
+                                entry_changed = true;
+                            }
+                        }
+                    }
+                    if entry_changed {
+                        changed = true;
+                        next_dirty.insert(canonical);
+                    }
+                }
+                dirty = Some(next_dirty);
+                if !changed {
+                    break;
+                }
+            }
+        }
+
+        timing_mark("kotlin pass1 + multi-hop compose", &mut phase);
+        has_kotlin_cross_file = !kotlin_summaries.is_empty();
+        cross_file_summaries.extend(kotlin_summaries);
+    }
+
+    let has_cross_file = !cross_file_summaries.is_empty();
+
+    let canonical_path_lookup: HashMap<PathBuf, PathBuf> = {
+        let mut lookup = HashMap::with_capacity(prepared_files.len() * 3);
+        for (path, prepared) in &prepared_files {
+            let canonical = &prepared.canonical_path;
+            lookup.insert(path.clone(), canonical.clone());
+            lookup.insert(canonical.clone(), canonical.clone());
+            if path.is_relative() {
+                lookup.insert(scan_root.join(path), canonical.clone());
+            }
+        }
+        lookup
+    };
+
+    // Build a directory→files index for Go same-package resolution.
+    // All .go files in the same directory share the same package.
+    let go_dir_index: HashMap<PathBuf, Vec<PathBuf>> = if has_go_cross_file {
+        let mut index: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
+        for (path, lang) in &files {
+            if matches!(lang, Language::Go) && !is_noise_path(path) {
+                if let Some(dir) = path.parent() {
+                    let canonical = prepared_files
+                        .get(path)
+                        .map(|prepared| prepared.canonical_path.clone())
+                        .unwrap_or_else(|| resolve_canonical_path(&canonical_path_lookup, path));
+                    index.entry(dir.to_path_buf()).or_default().push(canonical);
+                }
+            }
+        }
+        index
+    } else {
+        HashMap::new()
+    };
+
+    // Build a directory→files index for Java same-package resolution.
+    // All Java files in the same directory are treated as the same package
+    // (a proxy for the `package` declaration), mirroring the Go index above.
+    let java_dir_index: HashMap<PathBuf, Vec<PathBuf>> = if has_java_cross_file {
+        let mut index: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
+        for (path, lang) in &files {
+            if matches!(lang, Language::Java) && !is_noise_path(path) {
+                if let Some(dir) = path.parent() {
+                    let canonical = prepared_files
+                        .get(path)
+                        .map(|prepared| prepared.canonical_path.clone())
+                        .unwrap_or_else(|| resolve_canonical_path(&canonical_path_lookup, path));
+                    index.entry(dir.to_path_buf()).or_default().push(canonical);
+                }
+            }
+        }
+        index
+    } else {
+        HashMap::new()
+    };
+
+    // Build a directory→files index for Ruby same-package resolution.
+    // All Ruby files in the same directory are treated as the same package
+    // (a same-directory proxy), mirroring the Java/Go indexes above.
+    let ruby_dir_index: HashMap<PathBuf, Vec<PathBuf>> = if has_ruby_cross_file {
+        let mut index: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
+        for (path, lang) in &files {
+            if matches!(lang, Language::Ruby) && !is_noise_path(path) {
+                if let Some(dir) = path.parent() {
+                    let canonical = prepared_files
+                        .get(path)
+                        .map(|prepared| prepared.canonical_path.clone())
+                        .unwrap_or_else(|| resolve_canonical_path(&canonical_path_lookup, path));
+                    index.entry(dir.to_path_buf()).or_default().push(canonical);
+                }
+            }
+        }
+        index
+    } else {
+        HashMap::new()
+    };
+
+    // Build a directory→files index for PHP same-package resolution. All PHP
+    // files in the same directory are treated as the same package (a
+    // same-directory proxy for namespace/autoload scope), mirroring the Go and
+    // Java indexes above.
+    let php_dir_index: HashMap<PathBuf, Vec<PathBuf>> = if has_php_cross_file {
+        let mut index: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
+        for (path, lang) in &files {
+            if matches!(lang, Language::Php) && !is_noise_path(path) {
+                if let Some(dir) = path.parent() {
+                    let canonical = prepared_files
+                        .get(path)
+                        .map(|prepared| prepared.canonical_path.clone())
+                        .unwrap_or_else(|| resolve_canonical_path(&canonical_path_lookup, path));
+                    index.entry(dir.to_path_buf()).or_default().push(canonical);
+                }
+            }
+        }
+        index
+    } else {
+        HashMap::new()
+    };
+
+    // Build a directory→files index for C# same-namespace resolution.
+    // All C# files in the same directory are treated as the same namespace
+    // (a proxy for the `namespace` declaration), mirroring the Java/Go indexes.
+    let csharp_dir_index: HashMap<PathBuf, Vec<PathBuf>> = if has_csharp_cross_file {
+        let mut index: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
+        for (path, lang) in &files {
+            if matches!(lang, Language::CSharp) && !is_noise_path(path) {
+                if let Some(dir) = path.parent() {
+                    let canonical = prepared_files
+                        .get(path)
+                        .map(|prepared| prepared.canonical_path.clone())
+                        .unwrap_or_else(|| resolve_canonical_path(&canonical_path_lookup, path));
+                    index.entry(dir.to_path_buf()).or_default().push(canonical);
+                }
+            }
+        }
+        index
+    } else {
+        HashMap::new()
+    };
+
+    // Build a directory→files index for Kotlin same-package resolution.
+    // All Kotlin files in the same directory are treated as the same package
+    // (a proxy for the `package` declaration), mirroring the Java/Go/C# indexes.
+    let kotlin_dir_index: HashMap<PathBuf, Vec<PathBuf>> = if has_kotlin_cross_file {
+        let mut index: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
+        for (path, lang) in &files {
+            if matches!(lang, Language::Kotlin) && !is_noise_path(path) {
+                if let Some(dir) = path.parent() {
+                    let canonical = prepared_files
+                        .get(path)
+                        .map(|prepared| prepared.canonical_path.clone())
+                        .unwrap_or_else(|| resolve_canonical_path(&canonical_path_lookup, path));
+                    index.entry(dir.to_path_buf()).or_default().push(canonical);
+                }
+            }
+        }
+        index
+    } else {
+        HashMap::new()
+    };
+
+    timing_mark("pre-pass2 setup (all langs, incl. indexes)", &mut phase);
+    // ── Pass 2: Full analysis with cross-file summaries available ─────
+    let outcomes: Vec<FileScanOutcome> = files
+        .par_iter()
+        .map(|(path, language)| {
+            // Skip files in test/vendor/fixture directories
+            if is_noise_path(path) {
+                return FileScanOutcome::skipped(ScanSkipReason::Noise);
+            }
+            let _budget = super::budget::FileBudgetGuard::start(file_budget);
+            let timed_out = || {
+                warnings.lock().expect("lock poisoned").push(format!(
+                    "warning: {} timed out after {:.1}s (--file-timeout); file not fully analysed",
+                    path.display(),
+                    file_budget.map_or(0.0, |b| b.as_secs_f64())
+                ));
+                FileScanOutcome::skipped(ScanSkipReason::Timeout)
+            };
+
+            match std::fs::metadata(path) {
+                Ok(m) if m.len() > max_file_size => {
+                    warnings.lock().expect("lock poisoned").push(format!(
+                        "warning: skipping {} ({} bytes exceeds --max-file-size)",
+                        path.display(),
+                        m.len()
+                    ));
+                    return FileScanOutcome::skipped(ScanSkipReason::TooLarge);
+                }
+                Err(_) => {
+                    warnings.lock().expect("lock poisoned").push(format!(
+                        "warning: skipping {} (cannot read metadata)",
+                        path.display()
+                    ));
+                    return FileScanOutcome::skipped(ScanSkipReason::MetadataError);
+                }
+                _ => {}
+            }
+
+            let prepared = prepared_files.get(path).map(|stored| stored.prepare(path));
+            let owned_source;
+            let source = if let Some(prepared) = prepared.as_ref() {
+                prepared.source.as_str()
+            } else {
+                let read_source = match std::fs::read_to_string(path) {
+                    Ok(source) => source,
+                    Err(error) if error.kind() == std::io::ErrorKind::InvalidData => {
+                        warnings.lock().expect("lock poisoned").push(format!(
+                            "warning: skipping {} (binary or non-UTF-8 content)",
+                            path.display()
+                        ));
+                        return FileScanOutcome::skipped(ScanSkipReason::Binary);
+                    }
+                    Err(error) => {
+                        warnings.lock().expect("lock poisoned").push(format!(
+                            "warning: skipping {} (cannot read file: {})",
+                            path.display(),
+                            error
+                        ));
+                        return FileScanOutcome::skipped(ScanSkipReason::ReadError);
+                    }
+                };
+                if is_minified(&read_source) {
+                    return FileScanOutcome::skipped(ScanSkipReason::Minified);
+                }
+                owned_source = read_source;
+                owned_source.as_str()
+            };
+
+            let inline_ignores = inline_ignore_directives(source, *language);
+
+            let owned_tree;
+            let tree = if let Some(prepared) = prepared.as_ref() {
+                if treats_tree_errors_as_parse_failures(*language, path)
+                    && prepared.tree.root_node().has_error()
+                {
+                    warnings.lock().expect("lock poisoned").push(format!(
+                        "warning: skipping {} (parse error)",
+                        path.display()
+                    ));
+                    return FileScanOutcome::skipped(ScanSkipReason::ParseError);
+                }
+                &prepared.tree
+            } else {
+                let Some(parsed_tree) = super::parser::parse_path(source, *language, path) else {
+                    if super::budget::expired() {
+                        return timed_out();
+                    }
+                    warnings.lock().expect("lock poisoned").push(format!(
+                        "warning: skipping {} (parser could not build a syntax tree)",
+                        path.display()
+                    ));
+                    return FileScanOutcome::skipped(ScanSkipReason::ParseError);
+                };
+                if treats_tree_errors_as_parse_failures(*language, path)
+                    && parsed_tree.root_node().has_error()
+                {
+                    warnings.lock().expect("lock poisoned").push(format!(
+                        "warning: skipping {} (parse error)",
+                        path.display()
+                    ));
+                    return FileScanOutcome::skipped(ScanSkipReason::ParseError);
+                }
+                owned_tree = parsed_tree;
+                &owned_tree
+            };
+            if super::budget::expired() {
+                return timed_out();
+            }
+            let mut file_stats = ScanStats::default();
+            file_stats.record_scanned();
+
+            let file_str = path.display().to_string();
+            let relative_path = relative_scan_path(scan_root, path);
+            let analysis_plan = registry.analysis_plan_for_path(*language, &relative_path);
+            let ast_rule_batch = AstRuleBatch::from_rules(&analysis_plan.ast_rules);
+            if ast_rule_batch.is_empty() && analysis_plan.taint_specs.is_empty() {
+                return FileScanOutcome {
+                    findings: Vec::new(),
+                    stats: file_stats,
+                };
+            }
+
+            // Per-file analysis context. Python builds an import alias table so
+            // rules can resolve aliased callees (`import pickle as p; p.loads(x)`)
+            // back to their canonical dotted paths before sink matching.
+            let owned_python_aliases;
+            let python_aliases = if matches!(language, Language::Python) {
+                if let Some(prepared) = prepared.as_ref() {
+                    Some(&prepared.aliases)
+                } else {
+                    owned_python_aliases = py_aliases_from_tree(source, tree);
+                    Some(&owned_python_aliases)
+                }
+            } else {
+                None
+            };
+            let owned_javascript_aliases;
+            let javascript_aliases = if matches!(language, Language::JavaScript) {
+                if let Some(prepared) = prepared.as_ref() {
+                    Some(&prepared.aliases)
+                } else {
+                    owned_javascript_aliases = js_aliases_from_tree(source, tree);
+                    Some(&owned_javascript_aliases)
+                }
+            } else {
+                None
+            };
+            let owned_go_aliases;
+            let go_aliases = if matches!(language, Language::Go) {
+                if let Some(prepared) = prepared.as_ref() {
+                    Some(&prepared.aliases)
+                } else {
+                    owned_go_aliases = go_aliases_from_tree(source, tree);
+                    Some(&owned_go_aliases)
+                }
+            } else {
+                None
+            };
+
+            // Build Python import-to-path map for cross-file resolution.
+            let python_import_paths =
+                if has_python_cross_file && matches!(language, Language::Python) {
+                    let mut imports = resolve_imports_to_paths(source, tree, path);
+                    // Canonicalize all paths to match the summary map keys.
+                    let canonical: HashMap<String, PathBuf> = imports
+                        .drain()
+                        .map(|(k, v)| {
+                            let canon = resolve_canonical_path(&canonical_path_lookup, &v);
+                            (k, canon)
+                        })
+                        .collect();
+                    Some(canonical)
+                } else {
+                    None
+                };
+
+            // Build JavaScript import-to-path map for cross-file resolution.
+            let javascript_import_paths = if has_js_cross_file
+                && matches!(language, Language::JavaScript)
+            {
+                let mut imports = javascript_taint::resolve_js_imports_to_paths(source, tree, path);
+                let canonical: HashMap<String, PathBuf> = imports
+                    .drain()
+                    .map(|(k, v)| {
+                        let canon = resolve_canonical_path(&canonical_path_lookup, &v);
+                        (k, canon)
+                    })
+                    .collect();
+                Some(canonical)
+            } else {
+                None
+            };
+
+            // Build Go same-package paths for cross-file resolution.
+            // All .go files in the same directory share a package, so
+            // we provide the paths of sibling files (excluding self).
+            let go_same_package_paths = if has_go_cross_file && matches!(language, Language::Go) {
+                path.parent().and_then(|dir| {
+                    let canonical_self = prepared
+                        .as_ref()
+                        .map(|prepared| prepared.canonical_path.clone())
+                        .unwrap_or_else(|| resolve_canonical_path(&canonical_path_lookup, path));
+                    go_dir_index.get(dir).map(|siblings| {
+                        siblings
+                            .iter()
+                            .filter(|p| **p != canonical_self)
+                            .cloned()
+                            .collect::<Vec<_>>()
+                    })
+                })
+            } else {
+                None
+            };
+
+            // Build Java same-package paths for cross-file resolution, the
+            // same directory-as-package heuristic used for Go above.
+            let java_same_package_paths = if has_java_cross_file
+                && matches!(language, Language::Java)
+            {
+                path.parent().and_then(|dir| {
+                    let canonical_self = prepared
+                        .as_ref()
+                        .map(|prepared| prepared.canonical_path.clone())
+                        .unwrap_or_else(|| resolve_canonical_path(&canonical_path_lookup, path));
+                    java_dir_index.get(dir).map(|siblings| {
+                        siblings
+                            .iter()
+                            .filter(|p| **p != canonical_self)
+                            .cloned()
+                            .collect::<Vec<_>>()
+                    })
+                })
+            } else {
+                None
+            };
+
+            // Build Ruby same-package paths for cross-file resolution, the
+            // same directory-as-package heuristic used for Java/Go above.
+            let ruby_same_package_paths = if has_ruby_cross_file
+                && matches!(language, Language::Ruby)
+            {
+                path.parent().and_then(|dir| {
+                    let canonical_self = prepared
+                        .as_ref()
+                        .map(|prepared| prepared.canonical_path.clone())
+                        .unwrap_or_else(|| resolve_canonical_path(&canonical_path_lookup, path));
+                    ruby_dir_index.get(dir).map(|siblings| {
+                        siblings
+                            .iter()
+                            .filter(|p| **p != canonical_self)
+                            .cloned()
+                            .collect::<Vec<_>>()
+                    })
+                })
+            } else {
+                None
+            };
+
+            // Build PHP same-package paths for cross-file resolution, the same
+            // directory-as-package heuristic used for Go/Java above.
+            let php_same_package_paths = if has_php_cross_file && matches!(language, Language::Php)
+            {
+                path.parent().and_then(|dir| {
+                    let canonical_self = prepared
+                        .as_ref()
+                        .map(|prepared| prepared.canonical_path.clone())
+                        .unwrap_or_else(|| resolve_canonical_path(&canonical_path_lookup, path));
+                    php_dir_index.get(dir).map(|siblings| {
+                        siblings
+                            .iter()
+                            .filter(|p| **p != canonical_self)
+                            .cloned()
+                            .collect::<Vec<_>>()
+                    })
+                })
+            } else {
+                None
+            };
+
+            // Build C# same-namespace paths for cross-file resolution, the
+            // same directory-as-namespace heuristic used for Java/Go above.
+            let csharp_same_package_paths = if has_csharp_cross_file
+                && matches!(language, Language::CSharp)
+            {
+                path.parent().and_then(|dir| {
+                    let canonical_self = prepared
+                        .as_ref()
+                        .map(|prepared| prepared.canonical_path.clone())
+                        .unwrap_or_else(|| resolve_canonical_path(&canonical_path_lookup, path));
+                    csharp_dir_index.get(dir).map(|siblings| {
+                        siblings
+                            .iter()
+                            .filter(|p| **p != canonical_self)
+                            .cloned()
+                            .collect::<Vec<_>>()
+                    })
+                })
+            } else {
+                None
+            };
+
+            // Build Kotlin same-package paths for cross-file resolution, the
+            // same directory-as-package heuristic used for Java/Go/C# above.
+            let kotlin_same_package_paths = if has_kotlin_cross_file
+                && matches!(language, Language::Kotlin)
+            {
+                path.parent().and_then(|dir| {
+                    let canonical_self = prepared
+                        .as_ref()
+                        .map(|prepared| prepared.canonical_path.clone())
+                        .unwrap_or_else(|| resolve_canonical_path(&canonical_path_lookup, path));
+                    kotlin_dir_index.get(dir).map(|siblings| {
+                        siblings
+                            .iter()
+                            .filter(|p| **p != canonical_self)
+                            .cloned()
+                            .collect::<Vec<_>>()
+                    })
+                })
+            } else {
+                None
+            };
+
+            let ctx = FileContext {
+                python_aliases,
+                javascript_aliases,
+                go_aliases,
+                cross_file_summaries: if has_cross_file {
+                    Some(&cross_file_summaries)
+                } else {
+                    None
+                },
+                python_import_paths: python_import_paths.as_ref(),
+                javascript_import_paths: javascript_import_paths.as_ref(),
+                go_same_package_paths,
+                java_same_package_paths,
+                ruby_same_package_paths,
+                php_same_package_paths,
+                csharp_same_package_paths,
+                kotlin_same_package_paths,
+                secret_thresholds,
+            };
+
+            let mut file_findings = Vec::new();
+
+            // Dispatch every built-in taint engine through one table
+            // (`TAINT_DISPATCH`) rather than a per-language block. For each
+            // engine, collect the enabled rule ids whose `spec.engine`
+            // matches, and run the batched dispatcher only when that set is
+            // non-empty — so a file pays only for engines with enabled rules
+            // for its language. Cross-file engines read `ctx` for Pass-1
+            // summaries; intra-file engines ignore it (see the adapters and
+            // table near the top of this module). Batched dispatch also
+            // avoids the per-rule `Rule::check` fallback path.
+            for (engine, runner) in TAINT_DISPATCH {
+                let enabled_ids: std::collections::HashSet<&str> = analysis_plan
+                    .taint_specs
+                    .iter()
+                    .filter(|spec| spec.engine == *engine)
+                    .map(|spec| spec.rule_id)
+                    .collect();
+                if !enabled_ids.is_empty() {
+                    if super::budget::expired() {
+                        return timed_out();
+                    }
+                    file_findings.extend(runner(source, tree, &ctx, &enabled_ids));
+                }
+            }
+
+            let Some(ast_findings) = ast_rule_batch.run(source, tree, &ctx) else {
+                return timed_out();
+            };
+            file_findings.extend(ast_findings);
+
+            for finding in &mut file_findings {
+                finding.file = file_str.clone();
+            }
+
+            FileScanOutcome {
+                findings: apply_inline_ignores(file_findings, &inline_ignores),
+                stats: file_stats,
+            }
+        })
+        .collect();
+
+    timing_mark("pass2 per-file analysis (parallel)", &mut phase);
+    let mut results = Vec::new();
+    for outcome in outcomes {
+        stats.extend(outcome.stats);
+        results.extend(outcome.findings);
+    }
+
+    results.sort_by(|a, b| {
+        a.file
+            .cmp(&b.file)
+            .then(a.line.cmp(&b.line))
+            .then(a.column.cmp(&b.column))
+    });
+    (
+        ScanResult {
+            findings: results,
+            files_scanned: stats.files_scanned,
+            stats,
+            duration: start.elapsed(),
+        },
+        warnings.into_inner().unwrap_or_default(),
+    )
+}
+
+fn resolve_canonical_path(lookup: &HashMap<PathBuf, PathBuf>, path: &Path) -> PathBuf {
+    if let Some(canonical) = lookup.get(path) {
+        return canonical.clone();
+    }
+    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+fn treats_tree_errors_as_parse_failures(language: Language, _path: &Path) -> bool {
+    !matches!(
+        language,
+        Language::NginxConf
+            | Language::ApacheConf
+            | Language::HAProxyConf
+            | Language::Dockerfile
+            | Language::Manifest
+            // Regex-mode rules match raw text and never use the syntax tree;
+            // don't gate them behind tree-sitter parse success.
+            | Language::Regex
+    )
+}
+
+fn scan_root(path: &Path) -> &Path {
+    if path.is_file() {
+        path.parent().unwrap_or_else(|| Path::new("."))
+    } else {
+        path
+    }
+}
+
+fn relative_scan_path(scan_root: &Path, path: &Path) -> PathBuf {
+    path.strip_prefix(scan_root).unwrap_or(path).to_path_buf()
+}
+
+fn has_glob_metacharacters(pattern: &str) -> bool {
+    pattern.contains('*') || pattern.contains('?') || pattern.contains('[') || pattern.contains('{')
+}
+
+fn normalize_match_path(path: &Path) -> String {
+    path.components()
+        .map(|component| component.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, Barrier,
+    };
+
+    #[test]
+    fn prepared_snapshots_do_not_retain_trees_between_consumers() {
+        let active = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+        let source = "const value: number = 1;\n".repeat(400);
+        let snapshots: Vec<_> = (0..128)
+            .map(|index| StoredPreparedFile {
+                source: source.clone(),
+                language: Language::JavaScript,
+                aliases: AliasTable::default(),
+                canonical_path: PathBuf::from(format!("file-{index}.ts")),
+                tree_leases: Some(Arc::clone(&active)),
+            })
+            .collect();
+        assert!(
+            snapshots
+                .iter()
+                .map(|entry| entry.source.len())
+                .sum::<usize>()
+                > 1024 * 1024
+        );
+        assert_eq!(active.load(Ordering::SeqCst), 0);
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(2)
+            .build()
+            .unwrap();
+        pool.install(|| {
+            snapshots.par_iter().for_each(|snapshot| {
+                let prepared = snapshot.prepare(&snapshot.canonical_path);
+                peak.fetch_max(active.load(Ordering::SeqCst), Ordering::SeqCst);
+                assert!(!prepared.tree.root_node().has_error());
+            })
+        });
+        assert!(peak.load(Ordering::SeqCst) > 0);
+        assert!(peak.load(Ordering::SeqCst) <= 2);
+        assert_eq!(active.load(Ordering::SeqCst), 0);
+        // Repeated fixpoint visits do not accumulate retained trees.
+        for _ in 0..5 {
+            for snapshot in &snapshots {
+                let prepared = snapshot.prepare(&snapshot.canonical_path);
+                assert!(!prepared.tree.root_node().has_error());
+                assert_eq!(active.load(Ordering::SeqCst), 1);
+            }
+            assert_eq!(active.load(Ordering::SeqCst), 0);
+        }
+    }
+
+    #[test]
+    fn reparsed_snapshot_preserves_cross_file_summary_positive_and_negative_cases() {
+        let source = "def passthrough(value):\n    return value\n\ndef constant(value):\n    return 'safe'\n";
+        let path = Path::new("helpers.py");
+        let tree = super::super::parser::parse_file(source, Language::Python).unwrap();
+        let aliases = py_aliases_from_tree(source, &tree);
+        let registry = RuleRegistry::new();
+        let rule_specs: Vec<_> = registry
+            .taint_specs_for_language(Language::Python)
+            .into_iter()
+            .filter(|spec| matches!(spec.engine, TaintEngine::Python))
+            .map(|spec| (spec.rule_id, spec.spec.clone()))
+            .collect();
+        let baseline = python_taint::extract_cross_file_summaries(
+            tree.root_node(),
+            source,
+            Some(&aliases),
+            &rule_specs,
+        );
+        assert!(baseline
+            .iter()
+            .any(|summary| summary.name == "passthrough" && summary.params_to_return == vec![0]));
+        assert!(!baseline
+            .iter()
+            .any(|summary| summary.name == "constant" && !summary.params_to_return.is_empty()));
+        let snapshot = StoredPreparedFile {
+            source: source.to_owned(),
+            language: Language::Python,
+            aliases,
+            canonical_path: path.to_owned(),
+            tree_leases: None,
+        };
+        drop(tree);
+        for _ in 0..5 {
+            let prepared = snapshot.prepare(path);
+            let reparsed = python_taint::extract_cross_file_summaries(
+                prepared.tree.root_node(),
+                &prepared.source,
+                Some(&prepared.aliases),
+                &rule_specs,
+            );
+            assert_eq!(baseline, reparsed);
+        }
+    }
+
+    struct CountingRule {
+        id: &'static str,
+        requirement: AstAnalysisRequirement,
+        syntax_calls: Arc<AtomicUsize>,
+        context_calls: Arc<AtomicUsize>,
+    }
+
+    impl Rule for CountingRule {
+        fn id(&self) -> &str {
+            self.id
+        }
+        fn severity(&self) -> crate::Severity {
+            crate::Severity::Low
+        }
+        fn cwe(&self) -> Option<&str> {
+            None
+        }
+        fn description(&self) -> &str {
+            "test rule"
+        }
+        fn language(&self) -> Language {
+            Language::JavaScript
+        }
+        fn ast_analysis_requirement(&self) -> AstAnalysisRequirement {
+            self.requirement
+        }
+        fn check(&self, _source: &str, _tree: &tree_sitter::Tree) -> Vec<Finding> {
+            self.syntax_calls.fetch_add(1, Ordering::SeqCst);
+            Vec::new()
+        }
+        fn check_with_context(
+            &self,
+            _source: &str,
+            _tree: &tree_sitter::Tree,
+            _ctx: &FileContext<'_>,
+        ) -> Vec<Finding> {
+            self.context_calls.fetch_add(1, Ordering::SeqCst);
+            Vec::new()
+        }
+    }
+
+    #[test]
+    fn block_comment_ignore_js() {
+        let result = parse_inline_ignore("/* foxguard: ignore */", Language::JavaScript);
+        assert!(result.is_some());
+        let (comment_only, spec) = result.unwrap();
+        assert!(comment_only);
+        assert!(spec.all_rules);
+    }
+
+    #[test]
+    fn block_comment_ignore_go() {
+        let result = parse_inline_ignore("/* foxguard: ignore */", Language::Go);
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn block_comment_ignore_java() {
+        let result = parse_inline_ignore("/* foxguard: ignore */", Language::Java);
+        assert!(result.is_some());
+    }
+
+    #[test]
+    fn block_comment_ignore_not_python() {
+        let result = parse_inline_ignore("/* foxguard: ignore */", Language::Python);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn block_comment_ignore_not_ruby() {
+        let result = parse_inline_ignore("/* foxguard: ignore */", Language::Ruby);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn block_comment_ignore_with_rule_id() {
+        let result =
+            parse_inline_ignore("/* foxguard: ignore[js/no-eval] */", Language::JavaScript);
+        assert!(result.is_some());
+        let (_, spec) = result.unwrap();
+        assert!(!spec.all_rules);
+        assert!(spec.rule_ids.contains("js/no-eval"));
+    }
+
+    #[test]
+    fn path_exclude_matcher_matches_prefixes_recursively() {
+        let matcher =
+            PathExcludeMatcher::new(&["vendor".to_string()]).expect("failed to build matcher");
+
+        assert!(matcher.is_excluded(Path::new("vendor/file.js")));
+        assert!(matcher.is_excluded(Path::new("vendor/nested/file.js")));
+        assert!(!matcher.is_excluded(Path::new("src/vendor/file.js")));
+    }
+
+    #[test]
+    fn path_exclude_matcher_matches_globs() {
+        let matcher = PathExcludeMatcher::new(&["generated/**/*.js".to_string()])
+            .expect("failed to build matcher");
+
+        assert!(matcher.is_excluded(Path::new("generated/foo/bar.js")));
+        assert!(!matcher.is_excluded(Path::new("generated/foo/bar.ts")));
+    }
+
+    #[test]
+    fn ast_rule_batch_dispatches_by_analysis_requirement() {
+        let syntax_calls = Arc::new(AtomicUsize::new(0));
+        let context_calls = Arc::new(AtomicUsize::new(0));
+        let syntax_rule = CountingRule {
+            id: "test/syntax",
+            requirement: AstAnalysisRequirement::SyntaxTree,
+            syntax_calls: Arc::clone(&syntax_calls),
+            context_calls: Arc::clone(&context_calls),
+        };
+        let context_rule = CountingRule {
+            id: "test/context",
+            requirement: AstAnalysisRequirement::FileContext,
+            syntax_calls: Arc::clone(&syntax_calls),
+            context_calls: Arc::clone(&context_calls),
+        };
+        let rules: Vec<&dyn Rule> = vec![&syntax_rule, &context_rule];
+        let batch = AstRuleBatch::from_rules(&rules);
+        let source = "const value = 1;\n";
+        let tree = super::super::parser::parse_file(source, Language::JavaScript).expect("parse");
+
+        let findings = batch.run(source, &tree, &FileContext::default()).unwrap();
+
+        assert!(findings.is_empty());
+        assert_eq!(syntax_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(context_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn concurrent_scans_keep_secret_thresholds_per_registry() {
+        let repo = tempfile::tempdir().expect("failed to create temp dir");
+        for index in 0..64 {
+            std::fs::write(
+                repo.path().join(format!("file-{index}.js")),
+                "const apiKey = \"secret1\";\n",
+            )
+            .expect("failed to write fixture");
+        }
+
+        let barrier = Arc::new(Barrier::new(2));
+        let low_path = repo.path().to_path_buf();
+        let high_path = repo.path().to_path_buf();
+        let low_barrier = Arc::clone(&barrier);
+        let high_barrier = Arc::clone(&barrier);
+
+        let low_threshold = std::thread::spawn(move || {
+            let mut registry = RuleRegistry::empty();
+            registry.register(Box::new(crate::rules::javascript::NoHardcodedSecret));
+            registry.set_secret_thresholds(crate::rules::common::SecretScanThresholds::new(
+                Some(4),
+                None,
+            ));
+            low_barrier.wait();
+
+            for _ in 0..8 {
+                let (result, notices) = scan_directory_with_notices(
+                    low_path.to_str().expect("non-utf8 path"),
+                    &registry,
+                    1_000_000,
+                    None,
+                );
+                assert!(notices.is_empty());
+                assert_eq!(result.findings.len(), 64);
+            }
+        });
+
+        let high_threshold = std::thread::spawn(move || {
+            let mut registry = RuleRegistry::empty();
+            registry.register(Box::new(crate::rules::javascript::NoHardcodedSecret));
+            registry.set_secret_thresholds(crate::rules::common::SecretScanThresholds::new(
+                Some(9),
+                None,
+            ));
+            high_barrier.wait();
+
+            for _ in 0..8 {
+                let (result, notices) = scan_directory_with_notices(
+                    high_path.to_str().expect("non-utf8 path"),
+                    &registry,
+                    1_000_000,
+                    None,
+                );
+                assert!(notices.is_empty());
+                assert!(result.findings.is_empty());
+            }
+        });
+
+        low_threshold
+            .join()
+            .unwrap_or_else(|_| panic!("low-threshold scan panicked"));
+        high_threshold
+            .join()
+            .unwrap_or_else(|_| panic!("high-threshold scan panicked"));
+    }
+
+    #[test]
+    fn scan_stats_track_ignored_and_unsupported_files() {
+        let repo = tempfile::tempdir().expect("failed to create temp dir");
+        std::fs::write(repo.path().join("included.js"), "const value = 1;\n")
+            .expect("failed to write included file");
+        std::fs::write(repo.path().join("ignored.js"), "const value = 2;\n")
+            .expect("failed to write ignored file");
+        std::fs::write(repo.path().join("README.md"), "# fixture\n")
+            .expect("failed to write unsupported file");
+
+        let excludes =
+            PathExcludeMatcher::new(&["ignored.js".to_string()]).expect("exclude matcher");
+        let (result, notices) = scan_directory_with_notices(
+            repo.path().to_str().expect("non-utf8 path"),
+            &RuleRegistry::empty(),
+            1_048_576,
+            Some(&excludes),
+        );
+
+        assert!(notices.is_empty(), "unexpected notices: {notices:?}");
+        assert_eq!(result.files_scanned, 1);
+        assert_eq!(result.stats.files_discovered, 3);
+        assert_eq!(result.stats.files_scanned, 1);
+        assert_eq!(result.stats.files_skipped, 2);
+        assert_eq!(result.stats.files_ignored, 1);
+        assert_eq!(result.stats.unsupported_files, 1);
+    }
+
+    #[test]
+    fn dockerfile_filename_detection() {
+        // Exact name "Dockerfile" must detect as Dockerfile.
+        assert_eq!(
+            detect_language(Path::new("Dockerfile")),
+            Some(Language::Dockerfile),
+            "bare 'Dockerfile' should be detected"
+        );
+        // Lowercase variant
+        assert_eq!(
+            detect_language(Path::new("dockerfile")),
+            Some(Language::Dockerfile),
+            "'dockerfile' (lowercase) should be detected"
+        );
+        // Stage-specific variant: Dockerfile.prod
+        assert_eq!(
+            detect_language(Path::new("Dockerfile.prod")),
+            Some(Language::Dockerfile),
+            "'Dockerfile.prod' should be detected"
+        );
+        // *.dockerfile extension
+        assert_eq!(
+            detect_language(Path::new("backend.dockerfile")),
+            Some(Language::Dockerfile),
+            "'backend.dockerfile' should be detected via extension"
+        );
+    }
+
+    #[test]
+    fn groovy_extension_and_jenkinsfile_detection() {
+        for name in [
+            "build.gradle",
+            "Foo.groovy",
+            "script.gvy",
+            "Jenkinsfile",
+            "Jenkinsfile.release",
+        ] {
+            assert_eq!(
+                detect_language(Path::new(name)),
+                Some(Language::Groovy),
+                "{name}"
+            );
+        }
+        assert_eq!(
+            detect_language(Path::new("build.gradle.kts")),
+            Some(Language::Kotlin)
+        );
+        assert_eq!(detect_language(Path::new("Jenkinsfilex")), None);
+    }
+
+    #[test]
+    fn haskell_extension_detection() {
+        assert_eq!(
+            detect_language(Path::new("Main.hs")),
+            Some(Language::Haskell)
+        );
+        assert_eq!(
+            detect_language(Path::new("Module.lhs")),
+            Some(Language::Haskell)
+        );
+        assert_eq!(
+            detect_language(Path::new("Bindings.hsc")),
+            Some(Language::Haskell)
+        );
+    }
+
+    #[test]
+    fn exhausted_file_budget_reports_timeout_instead_of_dropping_file() {
+        let repo = tempfile::tempdir().expect("failed to create temp dir");
+        std::fs::write(repo.path().join("slow.js"), "var a = 1;\n").unwrap();
+        let files = vec![(repo.path().join("slow.js"), Language::JavaScript)];
+        let scan = |budget| {
+            scan_files(
+                repo.path(),
+                files.clone(),
+                &RuleRegistry::empty(),
+                1_048_576,
+                ScanStats::default(),
+                budget,
+            )
+        };
+
+        let (result, notices) = scan(Some(std::time::Duration::ZERO));
+        assert_eq!(result.stats.timed_out_files, 1);
+        assert_eq!(result.stats.files_scanned, 0);
+        assert!(result
+            .stats
+            .skipped_summary()
+            .unwrap()
+            .contains("timed out"));
+        assert!(
+            notices
+                .iter()
+                .any(|n| n.contains("slow.js") && n.contains("timed out")),
+            "expected timeout notice, got {notices:?}"
+        );
+        // Exit policy: fatal by default, tolerated when explicitly allowed.
+        assert!(result
+            .stats
+            .error_summary()
+            .unwrap()
+            .contains("file timeout"));
+        assert!(result.stats.error_summary_with(false).is_none());
+
+        let (result, notices) = scan(None);
+        assert_eq!(result.stats.timed_out_files, 0);
+        assert_eq!(result.stats.files_scanned, 1);
+        assert!(notices.is_empty());
+    }
+
+    #[test]
+    fn scan_stats_track_binary_and_parse_error_files() {
+        let repo = tempfile::tempdir().expect("failed to create temp dir");
+        std::fs::write(repo.path().join("binary.js"), [0xff, 0xfe])
+            .expect("failed to write binary file");
+        std::fs::write(repo.path().join("broken.js"), "function (\n")
+            .expect("failed to write broken file");
+
+        let (result, notices) = scan_directory_with_notices(
+            repo.path().to_str().expect("non-utf8 path"),
+            &RuleRegistry::empty(),
+            1_048_576,
+            None,
+        );
+
+        assert_eq!(result.files_scanned, 0);
+        assert_eq!(result.stats.files_discovered, 2);
+        assert_eq!(result.stats.files_skipped, 2);
+        assert_eq!(result.stats.binary_files, 1);
+        assert_eq!(result.stats.parse_error_files, 1);
+        assert!(
+            notices
+                .iter()
+                .any(|notice| notice.contains("binary or non-UTF-8")),
+            "expected binary warning, got {notices:?}"
+        );
+        assert!(
+            notices.iter().any(|notice| notice.contains("parse error")),
+            "expected parse warning, got {notices:?}"
+        );
+    }
+}

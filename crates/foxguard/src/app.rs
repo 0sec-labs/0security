@@ -1,0 +1,1295 @@
+use crate::baseline::{
+    compare_with_baseline_at_root, load_baseline, suppress_with_baseline_at_root,
+    write_baseline_at_root, BaselineComparison, BaselineFile,
+};
+use crate::cli::{DiffArgs, OutputFormat, PrSecurityPolicyArgs, ScanArgs, SecretsArgs, TuiArgs};
+use crate::config::{
+    apply_scan_defaults, apply_secrets_defaults, apply_severity_overrides, config_root_for_scan,
+    load_for_scan, secret_scan_thresholds, suppress_with_patterns, suppress_with_scan_ignores,
+    FoxguardConfig,
+};
+use crate::deps::{scan_dependency_vulnerabilities, DependencyScanOptions};
+use crate::diff::run_diff_with_coccinelle_warnings;
+use crate::engine::{
+    coccinelle, codeql, scan_directory_with_notices, scan_paths_with_root_with_notices, ScanResult,
+    ScanStats,
+};
+use crate::pr_policy::{
+    resolve as resolve_pr_security_policy, PrPolicyNotEvaluated, PrPolicyNotEvaluatedReason,
+    PrSecurityPolicy,
+};
+use crate::rules::semgrep_compat::load_semgrep_rules;
+use crate::rules::RuleRegistry;
+use crate::scan_plan::{ScanPlan, ScanTargetRequest};
+use crate::secrets::{
+    scan_directory_with_config_and_notices, scan_paths_with_config_and_notices, SecretScanConfig,
+};
+use crate::Finding;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
+
+pub struct ScanExecution {
+    pub args: ScanArgs,
+    pub findings: Vec<Finding>,
+    pub files_scanned: usize,
+    pub stats: ScanStats,
+    pub duration: std::time::Duration,
+    pub notices: Vec<String>,
+    pub pr_security_policy: Option<PrSecurityPolicy>,
+    pub pr_security_policy_not_evaluated: Option<PrPolicyNotEvaluated>,
+}
+
+pub struct SecretsExecution {
+    pub args: SecretsArgs,
+    pub findings: Vec<Finding>,
+    pub files_scanned: usize,
+    pub duration: std::time::Duration,
+    pub notices: Vec<String>,
+}
+
+pub struct DiffExecution {
+    pub args: DiffArgs,
+    pub findings: Vec<Finding>,
+    pub files_scanned: usize,
+    pub duration: std::time::Duration,
+    pub total_current: usize,
+    pub existing_count: usize,
+    pub notices: Vec<String>,
+    pub pr_security_policy: Option<PrSecurityPolicy>,
+    pub pr_security_policy_not_evaluated: Option<PrPolicyNotEvaluated>,
+}
+
+struct CodeQlDiffDatabases {
+    base: PathBuf,
+    head: PathBuf,
+}
+
+pub struct DiffSummary {
+    pub target: String,
+    pub total_current: usize,
+    pub existing_count: usize,
+}
+
+pub enum TuiMode {
+    Scan,
+    Diff { target: String },
+    Secrets,
+}
+
+pub struct TuiExecution {
+    pub mode: TuiMode,
+    pub path: String,
+    pub findings: Vec<Finding>,
+    pub files_scanned: usize,
+    pub duration: std::time::Duration,
+    pub explain: bool,
+    pub diff_summary: Option<DiffSummary>,
+    pub baseline_comparison: Option<BaselineComparison>,
+    pub notices: Vec<String>,
+}
+
+enum BaselineMode {
+    Suppress,
+    Compare,
+}
+
+impl BaselineMode {
+    fn apply(
+        self,
+        findings: Vec<Finding>,
+        baseline: Option<&BaselineFile>,
+        identity_root: &Path,
+    ) -> (Vec<Finding>, Option<BaselineComparison>) {
+        match self {
+            Self::Suppress => (
+                suppress_with_baseline_at_root(findings, baseline, identity_root),
+                None,
+            ),
+            Self::Compare => {
+                let comparison = baseline.map(|baseline| {
+                    compare_with_baseline_at_root(&findings, baseline, identity_root)
+                });
+                (findings, comparison)
+            }
+        }
+    }
+}
+
+pub fn resolve_scan_args(scan: &ScanArgs) -> Result<ScanArgs, String> {
+    let mut scan = scan.clone();
+    let config = load_for_scan(Path::new(&scan.path), scan.config.as_deref())?;
+    apply_scan_defaults(&mut scan, config.as_ref());
+    Ok(scan)
+}
+
+pub fn resolve_secrets_args(args: &SecretsArgs) -> Result<SecretsArgs, String> {
+    let mut args = args.clone();
+    let config = load_for_scan(Path::new(&args.path), args.config.as_deref())?;
+    apply_secrets_defaults(&mut args, config.as_ref());
+    Ok(args)
+}
+
+fn resolve_pr_security_policy_for_surface(
+    config: Option<&FoxguardConfig>,
+    args: &PrSecurityPolicyArgs,
+    github_pr: bool,
+) -> Result<Option<PrSecurityPolicy>, String> {
+    if !github_pr && !args.is_enabled() {
+        return Ok(None);
+    }
+
+    resolve_pr_security_policy(
+        config.and_then(|config| config.pr_security_policy.as_ref()),
+        &args.input(),
+    )
+    .map(Some)
+}
+
+fn scan_targets_pr_policy_root(scan_path: &Path, config_path: Option<&str>) -> bool {
+    if !scan_path.is_dir() {
+        return false;
+    }
+
+    let configured_root = config_root_for_scan(scan_path, config_path);
+    let Some(project_root) =
+        crate::path_identity::pr_policy_root(scan_path, configured_root.as_deref())
+    else {
+        return false;
+    };
+
+    crate::path_identity::resolve_path_for_boundary(scan_path) == project_root
+}
+
+pub fn scan_findings(scan: &ScanArgs) -> Result<ScanResult, String> {
+    let execution = execute_scan(scan)?;
+    Ok(ScanResult {
+        findings: execution.findings,
+        files_scanned: execution.files_scanned,
+        stats: execution.stats,
+        duration: execution.duration,
+    })
+}
+
+pub fn scan_findings_resolved(scan: ScanArgs) -> Result<ScanResult, String> {
+    let (execution, _) = execute_scan_resolved(scan, BaselineMode::Suppress)?;
+    Ok(ScanResult {
+        findings: execution.findings,
+        files_scanned: execution.files_scanned,
+        stats: execution.stats,
+        duration: execution.duration,
+    })
+}
+
+pub fn execute_scan(scan: &ScanArgs) -> Result<ScanExecution, String> {
+    execute_scan_resolved(resolve_scan_args(scan)?, BaselineMode::Suppress)
+        .map(|(execution, _)| execution)
+}
+
+fn execute_scan_resolved(
+    scan: ScanArgs,
+    baseline_mode: BaselineMode,
+) -> Result<(ScanExecution, Option<BaselineComparison>), String> {
+    let config = load_for_scan(Path::new(&scan.path), scan.config.as_deref())?;
+    validate_root_path(&scan.path)?;
+    validate_rules_path(scan.rules.as_deref())?;
+    let change_limited = scan.changed_files_from.is_some() || scan.changes.selection().is_some();
+    let requested_pr_security_policy = resolve_pr_security_policy_for_surface(
+        config.as_ref(),
+        &scan.pr_security_policy,
+        scan.github_pr.is_some(),
+    )?;
+    let full_repository_scan = requested_pr_security_policy.is_some()
+        && !change_limited
+        && scan_targets_pr_policy_root(Path::new(&scan.path), scan.config.as_deref());
+    let (pr_security_policy, pr_security_policy_not_evaluated) = match requested_pr_security_policy
+    {
+        Some(policy) if full_repository_scan => (Some(policy), None),
+        Some(policy) => {
+            let reason = if change_limited {
+                PrPolicyNotEvaluatedReason::ChangedOnlyScan
+            } else {
+                PrPolicyNotEvaluatedReason::PartialScan
+            };
+            (None, Some(PrPolicyNotEvaluated::new(policy, reason)))
+        }
+        None => (None, None),
+    };
+    let identity_root = finding_identity_root(Path::new(&scan.path), config.as_ref());
+
+    let mut registry = build_registry(scan.no_builtins, scan.rules.as_deref())?;
+    registry.set_secret_thresholds(secret_scan_thresholds(config.as_ref()));
+    let (mut coccinelle_rules, mut coccinelle_notices) = match scan.rules.as_deref() {
+        Some(rules_path) => coccinelle::load_coccinelle_rules(Path::new(rules_path)),
+        None => (Vec::new(), Vec::new()),
+    };
+    let (mut codeql_rules, mut codeql_notices) = match scan.rules.as_deref() {
+        Some(rules_path) => codeql::load_codeql_rules(Path::new(rules_path)),
+        None => (Vec::new(), Vec::new()),
+    };
+    if let Some(ref config) = config {
+        if !config.scan.rule_options.is_empty() {
+            let warnings = registry.configure_rules(&config.scan.rule_options)?;
+            for w in &warnings {
+                eprintln!("warning: {}", w);
+            }
+        }
+    }
+    let target_request = if let Some(list_file) = scan.changed_files_from.as_deref() {
+        // Explicit changed-file list (e.g. from the GitHub App): scan only
+        // these paths but keep `scan.path` as the analysis root so cross-file
+        // taint context is preserved. Precedence over the change-mode flags.
+        ScanTargetRequest::ChangedFilesList(list_file.into())
+    } else if let Some(selection) = scan.changes.selection() {
+        ScanTargetRequest::GitChanges(selection)
+    } else {
+        ScanTargetRequest::FullTree
+    };
+    let plan = ScanPlan::resolve(
+        &scan.path,
+        target_request,
+        scan.exclude.clone(),
+        scan.max_file_size,
+    )?;
+    let excludes = plan.exclude_matcher()?;
+    crate::engine::budget::set_file_timeout(
+        (scan.file_timeout > 0).then(|| std::time::Duration::from_secs(scan.file_timeout)),
+    );
+    let targets = plan.paths();
+    let coccinelle_rule_ids = coccinelle::rule_ids(&coccinelle_rules);
+    let codeql_rule_ids = codeql::rule_ids(&codeql_rules);
+
+    // In PQ mode, filter to only PQ-related rules
+    let pq_enable: Vec<String>;
+    let rule_filter_unknown = if scan.pq_mode {
+        pq_enable = collect_pq_rule_ids(&registry, &coccinelle_rule_ids, &codeql_rule_ids);
+        if pq_enable.is_empty() {
+            eprintln!(
+                "Warning: no PQ rules registered in this build. \
+                 Install a version with post-quantum crypto rules to use 'foxguard pqc'."
+            );
+        }
+        coccinelle::apply_rule_filter(&mut coccinelle_rules, &pq_enable, &[]);
+        codeql::apply_rule_filter(&mut codeql_rules, &pq_enable, &[]);
+        let external_rule_ids = external_rule_ids(&coccinelle_rule_ids, &codeql_rule_ids);
+        registry.apply_rule_filter_with_known(&pq_enable, &[], &external_rule_ids)
+    } else if let Some(config) = config.as_ref() {
+        coccinelle::apply_rule_filter(
+            &mut coccinelle_rules,
+            &config.scan.enable_rules,
+            &config.scan.disable_rules,
+        );
+        codeql::apply_rule_filter(
+            &mut codeql_rules,
+            &config.scan.enable_rules,
+            &config.scan.disable_rules,
+        );
+        let external_rule_ids = external_rule_ids(&coccinelle_rule_ids, &codeql_rule_ids);
+        registry.apply_rule_filter_with_known(
+            &config.scan.enable_rules,
+            &config.scan.disable_rules,
+            &external_rule_ids,
+        )
+    } else {
+        let external_rule_ids = external_rule_ids(&coccinelle_rule_ids, &codeql_rule_ids);
+        registry.apply_rule_filter_with_known(&[], &[], &external_rule_ids)
+    };
+
+    let scan_started = std::time::Instant::now();
+    let sca_only = scan.sca
+        && registry.all_rules().is_empty()
+        && coccinelle_rules.is_empty()
+        && codeql_rules.is_empty();
+    let (result, mut notices) = if sca_only {
+        (
+            ScanResult {
+                findings: Vec::new(),
+                files_scanned: 0,
+                stats: ScanStats::default(),
+                duration: std::time::Duration::default(),
+            },
+            Vec::new(),
+        )
+    } else if let Some(files) = targets {
+        scan_paths_with_root_with_notices(
+            Path::new(&scan.path),
+            files,
+            &registry,
+            scan.max_file_size,
+            Some(&excludes),
+        )
+    } else {
+        scan_directory_with_notices(&scan.path, &registry, scan.max_file_size, Some(&excludes))
+    };
+    let timeouts_fatal = scan.on_file_timeout == crate::cli::FileTimeoutPolicy::Fail;
+    if let Some(errors) = result.stats.error_summary_with(timeouts_fatal) {
+        return Err(format!(
+            "Scan incomplete: {errors}.\n{}",
+            notices.join("\n")
+        ));
+    }
+    notices.append(&mut coccinelle_notices);
+    notices.append(&mut codeql_notices);
+
+    if !rule_filter_unknown.is_empty() {
+        notices.insert(
+            0,
+            format!(
+                "Warning: unknown rule id{} in config (enable_rules/disable_rules): {}",
+                if rule_filter_unknown.len() == 1 {
+                    ""
+                } else {
+                    "s"
+                },
+                rule_filter_unknown.join(", ")
+            ),
+        );
+    }
+
+    let mut files_scanned = result.files_scanned;
+    let stats = result.stats;
+    let mut findings = result.findings;
+    let mut coccinelle_candidate_files = 0;
+    let mut codeql_candidate_rules = 0;
+
+    if !coccinelle_rules.is_empty() {
+        let coccinelle_result = if let Some(files) = targets {
+            coccinelle::scan_paths_with_notices(
+                Path::new(&scan.path),
+                files,
+                &coccinelle_rules,
+                scan.max_file_size,
+                Some(&excludes),
+            )
+        } else {
+            coccinelle::scan_path_with_notices(
+                Path::new(&scan.path),
+                &coccinelle_rules,
+                scan.max_file_size,
+                Some(&excludes),
+            )
+        };
+        coccinelle_candidate_files = coccinelle_result.candidate_files;
+        files_scanned += coccinelle_result.files_scanned;
+        notices.extend(coccinelle_result.notices);
+        findings.extend(coccinelle_result.findings);
+        findings.sort_by(|a, b| {
+            a.file
+                .cmp(&b.file)
+                .then(a.line.cmp(&b.line))
+                .then(a.column.cmp(&b.column))
+                .then(a.rule_id.cmp(&b.rule_id))
+        });
+    }
+    if !codeql_rules.is_empty() {
+        let codeql_result = codeql::scan_with_notices_for_target(
+            &codeql_rules,
+            scan.codeql_db.as_deref().map(Path::new),
+            Some(Path::new(&scan.path)),
+        );
+        codeql_candidate_rules = codeql_result.candidate_rules;
+        files_scanned += codeql_result.files_scanned;
+        notices.extend(codeql_result.notices);
+        findings.extend(codeql_result.findings);
+        findings.sort_by(|a, b| {
+            a.file
+                .cmp(&b.file)
+                .then(a.line.cmp(&b.line))
+                .then(a.column.cmp(&b.column))
+                .then(a.rule_id.cmp(&b.rule_id))
+        });
+    }
+
+    if scan.sca {
+        let sca_options = DependencyScanOptions {
+            offline: scan.sca_offline,
+            advisory_db: scan.sca_db.as_ref().map(PathBuf::from),
+            cache_path: scan.sca_cache.as_ref().map(PathBuf::from),
+        };
+        let sca_result = scan_dependency_vulnerabilities(
+            Path::new(&scan.path),
+            targets,
+            Some(&excludes),
+            scan.max_file_size,
+            &sca_options,
+        )?;
+        files_scanned += sca_result.files_scanned;
+        notices.extend(sca_result.notices);
+        findings.extend(sca_result.findings);
+        findings.sort_by(|a, b| {
+            a.file
+                .cmp(&b.file)
+                .then(a.line.cmp(&b.line))
+                .then(a.column.cmp(&b.column))
+                .then(a.rule_id.cmp(&b.rule_id))
+        });
+    }
+
+    // PQ audit: also open the ACTUAL cryptographic material in the repo
+    // (X.509 certs and keys) and emit real crypto findings. This is only run
+    // for `foxguard pqc` (pq_mode); it complements the pattern-matching rules
+    // by parsing the deployed certs/keys directly. Defensive: never crashes on
+    // malformed material — bad files are skipped.
+    if scan.pq_mode {
+        let cert_result = crate::certscan::scan_certificates(
+            Path::new(&scan.path),
+            Path::new(&scan.path),
+            Some(&excludes),
+        );
+        files_scanned += cert_result.files_scanned;
+        notices.extend(cert_result.notices);
+        findings.extend(cert_result.findings);
+        findings.sort_by(|a, b| {
+            a.file
+                .cmp(&b.file)
+                .then(a.line.cmp(&b.line))
+                .then(a.column.cmp(&b.column))
+                .then(a.rule_id.cmp(&b.rule_id))
+        });
+    }
+
+    let duration = scan_started.elapsed();
+    append_scan_stats_notice(&mut notices, &stats);
+
+    // CNSA 2.0 deadline annotation. Runs regardless of the `--cnsa2`
+    // opt-in flag because SARIF always carries the field in `properties`
+    // — it's metadata. The flag only controls terminal surface (see
+    // `src/main.rs`).
+    crate::compliance::annotate_cnsa2_deadlines(&mut findings, &registry);
+
+    let mut known_rule_ids = collect_rule_ids(&registry, &coccinelle_rules, &codeql_rules);
+    if scan.sca {
+        known_rule_ids.insert(crate::deps::OSV_RULE_ID.to_string());
+    }
+    let override_warnings =
+        apply_severity_overrides(&mut findings, config.as_ref(), &known_rule_ids);
+    notices.extend(override_warnings);
+
+    if let Some(min_conf) = scan.min_confidence {
+        findings.retain(|f| f.confidence >= min_conf);
+    }
+    crate::report::views::apply_views(&mut findings, &scan.views);
+
+    // Filter taint findings exceeding max_hops threshold
+    if let Some(ref cfg) = config {
+        if let Some(max) = cfg.scan.thresholds.taint.max_hops {
+            findings.retain(|f| f.taint_hops.is_none_or(|h| (h as usize) <= max));
+        }
+    }
+
+    if let Some(ref min_severity) = scan.severity {
+        let min = min_severity.to_severity();
+        findings.retain(|f| f.severity >= min);
+    }
+
+    findings = suppress_with_scan_ignores(findings, config.as_ref(), &identity_root);
+    findings = suppress_with_patterns(findings, config.as_ref());
+
+    if let Some(ref path) = scan.write_baseline {
+        write_baseline_at_root(Path::new(path), &findings, &identity_root)?;
+        notices.push(format!("Wrote baseline to {}", path));
+    }
+
+    let baseline = match scan.baseline.as_ref() {
+        Some(path) => load_baseline(Path::new(path))?,
+        None => None,
+    };
+
+    let (findings, baseline_comparison) =
+        baseline_mode.apply(findings, baseline.as_ref(), &identity_root);
+
+    if files_scanned == 0 && coccinelle_candidate_files == 0 && codeql_candidate_rules == 0 {
+        if stats.files_discovered == 0 {
+            let supported = if coccinelle_rules.is_empty() {
+                ".js, .ts, .py, .go, .rb, .java, .php, .rs, .cs, .swift, .kt, .hs"
+            } else {
+                ".js, .ts, .py, .go, .rb, .java, .php, .rs, .cs, .swift, .kt, .hs, .c, .h"
+            };
+            notices.push(format!("Warning: no files found. Supported: {supported}"));
+        } else {
+            notices.push(
+                "Warning: no files were scanned. See skipped-file summary for reasons.".to_string(),
+            );
+        }
+    }
+
+    if let Some(policy) = &pr_security_policy_not_evaluated {
+        notices.push(policy.to_string());
+    }
+
+    Ok((
+        ScanExecution {
+            args: scan,
+            findings,
+            files_scanned,
+            stats,
+            duration,
+            pr_security_policy,
+            pr_security_policy_not_evaluated,
+            notices,
+        },
+        baseline_comparison,
+    ))
+}
+
+pub fn execute_secrets(args: &SecretsArgs) -> Result<SecretsExecution, String> {
+    execute_secrets_resolved(resolve_secrets_args(args)?, BaselineMode::Suppress)
+        .map(|(execution, _)| execution)
+}
+
+fn execute_secrets_resolved(
+    args: SecretsArgs,
+    baseline_mode: BaselineMode,
+) -> Result<(SecretsExecution, Option<BaselineComparison>), String> {
+    let config_for_identity = load_for_scan(Path::new(&args.path), args.config.as_deref())?;
+    let identity_root = finding_identity_root(Path::new(&args.path), config_for_identity.as_ref());
+    validate_root_path(&args.path)?;
+
+    let scan_path = Path::new(&args.path);
+    let config = SecretScanConfig::from_inputs(
+        scan_path,
+        &args.exclude_paths,
+        args.exclude_path_file.as_deref().map(Path::new),
+        &args.ignored_rules,
+    )?;
+
+    let target_request = args
+        .changes
+        .selection()
+        .map(ScanTargetRequest::GitChanges)
+        .unwrap_or(ScanTargetRequest::FullTree);
+    let plan = ScanPlan::resolve(&args.path, target_request, vec![], args.max_file_size)?;
+    let (findings, mut notices, files_scanned, duration) = match plan.paths() {
+        Some(files) => {
+            let file_count = files.len();
+            let started = std::time::Instant::now();
+            let (findings, notices) =
+                scan_paths_with_config_and_notices(scan_path, files, &config, args.max_file_size);
+            (findings, notices, file_count, started.elapsed())
+        }
+        None => {
+            let started = std::time::Instant::now();
+            let (findings, notices) =
+                scan_directory_with_config_and_notices(&args.path, &config, args.max_file_size);
+            let files_scanned = count_secret_files(scan_path);
+            (findings, notices, files_scanned, started.elapsed())
+        }
+    };
+
+    if let Some(ref path) = args.write_baseline {
+        write_baseline_at_root(Path::new(path), &findings, &identity_root)?;
+        notices.push(format!("Wrote secrets baseline to {}", path));
+    }
+
+    let baseline = match args.baseline.as_ref() {
+        Some(path) => load_baseline(Path::new(path))?,
+        None => None,
+    };
+    let (findings, baseline_comparison) =
+        baseline_mode.apply(findings, baseline.as_ref(), &identity_root);
+
+    Ok((
+        SecretsExecution {
+            args,
+            findings,
+            files_scanned,
+            duration,
+            notices,
+        },
+        baseline_comparison,
+    ))
+}
+
+pub fn execute_diff(args: &DiffArgs) -> Result<DiffExecution, String> {
+    validate_root_path(&args.path)?;
+    let config = load_for_scan(Path::new(&args.path), args.config.as_deref())?;
+    let codeql_databases = resolve_codeql_diff_databases(args, config.as_ref())?;
+    let pr_security_policy_not_evaluated = resolve_pr_security_policy_for_surface(
+        config.as_ref(),
+        &args.pr_security_policy,
+        args.github_pr.is_some(),
+    )?
+    .map(|policy| PrPolicyNotEvaluated::new(policy, PrPolicyNotEvaluatedReason::DiffScan));
+    let pr_security_policy = None;
+    let identity_root = finding_identity_root(Path::new(&args.path), config.as_ref());
+    let config_scan = config.as_ref().map(|config| &config.scan);
+    let rules_path = args
+        .rules
+        .as_deref()
+        .or_else(|| config_scan.and_then(|scan_config| scan_config.rules.as_deref()));
+    let no_builtins = args.no_builtins
+        || config_scan
+            .map(|scan_config| scan_config.no_builtins)
+            .unwrap_or(false);
+    let min_severity = args
+        .severity
+        .or_else(|| config_scan.and_then(|scan_config| scan_config.severity));
+    let min_confidence = config_scan.and_then(|scan_config| scan_config.min_confidence);
+    let mut registry = build_registry(no_builtins, rules_path)?;
+    registry.set_secret_thresholds(secret_scan_thresholds(config.as_ref()));
+    let (mut coccinelle_rules, mut coccinelle_notices) = match rules_path {
+        Some(rules_path) => coccinelle::load_coccinelle_rules(Path::new(rules_path)),
+        None => (Vec::new(), Vec::new()),
+    };
+    let mut codeql_rules = if codeql_databases.is_some() {
+        let rules_path = rules_path.ok_or_else(|| {
+            "CodeQL diff requires --rules or scan.rules with engine: codeql rules".to_string()
+        })?;
+        codeql::load_codeql_rules_for_diff(Path::new(rules_path))?
+    } else {
+        Vec::new()
+    };
+    let coccinelle_rule_ids = coccinelle::rule_ids(&coccinelle_rules);
+    let codeql_rule_ids = codeql::rule_ids(&codeql_rules);
+    let external_rule_ids = external_rule_ids(&coccinelle_rule_ids, &codeql_rule_ids);
+    let rule_filter_unknown = if let Some(config) = config.as_ref() {
+        coccinelle::apply_rule_filter(
+            &mut coccinelle_rules,
+            &config.scan.enable_rules,
+            &config.scan.disable_rules,
+        );
+        codeql::apply_rule_filter(
+            &mut codeql_rules,
+            &config.scan.enable_rules,
+            &config.scan.disable_rules,
+        );
+        registry.apply_rule_filter_with_known(
+            &config.scan.enable_rules,
+            &config.scan.disable_rules,
+            &external_rule_ids,
+        )
+    } else {
+        registry.apply_rule_filter_with_known(&[], &[], &external_rule_ids)
+    };
+    let ((mut scan_result, mut diff_result), mut notices) = run_diff_with_coccinelle_warnings(
+        &args.path,
+        &args.target,
+        &registry,
+        &coccinelle_rules,
+        args.max_file_size,
+    )?;
+    notices.append(&mut coccinelle_notices);
+    append_scan_stats_notice(&mut notices, &scan_result.stats);
+
+    if let Some(databases) = codeql_databases {
+        let base_result = codeql::scan_prebuilt_database(&codeql_rules, &databases.base)
+            .map_err(|error| format!("CodeQL base database comparison could not run: {error}"))?;
+        let head_result = codeql::scan_prebuilt_database(&codeql_rules, &databases.head)
+            .map_err(|error| format!("CodeQL head database comparison could not run: {error}"))?;
+        let head_files_scanned = head_result.files_scanned;
+        let codeql_diff = codeql::diff_prebuilt_database_findings(head_result, base_result)
+            .map_err(|error| format!("CodeQL database comparison could not run: {error}"))?;
+
+        scan_result.files_scanned += head_files_scanned;
+        diff_result.total_current += codeql_diff.total_current;
+        diff_result.existing_count += codeql_diff.existing_count;
+        diff_result.new_findings.extend(codeql_diff.new_findings);
+        diff_result.new_findings.sort_by(|a, b| {
+            a.file
+                .cmp(&b.file)
+                .then(a.line.cmp(&b.line))
+                .then(a.column.cmp(&b.column))
+                .then(a.rule_id.cmp(&b.rule_id))
+        });
+    }
+
+    if !rule_filter_unknown.is_empty() {
+        notices.insert(
+            0,
+            format!(
+                "Warning: unknown rule id{} in config (enable_rules/disable_rules): {}",
+                if rule_filter_unknown.len() == 1 {
+                    ""
+                } else {
+                    "s"
+                },
+                rule_filter_unknown.join(", ")
+            ),
+        );
+    }
+
+    // Annotate CNSA 2.0 deadlines on the new findings surfaced by this diff.
+    crate::compliance::annotate_cnsa2_deadlines(&mut diff_result.new_findings, &registry);
+
+    let known_rule_ids = collect_rule_ids(&registry, &coccinelle_rules, &codeql_rules);
+    let override_warnings = apply_severity_overrides(
+        &mut diff_result.new_findings,
+        config.as_ref(),
+        &known_rule_ids,
+    );
+    notices.extend(override_warnings);
+
+    if let Some(min_conf) = min_confidence {
+        diff_result
+            .new_findings
+            .retain(|f| f.confidence >= min_conf);
+    }
+
+    if let Some(min_severity) = min_severity {
+        let min = min_severity.to_severity();
+        diff_result.new_findings.retain(|f| f.severity >= min);
+    }
+    crate::report::views::apply_views(&mut diff_result.new_findings, &args.views);
+
+    diff_result.new_findings =
+        suppress_with_scan_ignores(diff_result.new_findings, config.as_ref(), &identity_root);
+    diff_result.new_findings = suppress_with_patterns(diff_result.new_findings, config.as_ref());
+
+    notices.push(format!(
+        "foxguard diff vs {}: {} new issue{} ({} total, {} existing)",
+        args.target,
+        diff_result.new_findings.len(),
+        if diff_result.new_findings.len() == 1 {
+            ""
+        } else {
+            "s"
+        },
+        diff_result.total_current,
+        diff_result.existing_count
+    ));
+
+    if let Some(policy) = &pr_security_policy_not_evaluated {
+        notices.push(policy.to_string());
+    }
+
+    Ok(DiffExecution {
+        args: args.clone(),
+        findings: diff_result.new_findings,
+        files_scanned: scan_result.files_scanned,
+        duration: scan_result.duration,
+        total_current: diff_result.total_current,
+        existing_count: diff_result.existing_count,
+        pr_security_policy,
+        pr_security_policy_not_evaluated,
+        notices,
+    })
+}
+
+fn resolve_codeql_diff_databases(
+    args: &DiffArgs,
+    config: Option<&FoxguardConfig>,
+) -> Result<Option<CodeQlDiffDatabases>, String> {
+    if args.codeql_base_db.is_some() || args.codeql_head_db.is_some() {
+        return codeql_diff_database_pair(
+            args.codeql_base_db.as_deref(),
+            args.codeql_head_db.as_deref(),
+            "--codeql-base-db and --codeql-head-db",
+        );
+    }
+
+    let config = config.map(|config| &config.diff);
+    codeql_diff_database_pair(
+        config.and_then(|config| config.codeql_base_db.as_deref()),
+        config.and_then(|config| config.codeql_head_db.as_deref()),
+        "diff.codeql_base_db and diff.codeql_head_db",
+    )
+}
+
+fn codeql_diff_database_pair(
+    base: Option<&str>,
+    head: Option<&str>,
+    source: &str,
+) -> Result<Option<CodeQlDiffDatabases>, String> {
+    match (base, head) {
+        (Some(base), Some(head)) => Ok(Some(CodeQlDiffDatabases {
+            base: PathBuf::from(base),
+            head: PathBuf::from(head),
+        })),
+        (None, None) => Ok(None),
+        _ => Err(format!("CodeQL diff requires both {source}")),
+    }
+}
+
+fn append_scan_stats_notice(notices: &mut Vec<String>, stats: &ScanStats) {
+    if let Some(summary) = stats.skipped_summary() {
+        notices.push(format!(
+            "Skipped {} file{}: {}.",
+            stats.files_skipped,
+            if stats.files_skipped == 1 { "" } else { "s" },
+            summary
+        ));
+    }
+}
+
+pub fn execute_tui(args: &TuiArgs) -> Result<TuiExecution, String> {
+    if args.secrets {
+        let (result, baseline_comparison) = execute_secrets_resolved(
+            resolve_secrets_args(&tui_secrets_args(args))?,
+            BaselineMode::Compare,
+        )?;
+        return Ok(TuiExecution {
+            mode: TuiMode::Secrets,
+            path: result.args.path.clone(),
+            findings: result.findings,
+            files_scanned: result.files_scanned,
+            duration: result.duration,
+            explain: false,
+            diff_summary: None,
+            baseline_comparison,
+            notices: result.notices,
+        });
+    }
+
+    if let Some(target) = args.diff.as_ref() {
+        let result = execute_diff(&tui_diff_args(args, target))?;
+        return Ok(TuiExecution {
+            mode: TuiMode::Diff {
+                target: result.args.target.clone(),
+            },
+            path: result.args.path.clone(),
+            findings: result.findings,
+            files_scanned: result.files_scanned,
+            duration: result.duration,
+            explain: args.explain,
+            diff_summary: Some(DiffSummary {
+                target: result.args.target,
+                total_current: result.total_current,
+                existing_count: result.existing_count,
+            }),
+            baseline_comparison: None,
+            notices: result.notices,
+        });
+    }
+
+    let (result, baseline_comparison) = execute_scan_resolved(
+        resolve_scan_args(&tui_scan_args(args))?,
+        BaselineMode::Compare,
+    )?;
+    Ok(TuiExecution {
+        mode: TuiMode::Scan,
+        path: result.args.path.clone(),
+        findings: result.findings,
+        files_scanned: result.files_scanned,
+        duration: result.duration,
+        explain: result.args.explain,
+        diff_summary: None,
+        baseline_comparison,
+        notices: result.notices,
+    })
+}
+
+fn tui_scan_args(args: &TuiArgs) -> ScanArgs {
+    ScanArgs {
+        views: Default::default(),
+        path: args.path.clone(),
+        config: args.config.clone(),
+        format: OutputFormat::Terminal,
+        severity: args.severity,
+        rules: args.rules.clone(),
+        no_builtins: args.no_builtins,
+        codeql_db: None,
+        changes: args.changes.clone(),
+        changed_files_from: None,
+        exclude: args.exclude.clone(),
+        baseline: args.baseline.clone(),
+        write_baseline: None,
+        explain: args.explain,
+        github_pr: None,
+        pr_security_policy: PrSecurityPolicyArgs::default(),
+        quiet: false,
+        output: None,
+        max_file_size: args.max_file_size,
+        file_timeout: crate::engine::budget::DEFAULT_FILE_TIMEOUT_SECS,
+        on_file_timeout: crate::cli::FileTimeoutPolicy::Fail,
+        fix: false,
+        show_confidence: false,
+        min_confidence: None,
+        pq_mode: args.pq_mode,
+        sca: false,
+        sca_offline: false,
+        sca_db: None,
+        sca_cache: None,
+        cnsa2: args.pq_mode,
+    }
+}
+
+fn tui_diff_args(args: &TuiArgs, target: &str) -> DiffArgs {
+    DiffArgs {
+        views: Default::default(),
+        target: target.to_string(),
+        path: args.path.clone(),
+        format: OutputFormat::Terminal,
+        severity: args.severity,
+        config: args.config.clone(),
+        rules: args.rules.clone(),
+        codeql_base_db: None,
+        codeql_head_db: None,
+        no_builtins: args.no_builtins,
+        output: None,
+        github_pr: None,
+        pr_security_policy: PrSecurityPolicyArgs::default(),
+        max_file_size: args.max_file_size,
+    }
+}
+
+fn tui_secrets_args(args: &TuiArgs) -> SecretsArgs {
+    SecretsArgs {
+        path: args.path.clone(),
+        config: args.config.clone(),
+        format: OutputFormat::Terminal,
+        changes: args.changes.clone(),
+        baseline: args.baseline.clone(),
+        write_baseline: None,
+        exclude_paths: Vec::new(),
+        exclude_path_file: None,
+        ignored_rules: Vec::new(),
+        output: None,
+        max_file_size: args.max_file_size,
+    }
+}
+
+fn collect_rule_ids(
+    registry: &RuleRegistry,
+    coccinelle_rules: &[coccinelle::CoccinelleRule],
+    codeql_rules: &[codeql::CodeQlRule],
+) -> HashSet<String> {
+    let mut ids: HashSet<String> = registry
+        .all_rules()
+        .iter()
+        .map(|rule| rule.id().to_string())
+        .collect();
+    ids.extend(coccinelle_rules.iter().map(|rule| rule.id().to_string()));
+    ids.extend(codeql_rules.iter().map(|rule| rule.id().to_string()));
+    ids
+}
+
+fn finding_identity_root(scan_path: &Path, config: Option<&FoxguardConfig>) -> PathBuf {
+    crate::path_identity::project_root(
+        scan_path,
+        config.map(|config| config.project_root.as_path()),
+    )
+}
+
+fn collect_pq_rule_ids(
+    registry: &RuleRegistry,
+    coccinelle_rule_ids: &HashSet<String>,
+    codeql_rule_ids: &HashSet<String>,
+) -> Vec<String> {
+    let mut ids: Vec<String> = registry
+        .all_rules()
+        .iter()
+        .map(|rule| rule.id().to_string())
+        .filter(|id| is_pq_rule_id(id))
+        .collect();
+
+    for id in coccinelle_rule_ids {
+        if is_pq_rule_id(id) && !ids.iter().any(|existing| existing == id) {
+            ids.push(id.clone());
+        }
+    }
+    for id in codeql_rule_ids {
+        if is_pq_rule_id(id) && !ids.iter().any(|existing| existing == id) {
+            ids.push(id.clone());
+        }
+    }
+
+    ids
+}
+
+fn external_rule_ids(
+    coccinelle_rule_ids: &HashSet<String>,
+    codeql_rule_ids: &HashSet<String>,
+) -> HashSet<String> {
+    let mut ids = coccinelle_rule_ids.clone();
+    ids.extend(codeql_rule_ids.iter().cloned());
+    ids
+}
+
+fn build_registry(no_builtins: bool, rules: Option<&str>) -> Result<RuleRegistry, String> {
+    validate_rules_path(rules)?;
+
+    // `RuleRegistry::new()` registers both the hand-written Rust rules and
+    // the bundled YAML rule packs (currently `rules/kernel/dirty-frag-class/`)
+    // embedded into the binary at compile time. `--no-builtins` therefore
+    // suppresses BOTH sources — anyone passing it gets nothing unless they
+    // also pass `--rules <path>`. We deliberately do not expose a separate
+    // `--no-bundled-rules` flag: there is no current use case for "Rust core
+    // only, no shipped YAML". Add one only when someone hits that need.
+    let mut registry = if no_builtins {
+        RuleRegistry::empty()
+    } else {
+        RuleRegistry::new()
+    };
+
+    // `--rules <path>` still loads additional external packs on top of the
+    // bundled set; semantics unchanged.
+    if let Some(rules_path) = rules {
+        let semgrep_rules = load_semgrep_rules(Path::new(rules_path));
+        for rule in semgrep_rules {
+            registry.register(rule);
+        }
+    }
+
+    Ok(registry)
+}
+
+fn validate_root_path(path: &str) -> Result<(), String> {
+    if !Path::new(path).exists() {
+        return Err(format!("path '{}' does not exist", path));
+    }
+    Ok(())
+}
+
+fn validate_rules_path(rules: Option<&str>) -> Result<(), String> {
+    if let Some(rules_path) = rules {
+        let path = Path::new(rules_path);
+        if !path.exists() {
+            return Err(format!("rules path '{}' does not exist", rules_path));
+        }
+    }
+
+    Ok(())
+}
+
+/// Returns `true` if the rule ID belongs to the PQ audit rule set.
+fn is_pq_rule_id(id: &str) -> bool {
+    id.contains("pq-vulnerable")
+        // Informational post-quantum-ready detectors: the migration-target
+        // side of the audit. Included so `foxguard pqc` activates them (they
+        // are opt-in and therefore dormant in a normal scan).
+        || id.contains("pq-ready")
+        || id.contains("hardcoded-crypto-algorithm")
+        || id == "config/dockerfile-insecure-tls-env"
+}
+
+fn count_secret_files(scan_path: &Path) -> usize {
+    if scan_path.is_file() {
+        return 1;
+    }
+
+    ignore::WalkBuilder::new(scan_path)
+        .hidden(false)
+        .git_ignore(true)
+        .build()
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.file_type().is_some_and(|ft| ft.is_file()))
+        .count()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cli::Cli;
+    use clap::Parser;
+
+    #[test]
+    fn tui_keeps_baselined_findings_reviewable_while_cli_suppresses_them() {
+        let temp = tempfile::tempdir().expect("temporary project");
+        let source = temp.path().join("app.py");
+        std::fs::write(&source, "import os\nos.system(input())\n")
+            .expect("write vulnerable source");
+        let source = source.to_string_lossy().into_owned();
+        let baseline = temp
+            .path()
+            .join("baseline.json")
+            .to_string_lossy()
+            .into_owned();
+        let seed = Cli::try_parse_from(["foxguard", &source, "--write-baseline", &baseline])
+            .expect("parse baseline creation");
+        let original = execute_scan(&seed.scan).expect("create baseline");
+        assert!(original
+            .findings
+            .iter()
+            .any(|finding| finding.rule_id.contains("command-injection")));
+
+        let cli = Cli::try_parse_from(["foxguard", &source, "--baseline", &baseline])
+            .expect("parse CLI comparison");
+        assert!(execute_scan(&cli.scan)
+            .expect("CLI scan")
+            .findings
+            .is_empty());
+
+        let tui = Cli::try_parse_from(["foxguard", "tui", &source, "--baseline", &baseline])
+            .expect("parse TUI comparison");
+        let Some(crate::cli::Command::Tui(args)) = tui.command else {
+            panic!("expected TUI");
+        };
+        let review = execute_tui(&args).expect("TUI scan");
+        let comparison = review.baseline_comparison.expect("baseline comparison");
+        assert_eq!(review.findings.len(), original.findings.len());
+        assert_eq!(
+            comparison.recurring,
+            (0..review.findings.len()).collect::<Vec<_>>()
+        );
+        assert!(comparison.introduced.is_empty());
+        assert!(comparison.resolved.is_empty());
+    }
+
+    #[test]
+    fn pq_rule_ids_include_coccinelle_rules() {
+        let registry = RuleRegistry::empty();
+        let coccinelle_rule_ids = HashSet::from([
+            "kernel/pq-vulnerable-cocci".to_string(),
+            "kernel/non-pq-cocci".to_string(),
+        ]);
+
+        let ids = collect_pq_rule_ids(&registry, &coccinelle_rule_ids, &HashSet::new());
+
+        assert!(ids.contains(&"kernel/pq-vulnerable-cocci".to_string()));
+        assert!(!ids.contains(&"kernel/non-pq-cocci".to_string()));
+    }
+
+    #[test]
+    fn changed_file_scan_is_not_labeled_as_a_repository_policy_decision() {
+        let temp = tempfile::tempdir().expect("temporary repository");
+        std::fs::write(temp.path().join("app.py"), "print('safe')\n").expect("write source file");
+        let changed_files = temp.path().join("changed-files.txt");
+        std::fs::write(&changed_files, "app.py\n").expect("write changed-files list");
+        let path = temp.path().to_string_lossy().into_owned();
+        let changed_files = changed_files.to_string_lossy().into_owned();
+        let cli = Cli::try_parse_from([
+            "foxguard",
+            "--pr-policy",
+            "--changed-files-from",
+            &changed_files,
+            &path,
+        ])
+        .expect("parse CLI scan");
+
+        let result = execute_scan(&cli.scan).expect("scan changed file");
+
+        assert!(result.pr_security_policy.is_none());
+        assert_eq!(
+            result
+                .pr_security_policy_not_evaluated
+                .as_ref()
+                .map(|policy| policy.reason),
+            Some(PrPolicyNotEvaluatedReason::ChangedOnlyScan)
+        );
+    }
+
+    #[test]
+    fn cli_scan_without_a_project_root_is_not_a_repository_policy_scan() {
+        let temp = tempfile::tempdir().expect("temporary directory");
+        std::fs::write(temp.path().join("app.py"), "print('safe')\n").expect("write source file");
+        let path = temp.path().to_string_lossy().into_owned();
+        let cli = Cli::try_parse_from(["foxguard", "--pr-policy", &path]).expect("parse CLI scan");
+
+        let result = execute_scan(&cli.scan).expect("scan directory");
+
+        assert!(result.pr_security_policy.is_none());
+        assert_eq!(
+            result
+                .pr_security_policy_not_evaluated
+                .as_ref()
+                .map(|policy| policy.reason),
+            Some(PrPolicyNotEvaluatedReason::PartialScan)
+        );
+    }
+
+    #[test]
+    fn cli_nested_repository_directory_is_not_a_repository_policy_scan() {
+        let temp = tempfile::tempdir().expect("temporary repository");
+        let repo = temp.path();
+        git(repo, &["init", "-q"]);
+        let source = repo.join("src").join("app.py");
+        std::fs::create_dir_all(source.parent().expect("source parent"))
+            .expect("create source directory");
+        std::fs::write(
+            source
+                .parent()
+                .expect("source parent")
+                .join(".foxguard.yml"),
+            "scan: {}\n",
+        )
+        .expect("write nested config");
+        std::fs::write(&source, "print('safe')\n").expect("write source file");
+        let path = source
+            .parent()
+            .expect("source parent")
+            .to_string_lossy()
+            .into_owned();
+        let cli = Cli::try_parse_from(["foxguard", "--pr-policy", &path]).expect("parse CLI scan");
+
+        let result = execute_scan(&cli.scan).expect("scan nested directory");
+
+        assert!(result.pr_security_policy.is_none());
+        assert_eq!(
+            result
+                .pr_security_policy_not_evaluated
+                .as_ref()
+                .map(|policy| policy.reason),
+            Some(PrPolicyNotEvaluatedReason::PartialScan)
+        );
+    }
+
+    #[test]
+    fn cli_git_root_beats_ancestor_explicit_config_for_policy_scope() {
+        let temp = tempfile::tempdir().expect("temporary directory");
+        let repo = temp.path().join("repo");
+        std::fs::create_dir_all(&repo).expect("create repository");
+        git(&repo, &["init", "-q"]);
+        std::fs::write(repo.join("app.py"), "print('safe')\n").expect("write source file");
+        let config = temp.path().join("foxguard.yml");
+        std::fs::write(&config, "scan: {}\n").expect("write ancestor config");
+        let path = repo.to_string_lossy().into_owned();
+        let config = config.to_string_lossy().into_owned();
+        let cli = Cli::try_parse_from(["foxguard", "--pr-policy", "--config", &config, &path])
+            .expect("parse CLI scan");
+
+        let result = execute_scan(&cli.scan).expect("scan Git root");
+
+        assert!(result.pr_security_policy.is_some());
+        assert!(result.pr_security_policy_not_evaluated.is_none());
+    }
+
+    fn git(repo: &Path, args: &[&str]) {
+        let status = std::process::Command::new("git")
+            .current_dir(repo)
+            .args(args)
+            .status()
+            .expect("run git");
+        assert!(status.success(), "git {:?} failed", args);
+    }
+
+    #[test]
+    fn diff_policy_is_explicitly_not_evaluated() {
+        let temp = tempfile::tempdir().expect("temporary repository");
+        let repo = temp.path();
+        git(repo, &["init", "-q"]);
+        std::fs::write(repo.join("app.py"), "print('before')\n").expect("write source file");
+        git(repo, &["add", "app.py"]);
+        git(
+            repo,
+            &[
+                "-c",
+                "user.name=Foxguard Test",
+                "-c",
+                "user.email=test@example.invalid",
+                "commit",
+                "-qm",
+                "initial",
+            ],
+        );
+        std::fs::write(repo.join("app.py"), "print('after')\n").expect("modify source file");
+
+        let result = execute_diff(&DiffArgs {
+            views: Default::default(),
+            target: "HEAD".to_string(),
+            path: repo.to_string_lossy().into_owned(),
+            config: None,
+            format: OutputFormat::Json,
+            severity: None,
+            rules: None,
+            codeql_base_db: None,
+            codeql_head_db: None,
+            no_builtins: false,
+            output: None,
+            github_pr: None,
+            pr_security_policy: PrSecurityPolicyArgs {
+                pr_policy: true,
+                ..PrSecurityPolicyArgs::default()
+            },
+            max_file_size: 1_048_576,
+        })
+        .expect("run diff");
+
+        assert!(result.pr_security_policy.is_none());
+        assert_eq!(
+            result
+                .pr_security_policy_not_evaluated
+                .as_ref()
+                .map(|policy| policy.reason),
+            Some(PrPolicyNotEvaluatedReason::DiffScan)
+        );
+    }
+}

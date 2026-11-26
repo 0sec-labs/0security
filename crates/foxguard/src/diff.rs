@@ -1,0 +1,511 @@
+use crate::engine::{
+    coccinelle, scan_directory_with_notices, scan_paths_with_root_with_notices, ScanResult,
+    ScanStats,
+};
+use crate::path_identity::{finding_path_key, stored_path_key};
+use crate::rules::RuleRegistry;
+use crate::Finding;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+/// Result of a diff scan: new findings plus summary counts.
+pub struct DiffResult {
+    pub new_findings: Vec<Finding>,
+    pub total_current: usize,
+    pub existing_count: usize,
+}
+
+/// Run git in a specific repo directory.
+fn run_git(repo_root: &Path, args: &[&str]) -> Result<String, String> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo_root)
+        .args(args)
+        .output()
+        .map_err(|e| format!("Failed to run git: {}", e))?;
+
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+/// Get the repo root for the given path.
+fn repo_root(path: &Path) -> Result<PathBuf, String> {
+    let dir = if path.is_dir() {
+        path
+    } else {
+        path.parent().unwrap_or(Path::new("."))
+    };
+    let root = run_git(dir, &["rev-parse", "--show-toplevel"])?;
+    Ok(PathBuf::from(root.trim()))
+}
+
+/// Get files changed between the target branch and HEAD.
+fn changed_files_vs_target(repo_root: &Path, target: &str) -> Result<Vec<PathBuf>, String> {
+    // Get the merge base to find only truly changed files
+    let merge_base =
+        run_git(repo_root, &["merge-base", target, "HEAD"]).unwrap_or_else(|_| target.to_string());
+    let merge_base = merge_base.trim();
+
+    let stdout = run_git(
+        repo_root,
+        &[
+            "diff",
+            "--name-only",
+            "-z",
+            "--diff-filter=ACMR",
+            merge_base,
+        ],
+    )?;
+
+    let mut files = Vec::new();
+    for name in stdout.split('\0').filter(|name| !name.is_empty()) {
+        let path = repo_root.join(name);
+        if path.exists() {
+            files.push(path);
+        }
+    }
+
+    Ok(files)
+}
+
+/// Read a file's contents from a specific git ref.
+fn read_file_at_ref(repo_root: &Path, git_ref: &str, rel_path: &str) -> Result<String, String> {
+    let spec = format!("{}:{}", git_ref, rel_path);
+    run_git(repo_root, &["show", &spec])
+}
+
+fn scan_target_branch_files_with_warnings(
+    repo_root: &Path,
+    target: &str,
+    changed_files: &[PathBuf],
+    registry: &RuleRegistry,
+    coccinelle_rules: &[coccinelle::CoccinelleRule],
+    max_file_size: u64,
+) -> Result<(ScanResult, Vec<String>), String> {
+    let temp_dir =
+        tempfile::tempdir().map_err(|e| format!("Failed to create temp directory: {}", e))?;
+
+    let mut temp_paths = Vec::new();
+
+    for file in changed_files {
+        let rel_path = file
+            .strip_prefix(repo_root)
+            .map_err(|e| format!("Failed to get relative path: {}", e))?;
+        let rel_str = rel_path.to_string_lossy().to_string();
+
+        // Try to read from the target branch; skip files that don't exist there (new files)
+        let content = match read_file_at_ref(repo_root, target, &rel_str) {
+            Ok(c) => c,
+            Err(_) => continue, // file doesn't exist on target branch
+        };
+
+        let temp_path = temp_dir.path().join(rel_path);
+        if let Some(parent) = temp_path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("Failed to create temp dir: {}", e))?;
+        }
+        std::fs::write(&temp_path, &content)
+            .map_err(|e| format!("Failed to write temp file: {}", e))?;
+
+        temp_paths.push(temp_path);
+    }
+
+    if temp_paths.is_empty() {
+        return Ok((
+            ScanResult {
+                findings: Vec::new(),
+                files_scanned: 0,
+                stats: ScanStats::default(),
+                duration: std::time::Duration::ZERO,
+            },
+            Vec::new(),
+        ));
+    }
+
+    let (mut result, mut warnings) = scan_paths_with_root_with_notices(
+        temp_dir.path(),
+        &temp_paths,
+        registry,
+        max_file_size,
+        None,
+    );
+    if let Some(errors) = result.stats.error_summary() {
+        return Err(format!(
+            "Target branch scan incomplete: {errors}.\n{}",
+            warnings.join("\n")
+        ));
+    }
+    // Rewrite temp-checkout findings back to repo-relative paths before diffing.
+    for finding in &mut result.findings {
+        finding.file = stored_path_key(temp_dir.path(), &finding.file);
+    }
+
+    if !coccinelle_rules.is_empty() {
+        append_coccinelle_scan(
+            &mut result,
+            &mut warnings,
+            coccinelle::scan_paths_with_notices(
+                temp_dir.path(),
+                &temp_paths,
+                coccinelle_rules,
+                max_file_size,
+                None,
+            ),
+        );
+    }
+
+    Ok((result, warnings))
+}
+
+/// Two findings are "the same" if they share the same rule id, full normalized
+/// relative path, and snippet content. We deliberately ignore line numbers since
+/// they shift with edits, but we keep the whole path so distinct files do not
+/// collapse just because their tail components happen to match.
+fn stored_finding_key(root: &Path, finding: &Finding) -> (String, String, String) {
+    (
+        finding.rule_id.clone(),
+        stored_path_key(root, &finding.file),
+        finding.snippet.trim().to_string(),
+    )
+}
+
+fn current_finding_key(root: &Path, finding: &Finding) -> (String, String, String) {
+    (
+        finding.rule_id.clone(),
+        finding_path_key(root, &finding.file),
+        finding.snippet.trim().to_string(),
+    )
+}
+
+/// Compute new findings: those in current but not in base.
+/// Matching is by (rule_id, full_normalized_path, snippet_content).
+pub fn diff_findings(current: Vec<Finding>, base: Vec<Finding>) -> DiffResult {
+    diff_findings_with_root(current, base, Path::new("."))
+}
+
+fn diff_findings_with_root(current: Vec<Finding>, base: Vec<Finding>, root: &Path) -> DiffResult {
+    let total_current = current.len();
+
+    let base_keys: HashSet<(String, String, String)> = base
+        .iter()
+        .map(|finding| stored_finding_key(root, finding))
+        .collect();
+
+    let new_findings: Vec<Finding> = current
+        .into_iter()
+        .filter(|finding| !base_keys.contains(&current_finding_key(root, finding)))
+        .collect();
+
+    let existing_count = total_current - new_findings.len();
+
+    DiffResult {
+        new_findings,
+        total_current,
+        existing_count,
+    }
+}
+
+/// Run a full diff scan: scan current tree, scan target branch files, return new findings.
+pub fn run_diff(
+    scan_path: &str,
+    target: &str,
+    registry: &RuleRegistry,
+    max_file_size: u64,
+) -> Result<(ScanResult, DiffResult), String> {
+    Ok(run_diff_with_warnings(scan_path, target, registry, max_file_size)?.0)
+}
+
+pub fn run_diff_with_warnings(
+    scan_path: &str,
+    target: &str,
+    registry: &RuleRegistry,
+    max_file_size: u64,
+) -> Result<((ScanResult, DiffResult), Vec<String>), String> {
+    run_diff_with_coccinelle_warnings(scan_path, target, registry, &[], max_file_size)
+}
+
+pub fn run_diff_with_coccinelle_warnings(
+    scan_path: &str,
+    target: &str,
+    registry: &RuleRegistry,
+    coccinelle_rules: &[coccinelle::CoccinelleRule],
+    max_file_size: u64,
+) -> Result<((ScanResult, DiffResult), Vec<String>), String> {
+    let scan_root = Path::new(scan_path);
+    let repo = repo_root(scan_root)?;
+
+    // Verify the target ref exists
+    run_git(&repo, &["rev-parse", "--verify", target])
+        .map_err(|_| format!("Target ref '{}' does not exist", target))?;
+
+    // Scan current working tree
+    let (mut current_result, mut warnings) =
+        scan_directory_with_notices(scan_path, registry, max_file_size, None);
+    if let Some(errors) = current_result.stats.error_summary() {
+        return Err(format!(
+            "Scan incomplete: {errors}.\n{}",
+            warnings.join("\n")
+        ));
+    }
+    if !coccinelle_rules.is_empty() {
+        append_coccinelle_scan(
+            &mut current_result,
+            &mut warnings,
+            coccinelle::scan_path_with_notices(scan_root, coccinelle_rules, max_file_size, None),
+        );
+    }
+
+    // Get changed files between target and HEAD
+    let changed = changed_files_vs_target(&repo, target)?;
+
+    if changed.is_empty() {
+        // No changed files — everything is existing
+        let total = current_result.findings.len();
+        return Ok((
+            (
+                ScanResult {
+                    findings: Vec::new(),
+                    files_scanned: current_result.files_scanned,
+                    stats: current_result.stats,
+                    duration: current_result.duration,
+                },
+                DiffResult {
+                    new_findings: Vec::new(),
+                    total_current: total,
+                    existing_count: total,
+                },
+            ),
+            warnings,
+        ));
+    }
+
+    let (base_result, base_warnings) = scan_target_branch_files_with_warnings(
+        &repo,
+        target,
+        &changed,
+        registry,
+        coccinelle_rules,
+        max_file_size,
+    )?;
+    warnings.extend(base_warnings);
+    let current_files_scanned = current_result.files_scanned;
+    let current_stats = current_result.stats.clone();
+    let current_duration = current_result.duration;
+
+    // Only diff findings from changed files (current side)
+    let changed_rel: HashSet<String> = changed
+        .iter()
+        .filter_map(|p| {
+            p.strip_prefix(&repo)
+                .ok()
+                .map(|r| r.to_string_lossy().to_string())
+        })
+        .collect();
+
+    let (changed_findings, unchanged_findings): (Vec<Finding>, Vec<Finding>) =
+        current_result.findings.into_iter().partition(|f| {
+            // The file field in findings is relative to scan root
+            changed_rel
+                .iter()
+                .any(|rel| f.file.ends_with(rel) || rel.ends_with(&f.file))
+        });
+
+    let diff = diff_findings_with_root(changed_findings, base_result.findings, &repo);
+    let total_current = diff.total_current + unchanged_findings.len();
+    let existing_count = diff.existing_count + unchanged_findings.len();
+
+    Ok((
+        (
+            ScanResult {
+                findings: Vec::new(), // not used; diff_result has everything
+                files_scanned: current_files_scanned,
+                stats: current_stats,
+                duration: current_duration,
+            },
+            DiffResult {
+                new_findings: diff.new_findings,
+                total_current,
+                existing_count,
+            },
+        ),
+        warnings,
+    ))
+}
+
+fn append_coccinelle_scan(
+    result: &mut ScanResult,
+    warnings: &mut Vec<String>,
+    coccinelle_result: coccinelle::CoccinelleScanResult,
+) {
+    if coccinelle_result.candidate_files == 0 {
+        return;
+    }
+
+    result.files_scanned += coccinelle_result.files_scanned;
+    result.findings.extend(coccinelle_result.findings);
+    result.findings.sort_by(|a, b| {
+        a.file
+            .cmp(&b.file)
+            .then(a.line.cmp(&b.line))
+            .then(a.column.cmp(&b.column))
+            .then(a.rule_id.cmp(&b.rule_id))
+    });
+    warnings.extend(coccinelle_result.notices);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::Severity;
+    use tempfile::TempDir;
+
+    fn make_finding(rule_id: &str, file: &str, line: usize, snippet: &str) -> Finding {
+        Finding {
+            rule_id: rule_id.to_string(),
+            severity: Severity::High,
+            cwe: None,
+            description: "test".to_string(),
+            file: file.to_string(),
+            line,
+            column: 1,
+            end_line: line,
+            end_column: 10,
+            snippet: snippet.to_string(),
+            source_line: None,
+            source_description: None,
+            sink_line: None,
+            sink_description: None,
+            fix_suggestion: None,
+            sink_start_byte: None,
+            sink_end_byte: None,
+            confidence: crate::default_confidence(),
+            taint_hops: None,
+            tags: vec![],
+            crypto_algorithm: None,
+            cnsa2_deadline: None,
+            dep_name: None,
+            dep_version: None,
+            dep_ecosystem: None,
+            dep_purl: None,
+            dep_vulnerability_id: None,
+            dep_fixed_version: None,
+            dep_source: None,
+            dep_vulnerability_severity: None,
+            dep_path: vec![],
+            crypto_material: None,
+        }
+    }
+
+    #[test]
+    fn test_diff_findings_new_only() {
+        let current = vec![
+            make_finding("rule-1", "app.js", 10, "eval(input)"),
+            make_finding("rule-2", "app.js", 20, "exec(cmd)"),
+        ];
+        let base = vec![
+            make_finding("rule-1", "app.js", 8, "eval(input)"), // same rule+snippet, different line
+        ];
+
+        let result = diff_findings(current, base);
+        assert_eq!(result.new_findings.len(), 1);
+        assert_eq!(result.new_findings[0].rule_id, "rule-2");
+        assert_eq!(result.total_current, 2);
+        assert_eq!(result.existing_count, 1);
+    }
+
+    #[test]
+    fn test_diff_findings_all_new() {
+        let current = vec![make_finding("rule-1", "app.js", 10, "eval(input)")];
+        let base = vec![];
+
+        let result = diff_findings(current, base);
+        assert_eq!(result.new_findings.len(), 1);
+        assert_eq!(result.existing_count, 0);
+    }
+
+    #[test]
+    fn test_diff_findings_none_new() {
+        let current = vec![make_finding("rule-1", "app.js", 10, "eval(input)")];
+        let base = vec![make_finding("rule-1", "app.js", 10, "eval(input)")];
+
+        let result = diff_findings(current, base);
+        assert_eq!(result.new_findings.len(), 0);
+        assert_eq!(result.existing_count, 1);
+    }
+
+    #[test]
+    fn test_diff_findings_snippet_whitespace_tolerance() {
+        let current = vec![make_finding("rule-1", "app.js", 10, "  eval(input)  ")];
+        let base = vec![make_finding("rule-1", "app.js", 5, "eval(input)")];
+
+        let result = diff_findings(current, base);
+        assert_eq!(
+            result.new_findings.len(),
+            0,
+            "whitespace-trimmed snippets should match"
+        );
+    }
+
+    #[test]
+    fn test_diff_findings_distinguishes_same_tail_in_different_directories() {
+        let current = vec![make_finding(
+            "rule-1",
+            "packages/a/src/app.js",
+            10,
+            "eval(input)",
+        )];
+        let base = vec![make_finding(
+            "rule-1",
+            "services/a/src/app.js",
+            10,
+            "eval(input)",
+        )];
+
+        let result = diff_findings(current, base);
+        assert_eq!(
+            result.new_findings.len(),
+            1,
+            "distinct files must not collapse just because their path tails match"
+        );
+        assert_eq!(result.existing_count, 0);
+    }
+
+    #[test]
+    fn test_diff_findings_with_root_matches_absolute_current_paths() {
+        let repo = match TempDir::new() {
+            Ok(repo) => repo,
+            Err(error) => panic!("failed to create temp dir: {error}"),
+        };
+        let current_path = repo.path().join("packages/a/src/app.js");
+        let Some(parent) = current_path.parent() else {
+            panic!("test file should have parent");
+        };
+        if let Err(error) = std::fs::create_dir_all(parent) {
+            panic!("failed to create test directories: {error}");
+        }
+        if let Err(error) = std::fs::write(&current_path, "eval(input)\n") {
+            panic!("failed to create test file: {error}");
+        }
+        let current_file = current_path.to_string_lossy().into_owned();
+
+        let current = vec![make_finding("rule-1", &current_file, 10, "eval(input)")];
+        let base = vec![make_finding(
+            "rule-1",
+            "packages/a/src/app.js",
+            8,
+            "eval(input)",
+        )];
+
+        let result = diff_findings_with_root(current, base, repo.path());
+        assert_eq!(
+            result.new_findings.len(),
+            0,
+            "absolute current paths should match stored repo-relative base paths"
+        );
+        assert_eq!(result.existing_count, 1);
+    }
+}

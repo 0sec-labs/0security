@@ -53,3 +53,14 @@ services/
 .0-self-edit/
 __pycache__/
 *.pyc
+
+# Rust build output
+/target/
+*-target/
+.fp-check-target/
+crates/foxguard/benchmarks/repos/
+crates/foxguard/benchmarks/results*.md
+crates/foxguard/benchmarks/.version-worktrees-*/
+crates/foxguard/benchmarks/precision/clones/
+crates/foxguard/.registry-snapshot/
+crates/foxguard/rules/kernel/dirty-frag-class/queries/.scratch.*/

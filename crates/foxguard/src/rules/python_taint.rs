@@ -1,0 +1,3139 @@
+//! Intraprocedural, flow-insensitive taint analysis for Python.
+//!
+//! # Scope
+//!
+//! The engine walks a single function body in source order and reports
+//! every sink call whose arguments are reachable from a configured source.
+//! It is deliberately small:
+//!
+//! - **Per function.** No cross-function analysis. Each function is analyzed
+//!   independently; taint does not cross call boundaries.
+//! - **Per file.** No cross-file analysis. Callers of helper functions in
+//!   other modules are on their own.
+//! - **Flow-insensitive.** Statements are processed in source order. When a
+//!   variable is reassigned to a non-tainted expression the old taint is
+//!   dropped, but control flow is not modeled — taint observed in one branch
+//!   of an `if` is treated as taint in the fall-through. Over-approximation
+//!   is the whole point.
+//! - **No container sensitivity.** `d["key"]` is tainted if `d` is tainted.
+//!   Individual keys are not tracked.
+//! - **No attribute propagation beyond one level.** `x.y` is tainted if `x`
+//!   is tainted, but taint does not persist on `x.y` as a distinct name.
+//! - **Sanitizers collapse to "clean".** When a call whose callee matches a
+//!   [`TaintSpec::sanitizers`] entry is applied to a tainted value, the
+//!   result is treated as clean — the engine does not track a separate
+//!   "sanitized" state the way Semgrep's `mode: taint` does.
+//!
+//! Everything the engine knows about *which* patterns are sources, sinks, or
+//! sanitizers is expressed declaratively via [`TaintSpec`] — nothing is
+//! hardcoded about Flask, pickle, or any other library. The POC ships one
+//! built-in rule as the first consumer; future rules (including
+//! Semgrep-compatible `mode: taint` YAML) will plug into the same API.
+
+use crate::rules::common::AliasTable;
+use crate::rules::cross_file::{CrossFileSummaryMap, FunctionTaintSummary};
+use crate::rules::taint_engine::{
+    analyze_function_generic, attribution_hint_for_sink, build_batched_taint_groups,
+    cross_file_taint_finding, extract_cross_file_summary_for_function,
+    extract_cross_file_summary_for_function_cf, match_binop_format_sink, match_call_sink,
+    match_object_literal_sink, match_return_value_sink, node_text, push_attributed_findings,
+    summarize_function_return_generic, taint_finding_for_node_ranged, AnalysisContext,
+    TaintLanguageAdapter, TaintState,
+};
+pub use crate::rules::taint_engine::{
+    BatchedRule, NodeMatcher, ReturnSummary, ReturnTaintSummary, RuleFilter, TaintFinding,
+    TaintSpec,
+};
+use std::collections::HashMap;
+use std::path::PathBuf;
+use tree_sitter::Node;
+
+/// Cross-file context passed to `analyze_tree` to enable cross-file taint
+/// propagation. When `Some`, the engine resolves calls to imported functions
+/// via the summary map and emits findings when tainted arguments reach
+/// cross-file sinks.
+#[derive(Clone)]
+pub struct CrossFileInfo<'a> {
+    /// Map from local import name (e.g. "queries") to the resolved file path.
+    pub import_to_path: &'a HashMap<String, PathBuf>,
+    /// Cross-file summaries keyed by canonical file path.
+    pub summaries: &'a CrossFileSummaryMap,
+    /// The rule filter used to emit cross-file findings. Cross-file
+    /// findings are only emitted when the summary's `sink_rule_id`
+    /// passes this filter.
+    ///
+    /// - [`RuleFilter::Single`] in single-rule mode (the historical
+    ///   behaviour).
+    /// - [`RuleFilter::Any`] with a set of allowed rule ids in batched
+    ///   mode, so a single walk can attribute findings to any of the
+    ///   batched rules.
+    pub rule_filter: RuleFilter<'a>,
+}
+
+// ─── Public API ────────────────────────────────────────────────────────��──
+
+/// Type alias for the Python-specific analysis context.
+type PyCtx<'a> = AnalysisContext<'a, CrossFileInfo<'a>>;
+
+/// Run the taint engine over every function definition inside `root` and
+/// return one [`TaintFinding`] per source→sink flow discovered.
+///
+/// The root can be a whole file tree. The engine finds every
+/// `function_definition` inside it (including nested ones) and analyzes
+/// each independently.
+///
+/// Internally this runs in two passes:
+///
+/// 1. **Pass 1 — return summaries.** Every function in the file is walked
+///    and its `return` expressions are classified as tainted / clean
+///    using the same `expression_taint` logic that pass 2 uses. The
+///    difference is that pass 1 has an *empty* return summary, so calls
+///    to local helpers fall through to default behavior. This gives one
+///    level of interprocedural propagation: a direct helper whose body
+///    reads a source will be summarized as tainted, but a helper that
+///    itself calls another helper will not (the deeper chain is missed).
+///    Documented limitation for v1.
+///
+/// 2. **Pass 2 — analysis with summaries.** Re-analyze each function with
+///    the pass-1 summary available. A call to a bare local helper whose
+///    summary says "tainted" now makes the call result tainted, so the
+///    caller's local bindings and sink arguments propagate correctly.
+pub fn analyze_tree(
+    root: Node<'_>,
+    source: &str,
+    spec: &TaintSpec,
+    aliases: Option<&AliasTable>,
+) -> Vec<TaintFinding> {
+    analyze_tree_with_cross_file(root, source, spec, aliases, None)
+}
+
+/// Like [`analyze_tree`] but with optional cross-file taint summaries.
+///
+/// When `cross_file` is `Some`, calls to imported functions are resolved
+/// against the summary map. If a tainted argument reaches a sink in the
+/// imported function (per its summary), a finding is emitted in the
+/// caller's file.
+pub fn analyze_tree_with_cross_file<'a>(
+    root: Node<'_>,
+    source: &'a str,
+    spec: &'a TaintSpec,
+    aliases: Option<&'a AliasTable>,
+    cross_file: Option<&'a CrossFileInfo<'a>>,
+) -> Vec<TaintFinding> {
+    // Pass 1: build return summaries using an empty summary map so that
+    // calls to local helpers inside helper bodies fall through to the
+    // default behavior. This is the one-level interprocedural limit.
+    let empty_summary = ReturnSummary::new();
+    let mut summaries = ReturnSummary::new();
+    let pass1_ctx = AnalysisContext {
+        source,
+        spec,
+        aliases,
+        summaries: &empty_summary,
+        cross_file: None,
+        sink_to_rules: None,
+        label_policy: None,
+    };
+    collect_function_defs(root, &mut |func_node| {
+        let (name, ret_taint) = summarize_function_return(func_node, &pass1_ctx);
+        if let Some(name) = name {
+            summaries.insert(name, ret_taint);
+        }
+    });
+
+    // Pass 2: full analysis with the summary map available.
+    let ctx = AnalysisContext {
+        source,
+        spec,
+        aliases,
+        summaries: &summaries,
+        cross_file,
+        sink_to_rules: None,
+        label_policy: None,
+    };
+    let mut findings = Vec::new();
+    collect_function_defs(root, &mut |func_node| {
+        analyze_function(func_node, &ctx, &mut findings);
+    });
+    findings
+}
+
+/// Cross-file info used by the batched analyzer.
+///
+/// Unlike [`CrossFileInfo`] — which takes a single `current_rule_id` —
+/// the batched variant only needs the summary map and the import map.
+/// The allowed rule ids are derived per sanitizer-group from the input
+/// [`BatchedRule`] slice.
+pub struct CrossFileInfoBatched<'a> {
+    pub import_to_path: &'a HashMap<String, PathBuf>,
+    pub summaries: &'a CrossFileSummaryMap,
+}
+
+/// Batched Python taint analysis.
+///
+/// Runs the taint engine once per sanitizer-group instead of once per
+/// rule. The rule-agnostic Pass 1 summaries are shared across all rules
+/// in a sanitizer group (summaries are source-driven and foxguard's
+/// built-in Python taint rules share `python_taint_sources()`). Rules
+/// with different sanitizer sets land in different groups because
+/// sanitizers affect both the return-taint summary and the intra-file
+/// taint state.
+///
+/// Returns `(rule_id, finding)` pairs. Each finding carries its
+/// `rule_id_hint` set to the attributed rule so the caller can dispatch
+/// to per-rule metadata (severity, CWE, fix hints).
+pub fn analyze_tree_batched<'a>(
+    root: Node<'_>,
+    source: &'a str,
+    rules: &[BatchedRule<'a>],
+    aliases: Option<&'a AliasTable>,
+    cross_file: Option<&'a CrossFileInfoBatched<'a>>,
+) -> Vec<(String, TaintFinding)> {
+    if rules.is_empty() {
+        return Vec::new();
+    }
+
+    let mut out: Vec<(String, TaintFinding)> = Vec::new();
+    for group in build_batched_taint_groups(rules) {
+        // Pass 1: compute summaries once for the entire group.
+        let empty_summary = ReturnSummary::new();
+        let pass1_ctx = AnalysisContext {
+            source,
+            spec: &group.spec,
+            aliases,
+            summaries: &empty_summary,
+            cross_file: None,
+            sink_to_rules: None,
+            label_policy: None,
+        };
+        let mut summaries = ReturnSummary::new();
+        collect_function_defs(root, &mut |func_node| {
+            let (name, ret_taint) = summarize_function_return(func_node, &pass1_ctx);
+            if let Some(name) = name {
+                summaries.insert(name, ret_taint);
+            }
+        });
+
+        // Pass 2: one walk emits findings for every rule in the group.
+        // Cross-file dispatch uses `RuleFilter::Any` so the single walk
+        // can attribute findings across every rule in this group.
+        let cross_file_for_group = cross_file.map(|cf| CrossFileInfo {
+            import_to_path: cf.import_to_path,
+            summaries: cf.summaries,
+            rule_filter: RuleFilter::Any(&group.allowed_rule_ids),
+        });
+        let ctx = AnalysisContext {
+            source,
+            spec: &group.spec,
+            aliases,
+            summaries: &summaries,
+            cross_file: cross_file_for_group.as_ref(),
+            sink_to_rules: Some(&group.sink_to_rules),
+            label_policy: None,
+        };
+        let mut group_findings: Vec<TaintFinding> = Vec::new();
+        collect_function_defs(root, &mut |func_node| {
+            analyze_function(func_node, &ctx, &mut group_findings);
+        });
+
+        push_attributed_findings(&mut out, group_findings, &group.sink_to_rules);
+    }
+
+    out
+}
+
+/// Extract cross-file function taint summaries for all top-level functions
+/// in a parsed Python file.
+///
+/// For each function, every parameter is treated as a synthetic taint source.
+/// Each rule spec's sinks are tested against the function body. If a
+/// parameter reaches a sink, a [`ParamSinkFlow`] is recorded. If a
+/// parameter flows to a return value, `params_to_return` records the index.
+///
+/// The `rule_specs` argument should be the output of
+/// [`crate::rules::python::python_taint_rule_specs()`].
+pub fn extract_cross_file_summaries(
+    root: Node<'_>,
+    source: &str,
+    aliases: Option<&AliasTable>,
+    rule_specs: &[(&str, TaintSpec)],
+) -> Vec<FunctionTaintSummary> {
+    let mut summaries = Vec::new();
+
+    collect_function_defs(root, &mut |func_node| {
+        let Some(name_node) = func_node.child_by_field_name("name") else {
+            return;
+        };
+        let func_name = node_text(name_node, source).to_string();
+        let param_names = collect_param_names(func_node, source);
+
+        if let Some(summary) =
+            extract_cross_file_summary_for_function::<PyTaintAdapter, CrossFileInfo<'_>>(
+                func_node,
+                &func_name,
+                &param_names,
+                source,
+                aliases,
+                rule_specs,
+            )
+        {
+            summaries.push(summary);
+        }
+    });
+
+    summaries
+}
+
+/// Re-derive a file's cross-file summaries with cross-file call resolution
+/// enabled, composing the current summary map one hop deeper.
+///
+/// This is the per-file step of the scanner's **bounded multi-hop** fixpoint.
+/// For each function it re-runs the parameter-as-source summary extraction, but
+/// this time calls to helpers in *other* files are resolved against `summaries`
+/// (using this file's `import_to_path`). A parameter that only reaches a sink or
+/// the return value *through* such a cross-file helper is therefore captured —
+/// e.g. `f(p)` whose body is `return g(p)` where `g` (another file) sinks its
+/// argument: `f`'s summary gains that `params_to_sink` entry.
+///
+/// The scanner unions the returned flows into the existing summaries via
+/// [`FunctionTaintSummary::merge_from`] and repeats until a fixpoint (no change)
+/// or the hop bound is reached. `summaries` is a read-only snapshot from the
+/// previous round, so each round adds exactly one hop; monotone growth over a
+/// finite lattice guarantees termination, and the scanner's round cap is a hard
+/// backstop against mutually-recursive helpers. No stack recursion crosses file
+/// bodies here — resolution only reads precomputed summaries — so a cyclic
+/// helper graph cannot loop forever within a round.
+pub fn compose_cross_file_summaries(
+    root: Node<'_>,
+    source: &str,
+    aliases: Option<&AliasTable>,
+    rule_specs: &[(&str, TaintSpec)],
+    import_to_path: &HashMap<String, PathBuf>,
+    summaries: &CrossFileSummaryMap,
+    allowed_rule_ids: &std::collections::HashSet<String>,
+) -> Vec<FunctionTaintSummary> {
+    let cross_file = CrossFileInfo {
+        import_to_path,
+        summaries,
+        rule_filter: RuleFilter::Any(allowed_rule_ids),
+    };
+
+    let mut out = Vec::new();
+    collect_function_defs(root, &mut |func_node| {
+        let Some(name_node) = func_node.child_by_field_name("name") else {
+            return;
+        };
+        let func_name = node_text(name_node, source).to_string();
+        let param_names = collect_param_names(func_node, source);
+
+        if let Some(summary) =
+            extract_cross_file_summary_for_function_cf::<PyTaintAdapter, CrossFileInfo<'_>>(
+                func_node,
+                &func_name,
+                &param_names,
+                source,
+                aliases,
+                rule_specs,
+                Some(&cross_file),
+            )
+        {
+            out.push(summary);
+        }
+    });
+    out
+}
+
+/// Collect parameter names from a function definition, in order.
+fn collect_param_names(func_node: Node<'_>, source: &str) -> Vec<String> {
+    let Some(params) = func_node.child_by_field_name("parameters") else {
+        return Vec::new();
+    };
+    let mut names = Vec::new();
+    let mut cursor = params.walk();
+    for child in params.children(&mut cursor) {
+        let param_name = match child.kind() {
+            "identifier" => Some(node_text(child, source)),
+            "typed_parameter" | "default_parameter" | "typed_default_parameter" => {
+                let mut inner_cursor = child.walk();
+                let mut found: Option<&str> = None;
+                for inner in child.children(&mut inner_cursor) {
+                    if inner.kind() == "identifier" {
+                        found = Some(node_text(inner, source));
+                        break;
+                    }
+                }
+                found
+            }
+            _ => None,
+        };
+        if let Some(name) = param_name {
+            // Skip `self` and `cls` — they are not user-controlled.
+            if name != "self" && name != "cls" {
+                names.push(name.to_string());
+            }
+        }
+    }
+    names
+}
+
+fn function_summary_key(name: &str, arity: usize) -> String {
+    format!("{name}/{arity}")
+}
+
+fn call_summary_key(name: &str, args: Node<'_>) -> String {
+    let mut cursor = args.walk();
+    function_summary_key(name, args.named_children(&mut cursor).count())
+}
+
+fn summarize_function_return(
+    func_node: Node<'_>,
+    ctx: &PyCtx<'_>,
+) -> (Option<String>, ReturnTaintSummary) {
+    let name = func_node
+        .child_by_field_name("name")
+        .map(|n| node_text(n, ctx.source).to_string());
+    let summary =
+        summarize_function_return_generic::<PyTaintAdapter, _>(func_node, ctx, collect_param_names);
+    let name = name
+        .map(|name| function_summary_key(&name, collect_param_names(func_node, ctx.source).len()));
+    (name, summary)
+}
+
+// ─── Internals ────────────────────────────────────────────────────────────
+
+/// Zero-sized marker type for the Python taint language adapter.
+pub(super) struct PyTaintAdapter;
+
+impl<'a> TaintLanguageAdapter<CrossFileInfo<'a>> for PyTaintAdapter {
+    fn is_nested_scope(kind: &str) -> bool {
+        kind == "function_definition"
+    }
+
+    fn dispatch_walk_node(
+        node: Node<'_>,
+        ctx: &PyCtx<'_>,
+        state: &mut TaintState,
+        findings: &mut Vec<TaintFinding>,
+    ) {
+        if node.kind() == "assignment" {
+            handle_assignment(node, ctx, state);
+        }
+        // Walrus operator: `name := value` (named_expression).
+        if node.kind() == "named_expression" {
+            if let (Some(name), Some(value)) = (
+                node.child_by_field_name("name"),
+                node.child_by_field_name("value"),
+            ) {
+                if name.kind() == "identifier" {
+                    let lhs = node_text(name, ctx.source).to_string();
+                    if let Some(o) = expression_taint(value, ctx, state) {
+                        state.taint_ranged(lhs, o.description, o.line, o.source_range);
+                    } else {
+                        state.clear(&lhs);
+                    }
+                }
+            }
+        }
+        if node.kind() == "call" {
+            handle_call(node, ctx, state, findings);
+        }
+        if node.kind() == "with_statement" {
+            handle_with_statement(node, ctx, state);
+        }
+        if node.kind() == "binary_operator" || node.kind() == "string" {
+            handle_binop_format_sink(node, ctx, state, findings);
+        }
+        if node.kind() == "dictionary" {
+            handle_dict_literal_sink(node, ctx, state, findings);
+        }
+        if node.kind() == "return_statement" {
+            handle_return_value_sink(node, ctx, state, findings);
+        }
+    }
+
+    fn dispatch_summary_node(
+        node: Node<'_>,
+        ctx: &PyCtx<'_>,
+        state: &mut TaintState,
+        findings: &mut Vec<TaintFinding>,
+        return_taint: &mut Option<String>,
+    ) {
+        // Dispatch the same handlers as the main walk.
+        Self::dispatch_walk_node(node, ctx, state, findings);
+        // Additionally check return statements.
+        if node.kind() == "return_statement" && return_taint.is_none() {
+            let mut cursor = node.walk();
+            for child in node.named_children(&mut cursor) {
+                if let Some(o) = expression_taint(child, ctx, state) {
+                    *return_taint = Some(o.description);
+                    break;
+                }
+            }
+        }
+    }
+
+    fn expression_taint(
+        expr: Node<'_>,
+        ctx: &PyCtx<'_>,
+        state: &TaintState,
+    ) -> Option<(String, usize)> {
+        expression_taint(expr, ctx, state).map(|o| (o.description, o.line))
+    }
+
+    fn seed_params(func_node: Node<'_>, ctx: &PyCtx<'_>, state: &mut TaintState) {
+        if let Some(params) = func_node.child_by_field_name("parameters") {
+            let decorators = decorator_method_names(func_node, ctx.source);
+            seed_param_sources(params, ctx.source, ctx.spec, state, &decorators);
+        }
+    }
+}
+
+/// Collect the final method-name segment of each *call* decorator on
+/// `func_node` (a `function_definition`). For `@mcp.tool()` this yields
+/// `["tool"]`; for `@app.route("/x")` → `["route"]`. Only CALL decorators are
+/// reported (Semgrep's `@$SERVER.tool()` shape requires the call), and only the
+/// callee's final `.name` segment is kept, so `@$SERVER.tool()` binds any
+/// `<recv>.tool(...)` decorator regardless of the receiver.
+fn decorator_method_names(func_node: Node<'_>, source: &str) -> Vec<String> {
+    let Some(parent) = func_node.parent() else {
+        return Vec::new();
+    };
+    if parent.kind() != "decorated_definition" {
+        return Vec::new();
+    }
+    let mut names = Vec::new();
+    let mut cursor = parent.walk();
+    for child in parent.children(&mut cursor) {
+        if child.kind() != "decorator" {
+            continue;
+        }
+        // The decorator's payload is its first named child (the `@`-prefixed
+        // expression): a `call`, `attribute`, or `identifier`.
+        let mut dcur = child.walk();
+        let expr = child.named_children(&mut dcur).next();
+        let Some(expr) = expr else { continue };
+        if expr.kind() != "call" {
+            continue;
+        }
+        let Some(callee) = expr.child_by_field_name("function") else {
+            continue;
+        };
+        if let Some(name) = callee_final_name(callee, source) {
+            names.push(name);
+        }
+    }
+    names
+}
+
+/// The final name segment of a call callee: for an `attribute` (`mcp.tool`) the
+/// `.attribute` field (`tool`); for a bare `identifier` (`tool`) its text.
+fn callee_final_name(callee: Node<'_>, source: &str) -> Option<String> {
+    match callee.kind() {
+        "identifier" => Some(node_text(callee, source).to_string()),
+        "attribute" => callee
+            .child_by_field_name("attribute")
+            .map(|a| node_text(a, source).to_string()),
+        _ => None,
+    }
+}
+
+fn collect_function_defs<'tree, F>(node: Node<'tree>, visit: &mut F)
+where
+    F: FnMut(Node<'tree>),
+{
+    if node.kind() == "function_definition" {
+        visit(node);
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_function_defs(child, visit);
+    }
+}
+
+fn analyze_function(func_node: Node<'_>, ctx: &PyCtx<'_>, findings: &mut Vec<TaintFinding>) {
+    analyze_function_generic::<PyTaintAdapter, _>(func_node, ctx, findings);
+}
+
+fn seed_param_sources(
+    params: Node<'_>,
+    source: &str,
+    spec: &TaintSpec,
+    state: &mut TaintState,
+    decorators: &[String],
+) {
+    let mut cursor = params.walk();
+    for child in params.children(&mut cursor) {
+        let param_name = match child.kind() {
+            "identifier" => node_text(child, source),
+            "typed_parameter" | "default_parameter" | "typed_default_parameter" => {
+                // Drill to the first identifier inside.
+                let mut inner_cursor = child.walk();
+                let mut found: Option<&str> = None;
+                for inner in child.children(&mut inner_cursor) {
+                    if inner.kind() == "identifier" {
+                        found = Some(node_text(inner, source));
+                        break;
+                    }
+                }
+                match found {
+                    Some(n) => n,
+                    None => continue,
+                }
+            }
+            _ => continue,
+        };
+
+        for matcher in &spec.sources {
+            match matcher {
+                NodeMatcher::ParamName { names, description } => {
+                    if names.iter().any(|n| n == param_name)
+                        || crate::rules::taint_engine::param_names_are_wildcard(names)
+                    {
+                        let line = child.start_position().row + 1;
+                        state.taint(param_name.to_string(), description.clone(), line);
+                        break;
+                    }
+                }
+                // Seed the parameter ONLY when the enclosing function carries a
+                // `<x>.<decorator>(...)` decorator (the MCP `@$SERVER.tool()`
+                // discriminator). An undecorated function's parameters are never
+                // seeded — the whole point of this matcher.
+                NodeMatcher::DecoratedParamSource {
+                    decorator,
+                    description,
+                } if decorators.iter().any(|d| d == decorator) => {
+                    let line = child.start_position().row + 1;
+                    state.taint(param_name.to_string(), description.clone(), line);
+                    break;
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+fn handle_assignment(node: Node<'_>, ctx: &PyCtx<'_>, state: &mut TaintState) {
+    let (Some(left), Some(right)) = (
+        node.child_by_field_name("left"),
+        node.child_by_field_name("right"),
+    ) else {
+        return;
+    };
+
+    // Simple identifier LHS: the common case.
+    if left.kind() == "identifier" {
+        let lhs_name = node_text(left, ctx.source).to_string();
+        if let Some(o) = expression_taint(right, ctx, state) {
+            state.taint_ranged(lhs_name, o.description, o.line, o.source_range);
+        } else {
+            // Reassignment with a clean RHS kills any previous taint on LHS.
+            state.clear(&lhs_name);
+        }
+        return;
+    }
+
+    // Tuple/list destructuring LHS: `a, b = ...` or `[a, b] = ...`.
+    // Tree-sitter-python uses `pattern_list` for bare `a, b`, and
+    // `tuple_pattern` / `list_pattern` for parenthesized/bracketed forms.
+    // We walk the LHS targets and pair them with RHS elements when the
+    // RHS is also a tuple/list literal of the same arity. Otherwise we
+    // fall back to conservative semantics: if the RHS is tainted at all,
+    // taint every LHS target (we lack type info to pick the slot).
+    if is_destructuring_pattern(left) {
+        let lhs_targets = collect_destructuring_targets(left, ctx.source);
+        if lhs_targets.is_empty() {
+            return;
+        }
+
+        if let Some(rhs_elems) = tuple_like_elements(right) {
+            if rhs_elems.len() == lhs_targets.len() {
+                for (target, rhs) in lhs_targets.iter().zip(rhs_elems.iter()) {
+                    if let Some(o) = expression_taint(*rhs, ctx, state) {
+                        state.taint_ranged(target.clone(), o.description, o.line, o.source_range);
+                    } else {
+                        state.clear(target);
+                    }
+                }
+                return;
+            }
+        }
+
+        // Arity mismatch or opaque RHS: apply conservative semantics.
+        if let Some(o) = expression_taint(right, ctx, state) {
+            for target in &lhs_targets {
+                state.taint_ranged(
+                    target.clone(),
+                    o.description.clone(),
+                    o.line,
+                    o.source_range,
+                );
+            }
+        } else {
+            for target in &lhs_targets {
+                state.clear(target);
+            }
+        }
+    }
+}
+
+/// Handle `with expr as name: ...` statements. If the context expression
+/// is tainted, the `as` target inherits taint.
+///
+/// Tree-sitter structure (tree-sitter-python):
+/// ```text
+/// with_statement
+///   with_clause
+///     with_item
+///       as_pattern
+///         <value expression>   (first named child)
+///         as_pattern_target
+///           identifier          (the alias)
+/// ```
+fn handle_with_statement(node: Node<'_>, ctx: &PyCtx<'_>, state: &mut TaintState) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() != "with_clause" {
+            continue;
+        }
+        let mut clause_cursor = child.walk();
+        for item in child.children(&mut clause_cursor) {
+            if item.kind() != "with_item" {
+                continue;
+            }
+            // Inside with_item, look for an as_pattern which wraps the
+            // value expression and the alias target.
+            let mut item_cursor = item.walk();
+            for item_child in item.named_children(&mut item_cursor) {
+                if item_child.kind() == "as_pattern" {
+                    handle_as_pattern(item_child, ctx, state);
+                }
+            }
+        }
+    }
+}
+
+/// Process an `as_pattern` node: the first named child is the value
+/// expression and the `as_pattern_target` child contains the alias
+/// identifier. If the value is tainted, taint the alias.
+fn handle_as_pattern(node: Node<'_>, ctx: &PyCtx<'_>, state: &mut TaintState) {
+    let mut cursor = node.walk();
+    let named: Vec<Node<'_>> = node.named_children(&mut cursor).collect();
+    // First named child = value expression, look for as_pattern_target among rest.
+    let value = match named.first() {
+        Some(n) => *n,
+        None => return,
+    };
+    let alias_ident = named.iter().find_map(|n| {
+        if n.kind() == "as_pattern_target" {
+            // The identifier is the first named child of the target.
+            let mut inner = n.walk();
+            let found = n
+                .named_children(&mut inner)
+                .find(|c| c.kind() == "identifier");
+            found
+        } else {
+            None
+        }
+    });
+    let Some(alias_node) = alias_ident else {
+        return;
+    };
+    let alias_name = node_text(alias_node, ctx.source).to_string();
+    if let Some(o) = expression_taint(value, ctx, state) {
+        state.taint_ranged(alias_name, o.description, o.line, o.source_range);
+    } else {
+        state.clear(&alias_name);
+    }
+}
+
+fn is_destructuring_pattern(node: Node<'_>) -> bool {
+    matches!(
+        node.kind(),
+        "pattern_list" | "tuple_pattern" | "list_pattern"
+    )
+}
+
+/// Collect the identifier names that are direct targets of a destructuring
+/// LHS. Nested patterns (`(a, (b, c)) = ...`) recurse; non-identifier
+/// targets like `obj.attr` or `d[k]` are skipped because the engine only
+/// tracks plain names in its taint state.
+fn collect_destructuring_targets(node: Node<'_>, source: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        match child.kind() {
+            "identifier" => out.push(node_text(child, source).to_string()),
+            "pattern_list" | "tuple_pattern" | "list_pattern" => {
+                out.extend(collect_destructuring_targets(child, source));
+            }
+            // `*rest` captures in unpacking: tree-sitter-python wraps the
+            // inner name in a list_splat_pattern.
+            "list_splat_pattern" => {
+                let mut inner = child.walk();
+                for c in child.named_children(&mut inner) {
+                    if c.kind() == "identifier" {
+                        out.push(node_text(c, source).to_string());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// If `node` is a tuple/list literal or an `expression_list`, return its
+/// element nodes in order. Otherwise return `None`.
+fn tuple_like_elements<'tree>(node: Node<'tree>) -> Option<Vec<Node<'tree>>> {
+    match node.kind() {
+        "expression_list" | "tuple" | "list" => {
+            let mut cursor = node.walk();
+            let elems: Vec<Node<'tree>> = node.named_children(&mut cursor).collect();
+            Some(elems)
+        }
+        _ => None,
+    }
+}
+
+fn handle_call(
+    node: Node<'_>,
+    ctx: &PyCtx<'_>,
+    state: &mut TaintState,
+    findings: &mut Vec<TaintFinding>,
+) {
+    let Some(func) = node.child_by_field_name("function") else {
+        return;
+    };
+    let callee_text = node_text(func, ctx.source);
+    let resolved = match ctx.aliases {
+        Some(a) => a.resolve(callee_text).into_owned(),
+        None => callee_text.to_string(),
+    };
+
+    if let Some(sink) = match_call_sink(ctx.spec, resolved.as_str(), ctx.sink_to_rules) {
+        // Check each argument for taint.
+        let Some(args) = node.child_by_field_name("arguments") else {
+            return;
+        };
+        let mut cursor = args.walk();
+        for arg in args.named_children(&mut cursor) {
+            if let Some(o) = expression_taint(arg, ctx, state) {
+                let rule_hint = attribution_hint_for_sink(&sink);
+                findings.push(taint_finding_for_node_ranged(
+                    node,
+                    o.description,
+                    sink.description,
+                    o.line,
+                    rule_hint,
+                    1,
+                    o.source_range,
+                ));
+                // One finding per sink call is enough — don't double-report
+                // when multiple args are tainted.
+                break;
+            }
+        }
+        return;
+    }
+
+    // ── Cross-file summary check ─────────────────────────────────────
+    // If the callee is an imported function with cross-file summaries,
+    // check whether any tainted argument reaches a sink in the imported
+    // function (per its summary).
+    if let Some(cross_file) = ctx.cross_file {
+        handle_cross_file_call(node, func, callee_text, ctx, state, findings, cross_file);
+    }
+}
+
+/// Handle a `BinopFormat` string-building sink: a binary `+`/`%` concatenation
+/// or an f-string interpolation that mixes a string literal/format with a
+/// tainted operand. Fires only when (a) the spec has a `BinopFormat` sink,
+/// (b) at least one operand is a string literal/f-string, and (c) at least one
+/// operand is tainted. The literal guard keeps this from firing on pure
+/// numeric/variable arithmetic.
+///
+/// To avoid double-reporting on a nested concat chain (`"a" + "b" + tainted`),
+/// the handler skips a `binary_operator` whose parent is itself a `+`/`%`
+/// `binary_operator` — the finding is reported once on the outermost node.
+fn handle_binop_format_sink(
+    node: Node<'_>,
+    ctx: &PyCtx<'_>,
+    state: &mut TaintState,
+    findings: &mut Vec<TaintFinding>,
+) {
+    let Some(sink) = match_binop_format_sink(ctx.spec, ctx.sink_to_rules) else {
+        return;
+    };
+
+    // Skip inner nodes of a chain to report once on the outermost.
+    if node.kind() == "binary_operator" {
+        if let Some(parent) = node.parent() {
+            if parent.kind() == "binary_operator" && binop_is_concat(parent, ctx.source) {
+                return;
+            }
+        }
+        if !binop_is_concat(node, ctx.source) {
+            return;
+        }
+    }
+
+    // Only an f-string (`string` node carrying `interpolation`) is a relevant
+    // format node; plain string literals are not sinks on their own.
+    if node.kind() == "string" && !python_string_is_fstring(node) {
+        return;
+    }
+
+    let has_string_literal = match node.kind() {
+        "string" => true, // the f-string itself supplies the format/literal
+        "binary_operator" => binop_has_string_literal_operand(node, ctx.source),
+        _ => false,
+    };
+    if !has_string_literal {
+        return;
+    }
+
+    if let Some(o) = expression_taint(node, ctx, state) {
+        let rule_hint = attribution_hint_for_sink(&sink);
+        findings.push(taint_finding_for_node_ranged(
+            node,
+            o.description,
+            sink.description,
+            o.line,
+            rule_hint,
+            1,
+            o.source_range,
+        ));
+    }
+}
+
+/// Dict-literal sink: `{"role": "system", "content": tainted}`. Fires when the
+/// spec carries an `ObjectLiteralValue` sink and at least one `pair` value in
+/// this `dictionary` literal is tainted. Reports once on the whole literal.
+fn handle_dict_literal_sink(
+    node: Node<'_>,
+    ctx: &PyCtx<'_>,
+    state: &mut TaintState,
+    findings: &mut Vec<TaintFinding>,
+) {
+    let Some(sink) = match_object_literal_sink(ctx.spec, ctx.sink_to_rules) else {
+        return;
+    };
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        if child.kind() != "pair" {
+            continue;
+        }
+        let Some(value) = child.child_by_field_name("value") else {
+            continue;
+        };
+        if let Some(o) = expression_taint(value, ctx, state) {
+            let rule_hint = attribution_hint_for_sink(&sink);
+            findings.push(taint_finding_for_node_ranged(
+                node,
+                o.description,
+                sink.description,
+                o.line,
+                rule_hint,
+                1,
+                o.source_range,
+            ));
+            return;
+        }
+    }
+}
+
+/// Return-value sink: `return tainted`. Fires when the spec carries a
+/// `ReturnValue` sink and the `return_statement`'s returned expression is
+/// tainted. Reports once on the return statement.
+fn handle_return_value_sink(
+    node: Node<'_>,
+    ctx: &PyCtx<'_>,
+    state: &mut TaintState,
+    findings: &mut Vec<TaintFinding>,
+) {
+    let Some(sink) = match_return_value_sink(ctx.spec, ctx.sink_to_rules) else {
+        return;
+    };
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        if let Some(o) = expression_taint(child, ctx, state) {
+            let rule_hint = attribution_hint_for_sink(&sink);
+            findings.push(taint_finding_for_node_ranged(
+                node,
+                o.description,
+                sink.description,
+                o.line,
+                rule_hint,
+                1,
+                o.source_range,
+            ));
+            return;
+        }
+    }
+}
+
+/// True when `node` is a `binary_operator` whose operator is `+` or `%`.
+fn binop_is_concat(node: Node<'_>, source: &str) -> bool {
+    node.child_by_field_name("operator")
+        .map(|op| {
+            let t = node_text(op, source);
+            t == "+" || t == "%"
+        })
+        .unwrap_or(false)
+}
+
+/// True when `node` is a Python string-CONSTRUCTION expression — the SOURCE
+/// shape for the string-building taint rules (`avoid-sqlalchemy-text`,
+/// `twiml-injection`): the dynamically assembled string is the taint origin.
+///
+/// Recognises:
+///   - an interpolated f-string (`f"...{x}..."`),
+///   - a `+`/`%` binop whose chain contains a string literal
+///     (`"a" + x`, `x % y`), and
+///   - a `"...".format(...)` call on a string-literal receiver.
+///
+/// Requiring a concrete string literal / f-string keeps this FP-safe: a plain
+/// string literal, numeric arithmetic, or a bare variable is NOT a source.
+fn node_is_python_string_construction(node: Node<'_>, source: &str) -> bool {
+    match node.kind() {
+        "string" => python_string_is_fstring(node),
+        "binary_operator" => {
+            binop_is_concat(node, source) && binop_has_string_literal_operand(node, source)
+        }
+        "call" => call_is_str_format(node, source),
+        _ => false,
+    }
+}
+
+/// True when `node` is a `"...".format(...)` call — a `.format` method call
+/// whose receiver is a string (or concatenated-string) literal.
+fn call_is_str_format(node: Node<'_>, source: &str) -> bool {
+    let Some(func) = node.child_by_field_name("function") else {
+        return false;
+    };
+    if func.kind() != "attribute" {
+        return false;
+    }
+    let Some(attr) = func.child_by_field_name("attribute") else {
+        return false;
+    };
+    if node_text(attr, source) != "format" {
+        return false;
+    }
+    let Some(obj) = func.child_by_field_name("object") else {
+        return false;
+    };
+    matches!(obj.kind(), "string" | "concatenated_string")
+}
+
+/// True when the `string` node is an f-string (carries an `interpolation`).
+fn python_string_is_fstring(node: Node<'_>) -> bool {
+    let mut cursor = node.walk();
+    let mut has_interp = false;
+    for c in node.children(&mut cursor) {
+        if c.kind() == "interpolation" {
+            has_interp = true;
+            break;
+        }
+    }
+    has_interp
+}
+
+/// True when a `+`/`%` concat chain contains at least one string-literal
+/// operand (a `string` or `concatenated_string` node), recursing into nested
+/// `+`/`%` operators.
+fn binop_has_string_literal_operand(node: Node<'_>, source: &str) -> bool {
+    fn operand_has_string(n: Node<'_>, source: &str) -> bool {
+        match n.kind() {
+            "string" | "concatenated_string" => true,
+            "binary_operator" => {
+                if !binop_is_concat(n, source) {
+                    return false;
+                }
+                let left = n.child_by_field_name("left");
+                let right = n.child_by_field_name("right");
+                left.map(|l| operand_has_string(l, source)).unwrap_or(false)
+                    || right
+                        .map(|r| operand_has_string(r, source))
+                        .unwrap_or(false)
+            }
+            "parenthesized_expression" => n
+                .named_child(0)
+                .map(|c| operand_has_string(c, source))
+                .unwrap_or(false),
+            _ => false,
+        }
+    }
+    operand_has_string(node, source)
+}
+
+/// Check if a call targets an imported function with cross-file summaries.
+///
+/// Handles two import patterns:
+/// - `from . import queries; queries.run_query(x)` — attribute call on imported module
+/// - `from .queries import run_query; run_query(x)` — direct call to imported function
+fn handle_cross_file_call(
+    node: Node<'_>,
+    func: Node<'_>,
+    callee_text: &str,
+    ctx: &PyCtx<'_>,
+    state: &TaintState,
+    findings: &mut Vec<TaintFinding>,
+    cross_file: &CrossFileInfo<'_>,
+) {
+    // Try to resolve the callee to a (file_path, function_name) pair.
+    let resolved = resolve_cross_file_callee(func, callee_text, ctx.source, cross_file);
+    let Some((file_path, func_name)) = resolved else {
+        return;
+    };
+
+    // Look up summaries for the resolved file.
+    let Some(file_summaries) = cross_file.summaries.get(&file_path) else {
+        return;
+    };
+
+    // Find the function summary.
+    let Some(summary) = file_summaries.iter().find(|s| s.name == func_name) else {
+        return;
+    };
+
+    // Collect argument nodes.
+    let Some(args) = node.child_by_field_name("arguments") else {
+        return;
+    };
+    let mut cursor = args.walk();
+    let arg_nodes: Vec<Node<'_>> = args.named_children(&mut cursor).collect();
+
+    // For each tainted argument, check if the corresponding parameter
+    // has a ParamSinkFlow whose rule ID matches the current filter.
+    for flow in &summary.params_to_sink {
+        if !cross_file.rule_filter.allows(&flow.sink_rule_id) {
+            continue;
+        }
+        if flow.param_index >= arg_nodes.len() {
+            continue;
+        }
+        let arg = arg_nodes[flow.param_index];
+        if let Some(o) = expression_taint(arg, ctx, state) {
+            findings.push(cross_file_taint_finding(
+                node,
+                o.description,
+                o.line,
+                &flow.sink_description,
+                &func_name,
+                &flow.sink_rule_id,
+            ));
+            // One finding per cross-file call is enough.
+            return;
+        }
+    }
+}
+
+/// Resolve a call-site callee to (file_path, function_name) using the
+/// cross-file import map.
+fn resolve_cross_file_callee(
+    func: Node<'_>,
+    callee_text: &str,
+    source: &str,
+    cross_file: &CrossFileInfo<'_>,
+) -> Option<(PathBuf, String)> {
+    // Pattern 1: attribute call `module.func(...)` where `module` is an
+    // imported module name (e.g. `queries.run_query`).
+    if func.kind() == "attribute" {
+        if let Some(object) = func.child_by_field_name("object") {
+            if object.kind() == "identifier" {
+                let module_name = node_text(object, source);
+                if let Some(file_path) = cross_file.import_to_path.get(module_name) {
+                    if let Some(attr) = func.child_by_field_name("attribute") {
+                        let func_name = node_text(attr, source).to_string();
+                        return Some((file_path.clone(), func_name));
+                    }
+                }
+            }
+        }
+    }
+
+    // Pattern 2: direct call `func(...)` where `func` was imported from
+    // another module (e.g. `from .queries import run_query; run_query(x)`).
+    if func.kind() == "identifier" {
+        // Check all __from__:<module>:<name> entries
+        for (key, file_path) in cross_file.import_to_path.iter() {
+            if let Some(rest) = key.strip_prefix("__from__:") {
+                if let Some((_module, name)) = rest.split_once(':') {
+                    if name == callee_text {
+                        return Some((file_path.clone(), name.to_string()));
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Outcome of an [`expression_taint`] evaluation: the source description, the
+/// 1-indexed source line, and — when the originating source is a concrete AST
+/// node — the byte range of that node.
+///
+/// `source_range` is threaded so that at a sink the engine can report WHERE the
+/// source was, enabling the source-side `pattern-inside` / `pattern-not`
+/// post-filter in `semgrep_taint.rs`. It is `None` when the origin has no single
+/// node span (e.g. a seeded parameter tracked only by name). Rules WITHOUT a
+/// source-side `pattern-inside`/`pattern-not` never consult it, so this is
+/// purely additive.
+struct TaintOrigin {
+    description: String,
+    line: usize,
+    source_range: Option<(usize, usize)>,
+}
+
+/// Returns a [`TaintOrigin`] if `expr` evaluates to (or references) a tainted
+/// value, otherwise `None`.
+fn expression_taint(expr: Node<'_>, ctx: &PyCtx<'_>, state: &TaintState) -> Option<TaintOrigin> {
+    let expr_line = expr.start_position().row + 1;
+
+    // Direct source match on this expression: the matched node IS the source,
+    // so record its byte range.
+    if let Some(desc) = match_source(expr, ctx.source, ctx.spec, ctx.aliases) {
+        return Some(TaintOrigin {
+            description: desc,
+            line: expr_line,
+            source_range: Some((expr.start_byte(), expr.end_byte())),
+        });
+    }
+
+    // Tainted identifier reference: inherit the origin's stored range.
+    if expr.kind() == "identifier" {
+        let name = node_text(expr, ctx.source);
+        if let Some(info) = state.info(name) {
+            return Some(TaintOrigin {
+                description: info.description.clone(),
+                line: info.line,
+                source_range: info.source_range,
+            });
+        }
+    }
+
+    // Tainted attribute access on a tainted root (x.y where x is tainted):
+    // inherit the root's stored source range.
+    if expr.kind() == "attribute" {
+        if let Some(object) = expr.child_by_field_name("object") {
+            if object.kind() == "identifier" {
+                let name = node_text(object, ctx.source);
+                if let Some(info) = state.info(name) {
+                    return Some(TaintOrigin {
+                        description: info.description.clone(),
+                        line: info.line,
+                        source_range: info.source_range,
+                    });
+                }
+            }
+        }
+    }
+
+    // Tainted subscript (d[k] where d is tainted — no key sensitivity).
+    // Recurse into the subject so that nested subscript chains like
+    // `request.json["a"]["b"]` propagate taint: if any link in the chain
+    // (or its root) is tainted, the whole chain is. This also naturally
+    // handles attribute-then-subscript (`request.form["x"]`) and
+    // identifier roots via the recursive call.
+    if expr.kind() == "subscript" {
+        if let Some(value) = expr.child_by_field_name("value") {
+            if let Some(result) = expression_taint(value, ctx, state) {
+                return Some(result);
+            }
+        }
+    }
+
+    // Tuple / list literals: if any element is tainted, the container is
+    // tainted. This is needed for `"... %s %s" % (clean, tainted)` where
+    // the RHS is a tuple — the `%` operator handler recurses into the
+    // right operand, which is the tuple itself.
+    if expr.kind() == "tuple" || expr.kind() == "list" {
+        let mut cursor = expr.walk();
+        for child in expr.named_children(&mut cursor) {
+            if let Some(result) = expression_taint(child, ctx, state) {
+                return Some(result);
+            }
+        }
+    }
+
+    // List / set / dict comprehensions and generator expressions:
+    // `[expr for x in iterable]`, `{expr for x in iterable}`,
+    // `{k: v for x in iterable}`, `(expr for x in iterable)`.
+    // Conservative: if the iterable in any `for_in_clause` is tainted,
+    // the entire comprehension result is tainted.
+    if matches!(
+        expr.kind(),
+        "list_comprehension"
+            | "set_comprehension"
+            | "dictionary_comprehension"
+            | "generator_expression"
+    ) {
+        let mut cursor = expr.walk();
+        for child in expr.named_children(&mut cursor) {
+            if child.kind() == "for_in_clause" {
+                if let Some(iterable) = child.child_by_field_name("right") {
+                    if let Some(result) = expression_taint(iterable, ctx, state) {
+                        return Some(result);
+                    }
+                }
+            }
+        }
+    }
+
+    // F-string / formatted-string interpolation. In tree-sitter-python both
+    // plain and f-strings are `string` nodes; f-strings are distinguished by
+    // carrying one or more `interpolation` children. Each `interpolation`
+    // wraps an inner expression between literal `{` / `}` tokens. If any
+    // interpolated expression is tainted, the whole f-string is tainted.
+    // Plain strings with no interpolation children fall through clean.
+    if expr.kind() == "string" {
+        let mut cursor = expr.walk();
+        for child in expr.children(&mut cursor) {
+            if child.kind() == "interpolation" {
+                let mut inner = child.walk();
+                for inner_child in child.named_children(&mut inner) {
+                    if let Some(result) = expression_taint(inner_child, ctx, state) {
+                        return Some(result);
+                    }
+                }
+            }
+        }
+    }
+
+    // Conditional expression (ternary): `x = tainted if cond else safe`.
+    // Conservative: if EITHER branch is tainted, the result is tainted.
+    // tree-sitter-python lays out `conditional_expression` without field
+    // names: named_child(0) = body, named_child(1) = condition,
+    // named_child(2) = alternative. We check body and alternative only.
+    if expr.kind() == "conditional_expression" {
+        if let Some(body) = expr.named_child(0) {
+            if let Some(result) = expression_taint(body, ctx, state) {
+                return Some(result);
+            }
+        }
+        if let Some(alternative) = expr.named_child(2) {
+            if let Some(result) = expression_taint(alternative, ctx, state) {
+                return Some(result);
+            }
+        }
+    }
+
+    // Binary `+` / `%` propagation: `"prefix " + tainted`, `tainted + "suffix"`,
+    // and `"SELECT %s" % tainted` are all tainted. The `%` operator covers
+    // Python's old-style string formatting (`"... %s ..." % val`), which is
+    // a common SQL/command injection vector.
+    // Conservative: if EITHER operand is tainted, the result is tainted.
+    // Integer arithmetic on clean values short-circuits naturally because
+    // both recursive calls return None.
+    if expr.kind() == "binary_operator" {
+        if let Some(op) = expr.child_by_field_name("operator") {
+            let op_text = node_text(op, ctx.source);
+            if op_text == "+" || op_text == "%" {
+                if let Some(left) = expr.child_by_field_name("left") {
+                    if let Some(result) = expression_taint(left, ctx, state) {
+                        return Some(result);
+                    }
+                }
+                if let Some(right) = expr.child_by_field_name("right") {
+                    if let Some(result) = expression_taint(right, ctx, state) {
+                        return Some(result);
+                    }
+                }
+            }
+        }
+    }
+
+    // Recurse one level for wrapping expressions (e.g. `bytes(request.data)`),
+    // so the taint survives trivial type conversions without requiring
+    // full interprocedural tracking.
+    //
+    // BUT: if the callee matches a configured sanitizer, the result is
+    // clean regardless of whether any argument was tainted. This is the
+    // "collapse to clean" semantics documented at the top of the module.
+    if expr.kind() == "call" {
+        if is_sanitizer_call(expr, ctx.source, ctx.spec, ctx.aliases) {
+            return None;
+        }
+        if let Some(args) = expr.child_by_field_name("arguments") {
+            if let Some(func) = expr.child_by_field_name("function") {
+                if func.kind() == "identifier" {
+                    let callee = node_text(func, ctx.source);
+                    if let Some(summary) = ctx.summaries.get(&call_summary_key(callee, args)) {
+                        if let Some(desc) = &summary.direct_source {
+                            return Some(TaintOrigin {
+                                description: format!("{desc} (via {callee})"),
+                                line: expr_line,
+                                source_range: Some((expr.start_byte(), expr.end_byte())),
+                            });
+                        }
+                        let mut cursor = args.walk();
+                        let arg_nodes: Vec<Node<'_>> = args.named_children(&mut cursor).collect();
+                        for &param_idx in &summary.params_to_return {
+                            if param_idx < arg_nodes.len() {
+                                if let Some(o) = expression_taint(arg_nodes[param_idx], ctx, state)
+                                {
+                                    return Some(TaintOrigin {
+                                        description: format!("{} (via {callee})", o.description),
+                                        line: o.line,
+                                        source_range: o.source_range,
+                                    });
+                                }
+                            }
+                        }
+                        return None;
+                    }
+                }
+            }
+            // When a generator expression is the sole argument,
+            // tree-sitter-python places a `generator_expression` node
+            // (including the parentheses) where `argument_list` would
+            // normally be. Treat the whole node as an expression so the
+            // comprehension handler can inspect the iterable.
+            if args.kind() == "generator_expression" {
+                if let Some(result) = expression_taint(args, ctx, state) {
+                    return Some(result);
+                }
+            }
+            let mut cursor = args.walk();
+            for arg in args.named_children(&mut cursor) {
+                if let Some(result) = expression_taint(arg, ctx, state) {
+                    return Some(result);
+                }
+            }
+        }
+
+        // `.format()` propagation: `"SELECT {} FROM t".format(tainted)` is
+        // tainted even though the receiver (a string literal) is not. This
+        // covers Python's new-style string formatting injection pattern.
+        if let Some(func) = expr.child_by_field_name("function") {
+            if func.kind() == "attribute" {
+                if let Some(attr) = func.child_by_field_name("attribute") {
+                    if node_text(attr, ctx.source) == "format" {
+                        if let Some(args) = expr.child_by_field_name("arguments") {
+                            let mut cursor = args.walk();
+                            for arg in args.named_children(&mut cursor) {
+                                if let Some(result) = expression_taint(arg, ctx, state) {
+                                    return Some(result);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Method-call propagation on a tainted root: `x.foo(...)` is
+        // tainted when the receiver `x` (or any attribute/subscript chain
+        // rooted at a tainted value) is tainted. Conservative: tainted-in
+        // → tainted-out, mirroring the wrapping-call rule. Method calls
+        // on literal receivers (e.g. `"foo".upper()`) are NOT tainted
+        // because the recursive `expression_taint` on the object returns
+        // None for a bare string literal.
+        if let Some(func) = expr.child_by_field_name("function") {
+            if func.kind() == "attribute" {
+                if let Some(object) = func.child_by_field_name("object") {
+                    if let Some(result) = expression_taint(object, ctx, state) {
+                        return Some(result);
+                    }
+                }
+            }
+        }
+
+        // Same-file interprocedural v1: a bare identifier callee whose
+        // name matches a function in the return-summary map propagates
+        // the summary's taint description as the call's result. The
+        // description is decorated with "(via <callee>)" so findings
+        // show the helper chain. Only bare identifiers are considered —
+        // attribute calls like `self.helper()` or `obj.method()` need
+        // different semantics and are out of scope for v1.
+        if let Some(func) = expr.child_by_field_name("function") {
+            if func.kind() == "identifier" {
+                let callee = node_text(func, ctx.source);
+                if let Some(args) = expr.child_by_field_name("arguments") {
+                    if let Some(summary) = ctx.summaries.get(&call_summary_key(callee, args)) {
+                        if let Some(desc) = &summary.direct_source {
+                            return Some(TaintOrigin {
+                                description: format!("{desc} (via {callee})"),
+                                line: expr_line,
+                                source_range: Some((expr.start_byte(), expr.end_byte())),
+                            });
+                        }
+                        let mut cursor = args.walk();
+                        let arg_nodes: Vec<Node<'_>> = args.named_children(&mut cursor).collect();
+                        for &param_idx in &summary.params_to_return {
+                            if param_idx < arg_nodes.len() {
+                                if let Some(o) = expression_taint(arg_nodes[param_idx], ctx, state)
+                                {
+                                    return Some(TaintOrigin {
+                                        description: format!("{} (via {callee})", o.description),
+                                        line: o.line,
+                                        source_range: o.source_range,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Cross-file return-taint: if the callee is an imported function
+        // whose summary says a tainted argument flows to the return value,
+        // the call expression is tainted. This enables multi-hop chains
+        // (A → B → C) where B is a passthrough.
+        if let Some(cross_file) = ctx.cross_file {
+            if let Some(func) = expr.child_by_field_name("function") {
+                let callee_text = node_text(func, ctx.source);
+                if let Some((file_path, func_name)) =
+                    resolve_cross_file_callee(func, callee_text, ctx.source, cross_file)
+                {
+                    if let Some(file_summaries) = cross_file.summaries.get(&file_path) {
+                        if let Some(summary) = file_summaries.iter().find(|s| s.name == func_name) {
+                            if let Some(args) = expr.child_by_field_name("arguments") {
+                                let mut cursor = args.walk();
+                                let arg_nodes: Vec<Node<'_>> =
+                                    args.named_children(&mut cursor).collect();
+                                for &param_idx in &summary.params_to_return {
+                                    if param_idx < arg_nodes.len() {
+                                        if let Some(o) =
+                                            expression_taint(arg_nodes[param_idx], ctx, state)
+                                        {
+                                            return Some(TaintOrigin {
+                                                description: format!(
+                                                    "{} (via cross-file {func_name})",
+                                                    o.description
+                                                ),
+                                                line: o.line,
+                                                source_range: o.source_range,
+                                            });
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Returns `true` if `call_node` is a call whose callee matches any of the
+/// configured sanitizer matchers in `spec`. Only `NodeMatcher::Call` entries
+/// are meaningful as sanitizers today; other kinds are ignored.
+fn is_sanitizer_call(
+    call_node: Node<'_>,
+    source: &str,
+    spec: &TaintSpec,
+    aliases: Option<&AliasTable>,
+) -> bool {
+    if call_node.kind() != "call" {
+        return false;
+    }
+    let Some(func) = call_node.child_by_field_name("function") else {
+        return false;
+    };
+    let callee_text = node_text(func, source);
+    let resolved: std::borrow::Cow<'_, str> = match aliases {
+        Some(a) => a.resolve(callee_text),
+        None => std::borrow::Cow::Borrowed(callee_text),
+    };
+    for matcher in &spec.sanitizers {
+        if let NodeMatcher::Call { canonical, .. } = matcher {
+            if callee_text == canonical.as_str() || resolved.as_ref() == canonical.as_str() {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// True when the indexed `value` of a subscript matches the requested base.
+/// `want = None` matches any base. For `Some(name)`, the final segment of the
+/// indexed expression must equal `name`: an `identifier` matches its own
+/// text, an `attribute` matches its final attribute name.
+fn subscript_base_matches(value: Node<'_>, source: &str, want: Option<&str>) -> bool {
+    let Some(want) = want else {
+        return true;
+    };
+    match value.kind() {
+        "identifier" => node_text(value, source) == want,
+        "attribute" => value
+            .child_by_field_name("attribute")
+            .map(|a| node_text(a, source) == want)
+            .unwrap_or(false),
+        _ => false,
+    }
+}
+
+/// True when `node`'s source text satisfies the optional source-regex
+/// constraint carried by a `LiteralString { regex }` matcher.
+///
+/// `None` = no constraint (any string literal qualifies — the bare `"..."`
+/// hardcoded-secret shape). `Some(pattern)` restricts seeding to literals whose
+/// text matches the combined lookahead regex built by the Semgrep bridge (the
+/// `"$URL"` + `metavariable-regex` shape). Compiled regexes are cached per
+/// thread so a file with many literals does not recompile the pattern each
+/// time. A compile failure (the bridge already rejects malformed patterns at
+/// load time) conservatively yields "no match" so a bad constraint never
+/// over-seeds.
+fn literal_matches_source_regex(node: Node<'_>, source: &str, regex: Option<&str>) -> bool {
+    let Some(pattern) = regex else {
+        return true;
+    };
+    let text = node_text(node, source);
+    SOURCE_REGEX_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if let Some(re) = cache.get(pattern) {
+            return re.is_match(text);
+        }
+        match crate::rules::semgrep_compat::compile_regex(pattern) {
+            Ok(re) => {
+                let matched = re.is_match(text);
+                cache.insert(pattern.to_string(), re);
+                matched
+            }
+            Err(_) => false,
+        }
+    })
+}
+
+thread_local! {
+    /// Per-thread cache of compiled source-literal regexes, keyed by the regex
+    /// source string, to avoid recompiling once per string-literal node.
+    static SOURCE_REGEX_CACHE: std::cell::RefCell<
+        HashMap<String, crate::rules::semgrep_compat::CompiledRegex>,
+    > = std::cell::RefCell::new(HashMap::new());
+}
+
+fn match_source(
+    node: Node<'_>,
+    source: &str,
+    spec: &TaintSpec,
+    aliases: Option<&AliasTable>,
+) -> Option<String> {
+    for matcher in &spec.sources {
+        match matcher {
+            NodeMatcher::Attribute {
+                root,
+                field,
+                description,
+            } => {
+                if node.kind() != "attribute" {
+                    continue;
+                }
+                let Some(final_attr) = node.child_by_field_name("attribute") else {
+                    continue;
+                };
+                if node_text(final_attr, source) != field.as_str() {
+                    continue;
+                }
+                let Some(raw_root) = leftmost_identifier(node, source) else {
+                    continue;
+                };
+                // Match against both the raw leftmost identifier (e.g.
+                // `request` from `from flask import request`) and its
+                // alias-resolved canonical (e.g. `flask.request`). This lets
+                // one spec cover both imported and parameter-introduced
+                // `request` names without requiring callers to duplicate
+                // their source list.
+                if raw_root == root.as_str() {
+                    return Some(description.clone());
+                }
+                if let Some(a) = aliases {
+                    if a.resolve(raw_root).as_ref() == root.as_str() {
+                        return Some(description.clone());
+                    }
+                }
+            }
+            NodeMatcher::Call {
+                canonical,
+                description,
+            } => {
+                if node.kind() != "call" {
+                    continue;
+                }
+                let Some(func) = node.child_by_field_name("function") else {
+                    continue;
+                };
+                let callee_text = node_text(func, source);
+                if callee_text == canonical.as_str() {
+                    return Some(description.clone());
+                }
+                if let Some(a) = aliases {
+                    if a.resolve(callee_text).as_ref() == canonical.as_str() {
+                        return Some(description.clone());
+                    }
+                }
+            }
+            NodeMatcher::FieldName { field, description } => {
+                // Any-receiver attribute READ: `<anything>.field`. Matches an
+                // `attribute` node whose final attribute equals `field`,
+                // regardless of the root identifier. Covers web-request
+                // property sources like `req.body`, `request.query`.
+                if node.kind() != "attribute" {
+                    continue;
+                }
+                let Some(final_attr) = node.child_by_field_name("attribute") else {
+                    continue;
+                };
+                if node_text(final_attr, source) == field.as_str() {
+                    return Some(description.clone());
+                }
+            }
+            NodeMatcher::Subscript { base, description } => {
+                // Index access `base[...]`. Matches a `subscript` node whose
+                // indexed value's final segment equals `base` (or any when
+                // `base` is None). Covers `request.POST[...]`, `params[...]`.
+                if node.kind() != "subscript" {
+                    continue;
+                }
+                let Some(value) = node.child_by_field_name("value") else {
+                    continue;
+                };
+                if subscript_base_matches(value, source, base.as_deref()) {
+                    return Some(description.clone());
+                }
+            }
+            NodeMatcher::ParamName { .. } => {
+                // ParamName matchers are applied when seeding the state
+                // from the function's parameter list, not when walking
+                // expressions.
+            }
+            NodeMatcher::DecoratedParamSource { .. } => {
+                // Applied when seeding decorated-function parameters (see
+                // `seed_param_sources`), not when walking expressions.
+            }
+            NodeMatcher::LiteralString { description, regex } => {
+                // Ellipsis-string source `"..."`: any string literal is a taint
+                // origin. Python string literals are `string` (and adjacent
+                // `concatenated_string`, e.g. `"a" "b"`). Matching ONLY these
+                // literal node kinds keeps the source faithful — an identifier,
+                // call result, or environment read is never seeded.
+                //
+                // When `regex` is `Some`, the literal is seeded ONLY if its text
+                // matches the constraint (the `"$URL"` + `metavariable-regex`
+                // shape — e.g. the `requests` `http://` cleartext rules). This
+                // is the whole point: `requests.request("GET", "http://evil")`
+                // fires, but `"https://safe"` / `"localhost"` do NOT match and
+                // are never seeded.
+                if matches!(node.kind(), "string" | "concatenated_string")
+                    && literal_matches_source_regex(node, source, regex.as_deref())
+                {
+                    return Some(description.clone());
+                }
+            }
+            NodeMatcher::BinopFormat { description } => {
+                // String-construction SOURCE (`avoid-sqlalchemy-text`,
+                // `twiml-injection`): a dynamically assembled string is itself
+                // the taint origin. Fires on
+                //   - `"a" + x` / `x % y` : a `+`/`%` binop with a string-literal
+                //     operand,
+                //   - `f"...{x}..."`      : an interpolated f-string,
+                //   - `"...".format(x)`   : a `.format(...)` call on a string
+                //     literal.
+                // Requiring a concrete literal / f-string keeps this from seeding
+                // plain numeric arithmetic or non-string values (FP-safe), and
+                // means a plain string literal (`"foo"`) is NOT a source.
+                if node_is_python_string_construction(node, source) {
+                    return Some(description.clone());
+                }
+            }
+            NodeMatcher::MethodName { .. }
+            | NodeMatcher::CallRegex { .. }
+            | NodeMatcher::MethodNameRegex { .. }
+            | NodeMatcher::ReceiverCall { .. }
+            | NodeMatcher::MemberAssign { .. }
+            | NodeMatcher::ObjectLiteralValue { .. }
+            | NodeMatcher::ReturnValue { .. }
+            // Java-only typed-metavariable source; Python has no declared-type
+            // seeding, so it is a no-op here.
+            | NodeMatcher::TypedName { .. }
+            // Java-only typed-assignment sink; no-op in source position here.
+            | NodeMatcher::TypedAssignTarget { .. }
+            // PHP-only loose-equality comparison sink; no-op in the Python engine.
+            | NodeMatcher::LooseEquality { .. }
+            // PHP-only tainted class-name / subscript-key sinks; no-op in the
+            // Python engine.
+            | NodeMatcher::TaintedCallee { .. }
+            | NodeMatcher::TaintedSubscriptKey { .. }
+            // Focus-on-call-argument source is seeded only by the C# engine;
+            // no-op in source position here.
+            | NodeMatcher::CallArgSource { .. }
+            // First-parameter signature source / concat-in-call sink are
+            // C#-only; carried in the spec but no-op here.
+            | NodeMatcher::FirstParamSource { .. }
+            | NodeMatcher::CallArgConcat { .. }
+            // C#-only (constructor-arg/property-assign) and Java-only
+            // (method-arg/receiver-provenance) sinks; carried but no-op here.
+            | NodeMatcher::ConstructorArgSink { .. }
+            | NodeMatcher::PropertyAssignSink { .. }
+            | NodeMatcher::MethodArgSink { .. }
+            | NodeMatcher::ReceiverProvenanceCall { .. }
+            | NodeMatcher::LiteralArgCall { .. } => {
+                // Sink-only matchers; MemberAssign is JS-specific.
+            }
+        }
+    }
+    None
+}
+
+/// Canonical set of untrusted-input sources for Python web handlers
+/// and CLI entry points.
+///
+/// Shared across every `py/taint-*` rule so that "what counts as
+/// untrusted" is defined once and stays consistent. Covers Flask,
+/// Django, FastAPI/Starlette request attributes, plus common CLI
+/// sources (`sys.argv`, `sys.stdin`, `input()`, `os.environ`,
+/// `os.getenv`).
+///
+/// Note on method calls: entries like `request.GET.get("x")` or
+/// `os.environ.get("X")` are method calls on a tainted attribute.
+/// The v1 engine only taints the *subject* of such a call when the
+/// subject itself is an attribute source (one-level attribute
+/// propagation); a method call *on top of* that attribute is not
+/// recognized as a source today. Subscript access
+/// (`request.GET["x"]`, `os.environ["X"]`) works correctly via the
+/// subscript-on-tainted-root propagation rule. The method-call path
+/// will be picked up once issue #27 (taint through method calls on
+/// tainted receivers) lands.
+pub fn python_taint_sources() -> Vec<NodeMatcher> {
+    vec![
+        // ─── Flask ────────────────────────────────────────────────
+        NodeMatcher::Attribute {
+            root: "request".into(),
+            field: "data".into(),
+            description: "flask.request.data".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "request".into(),
+            field: "form".into(),
+            description: "flask.request.form".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "request".into(),
+            field: "args".into(),
+            description: "flask.request.args".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "request".into(),
+            field: "values".into(),
+            description: "flask.request.values".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "request".into(),
+            field: "json".into(),
+            description: "flask.request.json".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "request".into(),
+            field: "files".into(),
+            description: "flask.request.files".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "request".into(),
+            field: "cookies".into(),
+            description: "flask.request.cookies".into(),
+        },
+        NodeMatcher::Call {
+            canonical: "request.get_data".into(),
+            description: "flask.request.get_data()".into(),
+        },
+        NodeMatcher::Call {
+            canonical: "request.get_json".into(),
+            description: "flask.request.get_json()".into(),
+        },
+        // ─── Django ───────────────────────────────────────────────
+        // `request.GET`, `request.POST`, etc. are QueryDict attributes
+        // on Django's HttpRequest. Subscript access taints; method
+        // calls like `.get("key")` need issue #27.
+        NodeMatcher::Attribute {
+            root: "request".into(),
+            field: "POST".into(),
+            description: "django.request.POST".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "request".into(),
+            field: "GET".into(),
+            description: "django.request.GET".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "request".into(),
+            field: "COOKIES".into(),
+            description: "django.request.COOKIES".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "request".into(),
+            field: "FILES".into(),
+            description: "django.request.FILES".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "request".into(),
+            field: "META".into(),
+            description: "django.request.META".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "request".into(),
+            field: "headers".into(),
+            description: "django/fastapi.request.headers".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "request".into(),
+            field: "body".into(),
+            description: "django/fastapi.request.body".into(),
+        },
+        // ─── FastAPI / Starlette ──────────────────────────────────
+        // Starlette's Request exposes `query_params`, `path_params`,
+        // `cookies`, `headers`; body access goes through awaitable
+        // method calls (`await request.json()`, etc.). The Call
+        // entries below match the bare callee shape; `await` is a
+        // wrapper the engine sees through.
+        NodeMatcher::Attribute {
+            root: "request".into(),
+            field: "query_params".into(),
+            description: "fastapi/starlette.request.query_params".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "request".into(),
+            field: "path_params".into(),
+            description: "fastapi/starlette.request.path_params".into(),
+        },
+        NodeMatcher::Call {
+            canonical: "request.body".into(),
+            description: "fastapi/starlette.request.body()".into(),
+        },
+        NodeMatcher::Call {
+            canonical: "request.json".into(),
+            description: "fastapi/starlette.request.json()".into(),
+        },
+        NodeMatcher::Call {
+            canonical: "request.form".into(),
+            description: "fastapi/starlette.request.form()".into(),
+        },
+        NodeMatcher::Call {
+            canonical: "request.stream".into(),
+            description: "fastapi/starlette.request.stream()".into(),
+        },
+        // ─── CLI: sys.argv / sys.stdin / input() ──────────────────
+        NodeMatcher::Attribute {
+            root: "sys".into(),
+            field: "argv".into(),
+            description: "sys.argv".into(),
+        },
+        NodeMatcher::Call {
+            canonical: "sys.stdin.read".into(),
+            description: "sys.stdin.read()".into(),
+        },
+        NodeMatcher::Call {
+            canonical: "sys.stdin.readline".into(),
+            description: "sys.stdin.readline()".into(),
+        },
+        NodeMatcher::Call {
+            canonical: "input".into(),
+            description: "input()".into(),
+        },
+        // ─── CLI: os.environ / os.getenv ──────────────────────────
+        // `os.environ["X"]` works via subscript; `os.environ.get("X")`
+        // depends on issue #27 (method calls on tainted receivers).
+        NodeMatcher::Attribute {
+            root: "os".into(),
+            field: "environ".into(),
+            description: "os.environ".into(),
+        },
+        NodeMatcher::Call {
+            canonical: "os.getenv".into(),
+            description: "os.getenv(...)".into(),
+        },
+        NodeMatcher::Call {
+            canonical: "os.environ.get".into(),
+            description: "os.environ.get(...)".into(),
+        },
+        // ─── Tornado ──────────────────────────────────────────────
+        // Tornado request handlers use `self.get_argument()`,
+        // `self.get_body_argument()`, `self.get_query_argument()`
+        // for user input, and `self.request.body` for raw body.
+        NodeMatcher::Call {
+            canonical: "self.get_argument".into(),
+            description: "tornado.self.get_argument()".into(),
+        },
+        NodeMatcher::Call {
+            canonical: "self.get_body_argument".into(),
+            description: "tornado.self.get_body_argument()".into(),
+        },
+        NodeMatcher::Call {
+            canonical: "self.get_query_argument".into(),
+            description: "tornado.self.get_query_argument()".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "self".into(),
+            field: "body".into(),
+            description: "tornado.self.request.body".into(),
+        },
+        // ─── Bottle ─────────────────────────────────────────────
+        // Bottle uses `request.params`, `request.forms`,
+        // `request.query` for user input. `request.json` is already
+        // covered by the Flask entry above.
+        NodeMatcher::Attribute {
+            root: "request".into(),
+            field: "params".into(),
+            description: "bottle.request.params".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "request".into(),
+            field: "forms".into(),
+            description: "bottle.request.forms".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "request".into(),
+            field: "query".into(),
+            description: "bottle.request.query".into(),
+        },
+        // ─── Handler-parameter sources ────────────────────────────
+        // Covers `def view(request): ...` across Flask/Django and
+        // `async def handler(request: Request): ...` in
+        // FastAPI/Starlette. `req` is the idiomatic short alias in
+        // FastAPI and express-style examples.
+        NodeMatcher::ParamName {
+            names: vec!["request".into(), "req".into()],
+            description: "untrusted request parameter".into(),
+        },
+    ]
+}
+
+/// Walk an attribute chain leftward and return the leftmost identifier text.
+/// For `request.form.get`, returns `"request"`. For `x.y`, returns `"x"`.
+/// Returns `None` if the leftmost node is not a simple identifier.
+fn leftmost_identifier<'a>(mut node: Node<'_>, source: &'a str) -> Option<&'a str> {
+    loop {
+        match node.kind() {
+            "identifier" => return Some(node_text(node, source)),
+            "attribute" => {
+                node = node.child_by_field_name("object")?;
+            }
+            _ => return None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::parser::parse_file;
+    use crate::rules::python_aliases::from_tree as py_aliases_from_tree;
+    use crate::Language;
+
+    fn spec_pickle_from_request() -> TaintSpec {
+        TaintSpec {
+            sources: vec![
+                NodeMatcher::Attribute {
+                    root: "request".into(),
+                    field: "data".into(),
+                    description: "flask.request.data".into(),
+                },
+                NodeMatcher::Attribute {
+                    root: "request".into(),
+                    field: "form".into(),
+                    description: "flask.request.form".into(),
+                },
+                NodeMatcher::Attribute {
+                    root: "request".into(),
+                    field: "args".into(),
+                    description: "flask.request.args".into(),
+                },
+                NodeMatcher::Call {
+                    canonical: "request.get_json".into(),
+                    description: "flask.request.get_json()".into(),
+                },
+                NodeMatcher::ParamName {
+                    names: vec!["request".into()],
+                    description: "function parameter named request".into(),
+                },
+            ],
+            sinks: vec![
+                NodeMatcher::Call {
+                    canonical: "pickle.loads".into(),
+                    description: "pickle.loads".into(),
+                },
+                NodeMatcher::Call {
+                    canonical: "pickle.load".into(),
+                    description: "pickle.load".into(),
+                },
+            ],
+            sanitizers: vec![],
+        }
+    }
+
+    fn run(source: &str) -> Vec<TaintFinding> {
+        let tree = parse_file(source, Language::Python).expect("parse");
+        let aliases = py_aliases_from_tree(source, &tree);
+        analyze_tree(
+            tree.root_node(),
+            source,
+            &spec_pickle_from_request(),
+            Some(&aliases),
+        )
+    }
+
+    #[test]
+    fn direct_flow_request_data_to_pickle_loads() {
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    data = request.data
+    return pickle.loads(data)
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+        assert!(f[0].source_description.contains("request.data"));
+        assert_eq!(f[0].sink_description, "pickle.loads");
+    }
+
+    #[test]
+    fn direct_in_function_flow_is_tagged_one_hop() {
+        // Direct source→sink flows should come back with hops=1 so the
+        // reporting layer maps them to confidence=1.0 (no downgrade for
+        // interprocedural uncertainty). Regression guard for #207.
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    return pickle.loads(request.data)
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+        assert_eq!(f[0].hops, 1);
+    }
+
+    #[test]
+    fn chained_assignment_propagates_taint() {
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    a = request.form
+    b = a
+    c = b
+    return pickle.loads(c)
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn reassignment_to_literal_kills_taint() {
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    data = request.data
+    data = b"static"
+    return pickle.loads(data)
+"#;
+        assert_eq!(run(src).len(), 0);
+    }
+
+    #[test]
+    fn taint_survives_branch_over_approximation() {
+        // Flow-insensitive: taint observed in one branch persists into the
+        // fall-through. The POC deliberately over-approximates.
+        let src = r#"
+import pickle
+from flask import request
+
+def handler(cond):
+    if cond:
+        data = request.data
+    return pickle.loads(data)
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn function_parameter_named_request_is_tainted() {
+        let src = r#"
+import pickle
+
+def handler(request):
+    return pickle.loads(request.data)
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn nested_function_has_independent_taint() {
+        // The outer function taints `data`, but the inner function never
+        // sees it — each function body is analyzed independently.
+        let src = r#"
+import pickle
+from flask import request
+
+def outer():
+    data = request.data
+    def inner():
+        return pickle.loads(data)
+    return inner
+"#;
+        // outer() has no sink call; inner() has a sink call on `data`
+        // which is not in its own scope, so zero findings.
+        assert_eq!(run(src).len(), 0);
+    }
+
+    #[test]
+    fn no_source_no_finding() {
+        let src = r#"
+import pickle
+
+def handler():
+    data = b"trusted"
+    return pickle.loads(data)
+"#;
+        assert_eq!(run(src).len(), 0);
+    }
+
+    #[test]
+    fn source_call_get_json_flows_to_sink() {
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    payload = request.get_json()
+    return pickle.loads(payload)
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn direct_source_as_sink_argument_without_intermediate() {
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    return pickle.loads(request.data)
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn subscript_on_tainted_root_is_tainted() {
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    form = request.form
+    return pickle.loads(form["payload"])
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn wrapping_call_preserves_taint() {
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    return pickle.loads(bytes(request.data))
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    fn spec_pickle_with_html_escape_sanitizer() -> TaintSpec {
+        let mut spec = spec_pickle_from_request();
+        spec.sanitizers = vec![NodeMatcher::Call {
+            canonical: "html.escape".into(),
+            description: "html.escape".into(),
+        }];
+        spec
+    }
+
+    fn run_with(source: &str, spec: &TaintSpec) -> Vec<TaintFinding> {
+        let tree = parse_file(source, Language::Python).expect("parse");
+        let aliases = py_aliases_from_tree(source, &tree);
+        analyze_tree(tree.root_node(), source, spec, Some(&aliases))
+    }
+
+    #[test]
+    fn sanitizer_call_kills_taint() {
+        let src = r#"
+import pickle
+import html
+from flask import request
+
+def handler():
+    raw = request.data
+    clean = html.escape(raw)
+    return pickle.loads(clean)
+"#;
+        assert_eq!(
+            run_with(src, &spec_pickle_with_html_escape_sanitizer()).len(),
+            0
+        );
+    }
+
+    #[test]
+    fn sanitizer_bypassed_still_flows() {
+        // html.escape is applied to `raw` and stored in `escaped`, but the
+        // sink reads the still-tainted `raw`. Must still fire.
+        let src = r#"
+import pickle
+import html
+from flask import request
+
+def handler():
+    raw = request.data
+    escaped = html.escape(raw)
+    return pickle.loads(raw)
+"#;
+        assert_eq!(
+            run_with(src, &spec_pickle_with_html_escape_sanitizer()).len(),
+            1
+        );
+    }
+
+    #[test]
+    fn non_sanitizer_wrapping_call_preserves_taint() {
+        // bytes() is not listed as a sanitizer, so the wrapping-call rule
+        // still applies and taint survives.
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    data = bytes(request.data)
+    return pickle.loads(data)
+"#;
+        assert_eq!(
+            run_with(src, &spec_pickle_with_html_escape_sanitizer()).len(),
+            1
+        );
+    }
+
+    #[test]
+    fn sanitizer_result_assigned_to_new_variable() {
+        // The assignment `data = html.escape(request.args["q"])` must not
+        // add `data` to the taint set.
+        let src = r#"
+import pickle
+import html
+from flask import request
+
+def handler():
+    data = html.escape(request.args["q"])
+    return pickle.loads(data)
+"#;
+        assert_eq!(
+            run_with(src, &spec_pickle_with_html_escape_sanitizer()).len(),
+            0
+        );
+    }
+
+    #[test]
+    fn multiple_sanitizers_in_spec() {
+        let mut spec = spec_pickle_from_request();
+        spec.sanitizers = vec![
+            NodeMatcher::Call {
+                canonical: "html.escape".into(),
+                description: "html.escape".into(),
+            },
+            NodeMatcher::Call {
+                canonical: "shlex.quote".into(),
+                description: "shlex.quote".into(),
+            },
+        ];
+
+        let src_escape = r#"
+import pickle
+import html
+from flask import request
+
+def handler():
+    return pickle.loads(html.escape(request.data))
+"#;
+        let src_quote = r#"
+import pickle
+import shlex
+from flask import request
+
+def handler():
+    return pickle.loads(shlex.quote(request.data))
+"#;
+        let src_neither = r#"
+import pickle
+from flask import request
+
+def handler():
+    return pickle.loads(urllib.parse.quote(request.data))
+"#;
+        assert_eq!(run_with(src_escape, &spec).len(), 0);
+        assert_eq!(run_with(src_quote, &spec).len(), 0);
+        assert_eq!(run_with(src_neither, &spec).len(), 1);
+    }
+
+    #[test]
+    fn nested_subscript_propagates_through_chain() {
+        // `request.form["a"]["b"]["c"]` must be tainted: the innermost
+        // subject `request.form` is a source, and every outer subscript
+        // preserves taint regardless of the keys.
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    return pickle.loads(request.form["a"]["b"]["c"])
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+        assert!(f[0].source_description.contains("request.form"));
+    }
+
+    #[test]
+    fn tuple_unpack_literal_rhs_taints_matching_element() {
+        // `a, b = request.args["a"], request.args["b"]`: both a and b are
+        // tainted because each RHS element is a subscript on a source.
+        // The sink reads `a`, so we should see exactly one finding.
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    a, b = request.args["a"], request.args["b"]
+    return pickle.loads(a)
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn tuple_unpack_literal_rhs_leaves_clean_element_clean() {
+        // Precise pairing: only the first element of the RHS is tainted,
+        // the sink reads `b` which pairs with the clean literal, so the
+        // taint rule must stay silent.
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    a, b = request.args["a"], b"static"
+    return pickle.loads(b)
+"#;
+        assert_eq!(run(src).len(), 0);
+    }
+
+    #[test]
+    fn tuple_unpack_tainted_rhs_conservatively_taints_all_targets() {
+        // When the RHS is a single opaque expression we can't know which
+        // slot is tainted without type info, so both targets are tainted.
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    a, b = request.get_json()
+    return pickle.loads(b)
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn list_unpack_similar_to_tuple_unpack() {
+        // `[a, b] = ...` should behave the same as `a, b = ...`.
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    [a, b] = [request.args["a"], b"static"]
+    return pickle.loads(a)
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn interprocedural_tainted_return_propagates_to_caller() {
+        let src = r#"
+import pickle
+from flask import request
+
+def get_user_input():
+    return request.data
+
+def handler():
+    data = get_user_input()
+    return pickle.loads(data)
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+        assert!(f[0].source_description.contains("get_user_input"));
+        assert!(f[0].source_description.contains("request.data"));
+    }
+
+    #[test]
+    fn interprocedural_clean_return_does_not_fire() {
+        let src = r#"
+import pickle
+
+def literal_helper():
+    return b"static"
+
+def handler():
+    return pickle.loads(literal_helper())
+"#;
+        assert_eq!(run(src).len(), 0);
+    }
+
+    #[test]
+    fn interprocedural_return_is_parameter_sensitive() {
+        let src = r#"
+import pickle
+from flask import request
+
+def choose(first, second):
+    return second
+
+def handler():
+    data = choose(request.data, b"static")
+    return pickle.loads(data)
+"#;
+        assert_eq!(run(src).len(), 0);
+    }
+
+    #[test]
+    fn interprocedural_late_definition_still_found() {
+        // Helper defined *below* the caller: pass 1 collects summaries
+        // for every function in the file before pass 2 runs, so the
+        // order of definitions does not matter.
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    data = helper()
+    return pickle.loads(data)
+
+def helper():
+    return request.data
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn multi_hop_chain_is_out_of_scope_v1() {
+        // Two-hop chain: `middle()` calls `source()`. Pass 1 evaluates
+        // each helper with an empty summary, so `middle`'s return (which
+        // calls `source`) is seen as clean. Documented v1 limitation —
+        // the test pins the behavior so a future upgrade breaking it is
+        // a deliberate decision.
+        let src = r#"
+import pickle
+from flask import request
+
+def source():
+    return request.data
+
+def middle():
+    return source()
+
+def handler():
+    return pickle.loads(middle())
+"#;
+        assert_eq!(run(src).len(), 0);
+    }
+
+    #[test]
+    fn interprocedural_direct_call_as_sink_argument() {
+        let src = r#"
+import pickle
+from flask import request
+
+def get_user_input():
+    return request.data
+
+def handler():
+    return pickle.loads(get_user_input())
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn method_call_on_tainted_source_propagates() {
+        // `request.args.get("x")` — the receiver `request.args` is a
+        // source, so the method-call result is tainted and must flow
+        // into the sink.
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    data = request.args.get("x")
+    return pickle.loads(data)
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+        assert!(f[0].source_description.contains("request.args"));
+    }
+
+    #[test]
+    fn method_call_on_tainted_subscript_propagates() {
+        // `request.args["x"].upper()` — the receiver is a subscript
+        // chain on a tainted source.
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    data = request.args["x"].upper()
+    return pickle.loads(data)
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn method_call_on_literal_root_is_clean() {
+        // `"literal".upper()` is not tainted — the object is a string
+        // literal with no interpolation, so `expression_taint` on it
+        // returns None.
+        let src = r#"
+import pickle
+
+def handler():
+    data = "literal".upper()
+    return pickle.loads(data)
+"#;
+        assert_eq!(run(src).len(), 0);
+    }
+
+    #[test]
+    fn method_call_with_args_still_tainted() {
+        // Extra positional / keyword args must not defeat the
+        // propagation.
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    data = request.args.get("x", "default")
+    return pickle.loads(data)
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn chained_method_calls_preserve_taint() {
+        // `request.args.get("x").strip().upper()` — three levels of
+        // method call on a tainted root, all must propagate.
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    data = request.args.get("x").strip().upper()
+    return pickle.loads(data)
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn fstring_with_tainted_interpolation_is_tainted() {
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    data = f"{request.data}"
+    return pickle.loads(data)
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+        assert!(f[0].source_description.contains("request.data"));
+    }
+
+    #[test]
+    fn fstring_with_literal_only_is_clean() {
+        // No interpolation → no propagation path. `f"hello {1+2}"` has
+        // an interpolation but its inner expression is a pure literal,
+        // so no taint is found.
+        let src = r#"
+import pickle
+
+def handler():
+    data = f"hello {1+2}"
+    return pickle.loads(data)
+"#;
+        assert_eq!(run(src).len(), 0);
+    }
+
+    #[test]
+    fn fstring_with_tainted_mixed_with_literals_is_tainted() {
+        // `f"a {x} b"` where `x` carries taint from a prior assignment.
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    x = request.args["q"]
+    data = f"a {x} b"
+    return pickle.loads(data)
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn alias_resolution_through_import_table() {
+        // import pickle as p; p.loads(...) must still be recognized as the
+        // pickle.loads sink when the alias table is supplied.
+        let src = r#"
+import pickle as p
+from flask import request
+
+def handler():
+    return p.loads(request.data)
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn string_concat_with_tainted_right_operand_is_tainted() {
+        // "prefix " + request.data → tainted. The most common SQL/command
+        // injection pattern in Python.
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    data = "prefix " + request.data
+    return pickle.loads(data)
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn string_concat_with_tainted_left_operand_is_tainted() {
+        // request.data + " suffix" → tainted (symmetric to the above).
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    data = request.data + " suffix"
+    return pickle.loads(data)
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn chained_string_concat_with_tainted_operand_is_tainted() {
+        // ("a" + "b") + request.data → tainted. Left-associative, so the
+        // engine sees `binary_operator("+", binary_operator("+", "a", "b"), request.data)`.
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    data = "a" + "b" + request.data
+    return pickle.loads(data)
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn string_concat_with_both_literal_is_clean() {
+        // "a" + "b" → no taint.
+        let src = r#"
+import pickle
+
+def handler():
+    data = "a" + "b"
+    return pickle.loads(data)
+"#;
+        assert_eq!(run(src).len(), 0);
+    }
+
+    #[test]
+    fn integer_arithmetic_is_clean() {
+        // 1 + 2 → no taint. The engine's `+` handler must not over-fire
+        // on integer arithmetic. Clean operands short-circuit naturally.
+        let src = r#"
+import pickle
+
+def handler():
+    x = 1 + 2
+    data = b"trusted" + bytes([x])
+    return pickle.loads(data)
+"#;
+        assert_eq!(run(src).len(), 0);
+    }
+
+    #[test]
+    fn percent_format_with_tainted_operand_is_tainted() {
+        // "... %s" % tainted → tainted (old-style string formatting).
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    name = request.args.get("name")
+    data = "prefix_%s" % name
+    pickle.loads(data)
+"#;
+        assert!(!run(src).is_empty());
+    }
+
+    #[test]
+    fn percent_format_with_clean_operand_is_clean() {
+        let src = r#"
+import pickle
+
+def handler():
+    data = "prefix_%s" % "literal"
+    pickle.loads(data)
+"#;
+        assert_eq!(run(src).len(), 0);
+    }
+
+    #[test]
+    fn dot_format_with_tainted_argument_is_tainted() {
+        // "...{}".format(tainted) → tainted (new-style string formatting).
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    name = request.args.get("name")
+    data = "prefix_{}".format(name)
+    pickle.loads(data)
+"#;
+        assert!(!run(src).is_empty());
+    }
+
+    #[test]
+    fn dot_format_with_clean_arguments_is_clean() {
+        let src = r#"
+import pickle
+
+def handler():
+    data = "prefix_{}".format("literal")
+    pickle.loads(data)
+"#;
+        assert_eq!(run(src).len(), 0);
+    }
+
+    #[test]
+    fn percent_format_tuple_with_tainted_is_tainted() {
+        // "... %s ... %s" % (clean, tainted) → tainted
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    user_input = request.args.get("q")
+    data = "%s_%s" % ("safe", user_input)
+    pickle.loads(data)
+"#;
+        assert!(!run(src).is_empty());
+    }
+
+    #[test]
+    fn conditional_expression_tainted_body_propagates() {
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    data = request.data if True else "safe"
+    pickle.loads(data)
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+        assert!(f[0].source_description.contains("request.data"));
+    }
+
+    #[test]
+    fn conditional_expression_tainted_alternative_propagates() {
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    data = "safe" if True else request.data
+    pickle.loads(data)
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+        assert!(f[0].source_description.contains("request.data"));
+    }
+
+    #[test]
+    fn conditional_expression_clean_both_branches_is_clean() {
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    data = "a" if True else "b"
+    pickle.loads(data)
+"#;
+        assert!(run(src).is_empty());
+    }
+
+    // ---- Comprehension taint propagation (refs #96) ----
+
+    #[test]
+    fn list_comprehension_tainted_iterable_propagates() {
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    user_input = request.args.get("q")
+    data = [x for x in user_input]
+    pickle.loads(data)
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+    }
+
+    #[test]
+    fn list_comprehension_method_call_on_tainted_elements() {
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    items = request.args.getlist("items")
+    data = [x.strip() for x in items]
+    pickle.loads(data)
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+    }
+
+    #[test]
+    fn list_comprehension_clean_iterable_is_clean() {
+        let src = r#"
+import pickle
+
+def handler():
+    data = [x for x in ["safe", "literal"]]
+    pickle.loads(data)
+"#;
+        assert!(run(src).is_empty());
+    }
+
+    #[test]
+    fn dict_comprehension_tainted_values_propagates() {
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    user_input = request.args.get("q")
+    data = {k: v for k, v in user_input.items()}
+    pickle.loads(data)
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+    }
+
+    #[test]
+    fn set_comprehension_tainted_iterable_propagates() {
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    user_input = request.args.get("q")
+    data = {x for x in user_input}
+    pickle.loads(data)
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+    }
+
+    #[test]
+    fn generator_expression_tainted_iterable_propagates() {
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    user_input = request.args.get("q")
+    data = list(x for x in user_input)
+    pickle.loads(data)
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+    }
+
+    #[test]
+    fn with_statement_tainted_context_propagates_to_alias() {
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    with open(request.data) as f:
+        pickle.loads(f.read())
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+        assert_eq!(f[0].sink_description, "pickle.loads");
+    }
+
+    #[test]
+    fn with_statement_clean_context_does_not_taint_alias() {
+        let src = r#"
+import pickle
+
+def handler():
+    with open("literal.txt") as f:
+        pickle.loads(f.read())
+"#;
+        assert!(run(src).is_empty());
+    }
+
+    /// Helper that uses the full `python_taint_sources()` with pickle sinks.
+    fn run_full_sources(source: &str) -> Vec<TaintFinding> {
+        let spec = TaintSpec {
+            sources: python_taint_sources(),
+            sinks: vec![NodeMatcher::Call {
+                canonical: "pickle.loads".into(),
+                description: "pickle.loads".into(),
+            }],
+            sanitizers: vec![],
+        };
+        run_with(source, &spec)
+    }
+
+    // ─── Tornado source tests ────────────────────────────────────────
+
+    #[test]
+    fn tornado_get_argument_is_tainted() {
+        let src = r#"
+import pickle
+
+class Handler:
+    def post(self):
+        data = self.get_argument("payload")
+        pickle.loads(data)
+"#;
+        let f = run_full_sources(src);
+        assert_eq!(f.len(), 1);
+        assert!(f[0].source_description.contains("get_argument"));
+    }
+
+    #[test]
+    fn tornado_get_body_argument_is_tainted() {
+        let src = r#"
+import pickle
+
+class Handler:
+    def post(self):
+        data = self.get_body_argument("payload")
+        pickle.loads(data)
+"#;
+        let f = run_full_sources(src);
+        assert_eq!(f.len(), 1);
+        assert!(f[0].source_description.contains("get_body_argument"));
+    }
+
+    #[test]
+    fn tornado_get_query_argument_is_tainted() {
+        let src = r#"
+import pickle
+
+class Handler:
+    def get(self):
+        data = self.get_query_argument("q")
+        pickle.loads(data)
+"#;
+        let f = run_full_sources(src);
+        assert_eq!(f.len(), 1);
+        assert!(f[0].source_description.contains("get_query_argument"));
+    }
+
+    #[test]
+    fn tornado_request_body_is_tainted() {
+        let src = r#"
+import pickle
+
+class Handler:
+    def post(self):
+        data = self.request.body
+        pickle.loads(data)
+"#;
+        let f = run_full_sources(src);
+        assert_eq!(f.len(), 1);
+    }
+
+    // ─── Bottle source tests ────────────────────────────────────────
+
+    #[test]
+    fn bottle_request_params_is_tainted() {
+        let src = r#"
+import pickle
+from bottle import request
+
+def handler():
+    data = request.params
+    pickle.loads(data)
+"#;
+        let f = run_full_sources(src);
+        assert_eq!(f.len(), 1);
+        assert!(f[0].source_description.contains("params"));
+    }
+
+    #[test]
+    fn bottle_request_forms_is_tainted() {
+        let src = r#"
+import pickle
+from bottle import request
+
+def handler():
+    data = request.forms
+    pickle.loads(data)
+"#;
+        let f = run_full_sources(src);
+        assert_eq!(f.len(), 1);
+        assert!(f[0].source_description.contains("forms"));
+    }
+
+    #[test]
+    fn bottle_request_query_is_tainted() {
+        let src = r#"
+import pickle
+from bottle import request
+
+def handler():
+    data = request.query
+    pickle.loads(data)
+"#;
+        let f = run_full_sources(src);
+        assert_eq!(f.len(), 1);
+        assert!(f[0].source_description.contains("query"));
+    }
+
+    #[test]
+    fn walrus_operator_propagates_taint() {
+        let src = r#"
+import pickle
+from flask import request
+
+def handler():
+    if data := request.get_json():
+        pickle.loads(data)
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+        assert_eq!(f[0].sink_description, "pickle.loads");
+    }
+}

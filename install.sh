@@ -34,6 +34,8 @@ esac
 # copies can still update, as `0-<platform>`. Prefer the new name and fall back to
 # the old one when a release or mirror has only that.
 NEW_ASSET="0security-${ASSET#0-}"
+# Foxguard ships beside `0` under the same platform suffix.
+FG_ASSET="foxguard-${ASSET#0-}"
 
 command -v curl >/dev/null 2>&1 || fail "curl is required"
 if command -v sha256sum >/dev/null 2>&1; then
@@ -165,56 +167,31 @@ else
   printf '%s\n' "Installed verified 0security to ${INSTALL_DIR}/0security" >&2
 fi
 
-# Provision the default static analyzer too, so standalone source reviews do
-# not require Node/npm. INSTALL_FOXGUARD=0 opts out for pre-provisioned hosts.
+# Install the default static analyzer (Foxguard) next to `0`, so source reviews
+# do not require Node/npm. It is built from this repository's crates/foxguard by
+# the same release workflow as `0`, published as foxguard-<platform>, and listed
+# in the same checksums.txt, so the attestation and signature checks above cover
+# it. INSTALL_FOXGUARD=0 opts out for pre-provisioned hosts. A release or mirror
+# that has no foxguard asset leaves 0security installed without it.
 if [ "${INSTALL_FOXGUARD:-1}" != "0" ]; then
-  FOXGUARD_TAG="${FOXGUARD_TAG:-v0.14.2}"
-  [ "$FOXGUARD_TAG" = "v0.14.2" ] || fail "update the pinned FoxGuard checksums before selecting another release"
-  FOXGUARD_REPO="0sec-labs/foxguard"
-
-  case "$(uname -s)" in
-    Darwin)
-      case "$(uname -m)" in
-        arm64) FG_ASSET="foxguard-macos-aarch64"; FG_SHA256="d81086ad96f46e07c863f33b64be1c5e14013d92f8e3344c6f17a23d8f34772f" ;;
-        *) fail "unsupported macOS architecture for FoxGuard companion" ;;
-      esac ;;
-    Linux)
-      case "$(uname -m)" in
-        x86_64|amd64) FG_ASSET="foxguard-linux-x86_64"; FG_SHA256="6996b73f5bd60eaa173908e585808a4df63595e09be34b1d7a5a70457a0ebec8" ;;
-        aarch64|arm64) FG_ASSET="foxguard-linux-aarch64"; FG_SHA256="db6df4e455740488efef3be01df2217f825e0878ff1e4288e945db2133cabb7c" ;;
-        *) fail "unsupported Linux architecture for FoxGuard companion" ;;
-      esac ;;
-    *) fail "unsupported operating system for FoxGuard companion" ;;
-  esac
-
-  if [ -x "${INSTALL_DIR}/foxguard" ]; then
-    printf '%s\n' "Keeping existing FoxGuard at ${INSTALL_DIR}/foxguard" >&2
+  fg_expected="$(awk -v asset="$FG_ASSET" '$2 == asset || $2 == ("*" asset) { print $1; exit }' "$manifest")"
+  if [ -z "$fg_expected" ]; then
+    printf '%s\n' "0 installer: this release lists no ${FG_ASSET}; keeping 0security installed without Foxguard" >&2
   else
     fg_binary="$(mktemp "${INSTALL_DIR}/.${FG_ASSET}.XXXXXX")"
-
-    printf '%s\n' "Downloading FoxGuard ${FOXGUARD_TAG} companion (${FG_ASSET})…" >&2
-    if download "https://github.com/${FOXGUARD_REPO}/releases/download/${FOXGUARD_TAG}/${FG_ASSET}" "$fg_binary" \
-      --connect-timeout 10 --max-time 30 --retry 1 --retry-delay 1 --retry-max-time 35; then
-      actual="$(sha256_file "$fg_binary")"
-      if [ "$FG_SHA256" = "$actual" ]; then
-        # The pinned SHA-256 above is the authority. An attestation, when the
-        # companion's release publishes one, is reported as extra evidence only.
-        if [ "$INSTALL_ATTESTATION" != "0" ] && attestation_usable; then
-          if attestation_verify "$fg_binary" "$FOXGUARD_REPO"; then
-            printf '%s\n' "FoxGuard attestation verified for ${FOXGUARD_REPO}." >&2
-          else
-            printf '%s\n' "No FoxGuard attestation verified; relying on the pinned SHA-256." >&2
-          fi
-        fi
+    printf '%s\n' "Downloading ${FG_ASSET}…" >&2
+    if download "${RELEASE_BASE_URL}/${FG_ASSET}" "$fg_binary" \
+      --connect-timeout 10 --max-time 60 --retry 1 --retry-delay 1 --retry-max-time 65; then
+      if [ "$fg_expected" = "$(sha256_file "$fg_binary")" ]; then
         chmod 755 "$fg_binary"
         mv -f "$fg_binary" "${INSTALL_DIR}/foxguard"
         fg_binary=""
-        printf '%s\n' "Installed verified FoxGuard to ${INSTALL_DIR}/foxguard" >&2
+        printf '%s\n' "Installed verified Foxguard to ${INSTALL_DIR}/foxguard" >&2
       else
-        printf '%s\n' "0 installer: FoxGuard checksum mismatch; keeping 0security installed without the companion" >&2
+        printf '%s\n' "0 installer: ${FG_ASSET} checksum mismatch; keeping 0security installed without Foxguard" >&2
       fi
     else
-      printf '%s\n' "0 installer: FoxGuard download failed; keeping 0security installed without the companion" >&2
+      printf '%s\n' "0 installer: ${FG_ASSET} download failed; keeping 0security installed without Foxguard" >&2
     fi
   fi
 fi

@@ -7,6 +7,7 @@
 #   docs     docs site build (and, on main, deploy)
 #   docker   Docker image + server-mode smoke
 #   deps     dependency manifests changed (advisory audit)
+#   rust     crates/, the Cargo workspace or the Rust toolchain pin changed (Foxguard tests)
 #
 # Safe by construction: on tags, for new branches (no base), when the
 # diff cannot be computed, or when the workflow itself changed, everything runs.
@@ -14,7 +15,7 @@
 # single required check.
 set -uo pipefail
 BASE="${1:-}"
-KEYS="code engine docs docker deps"
+KEYS="code engine docs docker deps rust"
 all() { for k in $KEYS; do printf '%s=true\n' "$k"; done; exit 0; }
 case "${GITHUB_REF:-}" in refs/tags/*) all ;; esac
 # On main the caller passes the last green Main sha as the base.
@@ -29,6 +30,7 @@ while IFS= read -r f; do
   esac
   case "$f" in
     docs/*|*.md|company-brain/*|LICENSE*) ;;                       # docs only: no test group
+    crates/*|Cargo.toml|Cargo.lock|rust-toolchain.toml) ;;         # Rust only: the rust group, not the TypeScript groups
     packages/web/*) code=true ;;                                   # dashboard: engine suite cannot see it
     *) code=true; engine=true ;;                                   # engine, cli, root, scripts, workflows: everything
   esac
@@ -36,13 +38,11 @@ while IFS= read -r f; do
     docs/*|README.md|packages/cli/*|packages/engine/*|scripts/check-docs-site.mjs|scripts/sync-cli-docs.mjs|scripts/check-docs-commands*|package.json|pnpm-lock.yaml) docs=true ;;
   esac
   case "$f" in
+    crates/foxguard/*|Cargo.toml|Cargo.lock|rust-toolchain.toml) docker=true ;;  # the image builds Foxguard from source
     deploy/docker/*|scripts/docker/*|scripts/smoke-server-mode.mjs|deploy/compose/*|packages/cli/src/web/server-mode*|packages/cli/src/web/dashboard-http.ts|packages/cli/src/commands/dashboard.ts) docker=true ;;
   esac
   case "$f" in
-  esac
-  case "$f" in
-  esac
-  case "$f" in
+    crates/*|Cargo.toml|Cargo.lock|rust-toolchain.toml|scripts/ensure-rust.sh|scripts/build-foxguard.sh) rust=true ;;
   esac
   case "$f" in
     package.json|packages/*/package.json|pnpm-lock.yaml|pnpm-workspace.yaml) deps=true ;;

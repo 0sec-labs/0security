@@ -34,7 +34,7 @@ The image is based on `ubuntu:24.04` and includes:
 | Category | Tools |
 |----------|-------|
 | Node.js runtime | Node 24, npm, npx |
-| Static analysis | FoxGuard (checksum-pinned) |
+| Static analysis | FoxGuard (built from the repository source) |
 | Web pentesting | sqlmap, nmap, nikto, gobuster, hydra, ffuf, wfuzz, whatweb, wafw00f, dirb |
 | Active Directory | impacket (0.13.1), certipy-ad (5.1.0), bloodhound-ce (1.9.1), ldap-utils, krb5-user |
 | Cloud identity | AzureHound (v3.0.0, checksum-pinned) |
@@ -342,7 +342,7 @@ Keep the access token secret, use HTTPS, and restrict who can reach the port.
 ## Supply chain
 
 - Commands run as the `ubuntu` user.
-- Ubuntu packages follow the configured apt repositories. The Dockerfile pins the AD Python packages and verifies the AzureHound and FoxGuard downloads.
+- Ubuntu packages follow the configured apt repositories. The Dockerfile pins the AD Python packages and verifies the AzureHound download. FoxGuard is built from the repository source in a separate build stage.
 - Changing `AZUREHOUND_VERSION` also needs matching checksums in the Dockerfile.
 - The AD tools venv is not on `PATH`, so it cannot shadow system Python packages.
 

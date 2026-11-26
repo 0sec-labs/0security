@@ -1,0 +1,3315 @@
+//! Intraprocedural, flow-insensitive taint analysis for JavaScript/TypeScript.
+//!
+//! Ported from `python_taint.rs` as part of issue #18. The surface mirrors
+//! the Python engine intentionally — `TaintSpec`, `NodeMatcher`,
+//! `TaintFinding`, and `analyze_tree` have identical shapes so a future
+//! refactor that extracts the language-agnostic core is cheap. For now we
+//! keep two engines so each grammar's quirks stay local.
+//!
+//! # Scope (same as Python)
+//!
+//! - **Per function.** Each `function_declaration`, `function_expression`,
+//!   `arrow_function`, and `method_definition` body is analyzed independently.
+//! - **Per file.** No cross-file analysis.
+//! - **Flow-insensitive.** Statements are processed in source order; a
+//!   reassignment with a clean RHS clears the target's taint.
+//! - **No container sensitivity.** `x["k"]` is tainted when `x` is tainted.
+//! - **One level of attribute propagation.** `req.body` is tainted when `req`
+//!   is tainted. `req.body.name` is tainted when `req` is tainted.
+//! - **One level of wrapping-call propagation.** `String(tainted)` stays
+//!   tainted unless the callee is in `sanitizers`.
+//! - **Template-literal propagation.** Any `template_string` with an
+//!   interpolation whose expression is tainted is itself tainted.
+//! - **Sanitizers collapse to "clean".**
+//!
+//! Everything specific to a library is expressed declaratively via `TaintSpec`.
+
+use super::common::AliasTable;
+use super::taint_engine::{
+    analyze_function_generic, attribution_hint_for_sink, build_batched_taint_groups,
+    cross_file_taint_finding, extract_cross_file_summary_for_function,
+    extract_cross_file_summary_for_function_cf, match_call_sink, match_member_assign_sink,
+    match_object_literal_sink, node_text, push_attributed_findings, taint_finding_for_node,
+    walk_body_for_summary_generic, AnalysisContext, TaintLanguageAdapter, TaintState,
+};
+pub use super::taint_engine::{
+    BatchedRule, NodeMatcher, ReturnSummary, ReturnTaintSummary, RuleFilter, TaintFinding,
+    TaintSpec,
+};
+use crate::rules::cross_file::{CrossFileSummaryMap, FunctionTaintSummary};
+use std::borrow::Cow;
+use std::collections::HashMap;
+use std::path::PathBuf;
+use tree_sitter::{Node, Tree};
+
+// ─── Public API ───────────────────────────────────────────────────────────
+
+/// Cross-file context passed to `analyze_tree_with_cross_file` to enable
+/// cross-file taint propagation. When `Some`, the engine resolves calls to
+/// imported functions via the summary map and emits findings when tainted
+/// arguments reach cross-file sinks.
+pub struct CrossFileInfo<'a> {
+    /// Map from local import name (e.g. `"./services"` module specifier or
+    /// local binding) to the resolved file path.
+    pub import_to_path: &'a HashMap<String, PathBuf>,
+    /// Cross-file summaries keyed by canonical file path.
+    pub summaries: &'a CrossFileSummaryMap,
+    /// The rule filter used to emit cross-file findings. Cross-file
+    /// findings are only emitted when the summary's `sink_rule_id`
+    /// passes this filter.
+    ///
+    /// - [`RuleFilter::Single`] in single-rule mode (the historical
+    ///   behaviour).
+    /// - [`RuleFilter::Any`] with a set of allowed rule ids in batched
+    ///   mode, so a single walk can attribute findings to any of the
+    ///   batched rules.
+    pub rule_filter: RuleFilter<'a>,
+}
+
+/// Type alias for the JS-specific analysis context.
+type JsCtx<'a> = AnalysisContext<'a, CrossFileInfo<'a>>;
+
+/// Run the taint engine over every function/method body inside `root` and
+/// return one `TaintFinding` per source→sink flow.
+///
+/// Runs two passes per file. Pass 1 builds the return-taint summary for
+/// every eligible function in the file. Pass 2 re-analyzes each scope
+/// with that summary available so bare helper calls propagate their
+/// return taint into the caller. See `python_taint::analyze_tree` for
+/// the full design; the JS engine mirrors it.
+pub fn analyze_tree(
+    root: Node<'_>,
+    source: &str,
+    spec: &TaintSpec,
+    aliases: Option<&AliasTable>,
+) -> Vec<TaintFinding> {
+    analyze_tree_with_cross_file(root, source, spec, aliases, None)
+}
+
+/// Like [`analyze_tree`] but with optional cross-file taint summaries.
+///
+/// When `cross_file` is `Some`, calls to imported functions are resolved
+/// against the summary map. If a tainted argument reaches a sink in the
+/// imported function (per its summary), a finding is emitted in the
+/// caller's file.
+pub fn analyze_tree_with_cross_file<'a>(
+    root: Node<'_>,
+    source: &'a str,
+    spec: &'a TaintSpec,
+    aliases: Option<&'a AliasTable>,
+    cross_file: Option<&'a CrossFileInfo<'a>>,
+) -> Vec<TaintFinding> {
+    let empty_summary = ReturnSummary::new();
+    let mut summaries = ReturnSummary::new();
+    let pass1_ctx = AnalysisContext {
+        source,
+        spec,
+        aliases,
+        summaries: &empty_summary,
+        cross_file: None,
+        sink_to_rules: None,
+        label_policy: None,
+    };
+    collect_summary_targets(root, source, &mut |name, func_node| {
+        let ret = summarize_function_return(func_node, &pass1_ctx);
+        summaries.insert(
+            function_summary_key(&name, collect_param_names(func_node, source).len()),
+            ret,
+        );
+    });
+
+    let ctx = AnalysisContext {
+        source,
+        spec,
+        aliases,
+        summaries: &summaries,
+        cross_file,
+        sink_to_rules: None,
+        label_policy: None,
+    };
+    let mut findings = Vec::new();
+    collect_function_scopes(root, &mut |func_node| {
+        analyze_function(func_node, &ctx, &mut findings);
+    });
+    findings
+}
+
+/// Cross-file info used by the batched analyzer.
+///
+/// Unlike [`CrossFileInfo`] — which takes a single rule filter — the
+/// batched variant only needs the summary map and the import paths.
+/// The allowed rule ids are derived per sanitizer-group from the input
+/// [`BatchedRule`] slice.
+pub struct CrossFileInfoBatched<'a> {
+    pub import_to_path: &'a HashMap<String, PathBuf>,
+    pub summaries: &'a CrossFileSummaryMap,
+}
+
+/// Batched JS taint analysis.
+///
+/// Runs the taint engine once per sanitizer-group instead of once per
+/// rule. Rules with different sanitizer sets land in different groups
+/// because sanitizers affect both the return-taint summary and the
+/// intra-file taint state.
+///
+/// Returns `(rule_id, finding)` pairs.
+pub fn analyze_tree_batched<'a>(
+    root: Node<'_>,
+    source: &'a str,
+    rules: &[BatchedRule<'a>],
+    aliases: Option<&'a AliasTable>,
+    cross_file: Option<&'a CrossFileInfoBatched<'a>>,
+) -> Vec<(String, TaintFinding)> {
+    if rules.is_empty() {
+        return Vec::new();
+    }
+
+    let mut out: Vec<(String, TaintFinding)> = Vec::new();
+    for group in build_batched_taint_groups(rules) {
+        // Pass 1: compute summaries once for the entire group.
+        let empty_summary = ReturnSummary::new();
+        let pass1_ctx = AnalysisContext {
+            source,
+            spec: &group.spec,
+            aliases,
+            summaries: &empty_summary,
+            cross_file: None,
+            sink_to_rules: None,
+            label_policy: None,
+        };
+        let mut summaries = ReturnSummary::new();
+        collect_summary_targets(root, source, &mut |name, func_node| {
+            let ret = summarize_function_return(func_node, &pass1_ctx);
+            summaries.insert(
+                function_summary_key(&name, collect_param_names(func_node, source).len()),
+                ret,
+            );
+        });
+
+        // Pass 2: one walk emits findings for every rule in the group.
+        let cross_file_for_group = cross_file.map(|cf| CrossFileInfo {
+            import_to_path: cf.import_to_path,
+            summaries: cf.summaries,
+            rule_filter: RuleFilter::Any(&group.allowed_rule_ids),
+        });
+        let ctx = AnalysisContext {
+            source,
+            spec: &group.spec,
+            aliases,
+            summaries: &summaries,
+            cross_file: cross_file_for_group.as_ref(),
+            sink_to_rules: Some(&group.sink_to_rules),
+            label_policy: None,
+        };
+        let mut group_findings: Vec<TaintFinding> = Vec::new();
+        collect_function_scopes(root, &mut |func_node| {
+            analyze_function(func_node, &ctx, &mut group_findings);
+        });
+
+        push_attributed_findings(&mut out, group_findings, &group.sink_to_rules);
+    }
+
+    out
+}
+
+/// Walk `root` and invoke `visit(name, body_node)` for every function
+/// whose simple name we can recover: top-level `function_declaration`s
+/// and `const foo = (...) => {...}` / `const foo = function(...) {...}`
+/// variable declarators with an arrow-function or function-expression
+/// initializer. Nested definitions inside other function scopes are NOT
+/// descended into for v1 — their summaries would rarely be useful and
+/// instance-method / class-method handling is explicitly out of scope.
+fn collect_summary_targets<'tree, F>(node: Node<'tree>, source: &str, visit: &mut F)
+where
+    F: FnMut(String, Node<'tree>),
+{
+    // Function declarations: record by name, don't descend into their
+    // body (nested helpers are out of scope for v1 summaries).
+    if matches!(
+        node.kind(),
+        "function_declaration" | "generator_function_declaration"
+    ) {
+        if let Some(name) = node.child_by_field_name("name") {
+            visit(node_text(name, source).to_string(), node);
+        }
+        return;
+    }
+    // `const foo = (...) => ...` / `const foo = function(...) {...}`
+    if node.kind() == "variable_declarator" {
+        if let (Some(name), Some(value)) = (
+            node.child_by_field_name("name"),
+            node.child_by_field_name("value"),
+        ) {
+            if name.kind() == "identifier"
+                && matches!(value.kind(), "arrow_function" | "function_expression")
+            {
+                visit(node_text(name, source).to_string(), value);
+                return;
+            }
+        }
+    }
+    // Otherwise recurse, but don't descend into *other* function scopes:
+    // nested-scope helpers are out of scope for v1.
+    if is_function_scope(node.kind()) {
+        return;
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_summary_targets(child, source, visit);
+    }
+}
+
+/// Pass-1 walker: compute the return-taint summary for a single function
+/// scope. Walks the body with the normal state machinery but throws away
+/// sink findings and records the first tainted return expression it sees.
+fn summarize_function(func_node: Node<'_>, ctx: &JsCtx<'_>) -> Option<String> {
+    let mut state = TaintState::default();
+    if let Some(params) = func_node.child_by_field_name("parameters") {
+        seed_param_sources(params, ctx.source, ctx.spec, &mut state);
+    }
+    if let Some(single) = func_node.child_by_field_name("parameter") {
+        if single.kind() == "identifier" {
+            let name = node_text(single, ctx.source);
+            for matcher in &ctx.spec.sources {
+                if let NodeMatcher::ParamName { names, description } = matcher {
+                    if names.iter().any(|n| n == name) {
+                        let line = single.start_position().row + 1;
+                        state.taint(name.to_string(), description.clone(), line);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    let body = func_node.child_by_field_name("body")?;
+
+    // Arrow-function concise body (`() => expr`): the body field holds
+    // the expression directly rather than a `statement_block`, and there
+    // is no `return_statement` node to visit. Evaluate taint on it up
+    // front so the summary still reflects the implicit return.
+    if func_node.kind() == "arrow_function" && body.kind() != "statement_block" {
+        return expression_taint(body, ctx, &state).map(|(desc, _line)| desc);
+    }
+
+    let mut scratch: Vec<TaintFinding> = Vec::new();
+    let mut return_taint: Option<String> = None;
+    walk_body_for_summary_generic::<JsTaintAdapter, _>(
+        body,
+        ctx,
+        &mut state,
+        &mut scratch,
+        &mut return_taint,
+    );
+    return_taint
+}
+
+fn summarize_function_return(func_node: Node<'_>, ctx: &JsCtx<'_>) -> ReturnTaintSummary {
+    let direct_source = summarize_function(func_node, ctx);
+    let mut summary = ReturnTaintSummary {
+        direct_source,
+        params_to_return: Vec::new(),
+    };
+
+    let empty_summary = ReturnSummary::new();
+    for (param_idx, param_name) in collect_param_names(func_node, ctx.source)
+        .into_iter()
+        .enumerate()
+    {
+        let synthetic_spec = TaintSpec {
+            sources: vec![NodeMatcher::ParamName {
+                names: vec![param_name.clone()],
+                description: format!("parameter '{}'", param_name),
+            }],
+            sinks: vec![],
+            sanitizers: ctx.spec.sanitizers.clone(),
+        };
+        let param_ctx = AnalysisContext {
+            source: ctx.source,
+            spec: &synthetic_spec,
+            aliases: ctx.aliases,
+            summaries: &empty_summary,
+            cross_file: None,
+            sink_to_rules: None,
+            label_policy: None,
+        };
+        if summarize_function(func_node, &param_ctx).is_some() {
+            summary.params_to_return.push(param_idx);
+        }
+    }
+
+    summary
+}
+
+// ─── Cross-file summary extraction ───────────────────────────────────────
+
+/// Extract cross-file taint summaries for every exported function in a JS/TS
+/// file. Each parameter is treated as a synthetic taint source and the engine
+/// checks which sinks it can reach. The resulting summaries are consumed in
+/// pass 2 by callers in other files.
+///
+/// The `rule_specs` argument should be the output of
+/// [`crate::rules::javascript::js_taint_rule_specs()`].
+pub fn extract_cross_file_summaries(
+    root: Node<'_>,
+    source: &str,
+    aliases: Option<&AliasTable>,
+    rule_specs: &[(&str, TaintSpec)],
+) -> Vec<FunctionTaintSummary> {
+    let mut summaries = Vec::new();
+
+    collect_exported_functions(root, source, &mut |func_name, func_node| {
+        let param_names = collect_param_names(func_node, source);
+
+        if let Some(summary) =
+            extract_cross_file_summary_for_function::<JsTaintAdapter, CrossFileInfo<'_>>(
+                func_node,
+                &func_name,
+                &param_names,
+                source,
+                aliases,
+                rule_specs,
+            )
+        {
+            summaries.push(summary);
+        }
+    });
+
+    summaries
+}
+
+/// Re-derive a file's cross-file summaries with import resolution enabled,
+/// composing the current summary map one hop deeper.
+///
+/// This is the JS/TS counterpart of
+/// [`python_taint::compose_cross_file_summaries`] and the per-file step of the
+/// scanner's **bounded multi-hop** fixpoint. For each exported function it
+/// re-runs the parameter-as-source summary extraction, but this time calls to
+/// helpers in *other* files are resolved against `summaries` (using this file's
+/// `import_to_path`). A parameter that only reaches a sink or the return value
+/// *through* such a cross-file helper is therefore captured — e.g. `f(p)` whose
+/// body is `return g(p)` where `g` (an imported module) sinks its argument:
+/// `f`'s summary gains that `params_to_sink` entry.
+///
+/// The scanner unions the returned flows into the existing summaries via
+/// [`FunctionTaintSummary::merge_from`] and repeats until a fixpoint (no change)
+/// or the hop bound is reached. `summaries` is a read-only snapshot from the
+/// previous round, so each round adds exactly one hop; monotone growth over a
+/// finite lattice guarantees termination, and the scanner's round cap is a hard
+/// backstop against mutually-recursive helpers.
+pub fn compose_cross_file_summaries(
+    root: Node<'_>,
+    source: &str,
+    aliases: Option<&AliasTable>,
+    rule_specs: &[(&str, TaintSpec)],
+    import_to_path: &HashMap<String, PathBuf>,
+    summaries: &CrossFileSummaryMap,
+    allowed_rule_ids: &std::collections::HashSet<String>,
+) -> Vec<FunctionTaintSummary> {
+    let cross_file = CrossFileInfo {
+        import_to_path,
+        summaries,
+        rule_filter: RuleFilter::Any(allowed_rule_ids),
+    };
+
+    let mut out = Vec::new();
+    collect_exported_functions(root, source, &mut |func_name, func_node| {
+        let param_names = collect_param_names(func_node, source);
+
+        if let Some(summary) =
+            extract_cross_file_summary_for_function_cf::<JsTaintAdapter, CrossFileInfo<'_>>(
+                func_node,
+                &func_name,
+                &param_names,
+                source,
+                aliases,
+                rule_specs,
+                Some(&cross_file),
+            )
+        {
+            out.push(summary);
+        }
+    });
+    out
+}
+
+/// Collect parameter names from a function node in declaration order.
+fn collect_param_names(func_node: Node<'_>, source: &str) -> Vec<String> {
+    let Some(params) = func_node.child_by_field_name("parameters") else {
+        // Arrow with single bare parameter: `x => ...`
+        if let Some(single) = func_node.child_by_field_name("parameter") {
+            if single.kind() == "identifier" {
+                return vec![node_text(single, source).to_string()];
+            }
+        }
+        return Vec::new();
+    };
+    let mut names = Vec::new();
+    let mut cursor = params.walk();
+    for child in params.children(&mut cursor) {
+        let param_name = match child.kind() {
+            "identifier" => Some(node_text(child, source)),
+            "assignment_pattern" => child
+                .child_by_field_name("left")
+                .filter(|n| n.kind() == "identifier")
+                .map(|n| node_text(n, source)),
+            "rest_pattern" => {
+                let mut inner = child.walk();
+                let mut found: Option<&str> = None;
+                for c in child.named_children(&mut inner) {
+                    if c.kind() == "identifier" {
+                        found = Some(node_text(c, source));
+                        break;
+                    }
+                }
+                found
+            }
+            "required_parameter" | "optional_parameter" => child
+                .child_by_field_name("pattern")
+                .filter(|n| n.kind() == "identifier")
+                .map(|n| node_text(n, source))
+                .or_else(|| first_identifier_child(child, source)),
+            _ => None,
+        };
+        if let Some(name) = param_name {
+            names.push(name.to_string());
+        }
+    }
+    names
+}
+
+fn first_identifier_child<'a>(node: Node<'_>, source: &'a str) -> Option<&'a str> {
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        if child.kind() == "identifier" {
+            return Some(node_text(child, source));
+        }
+    }
+    None
+}
+
+fn function_summary_key(name: &str, arity: usize) -> String {
+    format!("{name}/{arity}")
+}
+
+fn call_summary_key(name: &str, args: Node<'_>) -> String {
+    let mut cursor = args.walk();
+    function_summary_key(name, args.named_children(&mut cursor).count())
+}
+
+/// Walk the AST to find exported function declarations and their names.
+/// Handles:
+/// - `module.exports = { runQuery, evalExpression }` (CommonJS shorthand)
+/// - `module.exports = { runQuery: runQuery }` (explicit value)
+/// - `module.exports.foo = function(...)` (direct assignment)
+/// - `export function foo(...)` / `export const foo = (...)` (ES modules)
+/// - `export { foo }` (ES named re-exports)
+///
+/// The callback receives (function_name, function_node).
+fn collect_exported_functions<'tree, F>(root: Node<'tree>, source: &str, visit: &mut F)
+where
+    F: FnMut(String, Node<'tree>),
+{
+    // First, find all top-level function declarations and const arrow/fn
+    // assignments so we can resolve names to nodes.
+    let mut func_defs: HashMap<String, Node<'tree>> = HashMap::new();
+    let mut cursor = root.walk();
+    for child in root.children(&mut cursor) {
+        match child.kind() {
+            "function_declaration" | "generator_function_declaration" => {
+                if let Some(name) = child.child_by_field_name("name") {
+                    func_defs.insert(node_text(name, source).to_string(), child);
+                }
+            }
+            "lexical_declaration" | "variable_declaration" => {
+                let mut inner = child.walk();
+                for decl in child.children(&mut inner) {
+                    if decl.kind() == "variable_declarator" {
+                        if let (Some(name), Some(value)) = (
+                            decl.child_by_field_name("name"),
+                            decl.child_by_field_name("value"),
+                        ) {
+                            if name.kind() == "identifier"
+                                && matches!(value.kind(), "arrow_function" | "function_expression")
+                            {
+                                func_defs.insert(node_text(name, source).to_string(), value);
+                            }
+                        }
+                    }
+                }
+            }
+            "export_statement" => {
+                // `export function foo(...)` or `export const foo = (...) => ...`
+                let mut inner = child.walk();
+                for c in child.children(&mut inner) {
+                    match c.kind() {
+                        "function_declaration" | "generator_function_declaration" => {
+                            if let Some(name) = c.child_by_field_name("name") {
+                                let n = node_text(name, source).to_string();
+                                func_defs.insert(n.clone(), c);
+                                visit(n.clone(), c);
+                                // If this is a default export, also register
+                                // under the name "default" so that
+                                // `import X from "..."` can resolve it.
+                                let is_default = child.children(&mut child.walk()).any(|sib| {
+                                    !sib.is_named() && node_text(sib, source) == "default"
+                                });
+                                if is_default {
+                                    func_defs.insert("default".to_string(), c);
+                                    visit("default".to_string(), c);
+                                }
+                            }
+                        }
+                        "lexical_declaration" | "variable_declaration" => {
+                            let mut d = c.walk();
+                            for decl in c.children(&mut d) {
+                                if decl.kind() == "variable_declarator" {
+                                    if let (Some(name), Some(value)) = (
+                                        decl.child_by_field_name("name"),
+                                        decl.child_by_field_name("value"),
+                                    ) {
+                                        if name.kind() == "identifier"
+                                            && matches!(
+                                                value.kind(),
+                                                "arrow_function" | "function_expression"
+                                            )
+                                        {
+                                            let n = node_text(name, source).to_string();
+                                            func_defs.insert(n.clone(), value);
+                                            visit(n, value);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        // `export default function handler(req) {}` — named
+                        // default export. Also handles anonymous:
+                        // `export default function(req) {}` (function_expression
+                        // without a name field).
+                        "function_expression" | "arrow_function" => {
+                            // Check if this export_statement has a `default` keyword.
+                            let is_default = child
+                                .children(&mut child.walk())
+                                .any(|sib| !sib.is_named() && node_text(sib, source) == "default");
+                            if is_default {
+                                // Anonymous default export — use "default" as the name.
+                                let n = "default".to_string();
+                                func_defs.insert(n.clone(), c);
+                                visit(n, c);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // Now scan for module.exports patterns.
+    scan_module_exports(root, source, &func_defs, visit);
+}
+
+/// Scan for `module.exports = { ... }` and `module.exports.x = ...` patterns.
+fn scan_module_exports<'tree, F>(
+    root: Node<'tree>,
+    source: &str,
+    func_defs: &HashMap<String, Node<'tree>>,
+    visit: &mut F,
+) where
+    F: FnMut(String, Node<'tree>),
+{
+    let mut cursor = root.walk();
+    for child in root.children(&mut cursor) {
+        if child.kind() != "expression_statement" {
+            continue;
+        }
+        let Some(expr) = child.named_child(0) else {
+            continue;
+        };
+        if expr.kind() != "assignment_expression" {
+            continue;
+        }
+        let Some(left) = expr.child_by_field_name("left") else {
+            continue;
+        };
+        let Some(right) = expr.child_by_field_name("right") else {
+            continue;
+        };
+        let left_text = node_text(left, source);
+
+        // `module.exports = { runQuery, evalExpression }`
+        if left_text == "module.exports" && right.kind() == "object" {
+            let mut obj_cursor = right.walk();
+            for prop in right.named_children(&mut obj_cursor) {
+                match prop.kind() {
+                    // `{ runQuery }` — shorthand
+                    "shorthand_property_identifier" | "shorthand_property" => {
+                        let name = node_text(prop, source).to_string();
+                        if let Some(func_node) = func_defs.get(&name) {
+                            visit(name, *func_node);
+                        }
+                    }
+                    // `{ runQuery: runQuery }` or `{ runQuery: function(...) {} }`
+                    "pair" => {
+                        if let Some(key) = prop.child_by_field_name("key") {
+                            let export_name = node_text(key, source).to_string();
+                            if let Some(value) = prop.child_by_field_name("value") {
+                                if matches!(value.kind(), "arrow_function" | "function_expression")
+                                {
+                                    visit(export_name, value);
+                                } else if value.kind() == "identifier" {
+                                    let ref_name = node_text(value, source);
+                                    if let Some(func_node) = func_defs.get(ref_name) {
+                                        visit(export_name, *func_node);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        // `module.exports.foo = function(...)` or `module.exports.foo = someFunc`
+        if let Some(export_name) = left_text.strip_prefix("module.exports.") {
+            if matches!(right.kind(), "arrow_function" | "function_expression") {
+                visit(export_name.to_string(), right);
+            } else if right.kind() == "identifier" {
+                let ref_name = node_text(right, source);
+                if let Some(func_node) = func_defs.get(ref_name) {
+                    visit(export_name.to_string(), *func_node);
+                }
+            }
+        }
+    }
+}
+
+// ─── JS import resolution for cross-file analysis ────────────────────────
+
+/// Resolve JS import/require specifiers to file paths on disk.
+///
+/// Handles:
+/// - `const services = require("./services")` → resolve `./services` to
+///   `services.js` (or `.ts`, `.mjs`, etc.) in the same directory
+/// - `import { foo } from "./services"` → same resolution
+/// - `const { foo } = require("./services")` → maps both the module name
+///   and `__from__:./services:foo` for direct-name resolution
+///
+/// Returns a map from module specifier / synthetic keys to resolved file paths.
+pub fn resolve_js_imports_to_paths(
+    source: &str,
+    tree: &Tree,
+    current_file: &std::path::Path,
+) -> HashMap<String, PathBuf> {
+    let mut result = HashMap::new();
+    let Some(parent_dir) = current_file.parent() else {
+        return result;
+    };
+
+    resolve_js_imports_walk(&mut result, tree.root_node(), source, parent_dir);
+    result
+}
+
+/// File extensions to try when resolving a bare JS/TS module specifier.
+const JS_EXTENSIONS: &[&str] = &[".js", ".ts", ".mjs", ".cjs", ".jsx", ".tsx"];
+
+/// Try to resolve a relative module specifier to a file on disk.
+/// Tries the specifier as-is first, then with each extension, then as
+/// a directory with `index.*`.
+fn resolve_js_module_path(parent_dir: &std::path::Path, specifier: &str) -> Option<PathBuf> {
+    // Only resolve relative specifiers (starting with . or ..)
+    if !specifier.starts_with('.') {
+        return None;
+    }
+
+    let base = parent_dir.join(specifier);
+
+    // 1. Try the specifier as-is (e.g. `./services.js`)
+    if base.is_file() {
+        return Some(base);
+    }
+
+    // 2. Try appending each extension
+    for ext in JS_EXTENSIONS {
+        let candidate = parent_dir.join(format!("{}{}", specifier, ext));
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+
+    // 3. Try as directory with index.*
+    if base.is_dir() {
+        for ext in JS_EXTENSIONS {
+            let candidate = base.join(format!("index{}", ext));
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+
+    None
+}
+
+fn resolve_js_imports_walk(
+    result: &mut HashMap<String, PathBuf>,
+    node: Node<'_>,
+    source: &str,
+    parent_dir: &std::path::Path,
+) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        match child.kind() {
+            "import_statement" => {
+                resolve_js_import_statement(result, child, source, parent_dir);
+            }
+            "lexical_declaration" | "variable_declaration" => {
+                resolve_js_require_decl(result, child, source, parent_dir);
+            }
+            "export_statement" => {
+                // `export { foo } from "./mod"` — treat like an import
+                resolve_js_import_statement(result, child, source, parent_dir);
+            }
+            "program" | "statement_block" => {
+                resolve_js_imports_walk(result, child, source, parent_dir);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn resolve_js_import_statement(
+    result: &mut HashMap<String, PathBuf>,
+    node: Node<'_>,
+    source: &str,
+    parent_dir: &std::path::Path,
+) {
+    let Some(src_node) = node.child_by_field_name("source") else {
+        return;
+    };
+    let module = string_literal_text(src_node, source);
+    if module.is_empty() {
+        return;
+    }
+    let Some(resolved) = resolve_js_module_path(parent_dir, &module) else {
+        return;
+    };
+
+    // Map the module specifier to the resolved path.
+    result.insert(module.clone(), resolved.clone());
+
+    // For named imports `import { foo } from "./mod"`, also create
+    // `__from__:./mod:foo` entries so `handle_cross_file_call` can resolve
+    // direct calls to `foo(...)`.
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() != "import_clause" {
+            continue;
+        }
+        let mut inner = child.walk();
+        for spec in child.children(&mut inner) {
+            match spec.kind() {
+                "named_imports" => {
+                    let mut n_cursor = spec.walk();
+                    for isp in spec.children(&mut n_cursor) {
+                        if isp.kind() != "import_specifier" {
+                            continue;
+                        }
+                        let name = isp
+                            .child_by_field_name("name")
+                            .map(|n| node_text(n, source).to_string());
+                        let alias = isp
+                            .child_by_field_name("alias")
+                            .map(|n| node_text(n, source).to_string());
+                        if let Some(real) = name {
+                            let local = alias.unwrap_or_else(|| real.clone());
+                            let key = format!("__from__:{}:{}", module, real);
+                            result.insert(key, resolved.clone());
+                            // Also map the local name → module for
+                            // attribute-style calls
+                            let local_key = format!("__from__:{}:{}", module, local);
+                            if local != real {
+                                result.insert(local_key, resolved.clone());
+                            }
+                        }
+                    }
+                }
+                // `import handler from "./mod"` — default import.
+                // The identifier inside import_clause is the local
+                // binding for the default export.
+                "identifier" => {
+                    let local = node_text(spec, source).to_string();
+                    let key = format!("__default__:{}:{}", module, local);
+                    result.insert(key, resolved.clone());
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+fn resolve_js_require_decl(
+    result: &mut HashMap<String, PathBuf>,
+    node: Node<'_>,
+    source: &str,
+    parent_dir: &std::path::Path,
+) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() != "variable_declarator" {
+            continue;
+        }
+        let Some(value) = child.child_by_field_name("value") else {
+            continue;
+        };
+        let Some(module) = require_call_module(value, source) else {
+            continue;
+        };
+        let Some(resolved) = resolve_js_module_path(parent_dir, &module) else {
+            continue;
+        };
+        let Some(name_node) = child.child_by_field_name("name") else {
+            continue;
+        };
+
+        // Map the module specifier to the resolved path.
+        result.insert(module.clone(), resolved.clone());
+
+        match name_node.kind() {
+            "identifier" => {
+                // `const services = require("./services")`
+                // The local name (e.g. "services") maps to the module for
+                // attribute-style calls: `services.runQuery(...)`.
+                let local = node_text(name_node, source).to_string();
+                result.insert(local, resolved.clone());
+            }
+            "object_pattern" => {
+                // `const { runQuery } = require("./services")`
+                let mut p_cursor = name_node.walk();
+                for p in name_node.children(&mut p_cursor) {
+                    match p.kind() {
+                        "shorthand_property_identifier_pattern" => {
+                            let local = node_text(p, source).to_string();
+                            let key = format!("__from__:{}:{}", module, local);
+                            result.insert(key, resolved.clone());
+                        }
+                        "pair_pattern" => {
+                            let key_name = p
+                                .child_by_field_name("key")
+                                .map(|n| node_text(n, source).to_string());
+                            let value_name = p
+                                .child_by_field_name("value")
+                                .map(|n| node_text(n, source).to_string());
+                            if let (Some(real), Some(local)) = (key_name, value_name) {
+                                let key = format!("__from__:{}:{}", module, real);
+                                result.insert(key, resolved.clone());
+                                if local != real {
+                                    let lkey = format!("__from__:{}:{}", module, local);
+                                    result.insert(lkey, resolved.clone());
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+// ─── Per-file import alias table ──────────────────────────────────────────
+
+/// Per-file JavaScript/TypeScript import alias table.
+///
+/// Build a JavaScript/TypeScript import alias table from a parsed tree.
+///
+/// Maps a local identifier (as it appears in the source) to its canonical
+/// dotted path. Handles the common forms:
+///
+/// - `import { loads } from "pickle"`      -> `loads` -> `pickle.loads`
+/// - `import { loads as d } from "pickle"` -> `d`     -> `pickle.loads`
+/// - `import foo from "bar"`               -> `foo`   -> `bar` (default)
+/// - `import * as ns from "mod"`           -> `ns`    -> `mod`
+/// - `const pk = require("pickle")`        -> `pk`    -> `pickle`
+/// - `const { loads } = require("pickle")` -> `loads` -> `pickle.loads`
+/// - `const { loads: l2 } = require("pickle")` -> `l2` -> `pickle.loads`
+///
+/// File-scope only; function-local rebindings are not tracked. Dynamic
+/// forms (`import("mod")`) are out of scope.
+pub fn js_aliases_from_tree(source: &str, tree: &Tree) -> AliasTable {
+    let mut aliases = AliasTable::new();
+    js_walk_for_imports(&mut aliases, tree.root_node(), source);
+    aliases
+}
+
+fn js_walk_for_imports(aliases: &mut AliasTable, node: Node<'_>, source: &str) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        match child.kind() {
+            "import_statement" => js_collect_import(aliases, child, source),
+            "lexical_declaration" | "variable_declaration" => {
+                js_collect_require_decl(aliases, child, source);
+            }
+            // Recurse into top-level blocks/conditionals but stop at
+            // function bodies — alias resolution there is out of scope.
+            "program" | "statement_block" | "if_statement" | "try_statement"
+            | "labeled_statement" | "export_statement" => {
+                js_walk_for_imports(aliases, child, source);
+            }
+            _ => {}
+        }
+    }
+}
+
+fn js_collect_import(aliases: &mut AliasTable, node: Node<'_>, source: &str) {
+    // import_statement has a `source` field holding a `string` with an
+    // inner `string_fragment` that carries the module specifier.
+    let Some(src_node) = node.child_by_field_name("source") else {
+        return;
+    };
+    let module = string_literal_text(src_node, source);
+    if module.is_empty() {
+        return;
+    }
+
+    // The import clause is the unnamed child between `import` and `from`.
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() != "import_clause" {
+            continue;
+        }
+        let mut inner = child.walk();
+        for spec in child.children(&mut inner) {
+            match spec.kind() {
+                // `import foo from "bar"` — default import.
+                "identifier" => {
+                    let local = node_text(spec, source).to_string();
+                    aliases.insert(local, module.clone());
+                }
+                // `import * as ns from "mod"` — namespace import.
+                "namespace_import" => {
+                    let mut ns_cursor = spec.walk();
+                    for c in spec.children(&mut ns_cursor) {
+                        if c.kind() == "identifier" {
+                            let local = node_text(c, source).to_string();
+                            aliases.insert(local, module.clone());
+                        }
+                    }
+                }
+                // `import { a, b as c } from "mod"` — named imports.
+                "named_imports" => {
+                    let mut n_cursor = spec.walk();
+                    for isp in spec.children(&mut n_cursor) {
+                        if isp.kind() != "import_specifier" {
+                            continue;
+                        }
+                        let name = isp
+                            .child_by_field_name("name")
+                            .map(|n| node_text(n, source).to_string());
+                        let alias = isp
+                            .child_by_field_name("alias")
+                            .map(|n| node_text(n, source).to_string());
+                        if let Some(real) = name {
+                            let canonical = format!("{}.{}", module, real);
+                            let local = alias.unwrap_or(real);
+                            aliases.insert(local, canonical);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+fn js_collect_require_decl(aliases: &mut AliasTable, node: Node<'_>, source: &str) {
+    // Walk each variable_declarator under the decl.
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() != "variable_declarator" {
+            continue;
+        }
+        let Some(value) = child.child_by_field_name("value") else {
+            continue;
+        };
+        // Match `require("mod")` on the RHS.
+        let Some(module) = require_call_module(value, source) else {
+            continue;
+        };
+        let Some(name_node) = child.child_by_field_name("name") else {
+            continue;
+        };
+        match name_node.kind() {
+            "identifier" => {
+                // `const pk = require("pickle")` -> pk -> pickle
+                let local = node_text(name_node, source).to_string();
+                aliases.insert(local, module);
+            }
+            "object_pattern" => {
+                // `const { loads, dumps: d } = require("pickle")`
+                let mut p_cursor = name_node.walk();
+                for p in name_node.children(&mut p_cursor) {
+                    match p.kind() {
+                        "shorthand_property_identifier_pattern" => {
+                            let local = node_text(p, source).to_string();
+                            let canonical = format!("{}.{}", module, local);
+                            aliases.insert(local, canonical);
+                        }
+                        "pair_pattern" => {
+                            let key = p
+                                .child_by_field_name("key")
+                                .map(|n| node_text(n, source).to_string());
+                            let value = p
+                                .child_by_field_name("value")
+                                .map(|n| node_text(n, source).to_string());
+                            if let (Some(key), Some(value)) = (key, value) {
+                                let canonical = format!("{}.{}", module, key);
+                                aliases.insert(value, canonical);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// If `expr` is a `require("...")` call expression, return the module name.
+fn require_call_module(expr: Node<'_>, source: &str) -> Option<String> {
+    if expr.kind() != "call_expression" {
+        return None;
+    }
+    let func = expr.child_by_field_name("function")?;
+    if func.kind() != "identifier" || node_text(func, source) != "require" {
+        return None;
+    }
+    let args = expr.child_by_field_name("arguments")?;
+    let mut cursor = args.walk();
+    for arg in args.named_children(&mut cursor) {
+        if arg.kind() == "string" {
+            return Some(string_literal_text(arg, source));
+        }
+    }
+    None
+}
+
+/// Extract the textual content of a `string` literal node (without the
+/// surrounding quotes), using its `string_fragment` child.
+fn string_literal_text(node: Node<'_>, source: &str) -> String {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == "string_fragment" {
+            return node_text(child, source).to_string();
+        }
+    }
+    // Empty-string literal has no fragment child — fall back to trimming.
+    let raw = node_text(node, source);
+    raw.trim_matches(|c: char| c == '"' || c == '\'' || c == '`')
+        .to_string()
+}
+
+// ─── Internals ────────────────────────────────────────────────────────────
+
+/// Zero-sized marker type for the JS taint language adapter.
+pub(super) struct JsTaintAdapter;
+
+impl<'a> TaintLanguageAdapter<CrossFileInfo<'a>> for JsTaintAdapter {
+    fn is_nested_scope(kind: &str) -> bool {
+        is_function_scope(kind)
+    }
+
+    fn dispatch_walk_node(
+        node: Node<'_>,
+        ctx: &JsCtx<'_>,
+        state: &mut TaintState,
+        findings: &mut Vec<TaintFinding>,
+    ) {
+        match node.kind() {
+            "variable_declarator" => handle_variable_declarator(node, ctx, state),
+            "assignment_expression" => handle_assignment(node, ctx, state, findings),
+            "call_expression" => handle_call(node, ctx, state, findings),
+            "object" => handle_object_literal_sink(node, ctx, state, findings),
+            _ => {}
+        }
+    }
+
+    fn dispatch_summary_node(
+        node: Node<'_>,
+        ctx: &JsCtx<'_>,
+        state: &mut TaintState,
+        findings: &mut Vec<TaintFinding>,
+        return_taint: &mut Option<String>,
+    ) {
+        match node.kind() {
+            "variable_declarator" => {
+                handle_variable_declarator(node, ctx, state);
+            }
+            "assignment_expression" => {
+                handle_assignment(node, ctx, state, findings);
+            }
+            "call_expression" => {
+                handle_call(node, ctx, state, findings);
+            }
+            "return_statement" if return_taint.is_none() => {
+                let mut cursor = node.walk();
+                for child in node.named_children(&mut cursor) {
+                    if let Some((desc, _line)) = expression_taint(child, ctx, state) {
+                        *return_taint = Some(desc);
+                        break;
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn expression_taint(
+        expr: Node<'_>,
+        ctx: &JsCtx<'_>,
+        state: &TaintState,
+    ) -> Option<(String, usize)> {
+        expression_taint(expr, ctx, state)
+    }
+
+    fn seed_params(func_node: Node<'_>, ctx: &JsCtx<'_>, state: &mut TaintState) {
+        if let Some(params) = func_node.child_by_field_name("parameters") {
+            seed_param_sources(params, ctx.source, ctx.spec, state);
+        }
+        // Arrow functions with a single bare parameter.
+        if let Some(single) = func_node.child_by_field_name("parameter") {
+            if single.kind() == "identifier" {
+                let name = node_text(single, ctx.source);
+                let line = single.start_position().row + 1;
+                for matcher in &ctx.spec.sources {
+                    if let NodeMatcher::ParamName { names, description } = matcher {
+                        if names.iter().any(|n| n == name)
+                            || crate::rules::taint_engine::param_names_are_wildcard(names)
+                        {
+                            state.taint(name.to_string(), description.clone(), line);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Node kinds that introduce a fresh taint scope (a function body).
+fn is_function_scope(kind: &str) -> bool {
+    matches!(
+        kind,
+        "function_declaration"
+            | "function_expression"
+            | "arrow_function"
+            | "method_definition"
+            | "generator_function"
+            | "generator_function_declaration"
+    )
+}
+
+fn collect_function_scopes<'tree, F>(node: Node<'tree>, visit: &mut F)
+where
+    F: FnMut(Node<'tree>),
+{
+    if is_function_scope(node.kind()) {
+        visit(node);
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_function_scopes(child, visit);
+    }
+}
+
+fn analyze_function(func_node: Node<'_>, ctx: &JsCtx<'_>, findings: &mut Vec<TaintFinding>) {
+    analyze_function_generic::<JsTaintAdapter, _>(func_node, ctx, findings);
+}
+
+fn seed_param_sources(params: Node<'_>, source: &str, spec: &TaintSpec, state: &mut TaintState) {
+    let mut cursor = params.walk();
+    for child in params.children(&mut cursor) {
+        let param_name = match child.kind() {
+            "identifier" => node_text(child, source),
+            // `function f(x = 1)` — tree-sitter-javascript wraps the name in
+            // an `assignment_pattern` with `left`/`right` fields.
+            "assignment_pattern" => {
+                let Some(left) = child.child_by_field_name("left") else {
+                    continue;
+                };
+                if left.kind() != "identifier" {
+                    continue;
+                }
+                node_text(left, source)
+            }
+            // Rest params `...rest`
+            "rest_pattern" => {
+                let mut inner = child.walk();
+                let mut found: Option<&str> = None;
+                for c in child.named_children(&mut inner) {
+                    if c.kind() == "identifier" {
+                        found = Some(node_text(c, source));
+                        break;
+                    }
+                }
+                match found {
+                    Some(n) => n,
+                    None => continue,
+                }
+            }
+            _ => continue,
+        };
+
+        for matcher in &spec.sources {
+            if let NodeMatcher::ParamName { names, description } = matcher {
+                if names.iter().any(|n| n == param_name)
+                    || crate::rules::taint_engine::param_names_are_wildcard(names)
+                {
+                    let line = child.start_position().row + 1;
+                    state.taint(param_name.to_string(), description.clone(), line);
+                    break;
+                }
+            }
+        }
+    }
+}
+
+fn handle_variable_declarator(node: Node<'_>, ctx: &JsCtx<'_>, state: &mut TaintState) {
+    let Some(name) = node.child_by_field_name("name") else {
+        return;
+    };
+    let Some(value) = node.child_by_field_name("value") else {
+        // Bare `let x;` with no initializer — nothing to do.
+        return;
+    };
+
+    if name.kind() == "identifier" {
+        let lhs = node_text(name, ctx.source).to_string();
+        if let Some((desc, src_line)) = expression_taint(value, ctx, state) {
+            state.taint(lhs, desc, src_line);
+        } else {
+            state.clear(&lhs);
+        }
+        return;
+    }
+
+    // Destructuring: `const { a } = req.body` or `const [a, b] = arr`.
+    // Conservative semantics: if the RHS is tainted at all, taint every
+    // bound name. We do not attempt per-slot pairing for JS because
+    // destructuring shapes are more varied than Python's tuple unpack.
+    if matches!(name.kind(), "object_pattern" | "array_pattern") {
+        let targets = collect_destructuring_targets(name, ctx.source);
+        if let Some((desc, src_line)) = expression_taint(value, ctx, state) {
+            for t in &targets {
+                state.taint(t.clone(), desc.clone(), src_line);
+            }
+        } else {
+            for t in &targets {
+                state.clear(t);
+            }
+        }
+    }
+}
+
+fn collect_destructuring_targets(node: Node<'_>, source: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        match child.kind() {
+            "identifier" | "shorthand_property_identifier_pattern" => {
+                out.push(node_text(child, source).to_string());
+            }
+            "pair_pattern" => {
+                if let Some(v) = child.child_by_field_name("value") {
+                    if v.kind() == "identifier" {
+                        out.push(node_text(v, source).to_string());
+                    } else if matches!(v.kind(), "object_pattern" | "array_pattern") {
+                        out.extend(collect_destructuring_targets(v, source));
+                    }
+                }
+            }
+            "object_pattern" | "array_pattern" => {
+                out.extend(collect_destructuring_targets(child, source));
+            }
+            "rest_pattern" => {
+                let mut inner = child.walk();
+                for c in child.named_children(&mut inner) {
+                    if c.kind() == "identifier" {
+                        out.push(node_text(c, source).to_string());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+fn handle_assignment(
+    node: Node<'_>,
+    ctx: &JsCtx<'_>,
+    state: &mut TaintState,
+    findings: &mut Vec<TaintFinding>,
+) {
+    let (Some(left), Some(right)) = (
+        node.child_by_field_name("left"),
+        node.child_by_field_name("right"),
+    ) else {
+        return;
+    };
+
+    // Check MemberAssign sinks first: `el.innerHTML = tainted`.
+    if left.kind() == "member_expression" {
+        if let Some(prop) = left.child_by_field_name("property") {
+            let prop_name = node_text(prop, ctx.source);
+            if let Some(sink) = match_member_assign_sink(ctx.spec, prop_name, ctx.sink_to_rules) {
+                if let Some((src_desc, src_line)) = expression_taint(right, ctx, state) {
+                    let rule_hint = attribution_hint_for_sink(&sink);
+                    findings.push(taint_finding_for_node(
+                        node,
+                        src_desc,
+                        sink.description,
+                        src_line,
+                        rule_hint,
+                        1,
+                    ));
+                }
+            }
+        }
+        // Member-expression LHS: no local name to taint.
+        return;
+    }
+
+    if left.kind() == "identifier" {
+        let lhs = node_text(left, ctx.source).to_string();
+        if let Some((desc, src_line)) = expression_taint(right, ctx, state) {
+            state.taint(lhs, desc, src_line);
+        } else {
+            state.clear(&lhs);
+        }
+        return;
+    }
+
+    // Destructuring LHS: `({ a } = req.body)` or `[a, b] = arr`.
+    if matches!(left.kind(), "object_pattern" | "array_pattern") {
+        let targets = collect_destructuring_targets(left, ctx.source);
+        if let Some((desc, src_line)) = expression_taint(right, ctx, state) {
+            for t in &targets {
+                state.taint(t.clone(), desc.clone(), src_line);
+            }
+        } else {
+            for t in &targets {
+                state.clear(t);
+            }
+        }
+    }
+}
+
+/// Object-literal sink: `{ role: "system", content: tainted }`. Fires when the
+/// spec carries an `ObjectLiteralValue` sink and at least one `pair` value in
+/// this `object` literal is tainted. Reports once on the whole literal node.
+fn handle_object_literal_sink(
+    node: Node<'_>,
+    ctx: &JsCtx<'_>,
+    state: &mut TaintState,
+    findings: &mut Vec<TaintFinding>,
+) {
+    let Some(sink) = match_object_literal_sink(ctx.spec, ctx.sink_to_rules) else {
+        return;
+    };
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        // Only `key: value` pairs carry a tainted value position. Shorthand
+        // properties and spreads are handled by the literal's own propagation.
+        if child.kind() != "pair" {
+            continue;
+        }
+        let Some(value) = child.child_by_field_name("value") else {
+            continue;
+        };
+        if let Some((source_desc, src_line)) = expression_taint(value, ctx, state) {
+            let rule_hint = attribution_hint_for_sink(&sink);
+            findings.push(taint_finding_for_node(
+                node,
+                source_desc,
+                sink.description,
+                src_line,
+                rule_hint,
+                1,
+            ));
+            return;
+        }
+    }
+}
+
+fn handle_call(
+    node: Node<'_>,
+    ctx: &JsCtx<'_>,
+    state: &mut TaintState,
+    findings: &mut Vec<TaintFinding>,
+) {
+    let Some(func) = node.child_by_field_name("function") else {
+        return;
+    };
+    let callee_text = node_text(func, ctx.source);
+    let resolved: Cow<'_, str> = match ctx.aliases {
+        Some(a) => a.resolve(callee_text),
+        None => Cow::Borrowed(callee_text),
+    };
+
+    if let Some(sink) = match_call_sink(ctx.spec, resolved.as_ref(), ctx.sink_to_rules) {
+        let Some(args) = node.child_by_field_name("arguments") else {
+            return;
+        };
+        let mut cursor = args.walk();
+        for arg in args.named_children(&mut cursor) {
+            if let Some((source_desc, src_line)) = expression_taint(arg, ctx, state) {
+                let rule_hint = attribution_hint_for_sink(&sink);
+                findings.push(taint_finding_for_node(
+                    node,
+                    source_desc,
+                    sink.description,
+                    src_line,
+                    rule_hint,
+                    1,
+                ));
+                break;
+            }
+        }
+        return;
+    }
+
+    // ── Cross-file summary check ─────────────────────────────────────
+    // If the callee is an imported function with cross-file summaries,
+    // check whether any tainted argument reaches a sink in the imported
+    // function (per its summary).
+    if let Some(cross_file) = ctx.cross_file {
+        handle_cross_file_call(node, func, callee_text, ctx, state, findings, cross_file);
+    }
+}
+
+/// Check if a call targets an imported function with cross-file summaries.
+///
+/// Handles two import patterns:
+/// - `const services = require("./services"); services.runQuery(x)` — attribute call
+/// - `const { runQuery } = require("./services"); runQuery(x)` — direct call
+/// - `import { runQuery } from "./services"; runQuery(x)` — ES import direct call
+fn handle_cross_file_call(
+    node: Node<'_>,
+    func: Node<'_>,
+    callee_text: &str,
+    ctx: &JsCtx<'_>,
+    state: &TaintState,
+    findings: &mut Vec<TaintFinding>,
+    cross_file: &CrossFileInfo<'_>,
+) {
+    let resolved = resolve_cross_file_callee(func, callee_text, ctx.source, cross_file);
+    let Some((file_path, func_name)) = resolved else {
+        return;
+    };
+
+    let Some(file_summaries) = cross_file.summaries.get(&file_path) else {
+        return;
+    };
+
+    let Some(summary) = file_summaries.iter().find(|s| s.name == func_name) else {
+        return;
+    };
+
+    // Collect argument nodes.
+    let Some(args) = node.child_by_field_name("arguments") else {
+        return;
+    };
+    let mut cursor = args.walk();
+    let arg_nodes: Vec<Node<'_>> = args.named_children(&mut cursor).collect();
+
+    for flow in &summary.params_to_sink {
+        if !cross_file.rule_filter.allows(&flow.sink_rule_id) {
+            continue;
+        }
+        if flow.param_index >= arg_nodes.len() {
+            continue;
+        }
+        let arg = arg_nodes[flow.param_index];
+        if let Some((source_desc, src_line)) = expression_taint(arg, ctx, state) {
+            findings.push(cross_file_taint_finding(
+                node,
+                source_desc,
+                src_line,
+                &flow.sink_description,
+                &func_name,
+                &flow.sink_rule_id,
+            ));
+            return;
+        }
+    }
+}
+
+/// Resolve a call-site callee to (file_path, function_name) using the
+/// cross-file import map.
+fn resolve_cross_file_callee(
+    func: Node<'_>,
+    callee_text: &str,
+    source: &str,
+    cross_file: &CrossFileInfo<'_>,
+) -> Option<(PathBuf, String)> {
+    // Pattern 1: attribute call `module.func(...)` where `module` is a
+    // require'd/imported module (e.g. `services.runQuery`).
+    if func.kind() == "member_expression" {
+        if let Some(object) = func.child_by_field_name("object") {
+            if object.kind() == "identifier" {
+                let module_name = node_text(object, source);
+                if let Some(file_path) = cross_file.import_to_path.get(module_name) {
+                    if let Some(prop) = func.child_by_field_name("property") {
+                        let func_name = node_text(prop, source).to_string();
+                        return Some((file_path.clone(), func_name));
+                    }
+                }
+            }
+        }
+    }
+
+    // Pattern 2: direct call `func(...)` where `func` was destructured
+    // from a require or imported with ES `import { func } from "..."`.
+    if func.kind() == "identifier" {
+        for (key, file_path) in cross_file.import_to_path.iter() {
+            if let Some(rest) = key.strip_prefix("__from__:") {
+                if let Some((_module, name)) = rest.split_once(':') {
+                    if name == callee_text {
+                        return Some((file_path.clone(), name.to_string()));
+                    }
+                }
+            }
+        }
+    }
+
+    // Pattern 3: `callee_text` might be a dotted path like `services.runQuery`
+    // that wasn't parsed as a member_expression (e.g. from alias resolution).
+    if callee_text.contains('.') {
+        let parts: Vec<&str> = callee_text.splitn(2, '.').collect();
+        if parts.len() == 2 {
+            if let Some(file_path) = cross_file.import_to_path.get(parts[0]) {
+                return Some((file_path.clone(), parts[1].to_string()));
+            }
+        }
+    }
+
+    // Pattern 4: default import — `import handler from "./mod"; handler(...)`.
+    // The import resolution stores `__default__:./mod:handler` entries.
+    if func.kind() == "identifier" {
+        for (key, file_path) in cross_file.import_to_path.iter() {
+            if let Some(rest) = key.strip_prefix("__default__:") {
+                if let Some((_module, local_name)) = rest.split_once(':') {
+                    if local_name == callee_text {
+                        return Some((file_path.clone(), "default".to_string()));
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
+fn expression_taint(
+    expr: Node<'_>,
+    ctx: &JsCtx<'_>,
+    state: &TaintState,
+) -> Option<(String, usize)> {
+    let expr_line = expr.start_position().row + 1;
+
+    // Direct source match on this expression.
+    if let Some(desc) = match_source(expr, ctx.source, ctx.spec, ctx.aliases) {
+        return Some((desc, expr_line));
+    }
+
+    // Tainted identifier reference.
+    if expr.kind() == "identifier" {
+        let name = node_text(expr, ctx.source);
+        if let Some(info) = state.info(name) {
+            return Some((info.description.clone(), info.line));
+        }
+    }
+
+    // Tainted member-expression root: `x.y` where `x` is tainted.
+    if expr.kind() == "member_expression" {
+        if let Some(object) = expr.child_by_field_name("object") {
+            if let Some(result) = expression_taint(object, ctx, state) {
+                return Some(result);
+            }
+        }
+    }
+
+    // Tainted subscript: `x[k]` where `x` is tainted (no key sensitivity).
+    if expr.kind() == "subscript_expression" {
+        if let Some(object) = expr.child_by_field_name("object") {
+            if let Some(result) = expression_taint(object, ctx, state) {
+                return Some(result);
+            }
+        }
+    }
+
+    // Template literals propagate taint through any interpolation whose
+    // inner expression is tainted: `` `foo ${x}` `` is tainted when `x` is.
+    if expr.kind() == "template_string" {
+        let mut cursor = expr.walk();
+        for child in expr.children(&mut cursor) {
+            if child.kind() == "template_substitution" {
+                let mut inner = child.walk();
+                for inner_child in child.named_children(&mut inner) {
+                    if let Some(result) = expression_taint(inner_child, ctx, state) {
+                        return Some(result);
+                    }
+                }
+            }
+        }
+    }
+
+    // Ternary expression: `cond ? tainted : safe`.
+    // Conservative: if EITHER branch is tainted, the result is tainted.
+    if expr.kind() == "ternary_expression" {
+        if let Some(consequence) = expr.child_by_field_name("consequence") {
+            if let Some(result) = expression_taint(consequence, ctx, state) {
+                return Some(result);
+            }
+        }
+        if let Some(alternative) = expr.child_by_field_name("alternative") {
+            if let Some(result) = expression_taint(alternative, ctx, state) {
+                return Some(result);
+            }
+        }
+    }
+
+    // Binary plus (string concat): `"x" + tainted` is tainted.
+    if expr.kind() == "binary_expression" {
+        let mut cursor = expr.walk();
+        for child in expr.named_children(&mut cursor) {
+            if let Some(result) = expression_taint(child, ctx, state) {
+                return Some(result);
+            }
+        }
+    }
+
+    // Await expression: `await <inner>` — unwrap and recurse so that
+    // `await req.json()` propagates the taint of the inner call.
+    if expr.kind() == "await_expression" {
+        let mut cursor = expr.walk();
+        for child in expr.named_children(&mut cursor) {
+            if let Some(result) = expression_taint(child, ctx, state) {
+                return Some(result);
+            }
+        }
+    }
+
+    // Array / object literals: propagate taint from any element.
+    // This lets `[...req.body]` and `[tainted, clean]` carry taint.
+    if matches!(expr.kind(), "array" | "object") {
+        let mut cursor = expr.walk();
+        for child in expr.named_children(&mut cursor) {
+            if let Some(result) = expression_taint(child, ctx, state) {
+                return Some(result);
+            }
+        }
+    }
+
+    // Spread element: `...inner` — unwrap and recurse into the inner expression
+    // so that `[...req.body]` and `func(...tainted)` propagate taint.
+    if expr.kind() == "spread_element" {
+        let mut cursor = expr.walk();
+        for child in expr.named_children(&mut cursor) {
+            if let Some(result) = expression_taint(child, ctx, state) {
+                return Some(result);
+            }
+        }
+    }
+
+    // Parenthesized / unary / sequence wrappers: recurse into children.
+    if matches!(
+        expr.kind(),
+        "parenthesized_expression" | "unary_expression" | "sequence_expression"
+    ) {
+        let mut cursor = expr.walk();
+        for child in expr.named_children(&mut cursor) {
+            if let Some(result) = expression_taint(child, ctx, state) {
+                return Some(result);
+            }
+        }
+    }
+
+    // Wrapping call: `String(tainted)` / `bytes(tainted)`. Sanitizers short
+    // circuit this and collapse to clean.
+    if expr.kind() == "call_expression" {
+        if is_sanitizer_call(expr, ctx.source, ctx.spec, ctx.aliases) {
+            return None;
+        }
+        if let Some(args) = expr.child_by_field_name("arguments") {
+            if let Some(func) = expr.child_by_field_name("function") {
+                if func.kind() == "identifier" {
+                    let callee = node_text(func, ctx.source);
+                    if let Some(summary) = ctx.summaries.get(&call_summary_key(callee, args)) {
+                        if let Some(desc) = &summary.direct_source {
+                            return Some((format!("{desc} (via {callee})"), expr_line));
+                        }
+                        let mut cursor = args.walk();
+                        let arg_nodes: Vec<Node<'_>> = args.named_children(&mut cursor).collect();
+                        for &param_idx in &summary.params_to_return {
+                            if param_idx < arg_nodes.len() {
+                                if let Some((desc, src_line)) =
+                                    expression_taint(arg_nodes[param_idx], ctx, state)
+                                {
+                                    return Some((format!("{desc} (via {callee})"), src_line));
+                                }
+                            }
+                        }
+                        return None;
+                    }
+                }
+            }
+            let mut cursor = args.walk();
+            for arg in args.named_children(&mut cursor) {
+                if let Some(result) = expression_taint(arg, ctx, state) {
+                    return Some(result);
+                }
+            }
+        }
+
+        // Method-call propagation on a tainted root: `x.foo(...)` is
+        // tainted when the receiver `x` (or any member/subscript chain
+        // rooted at a tainted value) is tainted. Conservative: tainted-in
+        // → tainted-out, mirroring the wrapping-call rule. Method calls
+        // on literal receivers (e.g. `"foo".toUpperCase()`) are NOT
+        // tainted because the recursive `expression_taint` on the object
+        // returns None for a bare string literal.
+        if let Some(func) = expr.child_by_field_name("function") {
+            if func.kind() == "member_expression" {
+                if let Some(object) = func.child_by_field_name("object") {
+                    if let Some(result) = expression_taint(object, ctx, state) {
+                        return Some(result);
+                    }
+                }
+            }
+        }
+
+        // Same-file interprocedural v1: a bare identifier callee whose
+        // name is in the return-summary map propagates the summary's
+        // taint description through the call result. Method calls
+        // (`obj.helper()`) are out of scope for v1.
+        if let Some(func) = expr.child_by_field_name("function") {
+            if func.kind() == "identifier" {
+                let callee = node_text(func, ctx.source);
+                if let Some(args) = expr.child_by_field_name("arguments") {
+                    if let Some(summary) = ctx.summaries.get(&call_summary_key(callee, args)) {
+                        if let Some(desc) = &summary.direct_source {
+                            return Some((format!("{desc} (via {callee})"), expr_line));
+                        }
+                        let mut cursor = args.walk();
+                        let arg_nodes: Vec<Node<'_>> = args.named_children(&mut cursor).collect();
+                        for &param_idx in &summary.params_to_return {
+                            if param_idx < arg_nodes.len() {
+                                if let Some((desc, src_line)) =
+                                    expression_taint(arg_nodes[param_idx], ctx, state)
+                                {
+                                    return Some((format!("{desc} (via {callee})"), src_line));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Cross-file return-taint: if the callee is an imported function
+        // whose summary says a tainted argument flows to the return value,
+        // the call expression is tainted. This enables multi-hop chains
+        // (A → B → C) where B is a passthrough.
+        if let Some(cross_file) = ctx.cross_file {
+            if let Some(func) = expr.child_by_field_name("function") {
+                let callee_text = node_text(func, ctx.source);
+                if let Some((file_path, func_name)) =
+                    resolve_cross_file_callee(func, callee_text, ctx.source, cross_file)
+                {
+                    if let Some(file_summaries) = cross_file.summaries.get(&file_path) {
+                        if let Some(summary) = file_summaries.iter().find(|s| s.name == func_name) {
+                            if let Some(args) = expr.child_by_field_name("arguments") {
+                                let mut cursor = args.walk();
+                                let arg_nodes: Vec<Node<'_>> =
+                                    args.named_children(&mut cursor).collect();
+                                for &param_idx in &summary.params_to_return {
+                                    if param_idx < arg_nodes.len() {
+                                        if let Some((desc, src_line)) =
+                                            expression_taint(arg_nodes[param_idx], ctx, state)
+                                        {
+                                            return Some((
+                                                format!("{desc} (via cross-file {func_name})"),
+                                                src_line,
+                                            ));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
+fn is_sanitizer_call(
+    call_node: Node<'_>,
+    source: &str,
+    spec: &TaintSpec,
+    aliases: Option<&AliasTable>,
+) -> bool {
+    if call_node.kind() != "call_expression" {
+        return false;
+    }
+    let Some(func) = call_node.child_by_field_name("function") else {
+        return false;
+    };
+    let callee_text = node_text(func, source);
+    let resolved: Cow<'_, str> = match aliases {
+        Some(a) => a.resolve(callee_text),
+        None => Cow::Borrowed(callee_text),
+    };
+    let final_segment = resolved.rsplit('.').next().unwrap_or(&resolved);
+    for matcher in &spec.sanitizers {
+        match matcher {
+            NodeMatcher::Call { canonical, .. }
+                if callee_text == canonical.as_str() || resolved.as_ref() == canonical.as_str() =>
+            {
+                return true;
+            }
+            NodeMatcher::MethodName { method, .. } if method == final_segment => {
+                return true;
+            }
+            NodeMatcher::ReceiverCall { receiver, .. }
+                if resolved.split('.').next() == Some(receiver.as_str())
+                    && resolved.contains('.') =>
+            {
+                return true;
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+/// True when `node`'s source text satisfies the optional source-regex
+/// constraint carried by a `LiteralString { regex }` matcher (`None` = any
+/// literal). Mirrors the Python engine's enforcement so a `"$URL"` +
+/// `metavariable-regex` source seeds only the matching literals. Compiled
+/// regexes are cached per thread; a compile failure yields "no match".
+fn js_literal_matches_source_regex(node: Node<'_>, source: &str, regex: Option<&str>) -> bool {
+    let Some(pattern) = regex else {
+        return true;
+    };
+    let text = node_text(node, source);
+    JS_SOURCE_REGEX_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if let Some(re) = cache.get(pattern) {
+            return re.is_match(text);
+        }
+        match crate::rules::semgrep_compat::compile_regex(pattern) {
+            Ok(re) => {
+                let matched = re.is_match(text);
+                cache.insert(pattern.to_string(), re);
+                matched
+            }
+            Err(_) => false,
+        }
+    })
+}
+
+thread_local! {
+    /// Per-thread cache of compiled source-literal regexes (see the Python
+    /// engine's equivalent), keyed by the regex source string.
+    static JS_SOURCE_REGEX_CACHE: std::cell::RefCell<
+        HashMap<String, crate::rules::semgrep_compat::CompiledRegex>,
+    > = std::cell::RefCell::new(HashMap::new());
+}
+
+fn match_source(
+    node: Node<'_>,
+    source: &str,
+    spec: &TaintSpec,
+    aliases: Option<&AliasTable>,
+) -> Option<String> {
+    for matcher in &spec.sources {
+        match matcher {
+            NodeMatcher::Attribute {
+                root,
+                field,
+                description,
+            } => {
+                if node.kind() != "member_expression" {
+                    continue;
+                }
+                let Some(prop) = node.child_by_field_name("property") else {
+                    continue;
+                };
+                if node_text(prop, source) != field.as_str() {
+                    continue;
+                }
+                let Some(raw_root) = leftmost_identifier(node, source) else {
+                    continue;
+                };
+                if raw_root == root.as_str() {
+                    return Some(description.clone());
+                }
+                if let Some(a) = aliases {
+                    if a.resolve(raw_root).as_ref() == root.as_str() {
+                        return Some(description.clone());
+                    }
+                }
+            }
+            NodeMatcher::Call {
+                canonical,
+                description,
+            } => {
+                if node.kind() != "call_expression" {
+                    continue;
+                }
+                let Some(func) = node.child_by_field_name("function") else {
+                    continue;
+                };
+                let callee_text = node_text(func, source);
+                if callee_text == canonical.as_str() {
+                    return Some(description.clone());
+                }
+                if let Some(a) = aliases {
+                    if a.resolve(callee_text).as_ref() == canonical.as_str() {
+                        return Some(description.clone());
+                    }
+                }
+            }
+            NodeMatcher::FieldName { field, description } => {
+                // Any-receiver property READ: `<anything>.field`. Matches a
+                // `member_expression` whose property equals `field`,
+                // regardless of the object. Covers `req.body`, `req.query`,
+                // `req.params`, `req.headers`, `req.cookies`.
+                if node.kind() != "member_expression" {
+                    continue;
+                }
+                let Some(prop) = node.child_by_field_name("property") else {
+                    continue;
+                };
+                if node_text(prop, source) == field.as_str() {
+                    return Some(description.clone());
+                }
+            }
+            NodeMatcher::Subscript { base, description } => {
+                // Index access `base[...]` → `subscript_expression`. Matches
+                // when the indexed object's final segment equals `base` (or
+                // any when `base` is None).
+                if node.kind() != "subscript_expression" {
+                    continue;
+                }
+                let Some(object) = node.child_by_field_name("object") else {
+                    continue;
+                };
+                if js_subscript_base_matches(object, source, base.as_deref()) {
+                    return Some(description.clone());
+                }
+            }
+            NodeMatcher::ParamName { .. } => {
+                // Seeded at function entry, not matched on expressions.
+            }
+            NodeMatcher::LiteralString { description, regex } => {
+                // Ellipsis-string source `"..."`: any string literal is a taint
+                // origin. JS/TS string literals are `string` and (static or
+                // interpolated) `template_string`. Matching ONLY these literal
+                // node kinds keeps the source faithful — an identifier, call
+                // result, or environment read is never seeded, so the rule
+                // fires on `sign(p, "secret")` but not `sign(p, secretFromEnv)`.
+                //
+                // A `Some(regex)` constraint (the `"$URL"` + `metavariable-regex`
+                // shape) additionally restricts seeding to literals whose text
+                // matches; `None` (the common case) seeds any literal.
+                if matches!(node.kind(), "string" | "template_string")
+                    && js_literal_matches_source_regex(node, source, regex.as_deref())
+                {
+                    return Some(description.clone());
+                }
+            }
+            NodeMatcher::LiteralArgCall {
+                method,
+                arg,
+                description,
+            } => {
+                // Inline hash-provenance source `$CRYPTO.createHash("md5")`:
+                // a call whose final method-name segment equals `method` AND
+                // whose first argument is a string literal equal to `arg`. The
+                // `arg` discriminator ("md5") is what keeps `createHash("sha256")`
+                // clean. Seeds the call result tainted; the engine's method-chain
+                // propagation carries it through `.update(...).digest(...)`.
+                if node.kind() != "call_expression" {
+                    continue;
+                }
+                let Some(func) = node.child_by_field_name("function") else {
+                    continue;
+                };
+                if func.kind() != "member_expression" {
+                    continue;
+                }
+                let Some(prop) = func.child_by_field_name("property") else {
+                    continue;
+                };
+                if node_text(prop, source) != method.as_str() {
+                    continue;
+                }
+                let Some(args) = node.child_by_field_name("arguments") else {
+                    continue;
+                };
+                let mut cursor = args.walk();
+                let Some(first) = args.named_children(&mut cursor).next() else {
+                    continue;
+                };
+                if first.kind() == "string" && string_literal_text(first, source) == arg.as_str() {
+                    return Some(description.clone());
+                }
+            }
+            NodeMatcher::MethodName { .. }
+            | NodeMatcher::CallRegex { .. }
+            | NodeMatcher::MethodNameRegex { .. }
+            | NodeMatcher::ReceiverCall { .. }
+            | NodeMatcher::MemberAssign { .. }
+            | NodeMatcher::BinopFormat { .. }
+            | NodeMatcher::ObjectLiteralValue { .. }
+            | NodeMatcher::ReturnValue { .. }
+            // Java-only typed-metavariable source; JS has no declared-type
+            // seeding, so it is a no-op here.
+            | NodeMatcher::TypedName { .. }
+            // Java-only typed-assignment sink; no-op in source position here.
+            | NodeMatcher::TypedAssignTarget { .. }
+            // PHP-only loose-equality comparison sink; a sink-only matcher the
+            // JS engine does not match (no-op).
+            | NodeMatcher::LooseEquality { .. }
+            // PHP-only tainted class-name / subscript-key sinks; no-op in the
+            // JS engine.
+            | NodeMatcher::TaintedCallee { .. }
+            | NodeMatcher::TaintedSubscriptKey { .. }
+            // Focus-on-call-argument source is seeded only by the C# engine;
+            // no-op in source position here.
+            | NodeMatcher::CallArgSource { .. }
+            // First-parameter signature source / concat-in-call sink are
+            // C#-only; carried in the spec but no-op here.
+            | NodeMatcher::FirstParamSource { .. }
+            // Python-only MCP decorated-parameter source; no-op for JS.
+            | NodeMatcher::DecoratedParamSource { .. }
+            | NodeMatcher::CallArgConcat { .. }
+            // C#-only (constructor-arg/property-assign) and Java-only
+            // (method-arg/receiver-provenance) sinks; carried but no-op here.
+            | NodeMatcher::ConstructorArgSink { .. }
+            | NodeMatcher::PropertyAssignSink { .. }
+            | NodeMatcher::MethodArgSink { .. }
+            | NodeMatcher::ReceiverProvenanceCall { .. } => {
+                // Sink-only matchers; BinopFormat sinks are carried in the spec
+                // but the JS engine does not yet match them as a source (no-op).
+            }
+        }
+    }
+    None
+}
+
+/// True when the indexed object of a `subscript_expression` matches the
+/// requested base. `want = None` matches any. For `Some(name)`, an
+/// `identifier` matches its text and a `member_expression` matches its final
+/// property name.
+fn js_subscript_base_matches(object: Node<'_>, source: &str, want: Option<&str>) -> bool {
+    let Some(want) = want else {
+        return true;
+    };
+    match object.kind() {
+        "identifier" => node_text(object, source) == want,
+        "member_expression" => object
+            .child_by_field_name("property")
+            .map(|p| node_text(p, source) == want)
+            .unwrap_or(false),
+        _ => false,
+    }
+}
+
+/// Canonical set of untrusted-input sources for JavaScript/TypeScript web
+/// handlers. Organized by framework; add new sources to the matching
+/// section and keep the layout stable so future contributors know where
+/// their entries belong.
+///
+/// Frameworks covered today:
+/// 1. Generic handler parameters (`req`, `request`) — Express / Fastify /
+///    Next.js App Router share this convention.
+/// 2. Express-style `req.*` / `request.*` attribute access.
+/// 3. Next.js App Router (`request.nextUrl.*`, `request.cookies.*`).
+/// 4. Hono (`c.req.*` call / attribute patterns — `c` is intentionally
+///    NOT added as a `ParamName` matcher because single-letter locals
+///    named `c` are extremely common in generic JS and would explode
+///    false positives).
+/// 5. Fastify — largely overlaps with Express sources above; no new
+///    matchers needed today, but future Fastify-only fields go here.
+/// 6. SvelteKit (`event.request`, `event.params`, `event.url`). `event`
+///    is intentionally NOT a `ParamName` matcher — browser DOM event
+///    handlers use the same name and would flood false positives.
+/// 7. Deno (`Deno.args`, `Deno.env.get`).
+///
+/// Several method-call sources (`request.headers.get(...)`,
+/// `request.cookies.get(...)`, `request.formData()`, `request.json()`)
+/// require the engine to propagate taint from a method-call *receiver*
+/// into the call expression's result. That is tracked as issue #27 and
+/// is not expressible with the `NodeMatcher` variants today. Once #27
+/// lands, those patterns will fire automatically for any handler whose
+/// parameter is already seeded as `request` / `req` — no new matchers
+/// required here.
+pub fn javascript_taint_sources() -> Vec<NodeMatcher> {
+    vec![
+        // ─── 1. Generic handler parameters ────────────────────────────
+        NodeMatcher::ParamName {
+            names: vec!["req".into(), "request".into()],
+            description: "untrusted request parameter".into(),
+        },
+        // ─── 2. Express / general `req.*` and `request.*` ────────────
+        NodeMatcher::Attribute {
+            root: "req".into(),
+            field: "body".into(),
+            description: "req.body".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "req".into(),
+            field: "query".into(),
+            description: "req.query".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "req".into(),
+            field: "params".into(),
+            description: "req.params".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "req".into(),
+            field: "headers".into(),
+            description: "req.headers".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "req".into(),
+            field: "cookies".into(),
+            description: "req.cookies".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "request".into(),
+            field: "body".into(),
+            description: "request.body".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "request".into(),
+            field: "query".into(),
+            description: "request.query".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "request".into(),
+            field: "params".into(),
+            description: "request.params".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "request".into(),
+            field: "headers".into(),
+            description: "request.headers".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "request".into(),
+            field: "cookies".into(),
+            description: "request.cookies".into(),
+        },
+        // ─── 3. Next.js App Router ───────────────────────────────────
+        // `request.nextUrl` exposes a parsed URL — `.searchParams`,
+        // `.pathname`, `.href` are all untrusted when `request` is the
+        // handler input. `request.cookies` overlaps with Express above.
+        // Method-call variants (`request.headers.get`, `request.json`,
+        // `request.formData`, `request.cookies.get`) depend on issue
+        // #27 — see the header comment above.
+        NodeMatcher::Attribute {
+            root: "request".into(),
+            field: "nextUrl".into(),
+            description: "Next.js request.nextUrl".into(),
+        },
+        // ─── 4. Hono ─────────────────────────────────────────────────
+        // Hono handlers receive a context `c` whose `c.req` is the
+        // untrusted request. Direct `c.req` attribute access is covered
+        // by the `Attribute` matcher below; the most common call forms
+        // are enumerated explicitly so the engine picks them up even
+        // though `c` is never seeded via `ParamName` (see header
+        // comment for the rationale).
+        NodeMatcher::Attribute {
+            root: "c".into(),
+            field: "req".into(),
+            description: "Hono c.req".into(),
+        },
+        NodeMatcher::Call {
+            canonical: "c.req.query".into(),
+            description: "Hono c.req.query()".into(),
+        },
+        NodeMatcher::Call {
+            canonical: "c.req.param".into(),
+            description: "Hono c.req.param()".into(),
+        },
+        NodeMatcher::Call {
+            canonical: "c.req.header".into(),
+            description: "Hono c.req.header()".into(),
+        },
+        NodeMatcher::Call {
+            canonical: "c.req.json".into(),
+            description: "Hono c.req.json()".into(),
+        },
+        NodeMatcher::Call {
+            canonical: "c.req.formData".into(),
+            description: "Hono c.req.formData()".into(),
+        },
+        NodeMatcher::Call {
+            canonical: "c.req.parseBody".into(),
+            description: "Hono c.req.parseBody()".into(),
+        },
+        // ─── 5. Fastify ──────────────────────────────────────────────
+        // Fastify uses the same `request.body` / `.query` / `.params` /
+        // `.headers` / `.cookies` surface as Express, so the section 2
+        // matchers already cover it. Add Fastify-specific fields here
+        // if any ever diverge.
+        // ─── 6. SvelteKit ────────────────────────────────────────────
+        // `event` is intentionally NOT a `ParamName` matcher — DOM
+        // event handlers use the same name. Rely on explicit
+        // attribute paths from the request event object.
+        NodeMatcher::Attribute {
+            root: "event".into(),
+            field: "request".into(),
+            description: "SvelteKit event.request".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "event".into(),
+            field: "params".into(),
+            description: "SvelteKit event.params".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "event".into(),
+            field: "url".into(),
+            description: "SvelteKit event.url".into(),
+        },
+        // ─── 7. Deno ─────────────────────────────────────────────────
+        NodeMatcher::Attribute {
+            root: "Deno".into(),
+            field: "args".into(),
+            description: "Deno.args".into(),
+        },
+        NodeMatcher::Call {
+            canonical: "Deno.env.get".into(),
+            description: "Deno.env.get()".into(),
+        },
+        // ─── 8. Koa ──────────────────────────────────────────────────
+        // Koa handlers receive a context object `ctx`. `ctx.request.body`
+        // is the parsed body; `ctx.query`, `ctx.params`, and `ctx.headers`
+        // are delegated getters. `ctx.request.query` is covered by taint
+        // propagation from the `ctx` root.
+        NodeMatcher::ParamName {
+            names: vec!["ctx".into()],
+            description: "Koa context parameter".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "ctx".into(),
+            field: "body".into(),
+            description: "Koa ctx.request.body".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "ctx".into(),
+            field: "query".into(),
+            description: "Koa ctx.query".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "ctx".into(),
+            field: "params".into(),
+            description: "Koa ctx.params".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "ctx".into(),
+            field: "headers".into(),
+            description: "Koa ctx.headers".into(),
+        },
+        // ─── 9. NestJS ───────────────────────────────────────────────
+        // NestJS uses decorators (@Body(), @Query(), @Param(), @Headers())
+        // to inject request data into handler parameters. In compiled JS
+        // the decorated parameters retain their names, so we match common
+        // NestJS parameter names as a conservative approximation.
+        NodeMatcher::ParamName {
+            names: vec![
+                "body".into(),
+                "query".into(),
+                "params".into(),
+                "headers".into(),
+            ],
+            description: "NestJS decorated parameter".into(),
+        },
+    ]
+}
+
+/// Walk a member-expression chain leftward and return the leftmost
+/// identifier text. For `req.body.name`, returns `"req"`. For `x.y`,
+/// returns `"x"`.
+fn leftmost_identifier<'a>(mut node: Node<'_>, source: &'a str) -> Option<&'a str> {
+    loop {
+        match node.kind() {
+            "identifier" => return Some(node_text(node, source)),
+            "member_expression" => {
+                node = node.child_by_field_name("object")?;
+            }
+            "subscript_expression" => {
+                node = node.child_by_field_name("object")?;
+            }
+            _ => return None,
+        }
+    }
+}
+
+// ─── Tests ────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::parser::parse_file;
+    use crate::Language;
+
+    fn spec_innerhtml_from_req() -> TaintSpec {
+        TaintSpec {
+            sources: javascript_taint_sources(),
+            sinks: vec![
+                NodeMatcher::MemberAssign {
+                    field: "innerHTML".into(),
+                    description: "innerHTML assignment".into(),
+                },
+                NodeMatcher::MemberAssign {
+                    field: "outerHTML".into(),
+                    description: "outerHTML assignment".into(),
+                },
+                NodeMatcher::Call {
+                    canonical: "document.write".into(),
+                    description: "document.write".into(),
+                },
+            ],
+            sanitizers: vec![],
+        }
+    }
+
+    fn run(source: &str) -> Vec<TaintFinding> {
+        let tree = parse_file(source, Language::JavaScript).expect("parse");
+        let aliases = js_aliases_from_tree(source, &tree);
+        analyze_tree(
+            tree.root_node(),
+            source,
+            &spec_innerhtml_from_req(),
+            Some(&aliases),
+        )
+    }
+
+    #[test]
+    fn direct_flow_req_body_to_innerhtml() {
+        let src = r#"
+function handler(req) {
+    document.getElementById("x").innerHTML = req.body;
+}
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+        assert!(f[0].source_description.contains("req.body"));
+        assert_eq!(f[0].sink_description, "innerHTML assignment");
+    }
+
+    #[test]
+    fn express_param_source_is_implicit() {
+        // No explicit `req.body` access: the handler uses the bare `req`
+        // parameter, which is tainted via ParamName.
+        let src = r#"
+app.get("/", function(req, res) {
+    document.write(req);
+});
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn express_param_source_via_field_access() {
+        let src = r#"
+app.get("/", function(req, res) {
+    document.write(req.body.title);
+});
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn template_literal_propagates_taint() {
+        let src = r#"
+function handler(req) {
+    const el = document.getElementById("x");
+    el.innerHTML = `<p>${req.body.name}</p>`;
+}
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn reassignment_to_literal_kills_taint() {
+        let src = r#"
+function handler(req) {
+    let data = req.body.data;
+    data = "clean";
+    document.write(data);
+}
+"#;
+        assert_eq!(run(src).len(), 0);
+    }
+
+    #[test]
+    fn subscript_on_tainted_root_is_tainted() {
+        let src = r#"
+function handler(req) {
+    document.write(req.body["payload"]);
+}
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn one_hop_assignment_propagates() {
+        let src = r#"
+function handler(req) {
+    const name = req.query.name;
+    document.getElementById("x").innerHTML = name;
+}
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn alias_chain_propagates() {
+        let src = r#"
+function handler(req) {
+    const data = req.body.data;
+    const moreData = data;
+    document.write(moreData);
+}
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn no_source_no_finding() {
+        let src = r#"
+function handler() {
+    const x = "static";
+    document.write(x);
+    document.getElementById("a").innerHTML = "<p>hi</p>";
+}
+"#;
+        assert_eq!(run(src).len(), 0);
+    }
+
+    #[test]
+    fn nested_function_has_independent_taint() {
+        let src = r#"
+function outer(req) {
+    const data = req.body;
+    function inner() {
+        document.write(data);
+    }
+    return inner;
+}
+"#;
+        // `outer` has no sink call; `inner` sees no source because `data`
+        // is not in its local taint state.
+        assert_eq!(run(src).len(), 0);
+    }
+
+    #[test]
+    fn arrow_function_body_is_analyzed() {
+        let src = r#"
+const handler = (req, res) => {
+    document.write(req.body.x);
+};
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn alias_resolution_through_import_table() {
+        // `const { loads } = require("pickle"); loads(x)` must resolve to
+        // `pickle.loads` — verified via a spec that uses Call sink matching.
+        let src = r#"
+const { loads } = require("pickle");
+function handler(req) {
+    loads(req.body);
+}
+"#;
+        let spec = TaintSpec {
+            sources: javascript_taint_sources(),
+            sinks: vec![NodeMatcher::Call {
+                canonical: "pickle.loads".into(),
+                description: "pickle.loads".into(),
+            }],
+            sanitizers: vec![],
+        };
+        let tree = parse_file(src, Language::JavaScript).expect("parse");
+        let aliases = js_aliases_from_tree(src, &tree);
+        let findings = analyze_tree(tree.root_node(), src, &spec, Some(&aliases));
+        assert_eq!(findings.len(), 1);
+    }
+
+    #[test]
+    fn alias_import_star_as_namespace() {
+        let src = r#"
+import * as pickle from "pickle";
+function handler(req) {
+    pickle.loads(req.body);
+}
+"#;
+        let spec = TaintSpec {
+            sources: javascript_taint_sources(),
+            sinks: vec![NodeMatcher::Call {
+                canonical: "pickle.loads".into(),
+                description: "pickle.loads".into(),
+            }],
+            sanitizers: vec![],
+        };
+        let tree = parse_file(src, Language::JavaScript).expect("parse");
+        let aliases = js_aliases_from_tree(src, &tree);
+        let findings = analyze_tree(tree.root_node(), src, &spec, Some(&aliases));
+        assert_eq!(findings.len(), 1);
+    }
+
+    #[test]
+    fn require_default_binding_resolves() {
+        let src = r#"const pk = require("pickle");"#;
+        let tree = parse_file(src, Language::JavaScript).expect("parse");
+        let a = js_aliases_from_tree(src, &tree);
+        assert_eq!(a.get("pk"), Some("pickle"));
+        assert_eq!(a.resolve("pk.loads"), "pickle.loads");
+    }
+
+    #[test]
+    fn named_import_with_alias_resolves() {
+        let src = r#"import { loads as l2 } from "pickle";"#;
+        let tree = parse_file(src, Language::JavaScript).expect("parse");
+        let a = js_aliases_from_tree(src, &tree);
+        assert_eq!(a.get("l2"), Some("pickle.loads"));
+    }
+
+    #[test]
+    fn string_concat_propagates_taint() {
+        let src = r#"
+function handler(req) {
+    document.write("<h1>" + req.body.title + "</h1>");
+}
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn interprocedural_tainted_return_propagates_to_caller() {
+        // Use a module-scoped `req` so the caller's argument list is clean
+        // and the only path to taint in the caller is via the helper's
+        // return summary.
+        let src = r#"
+function getUserInput() {
+    return req.body;
+}
+
+function handler() {
+    const data = getUserInput();
+    document.write(data);
+}
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+        assert!(f[0].source_description.contains("getUserInput"));
+    }
+
+    #[test]
+    fn interprocedural_clean_return_does_not_fire() {
+        let src = r#"
+function cleanHelper() {
+    return "static";
+}
+
+function handler() {
+    document.write(cleanHelper());
+}
+"#;
+        assert_eq!(run(src).len(), 0);
+    }
+
+    #[test]
+    fn interprocedural_return_is_parameter_sensitive() {
+        let src = r#"
+function choose(first, second) {
+    return second;
+}
+
+function handler(req) {
+    const clean = "static";
+    document.write(choose(req.body, clean));
+}
+"#;
+        assert_eq!(run(src).len(), 0);
+    }
+
+    #[test]
+    fn interprocedural_late_definition_still_found() {
+        let src = r#"
+function handler() {
+    const data = helper();
+    document.write(data);
+}
+
+function helper() {
+    return req.body;
+}
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+        assert!(f[0].source_description.contains("helper"));
+    }
+
+    #[test]
+    fn multi_hop_chain_is_out_of_scope_v1() {
+        // Two-hop chain: `middle` calls `sourceFn`. Pass 1 uses an empty
+        // summary, so `middle`'s return is seen as clean. Documented
+        // v1 limitation — the test pins the behavior. The handler has
+        // no tainted argument (no `req` param or access), so the only
+        // path to taint would be a working multi-hop summary.
+        let src = r#"
+function sourceFn() {
+    return req.body;
+}
+
+function middle() {
+    return sourceFn();
+}
+
+function handler() {
+    document.write(middle());
+}
+"#;
+        assert_eq!(run(src).len(), 0);
+    }
+
+    #[test]
+    fn interprocedural_arrow_function_helper_propagates() {
+        // Arrow-function helper with concise body assigned to a const.
+        let src = r#"
+const getInput = () => req.body;
+
+function handler() {
+    document.write(getInput());
+}
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+        assert!(f[0].source_description.contains("getInput"));
+    }
+
+    #[test]
+    fn interprocedural_arrow_function_block_body_propagates() {
+        let src = r#"
+const getInput = () => { return req.body; };
+
+function handler() {
+    const data = getInput();
+    document.write(data);
+}
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+        assert!(f[0].source_description.contains("getInput"));
+    }
+
+    #[test]
+    fn method_call_on_tainted_source_propagates() {
+        // `req.body.get("x")` — receiver `req.body` is a source, method
+        // call result must carry the taint into the sink.
+        let src = r#"
+function handler(req) {
+    const data = req.body.get("x");
+    document.write(data);
+}
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+        assert!(f[0].source_description.contains("req.body"));
+    }
+
+    #[test]
+    fn method_call_with_args_still_tainted() {
+        let src = r#"
+function handler(req) {
+    const data = req.body.get("x", "default");
+    document.write(data);
+}
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn chained_method_calls_preserve_taint() {
+        let src = r#"
+function handler(req) {
+    const data = req.body.get("x").trim().toUpperCase();
+    document.write(data);
+}
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn to_string_on_tainted_value_is_tainted() {
+        let src = r#"
+function handler(req) {
+    const data = req.body.toString();
+    document.write(data);
+}
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn sanitizer_call_kills_taint() {
+        let mut spec = spec_innerhtml_from_req();
+        spec.sanitizers = vec![NodeMatcher::Call {
+            canonical: "escapeHtml".into(),
+            description: "escapeHtml".into(),
+        }];
+        let src = r#"
+function handler(req) {
+    const raw = req.body;
+    const clean = escapeHtml(raw);
+    document.write(clean);
+}
+"#;
+        let tree = parse_file(src, Language::JavaScript).expect("parse");
+        let aliases = js_aliases_from_tree(src, &tree);
+        assert_eq!(
+            analyze_tree(tree.root_node(), src, &spec, Some(&aliases)).len(),
+            0
+        );
+    }
+
+    // ─── SSTI rule tests ────────────────────────────────────────────────
+
+    #[test]
+    fn ssti_ejs_render_from_req_body() {
+        let spec = super::super::javascript::TaintSsti::spec();
+        let src = r#"
+const ejs = require("ejs");
+function handler(req, res) {
+    const template = req.body.template;
+    ejs.render(template);
+}
+"#;
+        let tree = parse_file(src, Language::JavaScript).expect("parse");
+        let aliases = js_aliases_from_tree(src, &tree);
+        let findings = analyze_tree(tree.root_node(), src, &spec, Some(&aliases));
+        assert!(!findings.is_empty(), "expected SSTI finding for ejs.render");
+        assert!(findings[0].sink_description.contains("ejs.render"));
+    }
+
+    #[test]
+    fn ssti_no_finding_when_static_template() {
+        let spec = super::super::javascript::TaintSsti::spec();
+        let src = r#"
+const ejs = require("ejs");
+function handler(req, res) {
+    ejs.render("<h1>Hello</h1>");
+}
+"#;
+        let tree = parse_file(src, Language::JavaScript).expect("parse");
+        let aliases = js_aliases_from_tree(src, &tree);
+        let findings = analyze_tree(tree.root_node(), src, &spec, Some(&aliases));
+        assert!(findings.is_empty(), "static template should not fire SSTI");
+    }
+
+    // ─── XPath injection rule tests ─────────────────────────────────────
+
+    #[test]
+    fn xpath_select_from_req_query() {
+        let spec = super::super::javascript::TaintXpathInjection::spec();
+        let src = r#"
+const xpath = require("xpath");
+function handler(req, res) {
+    const expr = req.query.path;
+    xpath.select(expr, doc);
+}
+"#;
+        let tree = parse_file(src, Language::JavaScript).expect("parse");
+        let aliases = js_aliases_from_tree(src, &tree);
+        let findings = analyze_tree(tree.root_node(), src, &spec, Some(&aliases));
+        assert!(!findings.is_empty(), "expected XPath injection finding");
+        assert!(findings[0].sink_description.contains("xpath.select"));
+    }
+
+    #[test]
+    fn xpath_no_finding_when_static_expression() {
+        let spec = super::super::javascript::TaintXpathInjection::spec();
+        let src = r#"
+const xpath = require("xpath");
+function handler(req, res) {
+    xpath.select("//book/title", doc);
+}
+"#;
+        let tree = parse_file(src, Language::JavaScript).expect("parse");
+        let aliases = js_aliases_from_tree(src, &tree);
+        let findings = analyze_tree(tree.root_node(), src, &spec, Some(&aliases));
+        assert!(findings.is_empty(), "static XPath should not fire");
+    }
+
+    // ─── LDAP injection rule tests ──────────────────────────────────────
+
+    #[test]
+    fn ldap_search_from_req_body() {
+        let spec = super::super::javascript::TaintLdapInjection::spec();
+        let src = r#"
+function handler(req, res) {
+    const filter = req.body.username;
+    client.search(filter);
+}
+"#;
+        let tree = parse_file(src, Language::JavaScript).expect("parse");
+        let aliases = js_aliases_from_tree(src, &tree);
+        let findings = analyze_tree(tree.root_node(), src, &spec, Some(&aliases));
+        assert!(
+            !findings.is_empty(),
+            "expected LDAP injection finding for .search()"
+        );
+        assert!(findings[0]
+            .sink_description
+            .contains("LDAP client.search()"));
+    }
+
+    #[test]
+    fn ldap_no_finding_when_static_filter() {
+        let spec = super::super::javascript::TaintLdapInjection::spec();
+        let src = r#"
+function handler(req, res) {
+    client.search("dc=example", { filter: "(cn=admin)" });
+}
+"#;
+        let tree = parse_file(src, Language::JavaScript).expect("parse");
+        let aliases = js_aliases_from_tree(src, &tree);
+        let findings = analyze_tree(tree.root_node(), src, &spec, Some(&aliases));
+        assert!(findings.is_empty(), "static LDAP filter should not fire");
+    }
+
+    // Issue #133: String.prototype.search() must not trigger LDAP rule.
+    #[test]
+    fn ldap_no_finding_for_string_search() {
+        let spec = super::super::javascript::TaintLdapInjection::spec();
+        let src = r#"
+function handler(req, res) {
+    const pattern = req.body.pattern;
+    "hello world".search(pattern);
+}
+"#;
+        let tree = parse_file(src, Language::JavaScript).expect("parse");
+        let aliases = js_aliases_from_tree(src, &tree);
+        let findings = analyze_tree(tree.root_node(), src, &spec, Some(&aliases));
+        assert!(
+            findings.is_empty(),
+            "String.prototype.search() should not fire LDAP rule"
+        );
+    }
+
+    // Issue #133: Function.prototype.bind() must not trigger LDAP rule.
+    #[test]
+    fn ldap_no_finding_for_function_bind() {
+        let spec = super::super::javascript::TaintLdapInjection::spec();
+        let src = r#"
+function handler(req, res) {
+    const ctx = req.body.context;
+    handler.bind(ctx);
+}
+"#;
+        let tree = parse_file(src, Language::JavaScript).expect("parse");
+        let aliases = js_aliases_from_tree(src, &tree);
+        let findings = analyze_tree(tree.root_node(), src, &spec, Some(&aliases));
+        assert!(
+            findings.is_empty(),
+            "Function.prototype.bind() should not fire LDAP rule"
+        );
+    }
+
+    #[test]
+    fn cross_file_summary_extraction_finds_exported_functions() {
+        // services.js-like fixture
+        let src = r#"
+const db = { query(_q) { return []; } };
+
+function runQuery(name) {
+    return db.query("SELECT * FROM users WHERE name = '" + name + "'");
+}
+
+function evalExpression(expr) {
+    return eval(expr);
+}
+
+module.exports = { runQuery, evalExpression };
+"#;
+        let tree = parse_file(src, Language::JavaScript).expect("parse");
+        let aliases = js_aliases_from_tree(src, &tree);
+        let rule_specs = crate::rules::javascript::js_taint_rule_specs();
+        let summaries =
+            extract_cross_file_summaries(tree.root_node(), src, Some(&aliases), &rule_specs);
+
+        eprintln!("summaries: {:#?}", summaries);
+        let names: Vec<&str> = summaries.iter().map(|s| s.name.as_str()).collect();
+        assert!(
+            names.contains(&"runQuery"),
+            "expected runQuery in summaries, got {:?}",
+            names
+        );
+        assert!(
+            names.contains(&"evalExpression"),
+            "expected evalExpression in summaries, got {:?}",
+            names
+        );
+
+        let rq = summaries.iter().find(|s| s.name == "runQuery").unwrap();
+        assert!(
+            rq.params_to_sink
+                .iter()
+                .any(|f| f.sink_rule_id == "js/taint-sql-injection"),
+            "expected runQuery to have sql-injection sink flow, got {:?}",
+            rq.params_to_sink
+        );
+
+        let ee = summaries
+            .iter()
+            .find(|s| s.name == "evalExpression")
+            .unwrap();
+        assert!(
+            ee.params_to_sink
+                .iter()
+                .any(|f| f.sink_rule_id == "js/taint-eval"),
+            "expected evalExpression to have eval sink flow, got {:?}",
+            ee.params_to_sink
+        );
+    }
+
+    #[test]
+    fn export_default_named_function_produces_summary() {
+        let src = r#"
+export default function handler(req) {
+    db.query("SELECT " + req.body);
+}
+"#;
+        let tree = parse_file(src, Language::JavaScript).expect("parse");
+        let aliases = js_aliases_from_tree(src, &tree);
+        let rule_specs = crate::rules::javascript::js_taint_rule_specs();
+        let summaries =
+            extract_cross_file_summaries(tree.root_node(), src, Some(&aliases), &rule_specs);
+
+        eprintln!("summaries: {:#?}", summaries);
+        let names: Vec<&str> = summaries.iter().map(|s| s.name.as_str()).collect();
+        // Should produce both the named export and a "default" alias.
+        assert!(
+            names.contains(&"handler"),
+            "expected 'handler' in summaries, got {:?}",
+            names
+        );
+        assert!(
+            names.contains(&"default"),
+            "expected 'default' in summaries, got {:?}",
+            names
+        );
+
+        let def = summaries.iter().find(|s| s.name == "default").unwrap();
+        assert!(
+            def.params_to_sink
+                .iter()
+                .any(|f| f.sink_rule_id == "js/taint-sql-injection"),
+            "expected default export to have sql-injection sink flow, got {:?}",
+            def.params_to_sink
+        );
+    }
+
+    #[test]
+    fn export_default_anonymous_function_produces_summary() {
+        let src = r#"
+export default function(req) {
+    db.query("SELECT " + req.body);
+}
+"#;
+        let tree = parse_file(src, Language::JavaScript).expect("parse");
+        let aliases = js_aliases_from_tree(src, &tree);
+        let rule_specs = crate::rules::javascript::js_taint_rule_specs();
+        let summaries =
+            extract_cross_file_summaries(tree.root_node(), src, Some(&aliases), &rule_specs);
+
+        let names: Vec<&str> = summaries.iter().map(|s| s.name.as_str()).collect();
+        assert!(
+            names.contains(&"default"),
+            "expected 'default' in summaries, got {:?}",
+            names
+        );
+    }
+
+    #[test]
+    fn export_default_arrow_function_produces_summary() {
+        let src = r#"
+export default (req) => {
+    db.query("SELECT " + req.body);
+}
+"#;
+        let tree = parse_file(src, Language::JavaScript).expect("parse");
+        let aliases = js_aliases_from_tree(src, &tree);
+        let rule_specs = crate::rules::javascript::js_taint_rule_specs();
+        let summaries =
+            extract_cross_file_summaries(tree.root_node(), src, Some(&aliases), &rule_specs);
+
+        let names: Vec<&str> = summaries.iter().map(|s| s.name.as_str()).collect();
+        assert!(
+            names.contains(&"default"),
+            "expected 'default' in summaries for arrow default export, got {:?}",
+            names
+        );
+    }
+
+    #[test]
+    fn import_default_cross_file_finding() {
+        // Simulate cross-file: module exports a default function with a
+        // SQL-injection sink; a caller imports it as default and passes
+        // tainted data.
+        let module_src = r#"
+export default function handler(req) {
+    db.query("SELECT " + req.body);
+}
+"#;
+        let module_tree = parse_file(module_src, Language::JavaScript).expect("parse module");
+        let module_aliases = js_aliases_from_tree(module_src, &module_tree);
+        let rule_specs = crate::rules::javascript::js_taint_rule_specs();
+        let summaries = extract_cross_file_summaries(
+            module_tree.root_node(),
+            module_src,
+            Some(&module_aliases),
+            &rule_specs,
+        );
+        assert!(
+            !summaries.is_empty(),
+            "expected at least one summary from default export"
+        );
+
+        // Build the cross-file summary map keyed by file path.
+        let module_path = PathBuf::from("/fake/handler.js");
+        let mut summary_map: CrossFileSummaryMap = HashMap::new();
+        summary_map.insert(module_path.clone(), summaries);
+
+        // Caller source: `import handler from "./handler"; handler(req.body);`
+        let caller_src = r#"
+import handler from "./handler";
+function route(req) {
+    handler(req.body);
+}
+"#;
+        let caller_tree = parse_file(caller_src, Language::JavaScript).expect("parse caller");
+        let caller_aliases = js_aliases_from_tree(caller_src, &caller_tree);
+
+        // Build import map manually (we can't resolve files on disk in
+        // a unit test, so we wire the mapping by hand).
+        let mut import_to_path: HashMap<String, PathBuf> = HashMap::new();
+        import_to_path.insert("./handler".to_string(), module_path.clone());
+        // Default import entry: __default__:./handler:handler
+        import_to_path.insert(
+            "__default__:./handler:handler".to_string(),
+            module_path.clone(),
+        );
+
+        let cross_file = CrossFileInfo {
+            import_to_path: &import_to_path,
+            summaries: &summary_map,
+            rule_filter: RuleFilter::Single("js/taint-sql-injection"),
+        };
+
+        let spec = rule_specs
+            .iter()
+            .find(|(id, _)| *id == "js/taint-sql-injection")
+            .map(|(_, s)| s)
+            .expect("sql-injection spec");
+
+        let findings = analyze_tree_with_cross_file(
+            caller_tree.root_node(),
+            caller_src,
+            spec,
+            Some(&caller_aliases),
+            Some(&cross_file),
+        );
+
+        eprintln!("findings: {:#?}", findings);
+        assert!(
+            !findings.is_empty(),
+            "expected cross-file finding for default import call"
+        );
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.sink_description.contains("cross-file")),
+            "expected finding to mention cross-file, got: {:?}",
+            findings
+                .iter()
+                .map(|f| &f.sink_description)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn ternary_tainted_consequence_propagates() {
+        let src = r#"
+function handler(req) {
+    const data = true ? req.body : "safe";
+    document.getElementById("x").innerHTML = data;
+}
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+        assert!(f[0].source_description.contains("req.body"));
+    }
+
+    #[test]
+    fn ternary_tainted_alternative_propagates() {
+        let src = r#"
+function handler(req) {
+    const data = false ? "safe" : req.body;
+    document.getElementById("x").innerHTML = data;
+}
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+        assert!(f[0].source_description.contains("req.body"));
+    }
+
+    #[test]
+    fn ternary_clean_both_branches_is_clean() {
+        let src = r#"
+function handler(req) {
+    const data = true ? "a" : "b";
+    document.getElementById("x").innerHTML = data;
+}
+"#;
+        assert!(run(src).is_empty());
+    }
+
+    // ─── Koa ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn koa_ctx_request_body_is_tainted() {
+        let src = r#"
+router.post("/", async (ctx) => {
+    document.write(ctx.request.body);
+});
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+        assert!(
+            f[0].source_description.contains("ctx"),
+            "expected Koa ctx source, got: {}",
+            f[0].source_description
+        );
+    }
+
+    #[test]
+    fn koa_ctx_query_is_tainted() {
+        let src = r#"
+router.get("/search", async (ctx) => {
+    document.getElementById("x").innerHTML = ctx.query.q;
+});
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn koa_ctx_params_is_tainted() {
+        let src = r#"
+router.get("/user/:id", async (ctx) => {
+    document.write(ctx.params.id);
+});
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn koa_ctx_headers_is_tainted() {
+        let src = r#"
+router.get("/", async (ctx) => {
+    document.write(ctx.headers["x-forwarded-for"]);
+});
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn koa_ctx_param_name_taints_bare_ctx() {
+        let src = r#"
+router.get("/", async (ctx) => {
+    document.write(ctx);
+});
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    // ─── NestJS ──────────────────────────────────────────────────────
+
+    #[test]
+    fn nestjs_body_param_is_tainted() {
+        let src = r#"
+function createUser(body) {
+    document.write(body.username);
+}
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn nestjs_query_param_is_tainted() {
+        let src = r#"
+function searchUsers(query) {
+    document.getElementById("x").innerHTML = query.term;
+}
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn nestjs_params_param_is_tainted() {
+        let src = r#"
+function getUser(params) {
+    document.write(params.id);
+}
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn nestjs_headers_param_is_tainted() {
+        let src = r#"
+function handler(headers) {
+    document.write(headers["authorization"]);
+}
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn await_expression_propagates_taint() {
+        let src = r#"
+async function handler(req) {
+    const data = await req.json();
+    document.getElementById("x").innerHTML = data;
+}
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+        assert_eq!(f[0].sink_description, "innerHTML assignment");
+    }
+}

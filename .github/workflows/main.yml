@@ -46,6 +46,7 @@ jobs:
       docs: ${{ steps.diff.outputs.docs }}
       docker: ${{ steps.diff.outputs.docker }}
       deps: ${{ steps.diff.outputs.deps }}
+      rust: ${{ steps.diff.outputs.rust }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -66,8 +67,39 @@ jobs:
           fi
           bash scripts/ci-changed.sh "$base" | tee -a "$GITHUB_OUTPUT"
 
+  foxguard:
+    name: build foxguard once
+    # The default scanner is built from crates/foxguard, not downloaded. The
+    # binary is cached by the hash of everything that can change it, so a
+    # TypeScript-only change restores it instead of compiling Rust; the other
+    # jobs fetch it as an artifact (setup-ci builds it itself if it is gone).
+    runs-on: graphide
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Restore the cached binary
+        id: cache
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        with:
+          path: foxguard-bin
+          key: foxguard-bin-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.toml', 'Cargo.lock', 'rust-toolchain.toml', 'crates/foxguard/**') }}
+      - name: Build Foxguard
+        if: steps.cache.outputs.cache-hit != 'true'
+        env:
+          INSTALL_DIR: ${{ github.workspace }}/foxguard-bin
+        run: bash scripts/build-foxguard.sh
+      - name: Share the binary
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: foxguard-${{ github.run_id }}
+          path: foxguard-bin/foxguard
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: true
+
   build:
     name: build CLI once
+    needs: foxguard
     runs-on: graphide
     timeout-minutes: 20
     steps:
@@ -363,9 +395,94 @@ jobs:
       - name: Audit JavaScript dependencies
         run: pnpm audit --audit-level=high
 
+  rust:
+    name: foxguard (${{ matrix.os }})
+    # Only when crates/foxguard, the Cargo workspace or the toolchain pin changed
+    # (scripts/ci-changed.sh), and always on tags. TypeScript-only diffs skip it.
+    needs: changes
+    if: ${{ !cancelled() && (startsWith(github.ref, 'refs/tags/') || (needs.changes.result == 'success' && needs.changes.outputs.rust == 'true')) }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    env:
+      CARGO_TERM_COLOR: always
+      # Single source of truth for the Semgrep version the parity tests and the
+      # nightly parity job use. Bump deliberately with a parity-test run.
+      SEMGREP_VERSION: "1.163.0"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install the pinned Rust toolchain
+        run: bash scripts/ensure-rust.sh
+      - uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-rust-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-cargo-rust-
+      - name: Format
+        if: matrix.os == 'ubuntu-latest'
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --locked -p foxguard --all-targets -- -D warnings
+      - name: Test
+        run: cargo test --locked -p foxguard
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        if: matrix.os == 'ubuntu-latest'
+        with:
+          python-version: "3.12"
+      - name: Semgrep parity suites
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          pip install "semgrep==${SEMGREP_VERSION}"
+          for t in semgrep_parity semgrep_parity_javascript semgrep_parity_go semgrep_parity_java semgrep_parity_c semgrep_parity_kotlin semgrep_parity_haskell semgrep_parity_inverse; do
+            cargo test --locked -p foxguard --test "$t"
+          done
+      - name: Benchmark corpus metadata and sealed negative controls
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          set -euo pipefail
+          cd crates/foxguard
+          python3 benchmarks/precision/precision.py validate
+          python3 -m unittest benchmarks/precision/test_zero_research.py benchmarks/precision/test_fixed_cases_v2.py
+          python3 -m unittest discover -s benchmarks/fixed-negative-controls-v2 -p 'test_*.py'
+          python3 -m unittest discover -s benchmarks/held-out-capability-v1 -p 'test_*.py'
+          cargo build --locked -p foxguard --bin foxguard
+          ref=$(python3 benchmarks/fixed-negative-controls-v2/fixed_controls.py run \
+            --candidate-id "ci-${GITHUB_SHA}" \
+            --champion-binary ../../target/debug/foxguard \
+            --challenger-binary ../../target/debug/foxguard \
+            --champion-source-root . \
+            --challenger-source-root . \
+            --results-dir "$RUNNER_TEMP/foxguard-negative-controls/raw" \
+            --output "$RUNNER_TEMP/foxguard-negative-controls/evidence.json")
+          python3 benchmarks/fixed-negative-controls-v2/fixed_controls.py verify \
+            --artifact "$RUNNER_TEMP/foxguard-negative-controls/evidence.json" \
+            --ref "$ref"
+      - name: Dogfood (foxguard scans its own source)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          set -euo pipefail
+          cargo build --release --locked -p foxguard --bin foxguard
+          cd crates/foxguard
+          fg=../../target/release/foxguard
+          "$fg" --severity high src/
+          "$fg" secrets src/
+          # Bypass .foxguard.yml so the repo baseline does not suppress fixture findings.
+          if "$fg" --config /dev/null tests/fixtures/ >/dev/null 2>&1; then
+            echo "::error::Expected foxguard to find issues in test fixtures but it exited clean"
+            exit 1
+          fi
+
   verify:
     name: verify
-    needs: [changes, build, static, engine, browser, smoke, unit, docker-server, docs]
+    needs: [changes, foxguard, build, static, engine, browser, smoke, unit, docker-server, docs, rust]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5

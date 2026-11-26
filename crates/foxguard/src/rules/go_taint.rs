@@ -1,0 +1,2458 @@
+//! Intraprocedural, flow-insensitive taint analysis for Go.
+//!
+//! Ported from `python_taint.rs` / `javascript_taint.rs` as part of
+//! issue #31. The surface mirrors the Python/JS engines intentionally
+//! — `TaintSpec`, `NodeMatcher`, `TaintFinding`, and `analyze_tree` have
+//! identical shapes so a future refactor that extracts the
+//! language-agnostic core is cheap. For now we keep three engines so
+//! each grammar's quirks stay local.
+//!
+//! # Scope (same as Python/JS)
+//!
+//! - **Per function / method / closure.** Each `function_declaration`,
+//!   `method_declaration`, and `func_literal` (closure / anonymous
+//!   function) body is analyzed independently.
+//! - **Per file.** No cross-file analysis.
+//! - **Flow-insensitive.** Statements are processed in source order; a
+//!   reassignment with a clean RHS clears the target's taint.
+//! - **One level of selector/subscript propagation.** `c.Query("x")`
+//!   and `m["k"]` propagate taint whenever the root is tainted.
+//! - **One level of wrapping-call propagation.** `string(tainted)`,
+//!   `fmt.Sprintf("%s", tainted)` stay tainted unless the callee is in
+//!   `sanitizers`.
+//! - **Binary `+` (string concat) propagates taint** — mirrors the JS
+//!   engine.
+//! - **Method-call propagation on tainted receivers** — `x.foo()` is
+//!   tainted when `x` is.
+//! - **Same-file interprocedural return propagation.** Pass 1 records a
+//!   return-taint summary per function / method simple name; pass 2
+//!   re-analyzes using the summary. Method names collide with bare
+//!   functions: last-write-wins (documented v1 limitation).
+//! - **Multi-return destructuring** — `a, b := f()`: if `f`'s summary
+//!   slot is tainted, all bound names are tainted.
+//!
+//! Everything specific to a library is expressed declaratively via
+//! `TaintSpec`.
+
+use super::common::AliasTable;
+use super::taint_engine::{
+    analyze_function_generic, attribution_hint_for_sink, build_batched_taint_groups,
+    cross_file_taint_finding, extract_cross_file_summary_for_function,
+    extract_cross_file_summary_for_function_cf, match_binop_format_sink, match_call_sink,
+    node_text, push_attributed_findings, summarize_function_return_generic, taint_finding_for_node,
+    AnalysisContext, LabelPolicy, TaintLanguageAdapter, TaintState,
+};
+pub use super::taint_engine::{
+    BatchedRule, NodeMatcher, ReturnSummary, ReturnTaintSummary, RuleFilter, TaintFinding,
+    TaintSpec,
+};
+use crate::rules::cross_file::{CrossFileSummaryMap, FunctionTaintSummary};
+use std::borrow::Cow;
+use std::collections::BTreeSet;
+use std::path::PathBuf;
+use tree_sitter::{Node, Tree};
+
+// ─── Public API ───────────────────────────────────────────────────────────
+
+/// Cross-file taint info for Go same-package resolution.
+///
+/// In Go, all `.go` files in the same directory belong to the same package
+/// and can call each other's functions without imports. This struct maps
+/// file paths in the same package to their taint summaries.
+pub struct CrossFileInfo<'a> {
+    /// Map from file path to taint summaries for that file.
+    /// For same-package resolution, these are all `.go` files in the
+    /// same directory as the current file.
+    pub same_package_paths: &'a [PathBuf],
+    /// Cross-file summaries keyed by canonical file path.
+    pub summaries: &'a CrossFileSummaryMap,
+    /// The rule filter used to emit cross-file findings. Cross-file
+    /// findings are only emitted when the summary's `sink_rule_id`
+    /// passes this filter.
+    ///
+    /// - [`RuleFilter::Single`] in single-rule mode (the historical
+    ///   behaviour).
+    /// - [`RuleFilter::Any`] with a set of allowed rule ids in batched
+    ///   mode, so a single walk can attribute findings to any of the
+    ///   batched rules.
+    pub rule_filter: RuleFilter<'a>,
+}
+
+/// Type alias for the Go-specific analysis context.
+type GoCtx<'a> = AnalysisContext<'a, CrossFileInfo<'a>>;
+
+/// A tainted value's `(description, source line, optional taint-labels set)`.
+/// The label component is `Some` only under an active taint-labels policy.
+type LabeledTaint = (String, usize, Option<BTreeSet<String>>);
+
+/// Run the taint engine over every function/method body inside `root`
+/// and return one `TaintFinding` per source→sink flow.
+///
+/// Runs two passes per file. Pass 1 builds the return-taint summary
+/// for every eligible function / method in the file. Pass 2
+/// re-analyzes each scope with that summary available.
+pub fn analyze_tree(
+    root: Node<'_>,
+    source: &str,
+    spec: &TaintSpec,
+    aliases: Option<&AliasTable>,
+) -> Vec<TaintFinding> {
+    analyze_tree_with_cross_file(root, source, spec, aliases, None)
+}
+
+/// Like [`analyze_tree`] but honoring a taint-**labels** [`LabelPolicy`]
+/// (Semgrep advanced taint mode). With `policy = None` this is byte-for-byte the
+/// historical unlabeled behavior. With `policy = Some(..)`, primary sources emit
+/// the policy's source label, values passing through string-building nodes are
+/// conditionally relabeled, and a sink fires only when the reaching value's
+/// label set satisfies the policy's boolean `requires:` — enabling the Go
+/// `INPUT and not CLEAN` negation-tier rules (open-redirect, tainted-url-host).
+pub fn analyze_tree_labeled<'a>(
+    root: Node<'_>,
+    source: &'a str,
+    spec: &'a TaintSpec,
+    aliases: Option<&'a AliasTable>,
+    policy: Option<&'a LabelPolicy>,
+) -> Vec<TaintFinding> {
+    let empty_summary = ReturnSummary::new();
+    let mut summaries = ReturnSummary::new();
+    let pass1_ctx = AnalysisContext {
+        source,
+        spec,
+        aliases,
+        summaries: &empty_summary,
+        cross_file: None,
+        sink_to_rules: None,
+        label_policy: policy,
+    };
+    collect_function_defs(root, &mut |func_node| {
+        let (name, ret_taint) = summarize_function_return(func_node, &pass1_ctx);
+        if let Some(name) = name {
+            summaries.insert(
+                function_summary_key(&name, collect_param_names(func_node, source).len()),
+                ret_taint,
+            );
+        }
+    });
+
+    let ctx = AnalysisContext {
+        source,
+        spec,
+        aliases,
+        summaries: &summaries,
+        cross_file: None,
+        sink_to_rules: None,
+        label_policy: policy,
+    };
+    let mut findings = Vec::new();
+    collect_function_defs(root, &mut |func_node| {
+        analyze_function(func_node, &ctx, &mut findings);
+    });
+    findings
+}
+
+/// Like [`analyze_tree`] but with optional cross-file taint summaries.
+///
+/// When `cross_file` is `Some`, calls to functions defined in other files
+/// of the same Go package are resolved against the summary map. If a
+/// tainted argument reaches a sink in the callee (per its summary), a
+/// finding is emitted in the caller's file.
+pub fn analyze_tree_with_cross_file<'a>(
+    root: Node<'_>,
+    source: &'a str,
+    spec: &'a TaintSpec,
+    aliases: Option<&'a AliasTable>,
+    cross_file: Option<&'a CrossFileInfo<'a>>,
+) -> Vec<TaintFinding> {
+    let empty_summary = ReturnSummary::new();
+    let mut summaries = ReturnSummary::new();
+    let pass1_ctx = AnalysisContext {
+        source,
+        spec,
+        aliases,
+        summaries: &empty_summary,
+        cross_file: None,
+        sink_to_rules: None,
+        label_policy: None,
+    };
+    collect_function_defs(root, &mut |func_node| {
+        let (name, ret_taint) = summarize_function_return(func_node, &pass1_ctx);
+        if let Some(name) = name {
+            summaries.insert(
+                function_summary_key(&name, collect_param_names(func_node, source).len()),
+                ret_taint,
+            );
+        }
+    });
+
+    let ctx = AnalysisContext {
+        source,
+        spec,
+        aliases,
+        summaries: &summaries,
+        cross_file,
+        sink_to_rules: None,
+        label_policy: None,
+    };
+    let mut findings = Vec::new();
+    collect_function_defs(root, &mut |func_node| {
+        analyze_function(func_node, &ctx, &mut findings);
+    });
+    findings
+}
+
+/// Cross-file info used by the batched analyzer.
+///
+/// Unlike [`CrossFileInfo`] — which takes a single `current_rule_id` —
+/// the batched variant only needs the summary map and the same-package
+/// paths. The allowed rule ids are derived per sanitizer-group from the
+/// input [`BatchedRule`] slice.
+pub struct CrossFileInfoBatched<'a> {
+    pub same_package_paths: &'a [PathBuf],
+    pub summaries: &'a CrossFileSummaryMap,
+}
+
+/// Batched Go taint analysis.
+///
+/// Runs the taint engine once per sanitizer-group instead of once per
+/// rule. In foxguard's default Go taint ruleset (9 rules) this collapses
+/// 9 full AST walks to 2 — one for the 8 no-sanitizer rules and one for
+/// the path-traversal rule (the only rule with sanitizers).
+///
+/// The rule-agnostic Pass 1 summaries are shared across all rules in a
+/// sanitizer group (they are source-driven, and the 9 built-in rules
+/// share `go_taint_sources()`). Rules with different sanitizer sets land
+/// in different groups because sanitizers affect both the return-taint
+/// summary and the intra-file taint state.
+///
+/// Returns `(rule_id, finding)` pairs. Each finding carries its
+/// `rule_id_hint` set to the attributed rule so the caller can dispatch
+/// to per-rule metadata (severity, CWE, fix hints).
+pub fn analyze_tree_batched<'a>(
+    root: Node<'_>,
+    source: &'a str,
+    rules: &[BatchedRule<'a>],
+    aliases: Option<&'a AliasTable>,
+    cross_file: Option<&'a CrossFileInfoBatched<'a>>,
+) -> Vec<(String, TaintFinding)> {
+    if rules.is_empty() {
+        return Vec::new();
+    }
+
+    let mut out: Vec<(String, TaintFinding)> = Vec::new();
+    for group in build_batched_taint_groups(rules) {
+        // Pass 1: compute summaries once for the entire group.
+        let empty_summary = ReturnSummary::new();
+        let pass1_ctx = AnalysisContext {
+            source,
+            spec: &group.spec,
+            aliases,
+            summaries: &empty_summary,
+            cross_file: None,
+            sink_to_rules: None,
+            label_policy: None,
+        };
+        let mut summaries = ReturnSummary::new();
+        collect_function_defs(root, &mut |func_node| {
+            let (name, ret_taint) = summarize_function_return(func_node, &pass1_ctx);
+            if let Some(name) = name {
+                summaries.insert(
+                    function_summary_key(&name, collect_param_names(func_node, source).len()),
+                    ret_taint,
+                );
+            }
+        });
+
+        // Pass 2: one walk emits findings for every rule in the group.
+        // Cross-file dispatch uses `RuleFilter::Any` so the single walk
+        // can attribute findings across every rule in this group.
+        let cross_file_for_group = cross_file.map(|cf| CrossFileInfo {
+            same_package_paths: cf.same_package_paths,
+            summaries: cf.summaries,
+            rule_filter: RuleFilter::Any(&group.allowed_rule_ids),
+        });
+        let ctx = AnalysisContext {
+            source,
+            spec: &group.spec,
+            aliases,
+            summaries: &summaries,
+            cross_file: cross_file_for_group.as_ref(),
+            sink_to_rules: Some(&group.sink_to_rules),
+            label_policy: None,
+        };
+        let mut group_findings: Vec<TaintFinding> = Vec::new();
+        collect_function_defs(root, &mut |func_node| {
+            analyze_function(func_node, &ctx, &mut group_findings);
+        });
+
+        push_attributed_findings(&mut out, group_findings, &group.sink_to_rules);
+    }
+
+    out
+}
+
+// ─── Per-file import alias table ──────────────────────────────────────────
+
+/// Per-file Go import alias table.
+///
+/// Maps a local package identifier to its canonical import path's
+/// last segment — the default name users reference in call sites.
+///
+/// Handles:
+///
+/// - `import "fmt"`              -> `fmt`  -> `fmt`
+/// - `import f "fmt"`            -> `f`    -> `fmt`
+/// - `import "net/http"`         -> `http` -> `http`
+/// - `import net "net/http"`     -> `net`  -> `http`
+/// - Grouped imports inside `import ( ... )` blocks.
+///
+/// Out of scope for v1 (documented):
+///
+/// - `import . "fmt"`  -- dot imports make names unqualified, rare.
+/// - `import _ "foo"`  -- side-effect imports introduce no names.
+///
+/// File-scope only; function-local rebindings are not tracked.
+pub fn go_aliases_from_tree(source: &str, tree: &Tree) -> AliasTable {
+    let mut aliases = AliasTable::new();
+    let root = tree.root_node();
+    let mut cursor = root.walk();
+    for child in root.children(&mut cursor) {
+        if child.kind() == "import_declaration" {
+            go_collect_import_decl(&mut aliases, child, source);
+        }
+    }
+    aliases
+}
+
+fn go_collect_import_decl(aliases: &mut AliasTable, node: Node<'_>, source: &str) {
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        match child.kind() {
+            "import_spec" => go_collect_import_spec(aliases, child, source),
+            "import_spec_list" => {
+                let mut inner = child.walk();
+                for spec in child.children(&mut inner) {
+                    if spec.kind() == "import_spec" {
+                        go_collect_import_spec(aliases, spec, source);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn go_collect_import_spec(aliases: &mut AliasTable, node: Node<'_>, source: &str) {
+    let Some(path_node) = node.child_by_field_name("path") else {
+        return;
+    };
+    let raw = node_text(path_node, source);
+    let path = raw.trim_matches(|c: char| c == '"' || c == '`');
+    if path.is_empty() {
+        return;
+    }
+    // Canonical: last segment of the import path, e.g. `net/http` -> `http`.
+    let canonical = path.rsplit('/').next().unwrap_or(path).to_string();
+
+    match node.child_by_field_name("name") {
+        // `import . "fmt"` -- out of scope; record nothing.
+        Some(name_node) if name_node.kind() == "dot" => {}
+        // `import _ "foo"` -- out of scope; record nothing.
+        Some(name_node) if name_node.kind() == "blank_identifier" => {}
+        // `import f "fmt"` -- local alias `f` -> canonical `fmt`.
+        Some(name_node) if name_node.kind() == "package_identifier" => {
+            let local = node_text(name_node, source).to_string();
+            aliases.insert(local, canonical);
+        }
+        // Plain `import "fmt"` -- the local name is the canonical.
+        _ => {
+            aliases.insert(canonical.clone(), canonical);
+        }
+    }
+}
+
+// ─── Cross-file summary extraction ───────────────────────────────────────
+
+/// Collect parameter names from a Go function / method declaration.
+///
+/// For a function like `func runQuery(name string) []any`, this returns
+/// `["name"]`. For a method like `func (s *Store) Run(q string)`, this
+/// returns `["q"]` (the receiver is excluded).
+fn collect_param_names(func_node: Node<'_>, source: &str) -> Vec<String> {
+    let Some(params) = func_node.child_by_field_name("parameters") else {
+        return Vec::new();
+    };
+    let mut names = Vec::new();
+    let mut cursor = params.walk();
+    for child in params.children(&mut cursor) {
+        if !matches!(
+            child.kind(),
+            "parameter_declaration" | "variadic_parameter_declaration"
+        ) {
+            continue;
+        }
+        let mut name_cursor = child.walk();
+        for inner in child.children(&mut name_cursor) {
+            if inner.kind() == "identifier" {
+                names.push(node_text(inner, source).to_string());
+            }
+        }
+    }
+    names
+}
+
+fn function_summary_key(name: &str, arity: usize) -> String {
+    format!("{name}/{arity}")
+}
+
+fn call_summary_key(name: &str, args: Node<'_>) -> String {
+    let mut cursor = args.walk();
+    function_summary_key(name, args.named_children(&mut cursor).count())
+}
+
+/// Extract cross-file function taint summaries for all functions in a
+/// parsed Go file.
+///
+/// For each function, every parameter is treated as a synthetic taint
+/// source. Each rule spec's sinks are tested against the function body.
+/// If a parameter reaches a sink, a [`ParamSinkFlow`] is recorded. If a
+/// parameter flows to a return value, `params_to_return` records the index.
+///
+/// Unlike Python, we process *all* functions (not just exported ones)
+/// because Go same-package calls can reach unexported (lowercase) functions.
+pub fn extract_cross_file_summaries(
+    root: Node<'_>,
+    source: &str,
+    aliases: Option<&AliasTable>,
+    rule_specs: &[(&str, TaintSpec)],
+) -> Vec<FunctionTaintSummary> {
+    let mut summaries = Vec::new();
+
+    collect_function_defs(root, &mut |func_node| {
+        // Only process named functions / methods (skip closures).
+        let Some(name_node) = func_node.child_by_field_name("name") else {
+            return;
+        };
+        let func_name = node_text(name_node, source).to_string();
+        let param_names = collect_param_names(func_node, source);
+
+        if let Some(summary) =
+            extract_cross_file_summary_for_function::<GoTaintAdapter, CrossFileInfo<'_>>(
+                func_node,
+                &func_name,
+                &param_names,
+                source,
+                aliases,
+                rule_specs,
+            )
+        {
+            summaries.push(summary);
+        }
+    });
+
+    summaries
+}
+
+/// Re-derive a file's cross-file summaries with same-package call resolution
+/// enabled, composing the current summary map one hop deeper.
+///
+/// This is the Go counterpart of [`python_taint::compose_cross_file_summaries`]
+/// and the per-file step of the scanner's **bounded multi-hop** fixpoint. For
+/// each function it re-runs the parameter-as-source summary extraction, but this
+/// time calls to helpers in *other* files of the same package are resolved
+/// against `summaries` (using this file's `same_package_paths`). A parameter
+/// that only reaches a sink or the return value *through* such a same-package
+/// helper is therefore captured — e.g. `f(p)` whose body is `return g(p)` where
+/// `g` (another file in the package) sinks its argument: `f`'s summary gains
+/// that `params_to_sink` entry.
+///
+/// The scanner unions the returned flows into the existing summaries via
+/// [`FunctionTaintSummary::merge_from`] and repeats until a fixpoint (no change)
+/// or the hop bound is reached. `summaries` is a read-only snapshot from the
+/// previous round, so each round adds exactly one hop; monotone growth over a
+/// finite lattice guarantees termination, and the scanner's round cap is a hard
+/// backstop against mutually-recursive helpers.
+pub fn compose_cross_file_summaries(
+    root: Node<'_>,
+    source: &str,
+    aliases: Option<&AliasTable>,
+    rule_specs: &[(&str, TaintSpec)],
+    same_package_paths: &[PathBuf],
+    summaries: &CrossFileSummaryMap,
+    allowed_rule_ids: &std::collections::HashSet<String>,
+) -> Vec<FunctionTaintSummary> {
+    let cross_file = CrossFileInfo {
+        same_package_paths,
+        summaries,
+        rule_filter: RuleFilter::Any(allowed_rule_ids),
+    };
+
+    let mut out = Vec::new();
+    collect_function_defs(root, &mut |func_node| {
+        let Some(name_node) = func_node.child_by_field_name("name") else {
+            return;
+        };
+        let func_name = node_text(name_node, source).to_string();
+        let param_names = collect_param_names(func_node, source);
+
+        if let Some(summary) =
+            extract_cross_file_summary_for_function_cf::<GoTaintAdapter, CrossFileInfo<'_>>(
+                func_node,
+                &func_name,
+                &param_names,
+                source,
+                aliases,
+                rule_specs,
+                Some(&cross_file),
+            )
+        {
+            out.push(summary);
+        }
+    });
+    out
+}
+
+// ─── Internals ────────────────────────────────────────────────────────────
+
+/// Walk `root` and visit every function/method declaration **and**
+/// every `func_literal` (closure / anonymous function). Named
+/// declarations and closures both get independent taint analysis.
+/// We recurse into function bodies so that closures nested inside
+/// call arguments (e.g. `r.GET("/path", func(c *gin.Context) { … })`)
+/// are discovered.
+fn collect_function_defs<'tree, F>(node: Node<'tree>, visit: &mut F)
+where
+    F: FnMut(Node<'tree>),
+{
+    if matches!(
+        node.kind(),
+        "function_declaration" | "method_declaration" | "func_literal"
+    ) {
+        visit(node);
+        // Continue recursing: the body may contain nested func_literals
+        // (closures passed as arguments, goroutines, etc.) that also
+        // need independent analysis.
+    }
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_function_defs(child, visit);
+    }
+}
+
+/// Zero-sized marker type for the Go taint language adapter.
+pub(super) struct GoTaintAdapter;
+
+impl<'a> TaintLanguageAdapter<CrossFileInfo<'a>> for GoTaintAdapter {
+    fn is_nested_scope(kind: &str) -> bool {
+        kind == "func_literal"
+    }
+
+    fn dispatch_walk_node(
+        node: Node<'_>,
+        ctx: &GoCtx<'_>,
+        state: &mut TaintState,
+        findings: &mut Vec<TaintFinding>,
+    ) {
+        match node.kind() {
+            "short_var_declaration" => {
+                handle_short_var_declaration(node, ctx, state);
+            }
+            "var_spec" => {
+                handle_var_spec(node, ctx, state);
+            }
+            "assignment_statement" => {
+                handle_assignment(node, ctx, state);
+            }
+            "call_expression" => {
+                handle_call(node, ctx, state, findings);
+            }
+            "binary_expression" => {
+                handle_binop_format_sink(node, ctx, state, findings);
+            }
+            _ => {}
+        }
+    }
+
+    fn dispatch_summary_node(
+        node: Node<'_>,
+        ctx: &GoCtx<'_>,
+        state: &mut TaintState,
+        findings: &mut Vec<TaintFinding>,
+        return_taint: &mut Option<String>,
+    ) {
+        // Dispatch the same handlers as the main walk.
+        Self::dispatch_walk_node(node, ctx, state, findings);
+        // Additionally check return statements (Go wraps in expression_list).
+        if node.kind() == "return_statement" && return_taint.is_none() {
+            let mut cursor = node.walk();
+            for child in node.named_children(&mut cursor) {
+                if child.kind() == "expression_list" {
+                    let mut inner = child.walk();
+                    for expr in child.named_children(&mut inner) {
+                        if let Some((desc, _line)) = expression_taint(expr, ctx, state) {
+                            *return_taint = Some(desc);
+                            break;
+                        }
+                    }
+                } else if let Some((desc, _line)) = expression_taint(child, ctx, state) {
+                    *return_taint = Some(desc);
+                }
+                if return_taint.is_some() {
+                    break;
+                }
+            }
+        }
+    }
+
+    fn expression_taint(
+        expr: Node<'_>,
+        ctx: &GoCtx<'_>,
+        state: &TaintState,
+    ) -> Option<(String, usize)> {
+        expression_taint(expr, ctx, state)
+    }
+
+    fn seed_params(func_node: Node<'_>, ctx: &GoCtx<'_>, state: &mut TaintState) {
+        if let Some(params) = func_node.child_by_field_name("parameters") {
+            seed_param_sources(params, ctx.source, ctx.spec, ctx.label_policy, state);
+        }
+    }
+}
+
+/// Extract a function / method simple name. For `method_declaration`
+/// the name is a `field_identifier`; for `function_declaration` it's
+/// an `identifier`.
+fn function_simple_name<'a>(func_node: Node<'_>, source: &'a str) -> Option<&'a str> {
+    func_node
+        .child_by_field_name("name")
+        .map(|n| node_text(n, source))
+}
+
+fn summarize_function_return(
+    func_node: Node<'_>,
+    ctx: &GoCtx<'_>,
+) -> (Option<String>, ReturnTaintSummary) {
+    let name = function_simple_name(func_node, ctx.source).map(|s| s.to_string());
+    let summary =
+        summarize_function_return_generic::<GoTaintAdapter, _>(func_node, ctx, collect_param_names);
+    (name, summary)
+}
+
+fn analyze_function(func_node: Node<'_>, ctx: &GoCtx<'_>, findings: &mut Vec<TaintFinding>) {
+    analyze_function_generic::<GoTaintAdapter, _>(func_node, ctx, findings);
+}
+
+fn seed_param_sources(
+    params: Node<'_>,
+    source: &str,
+    spec: &TaintSpec,
+    policy: Option<&LabelPolicy>,
+    state: &mut TaintState,
+) {
+    let mut cursor = params.walk();
+    for child in params.children(&mut cursor) {
+        if !matches!(
+            child.kind(),
+            "parameter_declaration" | "variadic_parameter_declaration"
+        ) {
+            continue;
+        }
+        // Colon-syntax typed-metavariable source `($REQ : *http.Request)`:
+        // seed EVERY name in this declaration when its DECLARED TYPE matches a
+        // `TypedName` source, regardless of the parameter's name. The type is
+        // shared by all names in a `parameter_declaration` (`a, b *http.Request`).
+        let typed_desc = child
+            .child_by_field_name("type")
+            .and_then(|ty| go_typed_source_description(spec, node_text(ty, source)));
+
+        // parameter_declaration has multiple `name` field children.
+        // `parameter_declaration.name` is an identifier but there may
+        // be several per declaration (`a, b int`).
+        let mut name_cursor = child.walk();
+        for inner in child.children(&mut name_cursor) {
+            if inner.kind() != "identifier" {
+                continue;
+            }
+            let param_name = node_text(inner, source);
+            let line = inner.start_position().row + 1;
+
+            if let Some(description) = &typed_desc {
+                state.taint_labeled(
+                    param_name.to_string(),
+                    description.clone(),
+                    line,
+                    source_labels(policy),
+                );
+                continue;
+            }
+
+            for matcher in &spec.sources {
+                if let NodeMatcher::ParamName { names, description } = matcher {
+                    if names.iter().any(|n| n == param_name)
+                        || crate::rules::taint_engine::param_names_are_wildcard(names)
+                    {
+                        state.taint_labeled(
+                            param_name.to_string(),
+                            description.clone(),
+                            line,
+                            source_labels(policy),
+                        );
+                        break;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// If `decl_type` (a variable's syntactic declared type, e.g. `*http.Request`)
+/// matches a `TypedName` colon-syntax source in `spec`, return that source's
+/// description. Both sides are normalized via `normalize_go_type` so
+/// `*http.Request` and `http.Request` compare equal (pointer stripped, package
+/// qualifier retained). Returns `None` when the type does not match a
+/// `TypedName` source — an unresolved / non-matching type is NEVER seeded
+/// (faithfulness: the source only taints variables of the annotated type).
+fn go_typed_source_description(spec: &TaintSpec, decl_type: &str) -> Option<String> {
+    let want = crate::rules::semgrep_taint::normalize_go_type(decl_type);
+    spec.sources.iter().find_map(|matcher| match matcher {
+        NodeMatcher::TypedName {
+            type_name,
+            description,
+        } if crate::rules::semgrep_taint::normalize_go_type(type_name) == want => {
+            Some(description.clone())
+        }
+        _ => None,
+    })
+}
+
+/// The label set a freshly-seeded primary source carries under `policy`:
+/// `Some({source_label})` when a policy is active, else `None` (the historical
+/// unlabeled behavior — no label gating).
+fn source_labels(policy: Option<&LabelPolicy>) -> Option<BTreeSet<String>> {
+    policy.map(|p| {
+        let mut set = BTreeSet::new();
+        set.insert(p.source_label.clone());
+        set
+    })
+}
+
+/// Collect identifiers from an `expression_list` that are plain
+/// identifier targets (e.g. LHS of `a, b := f()`). Non-identifier
+/// targets (selector/index) are skipped because the state only tracks
+/// bare names.
+fn collect_identifier_targets<'a>(list: Node<'_>, source: &'a str) -> Vec<&'a str> {
+    let mut out = Vec::new();
+    let mut cursor = list.walk();
+    for child in list.named_children(&mut cursor) {
+        if child.kind() == "identifier" {
+            out.push(node_text(child, source));
+        }
+    }
+    out
+}
+
+/// Collect expression nodes from an `expression_list`.
+fn collect_expression_list<'tree>(list: Node<'tree>) -> Vec<Node<'tree>> {
+    let mut out = Vec::new();
+    let mut cursor = list.walk();
+    for child in list.named_children(&mut cursor) {
+        out.push(child);
+    }
+    out
+}
+
+/// Handle `a := ...`, `a, b := ...`, `a, b := f()`.
+fn handle_short_var_declaration(node: Node<'_>, ctx: &GoCtx<'_>, state: &mut TaintState) {
+    let (Some(left), Some(right)) = (
+        node.child_by_field_name("left"),
+        node.child_by_field_name("right"),
+    ) else {
+        return;
+    };
+    propagate_multi_assign(left, right, ctx, state);
+}
+
+/// Handle `var x = ...`, `var x, y = f()`, `var x T = ...`.
+fn handle_var_spec(node: Node<'_>, ctx: &GoCtx<'_>, state: &mut TaintState) {
+    // var_spec has multiple `name` fields and an optional `value`
+    // expression_list.
+    let Some(value) = node.child_by_field_name("value") else {
+        // Colon-syntax typed-metavariable source `($REQ : *http.Request)`
+        // applied to a pure local declaration `var r *http.Request` (no
+        // initializer): seed every declared name whose DECLARED TYPE matches a
+        // `TypedName` source. Only the no-initializer form is seeded here — a
+        // declaration WITH an initializer flows through the value path below,
+        // where the initializer's taint governs (avoiding a seed-then-clear).
+        if let Some(description) = node
+            .child_by_field_name("type")
+            .and_then(|ty| go_typed_source_description(ctx.spec, node_text(ty, ctx.source)))
+        {
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                if child.kind() == "identifier" {
+                    let name = node_text(child, ctx.source);
+                    let line = child.start_position().row + 1;
+                    state.taint_labeled(
+                        name.to_string(),
+                        description.clone(),
+                        line,
+                        source_labels(ctx.label_policy),
+                    );
+                }
+            }
+        }
+        return;
+    };
+
+    // Collect the name identifiers from the var_spec directly.
+    let mut lhs_names: Vec<&str> = Vec::new();
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        if child.kind() == "identifier" {
+            lhs_names.push(node_text(child, ctx.source));
+        }
+    }
+    if lhs_names.is_empty() {
+        return;
+    }
+
+    // `value` is an expression_list. Pair it with LHS names.
+    let rhs_exprs = collect_expression_list(value);
+    apply_multi_assign_semantics(&lhs_names, &rhs_exprs, ctx, state);
+}
+
+/// Handle `x = ...`, `x, y = ...`, `x += ...`.
+fn handle_assignment(node: Node<'_>, ctx: &GoCtx<'_>, state: &mut TaintState) {
+    let (Some(left), Some(right)) = (
+        node.child_by_field_name("left"),
+        node.child_by_field_name("right"),
+    ) else {
+        return;
+    };
+    propagate_multi_assign(left, right, ctx, state);
+}
+
+fn propagate_multi_assign(
+    left: Node<'_>,
+    right: Node<'_>,
+    ctx: &GoCtx<'_>,
+    state: &mut TaintState,
+) {
+    // Both sides are `expression_list`s in tree-sitter-go.
+    let lhs_names = if left.kind() == "expression_list" {
+        collect_identifier_targets(left, ctx.source)
+    } else {
+        return;
+    };
+    if lhs_names.is_empty() {
+        return;
+    }
+    let rhs_exprs = if right.kind() == "expression_list" {
+        collect_expression_list(right)
+    } else {
+        vec![right]
+    };
+    apply_multi_assign_semantics(&lhs_names, &rhs_exprs, ctx, state);
+}
+
+/// Shared LHS/RHS pairing semantics for short_var_declaration,
+/// var_spec, and assignment_statement.
+///
+/// - If RHS and LHS arity match, pair element-wise.
+/// - Otherwise, if RHS is a single expression (typical multi-return
+///   call like `a, b := f()`), evaluate that expression's taint and
+///   broadcast to every LHS name. This is the conservative
+///   multi-return destructuring policy documented in the module header.
+fn apply_multi_assign_semantics(
+    lhs_names: &[&str],
+    rhs_exprs: &[Node<'_>],
+    ctx: &GoCtx<'_>,
+    state: &mut TaintState,
+) {
+    if lhs_names.len() == rhs_exprs.len() {
+        // Collect (desc, line, labels) first to avoid borrow conflicts. The
+        // label set is computed only when a taint-labels policy is active
+        // (`labels_for_rhs` returns `None` otherwise), so unlabeled rules are
+        // byte-for-byte unchanged.
+        let descs: Vec<Option<LabeledTaint>> = rhs_exprs
+            .iter()
+            .map(|rhs| {
+                expression_taint(*rhs, ctx, state)
+                    .map(|(d, line)| (d, line, labels_for_rhs(*rhs, ctx, state)))
+            })
+            .collect();
+        for (name, desc) in lhs_names.iter().zip(descs) {
+            match desc {
+                Some((d, line, labels)) => {
+                    state.taint_labeled((*name).to_string(), d, line, labels)
+                }
+                None => state.clear(name),
+            }
+        }
+        return;
+    }
+
+    // Conservative broadcast: if *any* RHS expression is tainted, taint
+    // every LHS name; otherwise clear them all.
+    let mut broadcast: Option<LabeledTaint> = None;
+    for rhs in rhs_exprs {
+        if let Some((d, line)) = expression_taint(*rhs, ctx, state) {
+            broadcast = Some((d, line, labels_for_rhs(*rhs, ctx, state)));
+            break;
+        }
+    }
+    match broadcast {
+        Some((desc, line, labels)) => {
+            for name in lhs_names {
+                state.taint_labeled((*name).to_string(), desc.clone(), line, labels.clone());
+            }
+        }
+        None => {
+            for name in lhs_names {
+                state.clear(name);
+            }
+        }
+    }
+}
+
+/// Compute the taint-**labels** set carried by a tainted RHS expression, or
+/// `None` when no policy is active (the unlabeled path). Thin wrapper over
+/// [`expression_labels`] gated on `ctx.label_policy`.
+fn labels_for_rhs(rhs: Node<'_>, ctx: &GoCtx<'_>, state: &TaintState) -> Option<BTreeSet<String>> {
+    let policy = ctx.label_policy?;
+    expression_labels(rhs, ctx, state, policy)
+}
+
+/// Resolve a `call_expression`'s callee into a canonical text. Handles
+/// bare identifiers (`foo`) and selector expressions (`pkg.Foo`,
+/// `obj.Method`).
+fn callee_text<'a>(call: Node<'_>, source: &'a str) -> Option<Cow<'a, str>> {
+    let func = call.child_by_field_name("function")?;
+    Some(Cow::Borrowed(node_text(func, source)))
+}
+
+fn handle_call(
+    node: Node<'_>,
+    ctx: &GoCtx<'_>,
+    state: &mut TaintState,
+    findings: &mut Vec<TaintFinding>,
+) {
+    let Some(callee_raw) = callee_text(node, ctx.source) else {
+        return;
+    };
+    let resolved: Cow<'_, str> = match ctx.aliases {
+        Some(a) => a.resolve(callee_raw.as_ref()),
+        None => Cow::Borrowed(callee_raw.as_ref()),
+    };
+
+    if let Some(sink) = match_call_sink(ctx.spec, resolved.as_ref(), ctx.sink_to_rules) {
+        let Some(args) = node.child_by_field_name("arguments") else {
+            return;
+        };
+        let mut cursor = args.walk();
+        for arg in args.named_children(&mut cursor) {
+            if let Some((source_desc, src_line)) = expression_taint(arg, ctx, state) {
+                // Taint-labels gating: under an active policy the sink fires only
+                // when this argument's reaching label set satisfies the boolean
+                // `requires:` (e.g. `INPUT and not CLEAN`). A value that flowed
+                // through a relabel (acquiring `CLEAN`) is correctly rejected.
+                if !sink_labels_satisfied(arg, ctx, state) {
+                    continue;
+                }
+                let rule_hint = attribution_hint_for_sink(&sink);
+                findings.push(taint_finding_for_node(
+                    node,
+                    source_desc,
+                    sink.description,
+                    src_line,
+                    rule_hint,
+                    1,
+                ));
+                break;
+            }
+        }
+        return;
+    }
+
+    // ── Cross-file summary check ─────────────────────────────────────
+    // If the callee is a bare identifier (same-package function call)
+    // and we have cross-file summaries, check whether any tainted
+    // argument reaches a sink in the callee function (per its summary).
+    if let Some(cross_file) = ctx.cross_file {
+        handle_cross_file_call(node, callee_raw.as_ref(), ctx, state, findings, cross_file);
+    }
+}
+
+/// Handle a `BinopFormat` string-building sink: a `binary_expression` `+`
+/// concatenation that mixes a Go string literal with a tainted operand
+/// (`"SELECT ... " + tainted`). Fires only when (a) the spec has a
+/// `BinopFormat` sink, (b) at least one operand is a string literal, and (c) at
+/// least one operand is tainted. The literal guard keeps numeric `+` clean.
+///
+/// To report once on a nested chain (`"a" + "b" + tainted`), the handler skips
+/// a `binary_expression` whose parent is also a `+` `binary_expression`.
+fn handle_binop_format_sink(
+    node: Node<'_>,
+    ctx: &GoCtx<'_>,
+    state: &mut TaintState,
+    findings: &mut Vec<TaintFinding>,
+) {
+    let Some(sink) = match_binop_format_sink(ctx.spec, ctx.sink_to_rules) else {
+        return;
+    };
+    if !go_binop_is_concat(node, ctx.source) {
+        return;
+    }
+    if let Some(parent) = node.parent() {
+        if parent.kind() == "binary_expression" && go_binop_is_concat(parent, ctx.source) {
+            return;
+        }
+    }
+    if !go_binop_has_string_literal_operand(node, ctx.source) {
+        return;
+    }
+    if let Some((source_desc, src_line)) = expression_taint(node, ctx, state) {
+        // Taint-labels gating (see `handle_call`): a policy's boolean
+        // `requires:` must be satisfied by the concat's reaching label set.
+        if !sink_labels_satisfied(node, ctx, state) {
+            return;
+        }
+        let rule_hint = attribution_hint_for_sink(&sink);
+        findings.push(taint_finding_for_node(
+            node,
+            source_desc,
+            sink.description,
+            src_line,
+            rule_hint,
+            1,
+        ));
+    }
+}
+
+/// True when `node` is a `binary_expression` whose operator is `+` (Go string
+/// concatenation; Go has no `%` string-format operator).
+fn go_binop_is_concat(node: Node<'_>, source: &str) -> bool {
+    node.child_by_field_name("operator")
+        .map(|op| node_text(op, source) == "+")
+        .unwrap_or(false)
+}
+
+/// True when a `+` concat chain contains at least one Go string-literal
+/// operand (`interpreted_string_literal` / `raw_string_literal`), recursing
+/// into nested `+` operators.
+fn go_binop_has_string_literal_operand(node: Node<'_>, source: &str) -> bool {
+    fn operand_has_string(n: Node<'_>, source: &str) -> bool {
+        match n.kind() {
+            "interpreted_string_literal" | "raw_string_literal" => true,
+            "binary_expression" => {
+                if !go_binop_is_concat(n, source) {
+                    return false;
+                }
+                let left = n.child_by_field_name("left");
+                let right = n.child_by_field_name("right");
+                left.map(|l| operand_has_string(l, source)).unwrap_or(false)
+                    || right
+                        .map(|r| operand_has_string(r, source))
+                        .unwrap_or(false)
+            }
+            "parenthesized_expression" => n
+                .named_child(0)
+                .map(|c| operand_has_string(c, source))
+                .unwrap_or(false),
+            _ => false,
+        }
+    }
+    operand_has_string(node, source)
+}
+
+/// Check if a call targets a same-package function with cross-file summaries.
+///
+/// In Go, all files in the same directory share the same package namespace.
+/// A bare identifier call like `runQuery(name)` may refer to a function
+/// defined in another `.go` file in the same directory.
+fn handle_cross_file_call(
+    node: Node<'_>,
+    _callee_text: &str,
+    ctx: &GoCtx<'_>,
+    state: &TaintState,
+    findings: &mut Vec<TaintFinding>,
+    cross_file: &CrossFileInfo<'_>,
+) {
+    // Only handle bare identifier calls (same-package function calls).
+    // Selector expressions like `pkg.Func` are external package calls
+    // which we don't resolve yet.
+    let func = match node.child_by_field_name("function") {
+        Some(f) if f.kind() == "identifier" => f,
+        _ => return,
+    };
+    let func_name = node_text(func, ctx.source);
+
+    // Search all same-package files for a function with this name.
+    let mut resolved_summary: Option<&FunctionTaintSummary> = None;
+    for pkg_path in cross_file.same_package_paths {
+        if let Some(file_summaries) = cross_file.summaries.get(pkg_path) {
+            if let Some(summary) = file_summaries.iter().find(|s| s.name == func_name) {
+                resolved_summary = Some(summary);
+                break;
+            }
+        }
+    }
+
+    let Some(summary) = resolved_summary else {
+        return;
+    };
+
+    // Collect argument nodes.
+    let Some(args) = node.child_by_field_name("arguments") else {
+        return;
+    };
+    let mut cursor = args.walk();
+    let arg_nodes: Vec<Node<'_>> = args.named_children(&mut cursor).collect();
+
+    // For each tainted argument, check if the corresponding parameter
+    // has a ParamSinkFlow whose rule ID matches the current filter.
+    for flow in &summary.params_to_sink {
+        if !cross_file.rule_filter.allows(&flow.sink_rule_id) {
+            continue;
+        }
+        if flow.param_index >= arg_nodes.len() {
+            continue;
+        }
+        let arg = arg_nodes[flow.param_index];
+        if let Some((source_desc, src_line)) = expression_taint(arg, ctx, state) {
+            if !sink_labels_satisfied(arg, ctx, state) {
+                continue;
+            }
+            findings.push(cross_file_taint_finding(
+                node,
+                source_desc,
+                src_line,
+                &flow.sink_description,
+                func_name,
+                &flow.sink_rule_id,
+            ));
+            // One finding per cross-file call is enough.
+            return;
+        }
+    }
+}
+
+/// Returns the (source description, source line) if `expr` evaluates to (or
+/// references) a tainted value, otherwise `None`.
+fn expression_taint(
+    expr: Node<'_>,
+    ctx: &GoCtx<'_>,
+    state: &TaintState,
+) -> Option<(String, usize)> {
+    let expr_line = expr.start_position().row + 1;
+
+    // Direct source match on this expression.
+    if let Some(desc) = match_source(expr, ctx.source, ctx.spec, ctx.aliases) {
+        return Some((desc, expr_line));
+    }
+
+    // Tainted identifier reference.
+    if expr.kind() == "identifier" {
+        let name = node_text(expr, ctx.source);
+        if let Some(info) = state.info(name) {
+            return Some((info.description.clone(), info.line));
+        }
+    }
+
+    // Tainted selector expression root: `x.y` where `x` is tainted (or
+    // any deeper chain rooted at a tainted value).
+    if expr.kind() == "selector_expression" {
+        if let Some(operand) = expr.child_by_field_name("operand") {
+            if let Some(result) = expression_taint(operand, ctx, state) {
+                return Some(result);
+            }
+        }
+    }
+
+    // Tainted index expression: `m[k]` where `m` is tainted.
+    if expr.kind() == "index_expression" {
+        if let Some(operand) = expr.child_by_field_name("operand") {
+            if let Some(result) = expression_taint(operand, ctx, state) {
+                return Some(result);
+            }
+        }
+    }
+
+    // Binary `+` (string concat) / arithmetic ops: if any operand is tainted,
+    // the result is. A COMPARISON / logical operator (`==`, `!=`, `<`, `<=`,
+    // `>`, `>=`, `&&`, `||`) yields a boolean predicate, NOT the operand's
+    // data — taint does not flow through it (a tainted string compared with
+    // `!=` produces a clean `bool`). This mirrors the `($X : bool)` sanitizer
+    // that Semgrep taint rules such as `gorm-dangerous-method-usage` use to
+    // stop taint at a boolean comparison, and prevents the false positive of a
+    // `(tainted != "x")` predicate flowing into a downstream sink.
+    if expr.kind() == "binary_expression" {
+        let is_comparison = expr
+            .child_by_field_name("operator")
+            .map(|op| {
+                matches!(
+                    node_text(op, ctx.source),
+                    "==" | "!=" | "<" | "<=" | ">" | ">=" | "&&" | "||"
+                )
+            })
+            .unwrap_or(false);
+        if !is_comparison {
+            let mut cursor = expr.walk();
+            for child in expr.named_children(&mut cursor) {
+                if let Some(result) = expression_taint(child, ctx, state) {
+                    return Some(result);
+                }
+            }
+        }
+    }
+
+    // Type assertion: `val.(string)` — propagate taint from operand.
+    if expr.kind() == "type_assertion_expression" {
+        if let Some(operand) = expr.child_by_field_name("operand") {
+            if let Some(result) = expression_taint(operand, ctx, state) {
+                return Some(result);
+            }
+        }
+    }
+
+    // Type conversion `[]byte("secret")`, `string(tainted)`: propagate taint
+    // from the converted operand. Go parses a conversion whose target is a type
+    // literal (`[]byte`, `string`) as a `type_conversion_expression` — distinct
+    // from the `call_expression` conversion handled below — so it needs its own
+    // arm. Recurse into the converted expression (the non-type named child);
+    // the `slice_type` / `type_identifier` child carries no taint.
+    if expr.kind() == "type_conversion_expression" {
+        let mut cursor = expr.walk();
+        for child in expr.named_children(&mut cursor) {
+            if let Some(result) = expression_taint(child, ctx, state) {
+                return Some(result);
+            }
+        }
+    }
+
+    // Parenthesized / unary wrappers: recurse into children.
+    if matches!(expr.kind(), "parenthesized_expression" | "unary_expression") {
+        let mut cursor = expr.walk();
+        for child in expr.named_children(&mut cursor) {
+            if let Some(result) = expression_taint(child, ctx, state) {
+                return Some(result);
+            }
+        }
+    }
+
+    // Composite literal — `&SomeStruct{Field: tainted}`. If any field
+    // value is tainted the whole literal is.
+    if expr.kind() == "composite_literal" {
+        let mut cursor = expr.walk();
+        for child in expr.children(&mut cursor) {
+            if child.kind() == "literal_value" {
+                let mut inner = child.walk();
+                for elem in child.named_children(&mut inner) {
+                    if let Some(result) = expression_taint(elem, ctx, state) {
+                        return Some(result);
+                    }
+                }
+            }
+        }
+    }
+    if expr.kind() == "keyed_element" {
+        let mut cursor = expr.walk();
+        for child in expr.named_children(&mut cursor) {
+            if let Some(result) = expression_taint(child, ctx, state) {
+                return Some(result);
+            }
+        }
+    }
+
+    // Wrapping call: `string(tainted)`, `fmt.Sprintf("%s", tainted)`,
+    // `[]byte(tainted)`. Sanitizers short-circuit this and collapse to
+    // clean.
+    if expr.kind() == "call_expression" {
+        if is_sanitizer_call(expr, ctx.source, ctx.spec, ctx.aliases) {
+            return None;
+        }
+        if let Some(args) = expr.child_by_field_name("arguments") {
+            if let Some(func) = expr.child_by_field_name("function") {
+                if func.kind() == "identifier" {
+                    let callee = node_text(func, ctx.source);
+                    if let Some(summary) = ctx.summaries.get(&call_summary_key(callee, args)) {
+                        if let Some(desc) = &summary.direct_source {
+                            return Some((format!("{desc} (via {callee})"), expr_line));
+                        }
+                        let mut cursor = args.walk();
+                        let arg_nodes: Vec<Node<'_>> = args.named_children(&mut cursor).collect();
+                        for &param_idx in &summary.params_to_return {
+                            if param_idx < arg_nodes.len() {
+                                if let Some((desc, src_line)) =
+                                    expression_taint(arg_nodes[param_idx], ctx, state)
+                                {
+                                    return Some((format!("{desc} (via {callee})"), src_line));
+                                }
+                            }
+                        }
+                        return None;
+                    }
+                }
+            }
+            let mut cursor = args.walk();
+            for arg in args.named_children(&mut cursor) {
+                if let Some(result) = expression_taint(arg, ctx, state) {
+                    return Some(result);
+                }
+            }
+        }
+
+        // Method-call propagation on a tainted receiver: `x.foo(...)`
+        // is tainted when `x` is tainted.
+        if let Some(func) = expr.child_by_field_name("function") {
+            if func.kind() == "selector_expression" {
+                if let Some(operand) = func.child_by_field_name("operand") {
+                    if let Some(result) = expression_taint(operand, ctx, state) {
+                        return Some(result);
+                    }
+                }
+            }
+        }
+
+        // Same-file interprocedural v1: bare identifier callee whose
+        // name matches a function / method in the summary map
+        // propagates the summary's taint through the call result.
+        if let Some(func) = expr.child_by_field_name("function") {
+            if func.kind() == "identifier" {
+                let callee = node_text(func, ctx.source);
+                if let Some(args) = expr.child_by_field_name("arguments") {
+                    if let Some(summary) = ctx.summaries.get(&call_summary_key(callee, args)) {
+                        if let Some(desc) = &summary.direct_source {
+                            return Some((format!("{desc} (via {callee})"), expr_line));
+                        }
+                        let mut cursor = args.walk();
+                        let arg_nodes: Vec<Node<'_>> = args.named_children(&mut cursor).collect();
+                        for &param_idx in &summary.params_to_return {
+                            if param_idx < arg_nodes.len() {
+                                if let Some((desc, src_line)) =
+                                    expression_taint(arg_nodes[param_idx], ctx, state)
+                                {
+                                    return Some((format!("{desc} (via {callee})"), src_line));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            // Method call on an arbitrary receiver with a summary
+            // entry for that method's simple name. Matches the v1
+            // policy documented in the module header.
+            if func.kind() == "selector_expression" {
+                if let Some(field) = func.child_by_field_name("field") {
+                    let method = node_text(field, ctx.source);
+                    if let Some(args) = expr.child_by_field_name("arguments") {
+                        if let Some(summary) = ctx.summaries.get(&call_summary_key(method, args)) {
+                            if let Some(desc) = &summary.direct_source {
+                                return Some((format!("{desc} (via {method})"), expr_line));
+                            }
+                            let mut cursor = args.walk();
+                            let arg_nodes: Vec<Node<'_>> =
+                                args.named_children(&mut cursor).collect();
+                            for &param_idx in &summary.params_to_return {
+                                if param_idx < arg_nodes.len() {
+                                    if let Some((desc, src_line)) =
+                                        expression_taint(arg_nodes[param_idx], ctx, state)
+                                    {
+                                        return Some((format!("{desc} (via {method})"), src_line));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Cross-file return-taint: if the callee is a same-package function
+        // whose summary says a tainted argument flows to the return value,
+        // the call expression is tainted. This enables multi-hop chains
+        // (A → B → C) where B is a passthrough.
+        if let Some(cross_file) = ctx.cross_file {
+            if let Some(func) = expr.child_by_field_name("function") {
+                if func.kind() == "identifier" {
+                    let func_name = node_text(func, ctx.source);
+                    for pkg_path in cross_file.same_package_paths {
+                        if let Some(file_summaries) = cross_file.summaries.get(pkg_path) {
+                            if let Some(summary) =
+                                file_summaries.iter().find(|s| s.name == func_name)
+                            {
+                                if let Some(args) = expr.child_by_field_name("arguments") {
+                                    let mut cursor = args.walk();
+                                    let arg_nodes: Vec<Node<'_>> =
+                                        args.named_children(&mut cursor).collect();
+                                    for &param_idx in &summary.params_to_return {
+                                        if param_idx < arg_nodes.len() {
+                                            if let Some((desc, src_line)) =
+                                                expression_taint(arg_nodes[param_idx], ctx, state)
+                                            {
+                                                return Some((
+                                                    format!("{desc} (via cross-file {func_name})"),
+                                                    src_line,
+                                                ));
+                                            }
+                                        }
+                                    }
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
+// ─── Taint-labels helpers (Semgrep advanced taint, negation tier) ──────────
+
+/// Compute the taint-**labels** set carried by `expr`, assuming it is a tainted
+/// value under the active `policy`. Returns `None` when the label set cannot be
+/// concretely determined (e.g. taint that arrives only via a cross-file/summary
+/// hop) — the safe direction, since an empty/absent label set makes a negated
+/// `requires:` (`INPUT and not CLEAN`) fail rather than over-fire.
+///
+/// Mirrors [`expression_taint`]'s structural propagation but on the label
+/// dimension: a direct source carries `{source_label}`; a stored variable
+/// carries whatever labels it was assigned; a value flowing through a
+/// string-building node (a `"literal" + $X` concat or an `fmt.Sprintf`-family
+/// call) acquires each applicable relabel's `to` label.
+fn expression_labels(
+    expr: Node<'_>,
+    ctx: &GoCtx<'_>,
+    state: &TaintState,
+    policy: &LabelPolicy,
+) -> Option<BTreeSet<String>> {
+    let base = expression_labels_core(expr, ctx, state, policy)?;
+    Some(go_relabel_through(expr, ctx, base, policy))
+}
+
+fn primary_label_set(policy: &LabelPolicy) -> BTreeSet<String> {
+    let mut set = BTreeSet::new();
+    set.insert(policy.source_label.clone());
+    set
+}
+
+fn expression_labels_core(
+    expr: Node<'_>,
+    ctx: &GoCtx<'_>,
+    state: &TaintState,
+    policy: &LabelPolicy,
+) -> Option<BTreeSet<String>> {
+    // Direct source match → the primary label.
+    if match_source(expr, ctx.source, ctx.spec, ctx.aliases).is_some() {
+        return Some(primary_label_set(policy));
+    }
+
+    // Tainted identifier → its stored label set (defaulting to the primary
+    // label if it was tainted without an explicit set).
+    if expr.kind() == "identifier" {
+        let name = node_text(expr, ctx.source);
+        return state.info(name).map(|info| {
+            info.labels
+                .clone()
+                .unwrap_or_else(|| primary_label_set(policy))
+        });
+    }
+
+    // Selector / index / type-assertion: propagate the operand's labels.
+    if matches!(
+        expr.kind(),
+        "selector_expression" | "index_expression" | "type_assertion_expression"
+    ) {
+        if let Some(operand) = expr.child_by_field_name("operand") {
+            return expression_labels(operand, ctx, state, policy);
+        }
+    }
+
+    // Binary concat / parenthesized / unary: first labeled operand wins (the
+    // relabel is applied by the wrapper on the way out).
+    if matches!(
+        expr.kind(),
+        "binary_expression" | "parenthesized_expression" | "unary_expression"
+    ) {
+        let mut cursor = expr.walk();
+        for child in expr.named_children(&mut cursor) {
+            if let Some(labels) = expression_labels(child, ctx, state, policy) {
+                return Some(labels);
+            }
+        }
+    }
+
+    // Call: sanitizers collapse to clean; otherwise the first labeled argument
+    // (or a tainted receiver) carries through. Cross-file / summary-tainted
+    // call results are intentionally left unlabeled (return `None` → safe
+    // no-fire under a negated `requires:`).
+    if expr.kind() == "call_expression" {
+        if is_sanitizer_call(expr, ctx.source, ctx.spec, ctx.aliases) {
+            return None;
+        }
+        if let Some(args) = expr.child_by_field_name("arguments") {
+            let mut cursor = args.walk();
+            for arg in args.named_children(&mut cursor) {
+                if let Some(labels) = expression_labels(arg, ctx, state, policy) {
+                    return Some(labels);
+                }
+            }
+        }
+        if let Some(func) = expr.child_by_field_name("function") {
+            if func.kind() == "selector_expression" {
+                if let Some(operand) = func.child_by_field_name("operand") {
+                    if let Some(labels) = expression_labels(operand, ctx, state, policy) {
+                        return Some(labels);
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Apply the policy's string-building relabels to `labels` when `expr` is a Go
+/// string-building node: a `+` concatenation with a string-literal operand
+/// (the `"$URLSTR" + $INPUT` shape) or an `fmt.Sprintf`/`Fprintf`/`Printf`
+/// call (the `fmt.Sprintf("$URLSTR", $INPUT, ...)` shape). For each relabel
+/// whose `from` label is present, its `to` label is added. Idempotent.
+///
+/// NOTE: Semgrep additionally constrains the literal with a URL-shaped
+/// `metavariable-regex`; we intentionally drop that constraint. Relabeling on
+/// *any* string-literal concat over-approximates the CLEAN set, which only ever
+/// SUPPRESSES a `not CLEAN` sink — a false-negative (safe) direction, never a
+/// false positive.
+fn go_relabel_through(
+    expr: Node<'_>,
+    ctx: &GoCtx<'_>,
+    mut labels: BTreeSet<String>,
+    policy: &LabelPolicy,
+) -> BTreeSet<String> {
+    if policy.relabels.is_empty() || !go_is_string_building_node(expr, ctx) {
+        return labels;
+    }
+    let additions: Vec<String> = policy
+        .relabels
+        .iter()
+        .filter(|r| labels.contains(&r.from))
+        .map(|r| r.to.clone())
+        .collect();
+    for a in additions {
+        labels.insert(a);
+    }
+    labels
+}
+
+/// True when `expr` is a Go string-building node for relabel purposes: a `+`
+/// concat with a string-literal operand, or a call to an `fmt` format helper
+/// that builds a string.
+fn go_is_string_building_node(expr: Node<'_>, ctx: &GoCtx<'_>) -> bool {
+    match expr.kind() {
+        "binary_expression" => {
+            go_binop_is_concat(expr, ctx.source)
+                && go_binop_has_string_literal_operand(expr, ctx.source)
+        }
+        "call_expression" => {
+            let Some(callee) = callee_text(expr, ctx.source) else {
+                return false;
+            };
+            let resolved: Cow<'_, str> = match ctx.aliases {
+                Some(a) => a.resolve(callee.as_ref()),
+                None => Cow::Borrowed(callee.as_ref()),
+            };
+            matches!(
+                resolved.as_ref(),
+                "fmt.Sprintf" | "fmt.Fprintf" | "fmt.Printf" | "fmt.Sprint" | "fmt.Sprintln"
+            )
+        }
+        _ => false,
+    }
+}
+
+/// Evaluate whether a sink argument's reaching taint satisfies the active
+/// policy's boolean `requires:`. With no policy this is always `true` (the
+/// historical "any tainted arg fires" behavior). With a policy the argument's
+/// label set is computed and the `requires:` expression evaluated — so a value
+/// that acquired `CLEAN` fails `INPUT and not CLEAN` and does not fire.
+fn sink_labels_satisfied(arg: Node<'_>, ctx: &GoCtx<'_>, state: &TaintState) -> bool {
+    let Some(policy) = ctx.label_policy else {
+        return true;
+    };
+    let labels = expression_labels(arg, ctx, state, policy).unwrap_or_default();
+    policy.sink_requires.eval(&labels)
+}
+
+fn is_sanitizer_call(
+    call_node: Node<'_>,
+    source: &str,
+    spec: &TaintSpec,
+    aliases: Option<&AliasTable>,
+) -> bool {
+    if call_node.kind() != "call_expression" {
+        return false;
+    }
+    let Some(func) = call_node.child_by_field_name("function") else {
+        return false;
+    };
+    let callee = node_text(func, source);
+    let resolved: Cow<'_, str> = match aliases {
+        Some(a) => a.resolve(callee),
+        None => Cow::Borrowed(callee),
+    };
+    for matcher in &spec.sanitizers {
+        if let NodeMatcher::Call { canonical, .. } = matcher {
+            if callee == canonical.as_str() || resolved.as_ref() == canonical.as_str() {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+fn match_source(
+    node: Node<'_>,
+    source: &str,
+    spec: &TaintSpec,
+    aliases: Option<&AliasTable>,
+) -> Option<String> {
+    for matcher in &spec.sources {
+        match matcher {
+            NodeMatcher::Attribute {
+                root,
+                field,
+                description,
+            } => {
+                if node.kind() != "selector_expression" {
+                    continue;
+                }
+                let Some(final_field) = node.child_by_field_name("field") else {
+                    continue;
+                };
+                if node_text(final_field, source) != field.as_str() {
+                    continue;
+                }
+                let Some(raw_root) = leftmost_identifier(node, source) else {
+                    continue;
+                };
+                if raw_root == root.as_str() {
+                    return Some(description.clone());
+                }
+                if let Some(a) = aliases {
+                    if a.resolve(raw_root).as_ref() == root.as_str() {
+                        return Some(description.clone());
+                    }
+                }
+            }
+            NodeMatcher::Call {
+                canonical,
+                description,
+            } => {
+                if node.kind() != "call_expression" {
+                    continue;
+                }
+                let Some(func) = node.child_by_field_name("function") else {
+                    continue;
+                };
+                let callee_text = node_text(func, source);
+                if callee_text == canonical.as_str() {
+                    return Some(description.clone());
+                }
+                if let Some(a) = aliases {
+                    if a.resolve(callee_text).as_ref() == canonical.as_str() {
+                        return Some(description.clone());
+                    }
+                }
+            }
+            NodeMatcher::FieldName { field, description } => {
+                // Any-receiver field READ: `<anything>.field`. Matches a
+                // `selector_expression` whose field equals `field`,
+                // regardless of the root operand. Covers `ctx.params`,
+                // `req.body`, etc.
+                if node.kind() != "selector_expression" {
+                    continue;
+                }
+                let Some(final_field) = node.child_by_field_name("field") else {
+                    continue;
+                };
+                if node_text(final_field, source) == field.as_str() {
+                    return Some(description.clone());
+                }
+            }
+            NodeMatcher::Subscript { base, description } => {
+                // Index access `base[...]` → `index_expression`. Matches when
+                // the indexed operand's final segment equals `base` (or any
+                // when `base` is None).
+                if node.kind() != "index_expression" {
+                    continue;
+                }
+                let Some(operand) = node.child_by_field_name("operand") else {
+                    continue;
+                };
+                if go_subscript_base_matches(operand, source, base.as_deref()) {
+                    return Some(description.clone());
+                }
+            }
+            NodeMatcher::ParamName { .. } => {
+                // Seeded at function entry, not matched on expressions.
+            }
+            // String-literal source — the ONLY Go registry rule with this shape
+            // is `hardcoded-jwt-key`, whose source is `[]byte("$F")` (a hardcoded
+            // byte-slice signing key). To stay faithful, the Go engine seeds ONLY
+            // a `[]byte("literal")` CONVERSION whose operand is a string literal —
+            // NOT a bare literal that merely appears somewhere. This is the whole
+            // point: `[]byte(os.Getenv("KEY"))` must NOT fire (its inner `"KEY"`
+            // is an env-var *name*, not the key), so seeding every string literal
+            // would over-match on exactly the canonical near-miss. An optional
+            // content `regex` further constrains the wrapped literal's text.
+            NodeMatcher::LiteralString { description, regex } => {
+                if node.kind() != "type_conversion_expression" {
+                    continue;
+                }
+                let Some(ty) = node.child_by_field_name("type") else {
+                    continue;
+                };
+                if node_text(ty, source).replace(|c: char| c.is_whitespace(), "") != "[]byte" {
+                    continue;
+                }
+                let Some(operand) = node.child_by_field_name("operand") else {
+                    continue;
+                };
+                if !matches!(
+                    operand.kind(),
+                    "interpreted_string_literal" | "raw_string_literal"
+                ) {
+                    continue;
+                }
+                match regex {
+                    None => return Some(description.clone()),
+                    Some(re) => {
+                        let text = node_text(operand, source);
+                        let inner = text.trim_matches(|c| c == '"' || c == '`');
+                        if let Ok(compiled) = crate::rules::semgrep_compat::compile_regex(re) {
+                            if compiled.is_match(inner) {
+                                return Some(description.clone());
+                            }
+                        }
+                        continue;
+                    }
+                }
+            }
+            NodeMatcher::MethodName { .. }
+            | NodeMatcher::CallRegex { .. }
+            | NodeMatcher::MethodNameRegex { .. }
+            | NodeMatcher::ReceiverCall { .. }
+            | NodeMatcher::MemberAssign { .. }
+            | NodeMatcher::BinopFormat { .. }
+            | NodeMatcher::ObjectLiteralValue { .. }
+            | NodeMatcher::ReturnValue { .. }
+            // Colon-syntax typed-metavariable source `($REQ : *http.Request)`:
+            // seeded by DECLARED TYPE at scope entry (`seed_param_sources` /
+            // `handle_var_spec`), like `ParamName` — not matched on expressions
+            // here, so it is a no-op in this per-node matcher.
+            | NodeMatcher::TypedName { .. }
+            // Java-only typed-assignment sink; no-op in source position here.
+            | NodeMatcher::TypedAssignTarget { .. }
+            // PHP-only loose-equality comparison sink; no-op in the Go engine.
+            | NodeMatcher::LooseEquality { .. }
+            // PHP-only tainted class-name / subscript-key sinks; no-op in the
+            // Go engine.
+            | NodeMatcher::TaintedCallee { .. }
+            | NodeMatcher::TaintedSubscriptKey { .. }
+            // Focus-on-call-argument source is seeded only by the C# engine;
+            // no-op in source position here.
+            | NodeMatcher::CallArgSource { .. }
+            // First-parameter signature source / concat-in-call sink are
+            // C#-only; carried in the spec but no-op here.
+            | NodeMatcher::FirstParamSource { .. }
+            // Python-only MCP decorated-parameter source; no-op for Go.
+            | NodeMatcher::DecoratedParamSource { .. }
+            | NodeMatcher::CallArgConcat { .. }
+            // C#-only (constructor-arg/property-assign) and Java-only
+            // (method-arg/receiver-provenance) sinks; carried but no-op here.
+            | NodeMatcher::ConstructorArgSink { .. }
+            | NodeMatcher::PropertyAssignSink { .. }
+            | NodeMatcher::MethodArgSink { .. }
+            | NodeMatcher::ReceiverProvenanceCall { .. }
+            | NodeMatcher::LiteralArgCall { .. } => {
+                // Sink-only matcher; MemberAssign is JS-specific; BinopFormat is
+                // matched on binary-expression nodes, not as a source.
+            }
+        }
+    }
+    None
+}
+
+/// True when the indexed operand of an `index_expression` matches the
+/// requested base. `want = None` matches any. For `Some(name)`, an
+/// `identifier` matches its text and a `selector_expression` matches its
+/// final field name.
+fn go_subscript_base_matches(operand: Node<'_>, source: &str, want: Option<&str>) -> bool {
+    let Some(want) = want else {
+        return true;
+    };
+    match operand.kind() {
+        "identifier" => node_text(operand, source) == want,
+        "selector_expression" => operand
+            .child_by_field_name("field")
+            .map(|f| node_text(f, source) == want)
+            .unwrap_or(false),
+        _ => false,
+    }
+}
+
+/// Canonical set of untrusted-input sources for Go web handlers and
+/// CLI entry points.
+///
+/// Organized by framework; add new sources to the matching section
+/// and keep the layout stable so future contributors know where
+/// their entries belong.
+///
+/// Why no `ParamName` matcher for Gin / Echo / Fiber `c`: single-letter
+/// locals named `c` are extremely common in generic Go code. Seeding
+/// every `c` parameter as a source would flood false positives.
+/// Instead we rely on method-call matchers (`c.Query`, `c.Param`, ...)
+/// which are specific enough. The `r`/`req`/`request` pattern in
+/// net/http handlers IS seeded via `ParamName` because those names
+/// are idiomatic for the `*http.Request` parameter.
+pub fn go_taint_sources() -> Vec<NodeMatcher> {
+    vec![
+        // ─── net/http handlers ───────────────────────────────────────
+        NodeMatcher::ParamName {
+            names: vec!["r".into(), "req".into(), "request".into()],
+            description: "net/http request parameter".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "r".into(),
+            field: "URL".into(),
+            description: "http.Request.URL".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "r".into(),
+            field: "Header".into(),
+            description: "http.Request.Header".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "r".into(),
+            field: "Body".into(),
+            description: "http.Request.Body".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "r".into(),
+            field: "Form".into(),
+            description: "http.Request.Form".into(),
+        },
+        NodeMatcher::Call {
+            canonical: "r.FormValue".into(),
+            description: "http.Request.FormValue".into(),
+        },
+        NodeMatcher::Call {
+            canonical: "r.PostFormValue".into(),
+            description: "http.Request.PostFormValue".into(),
+        },
+        NodeMatcher::Call {
+            canonical: "r.URL.Query".into(),
+            description: "http.Request.URL.Query()".into(),
+        },
+        // ─── Gin (github.com/gin-gonic/gin) ─────────────────────────
+        NodeMatcher::Call {
+            canonical: "c.Query".into(),
+            description: "gin *Context.Query".into(),
+        },
+        NodeMatcher::Call {
+            canonical: "c.PostForm".into(),
+            description: "gin *Context.PostForm".into(),
+        },
+        NodeMatcher::Call {
+            canonical: "c.Param".into(),
+            description: "gin *Context.Param".into(),
+        },
+        NodeMatcher::Call {
+            canonical: "c.GetHeader".into(),
+            description: "gin *Context.GetHeader".into(),
+        },
+        NodeMatcher::Call {
+            canonical: "c.GetQuery".into(),
+            description: "gin *Context.GetQuery".into(),
+        },
+        NodeMatcher::Call {
+            canonical: "c.GetString".into(),
+            description: "gin *Context.GetString".into(),
+        },
+        NodeMatcher::Call {
+            canonical: "c.FormValue".into(),
+            description: "gin *Context.FormValue".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "c".into(),
+            field: "Request".into(),
+            description: "gin *Context.Request".into(),
+        },
+        // ─── Echo (github.com/labstack/echo) ────────────────────────
+        NodeMatcher::Call {
+            canonical: "c.QueryParam".into(),
+            description: "echo Context.QueryParam".into(),
+        },
+        // (c.Param / c.FormValue are shared with Gin above.)
+        // ─── Fiber (github.com/gofiber/fiber/v2) ────────────────────
+        NodeMatcher::Call {
+            canonical: "c.Params".into(),
+            description: "fiber Ctx.Params".into(),
+        },
+        NodeMatcher::Call {
+            canonical: "c.Body".into(),
+            description: "fiber Ctx.Body".into(),
+        },
+        // (c.Query / c.FormValue are shared with Gin above.)
+        // ─── Chi (github.com/go-chi/chi) ────────────────────────────
+        NodeMatcher::Call {
+            canonical: "chi.URLParam".into(),
+            description: "chi.URLParam".into(),
+        },
+        // (r.URL.Query().Get is already covered by net/http sources.)
+        // ─── Generic ────────────────────────────────────────────────
+        NodeMatcher::Call {
+            canonical: "os.Getenv".into(),
+            description: "os.Getenv".into(),
+        },
+        NodeMatcher::Attribute {
+            root: "os".into(),
+            field: "Args".into(),
+            description: "os.Args".into(),
+        },
+    ]
+}
+
+/// Walk a selector-expression chain leftward and return the leftmost
+/// identifier text. For `r.URL.Query`, returns `"r"`. For
+/// `pkg.Something.Field`, returns `"pkg"`.
+fn leftmost_identifier<'a>(mut node: Node<'_>, source: &'a str) -> Option<&'a str> {
+    loop {
+        match node.kind() {
+            "identifier" | "package_identifier" => return Some(node_text(node, source)),
+            "selector_expression" => {
+                node = node.child_by_field_name("operand")?;
+            }
+            "index_expression" => {
+                node = node.child_by_field_name("operand")?;
+            }
+            _ => return None,
+        }
+    }
+}
+
+// ─── Tests ────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::parser::parse_file;
+    use crate::Language;
+
+    fn spec_exec_command() -> TaintSpec {
+        TaintSpec {
+            sources: go_taint_sources(),
+            sinks: vec![NodeMatcher::Call {
+                canonical: "exec.Command".into(),
+                description: "exec.Command".into(),
+            }],
+            sanitizers: vec![],
+        }
+    }
+
+    fn run(source: &str) -> Vec<TaintFinding> {
+        run_with(source, &spec_exec_command())
+    }
+
+    fn run_with(source: &str, spec: &TaintSpec) -> Vec<TaintFinding> {
+        let tree = parse_file(source, Language::Go).expect("parse");
+        let aliases = go_aliases_from_tree(source, &tree);
+        analyze_tree(tree.root_node(), source, spec, Some(&aliases))
+    }
+
+    #[test]
+    fn direct_flow_gin_query_to_exec_command() {
+        let src = r#"
+package main
+
+import "os/exec"
+
+func handler(c *gin.Context) {
+    name := c.Query("name")
+    exec.Command(name)
+}
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+        assert!(f[0].source_description.contains("gin"));
+        assert_eq!(f[0].sink_description, "exec.Command");
+    }
+
+    #[test]
+    fn net_http_form_value_to_exec() {
+        let src = r#"
+package main
+
+import (
+    "net/http"
+    "os/exec"
+)
+
+func handler(w http.ResponseWriter, r *http.Request) {
+    cmd := r.FormValue("cmd")
+    exec.Command(cmd)
+}
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn echo_context_query_param_to_exec() {
+        let src = r#"
+package main
+
+import "os/exec"
+
+func handler(c echo.Context) error {
+    name := c.QueryParam("name")
+    exec.Command(name)
+    return nil
+}
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn fiber_ctx_query_to_exec() {
+        let src = r#"
+package main
+
+import "os/exec"
+
+func handler(c *fiber.Ctx) error {
+    name := c.Query("name")
+    exec.Command(name)
+    return nil
+}
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn os_getenv_to_exec() {
+        let src = r#"
+package main
+
+import (
+    "os"
+    "os/exec"
+)
+
+func main() {
+    path := os.Getenv("TARGET")
+    exec.Command(path)
+}
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn method_call_on_tainted_receiver_propagates() {
+        // `r.URL` is a tainted attribute source; `.Query()` is a
+        // method call on the tainted receiver and must stay tainted.
+        let src = r#"
+package main
+
+import "os/exec"
+
+func handler(w http.ResponseWriter, r *http.Request) {
+    q := r.URL.Query().Get("name")
+    exec.Command(q)
+}
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn fmt_sprintf_wraps_taint() {
+        let src = r#"
+package main
+
+import (
+    "fmt"
+    "os/exec"
+)
+
+func handler(c *gin.Context) {
+    cmd := fmt.Sprintf("echo %s", c.Query("name"))
+    exec.Command(cmd)
+}
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn string_concat_propagates_taint() {
+        let src = r#"
+package main
+
+import "os/exec"
+
+func handler(c *gin.Context) {
+    cmd := "echo " + c.Query("name")
+    exec.Command(cmd)
+}
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn reassignment_to_literal_kills_taint() {
+        let src = r#"
+package main
+
+import "os/exec"
+
+func handler(c *gin.Context) {
+    name := c.Query("name")
+    name = "static"
+    exec.Command(name)
+}
+"#;
+        assert_eq!(run(src).len(), 0);
+    }
+
+    #[test]
+    fn interprocedural_tainted_return() {
+        let src = r#"
+package main
+
+import "os/exec"
+
+func getInput(c *gin.Context) string {
+    return c.Query("name")
+}
+
+func handler(c *gin.Context) {
+    name := getInput(c)
+    exec.Command(name)
+}
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+        assert!(f[0].source_description.contains("getInput"));
+    }
+
+    #[test]
+    fn interprocedural_clean_return_does_not_fire() {
+        let src = r#"
+package main
+
+import "os/exec"
+
+func staticCmd() string {
+    return "ls"
+}
+
+func handler() {
+    exec.Command(staticCmd())
+}
+"#;
+        assert_eq!(run(src).len(), 0);
+    }
+
+    #[test]
+    fn interprocedural_return_is_parameter_sensitive() {
+        let src = r#"
+package main
+
+import "os/exec"
+
+func choose(first, second string) string {
+    return second
+}
+
+func handler(c *gin.Context) {
+    clean := "ls"
+    exec.Command(choose(c.Query("name"), clean))
+}
+"#;
+        assert_eq!(run(src).len(), 0);
+    }
+
+    #[test]
+    fn nested_subscript_propagates() {
+        // Go map-of-maps: `m[k1][k2]` — if the outer root `headers` is
+        // tainted via `r.Header`, deep index access stays tainted.
+        let src = r#"
+package main
+
+import "os/exec"
+
+func handler(w http.ResponseWriter, r *http.Request) {
+    headers := r.Header
+    exec.Command(headers["X-Cmd"][0])
+}
+"#;
+        assert_eq!(run(src).len(), 1);
+    }
+
+    #[test]
+    fn multi_return_destructuring_taints_all() {
+        // Conservative policy: when helper returns tainted, every LHS
+        // name in `a, b := helper()` is tainted.
+        let src = r#"
+package main
+
+import "os/exec"
+
+func helper(c *gin.Context) (string, error) {
+    return c.Query("name"), nil
+}
+
+func handler(c *gin.Context) {
+    name, err := helper(c)
+    _ = err
+    exec.Command(name)
+}
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+    }
+
+    #[test]
+    fn sanitizer_call_kills_taint() {
+        let mut spec = spec_exec_command();
+        spec.sanitizers = vec![NodeMatcher::Call {
+            canonical: "html.EscapeString".into(),
+            description: "html.EscapeString".into(),
+        }];
+        let src = r#"
+package main
+
+import (
+    "html"
+    "os/exec"
+)
+
+func handler(c *gin.Context) {
+    raw := c.Query("name")
+    clean := html.EscapeString(raw)
+    exec.Command(clean)
+}
+"#;
+        assert_eq!(run_with(src, &spec).len(), 0);
+    }
+
+    #[test]
+    fn alias_resolution_through_import_table() {
+        // `import f "fmt"; f.Sprintf(...)` — a spec targeting
+        // `fmt.Sprintf` as a sink must still match. Use a custom spec
+        // so the canonical path is explicit.
+        let spec = TaintSpec {
+            sources: go_taint_sources(),
+            sinks: vec![NodeMatcher::Call {
+                canonical: "fmt.Sprintf".into(),
+                description: "fmt.Sprintf".into(),
+            }],
+            sanitizers: vec![],
+        };
+        let src = r#"
+package main
+
+import f "fmt"
+
+func handler(c *gin.Context) {
+    _ = f.Sprintf("%s", c.Query("name"))
+}
+"#;
+        let findings = run_with(src, &spec);
+        assert_eq!(findings.len(), 1);
+    }
+
+    #[test]
+    fn closure_gin_handler_fires_taint() {
+        // Closures passed as arguments to Gin router methods must be
+        // analyzed. This is the idiomatic way to write Gin handlers.
+        let src = r#"
+package main
+
+import (
+    "os/exec"
+    "github.com/gin-gonic/gin"
+)
+
+func main() {
+    r := gin.Default()
+    r.GET("/run", func(c *gin.Context) {
+        cmd := c.Query("cmd")
+        exec.Command(cmd).Output()
+    })
+}
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+        assert!(f[0].source_description.contains("gin"));
+        assert_eq!(f[0].sink_description, "exec.Command");
+    }
+
+    #[test]
+    fn closure_net_http_handler_fires_taint() {
+        // net/http handler written as a closure.
+        let src = r#"
+package main
+
+import (
+    "net/http"
+    "os/exec"
+)
+
+func main() {
+    http.HandleFunc("/run", func(w http.ResponseWriter, r *http.Request) {
+        cmd := r.FormValue("cmd")
+        exec.Command(cmd)
+    })
+}
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+    }
+
+    #[test]
+    fn no_source_no_finding() {
+        let src = r#"
+package main
+
+import "os/exec"
+
+func main() {
+    exec.Command("ls", "-la")
+}
+"#;
+        assert_eq!(run(src).len(), 0);
+    }
+
+    #[test]
+    fn import_alias_table_basic() {
+        let src = r#"
+package main
+
+import (
+    f "fmt"
+    "net/http"
+    alias "some/pkg/deep"
+)
+"#;
+        let tree = parse_file(src, Language::Go).expect("parse");
+        let a = go_aliases_from_tree(src, &tree);
+        assert_eq!(a.get("f"), Some("fmt"));
+        assert_eq!(a.get("http"), Some("http"));
+        assert_eq!(a.get("alias"), Some("deep"));
+        assert_eq!(a.resolve("f.Sprintf"), "fmt.Sprintf");
+        assert_eq!(a.resolve("http.Get"), "http.Get");
+    }
+
+    #[test]
+    fn method_declaration_summary_collected() {
+        // Method with tainted return; caller elsewhere uses the bare
+        // method name via the summary table.
+        let src = r#"
+package main
+
+import "os/exec"
+
+type S struct{}
+
+func (s *S) Fetch(c *gin.Context) string {
+    return c.Query("name")
+}
+
+func handler(c *gin.Context) {
+    var s S
+    name := s.Fetch(c)
+    exec.Command(name)
+}
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+        assert!(f[0].source_description.contains("Fetch"));
+    }
+
+    #[test]
+    fn type_assertion_propagates_taint() {
+        let src = r#"
+package main
+
+import "os/exec"
+
+func handler(c *gin.Context) {
+    var val interface{} = c.Query("cmd")
+    cmd := val.(string)
+    exec.Command(cmd)
+}
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+        assert_eq!(f[0].sink_description, "exec.Command");
+    }
+
+    #[test]
+    fn fiber_ctx_body_to_exec() {
+        let src = r#"
+package main
+
+import "os/exec"
+
+func handler(c *fiber.Ctx) error {
+    data := c.Body()
+    exec.Command(string(data))
+    return nil
+}
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+        assert!(f[0].source_description.contains("fiber"));
+    }
+
+    #[test]
+    fn fiber_ctx_params_to_exec() {
+        let src = r#"
+package main
+
+import "os/exec"
+
+func handler(c *fiber.Ctx) error {
+    id := c.Params("id")
+    exec.Command(id)
+    return nil
+}
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+        assert!(f[0].source_description.contains("fiber"));
+    }
+
+    #[test]
+    fn chi_url_param_to_exec() {
+        let src = r#"
+package main
+
+import (
+    "net/http"
+    "os/exec"
+    "github.com/go-chi/chi/v5"
+)
+
+func handler(w http.ResponseWriter, r *http.Request) {
+    slug := chi.URLParam(r, "slug")
+    exec.Command(slug)
+}
+"#;
+        let f = run(src);
+        assert_eq!(f.len(), 1);
+        assert!(f[0].source_description.contains("chi"));
+    }
+}

@@ -6,17 +6,18 @@
 ARG WORKBENCH_BASE=debian-base
 ARG KALI_IMAGE=scratch
 FROM rust:1.93-bookworm@sha256:7c4ae649a84014c467d79319bbf17ce2632ae8b8be123ac2fb2ea5be46823f31 AS foxguard-builder
-# The released 0.14.0 binary predates the v2 policy used by this repository.
-# Pin both source identity and archive bytes until that support is released.
-ENV RUSTUP_TOOLCHAIN=1.93.1 CARGO_BUILD_JOBS=2
-WORKDIR /build/foxguard
-RUN curl --fail --location --retry 3 --silent --show-error \
-      https://codeload.github.com/0sec-labs/foxguard/tar.gz/01a77530488f198584deb3ccec7cd2ce2f1c7688 -o /tmp/foxguard-source.tar.gz \
-    && printf '%s  /tmp/foxguard-source.tar.gz\n' c293250bd27704930662c93389300115635948da33109776a864ebeb7cfa9cac | sha256sum -c - \
-    && tar -xzf /tmp/foxguard-source.tar.gz --strip-components=1 \
-    && cargo build --locked --release --bin foxguard \
-    && install -D -m 0755 target/release/foxguard /out/foxguard \
-    && printf '%s\n' '{"revision":"01a77530488f198584deb3ccec7cd2ce2f1c7688","archiveSha256":"c293250bd27704930662c93389300115635948da33109776a864ebeb7cfa9cac","policyVersions":["v1","v2"]}' > /out/foxguard-source.json
+# Foxguard is built from this repository (crates/foxguard), not downloaded. The
+# toolchain comes from rust-toolchain.toml through scripts/ensure-rust.sh, so the
+# image, CI and the release binaries use the same compiler.
+ENV CARGO_BUILD_JOBS=2
+WORKDIR /build
+COPY rust-toolchain.toml Cargo.toml Cargo.lock ./
+COPY scripts/ensure-rust.sh scripts/ensure-rust.sh
+RUN bash scripts/ensure-rust.sh
+COPY crates/foxguard crates/foxguard
+RUN cargo build --locked --release -p foxguard --bin foxguard \
+    && install -D -m 0755 target/release/foxguard /out/foxguard
+RUN printf '%s\n' '{"source":"crates/foxguard","policyVersions":["v1","v2"]}' > /out/foxguard-source.json
 RUN mkdir /tmp/foxguard-policy-smoke \
     && printf 'pr_security_policy:\n  version: v2\n  scope: diff\n' > /tmp/foxguard-policy-smoke/.foxguard.yml \
     && printf 'print("ok")\n' > /tmp/foxguard-policy-smoke/fixture.py \
