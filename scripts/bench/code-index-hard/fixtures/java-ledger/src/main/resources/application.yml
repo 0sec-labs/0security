@@ -1,0 +1,12 @@
+spring:
+  application:
+    name: ledger
+
+server:
+  port: 8080
+
+ledger:
+  token-secret: ${LEDGER_TOKEN_SECRET:}
+  export-dir: ${LEDGER_EXPORT_DIR:data/exports}
+  template-dir: ${LEDGER_TEMPLATE_DIR:data/templates}
+  demo-data: ${LEDGER_DEMO_DATA:true}

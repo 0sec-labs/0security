@@ -1,0 +1,748 @@
+{
+  "fixture": "java-ledger",
+  "skill": null,
+  "cleanPaths": [
+    "src/main/java/com/ledger/apikeys/ApiKey.java",
+    "src/main/java/com/ledger/apikeys/ApiKeyController.java",
+    "src/main/java/com/ledger/apikeys/ApiKeyDto.java",
+    "src/main/java/com/ledger/apikeys/ApiKeyMapper.java",
+    "src/main/java/com/ledger/apikeys/ApiKeyRepository.java",
+    "src/main/java/com/ledger/apikeys/ApiKeyService.java",
+    "src/main/java/com/ledger/assets/Asset.java",
+    "src/main/java/com/ledger/assets/AssetController.java",
+    "src/main/java/com/ledger/assets/AssetDto.java",
+    "src/main/java/com/ledger/assets/AssetMapper.java",
+    "src/main/java/com/ledger/assets/AssetRepository.java",
+    "src/main/java/com/ledger/assets/AssetService.java",
+    "src/main/java/com/ledger/auditentries/AuditEntry.java",
+    "src/main/java/com/ledger/auditentries/AuditEntryController.java",
+    "src/main/java/com/ledger/auditentries/AuditEntryDto.java",
+    "src/main/java/com/ledger/auditentries/AuditEntryMapper.java",
+    "src/main/java/com/ledger/auditentries/AuditEntryRepository.java",
+    "src/main/java/com/ledger/auditentries/AuditEntryService.java",
+    "src/main/java/com/ledger/budgets/Budget.java",
+    "src/main/java/com/ledger/budgets/BudgetController.java",
+    "src/main/java/com/ledger/budgets/BudgetDto.java",
+    "src/main/java/com/ledger/budgets/BudgetMapper.java",
+    "src/main/java/com/ledger/budgets/BudgetRepository.java",
+    "src/main/java/com/ledger/budgets/BudgetService.java",
+    "src/main/java/com/ledger/cards/Card.java",
+    "src/main/java/com/ledger/cards/CardController.java",
+    "src/main/java/com/ledger/cards/CardDto.java",
+    "src/main/java/com/ledger/cards/CardMapper.java",
+    "src/main/java/com/ledger/cards/CardRepository.java",
+    "src/main/java/com/ledger/cards/CardService.java",
+    "src/main/java/com/ledger/categories/Category.java",
+    "src/main/java/com/ledger/categories/CategoryController.java",
+    "src/main/java/com/ledger/categories/CategoryDto.java",
+    "src/main/java/com/ledger/categories/CategoryMapper.java",
+    "src/main/java/com/ledger/categories/CategoryRepository.java",
+    "src/main/java/com/ledger/categories/CategoryService.java",
+    "src/main/java/com/ledger/contracts/Contract.java",
+    "src/main/java/com/ledger/contracts/ContractController.java",
+    "src/main/java/com/ledger/contracts/ContractDto.java",
+    "src/main/java/com/ledger/contracts/ContractMapper.java",
+    "src/main/java/com/ledger/contracts/ContractRepository.java",
+    "src/main/java/com/ledger/contracts/ContractService.java",
+    "src/main/java/com/ledger/costcenters/CostCenter.java",
+    "src/main/java/com/ledger/costcenters/CostCenterController.java",
+    "src/main/java/com/ledger/costcenters/CostCenterDto.java",
+    "src/main/java/com/ledger/costcenters/CostCenterMapper.java",
+    "src/main/java/com/ledger/costcenters/CostCenterRepository.java",
+    "src/main/java/com/ledger/costcenters/CostCenterService.java",
+    "src/main/java/com/ledger/currencies/Currency.java",
+    "src/main/java/com/ledger/currencies/CurrencyController.java",
+    "src/main/java/com/ledger/currencies/CurrencyDto.java",
+    "src/main/java/com/ledger/currencies/CurrencyMapper.java",
+    "src/main/java/com/ledger/currencies/CurrencyRepository.java",
+    "src/main/java/com/ledger/currencies/CurrencyService.java",
+    "src/main/java/com/ledger/departments/Department.java",
+    "src/main/java/com/ledger/departments/DepartmentController.java",
+    "src/main/java/com/ledger/departments/DepartmentDto.java",
+    "src/main/java/com/ledger/departments/DepartmentMapper.java",
+    "src/main/java/com/ledger/departments/DepartmentRepository.java",
+    "src/main/java/com/ledger/departments/DepartmentService.java",
+    "src/main/java/com/ledger/expense/Expense.java",
+    "src/main/java/com/ledger/expense/ExpenseController.java",
+    "src/main/java/com/ledger/expense/ExpenseDto.java",
+    "src/main/java/com/ledger/expense/ExpenseMapper.java",
+    "src/main/java/com/ledger/expense/ExpenseRepository.java",
+    "src/main/java/com/ledger/expense/ExpenseService.java",
+    "src/main/java/com/ledger/locations/Location.java",
+    "src/main/java/com/ledger/locations/LocationController.java",
+    "src/main/java/com/ledger/locations/LocationDto.java",
+    "src/main/java/com/ledger/locations/LocationMapper.java",
+    "src/main/java/com/ledger/locations/LocationRepository.java",
+    "src/main/java/com/ledger/locations/LocationService.java",
+    "src/main/java/com/ledger/mileage/MileageEntry.java",
+    "src/main/java/com/ledger/mileage/MileageEntryController.java",
+    "src/main/java/com/ledger/mileage/MileageEntryDto.java",
+    "src/main/java/com/ledger/mileage/MileageEntryMapper.java",
+    "src/main/java/com/ledger/mileage/MileageEntryRepository.java",
+    "src/main/java/com/ledger/mileage/MileageEntryService.java",
+    "src/main/java/com/ledger/notes/Note.java",
+    "src/main/java/com/ledger/notes/NoteController.java",
+    "src/main/java/com/ledger/notes/NoteDto.java",
+    "src/main/java/com/ledger/notes/NoteMapper.java",
+    "src/main/java/com/ledger/notes/NoteRepository.java",
+    "src/main/java/com/ledger/notes/NoteService.java",
+    "src/main/java/com/ledger/notifications/Notification.java",
+    "src/main/java/com/ledger/notifications/NotificationController.java",
+    "src/main/java/com/ledger/notifications/NotificationDto.java",
+    "src/main/java/com/ledger/notifications/NotificationMapper.java",
+    "src/main/java/com/ledger/notifications/NotificationRepository.java",
+    "src/main/java/com/ledger/notifications/NotificationService.java",
+    "src/main/java/com/ledger/perdiems/PerDiem.java",
+    "src/main/java/com/ledger/perdiems/PerDiemController.java",
+    "src/main/java/com/ledger/perdiems/PerDiemDto.java",
+    "src/main/java/com/ledger/perdiems/PerDiemMapper.java",
+    "src/main/java/com/ledger/perdiems/PerDiemRepository.java",
+    "src/main/java/com/ledger/perdiems/PerDiemService.java",
+    "src/main/java/com/ledger/policies/Policy.java",
+    "src/main/java/com/ledger/policies/PolicyController.java",
+    "src/main/java/com/ledger/policies/PolicyDto.java",
+    "src/main/java/com/ledger/policies/PolicyMapper.java",
+    "src/main/java/com/ledger/policies/PolicyRepository.java",
+    "src/main/java/com/ledger/policies/PolicyService.java",
+    "src/main/java/com/ledger/preferences/Preference.java",
+    "src/main/java/com/ledger/preferences/PreferenceController.java",
+    "src/main/java/com/ledger/preferences/PreferenceDto.java",
+    "src/main/java/com/ledger/preferences/PreferenceMapper.java",
+    "src/main/java/com/ledger/preferences/PreferenceRepository.java",
+    "src/main/java/com/ledger/preferences/PreferenceService.java",
+    "src/main/java/com/ledger/purchaseorders/PurchaseOrder.java",
+    "src/main/java/com/ledger/purchaseorders/PurchaseOrderController.java",
+    "src/main/java/com/ledger/purchaseorders/PurchaseOrderDto.java",
+    "src/main/java/com/ledger/purchaseorders/PurchaseOrderMapper.java",
+    "src/main/java/com/ledger/purchaseorders/PurchaseOrderRepository.java",
+    "src/main/java/com/ledger/purchaseorders/PurchaseOrderService.java",
+    "src/main/java/com/ledger/reminders/Reminder.java",
+    "src/main/java/com/ledger/reminders/ReminderController.java",
+    "src/main/java/com/ledger/reminders/ReminderDto.java",
+    "src/main/java/com/ledger/reminders/ReminderMapper.java",
+    "src/main/java/com/ledger/reminders/ReminderRepository.java",
+    "src/main/java/com/ledger/reminders/ReminderService.java",
+    "src/main/java/com/ledger/reports/Report.java",
+    "src/main/java/com/ledger/reports/ReportController.java",
+    "src/main/java/com/ledger/reports/ReportDto.java",
+    "src/main/java/com/ledger/reports/ReportMapper.java",
+    "src/main/java/com/ledger/reports/ReportRepository.java",
+    "src/main/java/com/ledger/reports/ReportService.java",
+    "src/main/java/com/ledger/savedfilters/SavedFilter.java",
+    "src/main/java/com/ledger/savedfilters/SavedFilterController.java",
+    "src/main/java/com/ledger/savedfilters/SavedFilterDto.java",
+    "src/main/java/com/ledger/savedfilters/SavedFilterMapper.java",
+    "src/main/java/com/ledger/savedfilters/SavedFilterRepository.java",
+    "src/main/java/com/ledger/savedfilters/SavedFilterService.java",
+    "src/main/java/com/ledger/tags/Tag.java",
+    "src/main/java/com/ledger/tags/TagController.java",
+    "src/main/java/com/ledger/tags/TagDto.java",
+    "src/main/java/com/ledger/tags/TagMapper.java",
+    "src/main/java/com/ledger/tags/TagRepository.java",
+    "src/main/java/com/ledger/tags/TagService.java",
+    "src/main/java/com/ledger/taxrates/TaxRate.java",
+    "src/main/java/com/ledger/taxrates/TaxRateController.java",
+    "src/main/java/com/ledger/taxrates/TaxRateDto.java",
+    "src/main/java/com/ledger/taxrates/TaxRateMapper.java",
+    "src/main/java/com/ledger/taxrates/TaxRateRepository.java",
+    "src/main/java/com/ledger/taxrates/TaxRateService.java",
+    "src/main/java/com/ledger/templates/Template.java",
+    "src/main/java/com/ledger/templates/TemplateController.java",
+    "src/main/java/com/ledger/templates/TemplateDto.java",
+    "src/main/java/com/ledger/templates/TemplateMapper.java",
+    "src/main/java/com/ledger/templates/TemplateRepository.java",
+    "src/main/java/com/ledger/templates/TemplateService.java",
+    "src/main/java/com/ledger/tenant/Tenant.java",
+    "src/main/java/com/ledger/tenant/TenantRepository.java",
+    "src/main/java/com/ledger/user/MeController.java",
+    "src/main/java/com/ledger/user/ProfileDto.java",
+    "src/main/java/com/ledger/user/User.java",
+    "src/main/java/com/ledger/user/UserRepository.java",
+    "src/main/java/com/ledger/user/UserService.java",
+    "src/main/java/com/ledger/webhooks/Webhook.java",
+    "src/main/java/com/ledger/webhooks/WebhookController.java",
+    "src/main/java/com/ledger/webhooks/WebhookDto.java",
+    "src/main/java/com/ledger/webhooks/WebhookMapper.java",
+    "src/main/java/com/ledger/webhooks/WebhookRepository.java",
+    "src/main/java/com/ledger/webhooks/WebhookService.java"
+  ],
+  "items": [
+    {
+      "id": "jl-vendor-bank",
+      "path": "src/main/java/com/ledger/vendor/VendorController.java",
+      "startLine": 83,
+      "endLine": 87,
+      "category": "authz",
+      "description": "PUT /api/tenants/{tenantId}/vendors/{id}/bank-details is the only one of the ten vendor endpoints without @PreAuthorize(\"@access.canManage(#tenantId)\"); VendorService trusts the path tenantId, so any authenticated user can replace another tenant's vendor bank account details.",
+      "alsoAt": [
+        {
+          "path": "src/main/java/com/ledger/vendor/VendorService.java",
+          "startLine": 52,
+          "endLine": 56
+        }
+      ],
+      "oracle": {
+        "mention": [
+          "bank[- ]?details?",
+          "iban",
+          "replace.{0,20}bank",
+          "bank account",
+          "canManage"
+        ],
+        "lineSlack": 3
+      }
+    },
+    {
+      "id": "jl-receipt-download",
+      "path": "src/main/java/com/ledger/receipt/ReceiptController.java",
+      "startLine": 54,
+      "endLine": 61,
+      "category": "authz",
+      "description": "GET /api/receipts/{receiptId}/download loads the receipt through ReceiptService.load, which goes straight to the repository without the tenant and owner-or-manager check that ExpenseService.get applies on the other receipt routes, so any authenticated user can download any receipt by id.",
+      "alsoAt": [
+        {
+          "path": "src/main/java/com/ledger/receipt/ReceiptService.java",
+          "startLine": 53,
+          "endLine": 55
+        }
+      ],
+      "oracle": {
+        "mention": [
+          "receipt",
+          "download"
+        ],
+        "lineSlack": 3
+      }
+    },
+    {
+      "id": "jl-statement-public",
+      "path": "src/main/java/com/ledger/statement/PublicStatementController.java",
+      "startLine": 23,
+      "endLine": 27,
+      "category": "authz",
+      "description": "GET /public/statements/{id}?token= verifies the share token signature but never compares the token's subject with {id}, and StatementService.build does no authorization, so any valid share token opens any statement.",
+      "alsoAt": [
+        {
+          "path": "src/main/java/com/ledger/statement/StatementService.java",
+          "startLine": 24,
+          "endLine": 28
+        }
+      ],
+      "oracle": {
+        "mention": [
+          "statements?",
+          "share (token|link)",
+          "/public/",
+          "token"
+        ],
+        "lineSlack": 3
+      }
+    },
+    {
+      "id": "jl-bulk-approve",
+      "path": "src/main/java/com/ledger/approval/ApprovalController.java",
+      "startLine": 40,
+      "endLine": 43,
+      "category": [
+        "authz",
+        "business-logic"
+      ],
+      "description": "POST /api/approvals/bulk-approve takes approverId from the request body and uses it for the maker-checker rule and the audit entry, so a requester can name another manager and approve their own request; the single approve route correctly uses the authenticated principal.",
+      "alsoAt": [
+        {
+          "path": "src/main/java/com/ledger/approval/ApprovalService.java",
+          "startLine": 47,
+          "endLine": 54
+        },
+        {
+          "path": "src/main/java/com/ledger/approval/ApprovalService.java",
+          "startLine": 62,
+          "endLine": 74
+        }
+      ],
+      "oracle": {
+        "mention": [
+          "bulk",
+          "approver ?id",
+          "approve ?all",
+          "maker.?checker",
+          "self.?approv",
+          "own request"
+        ],
+        "lineSlack": 3
+      }
+    },
+    {
+      "id": "jl-export-name",
+      "path": "src/main/java/com/ledger/export/ExportService.java",
+      "startLine": 40,
+      "endLine": 46,
+      "category": "path-traversal",
+      "description": "ExportService.create builds the export file path with exportDir.resolve(Text.plain(name) + \".csv\"). Text.plain only strips markup for HTML output, so ../ sequences in the export name survive and the CSV is written outside the export directory.",
+      "alsoAt": [
+        {
+          "path": "src/main/java/com/ledger/export/ExportService.java",
+          "startLine": 33,
+          "endLine": 33
+        },
+        {
+          "path": "src/main/java/com/ledger/common/Text.java",
+          "startLine": 17,
+          "endLine": 24
+        },
+        {
+          "path": "src/main/java/com/ledger/export/ExportController.java",
+          "startLine": 33,
+          "endLine": 37
+        }
+      ],
+      "oracle": {
+        "mention": [
+          "export",
+          "file ?name",
+          "travers",
+          "plain\\(",
+          "\\.csv",
+          "resolve"
+        ],
+        "lineSlack": 3
+      }
+    },
+    {
+      "id": "jl-admin-nested",
+      "path": "src/main/java/com/ledger/admin/AdminUserController.java",
+      "startLine": 30,
+      "endLine": 33,
+      "category": "authz",
+      "description": "The URL rule requestMatchers(\"/api/admin/*\").hasRole(\"ADMIN\") matches one path segment only, so nested admin routes such as /api/admin/users/{id}/roles and /api/admin/tenants/{id}/limits fall through to anyRequest().authenticated(); the admin controllers have no inline role check, so any authenticated user can change roles and tenant limits.",
+      "alsoAt": [
+        {
+          "path": "src/main/java/com/ledger/admin/AdminUserController.java",
+          "startLine": 35,
+          "endLine": 38
+        },
+        {
+          "path": "src/main/java/com/ledger/admin/AdminTenantController.java",
+          "startLine": 29,
+          "endLine": 32
+        },
+        {
+          "path": "src/main/java/com/ledger/security/SecurityConfig.java",
+          "startLine": 28,
+          "endLine": 28
+        },
+        {
+          "path": "src/main/java/com/ledger/admin/AdminService.java",
+          "startLine": 33,
+          "endLine": 37
+        }
+      ],
+      "oracle": {
+        "mention": [
+          "admin.{0,50}(role|tenant|limit|deactivat|nested|path|route|endpoint)",
+          "requestMatchers",
+          "/api/admin/\\*",
+          "(roles?|limits?).{0,40}admin"
+        ],
+        "lineSlack": 3
+      }
+    },
+    {
+      "id": "jl-search-comments",
+      "path": "src/main/java/com/ledger/search/GlobalSearchService.java",
+      "startLine": 37,
+      "endLine": 37,
+      "category": "authz",
+      "description": "GlobalSearchService scopes the expense and vendor searches by tenant but the comment search (CommentRepository.search) has no tenant filter, so GET /api/search?q= returns other tenants' comments.",
+      "alsoAt": [
+        {
+          "path": "src/main/java/com/ledger/comment/CommentRepository.java",
+          "startLine": 31,
+          "endLine": 37
+        },
+        {
+          "path": "src/main/java/com/ledger/search/SearchController.java",
+          "startLine": 21,
+          "endLine": 24
+        }
+      ],
+      "oracle": {
+        "mention": [
+          "global ?search",
+          "comments?.{0,80}(search|tenant)",
+          "(search|quer(y|ies)).{0,80}comments?"
+        ],
+        "lineSlack": 3
+      }
+    },
+    {
+      "id": "jl-project-transfer",
+      "path": "src/main/java/com/ledger/project/ProjectService.java",
+      "startLine": 58,
+      "endLine": 65,
+      "category": "authz",
+      "description": "transferExpenses checks that the caller manages the source project but loads the target project by id without checking it belongs to the caller's tenant, so a manager can move expenses into another tenant's project.",
+      "alsoAt": [
+        {
+          "path": "src/main/java/com/ledger/project/ProjectController.java",
+          "startLine": 54,
+          "endLine": 58
+        },
+        {
+          "path": "src/main/java/com/ledger/expense/ExpenseRepository.java",
+          "startLine": 46,
+          "endLine": 50
+        }
+      ],
+      "oracle": {
+        "mention": [
+          "transfer",
+          "target project",
+          "reassign"
+        ],
+        "lineSlack": 3
+      }
+    },
+    {
+      "id": "jl-comment-author",
+      "path": "src/main/java/com/ledger/comment/CommentController.java",
+      "startLine": 33,
+      "endLine": 38,
+      "category": [
+        "authz",
+        "business-logic"
+      ],
+      "description": "CommentService.add trusts authorId from CommentInput. The service-role integration route sets it legitimately, but the user route binds the request body into CommentInput and only overrides tenant and expense, so a user can post comments as someone else.",
+      "alsoAt": [
+        {
+          "path": "src/main/java/com/ledger/comment/CommentService.java",
+          "startLine": 28,
+          "endLine": 35
+        },
+        {
+          "path": "src/main/java/com/ledger/comment/CommentInput.java",
+          "startLine": 5,
+          "endLine": 7
+        }
+      ],
+      "oracle": {
+        "mention": [
+          "author(Id)?",
+          "comments?.{0,80}(spoof|impersonat|attribut)",
+          "CommentInput"
+        ],
+        "lineSlack": 3
+      }
+    },
+    {
+      "id": "jl-billing-header",
+      "path": "src/main/java/com/ledger/billing/BillingController.java",
+      "startLine": 19,
+      "endLine": 27,
+      "category": "authz",
+      "description": "BillingController reads the tenant from the X-Tenant-Id header and passes it to BillingService without checking membership, because TenantFilter skips /api/billing/**; any user can read another tenant's plan and invoices.",
+      "alsoAt": [
+        {
+          "path": "src/main/java/com/ledger/security/TenantFilter.java",
+          "startLine": 18,
+          "endLine": 22
+        },
+        {
+          "path": "src/main/java/com/ledger/billing/BillingService.java",
+          "startLine": 16,
+          "endLine": 18
+        }
+      ],
+      "oracle": {
+        "mention": [
+          "x-tenant-id",
+          "billing",
+          "tenant header"
+        ],
+        "lineSlack": 3
+      }
+    }
+  ],
+  "decoys": [
+    {
+      "id": "jl-decoy-vendor-read",
+      "path": "src/main/java/com/ledger/vendor/VendorController.java",
+      "startLine": 27,
+      "endLine": 37,
+      "category": "authz",
+      "description": "Vendor list and get carry @PreAuthorize(\"@access.canManage(#tenantId)\"), which ties the path tenant to the caller's tenant and role."
+    },
+    {
+      "id": "jl-decoy-vendor-write",
+      "path": "src/main/java/com/ledger/vendor/VendorController.java",
+      "startLine": 39,
+      "endLine": 62,
+      "category": "authz",
+      "description": "Vendor writes are guarded by canManage(#tenantId)."
+    },
+    {
+      "id": "jl-decoy-vendor-contacts-bank",
+      "path": "src/main/java/com/ledger/vendor/VendorController.java",
+      "startLine": 64,
+      "endLine": 81,
+      "category": "authz",
+      "description": "Vendor contacts and masked bank details are guarded by canManage(#tenantId)."
+    },
+    {
+      "id": "jl-decoy-expense-get",
+      "path": "src/main/java/com/ledger/expense/ExpenseService.java",
+      "startLine": 35,
+      "endLine": 40,
+      "category": "authz",
+      "description": "ExpenseService.get asserts tenant and owner-or-manager."
+    },
+    {
+      "id": "jl-decoy-expense-references",
+      "path": "src/main/java/com/ledger/expense/ExpenseService.java",
+      "startLine": 86,
+      "endLine": 94,
+      "category": "authz",
+      "description": "Client supplied project and vendor ids are re-validated against the caller's tenant."
+    },
+    {
+      "id": "jl-decoy-receipt-routes",
+      "path": "src/main/java/com/ledger/receipt/ReceiptController.java",
+      "startLine": 29,
+      "endLine": 52,
+      "category": "authz",
+      "description": "The four expense receipt routes go through ReceiptService, which calls the checked ExpenseService.get first."
+    },
+    {
+      "id": "jl-decoy-receipt-service",
+      "path": "src/main/java/com/ledger/receipt/ReceiptService.java",
+      "startLine": 25,
+      "endLine": 51,
+      "category": "authz",
+      "description": "These ReceiptService methods call ExpenseService.get before touching the repository."
+    },
+    {
+      "id": "jl-decoy-statement-internal",
+      "path": "src/main/java/com/ledger/statement/InternalStatementController.java",
+      "startLine": 21,
+      "endLine": 24,
+      "category": "authz",
+      "description": "/internal/** is restricted to the service role by the URL rule."
+    },
+    {
+      "id": "jl-decoy-statement-user",
+      "path": "src/main/java/com/ledger/statement/StatementController.java",
+      "startLine": 28,
+      "endLine": 36,
+      "category": "authz",
+      "description": "User statement routes authorize tenant and owner-or-manager before building or sharing."
+    },
+    {
+      "id": "jl-decoy-statement-authorize",
+      "path": "src/main/java/com/ledger/statement/StatementService.java",
+      "startLine": 44,
+      "endLine": 48,
+      "category": "authz",
+      "description": "StatementService.authorize checks tenant and owner-or-manager."
+    },
+    {
+      "id": "jl-decoy-approval-single",
+      "path": "src/main/java/com/ledger/approval/ApprovalController.java",
+      "startLine": 30,
+      "endLine": 38,
+      "category": "authz",
+      "description": "Single approve and reject use the authenticated principal as the decider."
+    },
+    {
+      "id": "jl-decoy-approval-service-single",
+      "path": "src/main/java/com/ledger/approval/ApprovalService.java",
+      "startLine": 37,
+      "endLine": 45,
+      "category": "authz",
+      "description": "approve and reject pass the principal id to the maker-checker rule."
+    },
+    {
+      "id": "jl-decoy-display-name",
+      "path": "src/main/java/com/ledger/user/UserService.java",
+      "startLine": 21,
+      "endLine": 25,
+      "category": "xss",
+      "description": "Text.plain is the right sanitizer for a display name that is rendered as HTML."
+    },
+    {
+      "id": "jl-decoy-safe-segment",
+      "path": "src/main/java/com/ledger/common/Text.java",
+      "startLine": 29,
+      "endLine": 41,
+      "category": "path-traversal",
+      "description": "safeSegment removes separators and dot sequences."
+    },
+    {
+      "id": "jl-decoy-template-publish",
+      "path": "src/main/java/com/ledger/templates/TemplateService.java",
+      "startLine": 48,
+      "endLine": 59,
+      "category": "path-traversal",
+      "description": "Template files are written to a tenant directory with Text.safeSegment."
+    },
+    {
+      "id": "jl-decoy-export-download-name",
+      "path": "src/main/java/com/ledger/export/ExportService.java",
+      "startLine": 70,
+      "endLine": 72,
+      "category": "path-traversal",
+      "description": "The download file name goes through Text.safeSegment."
+    },
+    {
+      "id": "jl-decoy-export-download",
+      "path": "src/main/java/com/ledger/export/ExportController.java",
+      "startLine": 44,
+      "endLine": 51,
+      "category": "authz",
+      "description": "Export download loads the job through ExportService.get, which checks tenant and owner-or-manager; the path comes from the stored job."
+    },
+    {
+      "id": "jl-decoy-tenant-filter",
+      "path": "src/main/java/com/ledger/security/TenantFilter.java",
+      "startLine": 24,
+      "endLine": 41,
+      "category": "authz",
+      "description": "TenantFilter rejects an X-Tenant-Id header that differs from the user's tenant."
+    },
+    {
+      "id": "jl-decoy-search-scoped",
+      "path": "src/main/java/com/ledger/search/GlobalSearchService.java",
+      "startLine": 31,
+      "endLine": 36,
+      "category": "authz",
+      "description": "Expense and vendor search are filtered by the caller's tenant (and owner for expenses)."
+    },
+    {
+      "id": "jl-decoy-admin-users-list",
+      "path": "src/main/java/com/ledger/admin/AdminUserController.java",
+      "startLine": 25,
+      "endLine": 28,
+      "category": "authz",
+      "description": "Single segment /api/admin/users is matched by the ADMIN URL rule."
+    },
+    {
+      "id": "jl-decoy-admin-tenants-list",
+      "path": "src/main/java/com/ledger/admin/AdminTenantController.java",
+      "startLine": 24,
+      "endLine": 27,
+      "category": "authz",
+      "description": "Single segment /api/admin/tenants is matched by the ADMIN URL rule."
+    },
+    {
+      "id": "jl-decoy-admin-stats",
+      "path": "src/main/java/com/ledger/admin/AdminStatsController.java",
+      "startLine": 20,
+      "endLine": 23,
+      "category": "authz",
+      "description": "Single segment /api/admin/stats is matched by the ADMIN URL rule."
+    },
+    {
+      "id": "jl-decoy-integration-comment",
+      "path": "src/main/java/com/ledger/comment/IntegrationCommentController.java",
+      "startLine": 23,
+      "endLine": 27,
+      "category": "authz",
+      "description": "The integration route is restricted to the service role and legitimately supplies authorId."
+    },
+    {
+      "id": "jl-decoy-project-source",
+      "path": "src/main/java/com/ledger/project/ProjectService.java",
+      "startLine": 73,
+      "endLine": 79,
+      "category": "authz",
+      "description": "requireManaged checks tenant and project manager for the source project."
+    },
+    {
+      "id": "jl-decoy-project-update",
+      "path": "src/main/java/com/ledger/project/ProjectService.java",
+      "startLine": 41,
+      "endLine": 45,
+      "category": "authz",
+      "description": "Project update requires the project manager in the caller's tenant."
+    },
+    {
+      "id": "jl-decoy-health",
+      "path": "src/main/java/com/ledger/web/HealthController.java",
+      "startLine": 10,
+      "endLine": 18,
+      "category": "authz",
+      "description": "Health and status are intentionally public and return constant data."
+    },
+    {
+      "id": "jl-decoy-public-plans",
+      "path": "src/main/java/com/ledger/web/PublicPlanController.java",
+      "startLine": 18,
+      "endLine": 24,
+      "category": "authz",
+      "description": "The published price list is intentionally public and not tenant data."
+    },
+    {
+      "id": "jl-decoy-category-require",
+      "path": "src/main/java/com/ledger/categories/CategoryService.java",
+      "startLine": 48,
+      "endLine": 53,
+      "category": "authz",
+      "description": "The service lookup checks tenant and owner-or-manager although the controller has no inline check."
+    },
+    {
+      "id": "jl-decoy-reminder-owned",
+      "path": "src/main/java/com/ledger/reminders/ReminderService.java",
+      "startLine": 54,
+      "endLine": 58,
+      "category": "authz",
+      "description": "Tenant scoped repository lookup plus owner-or-manager check."
+    },
+    {
+      "id": "jl-decoy-reminder-repo",
+      "path": "src/main/java/com/ledger/reminders/ReminderRepository.java",
+      "startLine": 20,
+      "endLine": 22,
+      "category": "authz",
+      "description": "Repository methods always take the tenant id."
+    },
+    {
+      "id": "jl-decoy-tag-controller",
+      "path": "src/main/java/com/ledger/tags/TagController.java",
+      "startLine": 48,
+      "endLine": 61,
+      "category": "authz",
+      "description": "The controller checks owner-or-manager on writes after a tenant scoped lookup."
+    },
+    {
+      "id": "jl-decoy-note-linked",
+      "path": "src/main/java/com/ledger/notes/NoteService.java",
+      "startLine": 57,
+      "endLine": 61,
+      "category": "authz",
+      "description": "The client supplied linkedExpenseId is re-validated through ExpenseService.get."
+    },
+    {
+      "id": "jl-decoy-po-vendor-ref",
+      "path": "src/main/java/com/ledger/purchaseorders/PurchaseOrderService.java",
+      "startLine": 67,
+      "endLine": 71,
+      "category": "authz",
+      "description": "The client supplied vendorRef is re-validated against the caller's tenant."
+    },
+    {
+      "id": "jl-decoy-api-key-own",
+      "path": "src/main/java/com/ledger/apikeys/ApiKeyService.java",
+      "startLine": 50,
+      "endLine": 55,
+      "category": "authz",
+      "description": "API keys are strictly personal: tenant and owner are checked."
+    },
+    {
+      "id": "jl-decoy-department-writes",
+      "path": "src/main/java/com/ledger/departments/DepartmentController.java",
+      "startLine": 41,
+      "endLine": 59,
+      "category": "authz",
+      "description": "Department writes are limited to managers by method security."
+    }
+  ]
+}
