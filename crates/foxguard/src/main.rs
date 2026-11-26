@@ -56,6 +56,7 @@ fn run_graph(args: &GraphArgs) -> i32 {
         root,
         &foxguard::graph::GraphOptions {
             taint_summaries: args.taint_summaries,
+            legacy_resolution: args.legacy_resolution,
         },
     );
     if args.missing_guard {

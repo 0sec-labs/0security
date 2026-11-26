@@ -10,6 +10,13 @@
 //! when `--taint-summaries` is given, and is empty otherwise.
 
 mod java;
+mod kotlin;
+mod resolve;
+mod security;
+mod types;
+
+#[cfg(test)]
+mod security_tests;
 
 use crate::engine::parser::parse_path;
 use crate::engine::scanner::detect_language;
@@ -27,8 +34,8 @@ pub const GRAPH_SCHEMA_VERSION: u32 = 1;
 const MAX_FILES: usize = 200_000;
 const MAX_FILE_BYTES: u64 = 1024 * 1024;
 const MAX_TAINT_BYTES: usize = 300 * 1024;
-/// A Java method name defined more often than this is not followed by name.
-const MAX_JAVA_NAME_DEFS: usize = 25;
+/// A Java method name defined more often than this is not followed by name (see `resolve`).
+const MAX_JAVA_NAME_DEFS: usize = resolve::MAX_NAME_DEFS;
 /// Calls kept in the output; the consumer's validator accepts two million.
 const MAX_CALLS: usize = 1_000_000;
 
@@ -67,6 +74,22 @@ pub struct GraphCall {
     /// The call looks like an authentication, authorization or ownership check (by name only).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub auth: bool,
+    /// The receiver as a path from a known type, for the resolver (Java and Kotlin); not serialized.
+    #[serde(skip)]
+    pub recv: Option<types::RecvPath>,
+    /// Symbol indices the call can reach after resolution; not serialized.
+    #[serde(skip)]
+    pub cand: Option<Box<[u32]>>,
+}
+
+/// Where an auth signal on a route came from: a URL rule, a deployment descriptor or a filter.
+#[derive(Debug, Serialize, Clone, PartialEq)]
+pub struct AuthSource {
+    pub signal: String,
+    /// `file:line` and the rule as written.
+    pub source: String,
+    /// `public`, `authenticated`, `role`, `denied`, `filter` or `annotation`.
+    pub access: &'static str,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -83,6 +106,14 @@ pub struct GraphRoute {
     /// Guard annotations or auth-like middleware on the route itself (Java annotations, JS/Python middleware).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub auth_signals: Vec<String>,
+    /// The rule behind each signal outside the handler itself (URL rules, `web.xml`, filters), and the
+    /// `permitAll` rules that make the route public.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub auth_sources: Vec<AuthSource>,
+    /// An explicit `permitAll`, `@PermitAll` or unrestricted `web.xml` constraint covers the route and
+    /// no auth signal does: the route is open on purpose.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub public: bool,
     /// Set by `--missing-guard`: sink categories the handler reaches within four call hops.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub sinks_reachable: Vec<&'static str>,
@@ -105,9 +136,19 @@ pub struct CodeGraph {
     pub taint_summaries: Vec<TaintSummaryOut>,
     pub unsupported: BTreeMap<String, usize>,
     pub truncated: bool,
+    /// Java and Kotlin calls left out because their name is defined too often to follow, even after
+    /// ranking the candidates by receiver type, imports and package. Calls to methods defined nowhere
+    /// in the tree (library calls) are not counted; they are in `callStats.external`.
+    pub dropped_calls: usize,
+    /// How the Java and Kotlin calls resolved (additive; absent when there were none).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub call_stats: Option<resolve::CallStats>,
     /// Caveats the consumer should show next to the answer (for example URL-pattern security rules).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<String>,
+    /// Classes of the tree, for the resolver; not serialized.
+    #[serde(skip)]
+    pub types: types::TypeTable,
 }
 
 /// One entry of `taintSummaries`: how a method's parameters reach sinks and its return value,
@@ -205,6 +246,9 @@ struct FileGraph {
     routes: Vec<GraphRoute>,
     notes: Vec<String>,
     taint: Vec<TaintSummaryOut>,
+    security: security::FileSecurity,
+    classes: Vec<types::ClassDef>,
+    scope: types::FileScope,
 }
 
 struct Ctx<'a> {
@@ -262,6 +306,8 @@ impl<'a> Ctx<'a> {
             sink,
             auth,
             receiver_type: None,
+            recv: None,
+            cand: None,
         });
     }
 }
@@ -432,6 +478,8 @@ fn js_route(ctx: &mut Ctx, call: Node, callee: Node, _current: &str) {
         middleware,
         framework: "express-like",
         auth_signals: vec![],
+        auth_sources: vec![],
+        public: false,
         sinks_reachable: vec![],
         missing_guard: None,
     });
@@ -581,6 +629,8 @@ fn py_routes(ctx: &mut Ctx, func: Node, decorated: Node, id: &str) {
                 middleware: middleware.clone(),
                 framework: "flask-fastapi",
                 auth_signals: vec![],
+                auth_sources: vec![],
+                public: false,
                 sinks_reachable: vec![],
                 missing_guard: None,
             });
@@ -593,6 +643,9 @@ fn py_routes(ctx: &mut Ctx, func: Node, decorated: Node, id: &str) {
 pub struct GraphOptions {
     /// Fill `taintSummaries` from the Java taint engine (slower: one analysis per parameter and rule).
     pub taint_summaries: bool,
+    /// Resolve calls by name and declared receiver type only, as the first version did. For
+    /// comparing the resolver against its predecessor.
+    pub legacy_resolution: bool,
 }
 
 enum FileOutcome {
@@ -647,6 +700,9 @@ fn graph_file(
             fg.taint = java_summaries(rel, source, tree.root_node());
         }
         return FileOutcome::Graph(Box::new(fg));
+    }
+    if lang == Language::Kotlin {
+        return FileOutcome::Graph(Box::new(kotlin::extract(rel, source, tree.root_node())));
     }
     let (lang_name, is_js) = match lang {
         Language::JavaScript => ("javascript", true),
@@ -800,7 +856,9 @@ pub fn mark_missing_guards(g: &mut CodeGraph) {
     let mut cache = NarrowCache::default();
     for c in &g.calls {
         from.entry(c.from.as_str()).or_default().push(c);
-        cache.fill(&by_name, c);
+        if c.cand.is_none() {
+            cache.fill(&by_name, c);
+        }
     }
     let marks: Vec<(bool, Vec<&'static str>)> = g
         .routes
@@ -826,7 +884,11 @@ pub fn mark_missing_guards(g: &mut CodeGraph) {
                                 sinks.push(s.category);
                             }
                         }
-                        if let Some(targets) = cache.get(c) {
+                        if let Some(cand) = &c.cand {
+                            if cand.len() <= MAX_NAME_FANOUT {
+                                next.extend(cand.iter().map(|&i| g.symbols[i as usize].id.as_str()));
+                            }
+                        } else if let Some(targets) = cache.get(c) {
                             if targets.len() <= MAX_NAME_FANOUT {
                                 next.extend(targets.iter().map(|s| s.id.as_str()));
                             }
@@ -869,8 +931,12 @@ pub fn build_graph_with(root: &Path, opts: &GraphOptions) -> CodeGraph {
         taint_summaries: vec![],
         unsupported: BTreeMap::new(),
         truncated: false,
+        dropped_calls: 0,
+        call_stats: None,
         notes: vec![],
+        types: types::TypeTable::default(),
     };
+    let mut web_paths: Vec<std::path::PathBuf> = Vec::new();
     let mut paths: Vec<_> = WalkBuilder::new(root)
         .hidden(true)
         .filter_entry(|e| {
@@ -885,12 +951,16 @@ pub fn build_graph_with(root: &Path, opts: &GraphOptions) -> CodeGraph {
     paths.sort();
     let mut jobs: Vec<(std::path::PathBuf, Language)> = Vec::new();
     for path in paths {
+        if path.file_name().and_then(|n| n.to_str()) == Some("web.xml") {
+            web_paths.push(path);
+            continue;
+        }
         let Some(lang) = detect_language(&path) else {
             continue;
         };
         let supported = matches!(
             lang,
-            Language::JavaScript | Language::Python | Language::Java
+            Language::JavaScript | Language::Python | Language::Java | Language::Kotlin
         );
         let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
         if name.ends_with(".d.ts") || name.contains(".min.") {
@@ -937,10 +1007,34 @@ pub fn build_graph_with(root: &Path, opts: &GraphOptions) -> CodeGraph {
         Err(_) => jobs.iter().map(work).collect(),
     };
 
+    let mut secs: Vec<security::FileSecurity> = Vec::new();
+    let mut classes: Vec<types::ClassDef> = Vec::new();
+    let mut scopes: HashMap<String, types::FileScope> = HashMap::new();
+    let mut webs: Vec<security::WebXml> = Vec::new();
+    let web_xmls: Vec<security::WebXml> = web_paths
+        .iter()
+        .filter_map(|p| {
+            let meta = std::fs::metadata(p).ok()?;
+            if meta.len() > MAX_FILE_BYTES {
+                return None;
+            }
+            let text = String::from_utf8_lossy(&std::fs::read(p).ok()?).into_owned();
+            let rel = p.strip_prefix(root).unwrap_or(p).to_string_lossy().replace('\\', "/");
+            Some(security::parse_web_xml(&rel, &text))
+        })
+        .collect();
     for outcome in results {
         match outcome {
             FileOutcome::Graph(fg) => {
                 g.files += 1;
+                let fg = *fg;
+                if !fg.security.is_empty() {
+                    secs.push(fg.security);
+                }
+                classes.extend(fg.classes);
+                if let Some(first) = fg.symbols.first() {
+                    scopes.insert(first.file.clone(), fg.scope);
+                }
                 g.symbols.extend(fg.symbols);
                 g.calls.extend(fg.calls);
                 g.routes.extend(fg.routes);
@@ -956,30 +1050,20 @@ pub fn build_graph_with(root: &Path, opts: &GraphOptions) -> CodeGraph {
         }
     }
 
-    // Java calls to names defined nowhere in the tree (JDK and library methods) would dominate the
-    // output, and so would calls to names defined in dozens of places (`get`, `add`, `toString`), which
-    // a by-name join cannot tell apart. Keep a Java call only when it joins a modest number of
-    // symbols, or is a sink or an auth signal.
-    let java_by_name = index_by_name(g.symbols.iter().filter(|s| s.language == "java"));
-    if !java_by_name.is_empty() {
-        let mut cache = NarrowCache::default();
-        for c in &g.calls {
-            cache.fill(&java_by_name, c);
-        }
-        let keep: Vec<bool> = g
-            .calls
-            .iter()
-            .map(|c| {
-                !c.file.ends_with(".java")
-                    || c.sink.is_some()
-                    || c.auth
-                    || cache
-                        .get(c)
-                        .is_some_and(|narrowed| (1..=MAX_JAVA_NAME_DEFS).contains(&narrowed.len()))
-            })
-            .collect();
-        let mut keep = keep.into_iter();
-        g.calls.retain(|_| keep.next().unwrap_or(true));
+    // Security rules outside annotations are joined to the routes of the whole tree.
+    for w in web_xmls {
+        webs.push(w);
+    }
+    security::apply(&mut g, secs, webs);
+    g.types = types::TypeTable::build(classes, scopes);
+
+    // Java and Kotlin calls to names defined nowhere in the tree (JDK and library methods) would
+    // dominate the output, and so would calls to names defined in dozens of places (`get`, `add`,
+    // `toString`) that neither the receiver's type nor the file's imports and package can tell apart.
+    if opts.legacy_resolution {
+        legacy_prune(&mut g);
+    } else {
+        resolve_jvm_calls(&mut g);
     }
     if g.calls.len() > MAX_CALLS {
         g.calls.truncate(MAX_CALLS);
@@ -997,6 +1081,100 @@ pub fn build_graph_with(root: &Path, opts: &GraphOptions) -> CodeGraph {
     }
     resolve_refs(&mut g);
     g
+}
+
+/// Resolve every Java and Kotlin call against the types of the tree and keep the ones that join a
+/// bounded number of symbols (or are sinks or auth signals); count what is given up.
+fn resolve_jvm_calls(g: &mut CodeGraph) {
+    let index = resolve::SymIndex::new(&g.symbols, true);
+    if index.is_empty() {
+        return;
+    }
+    let verdicts: Vec<resolve::Verdict> = {
+        let resolver = resolve::Resolver {
+            symbols: &g.symbols,
+            index: &index,
+            table: &g.types,
+        };
+        g.calls
+            .par_iter()
+            .map_init(HashMap::new, |memo, c| resolver.decide(c, memo))
+            .collect()
+    };
+    let mut stats = resolve::CallStats::default();
+    let mut dropped = 0usize;
+    let mut it = verdicts.into_iter();
+    g.calls.retain_mut(|c| {
+        let Some(v) = it.next() else { return true };
+        use resolve::Kind;
+        match v.kind {
+            Kind::NotJvm => return true,
+            Kind::External => stats.external += 1,
+            Kind::Resolved => stats.resolved += 1,
+            Kind::Ambiguous => stats.ambiguous += 1,
+            Kind::Ranked => stats.ranked += 1,
+            Kind::Dropped => {}
+        }
+        stats.jvm_calls += 1;
+        if !v.keep {
+            if v.kind == Kind::Dropped {
+                dropped += 1;
+            }
+            return false;
+        }
+        if v.receiver_type.is_some() {
+            c.receiver_type = v.receiver_type;
+        }
+        c.cand = v.cand;
+        true
+    });
+    g.dropped_calls = dropped;
+    if stats.jvm_calls > 0 {
+        g.call_stats = Some(stats);
+    }
+}
+
+/// The name-only resolution of the first version of the graph (no type table, no ranking), kept
+/// behind a hidden flag so the improvement can be measured on any tree.
+fn legacy_prune(g: &mut CodeGraph) {
+    let java_by_name = index_by_name(g.symbols.iter().filter(|s| s.language == "java"));
+    if java_by_name.is_empty() {
+        return;
+    }
+    let mut cache = NarrowCache::default();
+    for c in &g.calls {
+        cache.fill(&java_by_name, c);
+    }
+    let mut stats = resolve::CallStats::default();
+    let mut dropped = 0usize;
+    let keep: Vec<bool> = g
+        .calls
+        .iter()
+        .map(|c| {
+            if !c.file.ends_with(".java") {
+                return true;
+            }
+            stats.jvm_calls += 1;
+            let n = cache.get(c).map(|v| v.len()).unwrap_or(0);
+            match n {
+                0 => stats.external += 1,
+                1 => stats.resolved += 1,
+                2..=MAX_JAVA_NAME_DEFS => stats.ambiguous += 1,
+                _ => {}
+            }
+            let keep = c.sink.is_some() || c.auth || (1..=MAX_JAVA_NAME_DEFS).contains(&n);
+            if !keep && n > MAX_JAVA_NAME_DEFS {
+                dropped += 1;
+            }
+            keep
+        })
+        .collect();
+    let mut keep = keep.into_iter();
+    g.calls.retain(|_| keep.next().unwrap_or(true));
+    g.dropped_calls = dropped;
+    if stats.jvm_calls > 0 {
+        g.call_stats = Some(stats);
+    }
 }
 
 #[cfg(test)]
@@ -1258,6 +1436,7 @@ public class S {
             &dir,
             &GraphOptions {
                 taint_summaries: true,
+                ..Default::default()
             },
         );
         let _ = std::fs::remove_dir_all(&dir);
