@@ -24,11 +24,16 @@ case "$mode" in
     [ -z "${BITBUCKET_TOKEN:-}" ] || fail "Do not pass BITBUCKET_TOKEN to the scan step; keep it in a separate publish deployment"
     cd "$clone"
     # The model sees only the scan's credentials and settings, never publisher credentials.
+    # Model provider settings are passed when set: API keys, the provider pin and model, and the AWS settings Amazon Bedrock reads.
+    set --
+    for name in OPENAI_API_KEY OPENAI_BASE_URL ANTHROPIC_API_KEY GOOGLE_API_KEY ZERO_SELECTED_PROVIDER ZERO_MODEL ZERO_BEDROCK_MODEL BEDROCK_BASE_URL \
+      AWS_REGION AWS_DEFAULT_REGION AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_BEARER_TOKEN_BEDROCK AWS_ROLE_ARN AWS_WEB_IDENTITY_TOKEN_FILE AWS_ROLE_SESSION_NAME; do
+      eval "value=\"\${$name:-}\""
+      [ -z "$value" ] || set -- "$@" "$name=$value"
+    done
     exec env -i PATH="$PATH" HOME="${HOME:-/tmp}" \
       GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0="$clone" \
-      SSL_CERT_FILE="${SSL_CERT_FILE:-}" SSL_CERT_DIR="${SSL_CERT_DIR:-}" \
-      OPENAI_API_KEY="${OPENAI_API_KEY:-}" OPENAI_BASE_URL="${OPENAI_BASE_URL:-}" \
-      ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}" GOOGLE_API_KEY="${GOOGLE_API_KEY:-}" \
+      SSL_CERT_FILE="${SSL_CERT_FILE:-}" SSL_CERT_DIR="${SSL_CERT_DIR:-}" "$@" \
       ZERO_ENTERPRISE="${ZERO_ENTERPRISE:-}" DO_NOT_TRACK=1 \
       ZEROCI_BASE_BRANCH="${ZEROCI_BASE_BRANCH:-${BITBUCKET_PR_DESTINATION_BRANCH:-}}" \
       ZEROCI_COMMIT="${ZEROCI_COMMIT:-${BITBUCKET_COMMIT:-}}" ZEROCI_OUT_DIR="$out" \

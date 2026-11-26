@@ -22,7 +22,7 @@ import { Command } from "commander";
 import { buildInventory, untrustedGitConfig } from "@0/engine";
 import { parseScope, THREAT_MODEL_PATH, threatModelPrompt } from "@0/engine/shared";
 import { consoleTransportOptions, type ConsoleClient, type ConsoleTransportOptions } from "../console-client.js";
-import { connect, DEFAULT_SCAN_MODEL, defaultScanDeps, registerScanCommand, waitForThread, type ScanDeps } from "./scan.js";
+import { connect, DEFAULT_SCAN_MODEL, scanModelField, defaultScanDeps, registerScanCommand, waitForThread, type ScanDeps } from "./scan.js";
 import { planScan } from "../scan-plan.js";
 import { DEFAULT_BATCH_SIZE } from "../scan-batched.js";
 import { findingsFromReport, latestScanFindings, loadReportFile, MAX_SCAN_AGE_DAYS, type ScanSnapshot } from "../threat-interview-findings.js";
@@ -227,7 +227,7 @@ async function defaultBase(deps: ThreatModelDeps, repo: string, requested?: stri
 }
 
 async function runThread(client: ConsoleClient, deps: ThreatModelDeps, folder: string, text: string, options: ThreatModelOptions, budget: number, title: string, note: string) {
-  const created = asJson(asJson(await client.request("POST", "/api/console/sessions", { runtime: { model: options.model ?? DEFAULT_SCAN_MODEL }, title: title.slice(0, 120), costCeilingUsd: budget })).session);
+  const created = asJson(asJson(await client.request("POST", "/api/console/sessions", { runtime: { ...scanModelField(options) }, title: title.slice(0, 120), costCeilingUsd: budget })).session);
   const id = String(created.id);
   const path = `/api/console/sessions/${encodeURIComponent(id)}`;
   await client.request("PATCH", `${path}/configuration`, { workspacePath: folder });
@@ -470,7 +470,7 @@ export function registerThreatModelCommand(program: Command, deps: ThreatModelDe
     .option("--output <path>", `Where to write the threat model, relative to the folder, a .md file (default: ${THREAT_MODEL_PATH}); for example THREAT_MODEL.md`)
     .option("--format <format>", "json prints the outcome as JSON")
     .option("--budget <usd>", "Stop when the estimated spend reaches this many USD", String(DEFAULT_BUDGET_USD))
-    .option("--model <model>", `Model for the thread (default: ${DEFAULT_SCAN_MODEL})`)
+    .option("--model <model>", `Model for the thread (default: ${DEFAULT_SCAN_MODEL}; ZERO_MODEL or a pinned provider's default when set)`)
     .option("--timeout <seconds>", "Maximum seconds to wait", String(DEFAULT_TIMEOUT_SECONDS)))
     .addHelpText("after", `\nSections you mark with <!-- human --> are kept unchanged when the file is updated. Later scans take the file with \`0security scan --context ${THREAT_MODEL_PATH}\`.\nExit codes: 0 file written and well formed, 1 not written or malformed, 2 usage error, 3 stopped at the budget or time limit.`)
     .action(async (folder: string | undefined, options: ThreatModelOptions) => {

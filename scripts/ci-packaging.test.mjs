@@ -59,6 +59,20 @@ test('Pipe preserves partial scan artifacts and no-token publishing makes no req
   assert.equal(c.run({ MODE: 'publish' }).status, 0);
   assert.equal(readFileSync(c.log, 'utf8').trim().split('\n').length, 1);
 });
+test('Pipe scan step passes the provider pin, model and AWS settings, and the publisher gets none of them', t => {
+  const c = setup(t, 0);
+  const dump = join(c.dir, 'env.txt');
+  writeFileSync(join(c.dir, 'bin', '0security'), `#!/bin/sh\nenv > '${dump}'\nwhile [ $# -gt 0 ]; do if [ "$1" = -o ]; then printf '%s\\n' '{"findings":[]}' > "$2"; fi; shift; done\n`);
+  chmodSync(join(c.dir, 'bin', '0security'), 0o755);
+  const settings = { ZERO_SELECTED_PROVIDER: 'bedrock', ZERO_MODEL: 'eu.model.example', AWS_REGION: 'eu-central-1', AWS_ROLE_ARN: 'arn:aws:iam::123456789012:role/scan', AWS_WEB_IDENTITY_TOKEN_FILE: '/tmp/token' };
+  assert.equal(c.run(settings).status, 0);
+  const seen = readFileSync(dump, 'utf8');
+  for (const [name, value] of Object.entries(settings)) assert.match(seen, new RegExp(`^${name}=${value.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}$`, 'm'));
+  assert.doesNotMatch(seen, /^(?:OPENAI_API_KEY|AWS_ACCESS_KEY_ID)=/m);
+  rmSync(dump);
+  c.run({ MODE: 'publish', BITBUCKET_TOKEN: 'publisher-only', ZEROCI_REPO: 'team/repo', ...settings });
+  assert.ok(!existsSync(dump) || !/^(?:ZERO_SELECTED_PROVIDER|ZERO_MODEL|AWS_REGION)=/m.test(readFileSync(dump, 'utf8')));
+});
 test('Jenkins library export creates standard layout and exactly copies canonical trusted scripts', t => {
   const dir = mkdtempSync(join(tmpdir(), '0-jenkins-package-')); t.after(() => rmSync(dir, { recursive: true, force: true })); const out = join(dir, 'export');
   execFileSync('sh', [join(root, 'ci/packaging/package-jenkins-library.sh'), out]);
