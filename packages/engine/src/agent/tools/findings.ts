@@ -67,6 +67,11 @@ export const findingsToolDefinitions: Record<string, ToolDefinition> = {
         description:
           "OPTIONAL exact replacement text for source_start_line..source_end_line. For a diff review, every cited line must be added in the bound patch; read the numbered source before citing it. Do not send a unified diff or markdown fence.",
       },
+      fix_explanation: {
+        type: "string",
+        description:
+          "OPTIONAL, at most 600 characters, plain words, no markdown fence: what to change and why that closes the hole, citing only what is true of this code (names, calls and lines you read). Give it on every finding that has a fix, with or without suggested_replacement. Kept only with source_path.",
+      },
       // 0#170 — optional structured proof-of-concept step graph. When the
       // agent has structured execution data (e.g. it actually ran the curl /
       // docker steps and observed predictable outputs), it can pass them as a

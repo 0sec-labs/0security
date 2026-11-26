@@ -53,7 +53,10 @@ describe.each<Platform>(["bitbucket-cloud", "bitbucket-dc"])("review on %s", pla
     const inline = fake.comments.find(c => c.inline)!;
     expect(inline.inline).toEqual(cloud ? { path: "app/db.py", to: 2 } : { diffType: "EFFECTIVE", fileType: "TO", path: "app/db.py", line: 2, lineType: "ADDED" });
     expect(inline.text).toContain("SQL built from input");
-    expect(inline.text).toContain("Fix: run(query, name)");
+    expect(inline.text).toContain("**What and why:** The query joins user input. An attacker reads the table.");
+    expect(inline.text).toContain("**How to fix:**");
+    expect(inline.text).toContain("```python\nrun(query, [name])\n```");
+    expect(inline.text).toMatch(/Reported by 0\. Review it before you act on it\. \[0-review:/);
     const summary = fake.comments.find(c => !c.inline)!;
     expect(summary.text).toContain("Found 2 issues");
     expect(summary.text).toContain("reviewed 1 changed file");
@@ -76,6 +79,16 @@ describe.each<Platform>(["bitbucket-cloud", "bitbucket-dc"])("review on %s", pla
     expect(fixed).toMatchObject({ status: "reviewed", total: 0, inlineRemoved: 1 });
     expect(fake.comments).toHaveLength(1);
     expect(fake.comments[0]!.text).toContain("No findings");
+  });
+
+  it("uses the fix explanation as the How to fix paragraph and keeps the code block", async () => {
+    const { fake, client, pr } = await setup(platform);
+    const explained = finding({ suggestedFix: { replacement: "run(query, [name])", explanation: "Pass name as a bound parameter so the database never reads it as SQL." } });
+    await reviewPullRequest(pr, { client, runner: runnerOf(() => scan([explained])), state: memory() });
+    const text = fake.comments.find(c => c.inline)!.text;
+    expect(text).toContain("**How to fix:** Pass name as a bound parameter so the database never reads it as SQL.");
+    expect(text).not.toContain("adapt it to the surrounding code");
+    expect(text).toContain("```python\nrun(query, [name])\n```");
   });
 
   it("reads comments and pull requests across pages", async () => {

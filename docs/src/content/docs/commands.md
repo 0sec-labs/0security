@@ -2661,6 +2661,8 @@ Run the scan in a pull request check, then upload the result:
 
 The repository, commit and ref come from the clone (`GITHUB_SHA` and `GITHUB_REF` in Actions). The file is compressed, uploaded with `gh` and checked until GitHub has processed it; a refused file is reported with GitHub's reason. GitHub matches alerts by fingerprint, so an upload for a later commit updates them. `gh` needs permission to write security events (`security-events: write` in Actions).
 
+With `--to jira-cloud` or `--to jira-dc` one Jira issue is created for each open finding (options `--jira-project`, `--jira-issue-type`, `--jira-label`, `--url`, `--dry-run`; credentials in `JIRA_TOKEN`, plus `JIRA_EMAIL` for Cloud). Reruns create only new issues. See [Create Jira issues from findings](/ci/#create-jira-issues-from-findings).
+
 With `--to bitbucket-cloud` or `--to bitbucket-dc` the findings go to Bitbucket Code Insights instead. Upload the file from `0security scan --format json`, which carries the agent's verdict, rationale and fix guidance. With `BITBUCKET_TOKEN` set the report and its annotations are sent; without it the payload is printed. See [Bitbucket, Jenkins and Azure Pipelines](/ci/#bitbucket-jenkins-and-azure-pipelines).
 
 With `--to` set to an https URL, the findings go to your own shared findings server. Set `ZERO_FINDINGS_API_KEY` to a write key from `0security findings keys create <name> --scope write`. Name the repository with `--repo owner/name` (the clone's origin is used when you omit it) and a CI job or machine with `--source`. This needs an enterprise license on the server. See [Collect findings from many repositories](/server-mode/#collect-findings-from-many-repositories).
@@ -2671,10 +2673,14 @@ With `--to` set to an https URL, the findings go to your own shared findings ser
 
 | Option | Registered default | Description |
 | --- | --- | --- |
-| `--to <target>` | `github` | github (default), bitbucket-cloud, bitbucket-dc, or the https URL of a shared findings server (key from ZERO_FINDINGS_API_KEY) |
+| `--to <target>` | `github` | github (default), jira-cloud, jira-dc, bitbucket-cloud, bitbucket-dc, or the https URL of a shared findings server (key from ZERO_FINDINGS_API_KEY) |
 | `--source <label>` | — | Shared findings server: name of this CI job or machine (default: the key's name) |
-| `--url <url>` | — | Bitbucket Data Center base URL (default: BITBUCKET_URL) |
+| `--url <url>` | — | Bitbucket Data Center base URL (default: BITBUCKET_URL); Jira site URL (default: JIRA_URL) |
 | `--report-id <id>` | `0-security` | Bitbucket report id or key |
+| `--jira-project <key>` | — | Jira: project key for the new issues (default: JIRA_PROJECT) |
+| `--jira-issue-type <name>` | `Task` | Jira: issue type name |
+| `--jira-label <label>` | — | Jira: extra label on every issue (repeatable) |
+| `--dry-run` | — | Jira: print the issues that would be created and send nothing |
 | `--print` | — | Bitbucket: print the report and annotation payload instead of posting it (also the behaviour without BITBUCKET_TOKEN) |
 | `--allow-insecure-http` | — | Bitbucket and shared findings server: allow sending the token or key to an http:// URL that is not on this machine (default: refuse) |
 | `--repo <owner/name>` | — | Repository (default: the current clone's); Bitbucket: workspace/repo or PROJECT/repo |
@@ -4229,9 +4235,38 @@ Review Bitbucket pull requests from this machine (Cloud and Data Center).
 0security sentinels bitbucket
 ```
 
-Subcommands: [review](#sentinels-bitbucket-review) · [watch](#sentinels-bitbucket-watch).
+Subcommands: [review](#sentinels-bitbucket-review) · [watch](#sentinels-bitbucket-watch) · [doctor](#sentinels-bitbucket-doctor).
 
 Both commands scan what a pull request changes, publish a Code Insights report and keep one summary comment up to date. See [Review Bitbucket pull requests on your own machine](/ci/#review-bitbucket-pull-requests-on-your-own-machine).
+
+#### sentinels bitbucket doctor
+
+Check that a Bitbucket Sentinel will work before a review fails halfway: token, scopes, Code Insights, clone, model key and webhook settings.
+
+```text
+0security sentinels bitbucket doctor [options]
+```
+
+```bash
+export BITBUCKET_TOKEN=...
+0security sentinels bitbucket doctor --platform cloud --repo acme/app --checkout ~/code/app
+0security sentinels bitbucket doctor --platform dc --repo PROJ/app --url https://bitbucket.example.com --read-only
+```
+
+Each check prints PASS, FAIL or SKIP, then one `Next step:` line names the first thing to fix. A rejected token, a missing scope and a repository the token cannot see get different messages. The token is shown only as set and its length. The command exits 1 when a required check fails and 2 for bad options. Unless you pass `--read-only`, it creates a throw-away Code Insights report named `0-doctor-<random>` on the repository's latest commit and deletes it again. It posts and deletes a marker comment only when you pass `--pr`. See [Check your setup first](/ci/) for what each check means.
+
+| Option | Registered default | Description |
+| --- | --- | --- |
+| `--platform <platform>` **required** | — | cloud or dc (Data Center) |
+| `--repo <repo>` **required** | — | workspace/repo on Cloud, PROJECT/repo on Data Center |
+| `--url <url>` | — | Data Center base URL (default: BITBUCKET_URL) |
+| `--checkout <folder>` | — | Also check this local clone: its origin must be the Bitbucket repository and git ls-remote must work |
+| `--pr <number>` | — | Also post and delete a marker comment on this pull request |
+| `--read-only` | — | Write nothing: skip the Code Insights report test |
+| `--listen <host:port>` | — | The address you plan to give watch --listen |
+| `--allow-insecure-http` | — | Send the token to an http:// URL that is not on this machine (default: refuse) |
+| `--json` | — | Print JSON |
+| `--format <format>` | — | Output: text or json Choices: text, json. |
 
 #### sentinels bitbucket review
 

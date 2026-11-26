@@ -376,7 +376,7 @@ The JSON report has `schemaVersion: 1` and these fields:
 - `warnings`: present when a scan found nothing and its tool calls never named some source files. It lists the files that were not opened. The status stays `complete`: the check reads the commands the model ran, so it can miss a file read by a method it does not recognise. Run the scan again, or use `--passes 2`.
 - `target`: the folder's name, or the git URL without credentials. It is the same on every machine.
 - With `--passes`: `passes` (asked for, finished, failed) and every pass's `threadIds`.
-- For each finding: `severity`, `category`, `location` (path relative to the scanned folder, with start and end line), `evidence`, and `foundInPasses` with `--passes`. `cvssScore` and `suggestedFix` appear when the scan gave them.
+- For each finding: `severity`, `category`, `location` (path relative to the scanned folder, with start and end line), `evidence`, and `foundInPasses` with `--passes`. `cvssScore` and `suggestedFix` appear when the scan gave them. `suggestedFix` has `replacement` (code for the cited lines) and `explanation` (up to 600 characters of plain advice on what to change and why); either can be absent, and reports from older scans have no `explanation`.
 
 A finding's `fingerprint` is a hash of its file and first line, so the same place in unchanged code keeps it from scan to scan. It is absent when the finding cites no location. A model does not cite exactly the same lines every run, so match findings between scans by file and nearby lines.
 

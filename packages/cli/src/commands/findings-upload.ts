@@ -13,6 +13,7 @@ import { runGh } from "../host/gh.js";
 import { selectHost } from "../host/index.js";
 import { buildCodeInsights, postCodeInsights, readInsightFindings, type CodeInsightsPlatform, type FetchLike } from "../code-insights.js";
 import { finishWithError, UsageError } from "./output.js";
+import { runJiraExport } from "../jira/export.js";
 import { isServerTarget, runServerUpload, serverUploadDefaults } from "./findings-server-upload.js";
 
 const exec = promisify(execFile);
@@ -73,7 +74,7 @@ export function withoutOutOfScope(text: string): { text: string; dropped: number
   return dropped ? { text: JSON.stringify(document), dropped } : { text, dropped: 0 };
 }
 
-export interface UploadOptions { includeOutOfScope?: boolean; repo?: string; commit?: string; ref?: string; wait: boolean; tool?: string; format?: string; to?: string; url?: string; source?: string; reportId?: string; print?: boolean; allowInsecureHttp?: boolean }
+export interface UploadOptions { includeOutOfScope?: boolean; repo?: string; commit?: string; ref?: string; wait: boolean; tool?: string; format?: string; to?: string; url?: string; source?: string; reportId?: string; print?: boolean; allowInsecureHttp?: boolean; jiraProject?: string; jiraIssueType?: string; jiraLabel?: string[]; dryRun?: boolean }
 
 const BITBUCKET_TARGETS: Record<string, CodeInsightsPlatform> = { "bitbucket-cloud": "bitbucket-cloud", "bitbucket-dc": "bitbucket-dc" };
 const SLUG = /^[A-Za-z0-9._~-]{1,200}$/;
@@ -85,7 +86,7 @@ const REPORT_ID = /^[A-Za-z0-9._-]{1,100}$/;
  */
 export async function runBitbucketUpload(file: string, options: UploadOptions, deps: UploadDeps = defaults): Promise<{ published: boolean; total: number; emitted: number; dropped: number; requests?: number }> {
   const platform = BITBUCKET_TARGETS[options.to ?? ""];
-  if (!platform) throw new UsageError("--to must be github, bitbucket-cloud or bitbucket-dc.");
+  if (!platform) throw new UsageError("--to must be github, jira-cloud, jira-dc, bitbucket-cloud or bitbucket-dc.");
   const env = deps.env ?? process.env;
   let findings;
   try {
@@ -166,12 +167,16 @@ export async function runUpload(file: string, options: UploadOptions, deps: Uplo
 
 export function registerFindingsUploadCommand(parent: Command, deps: UploadDeps = defaults): void {
   parent.command("upload")
-    .description("Upload findings to GitHub code scanning (SARIF), to Bitbucket Code Insights (scan JSON or SARIF) or to a shared findings server (SARIF or scan JSON)")
+    .description("Upload findings to GitHub code scanning (SARIF), to Jira (one issue per open finding), to Bitbucket Code Insights (scan JSON or SARIF) or to a shared findings server (SARIF or scan JSON)")
     .argument("<file>", "SARIF 2.1.0 file from `0security scan --format sarif -o scan.sarif`; for Bitbucket also `0security scan --format json -o scan.json`")
-    .option("--to <target>", "github (default), bitbucket-cloud, bitbucket-dc, or the https URL of a shared findings server (key from ZERO_FINDINGS_API_KEY)", "github")
+    .option("--to <target>", "github (default), jira-cloud, jira-dc, bitbucket-cloud, bitbucket-dc, or the https URL of a shared findings server (key from ZERO_FINDINGS_API_KEY)", "github")
     .option("--source <label>", "Shared findings server: name of this CI job or machine (default: the key's name)")
-    .option("--url <url>", "Bitbucket Data Center base URL (default: BITBUCKET_URL)")
+    .option("--url <url>", "Bitbucket Data Center base URL (default: BITBUCKET_URL); Jira site URL (default: JIRA_URL)")
     .option("--report-id <id>", "Bitbucket report id or key", "0-security")
+    .option("--jira-project <key>", "Jira: project key for the new issues (default: JIRA_PROJECT)")
+    .option("--jira-issue-type <name>", "Jira: issue type name", "Task")
+    .option("--jira-label <label>", "Jira: extra label on every issue (repeatable)", (value: string, previous: string[] = []) => [...previous, value])
+    .option("--dry-run", "Jira: print the issues that would be created and send nothing")
     .option("--print", "Bitbucket: print the report and annotation payload instead of posting it (also the behaviour without BITBUCKET_TOKEN)")
     .option("--allow-insecure-http", "Bitbucket and shared findings server: allow sending the token or key to an http:// URL that is not on this machine (default: refuse)")
     .option("--repo <owner/name>", "Repository (default: the current clone's); Bitbucket: workspace/repo or PROJECT/repo")
@@ -187,6 +192,14 @@ export function registerFindingsUploadCommand(parent: Command, deps: UploadDeps 
           const sent = await runServerUpload(options.includeOutOfScope ? deps.readText(file) : withoutOutOfScope(deps.readText(file)).text, { ...options, to: options.to! }, { ...(deps.fetch ? { fetch: deps.fetch as never } : {}), ...(deps.env ? { env: deps.env } : {}), git: deps.git ?? serverUploadDefaults.git });
           if (options.format === "json") deps.out(JSON.stringify(sent));
           else deps.out(sent.alreadyImported ? `Already sent: this exact file was uploaded before (${sent.total} finding${sent.total === 1 ? "" : "s"} for ${sent.repo}).` : `Sent ${sent.total} finding${sent.total === 1 ? "" : "s"} for ${sent.repo}: ${sent.created} new, ${sent.known} already known.`);
+          return;
+        }
+        if (options.to === "jira-cloud" || options.to === "jira-dc") {
+          const jira = await runJiraExport(file, { to: options.to, ...(options.jiraProject ? { project: options.jiraProject } : {}), ...(options.jiraIssueType ? { issueType: options.jiraIssueType } : {}), ...(options.jiraLabel ? { labels: options.jiraLabel } : {}), ...(options.url ? { url: options.url } : {}), ...(options.dryRun ? { dryRun: true } : {}), ...(options.allowInsecureHttp ? { allowInsecureHttp: true } : {}) },
+            { env: deps.env ?? process.env, fetch: deps.fetch ?? ((url, init) => fetch(url, init)), readText: deps.readText });
+          if (options.format === "json") deps.out(JSON.stringify(jira, null, 2));
+          else if (jira.dryRun) { deps.out(`Dry run: ${jira.planned!.length} Jira issue(s) would be created; ${jira.skipped} suppressed, fixed or false-positive finding(s) skipped. Nothing was sent.`); for (const issue of jira.planned!) deps.out(`  [${issue.labels[1]}] ${issue.summary} (${issue.label})`); }
+          else deps.out(`Jira: created ${jira.created.length} issue(s)${jira.created.length ? ` (${jira.created.map(c => c.key).join(", ")})` : ""}; ${jira.existing.length} already had one (${jira.existing.map(e => e.key).join(", ") || "none"}); ${jira.skipped} suppressed, fixed or false-positive finding(s) skipped.`);
           return;
         }
         if (options.to && options.to !== "github") {

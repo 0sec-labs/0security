@@ -54,13 +54,37 @@ const bySeverity = (a: InsightFinding, b: InsightFinding) => SEVERITY_ORDER.inde
 const marker = (reportId: string, key: string) => `[0-review:${reportId}:${key}]`;
 export const findingKey = (finding: InsightFinding): string => createHash("sha256").update(`${finding.path ?? ""}\n${finding.line}\n${finding.cwe ?? finding.ruleId}`).digest("hex").slice(0, 12);
 
+const FENCE_LANGUAGE: Record<string, string> = { java: "java", kt: "kotlin", py: "python", js: "javascript", ts: "typescript", tsx: "tsx", jsx: "jsx", go: "go", rb: "ruby", php: "php", cs: "csharp", rs: "rust", xml: "xml", yml: "yaml", yaml: "yaml", sql: "sql", sh: "bash" };
+const MAX_FIX_CHARS = 1200;
+
+/** The suggested code in a fence the code itself cannot close early. Markdown inside a fence is shown as text, so it is not rewritten. */
+function fixBlock(fix: string, path?: string): string {
+  const code = fix.replace(/^Suggested replacement:\s*/, "").replace(/\r\n?/g, "\n").replace(/\s+$/, "");
+  if (!code.trim()) return "";
+  const clipped = code.length > MAX_FIX_CHARS ? `${code.slice(0, MAX_FIX_CHARS).replace(/\n[^\n]*$/, "")}\n...` : code;
+  const fence = "`".repeat(Math.max(3, ...(clipped.match(/`+/g) ?? []).map(run => run.length + 1)));
+  const language = FENCE_LANGUAGE[(path?.split(".").pop() ?? "").toLowerCase()] ?? "";
+  return `${fence}${language}\n${clipped}\n${fence}`;
+}
+
+/**
+ * One inline comment: what is wrong and why, how to fix it in words, then the code change in a fence. Bitbucket Cloud and
+ * Data Center both render fenced code in comments. The marker and the "Reported by 0" line stay last, as the update and
+ * removal logic find the comment by that marker.
+ */
 function inlineBody(reportId: string, finding: InsightFinding): string {
   const lines = [`**${finding.severity.toUpperCase()}**: ${oneLine(finding.title, 160)}`];
   const meta = [oneLine(finding.ruleId, 80), finding.cwe].filter(Boolean).join(", ");
   if (meta) lines.push(`Rule: ${meta}`);
   if (finding.verdict) lines.push(`Verdict: ${oneLine(finding.verdict, 80)}`);
-  if (finding.rationale) lines.push(oneLine(finding.rationale, 600));
-  if (finding.fix) lines.push(`Fix: ${oneLine(finding.fix.replace(/^Suggested replacement:\s*/, ""), 600)}`);
+  const description = oneLine(finding.description ?? "", 500);
+  const rationale = oneLine(finding.rationale ?? "", 600);
+  const why = [description, rationale && rationale !== description ? rationale : ""].filter(Boolean).join(" ");
+  if (why) lines.push(`**What and why:** ${why}`);
+  const block = finding.fix ? fixBlock(finding.fix, finding.path) : "";
+  const explanation = oneLine(finding.fixExplanation ?? "", 600);
+  if (explanation) lines.push(`**How to fix:** ${explanation}`, ...(block ? ["Suggested change:", block] : []));
+  else if (block) lines.push("**How to fix:** replace the flagged code with the change below, adapt it to the surrounding code, then run the review again to confirm the finding is gone.", block);
   lines.push("", `Reported by 0. Review it before you act on it. ${marker(reportId, findingKey(finding))}`);
   return lines.join("\n\n").replace(/\n\n\n/g, "\n\n");
 }

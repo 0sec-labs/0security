@@ -309,6 +309,33 @@ describe("ToolExecutor", () => {
     }
   });
 
+  it("finding keeps a bounded fix_explanation in the annotation and rejects an over-long one", async () => {
+    const root = mkdtempSync(join(tmpdir(), "0-fix-explanation-"));
+    try {
+      writeFileSync(join(root, "parser.ts"), "unsafe(input)\n");
+      ctx.scopePath = root;
+      const base = {
+        title: "Unvalidated parser input", severity: "high", category: "missing-validation",
+        description: "Input reaches the parser without validation.", evidence_request: "parser.ts:1",
+        evidence_response: "unsafe(input)", source_path: "parser.ts", source_start_line: 1,
+      };
+      const tooLong = await executor.execute({ name: "finding", arguments: { ...base, fix_explanation: "x".repeat(601) } });
+      expect(tooLong.success).toBe(false);
+      expect(tooLong.error).toContain("fix_explanation");
+      const notText = await executor.execute({ name: "finding", arguments: { ...base, fix_explanation: { a: 1 } } });
+      expect(notText.success).toBe(false);
+      expect(ctx.findings).toHaveLength(0);
+      const ok = await executor.execute({ name: "finding", arguments: { ...base, fix_explanation: "  Validate the input before it reaches unsafe(), so a crafted value is refused.  " } });
+      expect(ok.success).toBe(true);
+      expect(ctx.findings[0]?.reviewAnnotation).toEqual({
+        path: "parser.ts", startLine: 1,
+        fixExplanation: "Validate the input before it reaches unsafe(), so a crafted value is refused.",
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("rejects a suggested replacement cited on context instead of the changed line", async () => {
     const root = mkdtempSync(join(tmpdir(), "0-diff-suggestion-"));
     try {

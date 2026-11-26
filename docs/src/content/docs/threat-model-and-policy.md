@@ -22,8 +22,17 @@ The file has a fixed structure:
 
 - Front matter with `title`, `generated` (date), `commit`, `generator` and `status: draft`.
 - These sections, in order: Summary, What matters most, Assets, Actors, Trust boundaries, Entry points, Authorization and business rules, Data flows, Open questions.
+- A last section, Threat map, with a diagram (see below).
 
 The file names only what the thread saw, with `path:line`. Anything the code does not say is written as `unknown: confirm with the team` and listed under Open questions.
+
+### Threat map
+
+The last section, `## Threat map`, is a [Mermaid](https://mermaid.js.org) flowchart for readers who do not read code. It shows the components, external actors and data stores the other sections name, one subgraph per trust boundary, and arrows for the main data flows. Entry points with no authorization check seen are outlined in red. The web console and GitHub render Mermaid, so you can read the diagram in a pull request.
+
+The diagram is drawn from the same text as the sections above, so it shows what the thread saw and nothing more. It shows no findings: the draft records none.
+
+After the draft, 0 checks the diagram and prints a `note: diagram: ...` line if it looks wrong, for example a missing section, an unclosed code fence, a block that does not start with `flowchart`, or a `subgraph` without `end`. These notes are warnings only and do not change the exit code. 0 does not check that the diagram renders, so open the file's preview before you merge.
 
 ### Review and keep your edits
 

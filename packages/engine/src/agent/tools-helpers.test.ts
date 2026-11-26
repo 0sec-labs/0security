@@ -32,6 +32,16 @@ describe("findMatchingFindingCandidate by location", () => {
     expect(findMatchingFindingCandidate([stored], at("n", "different words", "a.js", 8, undefined, "ssrf"), { byLocation: true })?.id).toBe("row");
   });
 
+  it("keeps findings that name different advisories apart, even on one manifest line", () => {
+    const existing = [at("a", "[not-reached] snakeyaml 1.30: GHSA-3mc7-4q67-w48m", "pom.xml", 6, undefined, "vulnerable-dependency")];
+    const options = { byLocation: true };
+    expect(findMatchingFindingCandidate(existing, at("b", "[not-reached] snakeyaml 1.30: GHSA-98wm-3w3q-mw94", "pom.xml", 6, undefined, "vulnerable-dependency"), options)).toBeUndefined();
+    // Same evidence request and near-identical titles must not merge through the fuzzy-title rule either.
+    const near = (id: string, advisory: string) => ({ id, title: `[not-reached] snakeyaml 1.30: ${advisory}`, category: "vulnerable-dependency", evidenceRequest: "pom.xml advisory check", reviewAnnotation: { path: "pom.xml", startLine: 6 } });
+    expect(findMatchingFindingCandidate([near("x", "GHSA-3mc7-4q67-w48m")], near("y", "GHSA-98wm-3w3q-mw94"))).toBeUndefined();
+    expect(findMatchingFindingCandidate(existing, at("c", "snakeyaml 1.30 again: GHSA-3MC7-4Q67-W48M", "pom.xml", 6, undefined, "vulnerable-dependency"), options)?.id).toBe("a");
+  });
+
   it("does nothing by location unless asked, so the older behaviour is unchanged", () => {
     const existing = [at("a", "Server-side JavaScript injection", "app/routes/contributions.js", 32)];
     expect(findMatchingFindingCandidate(existing, at("b", "Totally different title", "app/routes/contributions.js", 32))).toBeUndefined();

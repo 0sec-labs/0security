@@ -63,7 +63,7 @@ content: |
 
   ### 6. Record
 
-  Call `finding` once for each broken assumption with: a title that names the assumption and the caller that breaks it; severity from the impact and how easy it is to reach; one of the listed categories (missing authorization, injection and similar fit most); `source_path`, `source_start_line` and `source_end_line` for the function or the offending caller; the assumption, the chain, the evidence and the impact in the description; and a `suggested_replacement` that establishes the assumption at the right place, in the function when every caller needs it. One root cause with several callers is one finding listing the callers.
+  Call `finding` once for each broken assumption with: a title that names the assumption and the caller that breaks it; severity from the impact and how easy it is to reach; one of the listed categories (missing authorization, injection and similar fit most); `source_path`, `source_start_line` and `source_end_line` for the function or the offending caller; the assumption, the chain, the evidence and the impact in the description; and a `suggested_replacement` together with `fix_explanation` (at most 600 characters, plain words: what to change and why it closes the hole, using only names and lines you read) that establishes the assumption at the right place, in the function when every caller needs it. One root cause with several callers is one finding listing the callers.
 
   ### 7. Finish
 

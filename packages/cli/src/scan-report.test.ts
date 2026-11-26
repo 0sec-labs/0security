@@ -22,6 +22,14 @@ describe("scanJson", () => {
     expect(report.counts).toEqual({ total: 1, critical: 0, high: 1, medium: 0, low: 0, info: 0 });
     expect(report.findings[0]).toMatchObject({ id: "f1", fingerprint: locationKey("src/users.ts", 12), title: "SQL injection in /users", severity: "high", category: "sql-injection", location: { path: "src/users.ts", startLine: 12, endLine: 14 }, cvssScore: 8.1, suggestedFix: { replacement: "db.query('select 1 where id = ?', [id])" } });
   });
+  it("carries the fix explanation next to, or without, the replacement", () => {
+    const withBoth = scanJson(outcome, [stored({ reviewAnnotation: { path: "src/users.ts", startLine: 12, suggestion: "x()", fixExplanation: "Bind the id as a parameter." } })]) as Record<string, any>;
+    expect(withBoth.findings[0].suggestedFix).toEqual({ replacement: "x()", explanation: "Bind the id as a parameter." });
+    const only = scanJson(outcome, [stored({ reviewAnnotation: { path: "src/users.ts", startLine: 12, fixExplanation: "Bind the id as a parameter." } })]) as Record<string, any>;
+    expect(only.findings[0].suggestedFix).toEqual({ explanation: "Bind the id as a parameter." });
+    const none = scanJson(outcome, [stored({ reviewAnnotation: { path: "src/users.ts", startLine: 12 } })]) as Record<string, any>;
+    expect(none.findings[0].suggestedFix).toBeUndefined();
+  });
   it("falls back to the analysis when a finding has no description", () => {
     expect((scanJson(outcome, [stored()]) as Record<string, any>).findings[0].description).toBe("id reaches the query");
   });
@@ -171,6 +179,12 @@ describe("mergePasses", () => {
     const plain = f("b", "models/user_model.py", 72, { title: "User passwords are stored and compared in plaintext", category: "other", reviewAnnotation: { path: "models/user_model.py", startLine: 72, endLine: 73 } });
     expect(mergePasses([[sql, plain]])).toHaveLength(2);
     expect(mergePasses([[sql], [plain]])).toHaveLength(2);
+  });
+  it("keeps findings for different advisories on one manifest line as separate records", () => {
+    const dep = (id: string, advisory: string) => f(id, "pom.xml", 6, { title: `[not-reached] snakeyaml 1.30: ${advisory}`, category: "supply-chain", severity: "info", reviewAnnotation: { path: "pom.xml", startLine: 6 } });
+    expect(mergePasses([[dep("a", "GHSA-3mc7-4q67-w48m"), dep("b", "GHSA-98wm-3w3q-mw94")]])).toHaveLength(2);
+    expect(mergePasses([[dep("a", "GHSA-3mc7-4q67-w48m")], [dep("b", "GHSA-98wm-3w3q-mw94")]])).toHaveLength(2);
+    expect(mergePasses([[dep("a", "GHSA-3mc7-4q67-w48m")], [dep("b", "GHSA-3mc7-4q67-w48m")]])).toHaveLength(1);
   });
   it("files an old finding under the same category rules as a new one", () => {
     const [only] = mergePasses([[f("a", "api_views/users.py", 60, { title: "Public registration accepts an admin flag and grants administrator privileges", category: "missing-validation" })]]);

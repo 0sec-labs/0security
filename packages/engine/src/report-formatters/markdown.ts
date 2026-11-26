@@ -304,6 +304,11 @@ function formatFinding(finding: Finding): string {
 
   if (finding.remediation) {
     lines.push(...remediationSection(finding.remediation));
+  } else if (finding.reviewAnnotation?.fixExplanation) {
+    lines.push("**How to fix:**");
+    lines.push("");
+    lines.push(finding.reviewAnnotation.fixExplanation);
+    lines.push("");
   }
 
   lines.push("<details>");

@@ -185,6 +185,35 @@ export class BitbucketClient {
     await postCodeInsights(payload, { ...target, ...(this.#baseUrl ? { baseUrl: this.#baseUrl } : {}), ...(this.#cloudApiUrl ? { cloudApiUrl: this.#cloudApiUrl } : {}) }, this.#token, fetcher);
   }
 
+  /** Setup check: read the repository itself. Returns its display name when Bitbucket gives one. */
+  async checkRepository(owner: string, repo: string): Promise<string> {
+    const raw = await this.#json("GET", this.#repoPath(owner, repo));
+    return text(raw["full_name"]) || text(raw["name"]) || `${owner}/${repo}`;
+  }
+
+  /** Setup check: ask for one page of one pull request, which needs only the read scope. Returns how many came back. */
+  async probePullRequests(owner: string, repo: string): Promise<number> {
+    const page = await this.#json("GET", this.platform === "bitbucket-cloud" ? `${this.#repoPath(owner, repo)}/pullrequests?state=OPEN&pagelen=1` : `${this.#repoPath(owner, repo)}/pull-requests?state=OPEN&limit=1`);
+    return Array.isArray(page["values"]) ? page["values"].length : 0;
+  }
+
+  /** Setup check: the hash of the repository's newest commit, or undefined when it has none. */
+  async latestCommit(owner: string, repo: string): Promise<string | undefined> {
+    const cloud = this.platform === "bitbucket-cloud";
+    const page = await this.#json("GET", `${this.#repoPath(owner, repo)}/commits?${cloud ? "pagelen" : "limit"}=1`);
+    const first: unknown = Array.isArray(page["values"]) ? page["values"][0] : undefined;
+    const hash = isRecord(first) ? text(first[cloud ? "hash" : "id"]) : "";
+    return /^[0-9a-f]{40}$/.test(hash) ? hash : undefined;
+  }
+
+  /** Remove a Code Insights report (and its annotations) from a commit. */
+  async deleteInsightsReport(target: { owner: string; repo: string; commit: string; reportId: string }): Promise<void> {
+    this.#repoPath(target.owner, target.repo);
+    const cloud = this.platform === "bitbucket-cloud";
+    const base = cloud ? this.#repoPath(target.owner, target.repo) : `${this.#baseUrl!.replace(/\/+$/, "")}/rest/insights/latest/projects/${part(target.owner)}/repos/${part(target.repo)}`;
+    await this.#send("DELETE", `${base}/${cloud ? "commit" : "commits"}/${part(target.commit)}/reports/${part(target.reportId)}`);
+  }
+
   /** Open pull requests of one repository, at most 1000. */
   async listOpenPullRequests(owner: string, repo: string): Promise<PullRequest[]> {
     const found: PullRequest[] = [];

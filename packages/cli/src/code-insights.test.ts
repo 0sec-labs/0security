@@ -30,6 +30,18 @@ describe("Code Insights payloads", () => {
     for (const text of ["Rule: injection", "CWE: CWE-89", "Verdict: verified, confidence 92%", "Rationale: Any unauthenticated", "Fix: Suggested replacement"]) expect(sql.details).toContain(text);
   });
 
+  it("reads the fix explanation, puts it first in the fix text and keeps it inside the length caps", () => {
+    const document = JSON.stringify({ findings: [{ category: "injection", severity: "high", title: "t", description: "d", location: { path: "a.py", startLine: 3 }, suggestedFix: { replacement: "run(q, [n])", explanation: "Bind n as a parameter so it is never read as SQL." } }] });
+    const [item] = readInsightFindings(document);
+    expect(item!.fixExplanation).toBe("Bind n as a parameter so it is never read as SQL.");
+    const cloud = (buildCodeInsights([item!], "bitbucket-cloud").batches[0] as Array<Record<string, string>>)[0]!;
+    expect(cloud.details).toContain("Fix: Bind n as a parameter so it is never read as SQL.\n\nSuggested replacement:\nrun(q, [n])");
+    const long = { ...item!, fix: `Suggested replacement:\n${"x".repeat(5000)}` };
+    const dc = (buildCodeInsights([long], "bitbucket-dc").batches[0] as { annotations: Array<Record<string, string>> }).annotations[0]!;
+    expect(dc.message!.length).toBeLessThanOrEqual(2000);
+    expect(dc.message).toContain("Fix: Bind n as a parameter");
+  });
+
   it("has no CRITICAL in Data Center and respects its field limits", () => {
     const payload = buildCodeInsights([finding({ severity: "critical", description: "x".repeat(5000) }), finding({ line: 2, severity: "info" })], "bitbucket-dc");
     const annotations = (payload.batches[0] as { annotations: Array<Record<string, string>> }).annotations;

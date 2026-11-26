@@ -1,8 +1,8 @@
 #!/usr/bin/env sh
 # Rehearse the Code Insights recipe on a real Bitbucket Cloud workspace, and print a checklist of what passed.
 #
-# THIS SCRIPT HAS NOT BEEN RUN against Bitbucket Cloud. Its first run is the rehearsal that issue "Rehearse the CI recipe on
-# real Bitbucket Cloud" asks for. It uses a fixture report with three findings, so it needs no model key.
+# Validated against Bitbucket Cloud on 2026-11-25: report, annotations and repeat upload passed.
+# It uses a fixture report with three findings, so it needs no model key.
 #
 #   BITBUCKET_TOKEN      repository access token that can write Code Insights reports
 #   REHEARSAL_REPO       workspace/repo of a test repository
@@ -25,7 +25,7 @@ say() { printf '%s\n' "$*"; }
 ok() { pass=$((pass + 1)); say "  [pass] $*"; }
 bad() { failed=$((failed + 1)); say "  [FAIL] $*"; }
 
-say "Bitbucket Cloud rehearsal (not yet run against a live workspace)"
+say "Bitbucket Cloud rehearsal"
 [ -n "${BITBUCKET_TOKEN:-}" ] || { say "Set BITBUCKET_TOKEN."; exit 2; }
 repo="${REHEARSAL_REPO:-}"
 case "$repo" in */*) ;; *) say "Set REHEARSAL_REPO to workspace/repo."; exit 2 ;; esac
@@ -53,13 +53,35 @@ case "$body" in *'"FAILED"'*) ok "report result is FAILED (it holds findings)" ;
 case "$body" in *'"SECURITY"'*) ok "report type is SECURITY" ;; *) bad "report type is not SECURITY" ;; esac
 
 say "3. Count the annotations"
-count_of() { printf '%s' "$1" | grep -o '"external_id"' | wc -l | tr -d ' '; }
-annotations="$(get "/annotations?pagelen=100" 2>/dev/null || true)"
+# Each annotation also embeds its report.external_id. Count the actual values,
+# rather than occurrences of external_id in the serialized response.
+count_of() {
+  printf '%s' "$1" | node -e '
+    let body = "";
+    process.stdin.on("data", chunk => body += chunk);
+    process.stdin.on("end", () => {
+      try {
+        const page = JSON.parse(body);
+        console.log(Array.isArray(page.values) ? page.values.length : 0);
+      } catch { console.log(0); }
+    });'
+}
+# Cloud annotation reads can lag successful writes by a few seconds.
+read_annotations() {
+  attempt=0
+  while [ "$attempt" -lt 10 ]; do
+    annotations="$(get "/annotations?pagelen=100" 2>/dev/null || true)"
+    [ "$(count_of "$annotations")" -eq 3 ] && return
+    attempt=$((attempt + 1))
+    sleep 1
+  done
+}
+read_annotations
 [ "$(count_of "$annotations")" -eq 3 ] && ok "3 annotations are on the report" || bad "expected 3 annotations, found $(count_of "$annotations")"
 
 say "4. Upload again and check nothing is duplicated"
 if upload; then
-  annotations="$(get "/annotations?pagelen=100" 2>/dev/null || true)"
+  read_annotations
   [ "$(count_of "$annotations")" -eq 3 ] && ok "still 3 annotations after the second upload" || bad "found $(count_of "$annotations") annotations after the second upload"
 else bad "second upload failed"; fi
 

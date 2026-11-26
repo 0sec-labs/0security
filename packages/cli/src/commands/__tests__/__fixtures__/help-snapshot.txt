@@ -1249,37 +1249,42 @@ Options:
 ### 0security findings upload (hidden)
 Usage: 0security findings upload [options] <file>
 
-Upload findings to GitHub code scanning (SARIF), to Bitbucket Code Insights (scan JSON or SARIF) or
-to a shared findings server (SARIF or scan JSON)
+Upload findings to GitHub code scanning (SARIF), to Jira (one issue per open finding), to Bitbucket
+Code Insights (scan JSON or SARIF) or to a shared findings server (SARIF or scan JSON)
 
 Arguments:
-  file                    SARIF 2.1.0 file from `0security scan --format sarif -o scan.sarif`; for
-                          Bitbucket also `0security scan --format json -o scan.json`
+  file                      SARIF 2.1.0 file from `0security scan --format sarif -o scan.sarif`; for
+                            Bitbucket also `0security scan --format json -o scan.json`
 
 Options:
-  --to <target>           github (default), bitbucket-cloud, bitbucket-dc, or the https URL of a
-                          shared findings server (key from ZERO_FINDINGS_API_KEY) (default:
-                          "github")
-  --source <label>        Shared findings server: name of this CI job or machine (default: the key's
-                          name)
-  --url <url>             Bitbucket Data Center base URL (default: BITBUCKET_URL)
-  --report-id <id>        Bitbucket report id or key (default: "0-security")
-  --print                 Bitbucket: print the report and annotation payload instead of posting it
-                          (also the behaviour without BITBUCKET_TOKEN)
-  --allow-insecure-http   Bitbucket and shared findings server: allow sending the token or key to an
-                          http:// URL that is not on this machine (default: refuse)
-  --repo <owner/name>     Repository (default: the current clone's); Bitbucket: workspace/repo or
-                          PROJECT/repo
-  --commit <sha>          Commit the results are for (default: HEAD, or GITHUB_SHA in Actions)
-  --ref <ref>             refs/heads/<branch> or refs/pull/<n>/merge (default: the current branch,
-                          or GITHUB_REF in Actions)
-  --tool <name>           Name the tool shown in GitHub
-  --include-out-of-scope  Also send findings the declared scope (0security scan --scope) labelled
-                          out of scope; they are skipped by default
-  --no-wait               Return when GitHub has accepted the upload instead of waiting for it to be
-                          processed
-  --format <format>       Output: text or json (default: "text")
-  -h, --help              display help for command
+  --to <target>             github (default), jira-cloud, jira-dc, bitbucket-cloud, bitbucket-dc, or
+                            the https URL of a shared findings server (key from
+                            ZERO_FINDINGS_API_KEY) (default: "github")
+  --source <label>          Shared findings server: name of this CI job or machine (default: the
+                            key's name)
+  --url <url>               Bitbucket Data Center base URL (default: BITBUCKET_URL); Jira site URL
+                            (default: JIRA_URL)
+  --report-id <id>          Bitbucket report id or key (default: "0-security")
+  --jira-project <key>      Jira: project key for the new issues (default: JIRA_PROJECT)
+  --jira-issue-type <name>  Jira: issue type name (default: "Task")
+  --jira-label <label>      Jira: extra label on every issue (repeatable)
+  --dry-run                 Jira: print the issues that would be created and send nothing
+  --print                   Bitbucket: print the report and annotation payload instead of posting it
+                            (also the behaviour without BITBUCKET_TOKEN)
+  --allow-insecure-http     Bitbucket and shared findings server: allow sending the token or key to
+                            an http:// URL that is not on this machine (default: refuse)
+  --repo <owner/name>       Repository (default: the current clone's); Bitbucket: workspace/repo or
+                            PROJECT/repo
+  --commit <sha>            Commit the results are for (default: HEAD, or GITHUB_SHA in Actions)
+  --ref <ref>               refs/heads/<branch> or refs/pull/<n>/merge (default: the current branch,
+                            or GITHUB_REF in Actions)
+  --tool <name>             Name the tool shown in GitHub
+  --include-out-of-scope    Also send findings the declared scope (0security scan --scope) labelled
+                            out of scope; they are skipped by default
+  --no-wait                 Return when GitHub has accepted the upload instead of waiting for it to
+                            be processed
+  --format <format>         Output: text or json (default: "text")
+  -h, --help                display help for command
 
 ### 0security findings variants (hidden)
 Usage: 0security findings variants [options] <finding>
@@ -1865,6 +1870,26 @@ Options:
 
 Commands:
   help [command]  display help for command
+
+### 0security sentinels bitbucket doctor (hidden)
+Usage: 0security sentinels bitbucket doctor [options]
+
+Check that a Bitbucket Sentinel will work: token, scopes, Code Insights, clone, model key and
+webhook settings
+
+Options:
+  --platform <platform>  cloud or dc (Data Center)
+  --repo <repo>          workspace/repo on Cloud, PROJECT/repo on Data Center
+  --url <url>            Data Center base URL (default: BITBUCKET_URL)
+  --checkout <folder>    Also check this local clone: its origin must be the Bitbucket repository
+                         and git ls-remote must work
+  --pr <number>          Also post and delete a marker comment on this pull request
+  --read-only            Write nothing: skip the Code Insights report test
+  --listen <host:port>   The address you plan to give watch --listen
+  --allow-insecure-http  Send the token to an http:// URL that is not on this machine (default:
+                         refuse)
+  --format <format>      Output: text or json (choices: "text", "json")
+  -h, --help             display help for command
 
 ### 0security sentinels bitbucket review (hidden)
 Usage: 0security sentinels bitbucket review [options]

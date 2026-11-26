@@ -115,4 +115,24 @@ describe("formatSarif custom rules", () => {
     expect(byId["accepted"].suppressions).toEqual([{ kind: "external", status: "accepted", justification: "vendor patch due", properties: { triage: "accepted", expiresAt: "2026-12-31T23:59:59.999Z", approver: "security lead" } }]);
     expect(byId["open"].suppressions).toBeUndefined();
   });
+
+  it("carries the fix explanation as a SARIF fix and a result property", () => {
+    const report: ScanReport = {
+      target: "/w/app", scanDepth: "quick", startedAt: "", completedAt: "", durationMs: 0, warnings: [],
+      summary: { totalAttacks: 1, totalFindings: 1, critical: 0, high: 1, medium: 0, low: 0, info: 0 },
+      findings: [{
+        id: "f1", templateId: "0:sqli", title: "SQL built from input", description: "d", severity: "high", category: "sql-injection", status: "confirmed",
+        evidence: { request: "", response: "", analysis: "" }, timestamp: 1,
+        reviewAnnotation: { path: "db.py", startLine: 2, endLine: 3, suggestion: "run(query, [name])", fixExplanation: "Pass name as a bound parameter so it is never read as SQL." },
+      }],
+    };
+    const result = JSON.parse(formatSarif(report)).runs[0].results[0];
+    expect(result.properties.fixExplanation).toBe("Pass name as a bound parameter so it is never read as SQL.");
+    expect(result.fixes).toEqual([{
+      description: { text: "Pass name as a bound parameter so it is never read as SQL." },
+      artifactChanges: [{ artifactLocation: { uri: "file:///w/app/db.py" }, replacements: [{ deletedRegion: { startLine: 2, endLine: 3 }, insertedContent: { text: "run(query, [name])\n" } }] }],
+    }]);
+    delete report.findings[0]!.reviewAnnotation!.fixExplanation;
+    expect(JSON.parse(formatSarif(report)).runs[0].results[0].fixes).toBeUndefined();
+  });
 });

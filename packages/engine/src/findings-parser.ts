@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
+import { z } from "zod";
 import type { Finding, Severity } from "./shared/index.js";
 import { derivePocStepsFromEvidence } from "./poc-steps.js";
 
@@ -113,6 +114,18 @@ export function isRepoRelativePath(path: string): boolean {
  */
 export const SUGGESTION_MAX_LENGTH = 20_000;
 
+/** Longest plain-language fix explanation a finding may carry. */
+export const FIX_EXPLANATION_MAX_LENGTH = 600;
+const fixExplanationSchema = z.string().trim().min(1).max(FIX_EXPLANATION_MAX_LENGTH);
+
+/** `undefined` for absent or blank input; `{ error }` when it is not a string or is too long; else the trimmed text. */
+export function parseFixExplanation(value: unknown): { value?: string; error?: string } {
+  if (value === undefined || value === null || (typeof value === "string" && value.trim() === "")) return {};
+  const parsed = fixExplanationSchema.safeParse(value);
+  if (parsed.success) return { value: parsed.data };
+  return { error: `fix_explanation must be plain text of at most ${FIX_EXPLANATION_MAX_LENGTH} characters: what to change and why it closes the hole.` };
+}
+
 /**
  * A suggestion is only attachable when the cloud can store it AND a PR
  * provider can render it. Oversized suggestions are DROPPED, never truncated
@@ -185,10 +198,13 @@ function attachReviewAnnotation(
   suggestion: unknown,
   scopePath: string | undefined,
   valid: boolean,
+  fixExplanation?: unknown,
 ): void {
   if (!valid || !scopePath || typeof fileRef !== "string") return;
   const parsed = parseFileLine(fileRef);
   if (!parsed) return;
+  // An over-long or malformed explanation is dropped here; the finding keeps its location and suggestion.
+  const explanation = parseFixExplanation(fixExplanation).value;
   finding.reviewAnnotation = {
     path: parsed.path,
     startLine: parsed.line,
@@ -197,6 +213,7 @@ function attachReviewAnnotation(
     isSuggestionAcceptable(suggestion)
       ? { suggestion }
       : {}),
+    ...(explanation ? { fixExplanation: explanation } : {}),
   };
 }
 
@@ -272,6 +289,7 @@ function parseJsonOutput(output: string, prefix: string, scopePath?: string): Fi
             f.suggested_replacement ?? f.suggestedReplacement,
             scopePath,
             validation.valid,
+            f.fix_explanation ?? f.fixExplanation,
           );
 
           if (!validation.valid) {
@@ -310,6 +328,7 @@ function extractStructuredField(content: string, field: string): string | undefi
     "description",
     "file",
     "suggested_replacement",
+    "fix_explanation",
     "hypothesis",
     "confidence",
     "reproducer_shape",
@@ -341,6 +360,7 @@ function parseStructuredBlocks(output: string, prefix: string, scopePath?: strin
     const file = extractStructuredField(content, "file") ?? "";
     const sanitizerLog = extractStructuredField(content, "sanitizer_log");
     const suggestedReplacement = extractStructuredField(content, "suggested_replacement");
+    const fixExplanation = extractStructuredField(content, "fix_explanation");
     const subsystem = extractStructuredField(content, "subsystem");
     const hypothesis = extractStructuredField(content, "hypothesis");
     const confidence = extractStructuredField(content, "confidence");
@@ -381,6 +401,7 @@ function parseStructuredBlocks(output: string, prefix: string, scopePath?: strin
       suggestedReplacement,
       scopePath,
       validation.valid,
+      fixExplanation,
     );
 
     if (!validation.valid) {

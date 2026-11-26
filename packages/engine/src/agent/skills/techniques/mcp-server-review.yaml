@@ -41,4 +41,4 @@ content: |
 
   ### 3. Record
 
-  One finding per issue: title, severity, `source_path` and lines, the evidence, `impact_assessment` with `blast_radius` in plain words on what an attacker can do and gets, and `suggested_replacement` for a concrete fix (a pinned version, a path allowlist, a scoped token). Say at the end which servers or tools you did not reach.
+  One finding per issue: title, severity, `source_path` and lines, the evidence, `impact_assessment` with `blast_radius` in plain words on what an attacker can do and gets, and `suggested_replacement` together with `fix_explanation` (at most 600 characters, plain words: what to change and why it closes the hole, using only names and lines you read) for a concrete fix (a pinned version, a path allowlist, a scoped token). Say at the end which servers or tools you did not reach.
