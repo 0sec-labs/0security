@@ -8,7 +8,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync, chmodSync }
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { proposeProof } from "../shared/reproduction.js";
 import { OciRunner } from "../verifier/docker-runner.js";
 import { REPRODUCTION_LIMITS, reproduceFinding } from "./harness.js";
@@ -21,7 +21,12 @@ const ACK = "REPRO_FIXTURE_ACK=intentionally-vulnerable node server.js";
 const proof = proposeProof({ pocSteps: [{ id: "e", kind: "exploit", summary: "x", action: { type: "http", method: "GET", url: "http://victim.example/download?name=../../etc/passwd" } }] })!;
 const dirs: string[] = [];
 afterAll(() => { for (const d of dirs) rmSync(d, { recursive: true, force: true }); });
-const left = () => spawnSync("docker", ["ps", "-aq", "--filter", "label=0.verify=1"], { encoding: "utf8" }).stdout.trim();
+// The label is shared by every container 0 starts on this daemon, so a leftover is only one that was not there when
+// the test began. Containers from other test files or earlier runs are not this test's to judge.
+const labelled = () => new Set(spawnSync("docker", ["ps", "-aq", "--no-trunc", "--filter", "label=0.verify=1"], { encoding: "utf8" }).stdout.split(/\s+/).filter(Boolean));
+let before = new Set<string>();
+beforeEach(() => { before = labelled(); });
+const left = () => [...labelled()].filter((id) => !before.has(id)).join("\n");
 
 describe.skipIf(!hasDocker)("reproduction in a real container with a read-only root", () => {
   const runner = new OciRunner();
