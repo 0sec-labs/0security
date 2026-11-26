@@ -190,6 +190,10 @@ describe("variant hunting from a verified finding", () => {
 
     const json = JSON.parse(await cli(["findings", "show", variantId, "--db-path", dbPath, "--json"])) as Record<string, unknown>;
     expect(json.variantOf).toBe(parentId);
+    // The thread called both sites high. Nobody confirmed them, so they are stored as medium with low confidence.
+    expect(json.severity).toBe("medium");
+    expect(json.confidence).toBe(0.4);
+    expect(String(json.description)).toMatch(/Unverified variant.*capped at medium \(the thread said high\)/s);
     expect(json.rootCause).toMatchObject({ bugClass: "SQL injection" });
     const parentJson = JSON.parse(await cli(["findings", "show", parentId, "--db-path", dbPath, "--json"])) as { variants: Array<{ id: string; status: string }> };
     expect(parentJson.variants).toHaveLength(2);
@@ -201,7 +205,7 @@ describe("variant hunting from a verified finding", () => {
 });
 
 describe("rescan of variants after a fix", () => {
-  it("marks the variant that was fixed and leaves the other open", async () => {
+  it("reports the variant that was fixed and the one still open", async () => {
     const model = modelClient();
     await runVerify([parentId], verifyOptions(), verifyDeps(model));
     writeFileSync(join(folder, "src", "orders.ts"), "export function load(db, id) {\n  return db.query(\"SELECT * FROM orders WHERE id = ?\", [id]);\n}\n");
