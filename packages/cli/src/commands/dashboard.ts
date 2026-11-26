@@ -53,6 +53,7 @@ import { handleWebConsoleApiRequest, handleApiRequest } from "../web/dashboard-a
 import { frameProtectionHeaders } from "../web/self-edit-preview.js";
 import { isAnonymousApiExemption, isBrowserOnlyRoute, privilegedRouteDenial } from "../web/privileged-routes.js";
 import { audit, auditDenial, configureAudit, currentAuditDbPath, setAuditSinkStatus } from "../web/audit.js";
+import { openHaRuntime, type HaRuntimeHandle } from "../ha-bridge.js";
 import { ServerModeGuard, handleHealth, isHealthRequest, isWildcardHost, resolveAccessSecret, splitList, validateAccessToken, type ServerPhase, type ServerRequestContext } from "../web/server-mode.js";
 import { hostname } from "node:os";
 import { listAudit, startAuditSinkFromEnv, TeamUserTable, type AuditSink } from "@0/engine/storage";
@@ -219,6 +220,24 @@ export function registerDashboardCommand(program: Command): void {
         }
         if (auditSink) { setAuditSinkStatus(() => auditSink!.status()); console.log(chalk.gray(`  Audit sink: sending the audit log to ${auditSink.status().label}`)); }
       }
+      // Shared database (ZERO_HA_DATABASE_URL, environment only). A named database that cannot be used stops the start:
+      // falling back to a different database would hide data from the other replicas.
+      let ha: HaRuntimeHandle | null = null;
+      if (serverMode) {
+        try {
+          ha = await openHaRuntime(process.env, {
+            onLeaderChange: leader => console.log(chalk.gray(`  Scheduler role: ${leader ? "this replica leads" : "another replica leads"}`)),
+            onError: error => console.error(chalk.dim(`  Shared database: ${error instanceof Error ? error.message : "error"}`)),
+          });
+          if (ha) {
+            await ha.start();
+            console.log(chalk.gray(`  Shared database: ${ha.label}, ${ha.isLeader() ? "this replica leads" : "another replica leads"}`));
+          }
+        } catch (error) {
+          console.error(`0: ${error instanceof Error ? error.message : "invalid shared database setting"}`);
+          process.exit(1);
+        }
+      }
       const imported = runStartupImport();
       if (imported && !imported.alreadyDone && (imported.migrated.length || imported.notMigrated.length)) process.stderr.write(`Imported ${imported.migrated.length} item(s) from your earlier setup; ${imported.notMigrated.length} could not be migrated. See the Extensions page.\n`);
       const capabilities = ["sessions", "workflows", "schedules", "approvals", "events", "workspaces", "artifacts", "model-connections", "provider-relay", "operator-services", "process-controls", "learning", "workflow-engine"];
@@ -272,7 +291,7 @@ export function registerDashboardCommand(program: Command): void {
           console.log(chalk.gray("  Dashboard assets not found: serving the API only."));
         }
         startupAssetCleanup = cleanupAssetDir;
-        const buildServices = (auth: TeamAuth, dbPath = opts.dbPath, stateDir = teamDirectory, relayEpoch = localHandshake.serverInstanceId) => createWorkspaceServices({ updates, relayEpoch, auth, dbPath, stateDir, workspace: opts.engineWorkspace, allowApply: opts.engineAllowApply, controlToken, engineBearer, timeCapMs, costCapUsd });
+        const buildServices = (auth: TeamAuth, dbPath = opts.dbPath, stateDir = teamDirectory, relayEpoch = localHandshake.serverInstanceId) => createWorkspaceServices({ ...(ha ? { mayPollSentinels: () => ha!.isLeader() } : {}), updates, relayEpoch, auth, dbPath, stateDir, workspace: opts.engineWorkspace, allowApply: opts.engineAllowApply, controlToken, engineBearer, timeCapMs, costCapUsd });
         let services = await buildServices(teamAuth);
         stopHostReconnect = watchManagedHosts();
         let { skills, gateway: consoleGateway, engagements, operator, workflows, github, sentinels } = services;
@@ -720,7 +739,7 @@ export function registerDashboardCommand(program: Command): void {
           void drained.then(() => {
           stopHostReconnect?.(); hostRepairAbort.abort();
           services.remoteProviderRelays.dispose();
-          void localProviderSessions.dispose().then(() => { modelBackends.dispose(); backends.dispose(); return engine?.dispose(); }).then(() => sentinels.dispose()).then(() => auditSink?.stop()).then(() => consoleGateway.closeAll()).then(() => workflows.dispose()).finally(() => {
+          void localProviderSessions.dispose().then(() => { modelBackends.dispose(); backends.dispose(); return engine?.dispose(); }).then(() => sentinels.dispose()).then(() => auditSink?.stop()).then(() => ha?.close()).then(() => consoleGateway.closeAll()).then(() => workflows.dispose()).finally(() => {
             operator.dispose();
             closeSharedDbs();
             github.dispose();
@@ -752,6 +771,7 @@ export function registerDashboardCommand(program: Command): void {
         startupOperator?.dispose();
         startupGitHub?.dispose();
         await engine?.dispose().catch(() => {});
+        await ha?.close().catch(() => {});
         startupAssetCleanup?.();
         throw error;
       }

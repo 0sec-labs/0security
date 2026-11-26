@@ -153,9 +153,11 @@ export class SentinelRunner {
   readonly #persistent: () => boolean;
   readonly #metrics: MetricSink | undefined;
   readonly #turns: AgentTurnDelivery;
+  readonly #mayPoll: () => boolean;
 
-  constructor(options: { metrics?: MetricSink; store: SentinelStore; workflows: SecurityWorkflowStore; missions: SentinelMissionRuntime; gh?: SentinelGhClient; now?: () => number; executionProfile?: () => "local" | "smolvm"; checkout?: (repo: string) => Promise<string | undefined>; persistentThread?: () => boolean; bitbucket?: { env?: NodeJS.ProcessEnv; reviewer?: BitbucketRunDeps["reviewer"] } }) {
+  constructor(options: { /** False on a replica that is not the leader: it skips due triggers so each runs once across replicas. */ mayPoll?: () => boolean; metrics?: MetricSink; store: SentinelStore; workflows: SecurityWorkflowStore; missions: SentinelMissionRuntime; gh?: SentinelGhClient; now?: () => number; executionProfile?: () => "local" | "smolvm"; checkout?: (repo: string) => Promise<string | undefined>; persistentThread?: () => boolean; bitbucket?: { env?: NodeJS.ProcessEnv; reviewer?: BitbucketRunDeps["reviewer"] } }) {
     this.#metrics = options.metrics;
+    this.#mayPoll = options.mayPoll ?? (() => true);
     this.#bitbucketEnv = options.bitbucket?.env; this.#bitbucketReviewer = options.bitbucket?.reviewer;
     this.#store = options.store; this.#workflows = options.workflows; this.#missions = options.missions;
     this.#executionProfile = options.executionProfile ?? (() => { try { return consoleExecutionProfile(); } catch { return "local"; } });
@@ -193,6 +195,7 @@ export class SentinelRunner {
     try {
       this.#reconcile(nowMs);
       this.#observeHomes();
+      if (!this.#mayPoll()) return;
       for (const trigger of this.#store.listDueTriggers(nowMs)) {
         if (this.#closed) break;
         try { await this.#fire(trigger, nowMs); } catch { /* One broken trigger must not stall the others. */ }

@@ -35,12 +35,12 @@ export class WebSentinelService {
    * `scheduler` starts the background tick (schedules, GitHub PR polling, run tracking). Off by default so tests and
    * tools that only need the HTTP surface do not run autonomous work; the dashboard turns it on.
    */
-  constructor(options: { metrics?: MetricSink; dbPath?: string; missions: SentinelMissionRuntime; now?: () => number; scheduler?: boolean | { pollIntervalMs?: number }; gh?: SentinelGhClient; executionProfile?: () => "local" | "smolvm"; checkout?: (repo: string) => Promise<string | undefined>; persistentThread?: () => boolean; bitbucket?: ConstructorParameters<typeof SentinelRunner>[0]["bitbucket"] }) {
+  constructor(options: { mayPoll?: () => boolean; metrics?: MetricSink; dbPath?: string; missions: SentinelMissionRuntime; now?: () => number; scheduler?: boolean | { pollIntervalMs?: number }; gh?: SentinelGhClient; executionProfile?: () => "local" | "smolvm"; checkout?: (repo: string) => Promise<string | undefined>; persistentThread?: () => boolean; bitbucket?: ConstructorParameters<typeof SentinelRunner>[0]["bitbucket"] }) {
     this.#store = new SentinelStore(options.dbPath);
     this.#workflows = new SecurityWorkflowStore(options.dbPath);
     this.#missions = options.missions;
     this.#now = options.now ?? Date.now;
-    this.#runner = new SentinelRunner({ metrics: options.metrics, store: this.#store, workflows: this.#workflows, missions: options.missions, now: this.#now, ...(options.gh ? { gh: options.gh } : {}), ...(options.executionProfile ? { executionProfile: options.executionProfile } : {}), ...(options.checkout ? { checkout: options.checkout } : {}), ...(options.persistentThread ? { persistentThread: options.persistentThread } : {}), ...(options.bitbucket ? { bitbucket: options.bitbucket } : {}) });
+    this.#runner = new SentinelRunner({ ...(options.mayPoll ? { mayPoll: options.mayPoll } : {}), metrics: options.metrics, store: this.#store, workflows: this.#workflows, missions: options.missions, now: this.#now, ...(options.gh ? { gh: options.gh } : {}), ...(options.executionProfile ? { executionProfile: options.executionProfile } : {}), ...(options.checkout ? { checkout: options.checkout } : {}), ...(options.persistentThread ? { persistentThread: options.persistentThread } : {}), ...(options.bitbucket ? { bitbucket: options.bitbucket } : {}) });
     if (options.scheduler) this.#noteAccessUpgrade();
     if (options.scheduler) this.#runner.start(typeof options.scheduler === "object" ? options.scheduler.pollIntervalMs : undefined);
   }
