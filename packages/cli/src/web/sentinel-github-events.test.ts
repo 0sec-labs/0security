@@ -13,8 +13,8 @@ const checkRun = (over: Record<string, unknown> = {}, suite: Record<string, unkn
 
 describe("trigger settings", () => {
   it("applies safe defaults: v prefix, five minute poll, reporting off", () => {
-    expect(SentinelReleaseConfigSchema.parse({ repo: "acme/app" })).toEqual({ repo: "acme/app", on: "release", tagPrefix: "v", pollMs: 300_000, report: "none" });
-    expect(SentinelCheckConfigSchema.parse({ repo: "acme/app" })).toEqual({ repo: "acme/app", conclusion: "any", pollMs: 300_000, report: "none" });
+    expect(SentinelReleaseConfigSchema.parse({ repo: "acme/app" })).toEqual({ repo: "acme/app", on: "release", tagPrefix: "v", pollMs: 300_000, report: "none", results: "off" });
+    expect(SentinelCheckConfigSchema.parse({ repo: "acme/app" })).toEqual({ repo: "acme/app", conclusion: "any", pollMs: 300_000, report: "none", results: "off" });
   });
   it("rejects unknown keys, bad repositories, shell-looking refs, short polls and unknown report modes", () => {
     for (const bad of [{ repo: "acme/app", extra: 1 }, { repo: "../x" }, { repo: "acme" }, { repo: "acme/app", tagPrefix: "v;rm" }, { repo: "acme/app", pollMs: 1000 }, { repo: "acme/app", report: "check-run" }]) {

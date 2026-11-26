@@ -115,12 +115,14 @@ automations:
           repo: o/r
           tagPrefix: v
           report: commit-status
+          results: sarif
       - kind: check-completed
         check:
           repo: o/r
           branch: main
           conclusion: failure
           report: comment
+          results: both
 `);
     const plan = planSync(loadDefinitions(s.defs), s.stores);
     expect(plan[0]).toMatchObject({ action: "create" });
@@ -128,8 +130,8 @@ automations:
     const triggers = s.stores.sentinels.listTriggers();
     expect(triggers.map(trigger => trigger.kind).sort()).toEqual(["check-completed", "release"]);
     expect(triggers.every(trigger => !trigger.enabled)).toBe(true);
-    expect(triggers.find(trigger => trigger.kind === "release")!.release).toEqual({ repo: "o/r", on: "release", tagPrefix: "v", pollMs: 300_000, report: "commit-status" });
-    expect(triggers.find(trigger => trigger.kind === "check-completed")!.check).toMatchObject({ branch: "main", conclusion: "failure", report: "comment" });
+    expect(triggers.find(trigger => trigger.kind === "release")!.release).toEqual({ repo: "o/r", on: "release", tagPrefix: "v", pollMs: 300_000, report: "commit-status", results: "sarif" });
+    expect(triggers.find(trigger => trigger.kind === "check-completed")!.check).toMatchObject({ branch: "main", conclusion: "failure", report: "comment", results: "both" });
     expect(planSync(loadDefinitions(s.defs), s.stores)[0]).toMatchObject({ action: "unchanged" });
     s.write("rel.yaml", exportDefinition(s.stores.sentinels.list()[0]!, s.stores));
     expect(planSync(loadDefinitions(s.defs), s.stores)[0]).toMatchObject({ action: "unchanged" });

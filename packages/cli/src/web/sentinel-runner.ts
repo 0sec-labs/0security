@@ -9,10 +9,13 @@ import {
   CHECKS_JQ, RELEASES_JQ, TAGS_JQ, checksFromPoll, isCommitSha, isSafeRef, matchesCheck, matchesRelease, releasesFromPoll, statusContext, statusFor, tagsFromPoll,
   type GithubEvent,
 } from "./sentinel-github-events.js";
+import { runGh } from "../host/gh.js";
+import { packSarif } from "../commands/findings-upload.js";
+import { buildSentinelSarif, neutralise } from "./sentinel-github-results.js";
 import { diffRightLines, inlineMarker, planInlineSuggestions, type SuggestionFinding } from "./pr-review.js";
 import {
-  isSafeGitRef, nextSentinelFire, sentinelNeedsReview, sentinelPollMs, sentinelReviewFingerprint,
-  type ShareSafeReport, type Sentinel, type SentinelActivation, type SentinelTrigger, type SecurityWorkflow,
+  isSafeGitRef, nextSentinelFire, resultsComment, resultsSarif, sentinelNeedsReview, sentinelPollMs, sentinelReviewFingerprint,
+  type ShareSafeReport, type Sentinel, type SentinelGithubPrConfig, type SentinelActivation, type SentinelTrigger, type SecurityWorkflow,
 } from "@0/engine/shared";
 import { consoleExecutionProfile } from "../console-execution.js";
 import { AgentTurnDelivery, type TurnResult } from "./agent-turns.js";
@@ -80,14 +83,22 @@ export interface SentinelMissionRuntime {
  */
 export const agentsPersistentThreadFromEnv = (): boolean => !/^(0|false|off|no)$/i.test((process.env.ZERO_AGENTS_PERSISTENT_THREAD ?? "").trim());
 /** Minimal `gh` seam (same shape as the engine's GhClient). Credentials stay in gh's own store. */
-export interface SentinelGhClient { run(args: string[]): Promise<{ stdout: string }> }
-const defaultSentinelGh = (): SentinelGhClient => ({ run: async args => { assertEgressAllowed("GitHub (gh)"); const { stdout } = await execute("gh", args, { timeout: 30_000, maxBuffer: 4_000_000 }); return { stdout }; } });
+export interface SentinelGhClient { run(args: string[], input?: string): Promise<{ stdout: string }> }
+/** `input` is a request body for standard input (a SARIF upload). */
+const defaultSentinelGh = (): SentinelGhClient => ({ run: async (args, input) => {
+  assertEgressAllowed("GitHub (gh)");
+  if (input !== undefined) return { stdout: await runGh(args, input) };
+  const { stdout } = await execute("gh", args, { timeout: 30_000, maxBuffer: 4_000_000 });
+  return { stdout };
+} });
 
 /**
  * Where a finished run posts its summary. A pull request number means one comment (found by a hidden marker, edited in place).
  * `mode: "status"` means a commit status on the commit, or on the commit `ref` points to (a tag, resolved when posting).
+ * `mode: "sarif"` means only a code scanning upload. Any mode with `sarifRef` (a full Git ref) also uploads the findings as SARIF;
+ * the commit is `headSha`, or the commit the tag in `ref` points to when `headSha` is not a commit.
  */
-export type SummaryTarget = { repo: string; headSha: string; fork: boolean } & ({ pr: number; mode?: "comment" } | { pr?: number; mode: "status"; ref?: string });
+export type SummaryTarget = { repo: string; headSha: string; fork: boolean; sarifRef?: string } & ({ pr: number; mode?: "comment" } | { pr?: number; mode: "status"; ref?: string } | { pr?: number; mode: "sarif"; ref?: string });
 
 export interface SentinelActor { userId: string; displayName: string; role?: "owner" | "editor" | "viewer"; onMissionCreated?: (missionId: string) => void }
 export class SentinelRunError extends Error {
@@ -410,6 +421,8 @@ export class SentinelRunner {
       const { stdout } = await this.#gh.run(["pr", "list", "--repo", github.repo, "--state", "open", "--limit", String(MAX_POLLED_PULL_REQUESTS), "--json", "number,headRefOid,title,url,baseRefName,headRefName,isCrossRepository,isDraft,state", ...(github.baseBranch ? ["--base", github.baseBranch] : [])]);
       const parsed: unknown = JSON.parse(stdout);
       if (!Array.isArray(parsed)) throw new Error("Unexpected gh output.");
+      // `gh pr list --limit` cuts the list without saying so. A full page means there may be more, so say that instead of baselining a partial list.
+      if (parsed.length >= MAX_POLLED_PULL_REQUESTS) throw new Error(`${MAX_POLLED_PULL_REQUESTS.toLocaleString("en-US")} or more open pull requests: gh stops reading at ${MAX_POLLED_PULL_REQUESTS.toLocaleString("en-US")}. Use a base-branch filter.`);
       prs = parsed.filter((pr): pr is (typeof prs)[number] => !!pr && typeof pr.number === "number" && typeof pr.headRefOid === "string")
         .filter(pr => pr.state === undefined || String(pr.state).toUpperCase() === "OPEN");
       if (prs.length > MAX_POLLED_EVENTS) throw new Error(`More than ${MAX_POLLED_EVENTS} matching open pull requests. Use a base-branch filter.`);
@@ -465,7 +478,7 @@ export class SentinelRunner {
         const outcome = await this.#deliverSafely({
           sentinel, origin: "github", via, trigger: { id: trigger.id, kind: "github-pr" }, automation, event, idempotencyKey: prIdempotencyKey,
           ...(fork ? { untrusted: true } : {}), ...(diff ? { context: { label: "pull-request-diff", text: diff } } : {}),
-          ...(github.commentOnPr === true ? { comment: { repo: github.repo, pr: pr.number, headSha: pr.headRefOid, fork } } : {}),
+          ...prTarget(github, pr, fork),
         });
         const update = this.#turnRelease(outcome, trigger.id);
         if (!isEnabled()) {
@@ -482,7 +495,7 @@ export class SentinelRunner {
         trigger: { kind: "github-pr", automationId: automation.id, triggerId: trigger.id, event },
         automation, autonomous: true, via, idempotencyKey: prIdempotencyKey, ...(fork ? { untrusted: true } : {}),
         ...(diff ? { context: { label: "pull-request-diff", text: diff } } : {}),
-        ...(github.commentOnPr === true ? { comment: { repo: github.repo, pr: pr.number, headSha: pr.headRefOid, fork } } : {}),
+        ...prTarget(github, pr, fork),
       });
       if (!result.ok) { lastStatus = result.kind; lastError = result.reason; break; }
       seen[key] = pr.headRefOid; launched += 1; lastActivationId = result.activation.id; lastStatus = "running";
@@ -520,12 +533,29 @@ export class SentinelRunner {
 
   /** Where this trigger's result goes, or nothing when reporting is off (the default). */
   #reportTarget(trigger: SentinelTrigger, event: GithubEvent): SummaryTarget | undefined {
-    const mode = (trigger.release ?? trigger.check)?.report ?? "none";
-    if (mode === "none") return undefined;
-    if (mode === "comment" && event.pr) return { repo: event.repo, pr: event.pr, headSha: event.sha ?? "", fork: false };
+    const config = trigger.release ?? trigger.check;
+    const results = config?.results ?? "off";
+    // `results: comment` asks for the same one comment as `report: comment`.
+    const mode = config?.report && config.report !== "none" ? config.report : resultsComment(results) ? "comment" : "none";
+    const sarifRef = resultsSarif(results) ? this.#sarifRefFor(event) : undefined;
+    let target: SummaryTarget | undefined;
+    if (mode === "comment" && event.pr) target = { repo: event.repo, pr: event.pr, headSha: event.sha ?? "", fork: false };
     // A tag has no pull request to comment on, and a tag push can point at a tag object: the status goes on the commit the tag resolves to.
-    if (event.kind === "release") return event.tag ? { repo: event.repo, mode: "status", headSha: "", ref: event.tag, fork: false } : undefined;
-    return event.sha ? { repo: event.repo, mode: "status", headSha: event.sha, fork: false, ...(event.pr ? { pr: event.pr } : {}) } : undefined;
+    else if (mode === "none") target = undefined;
+    else if (event.kind === "release") target = event.tag ? { repo: event.repo, mode: "status", headSha: "", ref: event.tag, fork: false } : undefined;
+    else target = event.sha ? { repo: event.repo, mode: "status", headSha: event.sha, fork: false, ...(event.pr ? { pr: event.pr } : {}) } : undefined;
+    if (!sarifRef) return target;
+    if (target) return { ...target, sarifRef };
+    return event.kind === "release"
+      ? { repo: event.repo, mode: "sarif", headSha: "", ref: event.tag, fork: false, sarifRef }
+      : { repo: event.repo, mode: "sarif", headSha: event.sha ?? "", fork: false, sarifRef };
+  }
+
+  /** The Git ref a code scanning upload is filed under: the tag, the pull request head, or the branch the check ran on. */
+  #sarifRefFor(event: GithubEvent): string | undefined {
+    if (event.kind === "release") return event.tag && isSafeRef(event.tag) ? `refs/tags/${event.tag}` : undefined;
+    if (event.pr) return `refs/pull/${event.pr}/head`;
+    return event.branch && isSafeRef(event.branch) ? `refs/heads/${event.branch}` : undefined;
   }
 
   /** One signed delivery. Nothing is polled; a webhook trigger never runs without a delivery. */
@@ -612,7 +642,7 @@ export class SentinelRunner {
 
   /** One summary comment per pull request and Sentinel, found by a hidden marker and edited in place on later pushes. */
   async #postSummary(sentinel: Sentinel, comment: SummaryTarget, missionId: string, recordId: string, exclude?: ReadonlySet<string>, isTurn = false): Promise<void> {
-    const subject = comment.mode === "status" ? `${comment.repo}@${(comment.ref ?? comment.headSha).slice(0, 40)}` : `${comment.repo}#${comment.pr}`;
+    const subject = comment.mode === "status" ? `${comment.repo}@${(comment.ref ?? comment.headSha).slice(0, 40)}` : comment.mode === "sarif" ? `${comment.repo}@${(comment.sarifRef ?? comment.headSha).slice(0, 60)}` : `${comment.repo}#${comment.pr}`;
     const nowMs = this.#now();
     while (this.#commentLog.length && nowMs - this.#commentLog[0]! > 3_600_000) this.#commentLog.shift();
     const gapKey = `${sentinel.id}:${subject}`;
@@ -621,7 +651,8 @@ export class SentinelRunner {
     if (limited) { audit({ actor: `sentinel:${sentinel.id}`, action: "sentinel.pr.comment", subject, outcome: "denied", detail: { sentinelId: sentinel.id, reason: limited } }); return; }
     this.#commentLog.push(nowMs); this.#commentLast.set(gapKey, nowMs);
     if (this.#commentLast.size > 500) this.#commentLast.delete(this.#commentLast.keys().next().value!);
-    if (comment.mode === "status") { await this.#postStatus(sentinel, comment, missionId, recordId, subject, exclude, isTurn); return; }
+    if (comment.mode === "sarif") { await this.#postSarif(sentinel, comment, missionId, recordId, subject, exclude, isTurn); return; }
+    if (comment.mode === "status") { await this.#postStatus(sentinel, comment, missionId, recordId, subject, exclude, isTurn); if (comment.sarifRef) await this.#postSarif(sentinel, comment, missionId, recordId, subject, exclude, isTurn); return; }
     const marker = prCommentMarker(sentinel.id);
     const body = renderPrComment(sentinel.name, marker, comment, (this.#missions.findings?.(missionId) ?? []).filter(finding => !exclude || !finding.id || !exclude.has(finding.id)));
     try {
@@ -632,6 +663,7 @@ export class SentinelRunner {
       if (!edited) await this.#gh.run(["pr", "comment", String(comment.pr), "--repo", comment.repo, "--body", body]);
       audit({ actor: `sentinel:${sentinel.id}`, action: "sentinel.pr.comment", subject, detail: { sentinelId: sentinel.id, mode: edited ? "edited" : "created" } });
       await this.#postInline(sentinel, comment, missionId, exclude);
+      if (comment.sarifRef) await this.#postSarif(sentinel, comment, missionId, recordId, subject, exclude, isTurn);
     } catch (error) {
       audit({ actor: `sentinel:${sentinel.id}`, action: "sentinel.pr.comment", subject, outcome: "denied", detail: { sentinelId: sentinel.id, reason: message(error).slice(0, 200) } });
       const failure = `The pull request comment could not be posted: ${message(error)}`.slice(0, 500);
@@ -658,6 +690,34 @@ export class SentinelRunner {
     } catch (error) {
       audit({ actor: `sentinel:${sentinel.id}`, action: "sentinel.github.status", subject, outcome: "denied", detail: { sentinelId: sentinel.id, reason: message(error).slice(0, 200) } });
       const failure = `The commit status could not be posted: ${message(error)}`.slice(0, 500);
+      try { if (isTurn) this.#store.updateTurn(recordId, { note: failure }); else this.#store.updateActivation(recordId, { error: failure }); } catch { /* deleted */ }
+    }
+  }
+
+  /**
+   * Uploads the run's findings to GitHub code scanning (`POST repos/{repo}/code-scanning/sarifs`, gzip then base64, with the commit
+   * and ref). The document is built from share-safe fields only, and the upload goes through the operator's own `gh` login. GitHub
+   * keys alerts by fingerprint, so a later run for the same ref updates them. A failure shows on the run and does not fail it.
+   */
+  async #postSarif(sentinel: Sentinel, target: SummaryTarget, missionId: string, recordId: string, subject: string, exclude: ReadonlySet<string> | undefined, isTurn: boolean): Promise<void> {
+    const ref = target.sarifRef;
+    try {
+      if (!ref || !/^refs\/(heads|tags|pull)\/[A-Za-z0-9._\/-]{1,200}$/.test(ref) || target.fork) throw new Error("No Git ref to upload for.");
+      let sha = target.headSha;
+      if (!isCommitSha(sha)) {
+        const tag = ref.startsWith("refs/tags/") ? ref.slice("refs/tags/".length) : undefined;
+        if (!tag || !isSafeRef(tag)) throw new Error("No commit to upload for.");
+        sha = (await this.#gh.run(["api", `repos/${target.repo}/commits/${tag}`, "--jq", ".sha"])).stdout.trim();
+        if (!isCommitSha(sha)) throw new Error("The tag does not point to a commit.");
+      }
+      const built = buildSentinelSarif(sentinel.name, (this.#missions.findings?.(missionId) ?? []).filter(finding => !exclude || !finding.id || !exclude.has(finding.id)));
+      const body = JSON.stringify({ commit_sha: sha, ref, sarif: packSarif(built.text), tool_name: "0security Sentinel" });
+      const response = JSON.parse((await this.#gh.run(["api", "--method", "POST", `repos/${target.repo}/code-scanning/sarifs`, "--input", "-"], body)).stdout || "{}") as { id?: unknown };
+      audit({ actor: `sentinel:${sentinel.id}`, action: "sentinel.github.sarif", subject, detail: { sentinelId: sentinel.id, results: built.included, skipped: built.skipped, id: typeof response.id === "string" || typeof response.id === "number" ? String(response.id).slice(0, 40) : undefined } });
+      if (built.skipped) { try { const note = `Code scanning upload left out ${built.skipped} finding${built.skipped === 1 ? "" : "s"} without a repository file location or over the ${built.included} result cap.`; if (isTurn) this.#store.updateTurn(recordId, { note }); else this.#store.updateActivation(recordId, { note }); } catch { /* deleted */ } }
+    } catch (error) {
+      audit({ actor: `sentinel:${sentinel.id}`, action: "sentinel.github.sarif", subject, outcome: "denied", detail: { sentinelId: sentinel.id, reason: message(error).slice(0, 200) } });
+      const failure = `The code scanning upload failed: ${message(error)}`.slice(0, 500);
       try { if (isTurn) this.#store.updateTurn(recordId, { note: failure }); else this.#store.updateActivation(recordId, { error: failure }); } catch { /* deleted */ }
     }
   }
@@ -877,9 +937,17 @@ export class SentinelRunner {
   }
 }
 
+/** What a pull request run sends back: a comment (`commentOnPr` or `results`) and/or a code scanning upload. A fork is never uploaded. */
+function prTarget(github: SentinelGithubPrConfig, pr: { number: number; headRefOid: string }, fork: boolean): { comment?: SummaryTarget } {
+  const comment = github.commentOnPr === true || resultsComment(github.results);
+  const sarifRef = resultsSarif(github.results) && !fork ? { sarifRef: `refs/pull/${pr.number}/head` } : {};
+  if (!comment && !sarifRef.sarifRef) return {};
+  const base = { repo: github.repo, pr: pr.number, headSha: pr.headRefOid, fork, ...sarifRef };
+  return { comment: comment ? base : { ...base, mode: "sarif" } };
+}
 const isGithubKind = (kind: string) => kind === "github-pr" || kind === "release" || kind === "check-completed";
 /** One line for GitHub: no links, markup, @mentions or #123 references. */
-const oneLine = (text: string, max: number) => text.replace(/[a-z][a-z0-9+.-]*:\/\/\S+/gi, "(link removed)").replace(/[\r\n\t]+/g, " ").replace(/[<>`\[\]]/g, "").replace(/@/g, "@\u200b").replace(/#(?=\w)/g, "#\u200b").slice(0, max).trim();
+const oneLine = neutralise;
 const SEVERITY_ORDER = ["critical", "high", "medium", "low", "info"];
 
 /** The comment carries share-safe fields only: severity, title, category and a repository-relative location. No evidence, PoC steps or local paths. */

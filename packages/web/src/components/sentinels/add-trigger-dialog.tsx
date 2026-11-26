@@ -64,6 +64,10 @@ export function AddTriggerDialog({ sentinel, automations, open, onOpenChange }: 
             <div className="min-w-0"><span id="trigger-forks-label" className="block text-sm">Include pull requests from forks</span><span className="block text-xs text-muted-foreground-1">Off: forks are skipped. On: read-only analysis of the diff, marked untrusted. Their code is never run.</span></div>
             <Switch aria-labelledby="trigger-forks-label" checked={draft.includeForks} onCheckedChange={value => set("includeForks", value)} />
           </div>
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0"><span id="trigger-sarif-label" className="block text-sm">Send findings to GitHub code scanning</span><span className="block text-xs text-muted-foreground-1">Uploads each run's findings with your gh login. Off: nothing is uploaded. Pull requests from forks are never uploaded.</span></div>
+            <Switch aria-labelledby="trigger-sarif-label" checked={draft.uploadSarif} onCheckedChange={value => set("uploadSarif", value)} />
+          </div>
         </>}
         <Row label="Budget per run (USD)"><Input aria-label="Trigger run budget in USD" type="number" min="0.01" max="100" step="0.01" placeholder="Use Sentinel cap" value={runBudget} onChange={event => setRunBudget(event.target.value)} /></Row>
         <ModelRow enabled={open} value={runModel} onChange={setRunModel} />
