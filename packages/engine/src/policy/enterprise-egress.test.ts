@@ -132,8 +132,8 @@ describe("ZERO_ENTERPRISE", () => {
     for (const value of ["", "0", "false", "no", " NO "]) expect(enterpriseMode({ [ENTERPRISE_ENV]: value })).toBe(false);
     for (const value of ["1", "true", "yes", "on"]) expect(enterpriseMode({ [ENTERPRISE_ENV]: value })).toBe(true);
   });
-  it("does not control analytics: DO_NOT_TRACK is the only opt-out", () => {
-    expect(analyticsOptedOut({ [ENTERPRISE_ENV]: "1" })).toBe(false);
+  it("turns analytics off, like DO_NOT_TRACK", () => {
+    expect(analyticsOptedOut({ [ENTERPRISE_ENV]: "1" })).toBe(true);
     expect(analyticsOptedOut({ DO_NOT_TRACK: "1" })).toBe(true);
     expect(resolveAnalyticsLevel({ DO_NOT_TRACK: "1" })).toBe("off");
     expect(resolveAnalyticsLevel({})).toBe("usage");
@@ -143,9 +143,11 @@ describe("ZERO_ENTERPRISE", () => {
     expect(() => assertEgressAllowed("example.invalid", { [ENTERPRISE_ENV]: "1" })).toThrow(EnterpriseEgressError);
   });
 
-  it("usage analytics send nothing under DO_NOT_TRACK", async () => {
+  it.each(["DO_NOT_TRACK", ENTERPRISE_ENV])("usage analytics send nothing under %s", async (name) => {
     enterprise();
-    vi.stubEnv("DO_NOT_TRACK", "1");
+    vi.stubEnv("DO_NOT_TRACK", undefined);
+    vi.stubEnv(ENTERPRISE_ENV, undefined);
+    vi.stubEnv(name, "1");
     vi.stubEnv("ZERO_ANALYTICS_POSTHOG_KEY", "phc_FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE0000");
     vi.stubEnv("ZERO_ANALYTICS_POSTHOG_HOST", "https://ph.example.test");
     const home = mkdtempSync(join(tmpdir(), "0-egress-"));

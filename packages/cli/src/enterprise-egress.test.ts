@@ -93,8 +93,8 @@ afterEach(async () => {
 });
 
 describe("ZERO_ENTERPRISE, CLI call sites", () => {
-  it("is not a feedback opt-out: DO_NOT_TRACK is the only telemetry switch", () => {
-    expect(FEEDBACK_OPT_OUT_ENV).toEqual(["DO_NOT_TRACK"]);
+  it("is a feedback and crash-report opt-out, with DO_NOT_TRACK", () => {
+    expect(FEEDBACK_OPT_OUT_ENV).toEqual(["DO_NOT_TRACK", "ZERO_ENTERPRISE"]);
   });
 
   it("update check: no lookup, no install, status stays empty", async () => {

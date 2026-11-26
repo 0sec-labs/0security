@@ -7,7 +7,7 @@ This page lists every place 0 can send data off the computer it runs on. It exis
 
 ## What leaves your machine
 
-Your code stays on your machine. 0 sends what you choose to your model provider. By default it also sends anonymous usage counts and lifecycle events (first run, which command ran, an update, an error exit) and crash reports, and it checks GitHub for updates. One switch stops the telemetry: `DO_NOT_TRACK=1`. `ZERO_NO_UPDATE_CHECK=1` stops the update check. `ZERO_ENTERPRISE=1` is the no-egress mode below, and it does not touch telemetry, so set `DO_NOT_TRACK=1` with it.
+Your code stays on your machine. 0 sends what you choose to your model provider. By default it also sends anonymous usage counts and lifecycle events (first run, which command ran, an update, an error exit) and crash reports, and it checks GitHub for updates. `DO_NOT_TRACK=1` stops the telemetry and crash reports. `ZERO_NO_UPDATE_CHECK=1` stops the update check. `ZERO_ENTERPRISE=1` is the no-egress mode below. It blocks every automatic outbound call, including telemetry, lifecycle events and crash reports.
 
 ## No-egress mode
 
@@ -19,6 +19,7 @@ export ZERO_ENTERPRISE=1
 
 Any value except empty, `0`, `false` or `no` turns it on. With it on, 0:
 
+- sends no telemetry, lifecycle events or crash reports;
 - makes no update check and refuses `0security doctor upgrade`;
 - skips the public model catalog and price lookups, so models without a built-in price show no cost;
 - removes the `web_search` tool and refuses the advisory lookup, remote extension sources, the sandbox runtime download, GitHub repository and skills directory reads, SARIF upload through `gh`, and remote worker provisioning;
@@ -28,7 +29,7 @@ It is read from the process environment only. A project file such as `<project>/
 
 The switch is off by default. An ordinary install keeps its current behavior. For a container, set it in the container environment; for a managed laptop, set it in the shell profile or the device policy.
 
-Telemetry is separate: `DO_NOT_TRACK=1` keeps `~/.0/analytics-sent.log`, which records every analytics payload that does leave, empty. For a no-egress install, set both.
+`DO_NOT_TRACK=1` stops telemetry on its own, without the rest of the mode. For belt and braces, set both on a no-egress install. `~/.0/analytics-sent.log` records every analytics payload that leaves, so it stays empty.
 
 ## Verify it yourself
 
@@ -36,16 +37,16 @@ The repository tests this in the engine and CLI test suites. Each test starts a 
 
 To check a real install, run `node scripts/airgap/verify-no-egress.mjs`. See [Air-gapped installation](/self-hosting/#air-gapped-installation).
 
-For a stronger guarantee than a test, also block egress at the network: run 0 in a container or network namespace whose only route is your model gateway, then run a scan with `ZERO_ENTERPRISE=1` and `DO_NOT_TRACK=1`. The switch gives you the same result without relying on the block, and the block catches a mistake the switch could not.
+For a stronger guarantee than a test, also block egress at the network: run 0 in a container or network namespace whose only route is your model gateway, then run a scan with `ZERO_ENTERPRISE=1`. The switch gives you the same result without relying on the block, and the block catches a mistake the switch could not.
 
 ## Telemetry
 
-One switch, `DO_NOT_TRACK=1`, stops every row here. `ZERO_ENTERPRISE` and `ZERO_OFFLINE` do not.
+`DO_NOT_TRACK=1` or `ZERO_ENTERPRISE=1` stops every row here. `ZERO_OFFLINE` does not.
 
 | Entry | Destination | When | What is sent | How to disable |
 | --- | --- | --- | --- | --- |
-| `usage-analytics-posthog` | `eu.i.posthog.com` | Batched while a command or the console runs, in a release build. Lifecycle events are skipped for `--help`, `--version`, shell completion, `config`, and CI or machine-output runs unless you set `analyticsLevel usage` yourself. | Anonymous counters, plus lifecycle events (`first_run`, `command_invoked`, `update`, `error_exit`) that name a known command or an error category and nothing else. The field list is under [Usage metrics](/configuration/#usage-metrics). | `DO_NOT_TRACK`. |
-| `crash-and-feedback` | Sentry (embedded project or `ZERO_SENTRY_DSN`), the feedback endpoint | A crash with `diagnosticReporting automatic`, or feedback you send. | A redacted crash envelope or the feedback text you reviewed. | `diagnosticReporting off`, `DO_NOT_TRACK`. |
+| `usage-analytics-posthog` | `eu.i.posthog.com` | Batched while a command or the console runs, in a release build. Lifecycle events are skipped for `--help`, `--version`, shell completion, `config`, and CI or machine-output runs unless you set `analyticsLevel usage` yourself. | Anonymous counters, plus lifecycle events (`first_run`, `command_invoked`, `update`, `error_exit`) that name a known command or an error category and nothing else. The field list is under [Usage metrics](/configuration/#usage-metrics). | `DO_NOT_TRACK`, `ZERO_ENTERPRISE`. |
+| `crash-and-feedback` | Sentry (embedded project or `ZERO_SENTRY_DSN`), the feedback endpoint | A crash with `diagnosticReporting automatic`, or feedback you send. | A redacted crash envelope or the feedback text you reviewed. | `diagnosticReporting off`, `DO_NOT_TRACK`, `ZERO_ENTERPRISE`. |
 
 ## Blocked by `ZERO_ENTERPRISE`
 
@@ -128,4 +129,4 @@ The inventory lives in `scripts/egress-inventory.json`. `pnpm check:egress-inven
 
 ## Defaults
 
-The defaults of an ordinary install did not change: usage metrics stay on at the `usage` level in release builds, and the update check stays on for interactive terminals. Whether the container image and install script should ship with `ZERO_ENTERPRISE` on, or with `DO_NOT_TRACK` set, is a product decision that this page does not make.
+The defaults of an ordinary install did not change: usage metrics stay on at the `usage` level in release builds, and the update check stays on for interactive terminals. The Helm chart and the AWS reference set `ZERO_ENTERPRISE` and `DO_NOT_TRACK` for you. The Docker Compose files set neither, because pull request reviews need GitHub. Set them in `.env` for a no-egress install.

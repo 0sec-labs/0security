@@ -231,10 +231,11 @@ function resolveFeedbackTarget(
 }
 
 /**
- * The env var that hard-disables submission. `DO_NOT_TRACK` is the one telemetry
- * opt-out (the cross-tool standard); it also stops analytics and crash reports.
+ * The env vars that hard-disable submission. `DO_NOT_TRACK` is the one telemetry
+ * switch (the cross-tool standard); `ZERO_ENTERPRISE` is the no-egress mode.
+ * Either one also stops analytics and crash reports.
  */
-export const FEEDBACK_OPT_OUT_ENV = ["DO_NOT_TRACK"] as const;
+export const FEEDBACK_OPT_OUT_ENV = ["DO_NOT_TRACK", "ZERO_ENTERPRISE"] as const;
 
 /** Request timeout. Short: this is a courtesy call behind a human keystroke. */
 const FEEDBACK_TIMEOUT_MS = 5000;
