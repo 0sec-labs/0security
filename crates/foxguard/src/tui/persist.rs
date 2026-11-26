@@ -116,8 +116,9 @@ impl SessionStore {
         hash.update(project.as_os_str().as_encoded_bytes());
         hash.update(b"\0");
         hash.update(mode.as_bytes());
+        let name: String = hash.finalize().iter().map(|b| format!("{b:02x}")).collect();
         Self {
-            path: base.join(format!("{:x}.json", hash.finalize())),
+            path: base.join(format!("{name}.json")),
             revision: None,
             writable: false,
         }
