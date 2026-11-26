@@ -10,7 +10,7 @@ A small benchmark to measure whether scans and skills help: tiny apps with known
 - `run.mjs` copies each fixture without `answer.json` into a temporary folder, so the model cannot read the key. It runs `node packages/cli/dist/index.js scan <copy> --budget <n> --format json -o <out>` with a fresh `HOME` (and XDG directories) per run, then parses the findings.
 - Configurations: `generic` (`--prepass off`), `skill` (`--skill <id>`, only for fixtures that name one), `foxguard` (`--prepass auto --scanner foxguard`, needs foxguard installed). For the infrastructure fixture only: `checkov-prepass` (`--prepass auto --scanner checkov`) and `checkov`, which runs Checkov alone, with no model and no cost, and scores its SARIF with the same matcher. `single` (`--batches off`) and `batched` (`--batches on --batch-size <n>`) compare one thread with one thread per batch of entry points; they are meant for `medium-app`. The default is `generic,skill`.
 - Matching (`match.mjs`, pure, unit tested): a finding finds a planted item when the path agrees (suffix match), its line range is within 5 lines of the item's, and it belongs to the item's category family (from the finding's category, then title, then description). Matching is one-to-one, so a single finding never credits two items. A finding on a decoy (within 2 lines), or any finding in the clean app, is a false positive. A finding that is neither is reported as "unmatched" (a real extra issue or noise; read them) and is not counted as a false positive.
-- The report is Markdown and JSON in `scripts/bench/results/` (git-ignored apart from `example.md`): recall, false positives, unmatched, cost and time per fixture and configuration, as mean with min-max over repeats.
+- The report is Markdown and JSON in `scripts/bench/results/` (git-ignored apart from `example.md` and the `ai-security-*.md` reports): recall, false positives, unmatched, cost and time per fixture and configuration, as mean with min-max over repeats.
 
 AI security (agent configuration files and LLM application code) has its own page: [Benchmark: AI security](benchmark-ai-security.md).
 
@@ -99,7 +99,7 @@ A run copies the project to a fresh git repository and a fresh home, imports the
 - The hidden proof exits 0.
 - A rescan with FoxGuard no longer reports the finding's rule in that file. This applies only where FoxGuard flagged the original: it did for 6 of the 14 cases (command injection and XML external entities in Java; command injection, SQL injection, `eval` and weak hashing in Node). Elsewhere the rescan column reads n/a, because a clean rescan would prove nothing.
 
-2026-11-24, default model (gpt-6-luna), 2 repeats, `--budget 0.5` per fix, total cost $0.08. The table is in `scripts/bench/results/fix-2026-11-24T07-59-17-725Z.md`.
+2026-11-24, default model (gpt-6-luna), 2 repeats, `--budget 0.5` per fix, total cost $0.08. The per-case table is not kept in the repository. `fix-score.mjs --run` writes it to `scripts/bench/results/` (git-ignored), so run the command above to reproduce it.
 
 - Fix rate 93% (26 of 28 attempts). All 28 committed, compiled where there is a build, kept the tests green and left the rescan clean where it applied. 26 blocked the proof.
 - The four Java cases were fixed 8 of 8 times. Cost per fix $0.0026 to $0.0039, 41 to 55 seconds.
@@ -132,7 +132,7 @@ This run had a single noise finding, so it says almost nothing about how much no
 
 `scripts/bench/triage-truth.mjs` runs the same scan and `findings verify --apply` on files whose ground truth comes from outside this repository. With `--owasp <checkout>` it reads `expectedresults-1.2.csv` of a BenchmarkJava checkout, takes a seeded sample with the same number of real and not-real cases in each of the eleven categories, copies only those test files to a scratch folder and scans that. A finding counts against a case when it is in that case's file and its text names the case's category. Any other finding is left out of the rates. The checkout is not committed (it is GPL and large).
 
-2026-11-24, default model, `--per-class 3 --seed 1`: 66 cases (33 real, 33 not real), one run, total cost $0.24 (verify $0.04). The report is `scripts/bench/results/triage-truth-2026-11-24T07-42-38-349Z.md`.
+2026-11-24, default model, `--per-class 3 --seed 1`: 66 cases (33 real, 33 not real), one run, total cost $0.24 (verify $0.04). The report is not kept in the repository. `triage-truth.mjs --run` writes it to `scripts/bench/results/` (git-ignored), so run the command above with the same options to reproduce it.
 
 - The scan reported 24 findings; 17 were verified. Of those, 15 matched real cases and 2 matched not-real cases.
 - Real bugs that verify called false-positive: 0 of 15 (recall loss 0%). True-positive verdicts: 11 of the 15 real findings (73%); 3 were uncertain.

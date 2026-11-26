@@ -45,6 +45,18 @@ The command exits 1 when it finds any advisory, so a scheduled job can fail. Add
 
 The malicious-package check is OSV's own records. 0 does not analyze package contents.
 
+## Check an SBOM from another tool
+
+For an ecosystem 0security cannot generate an SBOM for, make a CycloneDX JSON file with another generator, then check it:
+
+```bash
+0security sbom check other-tool.cdx.json
+```
+
+`sbom check` reads any CycloneDX JSON file with a `components` array. Each component needs a `purl` (package URL) such as `pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1`, and the version must be in the purl. A component with no `purl`, or one that is not a `pkg:` URL, is skipped without a message. If no component has one, the command stops with an error. Check that the `resolved` count at the end of the output matches the components you expect.
+
+A file with a log4j-core 2.14.1 component, an npm component with no known advisory and one component with no `purl` reported 8 advisories for log4j-core and `resolved 2`. The `--outdated` and `--registry` options and SARIF output were not tried on such a file. SPDX files are not read.
+
 ## List packages with a newer version
 
 ```bash

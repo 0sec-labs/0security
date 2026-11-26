@@ -1985,10 +1985,12 @@ Without `--sandbox`, each `--test` command runs on this machine, in the work tre
 
 Exit codes:
 
-- 0: a verified change, or committed with `--no-pr`
-- 1: no change, or a failed check
+- 0: a change was committed and no `--test` check failed
+- 1: no change, a failed check or a failed thread
 - 2: usage error
 - 3: stopped at the budget or time limit
+
+Exit code 0 with no `--test` means nothing was checked. The pull request is then a draft, unless you passed `--ready` or your policy sets the draft rule to `never`. A draft pull request means the change is not verified, and a pull request opened without checks is not verified even when it is ready. Without a pull request (`--no-pr`), the same exit codes apply.
 
 A fix policy (approved libraries, forbidden patterns, rules, notes; JSON or YAML) can steer the thread. It comes only from `--policy <file>` or from your own `~/.0/fix-policy.json|yaml|yml`.
 
