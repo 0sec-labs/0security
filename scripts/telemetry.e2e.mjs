@@ -177,7 +177,9 @@ try {
     const allowedTags = ['cli_version', 'release_channel', 'build_commit', 'kind', 'surface', 'command', 'platform', 'arch', 'runtime'];
     for (const tag of Object.keys(event.tags)) assert.ok(allowedTags.includes(tag), `unexpected tag ${tag}`);
     for (const marker of ['SECRET-CRASH-MESSAGE', 'victim.example', '/Users/alice', 'hunter2', home]) assert.equal(sentry[0].body.includes(marker), false, `crash envelope leaked ${marker}`);
-    assert.equal(posthog.length, 0, 'a crash alone is not usage');
+    const lifecycle = ['first_run', 'command_invoked', 'update', 'error_exit'];
+    for (const event of events()) assert.ok(lifecycle.includes(event.event), `a crash alone is not usage, got ${event.event}`);
+    assert.equal(everything().includes('SECRET-CRASH-MESSAGE'), false, 'no event carries the crash message');
     console.log('(ii) forced crash: one finite Sentry envelope, no message text.');
   }
 

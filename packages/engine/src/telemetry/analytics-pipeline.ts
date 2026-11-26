@@ -1301,6 +1301,11 @@ class AnalyticsPipeline {
     this.batch = [];
   }
 
+  /** True when something is queued or a usage snapshot is waiting, so an exit should flush first. */
+  hasPending(): boolean {
+    return this.batch.length > 0 || this.accDirty;
+  }
+
   /** Test-only: number of records currently queued. */
   __pendingCountForTests(): number {
     return this.batch.length;

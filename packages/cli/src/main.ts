@@ -161,6 +161,8 @@ function exitWithCommandError(err: unknown): void {
     analyticsPipeline.recordLifecycle({ event: "error_exit", error: err, command: crashCommandFromArgv(process.argv) });
   } catch { /* telemetry never changes the exit */ }
   const exit = () => process.exit(2);
+  // Nothing to send (opted out, no destination, source build): exit at once, as before.
+  if (!analyticsPipeline.hasPending()) return exit();
   void Promise.race([analyticsPipeline.flushNow().catch(() => {}), new Promise<void>((resolve) => setTimeout(resolve, 1500).unref?.())]).then(exit, exit);
 }
 
