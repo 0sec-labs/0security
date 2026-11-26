@@ -23,6 +23,8 @@ export interface ContainerLimits {
    * read-only root.
    */
   readOnlyRoot?: boolean;
+  /** Never pull the image: it must already be on this machine, so a run makes no registry request. */
+  pullNever?: boolean;
   /** Run even when the writable-layer cap cannot be applied. Off by default: the run is refused instead. */
   allowUnboundedStorage?: boolean;
 }

@@ -89,8 +89,8 @@ describe("executed PoC, end to end", () => {
     const lowSeverity = await save("Verbose banner", "low", [shell("l1", "node app.js read ../data/secret.txt", SECRET)]);
 
     const stored = (id: string) => db.getFindingExecutedPoc(id);
-    expect(stored(proven)).toMatchObject({ outcome: "executed-proven", reason: "expectation-met", stepIds: ["p1"], run: { status: "pass", isolation: "container", imageDigest: `sha256:${"a".repeat(64)}` } });
-    expect(stored(failing)).toMatchObject({ outcome: "executed-failed", reason: "expectation-not-met", run: { status: "fail", isolation: "container" } });
+    expect(stored(proven)).toMatchObject({ outcome: "script-matched", reason: "expectation-met", stepIds: ["p1"], run: { status: "pass", isolation: "container", imageDigest: `sha256:${"a".repeat(64)}` } });
+    expect(stored(failing)).toMatchObject({ outcome: "script-unmatched", reason: "expectation-not-met", run: { status: "fail", isolation: "container" } });
     expect(stored(failing)!.run!.logTail).toContain("denied");
     expect(stored(staticOnly)).toMatchObject({ outcome: "static-only", reason: "http-steps-need-a-running-app" });
     expect(stored(staticOnly)!.run).toBeUndefined();
@@ -110,19 +110,19 @@ describe("executed PoC, end to end", () => {
     const report = { target: "/app", scanDepth: "quick", startedAt: "2026-01-01T00:00:00.000Z", completedAt: "2026-01-01T00:01:00.000Z", durationMs: 1, warnings: [], summary: { totalAttacks: 0, totalFindings: 4, critical: 1, high: 2, medium: 0, low: 1, info: 0 }, findings } as unknown as ScanReport;
 
     const markdown = new TextDecoder().decode((await exportReport(report, "markdown")).body);
-    expect(markdown).toMatch(/\*\*PoC execution:\*\* `executed-proven`\. Executed, proven/);
-    expect(markdown).toMatch(/\*\*PoC execution:\*\* `executed-failed`\. Executed, failed/);
-    expect(markdown).toMatch(/\*\*PoC execution:\*\* `static-only`\. Static only: not proven by execution \(http steps need a running app\)/);
+    expect(markdown).toMatch(/\*\*PoC execution:\*\* `script-matched`\. Script matched/);
+    expect(markdown).toMatch(/\*\*PoC execution:\*\* `script-unmatched`\. Script unmatched/);
+    expect(markdown).toMatch(/\*\*PoC execution:\*\* `static-only`\. Static only: nothing ran to a verdict \(http steps need a running app\)/);
     expect((markdown.match(/PoC execution:/g) ?? []).length).toBe(3);
 
     const json = JSON.parse(new TextDecoder().decode((await exportReport(report, "json")).body));
-    expect(json.findings.map((f: { title: string; executedPoc?: { outcome: string } }) => [f.title, f.executedPoc?.outcome])).toEqual(expect.arrayContaining([["Path traversal in read", "executed-proven"], ["Path traversal in safe-read", "executed-failed"], ["Header injection", "static-only"], ["Verbose banner", undefined]]));
+    expect(json.findings.map((f: { title: string; executedPoc?: { outcome: string } }) => [f.title, f.executedPoc?.outcome])).toEqual(expect.arrayContaining([["Path traversal in read", "script-matched"], ["Path traversal in safe-read", "script-unmatched"], ["Header injection", "static-only"], ["Verbose banner", undefined]]));
 
     const sarif = JSON.parse(new TextDecoder().decode((await exportReport(report, "sarif")).body));
-    expect(sarif.runs[0].results.map((r: { properties: { executedPoc?: { outcome: string } } }) => r.properties.executedPoc?.outcome).sort()).toEqual(["executed-failed", "executed-proven", "static-only", undefined]);
+    expect(sarif.runs[0].results.map((r: { properties: { executedPoc?: { outcome: string } } }) => r.properties.executedPoc?.outcome).sort()).toEqual(["script-matched", "script-unmatched", "static-only", undefined]);
 
     const html = new TextDecoder().decode((await exportReport(report, "html")).body);
-    expect(html).toContain("PoC execution: executed-proven.");
+    expect(html).toContain("PoC execution: script-matched.");
     expect(html).toContain("PoC execution: static-only.");
   });
 
@@ -131,7 +131,7 @@ describe("executed PoC, end to end", () => {
     const { db, save } = harness(runner, 1);
     const first = await save("Traversal one", "high", [shell("a", "node app.js read ../data/secret.txt", SECRET)]);
     const second = await save("Traversal two", "high", [shell("b", "node app.js read ../data/secret.txt", SECRET)]);
-    expect(db.getFindingExecutedPoc(first)!.outcome).toBe("executed-proven");
+    expect(db.getFindingExecutedPoc(first)!.outcome).toBe("script-matched");
     expect(db.getFindingExecutedPoc(second)).toMatchObject({ outcome: "static-only", reason: "budget-exhausted" });
     expect(runner.requests).toHaveLength(1);
   });
@@ -144,7 +144,7 @@ describe("executed PoC, end to end", () => {
 
   it("refuses an unusable sandbox record: a proven record without a container run is not stored", () => {
     const { db } = harness(fakeContainer());
-    expect(() => db.setFindingExecutedPoc("missing", { schemaVersion: 1, harness: "0security-executed-poc/1", outcome: "executed-proven", reason: "x", stepIds: [], startedAt: "2026-01-01T00:00:00.000Z", finishedAt: "2026-01-01T00:00:01.000Z" })).toThrow(/not a complete/i);
+    expect(() => db.setFindingExecutedPoc("missing", { schemaVersion: 1, harness: "0security-executed-poc/1", outcome: "script-matched", reason: "x", stepIds: [], startedAt: "2026-01-01T00:00:00.000Z", finishedAt: "2026-01-01T00:00:01.000Z" })).toThrow(/not a complete/i);
   });
 });
 

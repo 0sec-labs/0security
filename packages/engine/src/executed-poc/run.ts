@@ -3,14 +3,20 @@
  * from its steps and run it through the existing verifier (`runVerifier`) on a
  * snapshot of the scanned folder, in a container with the network off.
  *
- * The model never calls this and cannot set its result. Only a passing run in a
- * container earns `executed-proven`; everything that did not execute to a
- * verdict is `static-only`. A host runner is refused: it cannot isolate.
+ * The model never calls this and cannot set its result, but it writes the
+ * commands, so a pass is `script-matched`, not proof. Everything that did not
+ * execute to a verdict is `static-only`. A host runner is refused: it cannot isolate.
+ *
+ * The commands are untrusted model text: they run with the network off, a
+ * read-only root, a noexec tmpfs, process, memory and time caps, on a snapshot
+ * that leaves out files that look like credentials. The image must already be on
+ * the machine: a run never pulls from a registry.
  */
 import type { ContainerRunner, StepRequest } from "../verifier/port.js";
 import { OciRunner } from "../verifier/docker-runner.js";
-import { isGitRepo, snapshotWorktree } from "../verifier/snapshot.js";
+import { isGitRepo, looksSecret, snapshotWorktree } from "../verifier/snapshot.js";
 import { runVerifier } from "../verifier/runner.js";
+import { redactLog } from "../verifier/redact.js";
 import { REPRODUCTION_LIMITS } from "../reproduction/harness.js";
 import { EXECUTED_POC_HARNESS, isPocEligibleSeverity, parseExecutedPoc, type ExecutedPoc, type ExecutedPocRun } from "../shared/executed-poc.js";
 import type { Finding } from "../shared/types.js";
@@ -96,7 +102,7 @@ function limited(runner: ContainerRunner, allowUnboundedStorage: boolean | undef
   return {
     get isolation() { return runner.isolation; },
     probe: () => runner.probe(),
-    run: (request: StepRequest) => runner.run({ ...request, limits: { ...REPRODUCTION_LIMITS, ...(allowUnboundedStorage ? { allowUnboundedStorage: true } : {}), ...request.limits } }),
+    run: (request: StepRequest) => runner.run({ ...request, limits: { ...REPRODUCTION_LIMITS, pullNever: true, ...(allowUnboundedStorage ? { allowUnboundedStorage: true } : {}), ...request.limits } }),
   };
 }
 
@@ -133,7 +139,7 @@ export async function executePocForFinding(input: ExecutePocInput): Promise<Exec
   if (!budget.reserve()) return staticOnly("budget-exhausted", plan.stepIds);
 
   const snapshot = await (async () => {
-    try { return (await isGitRepo(input.folder!)) ? await snapshotWorktree(input.folder!) : undefined; } catch { return undefined; }
+    try { return (await isGitRepo(input.folder!)) ? await snapshotWorktree(input.folder!, { exclude: looksSecret }) : undefined; } catch { return undefined; }
   })();
   if (!snapshot) return staticOnly("no-snapshot-of-the-folder", plan.stepIds);
   try {
@@ -142,12 +148,13 @@ export async function executePocForFinding(input: ExecutePocInput): Promise<Exec
     const result = await runVerifier({ spec, afterDir: snapshot.dir, runner: limited(runner, config.allowUnboundedStorage), skillId: "executed-poc", ...(input.signal ? { signal: input.signal } : {}) });
     budget.spend(result.durationMs);
     const run: ExecutedPocRun = {
-      status: result.status, reason: result.reason, command: result.command, isolation: result.isolation, durationMs: result.durationMs, logTail: result.logTail,
+      status: result.status, reason: result.reason, command: redactLog(result.command), isolation: result.isolation, durationMs: result.durationMs, logTail: result.logTail,
       ...(result.imageDigest ? { imageDigest: result.imageDigest } : {}), ...(result.exitCode !== undefined ? { exitCode: result.exitCode } : {}),
     };
     if (result.isolation !== "container") return staticOnly("no-container-isolation", plan.stepIds, run);
-    if (result.status === "pass") return record("executed-proven", "expectation-met", plan.stepIds, run);
-    if (result.status === "fail") return record("executed-failed", result.reason === "output-did-not-match" ? "expectation-not-met" : result.reason, plan.stepIds, run);
+    if (result.status === "pass") return record("script-matched", "expectation-met", plan.stepIds, run);
+    if (result.status === "fail") return record("script-unmatched", result.reason === "output-did-not-match" ? "expectation-not-met" : result.reason, plan.stepIds, run);
+    if (/no such image|unable to find image|image .* not known|not found locally/i.test(result.logTail)) return staticOnly("image-not-present-locally", plan.stepIds, run);
     return staticOnly(`run-${result.reason}`, plan.stepIds, run);
   } catch {
     return staticOnly("run-infra-error", plan.stepIds);
