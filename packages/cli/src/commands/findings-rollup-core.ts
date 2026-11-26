@@ -6,6 +6,7 @@
  * command reads and writes the files.
  */
 import { z } from "zod";
+import { compareFindingsByBusinessContext, type FindingBusinessContext } from "@0/engine/shared";
 
 export const ROLLUP_SCHEMA = "0.findings-rollup.v1";
 export const MAX_ROLLUP_ROWS = 200_000;
@@ -122,7 +123,14 @@ export interface RollupSummary {
   byTier: Count[];
   /** Present when an earlier export was given. */
   trend?: RollupTrend;
+  /** With a business context: the open findings to look at first. Severity is never changed; absent without a context. */
+  priority?: PriorityRow[];
 }
+export interface PriorityRow { repository: string; title: string; severity: string; category: string; path: string | null; why: string | null }
+/** How many ranked findings the summary lists. */
+export const PRIORITY_LIMIT = 10;
+/** What a business context says about a finding of a repository. */
+export type Ranker = (row: { repository: string; severity: string; path?: string }) => FindingBusinessContext;
 
 export interface TrendCount { name: string; opened: number; fixed: number; net: number }
 export interface RollupTrend {
@@ -255,8 +263,19 @@ export function summarise(rows: readonly RollupRow[], now: Date, earlier?: Rollu
   };
 }
 
+/** The open findings, by severity moved by the context, then by severity, then by title. Ordering only: counts stay real. */
+export function priorityOf(rows: readonly WorkRow[], ranker: Ranker): PriorityRow[] {
+  const open = mergeRows(rows).filter(r => !exclusionOf(r)).map(r => ({ r, businessContext: ranker(r) }));
+  return open
+    .sort((a, b) => compareFindingsByBusinessContext({ severity: a.r.severity, businessContext: a.businessContext }, { severity: b.r.severity, businessContext: b.businessContext }) || rank(a.r.severity) - rank(b.r.severity) || a.r.title.localeCompare(b.r.title) || a.r.fingerprint.localeCompare(b.r.fingerprint))
+    .slice(0, PRIORITY_LIMIT)
+    .map(({ r, businessContext }) => ({ repository: r.repository, title: r.title, severity: r.severity, category: r.category, path: (r as WorkRow).path ?? null, why: businessContext.tags.length ? businessContext.rationale : null }));
+}
+
 /** Strips control characters so a crafted name cannot move the cursor or fake a line. */
 const plain = (value: string): string => value.replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, " ");
+
+const priorityLines = (rows: PriorityRow[]): string[] => ["", "Look at first (ordered with your business context; severity is unchanged)", ...(rows.length ? rows.map(r => `  ${plain(r.severity)}  ${plain(r.repository)}${r.path ? ` ${plain(r.path)}` : ""}  ${plain(r.title)}${r.why ? `  [${plain(r.why)}]` : ""}`) : ["  none"])];
 
 const section = (title: string, counts: Count[]): string[] => {
   const width = Math.max(0, ...counts.map(c => plain(c.name).length));
@@ -289,6 +308,7 @@ export function renderText(summary: RollupSummary): string {
     ...section("By severity", summary.bySeverity), ...section("By category", summary.byCategory), ...section("By age", summary.byAge),
     ...section("By owner", summary.byOwner), ...section("By repository", summary.byRepository),
     ...(labelled(summary.byTeam) ? section("By team", summary.byTeam) : []), ...(labelled(summary.byTier) ? section("By tier", summary.byTier) : []),
+    ...(summary.priority ? priorityLines(summary.priority) : []),
     ...(summary.trend ? trendText(summary.trend) : []),
   ].join("\n");
 }
@@ -304,5 +324,5 @@ export function renderHtml(summary: RollupSummary): string {
   const labels = `${labelled(summary.byTeam) ? table("By team", summary.byTeam) : ""}${labelled(summary.byTier) ? table("By tier", summary.byTier) : ""}`;
   const ex = summary.excluded;
   const repos = `${summary.repositories} ${summary.repositories === 1 ? "repository" : "repositories"}`;
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Findings rollup</title><style>body{font:16px/1.5 system-ui,sans-serif;max-width:46rem;margin:2rem auto;padding:0 1rem;color:#1a1a1a}h1{font-size:1.6rem}h2{font-size:1.1rem;margin-top:1.6rem}table{border-collapse:collapse;width:100%}td{padding:.25rem .5rem;border-bottom:1px solid #ddd}.n{text-align:right;font-variant-numeric:tabular-nums}.big{font-size:2.4rem;font-weight:600}</style></head><body><h1>Findings rollup</h1><p class="big">${summary.open}</p><p>open findings across ${repos}. Left out: ${ex.fixed} fixed, ${ex["false-positive"]} false positive, ${ex.accepted} accepted, ${ex.suppressed} suppressed.</p>${table("By severity", summary.bySeverity)}${table("By category", summary.byCategory)}${table("By age", summary.byAge)}${table("By owner", summary.byOwner)}${table("By repository", summary.byRepository)}${labels}${trend}<p>Generated ${escapeHtml(summary.generatedAt)}.</p></body></html>\n`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Findings rollup</title><style>body{font:16px/1.5 system-ui,sans-serif;max-width:46rem;margin:2rem auto;padding:0 1rem;color:#1a1a1a}h1{font-size:1.6rem}h2{font-size:1.1rem;margin-top:1.6rem}table{border-collapse:collapse;width:100%}td{padding:.25rem .5rem;border-bottom:1px solid #ddd}.n{text-align:right;font-variant-numeric:tabular-nums}.big{font-size:2.4rem;font-weight:600}</style></head><body><h1>Findings rollup</h1><p class="big">${summary.open}</p><p>open findings across ${repos}. Left out: ${ex.fixed} fixed, ${ex["false-positive"]} false positive, ${ex.accepted} accepted, ${ex.suppressed} suppressed.</p>${table("By severity", summary.bySeverity)}${table("By category", summary.byCategory)}${table("By age", summary.byAge)}${table("By owner", summary.byOwner)}${table("By repository", summary.byRepository)}${labels}${summary.priority ? `<h2>Look at first</h2><p>Ordered with your business context. Severity is unchanged.</p><table>${summary.priority.length ? summary.priority.map(r => `<tr><td>${escapeHtml(plain(r.severity))}</td><td>${escapeHtml(plain(r.repository))}${r.path ? ` ${escapeHtml(plain(r.path))}` : ""}</td><td>${escapeHtml(plain(r.title))}${r.why ? ` (${escapeHtml(plain(r.why))})` : ""}</td></tr>`).join("") : "<tr><td>none</td></tr>"}</table>` : ""}${trend}<p>Generated ${escapeHtml(summary.generatedAt)}.</p></body></html>\n`;
 }

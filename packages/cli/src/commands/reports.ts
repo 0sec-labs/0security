@@ -2,7 +2,9 @@ import type { Command } from "commander";
 import { closeSync, fstatSync, openSync, readSync } from "node:fs";
 import { writeFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { toShareSafeReport, type ScanReport } from "@0/engine/shared";
+import { compareFindingsByBusinessContext, toShareSafeReport, type ScanReport } from "@0/engine/shared";
+import { findingPath } from "../business-context.js";
+import { loadContextFor, REPOSITORY_FLAG_HELP, withBusinessContext } from "../business-context-load.js";
 import { importCiReport } from "../report-import.js";
 import { assertLocalEngineAvailable } from "../local-engine.js";
 
@@ -41,14 +43,27 @@ export function registerReportsCommand(program: Command): void {
     .argument("<report>", "JSON report produced by 0")
     .option("--include-description", "Include each finding's free-text description (can quote code or secrets)")
     .option("--output <path>", "Write the share-safe report to a file instead of stdout")
+    .option("--context <file>", "Business context file (JSON): order the findings by what matters to you. The reasons are not written to the share-safe copy. Defaults to the file set with `0security config set findingsContext`")
+    .option("--repository <name>", REPOSITORY_FLAG_HELP)
     .description("Write a share-safe copy of a report: an allowlist of fields, with no evidence, PoC, transcripts or local paths. Nothing is sent anywhere.")
-    .action((report: string, options: { includeDescription?: boolean; output?: string }) => {
+    .action(async (report: string, options: { includeDescription?: boolean; output?: string; context?: string; repository?: string }) => {
+      const loaded = await loadContextFor(options);
       const parsed: unknown = JSON.parse(readArtifact(report, 20 * 1024 * 1024));
       const candidate = parsed as Partial<ScanReport> | null;
       if (!candidate || typeof candidate !== "object" || !Array.isArray(candidate.findings) || !candidate.summary || typeof candidate.target !== "string") {
         throw new Error("Not a 0security scan report: expected target, summary and findings.");
       }
-      const text = JSON.stringify(toShareSafeReport(candidate as ScanReport, { includeDescription: options.includeDescription === true }), null, 2);
+      let ordered = candidate as ScanReport;
+      if (loaded) {
+        // Ordering only: severities are untouched and the share-safe allowlist leaves the reasons out.
+        const located = (finding: ScanReport["findings"][number]) => finding.reviewAnnotation ?? (finding as { location?: unknown }).location;
+        const shaped = ordered.findings.map(finding => ({ finding, label: { severity: finding.severity, ...(findingPath(located(finding)) ? { reviewAnnotation: { path: findingPath(located(finding))!, startLine: 1 } } : {}) } }));
+        const labelled = withBusinessContext(shaped.map(entry => entry.label), loaded) as Array<{ businessContext?: unknown }>;
+        const order = shaped.map((entry, index) => ({ entry, businessContext: labelled[index]!.businessContext }));
+        order.sort((x, y) => compareFindingsByBusinessContext({ severity: x.entry.finding.severity, cvssScore: x.entry.finding.cvssScore, businessContext: x.businessContext }, { severity: y.entry.finding.severity, cvssScore: y.entry.finding.cvssScore, businessContext: y.businessContext }));
+        ordered = { ...ordered, findings: order.map(item => item.entry.finding) };
+      }
+      const text = JSON.stringify(toShareSafeReport(ordered, { includeDescription: options.includeDescription === true }), null, 2);
       if (options.output) writeFileSync(resolve(options.output), `${text}\n`, { mode: 0o600 });
       else console.log(text);
     });

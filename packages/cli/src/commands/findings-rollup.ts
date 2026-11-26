@@ -10,7 +10,9 @@ import { parse as parseYaml } from "yaml";
 import { osecDB } from "@0/engine/storage";
 import { findingDatabasePaths } from "../finding-focus.js";
 import { finishWithError, UsageError } from "./output.js";
-import { applyLabels, applyOwners, buildExport, parseExport, renderHtml, renderText, type LabelRule, type RollupExport, type RollupRow, type WorkRow } from "./findings-rollup-core.js";
+import { findingPath } from "../business-context.js";
+import { contextOptionsOf, labelFor, loadContextFor, type LoadedContext } from "../business-context-load.js";
+import { applyLabels, applyOwners, buildExport, priorityOf, parseExport, renderHtml, renderText, type LabelRule, type RollupExport, type RollupRow, type WorkRow } from "./findings-rollup-core.js";
 
 import { HISTORY_SCHEMA, buildRollupReport, latestSnapshotRows, parseHistory, rollupCsv, trendText, type RollupSnapshot } from "./findings-rollup-history.js";
 
@@ -22,7 +24,7 @@ const MAX_LABEL_BYTES = 1024 * 1024;
 const MAX_LABEL_RULES = 2000;
 const SQLITE_MAGIC = "SQLite format 3\u0000";
 
-export interface FindingsRollupOptions { export?: string; owners?: string; labels?: string; since?: string; repository?: string; format?: string; output?: string; history?: string }
+export interface FindingsRollupOptions { export?: string; owners?: string; labels?: string; context?: string; ranking?: LoadedContext; since?: string; repository?: string; format?: string; output?: string; history?: string }
 export interface FindingsRollupDeps {
   now(): Date;
   /** Databases to read when no input is named. */
@@ -51,7 +53,7 @@ function repositoryName(target: string): string {
   return trimmed || "unknown";
 }
 
-export function rowsFromDatabase(path: string, repository?: string): RollupRow[] {
+export function rowsFromDatabase(path: string, repository?: string): WorkRow[] {
   const db = new osecDB(path);
   try {
     const targets = new Map<string, string>();
@@ -62,11 +64,12 @@ export function rowsFromDatabase(path: string, repository?: string): RollupRow[]
     };
     const findings = db.listFindings({ limit: MAX_DB_ROWS + 1 });
     if (findings.length > MAX_DB_ROWS) throw new UsageError(`Database exceeds ${MAX_DB_ROWS} findings; refusing to label a truncated result as a complete snapshot.`);
-    return findings.map((f): RollupRow => {
+    return findings.map((f): WorkRow => {
       const at = new Date(f.timestamp).toISOString();
       return {
         repository: targetOf(f.scanId), fingerprint: f.fingerprint || f.id, title: f.title.slice(0, 300), severity: f.severity.toLowerCase(), category: f.category,
         status: f.status, triage: effectiveTriageStatus(f), owner: f.workflowAssignee?.trim() ? f.workflowAssignee.trim().slice(0, 100) : null, firstSeen: at, lastSeen: at,
+        ...(findingPath((f as { reviewAnnotation?: unknown }).reviewAnnotation) ? { path: findingPath((f as { reviewAnnotation?: unknown }).reviewAnnotation)!.slice(0, 500) } : {}),
       };
     });
   } finally { db.close(); }
@@ -94,7 +97,8 @@ function readInput(path: string, repository: string | undefined, now: Date): Wor
   let stat;
   try { stat = statSync(full); } catch { throw new UsageError(`${path} does not exist.`); }
   if (!stat.isFile() || stat.size > MAX_FILE_BYTES) throw new UsageError(`${path} must be a file of at most 100 MB.`);
-  if (isDatabase(full)) return [{ ...buildExport(rowsFromDatabase(full, repository), now, repository ? [repository] : undefined), source: basename(path) }];
+  // The rows keep their file path in memory so a business context can match it; an export never carries it.
+  if (isDatabase(full)) { const rows = rowsFromDatabase(full, repository); return [{ ...buildExport(rows, now, repository ? [repository] : undefined), findings: rows, source: basename(path) }]; }
   const text = readFileSync(full, "utf8");
   if (looksLikeSarif(text)) {
     try {
@@ -183,6 +187,9 @@ export function runFindingsRollup(inputs: string[], options: FindingsRollupOptio
     deps.err(`Wrote ${snapshots.length} dated snapshots to ${options.history}`);
   }
   const report = buildRollupReport(snapshots, now, earlier);
+  // Each row names its repository, so rules for specific repositories match on that name.
+  const loaded = options.ranking;
+  if (loaded) report.priority = priorityOf(current.rows, row => labelFor(loaded, row, row.repository));
   const format = options.format ?? "text";
   const escape = (value: string) => value.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
   const body = format === "json" ? `${JSON.stringify(report, null, 2)}\n` : format === "csv" ? rollupCsv(report)
@@ -198,11 +205,14 @@ export function registerFindingsRollupCommand(parent: Command, deps: FindingsRol
     .option("--owners <file>", "JSON file mapping repository names to owners, used when a finding has no assignee")
     .option("--labels <file>", "JSON or YAML file mapping repository names or globs (or path: globs) to a team and tier, shown as extra breakdowns")
     .option("--since <file>", "An earlier rollup export to compare with: shows findings opened and fixed since then")
-    .option("--repository <name>", "Repository name for findings read from a database or a SARIF file (default: the scan target's folder name, or the SARIF's repository)")
+    .option("--repository <name>", "Repository name for findings read from a database or a SARIF file (default: the scan target's folder name, or the SARIF's repository). Rules for a repository in the context file match this name")
+    .option("--context <file>", "Business context file (JSON): also list the open findings to look at first, ordered with it. Defaults to the file set with `0security config set findingsContext`")
     .addOption(new Option("--format <format>", "Output: text, json, html or csv").choices(["text", "json", "html", "csv"]))
     .option("-o, --output <file>", "Write the rollup to a file instead of stdout")
     .addHelpText("after", "\nWith no inputs it reads the findings databases on this machine. An input is a rollup export, a dated history archive (JSON), a SARIF file or a findings database (SQLite). Latest exportedAt wins per repository; snapshots stay separate in snapshotTrend, while --since supplies the trend comparison.")
-    .action((inputs: string[], options: FindingsRollupOptions) => {
-      try { runFindingsRollup(inputs, options, deps); } catch (error) { finishWithError(error, deps, options.format === "json"); }
+    .action(async (inputs: string[], raw: FindingsRollupOptions, command: Command) => {
+      // `findings` declares --context and --repository too, and Commander may bind them to the parent.
+      const options = { ...raw, ...contextOptionsOf(raw, command) };
+      try { runFindingsRollup(inputs, { ...options, ranking: await loadContextFor(options.context !== undefined ? { context: options.context } : {}) }, deps); } catch (error) { finishWithError(error, deps, options.format === "json"); }
     });
 }
