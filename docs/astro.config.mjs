@@ -224,6 +224,7 @@ export default defineConfig({
             { label: "Models", slug: "models" },
             { label: "Computers", slug: "computers" },
             { label: "Server mode and Docker", slug: "server-mode" },
+            { label: "Replicas and a shared database", slug: "high-availability" },
             { label: "Self-hosted trial guide", slug: "self-hosted-trial" },
             { label: "Self-hosting on Azure and AWS", slug: "self-hosting" },
             { label: "Reference deployment on AWS", slug: "aws-reference" },

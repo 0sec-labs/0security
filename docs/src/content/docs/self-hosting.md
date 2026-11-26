@@ -179,7 +179,7 @@ Use ECS to avoid managing host operating systems.
 
 ### Run on Kubernetes with Helm
 
-The Helm chart in `deploy/helm/zero` runs the console as one StatefulSet replica with one persistent volume. It adds probes, a network policy, an optional ingress and a service account for your cloud identity. The replica count is fixed at 1 and the chart rejects any other value.
+The Helm chart in `deploy/helm/zero` runs the console as one StatefulSet replica with one persistent volume. It adds probes, a network policy, an optional ingress and a service account for your cloud identity. The replica count is fixed at 1 and the chart rejects any other value, unless you turn on the [shared database preview](/high-availability/).
 
 Create a Secret with the access token first. Every key in it becomes an environment variable:
 

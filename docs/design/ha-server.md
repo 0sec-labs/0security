@@ -1,6 +1,6 @@
 # High availability for server mode
 
-Tracking issue: #476 (R61). Status: design, with phase 1 and the job queue built. The delivery steps that followed phase 1 are listed under "Delivery steps after phase 1".
+Tracking issue: #476 (R61). Status: design, with phase 1 built and the coordination steps shipped as a preview. The steps that followed phase 1 are listed under "Delivery steps after phase 1". The user page is [Replicas and a shared database](/high-availability/).
 
 Server mode runs as one process on one SQLite file. This page lists the state that blocks a second replica, picks the storage approach, and splits the work into phases that each ship alone.
 
@@ -169,7 +169,7 @@ Each phase ships alone and keeps single-node SQLite working. Effort is one engin
 
 Total: about 5 to 7 engineer-months. Phases 2 and 5 first give the best return: a team can then survive a replica restart without everyone signing in again.
 
-Do not claim HA in the docs before phase 7. Until then, `server-mode.md` keeps saying one replica.
+Do not claim HA in the docs before the storage phases are done. Until then, `server-mode.md` keeps saying one replica, and the shared database page says preview.
 
 ## Risks
 
@@ -253,3 +253,7 @@ Tests: a fake pool for resignation and repeated calls; real PostgreSQL for a dra
 - `deploy/compose/docker-compose.ha.yml` runs two replicas behind Caddy with `/readyz` health checks and cookie stickiness. It does not start a database, because a database on the compose network is on another machine and needs TLS.
 - `replicaCount` stays refused. A replica count above 1 without a shared database still corrupts SQLite.
 - Tests: `helm lint` and `helm template` cases in `scripts/helm-chart.test.mjs` and `docker compose config` in CI. Nothing was installed on a cluster, and the compose file was not run, because Docker is not available here.
+
+### Docs as built
+
+The page `high-availability.md` says what the replicas share (scheduler role, job queue, readiness) and what stays on each replica (findings, accounts, audit, Sentinels). It covers setup, rolling upgrades, drain, backup, database outage and troubleshooting. `server-mode.md` keeps its single-node claims and links to the preview.
