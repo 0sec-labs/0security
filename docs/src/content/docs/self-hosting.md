@@ -213,7 +213,7 @@ Set these values for your environment:
 - `team.config`: [OIDC sign-in](/server-mode/#oidc-sign-in). Put the client secret in the Secret as `ZERO_TEAM_OIDC_SECRET`.
 - `serviceAccount.annotations`: the IRSA role ARN on EKS, or the client ID for Azure workload identity. For Azure OpenAI without a key, set `model.azureEntra=true`. See [Models](/models/).
 
-`ZERO_ENTERPRISE` is on by default, so only the model endpoint you configured is contacted. Set `enterprise: false` to allow pull request reviews that call GitHub.
+`ZERO_ENTERPRISE` and `DO_NOT_TRACK` are on by default, so only the model endpoint you configured is contacted. Set `enterprise: false` to allow pull request reviews that call GitHub.
 
 Upgrade with `helm upgrade` after a [backup](#scheduled-backups-and-restore) and set `image.tag`. The pod restarts and migrations run on start. To roll back, restore the backup and pin the older tag.
 
@@ -453,7 +453,7 @@ An air-gapped network has no route to the internet. You carry 0 in on removable 
 
 ### What you can claim
 
-With `ZERO_ENTERPRISE=1` and a model endpoint inside your network, 0 contacts only that endpoint and the hosts you name yourself. The [data flow](/data-flow/) page lists every destination. The check below runs the real CLI with a recorder that refuses any non-loopback connection. It passed for the version, SBOM generation and a one-shot prompt against a local stub model. It also passed inside a container started with `--network none`.
+With `ZERO_ENTERPRISE=1`, `DO_NOT_TRACK=1` and a model endpoint inside your network, 0 contacts only that endpoint and the hosts you name yourself. The [data flow](/data-flow/) page lists every destination. The check below runs the real CLI with a recorder that refuses any non-loopback connection. It passed for the version, SBOM generation and a one-shot prompt against a local stub model. It also passed inside a container started with `--network none`.
 
 You cannot claim more than that:
 
@@ -491,6 +491,7 @@ Run a model gateway inside the network and use it as an OpenAI-compatible endpoi
 
 ```bash
 export ZERO_ENTERPRISE=1
+export DO_NOT_TRACK=1
 export OPENAI_BASE_URL=https://models.internal.example/v1
 export OPENAI_API_KEY=your-internal-gateway-key
 export ZERO_SELECTED_PROVIDER=openai
@@ -523,7 +524,7 @@ Repeat the build on the connected machine with the new version, carry the archiv
 
 1. Build the bundle, record the archive hash, and verify the hash after transfer.
 2. Install with `install-bundle.sh` and load the image into your internal registry.
-3. Set `ZERO_ENTERPRISE=1` everywhere 0 runs.
+3. Set `ZERO_ENTERPRISE=1` and `DO_NOT_TRACK=1` everywhere 0 runs.
 4. Point the provider at your in-network gateway and test one prompt.
 5. Run `verify-no-egress.mjs` and keep the output with your records.
 6. Block outbound traffic from the 0 hosts at the network.

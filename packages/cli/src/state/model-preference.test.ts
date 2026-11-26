@@ -17,7 +17,7 @@ beforeEach(() => {
     CODEX_HOME: join(homeDir, ".codex"),
     ZERO_CODEX_AUTH_JSON_PATH: join(homeDir, "no-codex-auth.json"),
     ZERO_OFFLINE: "1",
-    ZERO_NO_TELEMETRY: "1",
+    DO_NOT_TRACK: "1",
   };
   configureSettingsStore({ homeDir: isolated.homeDir, projectDir: isolated.homeDir });
 });

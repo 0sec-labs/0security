@@ -35,7 +35,7 @@ await mkdir(workspace, { recursive: true });
 const engineToken = randomBytes(32).toString('hex');
 const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !SCRUB.test(key)));
 Object.assign(env, {
-  HOME: home, ZERO_OFFLINE: '1', ZERO_NO_TELEMETRY: '1', NO_COLOR: '1', ZERO_SKIP_UPDATE_CHECK: '1',
+  HOME: home, ZERO_OFFLINE: '1', DO_NOT_TRACK: '1', NO_COLOR: '1', ZERO_SKIP_UPDATE_CHECK: '1',
   ZERO_E2E_ENGINE_TOKEN: engineToken, ZERO_NO_DEPRECATION_WARNINGS: '1',
 });
 const wait = ms => new Promise(done => setTimeout(done, ms));

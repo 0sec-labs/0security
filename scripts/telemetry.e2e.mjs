@@ -10,9 +10,8 @@
 // destination is 127.0.0.1 and the env contains no other endpoint.
 //
 // Asserts: (ii) a forced crash is sent automatically as one
-// finite Sentry envelope without message text; (iii) DO_NOT_TRACK,
-// ZERO_NO_TELEMETRY and ZERO_OFFLINE each send NOTHING to either server;
-// 
+// finite Sentry envelope without message text; (iii) DO_NOT_TRACK, the single
+// opt-out, sends NOTHING to either server.
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
@@ -183,14 +182,14 @@ try {
     console.log('(ii) forced crash: one finite Sentry envelope, no message text.');
   }
 
-  // (iii) Each hard opt-out sends nothing to either server.
-  for (const [name, value] of [['DO_NOT_TRACK', '1'], ['ZERO_NO_TELEMETRY', '1'], ['ZERO_OFFLINE', '1']]) {
+  // (iii) The single opt-out sends nothing to either server.
+  {
     reset();
-    await crashRun(await freshHome(), { [name]: value });
+    await crashRun(await freshHome(), { DO_NOT_TRACK: '1' });
     await wait(700);
-    assert.equal(posthog.length, 0, `${name}: PostHog received ${posthog.length} request(s)`);
-    assert.equal(sentry.length, 0, `${name}: Sentry received ${sentry.length} request(s)`);
-    console.log(`(iii) ${name}=${value}: nothing reached either server.`);
+    assert.equal(posthog.length, 0, `DO_NOT_TRACK: PostHog received ${posthog.length} request(s)`);
+    assert.equal(sentry.length, 0, `DO_NOT_TRACK: Sentry received ${sentry.length} request(s)`);
+    console.log('(iii) DO_NOT_TRACK=1: nothing reached either server.');
   }
 
   console.log('Telemetry e2e passed.');

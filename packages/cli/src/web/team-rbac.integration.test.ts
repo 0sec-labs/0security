@@ -57,7 +57,7 @@ async function startServer(port: number, license?: ReturnType<typeof makeTestLic
   let output = "";
   // The child trusts the throwaway key through a loader hook in this test's own temp folder, never through the environment.
   const shim = license ? writeLicenseShim(join(home, "shim"), license.publicKeys, enterpriseEntry) : [];
-  const child = spawn(process.execPath, ["--import", "tsx", ...shim, entry, "web", "--port", String(port), "--host", "127.0.0.1", "--asset-dir", assets, "--no-open", "--team-config", teamConfig, "--db-path", dbPath], { cwd, env: { ...process.env, HOME: home, ZERO_NO_TELEMETRY: "1", ZERO_LICENSE: "", ZERO_LICENSE_FILE: "", ...(license?.env ?? {}) } });
+  const child = spawn(process.execPath, ["--import", "tsx", ...shim, entry, "web", "--port", String(port), "--host", "127.0.0.1", "--asset-dir", assets, "--no-open", "--team-config", teamConfig, "--db-path", dbPath], { cwd, env: { ...process.env, HOME: home, DO_NOT_TRACK: "1", ZERO_LICENSE: "", ZERO_LICENSE_FILE: "", ...(license?.env ?? {}) } });
   child.stdout!.on("data", d => { output += String(d); }); child.stderr!.on("data", d => { output += String(d); });
   const deadline = Date.now() + 90_000;
   while (!output.includes("ZERO_DASHBOARD_READY") && Date.now() < deadline) {

@@ -66,7 +66,7 @@ describe("enterprise OpenAI-compatible gateway (LiteLLM in front of Bedrock)", (
     const fetchSpy = vi.fn<typeof fetch>((input, init) => realFetch(input, init));
     vi.stubGlobal("fetch", fetchSpy);
     // Telemetry off, as an enterprise deployment would set it.
-    vi.stubEnv("ZERO_NO_TELEMETRY", "1");
+    vi.stubEnv("DO_NOT_TRACK", "1");
 
     const rt = runtime(base);
     const first = await rt.executeNative("Review carefully", messages, tools);
@@ -95,7 +95,7 @@ describe("enterprise OpenAI-compatible gateway (LiteLLM in front of Bedrock)", (
   it("does not look up pricing at a third-party catalog when telemetry is off", async () => {
     const fetchSpy = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ data: [] }));
     vi.stubGlobal("fetch", fetchSpy);
-    for (const name of ["ZERO_NO_TELEMETRY", "ZERO_OFFLINE", "DO_NOT_TRACK"]) {
+    for (const name of ["ZERO_OFFLINE", "DO_NOT_TRACK"]) {
       vi.stubEnv(name, "1");
       await discoverAndRegisterPricing(`bedrock/unpriced-${name.toLowerCase()}`);
       vi.stubEnv(name, undefined);

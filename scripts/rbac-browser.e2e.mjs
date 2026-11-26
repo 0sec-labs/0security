@@ -68,7 +68,7 @@ const results = [];
 const ok = name => { results.push(name); console.log(`ok  ${name}`); };
 try {
   child = spawn(process.execPath, ['--import', join(base, 'shim/register.mjs'), join(root, 'packages/cli/dist/index.js'), 'web', '--host', '127.0.0.1', '--port', '0', '--no-open', '--ready-json', '--team-config', teamConfig, '--db-path', dbPath, '--asset-dir', join(root, 'packages/web/dist')],
-    { cwd: base, env: { PATH: process.env.PATH, HOME: home, NO_COLOR: '1', ZERO_NO_TELEMETRY: '1', ZERO_SKIP_UPDATE_CHECK: '1', ZERO_LICENSE: license }, stdio: ['ignore', 'pipe', 'pipe'] });
+    { cwd: base, env: { PATH: process.env.PATH, HOME: home, NO_COLOR: '1', DO_NOT_TRACK: '1', ZERO_SKIP_UPDATE_CHECK: '1', ZERO_LICENSE: license }, stdio: ['ignore', 'pipe', 'pipe'] });
   child.stdout.on('data', data => { output = (output + data).slice(-32000); });
   child.stderr.on('data', data => { output = (output + data).slice(-32000); });
   let origin;

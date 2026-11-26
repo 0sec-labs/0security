@@ -96,7 +96,7 @@ afterEach(async () => {
 });
 
 const enterprise = () => {
-  for (const name of ["ZERO_OFFLINE", "ZERO_NO_TELEMETRY", "DO_NOT_TRACK", "ZERO_ANALYTICS_LEVEL", "ZERO_CLOUD_TOKEN", "0SEC_CLOUD_TOKEN"]) vi.stubEnv(name, undefined);
+  for (const name of ["ZERO_OFFLINE", "DO_NOT_TRACK", "ZERO_ANALYTICS_LEVEL", "ZERO_CLOUD_TOKEN", "0SEC_CLOUD_TOKEN"]) vi.stubEnv(name, undefined);
   vi.stubEnv(ENTERPRISE_ENV, "1");
 };
 
@@ -113,7 +113,7 @@ describe("the egress guard itself", () => {
     expect(attempts.map(a => a.via)).toEqual(["http.request", "https.get"]);
   });
   it("control: without the switch the analytics pipeline does try to leave", async () => {
-    for (const name of ["ZERO_OFFLINE", "ZERO_NO_TELEMETRY", "DO_NOT_TRACK", "ZERO_ANALYTICS_LEVEL", "ZERO_CLOUD_TOKEN", "0SEC_CLOUD_TOKEN", ENTERPRISE_ENV]) vi.stubEnv(name, undefined);
+    for (const name of ["ZERO_OFFLINE", "DO_NOT_TRACK", "ZERO_ANALYTICS_LEVEL", "ZERO_CLOUD_TOKEN", "0SEC_CLOUD_TOKEN", ENTERPRISE_ENV]) vi.stubEnv(name, undefined);
     vi.stubEnv("ZERO_ANALYTICS_POSTHOG_KEY", "phc_FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE0000");
     vi.stubEnv("ZERO_ANALYTICS_POSTHOG_HOST", "https://ph.example.test");
     const home = mkdtempSync(join(tmpdir(), "0-egress-"));
@@ -135,9 +135,10 @@ describe("ZERO_ENTERPRISE", () => {
     for (const value of ["", "0", "false", "no", " NO "]) expect(enterpriseMode({ [ENTERPRISE_ENV]: value })).toBe(false);
     for (const value of ["1", "true", "yes", "on"]) expect(enterpriseMode({ [ENTERPRISE_ENV]: value })).toBe(true);
   });
-  it("feeds the existing opt-out gate and forces analytics off", () => {
-    expect(analyticsOptedOut({ [ENTERPRISE_ENV]: "1" })).toBe(true);
-    expect(resolveAnalyticsLevel({ [ENTERPRISE_ENV]: "1", ZERO_ANALYTICS_LEVEL: "full" })).toBe("off");
+  it("does not control analytics: DO_NOT_TRACK is the only opt-out", () => {
+    expect(analyticsOptedOut({ [ENTERPRISE_ENV]: "1" })).toBe(false);
+    expect(analyticsOptedOut({ DO_NOT_TRACK: "1" })).toBe(true);
+    expect(resolveAnalyticsLevel({ DO_NOT_TRACK: "1" })).toBe("off");
     expect(resolveAnalyticsLevel({})).toBe("usage");
   });
   it("assertEgressAllowed throws a typed error naming the destination", () => {
@@ -145,8 +146,9 @@ describe("ZERO_ENTERPRISE", () => {
     expect(() => assertEgressAllowed("example.invalid", { [ENTERPRISE_ENV]: "1" })).toThrow(EnterpriseEgressError);
   });
 
-  it("usage analytics (PostHog and cloud) send nothing", async () => {
+  it("usage analytics send nothing under DO_NOT_TRACK", async () => {
     enterprise();
+    vi.stubEnv("DO_NOT_TRACK", "1");
     vi.stubEnv("ZERO_ANALYTICS_POSTHOG_KEY", "phc_FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE0000");
     vi.stubEnv("ZERO_ANALYTICS_POSTHOG_HOST", "https://ph.example.test");
     vi.stubEnv("ZERO_CLOUD_TOKEN", "token-that-must-not-be-used");

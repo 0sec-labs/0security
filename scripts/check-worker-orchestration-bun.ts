@@ -96,7 +96,7 @@ try {
   session = createHostConsoleSession({ config: { runtime, role: "attack", tools: ["spawn_agent", "str_replace", "bash"].map(name => TOOL_DEFINITIONS[name]), scanId: "offline-orchestration", workspaceRoot: checkout,
     agentMessaging: { selfId: "offline-orchestration", selfRole: "parent", projectPath: checkout, homeDir: root, siblingChannelEnabled: false, operatorChannelEnabled: false },
     codebaseLearning: false, refineObjective: false, autonomyMode: "changes", maxToolIterations: 12 },
-    dbPath: join(root, "fixture.db"), executionEnvironment: { ZERO_0VERSE_MCP: "0", ZERO_DISABLE_HUNT_MEMORY: "1", ZERO_NO_TELEMETRY: "1" },
+    dbPath: join(root, "fixture.db"), executionEnvironment: { ZERO_0VERSE_MCP: "0", ZERO_DISABLE_HUNT_MEMORY: "1", DO_NOT_TRACK: "1" },
     launch: { command: process.execPath, args: [cli, "--host-console-worker"], cwd: checkout, env: { PATH: process.env.PATH, HOME: root }, graceMs: 100 },
   });
   await session.ready;

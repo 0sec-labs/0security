@@ -4,7 +4,7 @@ import { appendFileSync, closeSync, existsSync, fsyncSync, lstatSync, mkdirSync,
 import { isAbsolute, join } from "node:path";
 import { homeStateDir, VERSION } from "../shared/index.js";
 import { z } from "zod";
-import { analyticsOptedOut } from "./analytics-level.js";
+import { isOptOutSet } from "./analytics-level.js";
 import { redactRecordStrings } from "./analytics-pipeline.js";
 import { loadCloudCredentials } from "../cloud/credentials.js";
 import type { NativeRuntime } from "../runtime/types.js";
@@ -71,6 +71,15 @@ export interface BeginContribution {
   runId: string; attemptId?: string; model: string; scope: unknown; objective?: string | null; versions?: Record<string, string>;
   authSecretValues?: readonly string[];
 }
+/**
+ * Opt-in run contributions go to 0cloud, so they stay blocked by every offline and
+ * strict-mode switch even though analytics now has a single opt-out (DO_NOT_TRACK).
+ */
+const CONTRIBUTION_BLOCK_ENV = ["ZERO_OFFLINE", "ZERO_NO_TELEMETRY", "DO_NOT_TRACK", "ZERO_ENTERPRISE"] as const;
+function analyticsOptedOut(env: NodeJS.ProcessEnv = process.env): boolean {
+  return CONTRIBUTION_BLOCK_ENV.some((name) => isOptOutSet(env[name]));
+}
+
 export type ContributionUploadResult = { status: "uploaded"; nextChunkIndex: number } | { status: "denied" | "offline" | "pending"; reason: string };
 const PROCESS_INSTANCE = randomUUID();
 const context = new AsyncLocalStorage<{ capture: RunCapture; agentId: string; parentAgentId: string | null }>();

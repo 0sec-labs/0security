@@ -37,7 +37,7 @@ CLI_ENV=(env -i
   CODEX_HOME="$TMP/bare-home/codex"
   CLAUDE_CONFIG_DIR="$TMP/bare-home/claude"
   ZERO_CODEX_AUTH_JSON_PATH="$TMP/bare-home/no-auth.json"
-  ZERO_NO_TELEMETRY=1 DO_NOT_TRACK=1 CI=1 NO_COLOR=1 TERM=dumb)
+  DO_NOT_TRACK=1 CI=1 NO_COLOR=1 TERM=dumb)
 
 # Pick a portable "run with timeout" helper. GH Actions ubuntu runners have
 # coreutils `timeout`; macOS devs running this locally usually don't (unless

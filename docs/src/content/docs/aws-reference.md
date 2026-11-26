@@ -194,7 +194,7 @@ ZERO_PUBLIC_URL=https://${domain}
 ZERO_ALLOWED_HOSTS=${domain}
 ZERO_DATA_DIR=/data
 ZERO_ENTERPRISE=1
-ZERO_NO_TELEMETRY=1
+DO_NOT_TRACK=1
 COMPOSE_FILE=docker-compose.yml:docker-compose.data-disk.yml:docker-compose.reference.yml
 EOF
 chmod 600 .env

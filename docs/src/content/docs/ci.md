@@ -371,6 +371,7 @@ jobs:
           fail-on: high
         env:
           ZERO_ENTERPRISE: "1"
+          DO_NOT_TRACK: "1"
           ZERO_SELECTED_PROVIDER: azure
           AZURE_OPENAI_AUTH: entra
           AZURE_OPENAI_BASE_URL: https://your-resource.openai.azure.com/openai/v1
@@ -380,7 +381,7 @@ jobs:
 Keep these boundaries:
 
 - Give the runner's machine identity access to the model, as in [Azure OpenAI](/models/#azure-openai) or an AWS role for [Amazon Bedrock](/models/#amazon-bedrock). No model key is stored in GitHub.
-- `ZERO_ENTERPRISE` keeps everything off except the model endpoint you configured. The action's SARIF upload goes to GitHub with the job's token. See [Data flow](/data-flow/).
+- `ZERO_ENTERPRISE` keeps every outbound call off except the model endpoint you configured, and `DO_NOT_TRACK` stops telemetry. The action's SARIF upload goes to GitHub with the job's token. See [Data flow](/data-flow/).
 - Install `cosign` on the runner image, so the installer verifies the release [signature](/self-hosting/#verify-the-signature). Or put a pinned, verified binary in the runner image and skip the install.
 - Only run the job on trusted events. Do not run a self-hosted runner for pull requests from forks.
 

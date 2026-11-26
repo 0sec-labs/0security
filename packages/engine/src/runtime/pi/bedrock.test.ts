@@ -97,7 +97,7 @@ describe("Amazon Bedrock provider", () => {
     const endpoint = await mockBedrock();
     const runtime = createNativeApiRuntime({ type: "api", timeout: 10_000, provider: "bedrock", model: MODEL, singleModel: true, env: {
       ZERO_SUPPRESS_PROVIDER_STARTUP_LOG: "1", ZERO_LLM_FALLBACK: "", BEDROCK_BASE_URL: endpoint, AWS_BEDROCK_FORCE_HTTP1: "1",
-      AWS_ACCESS_KEY_ID: "AKIATESTONLY", AWS_SECRET_ACCESS_KEY: "synthetic-secret", AWS_REGION: "eu-central-1", ZERO_NO_TELEMETRY: "1" } });
+      AWS_ACCESS_KEY_ID: "AKIATESTONLY", AWS_SECRET_ACCESS_KEY: "synthetic-secret", AWS_REGION: "eu-central-1", DO_NOT_TRACK: "1" } });
     expect(runtime.resolvedProvider()).toBe("bedrock");
 
     const first = await runtime.executeNative("Review carefully", messages, tools);

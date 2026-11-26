@@ -73,7 +73,7 @@ function installEgressGuard(): void {
   restore.push(() => syncBuiltinESMExports());
 }
 
-const NETWORK_ENV = ["ZERO_OFFLINE", "ZERO_NO_TELEMETRY", "DO_NOT_TRACK", "ZERO_NO_UPDATE_CHECK", "ZERO_UPDATE_ORIGIN", "CI", "ZERO_FEEDBACK_URL", "ZERO_SENTRY_DSN", "ZERO_CLOUD_TOKEN"];
+const NETWORK_ENV = ["ZERO_OFFLINE", "DO_NOT_TRACK", "ZERO_NO_UPDATE_CHECK", "ZERO_UPDATE_ORIGIN", "CI", "ZERO_FEEDBACK_URL", "ZERO_SENTRY_DSN", "ZERO_CLOUD_TOKEN"];
 const enterprise = () => { for (const name of NETWORK_ENV) vi.stubEnv(name, undefined); vi.stubEnv(ENTERPRISE_ENV, "1"); };
 
 let home: string;
@@ -93,8 +93,8 @@ afterEach(async () => {
 });
 
 describe("ZERO_ENTERPRISE, CLI call sites", () => {
-  it("is one of the feedback opt-outs", () => {
-    expect(FEEDBACK_OPT_OUT_ENV).toContain(ENTERPRISE_ENV);
+  it("is not a feedback opt-out: DO_NOT_TRACK is the only telemetry switch", () => {
+    expect(FEEDBACK_OPT_OUT_ENV).toEqual(["DO_NOT_TRACK"]);
   });
 
   it("update check: no lookup, no install, status stays empty", async () => {
@@ -115,8 +115,9 @@ describe("ZERO_ENTERPRISE, CLI call sites", () => {
     expect(attempts).toEqual([]);
   });
 
-  it("feedback and crash reports are refused before any request", async () => {
+  it("feedback and crash reports are refused before any request under DO_NOT_TRACK", async () => {
     enterprise();
+    vi.stubEnv("DO_NOT_TRACK", "1");
     vi.stubEnv("ZERO_FEEDBACK_URL", "https://feedback.example.test/v1");
     vi.stubEnv("ZERO_SENTRY_DSN", "https://abc@o1.ingest.example.test/1");
     expect(submissionBlockedReason()).toBe("opt-out");

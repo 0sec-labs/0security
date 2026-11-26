@@ -136,7 +136,8 @@ export function resolveWorkbenchGuestSettings(settings: TuiSettings, env: Readon
 }
 
 export function workbenchNetworkEnabled(env: Readonly<NodeJS.ProcessEnv> = process.env): boolean {
-  return submissionBlockedReason({ ZERO_OFFLINE: env.ZERO_OFFLINE }, { allowCloud: false }) !== "opt-out";
+  const offline = env.ZERO_OFFLINE?.trim().toLowerCase();
+  return offline === undefined || ["", "0", "false", "no"].includes(offline);
 }
 
 /** Leave admitted guest processes and explicitly local invocations in this process. */
