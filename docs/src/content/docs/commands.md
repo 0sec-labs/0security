@@ -1781,7 +1781,7 @@ Browse and manage persisted findings
 
 Triage (`new`, `accepted`, `suppressed`) and verification are separate states. Accepting a finding records your decision; reproduction and fix verification are separate steps.
 
-Subcommands: [list](#findings-list) · [show](#findings-show) · [update](#findings-update) · [import](#findings-import) · [fix](#findings-fix) · [burndown](#findings-burndown) · [verify](#findings-verify) · [metrics](#findings-metrics) · [rollup](#findings-rollup) · [evidence](#findings-evidence) · [export-fixes](#findings-export-fixes) · [report-draft](#findings-report-draft) · [reproduce](#findings-reproduce) · [context](#findings-context) · [accept](#findings-accept) · [suppress](#findings-suppress) · [reopen](#findings-reopen) · [export](#findings-export) · [keys](#findings-keys) · [upload](#findings-upload) · [issues](#findings-issues) · [reports](#findings-reports).
+Subcommands: [list](#findings-list) · [show](#findings-show) · [update](#findings-update) · [import](#findings-import) · [fix](#findings-fix) · [burndown](#findings-burndown) · [verify](#findings-verify) · [metrics](#findings-metrics) · [rollup](#findings-rollup) · [evidence](#findings-evidence) · [export-fixes](#findings-export-fixes) · [report-draft](#findings-report-draft) · [reproduce](#findings-reproduce) · [context](#findings-context) · [accept](#findings-accept) · [suppress](#findings-suppress) · [reopen](#findings-reopen) · [export](#findings-export) · [keys](#findings-keys) · [variants](#findings-variants) · [upload](#findings-upload) · [issues](#findings-issues) · [reports](#findings-reports).
 
 | Option | Registered default | Description |
 | --- | --- | --- |
@@ -2055,6 +2055,8 @@ A policy file inside the repository being fixed is not read unless you pass `--r
 | `--policy <file>` | — | Policy file (.json or .yaml) of approved libraries and fix rules; any path you name, relative to the current directory. Default: ~/.0/fix-policy.json\|yaml\|yml |
 | `--ticket <key>` | — | Ticket key such as SEC-123 for the {ticket} placeholder in your policy's pull request settings |
 | `--repo-policy` | — | Also read fix-policy.* or .zero/fix-policy.* from the repository being fixed (untrusted content; off by default) |
+| `--no-variants` | — | Do not rescan the recorded variants or hunt for the same bug at other sites after the fix |
+| `--variant-budget <usd>` | `1` | Spend cap for each variant thread, in USD |
 | `--no-pr` | — | Commit on the fix branch but do not push or open a pull request |
 | `--budget <usd>` | `3` | Stop when the estimated spend reaches this many USD |
 | `--model <model>` | — | Model for the fix thread (default: gpt-6-luna) |
@@ -2528,6 +2530,48 @@ Exit codes:
 | `--json` | — | Print JSON |
 | `--format <format>` | — | Output: text or json Choices: text, json. |
 
+#### findings variants
+
+Experimental: hunt for the same bug at other sites from a finding's root cause, or rescan the recorded variants
+
+```text
+0security findings variants [options] <finding>
+```
+
+A fix closes one site; the same mistake is often at others. A finding can carry a root cause: the bug class, the unsafe pattern (the shape of the sink and where its input comes from), the guard that is missing, and the design origin (where the control should live so every site is covered). `0security findings verify` records one when it returns a true-positive verdict, and a hunt records one when the finding has none.
+
+The command starts a thread that follows the `variant-hunting` skill, seeded from that record. It searches the folder for the same sink shape, checks every hit and answers with the sites that still have the bug. Each site becomes a finding with a `variantOf` link to this one, so [findings show](#findings-show) lists the variants and [findings list](#findings-list) marks them. A site already recorded, or on the finding's own lines, is not recorded again. A finding that is itself a variant cannot start a hunt. The thread edits nothing.
+
+`--rescan` hunts for no new variants. It checks the variants already recorded again and marks each one fixed, or leaves it open when the bug is still there or the thread cannot tell. A fixed variant is not checked again. `0security findings fix` does this on the fixed work tree after it commits, then hunts, so the result shows next to the pull request; `0security findings verify` hunts after each true-positive verdict. Both take `--no-variants` to skip it and `--variant-budget` to cap each thread. Cross-repository search is not part of this.
+
+Pass the folder that was scanned with `--folder` (default: the current directory). This command reads files on this machine, so it needs the local console and rejects `--computer` and `--engine-url`.
+
+Exit codes:
+
+- 0: done
+- 1: the thread returned no answer
+- 2: usage error
+
+| Argument | Required | Description |
+| --- | --- | --- |
+| `finding` | Yes |  |
+
+| Option | Registered default | Description |
+| --- | --- | --- |
+| `--folder <dir>` | — | The folder that was scanned; the thread reads the code there (default: the current directory) |
+| `--rescan` | — | Check the variants already recorded for this finding and mark each fixed or still open; hunt for no new ones |
+| `--budget <usd>` | `1` | Spend cap for the thread, in USD |
+| `--model <model>` | — | Model for the thread (default: gpt-6-luna) |
+| `--timeout <seconds>` | `600` | Maximum seconds to wait for the thread |
+| `--format <format>` | — | Output: text or json Choices: text, json. |
+| `--engine-url <url>` | — | Attach directly to a running trusted engine |
+| `--engine-token-env <name>` | — | Environment variable holding the attached engine token |
+| `--computer <id>` | — | Use a registered remote computer |
+| `--engine <id>` | — |  |
+| `--computers-config <path>` | — | Operator computer connection registry JSON file |
+| `--engines-config <path>` | — |  |
+| `--db-path <path>` | — | Control database of the local engine to attach to |
+
 #### findings verify
 
 Experimental: re-check findings with a fresh thread each and record a verdict next to them
@@ -2545,6 +2589,8 @@ The verdict is stored next to the finding by its id. [findings list](#findings-l
 `--apply` never suppresses a critical or high finding. It suppresses a lower-severity finding only when the verdict is false-positive and it names a control at `path:line` that exists in the folder and the reasoning cites a `path:line` too. The suppression note starts with `False positive (model-verified):` and `0security findings reopen` undoes it. Without `--apply` no status changes.
 
 `--budget` is the total for the run and `--per-finding` caps one finding. `--concurrency` (1 to 3) runs threads side by side. The run stops when `--max-consecutive-failures` threads in a row return no verdict, or when the budget is spent. `--dry-run` lists what would be checked. `--format json` prints the report with counts per verdict, the reasoning, the cost and what `--apply` did.
+
+A true-positive verdict also stores the finding's root cause and starts a hunt for variants, the same bug at other sites ([findings variants](#findings-variants)). `--no-variants` turns that off and `--variant-budget` caps each hunt.
 
 Verify reads files on this machine, so it needs the local console and rejects `--computer` and `--engine-url`.
 
@@ -2572,6 +2618,8 @@ Exit codes:
 | `--max-consecutive-failures <n>` | `3` | Stop after this many checks in a row that return no verdict |
 | `--model <model>` | — | Model for the threads (default: gpt-6-luna) |
 | `--timeout <seconds>` | `600` | Maximum seconds to wait for one thread |
+| `--no-variants` | — | Do not hunt for the same bug at other sites after a true-positive verdict |
+| `--variant-budget <usd>` | `1` | Spend cap for each variant hunt, in USD |
 | `--dry-run` | — | List what would be checked and skipped; change nothing |
 | `--format <format>` | — | Output: text or json Choices: text, json. |
 | `--engine-url <url>` | — | Attach directly to a running trusted engine |

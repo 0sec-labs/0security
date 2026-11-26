@@ -17,6 +17,7 @@ import { findingsToolDefinitions } from "./findings.js";
 import { systemToolDefinitions } from "./system.js";
 import { skillsToolDefinitions } from "./skills.js";
 import { askOperatorToolDefinitions } from "./ask-operator.js";
+import { codeIndexToolDefinitions } from "./code-index.js";
 
 // Every per-domain definition map, merged. Key collisions are impossible —
 // each tool name is owned by exactly one domain module.
@@ -26,6 +27,7 @@ const DOMAIN_DEFINITIONS: Record<string, ToolDefinition> = {
   ...systemToolDefinitions,
   ...skillsToolDefinitions,
   ...askOperatorToolDefinitions,
+  ...codeIndexToolDefinitions,
 };
 
 // Canonical registry order. getToolsForRole("audit"/"review") enumerates
@@ -38,6 +40,10 @@ const TOOL_REGISTRY_ORDER = [
   "web_search",
   "load_skill",
   "ask_operator",
+  "callers_of",
+  "callees_of",
+  "routes",
+  "trace_to_sink",
 ] as const;
 
 export const TOOL_DEFINITIONS: Record<string, ToolDefinition> = Object.fromEntries(

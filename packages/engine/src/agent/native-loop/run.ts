@@ -9,7 +9,8 @@ import type { NativeMessage, NativeContentBlock, NativeToolDef } from "../../run
 import { resolve } from "node:path";
 import type { ToolDefinition, ToolCall, ToolResult, ToolContext } from "../types.js";
 import { toNativeToolDef } from "../native-tooldef.js";
-import { ToolExecutor, getToolsForRole, TOOL_DEFINITIONS } from "../tools.js";
+import { ToolExecutor, getToolsForRole, getPackToolDefinitions, TOOL_DEFINITIONS } from "../tools.js";
+import { DeferredToolRegistry } from "../deferred-tools.js";
 import { ToolHealthTracker } from "../tool-health.js";
 import { features } from "../features.js";
 import { LootLedger } from "../loot.js";
@@ -199,7 +200,21 @@ async function runNativeAgentLoopInternal(opts: NativeAgentLoopOptions): Promise
   toolCtx.delegationTools = tools;
 
   // Convert ToolDefinitions to native API format.
-  const nativeTools: NativeToolDef[] = tools.map(toNativeToolDef);
+  const baseNativeTools: NativeToolDef[] = tools.map(toNativeToolDef);
+  let nativeTools: NativeToolDef[] = baseNativeTools;
+  // Pack tools (code-index) are never in this list. A loaded skill that declares the pack adds them on the next turn,
+  // inside the worker policy: a restricted tool list or workflow phase that does not allow them keeps them out.
+  const packTools = new DeferredToolRegistry();
+  packTools.seed(filterWorkflowAgentTools(getPackToolDefinitions()).filter(tool => config.workerPolicy?.allowedTools === undefined || config.workerPolicy.allowedTools.includes(tool.name)));
+  (toolCtx as typeof toolCtx & { packTools?: DeferredToolRegistry }).packTools = packTools;
+  let loadedPackCount = 0;
+  const refreshPackTools = (): void => {
+    const loaded = packTools.loadedDefinitions();
+    if (loaded.length === loadedPackCount) return;
+    loadedPackCount = loaded.length;
+    nativeTools = [...baseNativeTools, ...loaded.map(toNativeToolDef)];
+    toolCtx.delegationTools = [...tools, ...loaded];
+  };
 
   // Initialize or restore state
   const sessionId = config.sessionId ?? randomUUID();
@@ -996,6 +1011,7 @@ async function runNativeAgentLoopInternal(opts: NativeAgentLoopOptions): Promise
         });
       }
     }
+    refreshPackTools();
     // Maintenance is a metered model call too. Re-enter the boundary gates
     // before planning if its usage/cancellation/elapsed time spent the allowance.
     if (executionSignal.aborted ||

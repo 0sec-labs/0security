@@ -14,6 +14,8 @@ export * from "./business-context.js";
 export * from "./fix-prompt.js";
 export * from "./triage-expiry.js";
 export * from "./verify-prompt.js";
+export * from "./root-cause.js";
+export * from "./variant-prompt.js";
 export * from "./scanners.js";
 export * from "./workflow.js";
 export * from "./research-evidence.js";

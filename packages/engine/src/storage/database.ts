@@ -41,6 +41,7 @@ import type {
 } from "./types.js";
 import type { FindingReproduction } from "../shared/reproduction.js";
 import type { ExecutedPoc } from "../shared/executed-poc.js";
+import type { RootCause } from "../shared/types.js";
 import type { FindingModelVerification, PersistedFindingReviewFields, WorkflowStatus } from "./finding-helpers.js";
 import type { TriageDetails } from "./repositories/finding-repository.js";
 import { createRepositories, type Repositories } from "./repositories/index.js";
@@ -247,6 +248,22 @@ export class osecDB {
 
   setFindingExecutedPoc(findingId: string, record: ExecutedPoc): void {
     return this.repos.findings.setFindingExecutedPoc(findingId, record);
+  }
+
+  getFindingRootCause(findingId: string): RootCause | undefined {
+    return this.repos.findings.getFindingRootCause(findingId);
+  }
+
+  setFindingRootCause(findingId: string, rootCause: RootCause): void {
+    return this.repos.findings.setFindingRootCause(findingId, rootCause);
+  }
+
+  listVariantLinks() {
+    return this.repos.findings.listVariantLinks();
+  }
+
+  listVariantsOf(findingId: string) {
+    return this.repos.findings.listVariantsOf(findingId);
   }
 
   setFindingModelVerification(findingId: string, verification: FindingModelVerification): void {

@@ -14,10 +14,11 @@ import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { Option, type Command } from "commander";
 import { assertEgressAllowed, bumpJavaDependency, parseDependencyFinding } from "@0/engine";
-import { fixPrompt, type FixPolicy, type FixPromptFinding } from "@0/engine/shared";
+import { fixPrompt, type FixPolicy, type FixPromptFinding, type RootCause } from "@0/engine/shared";
 import { loadFixPolicyFile, type FixPolicyOptions, type LoadedFixPolicy } from "./fix-policy.js";
 import { osecDB, resolveOsecDbPath } from "@0/engine/storage";
 import { consoleTransportOptions, type ConsoleClient, type ConsoleTransportOptions } from "../console-client.js";
+import { defaultVariantStore, DEFAULT_VARIANT_BUDGET_USD, huntVariants, rescanSummary, rescanVariants, type VariantParent, type VariantStore } from "./variants.js";
 import { connect, DEFAULT_SCAN_MODEL, defaultScanDeps, waitForThread, type ScanDeps } from "./scan.js";
 import { resolveFindingId, shortFindingId } from "../finding-id.js";
 import type { Host } from "../host/index.js";
@@ -39,7 +40,11 @@ const CHECK_TIMEOUT_MS = 10 * 60 * 1000;
 export const BRANCH_PREFIX = "0/fix-";
 
 export interface CheckResult { command: string; code: number; output: string; /** Set when the command ran in a container: "<image>, network off". */ sandbox?: string }
-export interface FindingToFix extends FixPromptFinding { fingerprint: string }
+export interface FindingToFix extends FixPromptFinding {
+  fingerprint: string;
+  /** Where the finding is stored and which scan it belongs to; variants found after the fix are stored there. Absent: no variant hunt. */
+  dbPath?: string; scanId?: string; rootCause?: RootCause; variantOf?: string;
+}
 
 export interface FixDeps extends Pick<ScanDeps, "open" | "err" | "sleep" | "startConsole"> {
   out(text: string): void;
@@ -56,6 +61,8 @@ export interface FixDeps extends Pick<ScanDeps, "open" | "err" | "sleep" | "star
   metrics?(record: Omit<RunMetric, "version" | "ci">): void;
   /** Remember what a standalone fix did, so `findings export-fixes` can report it. Not set for burndown, which keeps its own record. */
   record?(entry: { repo: string; fingerprint: string; outcome: FixOutcome }): void | Promise<void>;
+  /** Where root causes and variants are stored. Absent in tests that do not hunt, so they write nothing. */
+  variants?: VariantStore;
 }
 
 function resolveRow(rows: Array<Record<string, unknown>>, id: string): Record<string, unknown> {
@@ -95,6 +102,9 @@ const defaults: FixDeps = {
         id: String(row.id), title: String(row.title), severity: String(row.severity), category: String(row.category),
         tool: typeof row.tool === "string" ? row.tool : null, description: String(row.description ?? ""),
         fingerprint: String(row.fingerprint ?? row.id),
+        dbPath: resolveOsecDbPath(dbPath), scanId: String(row.scanId),
+        ...(db.getFindingRootCause(String(row.id)) ? { rootCause: db.getFindingRootCause(String(row.id)) } : {}),
+        ...(typeof row.variantOf === "string" && row.variantOf ? { variantOf: row.variantOf } : {}),
         ...(annotation ? { path: annotation.path, startLine: annotation.startLine, ...(annotation.endLine ? { endLine: annotation.endLine } : {}) } : {}),
         ...(typeof row.evidenceResponse === "string" && row.evidenceResponse ? { snippet: row.evidenceResponse } : {}),
       };
@@ -105,6 +115,7 @@ const defaults: FixDeps = {
   removeTemp: path => rmSync(path, { recursive: true, force: true }),
   writeFile: (path, text) => writeFileSync(path, text, { mode: 0o600 }),
   metrics: record => appendRunMetric(record),
+  variants: defaultVariantStore(),
   async record(entry) { const { recordStandaloneFix } = await import("./burndown.js"); recordStandaloneFix(entry.repo, entry.fingerprint, entry.outcome); },
 };
 
@@ -176,11 +187,13 @@ export function pullRequestBody(finding: FindingToFix, summary: string | undefin
 
 export interface FixOptions extends ConsoleTransportOptions {
   host?: string; bitbucketUrl?: string;
-  repo?: string; base?: string; test?: string[]; ready?: boolean; budget: string; model?: string; timeout: string; pr: boolean; format?: string; policy?: string; repoPolicy?: boolean; sandbox?: string; sandboxImage?: string; sandboxNetwork?: boolean; sandboxSetup?: string[]; sandboxProfile?: string; sandboxMavenSettings?: string; ticket?: string;
+  repo?: string; base?: string; test?: string[]; ready?: boolean; budget: string; model?: string; timeout: string; pr: boolean; format?: string; policy?: string; repoPolicy?: boolean; sandbox?: string; sandboxImage?: string; sandboxNetwork?: boolean; variants?: boolean; variantBudget?: string; sandboxSetup?: string[]; sandboxProfile?: string; sandboxMavenSettings?: string; ticket?: string;
 }
 
 export interface FixOutcome {
   finding: string; branch: string; changed: boolean; committed: boolean; checks: CheckResult[]; verified: boolean;
+  /** The variant hunt that followed the fix: sites recorded, and the earlier variants checked again in the fixed tree. */
+  variants?: { created: number; rescanned: { fixed: number; open: number; unchecked: number }; error?: string };
   pullRequest?: { url: string; created: boolean; draft: boolean }; threadId?: string; costUsd?: number; tokens?: number; budgetExhausted?: boolean; timedOut?: boolean; summary?: string;
 }
 
@@ -245,6 +258,7 @@ async function runFixFlow(id: string, options: FixOptions, deps: FixDeps): Promi
   let madeBranch: { repo: string; branch: string; existed: boolean } | undefined;
   let committedBranch = false;
   let cache: string | undefined;
+  let fixClient: ConsoleClient | undefined;
   try {
     try { options = applySandboxProfile(options); } catch (error) { throw new UsageError((error as Error).message); }
     const budget = Number(options.budget);
@@ -299,6 +313,7 @@ async function runFixFlow(id: string, options: FixOptions, deps: FixDeps): Promi
       if (direct.reason) deps.err(`not changed directly (${direct.reason}); asking the model`);
       const { client, stop } = await connect(options, deps);
       stopConsole = stop;
+      fixClient = client;
       thread = await runThread(client, deps, tree, finding, options, budget, policy, Boolean(sandbox));
     }
     const status = (await deps.git(tree, ["status", "--porcelain", "--untracked-files=all"])).trim();
@@ -344,7 +359,31 @@ async function runFixFlow(id: string, options: FixOptions, deps: FixDeps): Promi
     await deps.git(tree, [...identity, "commit", "--quiet", "-m", `${commitSubject(named, conventions)}\n\nFinding ${finding.id}`]);
     committedBranch = true;
     const outcome: FixOutcome = { ...common, changed: true, committed: true, checks, verified };
-    if (!options.pr) { deps.err(`committed on ${branch}; not pushed (--no-pr).`); await remember(outcome); return outcome; }
+    // The fix is the other trigger for a variant hunt: the tree now holds the fix, so a site that still has the bug stands out.
+    const followUp = async (done: FixOutcome): Promise<FixOutcome> => {
+      if (!deps.variants || options.variants === false || !finding.dbPath || !finding.scanId || finding.variantOf) return done;
+      const parent: VariantParent = {
+        id: finding.id, dbPath: finding.dbPath, scanId: finding.scanId, title: finding.title, category: finding.category, severity: finding.severity, description: finding.description,
+        ...(finding.path ? { path: finding.path } : {}), ...(finding.startLine ? { startLine: finding.startLine } : {}), ...(finding.endLine ? { endLine: finding.endLine } : {}), ...(finding.rootCause ? { rootCause: finding.rootCause } : {}),
+      };
+      const run = { timeout: options.timeout, budget: options.variantBudget ?? String(DEFAULT_VARIANT_BUDGET_USD), ...(options.model ? { model: options.model } : {}) };
+      try {
+        if (!fixClient) { const connection = await connect(options, deps); fixClient = connection.client; stopConsole ??= connection.stop; }
+        const store = { store: deps.variants, err: deps.err, sleep: deps.sleep };
+        const folder = tree;
+        const rescanned = await rescanVariants(fixClient, store, folder, parent, run);
+        const commit = (await deps.git(tree, ["rev-parse", "HEAD"]).catch(() => "")).trim();
+        const hunt = await huntVariants(fixClient, store, folder, parent, run, commit ? { fixCommit: commit } : {});
+        const error = hunt.error ?? rescanned.error;
+        deps.err(`variants: ${hunt.created.length} recorded, ${rescanned.items.length} checked again${error ? ` (${error})` : ""}`);
+        return { ...done, variants: { created: hunt.created.length, rescanned: rescanSummary(rescanned), ...(error ? { error } : {}) } };
+      } catch (error) {
+        const message = error instanceof Error ? error.message.split("\n")[0]! : String(error);
+        deps.err(`warning: the variant hunt did not run (${message})`);
+        return { ...done, variants: { created: 0, rescanned: { fixed: 0, open: 0, unchecked: 0 }, error: message } };
+      }
+    };
+    if (!options.pr) { deps.err(`committed on ${branch}; not pushed (--no-pr).`); const done = await followUp(outcome); await remember(done); return done; }
 
     // The branch is ours and only ours: never the base, always with a lease so a person's later push is not overwritten.
     if (!host) throw new Error("No pull request host was selected.");
@@ -368,7 +407,7 @@ async function runFixFlow(id: string, options: FixOptions, deps: FixDeps): Promi
       const reviewers = await chooseReviewers(deps, repo, base.ref, conventions, finding.path);
       if (conventions.labels?.length || reviewers.length) await decoratePullRequest(host, url, { ...conventions, reviewers }, deps.err);
     }
-    const opened: FixOutcome = { ...outcome, pullRequest: { url, created, draft } };
+    const opened: FixOutcome = await followUp({ ...outcome, pullRequest: { url, created, draft } });
     await remember(opened);
     return opened;
   } finally {
@@ -475,6 +514,8 @@ export function registerFixCommand(program: Command, deps: FixDeps = defaults): 
     .option("--policy <file>", "Policy file (.json or .yaml) of approved libraries and fix rules; any path you name, relative to the current directory. Default: ~/.0/fix-policy.json|yaml|yml")
     .option("--ticket <key>", "Ticket key such as SEC-123 for the {ticket} placeholder in your policy's pull request settings")
     .option("--repo-policy", "Also read fix-policy.* or .zero/fix-policy.* from the repository being fixed (untrusted content; off by default)")
+    .option("--no-variants", "Do not rescan the recorded variants or hunt for the same bug at other sites after the fix")
+    .option("--variant-budget <usd>", "Spend cap for each variant thread, in USD", String(DEFAULT_VARIANT_BUDGET_USD))
     .option("--no-pr", "Commit on the fix branch but do not push or open a pull request")
     .option("--budget <usd>", "Stop when the estimated spend reaches this many USD", String(DEFAULT_BUDGET_USD))
     .option("--model <model>", `Model for the fix thread (default: ${DEFAULT_SCAN_MODEL})`)

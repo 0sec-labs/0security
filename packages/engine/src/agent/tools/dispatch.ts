@@ -15,6 +15,7 @@ import { findingsDispatch } from "./findings.js";
 import { systemDispatch } from "./system.js";
 import { skillsDispatch } from "./skills.js";
 import { askOperatorDispatch } from "./ask-operator.js";
+import { codeIndexDispatch } from "./code-index.js";
 
 export const TOOL_DISPATCH: Record<string, string> = {
   ...reconDispatch,
@@ -22,4 +23,5 @@ export const TOOL_DISPATCH: Record<string, string> = {
   ...systemDispatch,
   ...skillsDispatch,
   ...askOperatorDispatch,
+  ...codeIndexDispatch,
 };

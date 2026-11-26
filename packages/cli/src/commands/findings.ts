@@ -13,6 +13,7 @@ import {
 import { buildFindingConsoleCommand } from "../finding-handoff.js";
 import { resolveFindingId, shortFindingId, shortFingerprint } from "../finding-id.js";
 import { rowVerification, verificationPhrase } from "../finding-verification.js";
+import { readVariantLinks, rowRootCause, rowVariantOf, variantLines, type VariantLink } from "../finding-variants.js";
 import { executedPocPhrase, rowExecutedPoc, reproductionDetail, reproductionPhrase, rowReproduction } from "../finding-reproduction.js";
 import { auditTriage, buildTriageRequest, triageLabel, type TriageFlags } from "./findings-triage.js";
 import { UsageError } from "./output.js";
@@ -58,6 +59,10 @@ type FindingRow = {
   reproduction?: string | null;
   /** JSON of the executed-PoC outcome and run record; null until a PoC attempt is recorded. */
   executedPoc?: string | null;
+  /** JSON of the structured root cause; null until recorded. */
+  rootCause?: string | null;
+  /** Id of the finding this one is a variant of; null for every other finding. */
+  variantOf?: string | null;
   pocSteps?: string | null;
   timestamp: number;
   score?: number | null;
@@ -195,6 +200,9 @@ function priorityFinding(row: PriorityRow) {
 function compareRows(a: PriorityRow, b: PriorityRow): number {
   return compareFindingsByBusinessContext({ ...priorityFinding(a), businessContext: (a as { businessContext?: unknown }).businessContext }, { ...priorityFinding(b), businessContext: (b as { businessContext?: unknown }).businessContext }) || b.timestamp - a.timestamp || b.id.localeCompare(a.id);
 }
+function renderVariants(row: FindingRow, links: readonly VariantLink[]): void {
+  for (const line of variantLines(row.id, rowVariantOf(row), links)) console.log(`  ${chalk.gray(line)}`);
+}
 function renderVerification(row: FindingRow, withProof = true): void {
   const phrase = verificationPhrase(rowVerification(row));
   if (phrase) console.log(`  ${chalk.gray(phrase)}`);
@@ -267,6 +275,7 @@ async function renderFindingsList(opts: FindingsListOptions): Promise<void> {
       } finally { db.close(); }
     }
   }
+  const links = readVariantLinks(dbPaths);
   const order = context ? contextComparer(context) : compareRows;
   rows.sort(order);
   groups.sort((a, b) => order(a.latest as FindingRow, b.latest as FindingRow));
@@ -284,6 +293,7 @@ async function renderFindingsList(opts: FindingsListOptions): Promise<void> {
     for (const f of rows.slice(0, limit)) {
       renderPriority(f, context);
       renderVerification(f);
+      renderVariants(f, links);
       console.log(`  ${chalk.gray(shortFindingId(f.id))}  ${chalk.gray(f.category)}  ${chalk.gray(`scan:${f.scanId.slice(0, 8)}`)}  ${chalk.gray(`fp:${shortFingerprint(f.fingerprint ?? f.id)}`)}`);
       console.log("");
     }
@@ -293,6 +303,7 @@ async function renderFindingsList(opts: FindingsListOptions): Promise<void> {
     const f = group.latest;
     renderPriority(f, context);
     renderVerification(f);
+    renderVariants(f, links);
     console.log(`  ${chalk.gray(`fp:${shortFingerprint(group.fingerprint)}`)}  ${chalk.gray(f.category)}  ${chalk.gray(`${group.count} hits / ${group.scans} scans${group.similar ? `, ${group.similar} similar merged` : ""}`)}  ${chalk.gray(`latest:${f.scanId.slice(0, 8)}`)}`);
     if (f.triageNote) console.log(`  ${chalk.gray("note:")} ${chalk.dim(f.triageNote)}${f.triageApprover && effectiveTriageStatus(f) === "accepted" ? chalk.gray(` (approver: ${f.triageApprover})`) : ""}`);
     console.log("");
@@ -375,12 +386,15 @@ export function registerFindingsCommand(program: Command): void {
         const related = finding.fingerprint ? db.getRelatedFindings(finding.fingerprint) as FindingRow[] : [finding];
 
         if (opts.json) {
-          const { modelVerification: _raw, reproduction: _rawRepro, executedPoc: _rawExec, ...plain } = finding as FindingRow & { reproduction?: unknown; executedPoc?: unknown };
+          const { modelVerification: _raw, reproduction: _rawRepro, executedPoc: _rawExec, rootCause: _rawCause, variantOf: _rawVariantOf, ...plain } = finding as FindingRow & { reproduction?: unknown; executedPoc?: unknown };
           const executedRecord = rowExecutedPoc(finding as { executedPoc?: unknown; severity?: string });
+          const rootCause = rowRootCause(finding);
+          const variantOf = rowVariantOf(finding);
+          const variants = db.listVariantLinks().filter(link => link.variantOf === finding.id).map(link => ({ id: link.id, status: link.status }));
           const stored = rowVerification(finding);
           const proofRecord = rowReproduction(finding as { reproduction?: unknown; pocSteps?: unknown });
           const why = context ? adjustmentFor(context.context, findingPath((finding as { reviewAnnotation?: unknown }).reviewAnnotation), context.repository) : undefined;
-          console.log(JSON.stringify({ ...plain, ...(why?.tags.length ? { ranking: { shift: why.shift, tags: why.tags, notes: why.notes } } : {}), ...(stored ? { verification: stored } : {}), ...(proofRecord ? { reproduction: proofRecord } : {}), ...(executedRecord ? { executedPoc: executedRecord } : {}), related: related.map((row) => ({ id: row.id, scanId: row.scanId, status: row.status, triage: row.triageStatus ?? "new" })) }, null, 2));
+          console.log(JSON.stringify({ ...plain, ...(why?.tags.length ? { ranking: { shift: why.shift, tags: why.tags, notes: why.notes } } : {}), ...(stored ? { verification: stored } : {}), ...(proofRecord ? { reproduction: proofRecord } : {}), ...(executedRecord ? { executedPoc: executedRecord } : {}), ...(rootCause ? { rootCause } : {}), ...(variantOf ? { variantOf } : {}), ...(variants.length ? { variants } : {}), related: related.map((row) => ({ id: row.id, scanId: row.scanId, status: row.status, triage: row.triageStatus ?? "new" })) }, null, 2));
           return;
         }
         console.log("");
@@ -411,6 +425,26 @@ export function registerFindingsCommand(program: Command): void {
           console.log(`  ${chalk.gray("Verification:")} ${verification.verdict}${verification.advisorySeverity ? `, advisory severity ${verification.advisorySeverity}` : ""} (${verification.model ?? "model"}, ${verification.verifiedAt.slice(0, 10)}; advice only, severity and status are unchanged)`);
           console.log(`  ${chalk.dim(verification.reasoning)}`);
           if (verification.applied) console.log(`  ${chalk.gray("Suppressed by 0security findings verify --apply.")}`);
+        }
+        const rootCause = rowRootCause(finding);
+        if (rootCause) {
+          console.log(`  ${chalk.gray("Root cause:")} ${rootCause.bugClass}`);
+          console.log(`  ${chalk.dim(`unsafe pattern: ${rootCause.unsafePattern.sink}, input from ${rootCause.unsafePattern.source}`)}`);
+          console.log(`  ${chalk.dim(`missing guard: ${rootCause.missingGuard}`)}`);
+          console.log(`  ${chalk.dim(`control belongs: ${rootCause.designOrigin}`)}`);
+        }
+        const variantOf = rowVariantOf(finding);
+        if (variantOf) {
+          const parent = all.find(row => row.id === variantOf);
+          console.log(`  ${chalk.gray("Variant of:")} ${shortFindingId(variantOf)}${parent ? ` ${parent.title}` : ""}`);
+        }
+        const variantRows = db.listVariantLinks().filter(link => link.variantOf === finding.id);
+        if (variantRows.length) {
+          console.log(`  ${chalk.gray("Variants:")} ${variantRows.length} (${variantRows.filter(link => link.status !== "fixed").length} open, ${variantRows.filter(link => link.status === "fixed").length} fixed)`);
+          for (const link of variantRows.slice(0, 20)) {
+            const row = all.find(candidate => candidate.id === link.id);
+            console.log(`  ${chalk.gray(shortFindingId(link.id))} ${link.status === "fixed" ? chalk.green("fixed") : chalk.yellow("open")} ${row?.title ?? ""}`);
+          }
         }
         const proofDetail = reproductionDetail(finding as { reproduction?: unknown; pocSteps?: unknown });
         if (proofDetail) console.log(`  ${chalk.gray(`${proofDetail.label}:`)}        ${proofDetail.line}`);

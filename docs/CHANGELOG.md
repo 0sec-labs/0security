@@ -15,6 +15,7 @@ on the GitHub Release tag.
 ### Added
 
 - A docs page, "Use 0 from Claude Code or Codex", shows how another coding agent drives 0 through its shell: scan, read findings, ask a question, exit codes. 0 has no MCP server for this; the CLI does the job.
+- Findings can carry a structured root cause (bug class, unsafe pattern, missing guard, design origin). `0security findings verify` records one on a true-positive verdict, and it seeds a hunt for variants: the same bug at other sites, stored as findings with a `variantOf` link that `findings show` and `findings list` display. `0security findings fix` rescans the recorded variants in the fixed tree and marks each fixed or still open, then hunts. New command `0security findings variants` runs a hunt or `--rescan` by hand; `--no-variants` turns the automatic runs off. Stored findings and exports are unchanged when these fields are absent.
 - Anonymous lifecycle events go to PostHog: `first_run`, `command_invoked` (a command name from a fixed list, otherwise `other`), `update` (the two versions) and `error_exit` (an error category only). They go straight to PostHog from the CLI. `DO_NOT_TRACK=1` turns them off.
 - The `usage` event has `finding_class_counts`, findings counted by a fixed list of vulnerability classes. Titles, descriptions, evidence and targets are still never sent.
 

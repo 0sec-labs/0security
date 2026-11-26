@@ -1,7 +1,7 @@
 // FindingRepository: persistence for findings.
 import { parseFindingBusinessContext, type FindingBusinessContext } from "../../shared/business-context.js";
 import { ImpactAssessmentSchema, type ImpactAssessment } from "../../shared/index.js";
-import { eq, desc, and, or } from "drizzle-orm";
+import { eq, desc, and, or, isNotNull } from "drizzle-orm";
 import type { Finding, FindingTriageStatus } from "../../shared/index.js";
 import * as schema from "../schema.js";
 import { findingStatuses, type FindingStatusDB } from "../schema.js";
@@ -9,6 +9,8 @@ import { iterateLatestFindingMetadata, getFindingFamilyMetadata, selectFindingFa
 import { parseExecutedPoc, type ExecutedPoc } from "../../shared/executed-poc.js";
 import { parseFindingReproduction, parseReproductionResult, type FindingReproduction } from "../../shared/reproduction.js";
 import { buildFindingFingerprint, type PersistedFindingReviewFields, type FindingModelVerification, parseFindingModelVerification, serializeFindingModelVerification, serializeFindingReproduction, serializeExecutedPoc, serializeFindingSourceVerification, serializeFindingVerificationResult, serializeFindingReviewAnnotation, restoreFindingReviewFields, deriveEvidenceFromPocSteps, normalizeWorkflowStatus, type WorkflowStatus } from "../finding-helpers.js";
+import { parseStoredRootCause } from "../../shared/root-cause.js";
+import type { RootCause } from "../../shared/index.js";
 import { effectiveTriageStatus } from "../../shared/triage-expiry.js";
 import { Repository } from "./base.js";
 
@@ -92,6 +94,12 @@ export class FindingRepository extends Repository {
     const evidenceRequest = finding.evidence.request || derivedEvidence.request;
     const evidenceResponse = finding.evidence.response || derivedEvidence.response;
     const evidenceAnalysis = finding.evidence.analysis ?? derivedEvidence.analysis ?? null;
+    // Written only when the finding carries them, so a rescan that re-saves a row never erases a recorded root cause.
+    const rootCause = parseStoredRootCause(finding.rootCause);
+    const variantFields = {
+      ...(rootCause ? { rootCause: JSON.stringify(rootCause) } : {}),
+      ...(finding.variantOf ? { variantOf: finding.variantOf } : {}),
+    };
     this.db
       .insert(schema.findings)
       .values({
@@ -128,6 +136,7 @@ export class FindingRepository extends Repository {
         reviewAnnotation: reviewAnnotationJson,
         sourceVerification: sourceVerificationJson,
         tool: finding.tool ?? null,
+        ...variantFields,
         timestamp: finding.timestamp,
       })
       .onConflictDoUpdate({
@@ -164,6 +173,7 @@ export class FindingRepository extends Repository {
           reviewAnnotation: reviewAnnotationJson,
           sourceVerification: sourceVerificationJson,
           tool: finding.tool ?? null,
+          ...variantFields,
           timestamp: finding.timestamp,
         },
       })
@@ -211,6 +221,35 @@ export class FindingRepository extends Repository {
       .set({ modelVerification: serializeFindingModelVerification(verification) })
       .where(eq(schema.findings.id, findingId)).run();
     if (result.changes === 0) throw new Error(`Finding ${findingId} not found`);
+  }
+
+
+  /** The structured root cause of a finding, or undefined when it has none. */
+  getFindingRootCause(findingId: string): RootCause | undefined {
+    return parseStoredRootCause(this.owner.getFinding(findingId)?.rootCause);
+  }
+
+
+  /** Record a root cause next to the finding. Touches no other column. */
+  setFindingRootCause(findingId: string, rootCause: RootCause): void {
+    const usable = parseStoredRootCause(rootCause);
+    if (!usable) throw new Error("Not a usable root cause.");
+    const result = this.db.update(schema.findings).set({ rootCause: JSON.stringify(usable) }).where(eq(schema.findings.id, findingId)).run();
+    if (result.changes === 0) throw new Error(`Finding ${findingId} not found`);
+  }
+
+
+  /** The findings recorded as variants of this one, oldest first. */
+  listVariantsOf(findingId: string) {
+    return this.db.select().from(schema.findings).where(eq(schema.findings.variantOf, findingId)).orderBy(schema.findings.timestamp, schema.findings.id).all();
+  }
+
+
+  /** Every variant link in this database: the variant's id, the finding it is a variant of, and the variant's status. */
+  listVariantLinks(): Array<{ id: string; variantOf: string; status: string }> {
+    return this.db.select({ id: schema.findings.id, variantOf: schema.findings.variantOf, status: schema.findings.status })
+      .from(schema.findings).where(isNotNull(schema.findings.variantOf)).all()
+      .map(row => ({ id: row.id, variantOf: row.variantOf as string, status: row.status }));
   }
 
 

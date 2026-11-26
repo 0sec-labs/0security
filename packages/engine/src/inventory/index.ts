@@ -56,11 +56,11 @@ export interface InventorySummary {
 
 export interface Inventory { units: InventoryUnit[]; summary: InventorySummary }
 
-const SKIP_DIRS: ReadonlySet<string> = new Set([
+export const SKIP_DIRS: ReadonlySet<string> = new Set([
   "node_modules", "vendor", "third_party", "third-party", "bower_components", "dist", "build", "out", "target", ".git", ".hg", ".svn", ".next", ".nuxt", ".svelte-kit", ".turbo", ".cache",
   "__pycache__", ".venv", "venv", "site-packages", ".tox", ".gradle", ".idea", ".vscode", "Pods", "coverage", ".terraform", "obj", ".mypy_cache", ".pytest_cache", ".yarn", ".pnpm-store",
 ]);
-const SKIP_FILE = /\.(?:min|bundle|generated)\.[a-z]+$|\.d\.ts$|\.pb\.go$|_pb2(?:_grpc)?\.py$|\.map$/i;
+export const SKIP_FILE = /\.(?:min|bundle|generated)\.[a-z]+$|\.d\.ts$|\.pb\.go$|_pb2(?:_grpc)?\.py$|\.map$/i;
 const MAX_LINE = 2000;
 
 export const unitId = (kind: UnitKind, path: string, startLine: number | undefined, name: string | undefined): string =>
