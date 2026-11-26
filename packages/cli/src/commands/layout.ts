@@ -179,7 +179,6 @@ function groupBehaviour(top: Command): void {
 function polish(command: Command, path: string): void {
   const examples = EXAMPLES[path];
   if (examples && !(command as unknown as { _hidden?: boolean })._hidden) command.addHelpText("after", `\n${examplesBlock(examples)}`);
-  for (const option of command.options) if (option.long === "--scan") option.hidden = true;
   if (isLeaf(command)) unifyOutputFlags(command);
   for (const sub of command.commands) polish(sub, `${path} ${sub.name()}`);
 }

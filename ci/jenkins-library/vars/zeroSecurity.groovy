@@ -3,7 +3,18 @@ def call(Map config = [:]) {
   String version = config.version ?: libraryResource('0security/VERSION').trim()
   if (!(version ==~ /[0-9]+\.[0-9]+\.[0-9]+/)) error('zeroSecurity: version must be a pinned X.Y.Z release')
   if (!config.scanLabel || !config.publishLabel || config.scanLabel == config.publishLabel) error('zeroSecurity: distinct scanLabel and publishLabel are required')
-  if (!config.modelCredential || !config.bitbucketCredential || !config.repo) error('zeroSecurity: modelCredential, bitbucketCredential and repo are required')
+  if ((!config.modelCredential && !config.modelEnv) || !config.bitbucketCredential || !config.repo) error('zeroSecurity: modelCredential (or modelEnv), bitbucketCredential and repo are required')
+  // Non-secret model settings, for example [ZERO_SELECTED_PROVIDER: 'bedrock', ZERO_MODEL: '<inference profile id>', AWS_REGION: 'eu-central-1'].
+  // The credential goes in modelCredential, bound to modelCredentialVariable (default OPENAI_API_KEY).
+  List allowedModelEnv = ['ZERO_SELECTED_PROVIDER', 'ZERO_MODEL', 'ZERO_BEDROCK_MODEL', 'BEDROCK_BASE_URL', 'OPENAI_BASE_URL', 'AWS_REGION', 'AWS_DEFAULT_REGION', 'AWS_ROLE_ARN', 'AWS_WEB_IDENTITY_TOKEN_FILE', 'AWS_ROLE_SESSION_NAME']
+  List modelEntries = []
+  (config.modelEnv ?: [:]).each { name, value ->
+    if (!(name in allowedModelEnv)) error("zeroSecurity: modelEnv may set only ${allowedModelEnv.join(', ')}")
+    if (!(value.toString() ==~ /[A-Za-z0-9._:\/@+,=-]*/)) error("zeroSecurity: modelEnv ${name} has characters a setting should not have")
+    modelEntries << "${name}=${value}".toString()
+  }
+  String credentialVariable = config.modelCredentialVariable ?: 'OPENAI_API_KEY'
+  if (!(credentialVariable in ['OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'GOOGLE_API_KEY', 'AWS_BEARER_TOKEN_BEDROCK'])) error('zeroSecurity: modelCredentialVariable must be OPENAI_API_KEY, ANTHROPIC_API_KEY, GOOGLE_API_KEY or AWS_BEARER_TOKEN_BEDROCK')
   String scanNode = ''
   String stashName = "zero-security-${env.BUILD_NUMBER}"
   node(config.scanLabel) {
@@ -15,14 +26,19 @@ def call(Map config = [:]) {
         writeFile file: 'install.sh', text: libraryResource('0security/install.sh')
         writeFile file: '0-ci-scan.sh', text: libraryResource('0security/0-ci-scan.sh')
       }
-      withEnv(["ZERO_TOOLS=${tools}"]) {
-        withCredentials([string(credentialsId: config.modelCredential, variable: 'OPENAI_API_KEY')]) {
-          sh '''
-            set -eu
-            export INSTALL_DIR="$ZERO_TOOLS/bin" PATH="$ZERO_TOOLS/bin:$PATH"
-            RELEASE_BASE_URL="https://github.com/0sec-labs/0security/releases/download/v${VERSION}" sh "$ZERO_TOOLS/install.sh"
-            sh "$ZERO_TOOLS/0-ci-scan.sh"
-          '''
+      Closure runScan = {
+        sh '''
+          set -eu
+          export INSTALL_DIR="$ZERO_TOOLS/bin" PATH="$ZERO_TOOLS/bin:$PATH"
+          RELEASE_BASE_URL="https://github.com/0sec-labs/0security/releases/download/v${VERSION}" sh "$ZERO_TOOLS/install.sh"
+          sh "$ZERO_TOOLS/0-ci-scan.sh"
+        '''
+      }
+      withEnv(["ZERO_TOOLS=${tools}"] + modelEntries) {
+        if (config.modelCredential) {
+          withCredentials([string(credentialsId: config.modelCredential, variable: credentialVariable)]) { runScan() }
+        } else {
+          runScan()
         }
       }
     }
@@ -38,7 +54,7 @@ def call(Map config = [:]) {
         unstash stashName
         writeFile file: 'install.sh', text: libraryResource('0security/install.sh')
         writeFile file: '0-ci-publish.sh', text: libraryResource('0security/0-ci-publish.sh')
-        withEnv(["VERSION=${version}", "ZEROCI_REPO=${config.repo}", "ZEROCI_UPLOAD_TO=${config.platform ?: 'bitbucket-dc'}", "BITBUCKET_URL=${config.bitbucketUrl ?: ''}", "ZERO_BITBUCKET_URL=${config.allowedBitbucketUrl ?: ''}", "ZERO_ENTERPRISE=${config.enterprise ? '1' : ''}", 'OPENAI_API_KEY=', 'ANTHROPIC_API_KEY=', 'GOOGLE_API_KEY=', 'DO_NOT_TRACK=1']) {
+        withEnv(["VERSION=${version}", "ZEROCI_REPO=${config.repo}", "ZEROCI_UPLOAD_TO=${config.platform ?: 'bitbucket-dc'}", "BITBUCKET_URL=${config.bitbucketUrl ?: ''}", "ZERO_BITBUCKET_URL=${config.allowedBitbucketUrl ?: ''}", "ZERO_ENTERPRISE=${config.enterprise ? '1' : ''}", 'OPENAI_API_KEY=', 'ANTHROPIC_API_KEY=', 'GOOGLE_API_KEY=', 'AWS_BEARER_TOKEN_BEDROCK=', 'DO_NOT_TRACK=1']) {
           withCredentials([string(credentialsId: config.bitbucketCredential, variable: 'BITBUCKET_TOKEN')]) {
             sh '''
               set -eu

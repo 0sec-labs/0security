@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Executed-PoC probe (not an A/B): does `findings reproduce` label a real model finding as executed-proven in Docker?
+// Executed-PoC probe (not an A/B): does `findings reproduce` label a real model finding as script-matched in Docker?
 //   node scripts/bench/code-index/poc-probe.mjs --image node:24-bookworm-slim@sha256:<64 hex> [--fixture vulnerable|fixed] [--model gpt-6-luna]
 // It copies scripts/bench/repro-fixtures/path-traversal/<fixture> into a scratch git repository, scans it with the real
 // model, then runs `findings reproduce` on the path-traversal finding. Prints one JSON line. Needs a running Docker.

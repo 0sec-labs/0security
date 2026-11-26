@@ -3,8 +3,8 @@
  *
  * A finding carries a structured root cause (bug class, unsafe pattern, missing guard, design origin). A fresh thread
  * searches the folder for the same bug at other sites, seeded from that record; each site it proves becomes a finding
- * with `variantOf` pointing at the seed. After a fix, the recorded variants are checked again and each is marked fixed
- * or left open. The thread never records anything itself: it answers with one json block and this module stores it.
+ * with `variantOf` pointing at the seed. After a fix, the recorded variants are checked again and each is marked
+ * fixed-pending-merge or left open (it becomes fixed only when the fix pull request is seen merged). The thread never records anything itself: it answers with one json block and this module stores it.
  */
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -22,7 +22,7 @@ import { findingDatabasePaths } from "../finding-focus.js";
 import type { StateStore } from "./burndown.js";
 import { runGh } from "../host/gh.js";
 import { selectHost, type Host } from "../host/index.js";
-import { connect, DEFAULT_SCAN_MODEL, defaultScanDeps, waitForThread, type ScanDeps } from "./scan.js";
+import { connect, DEFAULT_SCAN_MODEL, scanModelField, defaultScanDeps, waitForThread, type ScanDeps } from "./scan.js";
 import { finishWithError, UsageError } from "./output.js";
 import { asJson, finishedThread } from "./thread-output.js";
 
@@ -43,7 +43,7 @@ export class VariantBudget {
   get stoppedReason(): string { return this.known ? "overall budget exhausted" : "cost receipt unavailable; further paid work stopped"; }
 }
 const DEFAULT_TIMEOUT_SECONDS = 600;
-/** Findings with this status are the ones a rescan leaves alone. */
+/** Findings with this status are the ones a rescan leaves alone (set by a person or a verified fix, never by a rescan). */
 const DONE_STATUS = "fixed";
 
 /** The finding a hunt starts from. */
@@ -88,7 +88,7 @@ export interface RescanResult { threadId?: string; costUsd?: number; tokens?: nu
 interface PromptThread { id: string; reply?: string; error?: string; costUsd?: number; tokens?: number; failed: boolean }
 
 async function runPromptThread(client: ConsoleClient, deps: Pick<ScanDeps, "sleep" | "err">, folder: string, title: string, prompt: string, options: VariantRunOptions): Promise<PromptThread> {
-  const created = asJson(asJson(await client.request("POST", "/api/console/sessions", { runtime: { model: options.model ?? DEFAULT_SCAN_MODEL }, title: title.slice(0, 120), costCeilingUsd: Number(options.budget) })).session);
+  const created = asJson(asJson(await client.request("POST", "/api/console/sessions", { runtime: { ...scanModelField(options) }, title: title.slice(0, 120), costCeilingUsd: Number(options.budget) })).session);
   const id = String(created.id);
   const path = `/api/console/sessions/${encodeURIComponent(id)}`;
   await client.request("PATCH", `${path}/configuration`, { workspacePath: folder });
@@ -133,7 +133,10 @@ export async function huntVariants(client: ConsoleClient, deps: Pick<VariantDeps
   return { ...base, created, skipped, ...(rootCause ? { rootCause, rootCauseSource: seedCause ? "stored" as const : "derived" as const } : {}), ...(thread.error ? { error: thread.error } : {}) };
 }
 
-/** Check the recorded variants again and mark each one that is fixed. A variant the thread does not answer for stays as it was. */
+/**
+ * Check the recorded variants again and report what the thread says. A variant it finds fixed is only marked fixed-pending-merge, never fixed, because
+ * nothing but a model's reading of the code backs it. A variant the thread does not answer for is "unchecked".
+ */
 export async function rescanVariants(client: ConsoleClient, deps: Pick<VariantDeps, "store" | "err" | "sleep">, folder: string, parent: VariantParent, options: VariantRunOptions): Promise<RescanResult> {
   const pending = deps.store.variantsOf(parent).filter(v => v.status !== DONE_STATUS);
   if (!pending.length) return { items: [] };
@@ -160,13 +163,23 @@ export async function rescanVariants(client: ConsoleClient, deps: Pick<VariantDe
 const idFor = (parent: VariantParent, variant: Pick<ParsedVariant, "path" | "startLine">): string =>
   `variant-${createHash("sha256").update(`${parent.id}\n${variant.path}\n${variant.startLine}`).digest("hex").slice(0, 24)}`;
 
+/** A variant is an unverified model report: it never enters the findings as critical or high until a verify run confirms it. */
+export const VARIANT_MAX_SEVERITY = "medium";
+export const VARIANT_CONFIDENCE = 0.4;
+const SEVERITY_ORDER = ["info", "low", "medium", "high", "critical"];
+export function cappedVariantSeverity(severity: string): Finding["severity"] {
+  return (SEVERITY_ORDER.indexOf(severity) > SEVERITY_ORDER.indexOf(VARIANT_MAX_SEVERITY) ? VARIANT_MAX_SEVERITY : severity) as Finding["severity"];
+}
+
 /** The finding a variant is stored as. The first line of the request is the site, so each site has its own fingerprint. */
 export function variantFinding(parent: Pick<VariantParent, "id" | "category" | "title">, variant: ParsedVariant, rootCause: RootCause | undefined, id: string, now: number): Finding {
   const site = `${variant.path}:${variant.startLine}`;
+  const severity = cappedVariantSeverity(variant.severity);
+  const capped = severity !== variant.severity;
   return {
     id, templateId: "variant-hunting", title: variant.title,
-    description: `Variant of ${parent.id}: ${parent.title}\n\n${variant.description}${variant.suggestedFix ? `\n\nSuggested fix: ${variant.suggestedFix}` : ""}`,
-    severity: variant.severity as Finding["severity"], category: normalizeAttackCategory(parent.category).category, status: "discovered",
+    description: `Unverified variant of ${parent.id}: ${parent.title}\n\nA search thread reported this site from the same root cause. Nobody has confirmed it${capped ? `, so its severity is capped at ${severity} (the thread said ${variant.severity})` : ""}. Run \`findings verify\` on it to confirm or reject it.\n\n${variant.description}${variant.suggestedFix ? `\n\nSuggested fix: ${variant.suggestedFix}` : ""}`,
+    severity, confidence: VARIANT_CONFIDENCE, category: normalizeAttackCategory(parent.category).category, status: "discovered",
     evidence: { request: site, response: variant.evidence, analysis: `Same root cause as ${parent.id}.` },
     reviewAnnotation: { path: variant.path, startLine: variant.startLine, ...(variant.endLine ? { endLine: variant.endLine } : {}) },
     ...(rootCause ? { rootCause } : {}), variantOf: parent.id, tool: "variant-hunting", timestamp: now,
@@ -315,7 +328,7 @@ export function registerVariantsCommand(program: Command, deps: VariantDeps = de
     .option("--folder <dir>", "The folder that was scanned; the thread reads the code there (default: the current directory)")
     .option("--rescan", "Check the variants already recorded for this finding and mark each fixed or still open; hunt for no new ones")
     .option("--budget <usd>", "Spend cap for the thread, in USD", String(DEFAULT_VARIANT_BUDGET_USD))
-    .option("--model <model>", `Model for the thread (default: ${DEFAULT_SCAN_MODEL})`)
+    .option("--model <model>", `Model for the thread (default: ${DEFAULT_SCAN_MODEL}; ZERO_MODEL or a pinned provider's default when set)`)
     .option("--timeout <seconds>", "Maximum seconds to wait for the thread", String(DEFAULT_TIMEOUT_SECONDS))
     .addOption(new Option("--format <format>", "Output: text or json").choices(["text", "json"])))
     .addHelpText("after", "\nEach variant is stored as a finding with a variantOf link to this one; see it in `0security findings show` and `findings list`. `findings verify` and `findings fix` run this for you (turn it off with --no-variants). Nothing is edited.\nExit codes: 0 done, 1 the thread returned no answer, 2 usage error.")

@@ -4,7 +4,7 @@
 pipeline {
   agent any
   environment {
-    VERSION = '0.45.0' // Pin the CLI
+    VERSION = '0.46.0' // Pin the CLI
     BITBUCKET_URL = 'https://bitbucket.example.com' // Data Center server
     ZEROCI_REPO = 'PROJECT/repo'
   }

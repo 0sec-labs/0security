@@ -81,6 +81,13 @@ describe("Amazon Bedrock provider", () => {
     expect(pinned).toMatchObject({ provider: "bedrock", baseUrl: "https://bedrock-runtime.eu-central-1.amazonaws.com", defaultModel: MODEL });
   });
 
+  it("falls back to the Bedrock default model when pinned with no model set", () => {
+    const env = { AWS_REGION: "eu-central-1", AWS_ACCESS_KEY_ID: "AKIAEXAMPLE", AWS_SECRET_ACCESS_KEY: "secret", ZERO_SELECTED_PROVIDER: "bedrock", ZERO_SUPPRESS_PROVIDER_STARTUP_LOG: "1" } as NodeJS.ProcessEnv;
+    expect(detectProvider(undefined, undefined, env)).toMatchObject({ provider: "bedrock", defaultModel: MODEL });
+    expect(detectProvider(undefined, undefined, { ...env, ZERO_BEDROCK_MODEL: "eu.anthropic.example-v1:0" })).toMatchObject({ defaultModel: "eu.anthropic.example-v1:0" });
+    expect(detectProvider(undefined, undefined, { ...env, ZERO_MODEL: "us.anthropic.other-v1:0" })).toMatchObject({ defaultModel: "us.anthropic.other-v1:0" });
+  });
+
   it("reports not configured when no AWS credential source is present", () => {
     expect(resolveFailoverProvider("bedrock", MODEL, {})).toBeUndefined();
     expect(resolveFailoverProvider("bedrock", MODEL, { AWS_PROFILE: "audit" })).toMatchObject({ baseUrl: "https://bedrock-runtime.us-east-1.amazonaws.com" });

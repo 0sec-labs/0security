@@ -3,11 +3,11 @@
 Build the Pipe from the repository root:
 
 ```sh
-docker build -f ci/bitbucket-pipe/Dockerfile -t 0security-pipe:0.45.0 .
-sh ci/packaging/qualify-pipe.sh 0security-pipe:0.45.0
+docker build -f ci/bitbucket-pipe/Dockerfile -t 0security-pipe:0.46.0 .
+sh ci/packaging/qualify-pipe.sh 0security-pipe:0.46.0
 ```
 
-Set `QUALIFICATION_ARTIFACTS=/absolute/new-directory` to retain the synthetic report, exit code and commit after the rehearsal. The image installs CLI 0.45.0 from its release, verifies its published SHA-256 and embeds the trusted scan/publish scripts. Change `--build-arg VERSION=X.Y.Z` for another explicit release. No `latest` is fetched. The image metadata and invocation example are in `ci/bitbucket-pipe/`; the `docker://ghcr.io/0sec-labs/0security-pipe:0.45.0` name is the intended release location, **not a claim that it has been published**. Build and qualify first, then publish through the release process and replace both example image references with its immutable digest. This change publishes nothing.
+Set `QUALIFICATION_ARTIFACTS=/absolute/new-directory` to retain the synthetic report, exit code and commit after the rehearsal. The image installs CLI 0.46.0 from its release, verifies its published SHA-256 and embeds the trusted scan/publish scripts. Change `--build-arg VERSION=X.Y.Z` for another explicit release. No `latest` is fetched. The image metadata and invocation example are in `ci/bitbucket-pipe/`; the `docker://ghcr.io/0sec-labs/0security-pipe:0.46.0` name is the intended release location, **not a claim that it has been published**. Build and qualify first, then publish through the release process and replace both example image references with its immutable digest. This change publishes nothing.
 
 Use two pipeline steps. The scan receives only the model key. Keep `BITBUCKET_TOKEN` in a deployment variable available only to the publish step, which disables checkout and consumes only `.zero-ci/scan.*` artifacts. Scan mode refuses a token rather than silently exposing it to repository code. Publish mode runs from an empty temporary directory, accepts only regular artifacts below the clone, and clears model keys and execution settings from the child environment. Configure trusted pipeline definitions and deployment permissions so an untrusted PR cannot rewrite the publisher.
 
@@ -18,7 +18,7 @@ Use two pipeline steps. The scan receives only the model key. Keep `BITBUCKET_TO
 Export the standard Jenkins library structure:
 
 ```sh
-sh ci/packaging/package-jenkins-library.sh /tmp/0security-jenkins-0.45.0
+sh ci/packaging/package-jenkins-library.sh /tmp/0security-jenkins-0.46.0
 ```
 
 The command also writes a `.tar.gz` package and `.tar.gz.sha256` sidecar beside the output directory for release publication. The output contains `vars/zeroSecurity.groovy` and `resources/0security/`. Mirror that directory into an internal SCM repository, configure it as a trusted external Jenkins Shared Library named `0security`, pin its revision and disallow overriding that revision. `ci/jenkins-library/Jenkinsfile` is the test/adoption pipeline. Put this pipeline definition in trusted SCM, not the scanned PR. The library uses `libraryResource`, documented in [Jenkins Shared Libraries](https://www.jenkins.io/doc/book/pipeline/shared-libraries/), to load the installer and canonical scan/publish scripts.

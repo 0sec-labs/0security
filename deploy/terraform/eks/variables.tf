@@ -52,7 +52,7 @@ variable "access_token_secret_name" {
 }
 
 variable "bedrock_model_arns" {
-  description = "Bedrock model or inference profile ARNs the console may invoke. Empty grants no Bedrock access."
+  description = "Bedrock inference profile and foundation model ARNs the console may invoke. An inference profile ID needs both its inference-profile ARN and the foundation-model ARN behind it. Empty grants no Bedrock access."
   type        = list(string)
   default     = []
 }
