@@ -917,6 +917,9 @@ Options:
                                    policy's pull request settings
   --repo-policy                    Also read fix-policy.* or .zero/fix-policy.* from the repository
                                    being fixed (untrusted content; off by default)
+  --no-variants                    Do not rescan the recorded variants or hunt for the same bug at
+                                   other sites after the fix
+  --variant-budget <usd>           Spend cap for each variant thread, in USD (default: "1")
   --no-pr                          Commit on the fix branch but do not push or open a pull request
   --budget <usd>                   Stop when the estimated spend reaches this many USD (default:
                                    "3")
@@ -1279,6 +1282,28 @@ Options:
   --format <format>       Output: text or json (default: "text")
   -h, --help              display help for command
 
+### 0security findings variants (hidden)
+Usage: 0security findings variants [options] <finding>
+
+Experimental: hunt for the same bug at other sites from a finding's root cause, or rescan the
+recorded variants
+
+Options:
+  --folder <dir>             The folder that was scanned; the thread reads the code there (default:
+                             the current directory)
+  --rescan                   Check the variants already recorded for this finding and mark each
+                             fixed or still open; hunt for no new ones
+  --budget <usd>             Spend cap for the thread, in USD (default: "1")
+  --model <model>            Model for the thread (default: gpt-6-luna)
+  --timeout <seconds>        Maximum seconds to wait for the thread (default: "600")
+  --format <format>          Output: text or json (choices: "text", "json")
+  --engine-url <url>         Attach directly to a running trusted engine
+  --engine-token-env <name>  Environment variable holding the attached engine token
+  --computer <id>            Use a registered remote computer
+  --computers-config <path>  Operator computer connection registry JSON file
+  --db-path <path>           Control database of the local engine to attach to
+  -h, --help                 display help for command
+
 ### 0security findings verify
 Usage: 0security findings verify [options] [finding...]
 
@@ -1305,6 +1330,9 @@ Options:
                                   (default: "3")
   --model <model>                 Model for the threads (default: gpt-6-luna)
   --timeout <seconds>             Maximum seconds to wait for one thread (default: "600")
+  --no-variants                   Do not hunt for the same bug at other sites after a true-positive
+                                  verdict
+  --variant-budget <usd>          Spend cap for each variant hunt, in USD (default: "1")
   --dry-run                       List what would be checked and skipped; change nothing
   --format <format>               Output: text or json (choices: "text", "json")
   --engine-url <url>              Attach directly to a running trusted engine
