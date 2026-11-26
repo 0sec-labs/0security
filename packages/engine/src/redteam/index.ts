@@ -7,3 +7,11 @@ export { BRAIN_TOKEN_ENV, BRAIN_URL_ENV, brainUrl, dryRun as brainDryRun, reques
 export { LIMITS as BRAIN_LIMITS, validateRequest as validateBrainRequest, validateResponse as validateBrainResponse, type BrainManifest, type BrainScenario, type ScenarioRequest, type ScenarioResponse } from "./brain/schema.js";
 export { STARTER_PACK, selectStarter, starterFor } from "./brain/starter-pack.js";
 export { createMockBrain, type MockBrain, type MockBrainOptions } from "./brain/mock-server.js";
+export { argMatches, evaluateOracle } from "./oracle.js";
+export type { ArgCondition, OracleContext, OracleResult, OracleSpec } from "./oracle-types.js";
+export * from "./kit/index.js";
+export * from "./catalog/index.js";
+export * from "./strategies/index.js";
+export * from "./attacker/index.js";
+export * from "./eval/index.js";
+export * from "./brain/next-move.js";

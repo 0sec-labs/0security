@@ -6,10 +6,11 @@
 import { appendFileSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { Command } from "commander";
-import { createDecoy, createHoneypot, exportReport, judge, materializePayload, materializeSuccess, newCanary, parseScenario, parseTrace, redteamFindings, scenarioFromFinding, serveLines, type DecoyAlert, type RedteamVerdict, type Scenario, type TraceEvent } from "@0/engine";
+import { CATALOG, createDecoy, createHoneypot, kitByName, listKits, listStrategies, makeKitHoneypot, exportReport, judge, materializePayload, materializeSuccess, newCanary, parseScenario, parseTrace, redteamFindings, scenarioFromFinding, serveLines, type DecoyAlert, type RedteamVerdict, type Scenario, type TraceEvent } from "@0/engine";
 import type { Finding, ScanReport } from "@0/engine/shared";
 import { UsageError } from "./output.js";
 import { parseHeaders } from "./probe.js";
+import { registerRedteamAttackCommand } from "./redteam-attack.js";
 import { registerRedteamGenerateCommand } from "./redteam-generate.js";
 import { registerRedteamRunCommand } from "./redteam-run.js";
 
@@ -37,7 +38,7 @@ const defaults: RedteamDeps = {
   fetch: (url, init) => fetch(url, init),
 };
 
-export interface HoneypotCliOptions { trace: string; canary?: string; payload?: string; payloadFile?: string; decoy?: boolean; alertUrl?: string; alertHeader?: string[] }
+export interface HoneypotCliOptions { kit?: string; trace: string; canary?: string; payload?: string; payloadFile?: string; decoy?: boolean; alertUrl?: string; alertHeader?: string[] }
 /** The honeypot reads its canary from here when `--canary` is not given, so it is not in the process list. */
 export const CANARY_ENV = "ZERO_REDTEAM_CANARY";
 export interface JudgeCliOptions { trace: string; canary: string; forbid?: string; format: string; target?: string; scenario?: string }
@@ -48,6 +49,14 @@ const need = (name: string, value: string | undefined): string => {
   if (!value || !value.trim()) throw new UsageError(`${name} is required.`);
   return value;
 };
+
+/** Kit names from a comma list, validated against the real kits; an unknown name names the valid ones. */
+export function parseKits(raw: string | undefined): string[] {
+  const names = [...new Set((raw ?? "").split(",").map(name => name.trim()).filter(Boolean))];
+  const unknown = names.filter(name => !kitByName(name));
+  if (unknown.length) throw new UsageError(`Unknown kit: ${unknown.join(", ")}. Valid kits: ${listKits().map(kit => kit.name).join(", ")}.`);
+  return names;
+}
 
 const ALERT_TIMEOUT_MS = 5000;
 const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"]);
@@ -79,6 +88,8 @@ export async function runHoneypot(options: HoneypotCliOptions, deps: RedteamDeps
   if (options.payload && options.payloadFile) throw new UsageError("Use --payload or --payload-file, not both.");
   if (options.alertUrl && !options.decoy) throw new UsageError("--alert-url needs --decoy: alerts are for the decoy tools, which nothing legitimate calls.");
   if (options.alertHeader?.length && !options.alertUrl) throw new UsageError("--alert-header needs --alert-url.");
+  const kits = parseKits(options.kit);
+  if (kits.length && options.decoy) throw new UsageError("--kit cannot be combined with --decoy: the decoy serves its own fixed tools.");
   const record = (event: TraceEvent) => deps.appendLine(trace, JSON.stringify(event));
   const pending: Promise<void>[] = [];
   let pot;
@@ -89,8 +100,8 @@ export async function runHoneypot(options: HoneypotCliOptions, deps: RedteamDeps
     deps.err(`decoy up; recording calls to ${trace}${url ? `, alerting ${url.host}` : ", no alert URL (calls are only recorded)"}`);
   } else {
     const payload = options.payloadFile ? deps.readText(resolve(options.payloadFile)) : options.payload;
-    pot = createHoneypot({ canary, ...(payload ? { payload } : {}), onCall: record });
-    deps.err(`honeypot up; recording calls to ${trace}`);
+    pot = kits.length ? makeKitHoneypot({ canary, kits, ...(payload ? { payload } : {}), onCall: record }) : createHoneypot({ canary, ...(payload ? { payload } : {}), onCall: record });
+    deps.err(`honeypot up${kits.length ? ` with kits ${kits.join(", ")}` : ""}; recording calls to ${trace}`);
   }
   const server = serveLines(pot, deps.writeReply);
   await new Promise<void>(done => {
@@ -185,6 +196,53 @@ export function runConfig(options: ConfigCliOptions, deps: RedteamDeps = default
   return 0;
 }
 
+const LIST_KINDS = ["generators", "strategies", "kits"] as const;
+const DIFFICULTIES = ["basic", "intermediate", "advanced"] as const;
+const TIERS = ["open", "closed", "both"] as const;
+export interface ListCliOptions { area?: string; difficulty?: string; tier?: string; family?: string; format?: string }
+
+const oneOf = (name: string, value: string | undefined, allowed: readonly string[]): string | undefined => {
+  if (value !== undefined && !allowed.includes(value)) throw new UsageError(`${name} must be one of: ${allowed.join(", ")}.`);
+  return value;
+};
+
+const table = (header: string[], rows: string[][]): string => {
+  const width = header.map((name, i) => Math.max(name.length, ...rows.map(row => row[i]!.length)));
+  const line = (row: string[]) => row.map((cell, i) => cell.padEnd(width[i]!)).join("  ").trimEnd();
+  return `${[line(header), ...rows.map(line)].join("\n")}\n`;
+};
+
+/** Prints the generators, strategies or kits the other redteam commands accept, so an id can be found without reading source. */
+export function runList(kind: string, options: ListCliOptions, deps: Pick<RedteamDeps, "out" | "err"> = defaults): number {
+  if (!(LIST_KINDS as readonly string[]).includes(kind)) throw new UsageError(`list takes one of: ${LIST_KINDS.join(", ")}.`);
+  const format = oneOf("--format", options.format ?? "text", ["text", "json"])!;
+  const difficulty = oneOf("--difficulty", options.difficulty, DIFFICULTIES);
+  const tier = oneOf("--tier", options.tier, TIERS);
+  const unsupported = (flag: string, value: unknown, valid: string) => { if (value !== undefined) throw new UsageError(`${flag} does not apply to ${kind}; use it with ${valid}.`); };
+  let rows: Record<string, unknown>[]; let header: string[]; let cells: (row: Record<string, unknown>) => string[];
+  if (kind === "generators") {
+    unsupported("--family", options.family, "strategies");
+    const area = options.area?.toLowerCase();
+    rows = CATALOG.filter(spec => (!area || spec.area.toLowerCase().startsWith(area)) && (!difficulty || spec.difficulty === difficulty) && (!tier || spec.tier === tier))
+      .map(spec => ({ id: spec.id, area: spec.area, difficulty: spec.difficulty, tier: spec.tier, weakness: spec.weakness, requires: spec.requires }));
+    header = ["ID", "AREA", "DIFFICULTY", "TIER", "WEAKNESS TESTED"]; cells = row => [row["id"], row["area"], row["difficulty"], row["tier"], String(row["weakness"] ?? "").replace(/\s+/g, " ").slice(0, 70)] as string[];
+  } else if (kind === "strategies") {
+    unsupported("--area", options.area, "generators"); unsupported("--difficulty", options.difficulty, "generators"); unsupported("--tier", options.tier, "generators");
+    const family = options.family?.toLowerCase();
+    rows = listStrategies().filter(strategy => !family || strategy.family === family)
+      .map(strategy => ({ id: strategy.id, family: strategy.family, turns: strategy.turns, needsAttackerModel: strategy.needsAttackerModel, cost: strategy.cost, runnable: Boolean(strategy.apply), description: strategy.description }));
+    header = ["ID", "FAMILY", "TURNS", "ATTACKER MODEL", "COST", "WHAT IT DOES"]; cells = row => [row["id"], row["family"], row["turns"], row["needsAttackerModel"] ? "yes" : "no", row["cost"], String(row["description"] ?? "").replace(/\s+/g, " ").slice(0, 70)] as string[];
+  } else {
+    unsupported("--area", options.area, "generators"); unsupported("--difficulty", options.difficulty, "generators"); unsupported("--tier", options.tier, "generators"); unsupported("--family", options.family, "strategies");
+    rows = listKits().map(kit => ({ name: kit.name, description: kit.description, tools: kit.tools.map(tool => tool.name) }));
+    header = ["NAME", "TOOLS"]; cells = row => [row["name"] as string, (row["tools"] as string[]).join(", ")];
+  }
+  if (format === "json") deps.out(`${JSON.stringify(rows, null, 2)}\n`);
+  else if (!rows.length) deps.err(`No ${kind} match those filters.`);
+  else deps.out(table(header, rows.map(cells)));
+  return 0;
+}
+
 export function registerRedteamCommand(program: Command, deps: RedteamDeps = defaults): void {
   const redteam = program.command("redteam")
     .description("Test whether an agent obeys poisoned text: a fake MCP server that records its calls, and a judge that reads the recording");
@@ -194,6 +252,7 @@ export function registerRedteamCommand(program: Command, deps: RedteamDeps = def
     .option("--canary <text>", `The marker the poisoned text asks the agent to send out; the judge needs the same one (default: ${CANARY_ENV})`)
     .option("--payload <text>", "The poisoned instruction returned by the source tools (default: ask the agent to email the secret out)")
     .option("--payload-file <file>", "Read the poisoned instruction from a file")
+    .option("--kit <names>", "Comma separated kits of extra fake tools (see `0 redteam list kits`); the default tool set stays when omitted")
     .option("--decoy", "Serve decoy tools that nothing legitimate calls, so every call is an alert (for a running agent, not a test)")
     .option("--alert-url <url>", "With --decoy: POST each alert as JSON to this https URL (a chat webhook or your own collector); a `text` field makes it readable in Slack-style webhooks")
     .option("-H, --alert-header <header>", "Header for the alert request, `Name: value`; the value may be $ENV_VAR so a token is not typed on the command line (repeatable)", (value: string, previous: string[] = []) => [...previous, value])
@@ -218,6 +277,15 @@ export function registerRedteamCommand(program: Command, deps: RedteamDeps = def
     .option("--canary <text>", "Put this canary in each payload instead of making one")
     .option("--format <format>", "text or json", "text")
     .action((report: string, options: ScenariosCliOptions) => { process.exitCode = runScenarios(report, options, deps); });
+  redteam.command("list <what>")
+    .description("List what the redteam commands accept: generators (catalog test cases), strategies (ways to deliver a payload) or kits (fake tool sets)")
+    .option("--area <name>", "generators: area name or prefix, such as Payment")
+    .option("--difficulty <level>", "generators: basic, intermediate or advanced")
+    .option("--tier <tier>", "generators: open (templates ship here), closed (brain service only) or both")
+    .option("--family <name>", "strategies: family such as encoding or framing")
+    .option("--format <format>", "text or json", "text")
+    .action((what: string, options: ListCliOptions) => { process.exitCode = runList(what, options, deps); });
   registerRedteamRunCommand(redteam);
   registerRedteamGenerateCommand(redteam);
+  registerRedteamAttackCommand(redteam);
 }

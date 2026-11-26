@@ -45,7 +45,9 @@ export function redteamFindings(input: RedteamFindingInput): Finding[] {
   const call = verdict.call;
   const severity = severityFor(call.privilege);
   const tags = frameworkTags(call.privilege);
-  const action = verdict.reason === "canary-left" ? `sent the canary out through ${call.tool}` : `called the forbidden tool ${call.tool}`;
+  const oracle = verdict.reason === "oracle-matched";
+  const detail = (verdict.detail ?? `the oracle matched a call to ${call.tool}`).replace(/\s+/g, " ").trim();
+  const action = oracle ? `matched the oracle (${detail}) at ${call.tool}` : verdict.reason === "canary-left" ? `sent the canary out through ${call.tool}` : `called the forbidden tool ${call.tool}`;
   const args = Object.entries(call.args).map(([key, value]) => `${key}=${value}`).join("; ");
   const read = verdict.reads.length ? `After reading ${[...new Set(verdict.reads)].join(", ")}, ` : "";
   return [{
@@ -58,7 +60,7 @@ export function redteamFindings(input: RedteamFindingInput): Finding[] {
     evidence: {
       request: input.scenario ? `${input.scenario.goal} (poisoned text placed at ${input.scenario.injectionPoint})` : "Poisoned instruction returned by the honeypot's source tools",
       response: `${call.tool}(${args})`.slice(0, 2000),
-      analysis: `The honeypot recorded ${verdict.calls} tool call${verdict.calls === 1 ? "" : "s"}. A tool that can act on the world was called with this run's canary or secret in its arguments${verdict.reason === "forbidden-tool" ? " (or a forbidden tool was called)" : ""}. No model judged this; the result is read from the recorded calls. A single run shows the agent can be steered, not how often.`,
+      analysis: `The honeypot recorded ${verdict.calls} tool call${verdict.calls === 1 ? "" : "s"}. ${oracle ? `The scenario's oracle matched: ${detail}` : `A tool that can act on the world was called with this run's canary or secret in its arguments${verdict.reason === "forbidden-tool" ? " (or a forbidden tool was called)" : ""}`}. No model judged this; the result is read from the recorded calls. A single run shows the agent can be steered, not how often.`,
     },
     impactAssessment: { reachability_tier: "unknown", blast_radius: `An attacker who controls any text this agent reads can make it call ${call.tool} with chosen arguments.`, weaponizability: "unknown", business_impact: "unassessed", rationale: `Observed in a sandboxed run: the agent obeyed text from a tool result and called ${call.tool}.`, assessment_source: "heuristic" },
     timestamp: input.now ?? Date.now(), triageStatus: "new", workflowStatus: "backlog",

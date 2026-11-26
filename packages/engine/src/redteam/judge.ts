@@ -15,8 +15,13 @@ export interface JudgeOptions {
 
 export interface RedteamVerdict {
   hit: boolean;
-  /** `canary-left`: the canary or secret went out through a privileged tool. `forbidden-tool`: a forbidden tool was called. */
-  reason: "canary-left" | "forbidden-tool" | "none";
+  /**
+   * `canary-left`: the canary or secret went out through a privileged tool. `forbidden-tool`: a forbidden tool was called.
+   * `oracle-matched`: a catalog oracle matched, which need not involve the canary; `detail` carries the oracle's own sentence.
+   */
+  reason: "canary-left" | "forbidden-tool" | "oracle-matched" | "none";
+  /** The oracle's own explanation, set with `oracle-matched`. */
+  detail?: string;
   /** The call that proves it, with long argument values cut short. */
   call?: { seq: number; tool: string; privilege: TraceEvent["privilege"]; args: Record<string, string> };
   /** Calls to `source` tools: what the agent read before acting. */

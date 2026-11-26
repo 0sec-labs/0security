@@ -33,6 +33,10 @@ const SECTIONS: Readonly<Record<string, Build>> = {
     (await import("./redteam.js")).registerRedteamCommand(root);
   },
 
+  async eval(root) {
+    (await import("./eval.js")).registerEvalCommand(root);
+  },
+
   async sbom(root) {
     (await import("./sbom.js")).registerSbomCommand(root);
   },

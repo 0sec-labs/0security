@@ -23,12 +23,13 @@ describe("0 redteam generate", () => {
     expect(h.fetched).toHaveLength(0);
     expect(mock.requests).toHaveLength(0);
   });
-  it("uses the starter pack with no URL, names the source, and puts the canary in payload and success", async () => {
+  it("uses the open catalog with no URL, names the source, and puts the canary in payload and success", async () => {
     const h = harness();
     expect(await runGenerate({ manifest: "/m.json", canary: "CANARY-xyz" }, h.deps)).toBe(0);
     const text = h.out.join("");
-    expect(text).toContain("source: starter-pack");
+    expect(text).toContain("source: open-catalog");
     expect(text).toContain("No brain URL");
+    expect(text).toContain("open catalog");
     expect(text).toContain("CANARY-xyz");
     expect(text).not.toContain("AGENT-CANARY-0");
     expect(h.fetched).toHaveLength(0);
@@ -45,7 +46,7 @@ describe("0 redteam generate", () => {
     expect(h.err.join("\n")).not.toContain("Bearer");
     expect(mock.requests).toHaveLength(1);
   });
-  it("warns on stderr that remote payloads are hostile, and not for the starter pack", async () => {
+  it("warns on stderr that remote payloads are hostile, and not for the open catalog", async () => {
     mock = createMockBrain(); const url = await mock.start();
     const remote = harness();
     await runGenerate({ manifest: "/m.json", url }, remote.deps);
@@ -82,5 +83,54 @@ describe("0 redteam generate", () => {
     await program.parseAsync(["node", "0", "redteam", "generate", "--manifest", "/m.json", "--dry-run"]);
     expect(h.out.join("")).toContain("\"task\": \"scenarios\"");
     process.exitCode = 0;
+  });
+
+  const wide = JSON.stringify({ tools: [{ name: "send_email", privilege: "network-out", gate: "none" }, { name: "make_payment", privilege: "network-out", gate: "none" }, { name: "list_products", privilege: "none", gate: "none" }, { name: "get_quote", privilege: "none", gate: "none" }], sources: [{ kind: "web" }, { kind: "tool-result" }, { kind: "email" }] });
+  const files = { "/m.json": manifest, "/w.json": wide };
+  it("filters the catalog fallback by generator, area and difficulty and never calls out", async () => {
+    const h = harness({}, files);
+    expect(await runGenerate({ manifest: "/w.json", generator: "pay-product-ranking-steer", format: "json", canary: "CANARY-q" }, h.deps)).toBe(0);
+    const one = JSON.parse(h.out.join("")) as { source: string; note: string; scenarios: { id: string; payload: string; difficulty: string }[] };
+    expect(one.source).toBe("open-catalog");
+    expect(one.scenarios.map(s => s.id)).toEqual(["pay-product-ranking-steer"]);
+    expect(one.scenarios[0]!.payload).toContain("CANARY-q");
+    const area = harness({}, files);
+    await runGenerate({ manifest: "/w.json", area: "Payment", difficulty: "basic", format: "json", count: 20 }, area.deps);
+    const filtered = JSON.parse(area.out.join("")) as { scenarios: { id: string; difficulty: string }[] };
+    expect(filtered.scenarios.length).toBeGreaterThan(0);
+    expect(filtered.scenarios.every(s => s.difficulty === "basic" && s.id.startsWith("pay-"))).toBe(true);
+    const none = harness({}, files);
+    await runGenerate({ manifest: "/w.json", area: "zzz" }, none.deps);
+    expect(none.err.join("\n")).toContain("No scenarios matched");
+    expect(h.fetched.length + area.fetched.length + none.fetched.length).toBe(0);
+  });
+  it("applies --strategy to each printed payload and names dropped variants", async () => {
+    const h = harness({}, files);
+    await runGenerate({ manifest: "/w.json", generator: "pay-product-ranking-steer", strategy: "S01", canary: "CANARY-q" }, h.deps);
+    const text = h.out.join("");
+    expect(text).toMatch(/strategy S01 variant 1 of 1/);
+    const json = harness({}, files);
+    await runGenerate({ manifest: "/w.json", generator: "pay-product-ranking-steer", strategy: "S01", format: "json", canary: "CANARY-q" }, json.deps);
+    const parsed = JSON.parse(json.out.join("")) as { scenarios: { payload: string; variants: { text: string }[]; droppedVariants: unknown[] }[] };
+    expect(parsed.scenarios[0]!.variants[0]!.text).not.toBe(parsed.scenarios[0]!.payload);
+    expect(Array.isArray(parsed.scenarios[0]!.droppedVariants)).toBe(true);
+  });
+  it("rejects unknown generator, strategy, bad difficulty and strategies without a single-turn apply", async () => {
+    await expect(runGenerate({ manifest: "/m.json", generator: "zzz" }, harness().deps)).rejects.toThrow(/Unknown generator: zzz/);
+    await expect(runGenerate({ manifest: "/m.json", strategy: "S999" }, harness().deps)).rejects.toThrow(/Unknown strategy/);
+    await expect(runGenerate({ manifest: "/m.json", strategy: "S31" }, harness().deps)).rejects.toThrow(/redteam attack/);
+    await expect(runGenerate({ manifest: "/m.json", difficulty: "hard" }, harness().deps)).rejects.toThrow(/--difficulty/);
+  });
+  it("--list-generators points to redteam list generators and needs no manifest", async () => {
+    const h = harness();
+    expect(await runGenerate({ listGenerators: true }, h.deps)).toBe(0);
+    expect(h.out.join("")).toContain("0 redteam list generators");
+  });
+  it("filters do not change what a remote brain is asked, and say so", async () => {
+    mock = createMockBrain(); const url = await mock.start();
+    const h = harness({}, files);
+    await runGenerate({ manifest: "/w.json", url, area: "Payment", dryRun: false }, h.deps);
+    expect(h.err.join("\n")).toContain("only filter the open catalog");
+    expect(Object.keys((mock.requests[0]!.body as Record<string, unknown>)).sort()).toEqual(["manifest", "task", "v"]);
   });
 });

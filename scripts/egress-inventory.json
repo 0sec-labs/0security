@@ -613,6 +613,34 @@
       "disable": "Do not set a URL, pass --offline, or set ZERO_OFFLINE. ZERO_ENTERPRISE also keeps it off."
     },
     {
+      "id": "redteam-attack-model",
+      "class": "operator",
+      "enterprise": "allowed",
+      "destinations": [
+        "the OpenAI-compatible endpoint you set with --attacker-url or OPENAI_BASE_URL (otherwise api.openai.com): your own model"
+      ],
+      "files": [
+        "packages/cli/src/commands/redteam-attack.ts"
+      ],
+      "when": "Only `0 redteam attack` with --attacker adaptive, refine or tree. Never from the other attackers or any other command.",
+      "sent": "The attacker prompt: the objective, a harmless marker, the clipped conversation with the agent under test and the names of the tools it called. The agent's replies can contain whatever it chose to say. The API key goes in the Authorization header only. https only (plain http only to this machine). No redirect is followed; the request and the reply are size-capped.",
+      "disable": "Use --attacker crescendo or manyshot, which send nothing."
+    },
+    {
+      "id": "redteam-attack-brain",
+      "class": "operator",
+      "enterprise": "blocked",
+      "destinations": [
+        "the https URL you set with ZERO_BRAIN_URL; never a default"
+      ],
+      "files": [
+        "packages/cli/src/commands/redteam-attack.ts"
+      ],
+      "when": "Only `0 redteam attack --attacker brain`, with ZERO_BRAIN_URL set and not offline. Without a URL the command refuses; offline or enterprise mode falls back to the local crescendo attacker with a printed note.",
+      "sent": "The objective and generator id and, each turn, the clipped conversation (each text at most 2000 characters, at most the newest 40 entries) and the recorded calls from the fake environment (argument values at most 200 characters). A bearer token from ZERO_BRAIN_TOKEN goes in the Authorization header only. No redirect is followed.",
+      "disable": "Do not use --attacker brain, pass --offline, or set ZERO_OFFLINE. ZERO_ENTERPRISE also keeps it off."
+    },
+    {
       "id": "ha-shared-database",
       "class": "operator",
       "enterprise": "allowed",

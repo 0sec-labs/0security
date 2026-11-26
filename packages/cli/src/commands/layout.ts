@@ -39,7 +39,7 @@ export function adoptCommands(program: Command, only?: string): void {
 }
 
 export const HELP_GROUPS: readonly (readonly [string, readonly string[]])[] = [
-  ["Work", ["scan", "threat-model", "probe", "redteam", "sbom", "findings", "evidence", "threads", "sentinels"]],
+  ["Work", ["scan", "threat-model", "probe", "redteam", "eval", "sbom", "findings", "evidence", "threads", "sentinels"]],
   ["Setup", ["skills", "models", "computers", "config"]],
 ];
 
@@ -86,6 +86,7 @@ const examplesBlock = (lines: readonly string[]): string => `Examples:\n${lines.
 const EXAMPLES: Readonly<Record<string, readonly string[]>> = {
   scan: ["0security scan ~/code/app", "0security scan ~/code/app --format sarif -o scan.sarif --fail-on high", "0security scan https://github.com/acme/app --budget 2 --format json", "0security scan . --context .0/threat-model.md --policy ./policies --org-policy ~/org-policies", "0security scan . --scope SECURITY.md --fail-on high", "0security scan --scanner nuclei --target-url http://127.0.0.1:8080 --scope-file scope.txt"],
   probe: ["0security probe https://api.example.com/v1/chat/completions -H \"Authorization: Bearer $OPENAI_API_KEY\" --model gpt-4o-mini", "0security probe https://app.example.com/api/chat --body '{\"message\":\"{{prompt}}\"}' --response-path reply", "0security probe https://app.example.com/api/chat --i-own-this app.example.com --secret sk-live-1234 --format sarif -o probe.sarif --fail-on medium"],
+  eval: ["0security eval example > suite.json", "0security eval validate suite.json", "0security eval run suite.json --repeats 3 --baseline baseline.json --unsafe-no-isolation"],
   redteam: ["0security redteam config --trace /tmp/redteam.jsonl", "0security redteam honeypot --trace /tmp/redteam.jsonl --canary CANARY-1a2b3c", "0security redteam judge --trace /tmp/redteam.jsonl --canary CANARY-1a2b3c"],
   "threat-model": ["0security threat-model", "0security threat-model ~/code/app --pr", "0security threat-model --interview", "0security threat-model --output THREAT_MODEL.md", "0security scan ~/code/app --context ~/code/app/.0/threat-model.md"],
   sbom: ["0security sbom generate . -o sbom.cdx.json", "0security sbom check sbom.cdx.json", "0security sbom check sbom.cdx.json --format json", "0security sbom scan-models ./models", "0security sbom agent-config ."],
