@@ -1628,7 +1628,10 @@ pub(crate) fn is_plausible_yaml_load(node: Node<'_>, source: &str) -> bool {
     if receiver.to_ascii_lowercase().contains("yaml") {
         return true;
     }
-    if !receiver.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '$') {
+    if !receiver
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '_' || c == '$')
+    {
         return false;
     }
     let mut root = node;

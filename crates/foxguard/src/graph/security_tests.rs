@@ -98,7 +98,10 @@ fn missing_guard_uses_url_rules_and_keeps_open_routes_flagged_as_public() {
     let mut g = graph_of(&[("Api.java", CONTROLLER), ("SecurityConfig.java", CONFIG)]);
     mark_missing_guards(&mut g);
     // Guarded by hasRole through the URL rule: no longer a false positive.
-    assert_eq!(route(&g, "DELETE", "/users/{id}").missing_guard, Some(false));
+    assert_eq!(
+        route(&g, "DELETE", "/users/{id}").missing_guard,
+        Some(false)
+    );
 
     let mut open = graph_of(&[
         (
@@ -113,7 +116,11 @@ fn missing_guard_uses_url_rules_and_keeps_open_routes_flagged_as_public() {
     mark_missing_guards(&mut open);
     let r = route(&open, "GET", "/open/{x}");
     assert!(r.public, "explicit permitAll is reported as public");
-    assert_eq!(r.missing_guard, Some(true), "still reaches a sink with no check");
+    assert_eq!(
+        r.missing_guard,
+        Some(true),
+        "still reaches a sink with no check"
+    );
 }
 
 #[test]
@@ -220,7 +227,11 @@ fn unresolved_matchers_and_inert_method_security_are_reported_in_notes() {
             "class Cfg { void c(HttpSecurity h) throws Exception { h.authorizeHttpRequests(a -> a.requestMatchers(PathRequest.toStaticResources().atCommonLocations()).permitAll().requestMatchers(Missing.URLS).permitAll()); } }",
         ),
     ]);
-    assert!(g.notes.iter().any(|n| n.contains("PathRequest")), "{:?}", g.notes);
+    assert!(
+        g.notes.iter().any(|n| n.contains("PathRequest")),
+        "{:?}",
+        g.notes
+    );
     assert!(
         g.notes.iter().any(|n| n.contains("not string literals")),
         "{:?}",
@@ -236,7 +247,10 @@ fn unresolved_matchers_and_inert_method_security_are_reported_in_notes() {
         ),
         ("M.java", "@EnableMethodSecurity @Configuration class M {}"),
     ]);
-    assert!(!enabled.notes.iter().any(|n| n.starts_with("method-security:")));
+    assert!(!enabled
+        .notes
+        .iter()
+        .any(|n| n.starts_with("method-security:")));
 }
 
 #[test]
@@ -293,13 +307,21 @@ fn web_xml_constraints_servlet_mappings_and_filters() {
     let admin = route(&g, "GET", "/admin/panel");
     assert_eq!(admin.auth_signals, vec!["web.xml:auth-constraint(manager)"]);
     assert!(admin.auth_sources[0].source.contains("web.xml:"));
-    assert_eq!(admin.missing_guard, Some(false), "servlet container enforces the constraint");
+    assert_eq!(
+        admin.missing_guard,
+        Some(false),
+        "servlet container enforces the constraint"
+    );
     let open = route(&g, "GET", "/open/hello");
     assert!(open.public);
     let plain = route(&g, "GET", "/plain");
     assert!(plain.auth_signals.is_empty() && !plain.public);
     assert!(g.routes.iter().all(|r| !r.path.starts_with("/{servlet:")));
-    assert_eq!(g.unsupported.get("xml"), None, "web.xml is read, not skipped");
+    assert_eq!(
+        g.unsupported.get("xml"),
+        None,
+        "web.xml is read, not skipped"
+    );
 }
 
 #[test]
@@ -365,6 +387,9 @@ fn several_applications_each_use_their_own_chain() {
             "class S2 { void c(HttpSecurity h) throws Exception { h.authorizeHttpRequests(a -> a.anyRequest().permitAll()); } }",
         ),
     ]);
-    assert_eq!(route(&g, "GET", "/files").auth_signals, vec!["url-rule:authenticated"]);
+    assert_eq!(
+        route(&g, "GET", "/files").auth_signals,
+        vec!["url-rule:authenticated"]
+    );
     assert!(route(&g, "GET", "/files2").public);
 }

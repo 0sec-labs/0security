@@ -1,13 +1,17 @@
 //! Code graph export: symbols, call edges, HTTP routes and sink calls as versioned JSON.
 //!
-//! `foxguard graph <path>` walks a folder, parses JavaScript/TypeScript, Python and Java with the
-//! same tree-sitter grammars the scanner uses, and prints one JSON document (schema version 1).
-//! It is a name-based graph: a call edge carries the callee name as written and is resolved
-//! to symbols by the consumer. It is not a data-flow proof; the taint engines remain the
+//! `foxguard graph <path>` walks a folder, parses JavaScript/TypeScript, Python, Java and Kotlin
+//! with the same tree-sitter grammars the scanner uses, and prints one JSON document (schema
+//! version 1). A call edge carries the callee name as written; for Java and Kotlin it also carries
+//! the receiver's declared type, resolved through chains, fields, generics, interface dispatch and
+//! Spring wiring (`types`, `resolve`). It is not a data-flow proof; the taint engines remain the
 //! source of truth for findings. Other languages are counted under `unsupported`.
 //!
-//! The `taintSummaries` array holds the per-method summaries kept by `rules::cross_file` for Java
-//! when `--taint-summaries` is given, and is empty otherwise.
+//! Security configuration outside annotations (Spring Security URL rules, `web.xml`, filters) is
+//! mapped onto routes by `security`.
+//!
+//! The `taintSummaries` array holds the per-method summaries of the Java taint engine, keyed by
+//! class and symbol, when `--taint-summaries` is given, and is empty otherwise.
 
 mod java;
 mod kotlin;
@@ -913,7 +917,9 @@ pub fn mark_missing_guards(g: &mut CodeGraph) {
                         }
                         if let Some(cand) = &c.cand {
                             if cand.len() <= MAX_NAME_FANOUT {
-                                next.extend(cand.iter().map(|&i| g.symbols[i as usize].id.as_str()));
+                                next.extend(
+                                    cand.iter().map(|&i| g.symbols[i as usize].id.as_str()),
+                                );
                             }
                         } else if let Some(targets) = cache.get(c) {
                             if targets.len() <= MAX_NAME_FANOUT {
@@ -1046,7 +1052,11 @@ pub fn build_graph_with(root: &Path, opts: &GraphOptions) -> CodeGraph {
                 return None;
             }
             let text = String::from_utf8_lossy(&std::fs::read(p).ok()?).into_owned();
-            let rel = p.strip_prefix(root).unwrap_or(p).to_string_lossy().replace('\\', "/");
+            let rel = p
+                .strip_prefix(root)
+                .unwrap_or(p)
+                .to_string_lossy()
+                .replace('\\', "/");
             Some(security::parse_web_xml(&rel, &text))
         })
         .collect();
@@ -1122,11 +1132,9 @@ fn resolve_jvm_calls(g: &mut CodeGraph) {
             symbols: &g.symbols,
             index: &index,
             table: &g.types,
+            rank_cache: Default::default(),
         };
-        g.calls
-            .par_iter()
-            .map_init(HashMap::new, |memo, c| resolver.decide(c, memo))
-            .collect()
+        g.calls.par_iter().map(|c| resolver.decide(c)).collect()
     };
     let mut stats = resolve::CallStats::default();
     let mut dropped = 0usize;

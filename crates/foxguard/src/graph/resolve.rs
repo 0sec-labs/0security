@@ -8,11 +8,12 @@
 //! is still ambiguous is ranked by proximity (same file, same package, imported class, same module
 //! directory) before the call is given up, and the calls given up are counted in `droppedCalls`.
 
-use super::types::{FileScope, TypeRef, TypeTable};
+use super::types::{cached, FileScope, TypeRef, TypeTable};
 use super::{class_of, GraphCall, GraphSymbol};
 use serde::Serialize;
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, RwLock};
 
 /// A name still shared by more than this many methods after narrowing and ranking is not followed.
 pub(super) const MAX_NAME_DEFS: usize = 25;
@@ -101,9 +102,42 @@ fn common_dirs(a: &str, b: &str) -> usize {
         .count()
 }
 
+/// The imports of the calling file, split once per ranking.
+struct Imports<'a> {
+    /// Last two segments of every import: the class (or the class of a static import).
+    simple: HashSet<&'a str>,
+    wild_pkgs: HashSet<&'a str>,
+}
+
+impl<'a> Imports<'a> {
+    fn of(scope: &'a FileScope) -> Self {
+        let mut simple = HashSet::new();
+        let mut wild_pkgs = HashSet::new();
+        for i in &scope.imports {
+            let base = match i.strip_suffix(".*") {
+                Some(p) => {
+                    wild_pkgs.insert(p);
+                    p
+                }
+                None => i.as_str(),
+            };
+            let mut segs = base.rsplit('.');
+            simple.extend(segs.next());
+            simple.extend(segs.next());
+        }
+        Imports { simple, wild_pkgs }
+    }
+}
+
 /// Proximity of a candidate to the calling file: same file, same package, imported class,
 /// wildcard-imported package, then shared directory depth.
-fn score(sym: &GraphSymbol, call_file: &str, scope: &FileScope, table: &TypeTable) -> usize {
+fn score(
+    sym: &GraphSymbol,
+    call_file: &str,
+    scope: &FileScope,
+    imports: &Imports,
+    table: &TypeTable,
+) -> usize {
     if sym.file == call_file {
         return 1000;
     }
@@ -122,16 +156,10 @@ fn score(sym: &GraphSymbol, call_file: &str, scope: &FileScope, table: &TypeTabl
         s += 300;
     }
     let top = sym.qualified.split('.').next().unwrap_or("");
-    let dotted = format!(".{top}");
-    if !top.is_empty()
-        && scope
-            .imports
-            .iter()
-            .any(|i| i.ends_with(&dotted) || i.ends_with(&format!("{dotted}.*")))
-    {
+    if !top.is_empty() && imports.simple.contains(top) {
         s += 250;
     }
-    if !sym_pkg.is_empty() && scope.imports.iter().any(|i| i == &format!("{sym_pkg}.*")) {
+    if !sym_pkg.is_empty() && imports.wild_pkgs.contains(sym_pkg) {
         s += 150;
     }
     s + common_dirs(&sym.file, call_file).min(20)
@@ -146,10 +174,11 @@ fn rank(
 ) -> Option<Vec<u32>> {
     let empty = FileScope::default();
     let scope = table.scopes.get(call_file).unwrap_or(&empty);
+    let imports = Imports::of(scope);
     let mut best = 0usize;
     let mut top: Vec<u32> = Vec::new();
     for &c in cands {
-        let sc = score(&symbols[c as usize], call_file, scope, table);
+        let sc = score(&symbols[c as usize], call_file, scope, &imports, table);
         if sc > best {
             best = sc;
             top.clear();
@@ -183,12 +212,12 @@ pub(super) struct Resolver<'a> {
     pub symbols: &'a [GraphSymbol],
     pub index: &'a SymIndex,
     pub table: &'a TypeTable,
+    /// Ranking results by (name, receiver type, file), shared by all threads.
+    pub rank_cache: RwLock<HashMap<String, Option<Arc<Vec<u32>>>>>,
 }
 
-type RankMemo = HashMap<(String, String, String), Option<Vec<u32>>>;
-
 impl<'a> Resolver<'a> {
-    pub fn decide(&self, c: &GraphCall, memo: &mut RankMemo) -> Verdict {
+    pub fn decide(&self, c: &GraphCall) -> Verdict {
         if !(c.file.ends_with(".java") || c.file.ends_with(".kt") || c.file.ends_with(".kts")) {
             return Verdict {
                 keep: true,
@@ -237,17 +266,17 @@ impl<'a> Resolver<'a> {
         };
         let mut ranked = false;
         if cands.len() > MAX_NAME_DEFS {
-            let key = (
-                c.name.clone(),
-                receiver_type.clone().unwrap_or_default(),
-                c.file.clone(),
+            let key = format!(
+                "{}\0{}\0{}",
+                c.name,
+                receiver_type.as_deref().unwrap_or(""),
+                c.file
             );
-            let hit = memo
-                .entry(key)
-                .or_insert_with(|| rank(&cands, self.symbols, &c.file, self.table))
-                .clone();
+            let hit = cached(&self.rank_cache, &key, || {
+                rank(&cands, self.symbols, &c.file, self.table).map(Arc::new)
+            });
             if let Some(top) = hit {
-                cands = Cow::Owned(top);
+                cands = Cow::Owned(top.as_ref().clone());
                 ranked = true;
             }
         }

@@ -7,6 +7,7 @@
 //! or abstract type can dispatch to.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, RwLock};
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct TypeRef {
@@ -131,6 +132,35 @@ pub struct TypeTable {
     /// Super type simple name -> classes that name it directly.
     pub direct_subtypes: HashMap<String, Vec<usize>>,
     pub scopes: HashMap<String, FileScope>,
+    cache: Caches,
+}
+
+/// Memo of the per-type walks: a large tree asks the same few questions about the same types
+/// millions of times.
+#[derive(Debug, Default)]
+struct Caches {
+    closure: RwLock<HashMap<String, Arc<Vec<TypeRef>>>>,
+    subtypes: RwLock<HashMap<String, Arc<Vec<usize>>>>,
+    dispatch: RwLock<HashMap<String, Option<Arc<Vec<String>>>>>,
+    ret: RwLock<HashMap<String, Option<TypeRef>>>,
+    field: RwLock<HashMap<String, Option<TypeRef>>>,
+}
+
+pub(super) fn cached<T: Clone>(
+    map: &RwLock<HashMap<String, T>>,
+    key: &str,
+    compute: impl FnOnce() -> T,
+) -> T {
+    if let Ok(m) = map.read() {
+        if let Some(v) = m.get(key) {
+            return v.clone();
+        }
+    }
+    let v = compute();
+    if let Ok(mut m) = map.write() {
+        m.insert(key.to_string(), v.clone());
+    }
+    v
 }
 
 fn lower_camel(s: &str) -> String {
@@ -150,16 +180,16 @@ fn builtin_return(owner: &TypeRef, method: &str) -> Option<TypeRef> {
         "Optional" | "OptionalInt" | "Supplier" | "AtomicReference" | "ThreadLocal" | "Future"
         | "CompletableFuture" | "Callable" | "Mono" | "Lazy" | "Provider" | "ObjectProvider"
         | "ObjectFactory" => match method {
-            "get" | "orElseThrow" | "orElse" | "orElseGet" | "join" | "block" | "getIfAvailable"
-            | "getObject" | "getIfUnique" | "getNow" => first.cloned(),
+            "get" | "orElseThrow" | "orElse" | "orElseGet" | "join" | "block"
+            | "getIfAvailable" | "getObject" | "getIfUnique" | "getNow" => first.cloned(),
             _ => None,
         },
         "List" | "ArrayList" | "LinkedList" | "Collection" | "Set" | "HashSet" | "TreeSet"
         | "SortedSet" | "Queue" | "Deque" | "ArrayDeque" | "Iterator" | "ListIterator"
         | "Stack" | "Vector" | "Iterable" | "Page" | "Slice" | "PriorityQueue" => match method {
-            "get" | "getFirst" | "getLast" | "next" | "poll" | "peek" | "pop" | "first" | "last"
-            | "element" | "remove" | "removeFirst" | "removeLast" | "pollFirst" | "pollLast"
-            | "peekFirst" | "peekLast" | "previous" => first.cloned(),
+            "get" | "getFirst" | "getLast" | "next" | "poll" | "peek" | "pop" | "first"
+            | "last" | "element" | "remove" | "removeFirst" | "removeLast" | "pollFirst"
+            | "pollLast" | "peekFirst" | "peekLast" | "previous" => first.cloned(),
             "iterator" | "listIterator" => Some(TypeRef {
                 name: "Iterator".into(),
                 args: owner.args.clone(),
@@ -188,9 +218,16 @@ fn builtin_return(owner: &TypeRef, method: &str) -> Option<TypeRef> {
             "getBody" => first.cloned(),
             _ => None,
         },
-        "JpaRepository" | "CrudRepository" | "PagingAndSortingRepository" | "Repository"
-        | "ListCrudRepository" | "MongoRepository" | "ReactiveCrudRepository"
-        | "JpaSpecificationExecutor" | "ListPagingAndSortingRepository" | "QueryByExampleExecutor" => {
+        "JpaRepository"
+        | "CrudRepository"
+        | "PagingAndSortingRepository"
+        | "Repository"
+        | "ListCrudRepository"
+        | "MongoRepository"
+        | "ReactiveCrudRepository"
+        | "JpaSpecificationExecutor"
+        | "ListPagingAndSortingRepository"
+        | "QueryByExampleExecutor" => {
             let entity = first.cloned()?;
             match method {
                 "findById" => Some(TypeRef {
@@ -234,7 +271,14 @@ impl TypeTable {
     }
 
     /// `t` and its supertypes (with type arguments substituted), breadth first, bounded.
-    fn closure(&self, t: &TypeRef) -> Vec<TypeRef> {
+    fn closure(&self, t: &TypeRef) -> Arc<Vec<TypeRef>> {
+        if t.args.is_empty() {
+            return cached(&self.cache.closure, &t.name, || self.closure_uncached(t));
+        }
+        self.closure_uncached(t)
+    }
+
+    fn closure_uncached(&self, t: &TypeRef) -> Arc<Vec<TypeRef>> {
         let mut out = vec![t.clone()];
         let mut seen: HashSet<String> = HashSet::new();
         seen.insert(t.name.clone());
@@ -252,11 +296,21 @@ impl TypeTable {
                 }
             }
         }
-        out
+        Arc::new(out)
     }
 
     fn field_type(&self, owner: &TypeRef, field: &str) -> Option<TypeRef> {
-        for t in self.closure(owner) {
+        if owner.args.is_empty() {
+            let key = format!("{}\0{}", owner.name, field);
+            return cached(&self.cache.field, &key, || {
+                self.field_type_uncached(owner, field)
+            });
+        }
+        self.field_type_uncached(owner, field)
+    }
+
+    fn field_type_uncached(&self, owner: &TypeRef, field: &str) -> Option<TypeRef> {
+        for t in self.closure(owner).iter() {
             for &ci in self.classes_named(&t.name) {
                 let c = &self.classes[ci];
                 if let Some(f) = c.fields.get(field) {
@@ -268,7 +322,17 @@ impl TypeTable {
     }
 
     fn method_return(&self, owner: &TypeRef, method: &str) -> Option<TypeRef> {
-        for t in self.closure(owner) {
+        if owner.args.is_empty() {
+            let key = format!("{}\0{}", owner.name, method);
+            return cached(&self.cache.ret, &key, || {
+                self.method_return_uncached(owner, method)
+            });
+        }
+        self.method_return_uncached(owner, method)
+    }
+
+    fn method_return_uncached(&self, owner: &TypeRef, method: &str) -> Option<TypeRef> {
+        for t in self.closure(owner).iter() {
             let mut found: Vec<TypeRef> = Vec::new();
             for &ci in self.classes_named(&t.name) {
                 let c = &self.classes[ci];
@@ -278,9 +342,12 @@ impl TypeTable {
             }
             if !found.is_empty() {
                 // Overloads that disagree leave the type unknown.
-                return found.iter().all(|r| r == &found[0]).then(|| found[0].clone());
+                return found
+                    .iter()
+                    .all(|r| r == &found[0])
+                    .then(|| found[0].clone());
             }
-            if let Some(r) = builtin_return(&t, method) {
+            if let Some(r) = builtin_return(t, method) {
                 return Some(r);
             }
         }
@@ -300,7 +367,13 @@ impl TypeTable {
     }
 
     /// Transitive subtypes of `name` present in the tree.
-    fn subtypes(&self, name: &str) -> Vec<usize> {
+    fn subtypes(&self, name: &str) -> Arc<Vec<usize>> {
+        cached(&self.cache.subtypes, name, || {
+            Arc::new(self.subtypes_uncached(name))
+        })
+    }
+
+    fn subtypes_uncached(&self, name: &str) -> Vec<usize> {
         let mut out: Vec<usize> = Vec::new();
         let mut seen: HashSet<usize> = HashSet::new();
         let mut queue: Vec<String> = vec![name.to_string()];
@@ -323,6 +396,24 @@ impl TypeTable {
     /// can tell: `Some(vec![])` means the receiver type is known and the tree has no such method
     /// (a library call); `None` means the model has nothing to say (unknown type).
     pub fn dispatch(
+        &self,
+        ty: &TypeRef,
+        method: &str,
+        hint: Option<&(String, Option<String>)>,
+    ) -> Option<Arc<Vec<String>>> {
+        let key = format!(
+            "{}\0{}\0{}\0{}",
+            ty.name,
+            method,
+            hint.map(|h| h.0.as_str()).unwrap_or(""),
+            hint.and_then(|h| h.1.as_deref()).unwrap_or("")
+        );
+        cached(&self.cache.dispatch, &key, || {
+            self.dispatch_uncached(ty, method, hint).map(Arc::new)
+        })
+    }
+
+    fn dispatch_uncached(
         &self,
         ty: &TypeRef,
         method: &str,
@@ -358,10 +449,15 @@ impl TypeTable {
         // and for any type whose subclasses may override.
         let mut impls: Vec<usize> = self
             .subtypes(&ty.name)
-            .into_iter()
+            .iter()
+            .copied()
             .filter(|&ci| self.classes[ci].bodied.contains(method))
             .collect();
-        if abstract_type || own.iter().all(|&ci| !self.classes[ci].bodied.contains(method)) {
+        if abstract_type
+            || own
+                .iter()
+                .all(|&ci| !self.classes[ci].bodied.contains(method))
+        {
             impls = self.pick_bean(impls, hint);
             targets.extend(impls);
         } else if !impls.is_empty() {
@@ -369,14 +465,9 @@ impl TypeTable {
             targets.extend(impls);
         }
         if targets.is_empty() {
-            return if own.is_empty() && self.direct_subtypes.get(&ty.name).is_none() {
-                // Not a class of the tree and nothing in the tree extends it: a library type.
-                Some(vec![])
-            } else if own.is_empty() {
-                Some(vec![])
-            } else {
-                None
-            };
+            // Not a class of the tree and nothing in the tree that has the method extends it: a
+            // library type. A class of the tree without the method says nothing.
+            return own.is_empty().then(Vec::new);
         }
         let mut names: Vec<String> = targets
             .into_iter()
@@ -422,7 +513,11 @@ impl TypeTable {
             if qualifier.is_none() && primary.len() == 1 {
                 return primary;
             }
-            let named: Vec<usize> = pool.iter().copied().filter(|&ci| &bean(ci) == var).collect();
+            let named: Vec<usize> = pool
+                .iter()
+                .copied()
+                .filter(|&ci| &bean(ci) == var)
+                .collect();
             if !named.is_empty() {
                 return named;
             }
@@ -440,11 +535,7 @@ fn substitute(t: &TypeRef, params: &[String], args: &[TypeRef]) -> TypeRef {
     }
     TypeRef {
         name: t.name.clone(),
-        args: t
-            .args
-            .iter()
-            .map(|a| substitute(a, params, args))
-            .collect(),
+        args: t.args.iter().map(|a| substitute(a, params, args)).collect(),
     }
 }
 

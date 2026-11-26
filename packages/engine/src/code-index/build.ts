@@ -14,7 +14,7 @@ import type { CodeIndex, FileExtract } from "./types.js";
 const JS_EXT = new Set(["js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts"]);
 const PY_EXT = new Set(["py"]);
 /** Parsed only by the Foxguard graph. They are `unsupported` for the built-in extractor but still key the cache. */
-const GRAPH_ONLY_EXT = new Set(["java"]);
+const GRAPH_ONLY_EXT = new Set(["java", "kt", "kts"]);
 
 export interface BuildLimits { maxFiles: number; maxFileBytes: number; maxTotalBytes: number; /** Wall-clock limit for one file, ms. */ fileBudgetMs: number; /** Wall-clock limit for all files, ms. */ totalBudgetMs: number }
 /** Most Java files stat-ed for the cache key. */
@@ -52,6 +52,11 @@ function walk(root: string, limits: BuildLimits): { files: SourceFile[]; graphOn
         continue;
       }
       if (!entry.isFile()) continue;
+      // The servlet deployment descriptor holds security constraints the Foxguard graph maps onto routes.
+      if (entry.name === "web.xml" && graphOnly.length < GRAPH_ONLY_MAX && !isIgnored(rules, path, false)) {
+        try { const st = lstatSync(join(root, path)); graphOnly.push({ path, size: st.size, mtimeMs: st.mtimeMs }); } catch { /* vanished */ }
+        continue;
+      }
       const ext = extname(entry.name).slice(1).toLowerCase();
       if (!SOURCE_EXTENSIONS.has(ext) || SKIP_FILE.test(entry.name) || isIgnored(rules, path, false)) continue;
       if (!JS_EXT.has(ext) && !PY_EXT.has(ext)) {

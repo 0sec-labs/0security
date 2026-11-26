@@ -92,3 +92,105 @@ fn taint_summaries_are_exported_on_request() {
         .iter()
         .any(|x| x["function"] == "load" && x["language"] == "java"));
 }
+
+fn security_graph(extra: &[&str]) -> Value {
+    let dir =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/java_graph_security_app");
+    let out = Command::new(env!("CARGO_BIN_EXE_foxguard"))
+        .arg("graph")
+        .arg(dir)
+        .args(extra)
+        .output()
+        .expect("run foxguard graph");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    serde_json::from_slice(&out.stdout).expect("graph is JSON")
+}
+
+fn route<'a>(g: &'a Value, method: &str, path: &str) -> &'a Value {
+    g["routes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["method"] == method && r["path"] == path)
+        .unwrap_or_else(|| panic!("no route {method} {path}"))
+}
+
+#[test]
+fn url_rules_and_web_xml_reach_the_routes_of_the_security_fixture() {
+    let g = security_graph(&["--missing-guard"]);
+    // Covered by anyRequest().authenticated() with no annotation on the method.
+    let order = route(&g, "GET", "/shop/orders/{id}");
+    assert_eq!(
+        order["authSignals"],
+        serde_json::json!(["url-rule:authenticated"])
+    );
+    assert_eq!(order["missingGuard"], false);
+    assert!(order["authSources"][0]["source"]
+        .as_str()
+        .unwrap()
+        .contains("SecurityConfig.java:"));
+    // The method-specific rule.
+    assert_eq!(
+        route(&g, "DELETE", "/shop/orders/{id}")["authSignals"],
+        serde_json::json!(["url-rule:hasRole(OPS)"])
+    );
+    // hasAuthority over a file sink: guarded, no longer a false positive.
+    let export = route(&g, "GET", "/admin/export");
+    assert_eq!(
+        export["authSignals"],
+        serde_json::json!(["url-rule:hasAuthority(ADMIN)"])
+    );
+    assert_eq!(export["sinksReachable"], serde_json::json!(["file"]));
+    assert_eq!(export["missingGuard"], false);
+    // permitAll: public, reaches SQL through the interface, and is flagged as unguarded.
+    let search = route(&g, "GET", "/public/search");
+    assert_eq!(search["public"], true);
+    assert!(search.get("authSignals").is_none());
+    assert_eq!(search["sinksReachable"], serde_json::json!(["sql"]));
+    assert_eq!(search["missingGuard"], true);
+    // web.xml: the servlet mapping gives the path and the security constraint the role.
+    let legacy = route(&g, "GET", "/legacy/report");
+    assert_eq!(legacy["framework"], "servlet");
+    // The Spring chain (anyRequest) and the servlet container constraint both apply.
+    assert_eq!(
+        legacy["authSignals"],
+        serde_json::json!(["url-rule:authenticated", "web.xml:auth-constraint(auditor)"])
+    );
+    assert_eq!(legacy["missingGuard"], false);
+    // Kotlin: Ktor routes, `authenticate` is the signal.
+    assert_eq!(route(&g, "GET", "/kt/health")["framework"], "ktor");
+    assert_eq!(
+        route(&g, "GET", "/kt/me")["authSignals"],
+        serde_json::json!(["authenticate(jwt)"])
+    );
+    assert_eq!(route(&g, "GET", "/kt/me")["missingGuard"], false);
+    assert_eq!(route(&g, "GET", "/kt/health")["missingGuard"], false);
+    assert!(g["symbols"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|s| s["language"] == "kotlin" && s["qualified"] == "HealthChecker.status"));
+}
+
+#[test]
+fn interface_calls_resolve_to_the_single_implementor_in_the_security_fixture() {
+    let g = security_graph(&[]);
+    let call = g["calls"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["text"] == "orders.load")
+        .expect("orders.load");
+    assert_eq!(call["receiverType"], "OrderServiceImpl");
+    assert_eq!(g["droppedCalls"], 0);
+    assert!(g["callStats"]["resolved"].as_u64().unwrap() >= 4);
+    assert!(
+        g.get("notes").is_none(),
+        "nothing unresolved: {:?}",
+        g.get("notes")
+    );
+}

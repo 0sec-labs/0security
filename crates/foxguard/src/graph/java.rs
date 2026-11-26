@@ -8,12 +8,8 @@
 //! counts like the Spring one. Spring Security URL rules, `web.ignoring()` and filters are recorded for
 //! [`super::security`].
 
-use super::security::{
-    auth_filter_name, Access, FilterDef, PArg, Pm, UrlRule,
-};
-use super::types::{
-    parse_type, ClassDef, FieldDef, FileScope, RecvPath, Step, TypeRef,
-};
+use super::security::{auth_filter_name, Access, FilterDef, PArg, Pm, UrlRule};
+use super::types::{parse_type, ClassDef, FieldDef, FileScope, RecvPath, Step, TypeRef};
 use super::{AuthSource, FileGraph, GraphCall, GraphRoute, GraphSymbol, SinkTag};
 use regex::Regex;
 use std::collections::HashMap;
@@ -460,10 +456,7 @@ impl<'a> Walker<'a> {
                                     v.start_byte(),
                                     self.text(name),
                                     v,
-                                    vec![
-                                        Step::Call("iterator".into()),
-                                        Step::Call("next".into()),
-                                    ],
+                                    vec![Step::Call("iterator".into()), Step::Call("next".into())],
                                 ));
                             }
                         } else {
@@ -482,7 +475,12 @@ impl<'a> Walker<'a> {
 
     /// The receiver of a call as a path from a known type: a variable, field, `this`, class name
     /// (static call), `new T()`, or a chain of those with field reads and calls.
-    fn recv_path(&self, recv: Option<Node>, class: Option<&ClassInfo>, depth: usize) -> Option<RecvPath> {
+    fn recv_path(
+        &self,
+        recv: Option<Node>,
+        class: Option<&ClassInfo>,
+        depth: usize,
+    ) -> Option<RecvPath> {
         let this_path = || {
             class.map(|c| RecvPath {
                 base: TypeRef::named(&c.simple),
@@ -792,7 +790,9 @@ impl<'a> Walker<'a> {
                             .collect(),
                     );
                 }
-                "EnableMethodSecurity" | "EnableGlobalMethodSecurity" | "EnableReactiveMethodSecurity" => {
+                "EnableMethodSecurity"
+                | "EnableGlobalMethodSecurity"
+                | "EnableReactiveMethodSecurity" => {
                     self.out.security.method_security = true;
                 }
                 "Primary" => def.primary = true,
@@ -867,7 +867,11 @@ impl<'a> Walker<'a> {
         let has_body = node.child_by_field_name("body").is_some();
         let def = &mut self.out.classes[class.def];
         if let Some(r) = ret {
-            let r = if own.contains(&r.name) { TypeRef::default() } else { r };
+            let r = if own.contains(&r.name) {
+                TypeRef::default()
+            } else {
+                r
+            };
             def.methods.entry(name.clone()).or_default().push(r);
         }
         if has_body {
@@ -919,7 +923,11 @@ impl<'a> Walker<'a> {
                     .unwrap_or_default();
                 if matches!(
                     name.as_str(),
-                    "of" | "asList" | "copyOf" | "antMatcher" | "mvcMatcher" | "regexMatcher"
+                    "of" | "asList"
+                        | "copyOf"
+                        | "antMatcher"
+                        | "mvcMatcher"
+                        | "regexMatcher"
                         | "pattern"
                 ) {
                     let regex = regex || name == "regexMatcher";
@@ -950,8 +958,13 @@ impl<'a> Walker<'a> {
                             } else {
                                 found.push(v);
                             }
-                        } else if x.kind() == "field_access" && self.text(x).starts_with("HttpMethod.") {
-                            local = self.text(x).strip_prefix("HttpMethod.").map(str::to_uppercase);
+                        } else if x.kind() == "field_access"
+                            && self.text(x).starts_with("HttpMethod.")
+                        {
+                            local = self
+                                .text(x)
+                                .strip_prefix("HttpMethod.")
+                                .map(str::to_uppercase);
                         }
                     }
                     if found.is_empty() {
@@ -1087,7 +1100,10 @@ impl<'a> Walker<'a> {
                     any: false,
                     matchers,
                     access: Access::Public,
-                    source: compact(format!("{}:{} web.ignoring().{}{}", self.file, line, name, args_text)),
+                    source: compact(format!(
+                        "{}:{} web.ignoring().{}{}",
+                        self.file, line, name, args_text
+                    )),
                     pos: 0,
                 };
                 // Ignored requests skip every chain.
@@ -1100,7 +1116,11 @@ impl<'a> Walker<'a> {
                     self.note_unresolved(&u, line);
                 }
                 let key = self.chain_key;
-                self.out.security.chain_mut(key, self.file).scope.extend(matchers);
+                self.out
+                    .security
+                    .chain_mut(key, self.file)
+                    .scope
+                    .extend(matchers);
             }
             "addFilterBefore" | "addFilterAfter" | "addFilterAt" | "addFilter" => {
                 let Some(first) = args_of(node).into_iter().next() else {
@@ -1118,7 +1138,11 @@ impl<'a> Walker<'a> {
                     let line = node.start_position().row + 1;
                     let source = format!("{}:{} {}({})", self.file, line, name, f);
                     let key = self.chain_key;
-                    self.out.security.chain_mut(key, self.file).filters.push((f, source));
+                    self.out
+                        .security
+                        .chain_mut(key, self.file)
+                        .filters
+                        .push((f, source));
                 }
             }
             _ => {}
@@ -1476,7 +1500,12 @@ pub(super) fn is_method_security_annotation(name: &str) -> bool {
 }
 
 /// Request matcher calls of the Spring Security authorization DSL.
-pub(super) const MATCHER_CALLS: [&str; 4] = ["requestMatchers", "antMatchers", "mvcMatchers", "regexMatchers"];
+pub(super) const MATCHER_CALLS: [&str; 4] = [
+    "requestMatchers",
+    "antMatchers",
+    "mvcMatchers",
+    "regexMatchers",
+];
 
 fn args_of<'t>(call: Node<'t>) -> Vec<Node<'t>> {
     super::args_of(call)

@@ -173,8 +173,7 @@ pub(super) fn servlet_match(pattern: &str, path: &str) -> Option<usize> {
         let last = path.rsplit('/').next().unwrap_or("");
         return (!last.starts_with('{') && last.ends_with(&format!(".{ext}"))).then_some(50);
     }
-    (path == pattern.trim_end_matches('/') || (pattern == "/" && path.is_empty()))
-        .then_some(1000)
+    (path == pattern.trim_end_matches('/') || (pattern == "/" && path.is_empty())).then_some(1000)
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -213,7 +212,11 @@ fn pick_chain<'a>(chains: &'a [RChain], r: &GraphRoute) -> Option<&'a RChain> {
     let near = |c: &RChain| -> (bool, usize) {
         let a = c.file.rsplit_once('/').map(|x| x.0).unwrap_or("");
         let b = r.file.rsplit_once('/').map(|x| x.0).unwrap_or("");
-        let shared = a.split('/').zip(b.split('/')).take_while(|(x, y)| x == y).count();
+        let shared = a
+            .split('/')
+            .zip(b.split('/'))
+            .take_while(|(x, y)| x == y)
+            .count();
         (!c.rules.is_empty(), shared)
     };
     let mut best: Option<&RChain> = None;
@@ -333,7 +336,9 @@ fn strip_comments(text: &str) -> String {
     static C: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
     // Keep newlines so line numbers stay right.
     C.get_or_init(|| Regex::new(r"(?s)<!--.*?-->").expect("static regex"))
-        .replace_all(text, |c: &regex::Captures| "\n".repeat(c[0].matches('\n').count()))
+        .replace_all(text, |c: &regex::Captures| {
+            "\n".repeat(c[0].matches('\n').count())
+        })
         .into_owned()
 }
 
@@ -345,7 +350,8 @@ fn tag_values(block: &str, tag: &str) -> Vec<String> {
 }
 
 fn blocks<'a>(text: &'a str, tag: &str) -> Vec<(usize, &'a str)> {
-    let re = Regex::new(&format!(r"(?s)<{tag}(?:\s[^>]*?)?(?:/>|>(.*?)</{tag}\s*>)")).expect("block regex");
+    let re = Regex::new(&format!(r"(?s)<{tag}(?:\s[^>]*?)?(?:/>|>(.*?)</{tag}\s*>)"))
+        .expect("block regex");
     re.captures_iter(text)
         .map(|c| {
             let m = c.get(0).expect("whole match");
@@ -415,7 +421,7 @@ pub(super) fn parse_web_xml(file: &str, raw: &str) -> WebXml {
 }
 
 fn is_java_route(r: &GraphRoute) -> bool {
-    matches!(r.framework, "spring" | "jax-rs" | "servlet" | "ktor")
+    matches!(r.framework, "spring" | "jax-rs" | "servlet")
 }
 
 /// Filter names that look like an authentication or authorization filter.
@@ -467,7 +473,11 @@ pub(super) fn apply(g: &mut CodeGraph, secs: Vec<FileSecurity>, webs: Vec<WebXml
         method_security |= s.method_security;
         method_guards |= s.method_guards;
         raw_ignoring.extend(s.ignoring);
-        raw_chains.extend(s.chains.into_iter().filter(|c| !c.rules.is_empty() || !c.filters.is_empty()));
+        raw_chains.extend(
+            s.chains
+                .into_iter()
+                .filter(|c| !c.rules.is_empty() || !c.filters.is_empty()),
+        );
     }
     for c in &mut raw_chains {
         c.rules.sort_by_key(|r| r.pos);
@@ -479,7 +489,7 @@ pub(super) fn apply(g: &mut CodeGraph, secs: Vec<FileSecurity>, webs: Vec<WebXml
 
     // Resolve chains; scoped chains are consulted first, as Spring orders matching chains.
     let mut unresolved = 0usize;
-    let mut chains: Vec<RChain> = raw_chains
+    let chains: Vec<RChain> = raw_chains
         .iter()
         .map(|c| RChain {
             scope: c
@@ -521,7 +531,10 @@ pub(super) fn apply(g: &mut CodeGraph, secs: Vec<FileSecurity>, webs: Vec<WebXml
     if unresolved > 0 {
         g.notes.push(format!("spring-security-url-rules: {unresolved} request matcher value(s) are constants that are not string literals in the tree; the routes they cover are not marked"));
     }
-    let unscoped = chains.iter().filter(|c| c.scope.is_empty() && !c.rules.is_empty()).count();
+    let unscoped = chains
+        .iter()
+        .filter(|c| c.scope.is_empty() && !c.rules.is_empty())
+        .count();
     if unscoped > 1 {
         g.notes.push(format!("spring-security-url-rules: {unscoped} security filter chains without a securityMatcher exist; each route takes the one declared nearest to it in the tree"));
     }
@@ -580,13 +593,19 @@ pub(super) fn apply(g: &mut CodeGraph, secs: Vec<FileSecurity>, webs: Vec<WebXml
             .iter()
             .find(|rule| rule.pms.iter().any(|p| route_matches(p, r)));
         if let Some(rule) = ignored {
-            push_hit(r, "url-rule:permitAll".to_string(), rule.source.clone(), "public");
+            push_hit(
+                r,
+                "url-rule:permitAll".to_string(),
+                rule.source.clone(),
+                "public",
+            );
         }
         // Spring Security chain.
         if let Some(chain) = pick_chain(&chains, r).filter(|_| ignored.is_none()) {
-            let rule = chain.rules.iter().find(|rule| {
-                rule.any || rule.pms.iter().any(|p| route_matches(p, r))
-            });
+            let rule = chain
+                .rules
+                .iter()
+                .find(|rule| rule.any || rule.pms.iter().any(|p| route_matches(p, r)));
             if let Some(rule) = rule {
                 let (signal, access) = signal_of(&rule.access, "url-rule");
                 push_hit(r, signal, rule.source.clone(), access);
@@ -620,8 +639,14 @@ pub(super) fn apply(g: &mut CodeGraph, secs: Vec<FileSecurity>, webs: Vec<WebXml
             }
             if let Some((_, cs)) = best {
                 let guarded = cs.iter().find(|c| c.roles.is_some());
-                let source_of =
-                    |c: &WebConstraint| format!("{}:{} security-constraint {}", w.file, c.line, c.patterns.join(","));
+                let source_of = |c: &WebConstraint| {
+                    format!(
+                        "{}:{} security-constraint {}",
+                        w.file,
+                        c.line,
+                        c.patterns.join(",")
+                    )
+                };
                 match guarded {
                     Some(c) => {
                         let roles = c.roles.clone().unwrap_or_default();
@@ -630,7 +655,10 @@ pub(super) fn apply(g: &mut CodeGraph, secs: Vec<FileSecurity>, webs: Vec<WebXml
                         } else if roles.iter().any(|x| x == "*" || x == "**") {
                             ("web.xml:authenticated".to_string(), "authenticated")
                         } else {
-                            (format!("web.xml:auth-constraint({})", roles.join(",")), "role")
+                            (
+                                format!("web.xml:auth-constraint({})", roles.join(",")),
+                                "role",
+                            )
                         };
                         push_hit(r, signal, source_of(c), access);
                     }
@@ -646,11 +674,18 @@ pub(super) fn apply(g: &mut CodeGraph, secs: Vec<FileSecurity>, webs: Vec<WebXml
                 web_constraint_notes.insert(w.file.clone());
             }
             for fm in &w.filter_maps {
-                let class = w.filters.get(&fm.filter).cloned().unwrap_or_else(|| fm.filter.clone());
+                let class = w
+                    .filters
+                    .get(&fm.filter)
+                    .cloned()
+                    .unwrap_or_else(|| fm.filter.clone());
                 if !filter_is_auth(&class) && !filter_is_auth(&fm.filter) {
                     continue;
                 }
-                let by_url = fm.patterns.iter().any(|p| servlet_match(p, &r.path).is_some());
+                let by_url = fm
+                    .patterns
+                    .iter()
+                    .any(|p| servlet_match(p, &r.path).is_some());
                 let by_servlet = fm.servlets.iter().any(|s| {
                     w.servlet_maps
                         .iter()
@@ -695,7 +730,10 @@ mod tests {
         assert!(ant_match("/api/*/x", "/api/{v}/x"));
         assert!(ant_match("/users/{id}", "/users/{uid}"));
         assert!(ant_match("/css/*.css", "/css/site.css"));
-        assert!(!ant_match("/users/me", "/users/{id}"), "a literal does not cover a variable");
+        assert!(
+            !ant_match("/users/me", "/users/{id}"),
+            "a literal does not cover a variable"
+        );
         assert!(!ant_match("/api/*", "/api/a/b"));
         assert!(ant_match("/**", "/anything/at/all"));
         assert!(ant_match("/files/{*rest}", "/files/a/b"));

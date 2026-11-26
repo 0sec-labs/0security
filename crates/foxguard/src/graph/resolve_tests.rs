@@ -18,11 +18,18 @@ fn targets(g: &CodeGraph, from_method: &str, text: &str) -> Vec<String> {
         .unwrap_or_else(|| {
             panic!(
                 "no call {text} in {from_method}; have {:?}",
-                g.calls.iter().filter(|c| c.from == from.id).map(|c| &c.text).collect::<Vec<_>>()
+                g.calls
+                    .iter()
+                    .filter(|c| c.from == from.id)
+                    .map(|c| &c.text)
+                    .collect::<Vec<_>>()
             )
         });
     let mut v: Vec<String> = match &c.cand {
-        Some(cand) => cand.iter().map(|&i| g.symbols[i as usize].qualified.clone()).collect(),
+        Some(cand) => cand
+            .iter()
+            .map(|&i| g.symbols[i as usize].qualified.clone())
+            .collect(),
         None => vec!["<unresolved>".to_string()],
     };
     v.sort();
@@ -69,7 +76,10 @@ fn chained_receivers_this_and_field_of_field_are_narrowed() {
         };
         assert_eq!(targets(&g, m, t), vec!["Repo.save"], "{m}");
     }
-    assert_eq!(targets(&g, "Ctl.e", "holder.service.run"), vec!["Service.run"]);
+    assert_eq!(
+        targets(&g, "Ctl.e", "holder.service.run"),
+        vec!["Service.run"]
+    );
 }
 
 #[test]
@@ -110,13 +120,25 @@ class UseMapper { private final Mapper mapper; UseMapper(Mapper mapper) { this.m
         ),
     ]);
     // @Primary wins over several implementors.
-    assert_eq!(targets(&g, "Use.a", "notifier.send"), vec!["PushNotifier.send"]);
+    assert_eq!(
+        targets(&g, "Use.a", "notifier.send"),
+        vec!["PushNotifier.send"]
+    );
     // @Qualifier names the bean.
-    assert_eq!(targets(&g, "Use.b", "chosen.send"), vec!["SmsNotifier.send"]);
+    assert_eq!(
+        targets(&g, "Use.b", "chosen.send"),
+        vec!["SmsNotifier.send"]
+    );
     // Otherwise the field name is the bean name (here also `@Primary` is checked first, so primary wins).
-    assert_eq!(targets(&g, "Use.c", "mailNotifier.send"), vec!["PushNotifier.send"]);
+    assert_eq!(
+        targets(&g, "Use.c", "mailNotifier.send"),
+        vec!["PushNotifier.send"]
+    );
     // One implementor: constructor injection of the interface reaches it.
-    assert_eq!(targets(&g, "UseMapper.go", "mapper.map"), vec!["OnlyMapper.map"]);
+    assert_eq!(
+        targets(&g, "UseMapper.go", "mapper.map"),
+        vec!["OnlyMapper.map"]
+    );
     let call = g
         .calls
         .iter()
@@ -136,7 +158,10 @@ fn bean_named_like_the_field_and_unresolvable_wiring() {
             "class U { Notifier smsNotifier; Notifier other; void a() { smsNotifier.send(\"x\"); } void b() { other.send(\"x\"); } }",
         ),
     ]);
-    assert_eq!(targets(&g, "U.a", "smsNotifier.send"), vec!["SmsNotifier.send"]);
+    assert_eq!(
+        targets(&g, "U.a", "smsNotifier.send"),
+        vec!["SmsNotifier.send"]
+    );
     assert_eq!(
         targets(&g, "U.b", "other.send"),
         vec!["MailNotifier.send", "SmsNotifier.send"],
@@ -198,9 +223,18 @@ fn generics_resolve_container_elements_and_class_type_parameters() {
 }"#,
         ),
     ]);
-    assert_eq!(targets(&g, "Use.a", "maybe.get().touch"), vec!["User.touch"]);
-    assert_eq!(targets(&g, "Use.b", "accounts.get().touch"), vec!["Account.touch"]);
-    assert_eq!(targets(&g, "Use.c", "byName.get().touch"), vec!["User.touch"]);
+    assert_eq!(
+        targets(&g, "Use.a", "maybe.get().touch"),
+        vec!["User.touch"]
+    );
+    assert_eq!(
+        targets(&g, "Use.b", "accounts.get().touch"),
+        vec!["Account.touch"]
+    );
+    assert_eq!(
+        targets(&g, "Use.c", "byName.get().touch"),
+        vec!["User.touch"]
+    );
     assert_eq!(targets(&g, "Use.d", "box.get().touch"), vec!["User.touch"]);
     assert_eq!(targets(&g, "Use.e", "box.value.touch"), vec!["User.touch"]);
     assert_eq!(
@@ -269,14 +303,26 @@ fn names_defined_many_times_are_ranked_by_proximity_and_the_rest_are_counted_as_
         "z/Lost.java".to_string(),
         "package z;\nclass Lost { void go() { make().handle(); } }".to_string(),
     ));
-    let refs: Vec<(&str, &str)> = files.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
+    let refs: Vec<(&str, &str)> = files
+        .iter()
+        .map(|(a, b)| (a.as_str(), b.as_str()))
+        .collect();
     let g = graph_of(&refs);
     assert_eq!(targets(&g, "Caller.go", "handle"), vec!["Caller.handle"]);
-    assert_eq!(targets(&g, "User5.go", "make().handle"), vec!["Cls5.handle"]);
+    assert_eq!(
+        targets(&g, "User5.go", "make().handle"),
+        vec!["Cls5.handle"]
+    );
     assert_eq!(targets(&g, "Importer.go", "x.handle"), vec!["Cls9.handle"]);
-    assert_eq!(targets(&g, "Importer.h", "make().handle"), vec!["Cls9.handle"]);
+    assert_eq!(
+        targets(&g, "Importer.h", "make().handle"),
+        vec!["Cls9.handle"]
+    );
     // `Lost` has no package, import or directory in common with any candidate.
-    assert!(!g.calls.iter().any(|c| c.file.ends_with("Lost.java") && c.name == "handle"));
+    assert!(!g
+        .calls
+        .iter()
+        .any(|c| c.file.ends_with("Lost.java") && c.name == "handle"));
     assert_eq!(g.dropped_calls, 1);
     let stats = g.call_stats.clone().expect("stats");
     assert!(stats.jvm_calls >= 5);
@@ -296,11 +342,20 @@ fn dropped_calls_are_counted_when_nothing_singles_a_candidate_out() {
         "z/Lost.java".to_string(),
         "package z;\nclass Lost { void go() { handle(); unknown(); } }".to_string(),
     ));
-    let refs: Vec<(&str, &str)> = files.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
+    let refs: Vec<(&str, &str)> = files
+        .iter()
+        .map(|(a, b)| (a.as_str(), b.as_str()))
+        .collect();
     let g = graph_of(&refs);
-    assert_eq!(g.dropped_calls, 1, "handle() is defined 30 times and nothing ranks them");
+    assert_eq!(
+        g.dropped_calls, 1,
+        "handle() is defined 30 times and nothing ranks them"
+    );
     assert!(!g.calls.iter().any(|c| c.name == "handle"));
-    assert!(g.call_stats.as_ref().unwrap().external >= 1, "unknown() is external, not dropped");
+    assert!(
+        g.call_stats.as_ref().unwrap().external >= 1,
+        "unknown() is external, not dropped"
+    );
 }
 
 #[test]
@@ -308,8 +363,16 @@ fn legacy_resolution_flag_reproduces_name_only_joins() {
     let dir = std::env::temp_dir().join(format!("fg-graph-legacy-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    std::fs::write(dir.join("A.java"), "class A { void save() {} }\nclass B { void save() {} }").unwrap();
-    std::fs::write(dir.join("C.java"), "class C { A a; void go() { a.save(); b().save(); } B b() { return null; } }").unwrap();
+    std::fs::write(
+        dir.join("A.java"),
+        "class A { void save() {} }\nclass B { void save() {} }",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("C.java"),
+        "class C { A a; void go() { a.save(); b().save(); } B b() { return null; } }",
+    )
+    .unwrap();
     let new = build_graph(&dir);
     let old = build_graph_with(
         &dir,

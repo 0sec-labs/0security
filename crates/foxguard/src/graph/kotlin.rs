@@ -10,7 +10,7 @@ use super::java::{
     auth_signal, guard_annotation, is_method_security_annotation, join_path, sink_category,
     MATCHER_CALLS, PUBLIC_ANNOTATIONS, STEREOTYPES,
 };
-use super::security::{Access, FilterDef, PArg, Pm, UrlRule, auth_filter_name};
+use super::security::{auth_filter_name, Access, FilterDef, PArg, Pm, UrlRule};
 use super::types::{parse_type, ClassDef, FieldDef, FileScope, RecvPath, Step, TypeRef};
 use super::{AuthSource, FileGraph, GraphCall, GraphRoute, GraphSymbol, SinkTag};
 use regex::Regex;
@@ -49,7 +49,9 @@ struct KAnn {
 fn strip_comments(text: &str) -> String {
     static C: OnceLock<Regex> = OnceLock::new();
     re(&C, r"(?s)/\*.*?\*/|//[^\n]*")
-        .replace_all(text, |c: &regex::Captures| "\n".repeat(c[0].matches('\n').count()))
+        .replace_all(text, |c: &regex::Captures| {
+            "\n".repeat(c[0].matches('\n').count())
+        })
         .into_owned()
 }
 
@@ -261,7 +263,14 @@ struct Walker<'a> {
 
 const KTOR_VERBS: [&str; 7] = ["get", "post", "put", "delete", "patch", "head", "options"];
 /// Calls that return their receiver, so a chain keeps the receiver's type through them.
-const IDENTITY_CALLS: [&str; 6] = ["also", "apply", "takeIf", "takeUnless", "onEach", "requireNotNull"];
+const IDENTITY_CALLS: [&str; 6] = [
+    "also",
+    "apply",
+    "takeIf",
+    "takeUnless",
+    "onEach",
+    "requireNotNull",
+];
 
 fn is_upper(s: &str) -> bool {
     s.chars().next().is_some_and(|c| c.is_uppercase())
@@ -367,7 +376,11 @@ impl<'a> Walker<'a> {
                 "import_list" => {
                     for h in kids(k) {
                         let t = self.text(h);
-                        let t = t.trim_start_matches("import").trim().trim_end_matches(';').trim();
+                        let t = t
+                            .trim_start_matches("import")
+                            .trim()
+                            .trim_end_matches(';')
+                            .trim();
                         let t = t.split(" as ").next().unwrap_or(t).trim().to_string();
                         scope.imports.push(t);
                     }
@@ -408,11 +421,15 @@ impl<'a> Walker<'a> {
         let mut own: HashMap<String, FieldDef> = HashMap::new();
         // Primary constructor properties.
         if let Some(pc) = first_kind(decl, "primary_constructor") {
-            for p in kids(pc).into_iter().filter(|k| k.kind() == "class_parameter") {
+            for p in kids(pc)
+                .into_iter()
+                .filter(|k| k.kind() == "class_parameter")
+            {
                 if first_kind(p, "binding_pattern_kind").is_none() {
                     continue;
                 }
-                let (Some(n), Some(t)) = (first_kind(p, "simple_identifier"), self.type_of_decl(p)) else {
+                let (Some(n), Some(t)) = (first_kind(p, "simple_identifier"), self.type_of_decl(p))
+                else {
                     continue;
                 };
                 let pa = first_kind(p, "modifiers")
@@ -431,7 +448,10 @@ impl<'a> Walker<'a> {
         let mut consts: Vec<(String, Vec<String>)> = Vec::new();
         if let Some(body) = first_kind(decl, "class_body") {
             self.collect_properties(body, &mut own, &mut consts);
-            for c in kids(body).into_iter().filter(|k| k.kind() == "companion_object") {
+            for c in kids(body)
+                .into_iter()
+                .filter(|k| k.kind() == "companion_object")
+            {
                 if let Some(cb) = first_kind(c, "class_body") {
                     self.collect_properties(cb, &mut own, &mut consts);
                 }
@@ -544,7 +564,10 @@ impl<'a> Walker<'a> {
         own: &mut HashMap<String, FieldDef>,
         consts: &mut Vec<(String, Vec<String>)>,
     ) {
-        for p in kids(body).into_iter().filter(|k| k.kind() == "property_declaration") {
+        for p in kids(body)
+            .into_iter()
+            .filter(|k| k.kind() == "property_declaration")
+        {
             let Some(vd) = first_kind(p, "variable_declaration") else {
                 continue;
             };
@@ -558,8 +581,14 @@ impl<'a> Walker<'a> {
             let init = kids(p).into_iter().find(|k| {
                 !matches!(
                     k.kind(),
-                    "modifiers" | "binding_pattern_kind" | "variable_declaration" | "property_delegate"
-                        | "type_constraints" | "type_parameters" | "getter" | "setter"
+                    "modifiers"
+                        | "binding_pattern_kind"
+                        | "variable_declaration"
+                        | "property_delegate"
+                        | "type_constraints"
+                        | "type_parameters"
+                        | "getter"
+                        | "setter"
                 )
             });
             if let Some(i) = init {
@@ -619,7 +648,11 @@ impl<'a> Walker<'a> {
         }
     }
 
-    fn register_function(&mut self, decl: Node, class: Option<&KClass>) -> (String, Option<String>) {
+    fn register_function(
+        &mut self,
+        decl: Node,
+        class: Option<&KClass>,
+    ) -> (String, Option<String>) {
         let mut name = String::new();
         let mut receiver: Option<String> = None;
         let mut ret: Option<TypeRef> = None;
@@ -648,7 +681,11 @@ impl<'a> Walker<'a> {
             let has_body = first_kind(decl, "function_body").is_some();
             let def = &mut self.out.classes[c.def];
             if let Some(r) = ret {
-                let r = if tp.contains(&r.name) { TypeRef::default() } else { r };
+                let r = if tp.contains(&r.name) {
+                    TypeRef::default()
+                } else {
+                    r
+                };
                 def.methods.entry(name.clone()).or_default().push(r);
             }
             if has_body {
@@ -658,6 +695,7 @@ impl<'a> Walker<'a> {
         (name, receiver)
     }
 
+    #[allow(clippy::type_complexity)]
     fn collect_locals<'t>(
         &self,
         func: Node<'t>,
@@ -670,7 +708,9 @@ impl<'a> Walker<'a> {
         while let Some(n) = stack.pop() {
             match n.kind() {
                 "parameter" => {
-                    if let (Some(name), Some(t)) = (first_kind(n, "simple_identifier"), self.type_of_decl(n)) {
+                    if let (Some(name), Some(t)) =
+                        (first_kind(n, "simple_identifier"), self.type_of_decl(n))
+                    {
                         if !self.is_tparam(&t.name, class, tp) {
                             map.insert(self.text(name), Local::Ty(t));
                         }
@@ -687,7 +727,9 @@ impl<'a> Walker<'a> {
                             } else if let Some(init) = kids(n).into_iter().find(|k| {
                                 !matches!(
                                     k.kind(),
-                                    "modifiers" | "binding_pattern_kind" | "variable_declaration"
+                                    "modifiers"
+                                        | "binding_pattern_kind"
+                                        | "variable_declaration"
                                         | "property_delegate"
                                 )
                             }) {
@@ -737,7 +779,9 @@ impl<'a> Walker<'a> {
                 if let Some(f) = class.and_then(|c| c.fields.get(&name)) {
                     return typed(f.ty.clone(), Some((name, f.qualifier.clone())));
                 }
-                is_upper(&name).then(|| typed(TypeRef::named(&name), None)).flatten()
+                is_upper(&name)
+                    .then(|| typed(TypeRef::named(&name), None))
+                    .flatten()
             }
             "navigation_expression" => {
                 let ks = kids(n);
@@ -827,7 +871,14 @@ impl<'a> Walker<'a> {
 
     // ---- calls and routes ----
 
-    fn add_call(&mut self, from: &str, name: String, text: String, line: usize, recv: Option<RecvPath>) {
+    fn add_call(
+        &mut self,
+        from: &str,
+        name: String,
+        text: String,
+        line: usize,
+        recv: Option<RecvPath>,
+    ) {
         if name.is_empty() {
             return;
         }
@@ -939,7 +990,14 @@ impl<'a> Walker<'a> {
                     return false;
                 };
                 let name = self.text(id);
-                let text = format!("{}", self.render(callee, 0));
+                let mut text = self.render(callee, 0);
+                // `java.io.File(path)`: a constructor behind a package name, like Java's `new File`.
+                let package_like = text
+                    .rsplit_once('.')
+                    .is_some_and(|(p, _)| p.chars().all(|c| c.is_ascii_lowercase() || c == '.'));
+                if is_upper(&name) && package_like {
+                    text = format!("new {name}");
+                }
                 (name, text, nk.first().copied())
             }
             _ => return false,
@@ -1009,8 +1067,9 @@ impl<'a> Walker<'a> {
                         let mut ms: Vec<String> = Vec::new();
                         for part in split_args(&a.args) {
                             if part.trim_start().starts_with("method") {
-                                for c in re(&M, r"\b(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS|TRACE)\b")
-                                    .captures_iter(&part)
+                                for c in
+                                    re(&M, r"\b(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS|TRACE)\b")
+                                        .captures_iter(&part)
                                 {
                                     ms.push(c[1].to_string());
                                 }
@@ -1087,11 +1146,14 @@ impl<'a> Walker<'a> {
         class: Option<&KClass>,
         ktor: &Ktor,
     ) -> bool {
-        let Some(lambda) = first_kind(suffix, "annotated_lambda").and_then(|a| first_kind(a, "lambda_literal"))
+        let Some(lambda) =
+            first_kind(suffix, "annotated_lambda").and_then(|a| first_kind(a, "lambda_literal"))
         else {
             return false;
         };
-        let args: Vec<Node> = first_kind(suffix, "value_arguments").map(kids).unwrap_or_default();
+        let args: Vec<Node> = first_kind(suffix, "value_arguments")
+            .map(kids)
+            .unwrap_or_default();
         let first_str = args.first().and_then(|a| {
             let e = kids(*a).into_iter().next()?;
             (e.kind() == "string_literal").then(|| self.text(e).trim_matches('"').to_string())
@@ -1178,7 +1240,10 @@ impl<'a> Walker<'a> {
         let mut out = Vec::new();
         let mut unresolved = Vec::new();
         let mut method: Option<String> = None;
-        for a in kids(args).into_iter().filter(|k| k.kind() == "value_argument") {
+        for a in kids(args)
+            .into_iter()
+            .filter(|k| k.kind() == "value_argument")
+        {
             if let Some(e) = kids(a).into_iter().next() {
                 self.matcher_expr(e, regex, &mut method, &mut out, &mut unresolved);
             }
@@ -1227,8 +1292,12 @@ impl<'a> Walker<'a> {
             "call_expression" => {
                 let ks = kids(e);
                 let callee = ks.first().map(|c| self.text(*c)).unwrap_or_default();
-                let sfx = first_kind(e, "call_suffix").and_then(|s| first_kind(s, "value_arguments"));
-                if matches!(callee.as_str(), "arrayOf" | "listOf" | "setOf" | "antMatcher" | "mvcMatcher") {
+                let sfx =
+                    first_kind(e, "call_suffix").and_then(|s| first_kind(s, "value_arguments"));
+                if matches!(
+                    callee.as_str(),
+                    "arrayOf" | "listOf" | "setOf" | "antMatcher" | "mvcMatcher"
+                ) {
                     if let Some(args) = sfx {
                         for a in kids(args) {
                             if let Some(x) = kids(a).into_iter().next() {
@@ -1282,8 +1351,18 @@ impl<'a> Walker<'a> {
     fn chain_rule(&mut self, node: Node, callee: Node, name: &str) {
         let terminal = matches!(
             name,
-            "permitAll" | "anonymous" | "denyAll" | "authenticated" | "fullyAuthenticated" | "rememberMe"
-                | "hasRole" | "hasAnyRole" | "hasAuthority" | "hasAnyAuthority" | "hasIpAddress" | "access"
+            "permitAll"
+                | "anonymous"
+                | "denyAll"
+                | "authenticated"
+                | "fullyAuthenticated"
+                | "rememberMe"
+                | "hasRole"
+                | "hasAnyRole"
+                | "hasAuthority"
+                | "hasAnyAuthority"
+                | "hasIpAddress"
+                | "access"
         );
         if !terminal {
             return;
@@ -1302,11 +1381,17 @@ impl<'a> Walker<'a> {
         let (mname, mline, mpos) = match rc.kind() {
             "simple_identifier" => (self.text(rc), self.line_of(rc), rc.start_byte()),
             "navigation_expression" => {
-                let Some(sfx) = kids(rc).into_iter().rev().find(|k| k.kind() == "navigation_suffix") else {
+                let Some(sfx) = kids(rc)
+                    .into_iter()
+                    .rev()
+                    .find(|k| k.kind() == "navigation_suffix")
+                else {
                     return;
                 };
                 (
-                    first_kind(sfx, "simple_identifier").map(|i| self.text(i)).unwrap_or_default(),
+                    first_kind(sfx, "simple_identifier")
+                        .map(|i| self.text(i))
+                        .unwrap_or_default(),
                     self.line_of(sfx),
                     sfx.start_byte(),
                 )
@@ -1317,14 +1402,18 @@ impl<'a> Walker<'a> {
         if !(any || MATCHER_CALLS.contains(&mname.as_str())) {
             return;
         }
-        let args_node = first_kind(node, "call_suffix").and_then(|s| first_kind(s, "value_arguments"));
+        let args_node =
+            first_kind(node, "call_suffix").and_then(|s| first_kind(s, "value_arguments"));
         let inner = args_node
             .map(|a| self.text(a))
             .unwrap_or_default()
             .trim_start_matches('(')
             .trim_end_matches(')')
             .replace(['"', '\''], "");
-        let (matchers, unresolved) = match (any, first_kind(recv, "call_suffix").and_then(|s| first_kind(s, "value_arguments"))) {
+        let (matchers, unresolved) = match (
+            any,
+            first_kind(recv, "call_suffix").and_then(|s| first_kind(s, "value_arguments")),
+        ) {
             (false, Some(a)) => self.matcher_args(a, mname == "regexMatchers"),
             _ => (vec![], vec![]),
         };
@@ -1342,13 +1431,16 @@ impl<'a> Walker<'a> {
                     .unwrap_or_default()
             )
         };
-        let source: String = format!("{}:{} {}.{}({})", self.file, mline, matcher_text, name, inner)
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ")
-            .chars()
-            .take(140)
-            .collect();
+        let source: String = format!(
+            "{}:{} {}.{}({})",
+            self.file, mline, matcher_text, name, inner
+        )
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(140)
+        .collect();
         let access = self.access_of(name, &inner);
         self.push_rule(UrlRule {
             any,
@@ -1394,8 +1486,18 @@ impl<'a> Walker<'a> {
         };
         if !matches!(
             access_name.as_str(),
-            "permitAll" | "anonymous" | "denyAll" | "authenticated" | "fullyAuthenticated" | "rememberMe"
-                | "hasRole" | "hasAnyRole" | "hasAuthority" | "hasAnyAuthority" | "hasIpAddress" | "access"
+            "permitAll"
+                | "anonymous"
+                | "denyAll"
+                | "authenticated"
+                | "fullyAuthenticated"
+                | "rememberMe"
+                | "hasRole"
+                | "hasAnyRole"
+                | "hasAuthority"
+                | "hasAnyAuthority"
+                | "hasIpAddress"
+                | "access"
         ) {
             return;
         }
@@ -1448,12 +1550,19 @@ impl<'a> Walker<'a> {
                     }
                     let key = self.chain_key;
                     let file = self.file;
-                    self.out.security.chain_mut(key, file).scope.extend(matchers);
+                    self.out
+                        .security
+                        .chain_mut(key, file)
+                        .scope
+                        .extend(matchers);
                 }
             }
             "requestMatchers" | "antMatchers" | "mvcMatchers" | "regexMatchers" => {
                 let Some(a) = args else { return };
-                let callee_text = kids(node).first().map(|c| self.text(*c)).unwrap_or_default();
+                let callee_text = kids(node)
+                    .first()
+                    .map(|c| self.text(*c))
+                    .unwrap_or_default();
                 if !callee_text.contains("ignoring()") {
                     return;
                 }
@@ -1487,7 +1596,11 @@ impl<'a> Walker<'a> {
                     let source = format!("{}:{} {}({})", self.file, self.line_of(node), name, f);
                     let key = self.chain_key;
                     let file = self.file;
-                    self.out.security.chain_mut(key, file).filters.push((f, source));
+                    self.out
+                        .security
+                        .chain_mut(key, file)
+                        .filters
+                        .push((f, source));
                 }
             }
             _ => {}

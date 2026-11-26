@@ -17,7 +17,11 @@ fn targets(g: &CodeGraph, from_method: &str, text: &str) -> Vec<String> {
     let mut v: Vec<String> = c
         .cand
         .as_ref()
-        .map(|cand| cand.iter().map(|&i| g.symbols[i as usize].qualified.clone()).collect())
+        .map(|cand| {
+            cand.iter()
+                .map(|&i| g.symbols[i as usize].qualified.clone())
+                .collect()
+        })
         .unwrap_or_default();
     v.sort();
     v
@@ -77,9 +81,15 @@ fn kotlin_spring_controller_routes_symbols_and_guards() {
 fn kotlin_calls_use_constructor_properties_and_wiring() {
     let g = graph_of(&[("UserApi.kt", SPRING)]);
     // `repo` is a constructor property of type UserRepository: not Other.save.
-    assert_eq!(targets(&g, "UserApi.write", "repo.save"), vec!["UserRepository.save"]);
+    assert_eq!(
+        targets(&g, "UserApi.write", "repo.save"),
+        vec!["UserRepository.save"]
+    );
     // `@Qualifier("sms")` on a constructor property picks the bean.
-    assert_eq!(targets(&g, "UserApi.export", "notifier.send"), vec!["SmsNotifier.send"]);
+    assert_eq!(
+        targets(&g, "UserApi.export", "notifier.send"),
+        vec!["SmsNotifier.send"]
+    );
     assert!(g.calls.iter().any(|c| c.text == "Runtime.getRuntime().exec"
         && c.sink.as_ref().map(|s| s.category) == Some("command")));
 }
@@ -89,7 +99,10 @@ fn kotlin_missing_guard_flags_the_unguarded_export() {
     let mut g = graph_of(&[("UserApi.kt", SPRING)]);
     mark_missing_guards(&mut g);
     assert_eq!(route(&g, "GET", "/api/export").missing_guard, Some(true));
-    assert_eq!(route(&g, "GET", "/api/users/{id}").missing_guard, Some(false));
+    assert_eq!(
+        route(&g, "GET", "/api/users/{id}").missing_guard,
+        Some(false)
+    );
 }
 
 const KTOR: &str = r#"package com.x
@@ -124,7 +137,11 @@ fn ktor_routes_prefixes_and_authenticate_wrappers() {
     assert_eq!(me.auth_sources[0].access, "authenticated");
     let post = route(&g, "POST", "/items");
     assert_eq!(post.auth_signals, vec!["authenticate(auth-jwt)"]);
-    assert_eq!(post.missing_guard, Some(false), "the authenticate block guards it");
+    assert_eq!(
+        post.missing_guard,
+        Some(false),
+        "the authenticate block guards it"
+    );
     route(&g, "GET", "/items/{id}");
     // A handler is a symbol and owns the calls in its lambda.
     let handler = g
@@ -179,7 +196,10 @@ class Cfg {
         route(&g, "GET", "/admin/x").auth_signals,
         vec!["url-rule:hasAuthority(ADMIN)"]
     );
-    assert_eq!(route(&g, "GET", "/other").auth_signals, vec!["url-rule:authenticated"]);
+    assert_eq!(
+        route(&g, "GET", "/other").auth_signals,
+        vec!["url-rule:authenticated"]
+    );
 
     let chain = graph_of(&[
         ("Api.kt", "@RestController class Api { @GetMapping(\"/a\") fun a() = \"\" }"),
@@ -188,7 +208,10 @@ class Cfg {
             "class Cfg { fun c(h: HttpSecurity) { h.authorizeHttpRequests { it.requestMatchers(\"/a\").hasRole(\"OPS\").anyRequest().authenticated() } } }",
         ),
     ]);
-    assert_eq!(route(&chain, "GET", "/a").auth_signals, vec!["url-rule:hasRole(OPS)"]);
+    assert_eq!(
+        route(&chain, "GET", "/a").auth_signals,
+        vec!["url-rule:hasRole(OPS)"]
+    );
 }
 
 #[test]
