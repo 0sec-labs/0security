@@ -1,6 +1,6 @@
 import { PassThrough } from "node:stream";
 import { describe, expect, it } from "vitest";
-import { runConfig, runHoneypot, runJudge, runScenarios, type RedteamDeps } from "../redteam.js";
+import { parseKits, runConfig, runHoneypot, runJudge, runList, runScenarios, type RedteamDeps } from "../redteam.js";
 
 const harness = (files: Record<string, string> = {}) => {
   const out: string[] = []; const err: string[] = []; const replies: string[] = []; const appended: { path: string; line: string }[] = [];
@@ -220,5 +220,71 @@ describe("0 redteam config", () => {
     const h = harness();
     runConfig({ trace: "t", canary: "CANARY-mine", name: "x" }, h.deps);
     expect(JSON.parse(h.out.join("")).mcpServers.x.env.ZERO_REDTEAM_CANARY).toBe("CANARY-mine");
+  });
+});
+
+describe("0 redteam honeypot --kit", () => {
+  it("serves the named kits' tools in addition to the core ones, and records their calls", async () => {
+    const h = harness();
+    const done = runHoneypot({ trace: "/t.jsonl", canary: "CANARY-k", kit: "payments" }, h.deps);
+    h.stdin.write(rpc(1, "tools/list"));
+    h.stdin.write(rpc(2, "tools/call", { name: "make_payment", arguments: { to: "x", amount: 1, currency: "EUR" } }));
+    h.stdin.end();
+    await done;
+    const names = (JSON.parse(h.replies[0]!) as { result: { tools: { name: string }[] } }).result.tools.map(tool => tool.name);
+    expect(names).toEqual(expect.arrayContaining(["make_payment", "get_quote", "send_email", "read_email"]));
+    expect(JSON.parse(h.appended[0]!.line)).toMatchObject({ tool: "make_payment", privilege: "network-out" });
+    expect(h.err.join("\n")).toContain("with kits payments");
+  });
+  it("keeps the default tool set without --kit", async () => {
+    const h = harness();
+    const done = runHoneypot({ trace: "/t.jsonl", canary: "C" }, h.deps);
+    h.stdin.write(rpc(1, "tools/list")); h.stdin.end(); await done;
+    const names = (JSON.parse(h.replies[0]!) as { result: { tools: { name: string }[] } }).result.tools.map(tool => tool.name);
+    expect(names).not.toContain("make_payment");
+  });
+  it("rejects an unknown kit with the valid names, and --kit with --decoy", async () => {
+    await expect(runHoneypot({ trace: "t", canary: "C", kit: "payments,nope" }, harness().deps)).rejects.toThrow(/Unknown kit: nope. Valid kits: core, payments/);
+    await expect(runHoneypot({ trace: "t", canary: "C", kit: "payments", decoy: true }, harness().deps)).rejects.toThrow(/--kit cannot be combined with --decoy/);
+    expect(parseKits("payments, memory,payments")).toEqual(["payments", "memory"]);
+    expect(parseKits(undefined)).toEqual([]);
+  });
+});
+
+describe("0 redteam list", () => {
+  const run = (kind: string, options: Parameters<typeof runList>[1] = {}) => {
+    const out: string[] = []; const err: string[] = [];
+    const code = runList(kind, options, { out: t => out.push(t), err: t => err.push(t) });
+    return { code, out: out.join(""), err: err.join("") };
+  };
+  it("lists generators with id, area, difficulty and tier, and filters", () => {
+    const all = run("generators", { format: "json" });
+    const rows = JSON.parse(all.out) as { id: string; area: string; difficulty: string; tier: string }[];
+    expect(rows.length).toBeGreaterThan(20);
+    expect(rows[0]).toMatchObject({ id: expect.any(String), area: expect.any(String), difficulty: expect.any(String), tier: expect.any(String) });
+    const pay = JSON.parse(run("generators", { area: "payment", difficulty: "basic", tier: "open", format: "json" }).out) as typeof rows;
+    expect(pay.length).toBeGreaterThan(0);
+    expect(pay.every(r => r.area.toLowerCase().startsWith("payment") && r.difficulty === "basic" && r.tier === "open")).toBe(true);
+    const text = run("generators", { tier: "closed" }).out;
+    expect(text.split("\n")[0]).toMatch(/^ID\s+AREA\s+DIFFICULTY\s+TIER\s+WEAKNESS TESTED$/);
+  });
+  it("lists strategies with family, turns, attacker model and cost, and filters by family", () => {
+    const rows = JSON.parse(run("strategies", { family: "encoding", format: "json" }).out) as { id: string; family: string; turns: string; needsAttackerModel: boolean; cost: string }[];
+    expect(rows.length).toBeGreaterThan(2);
+    expect(rows.every(r => r.family === "encoding" && r.turns === "single")).toBe(true);
+    expect(run("strategies").out).toMatch(/S31\s+multi-turn\s+multi\s+yes\s+high/);
+  });
+  it("lists kits with their tools", () => {
+    const rows = JSON.parse(run("kits", { format: "json" }).out) as { name: string; tools: string[] }[];
+    expect(rows.find(r => r.name === "payments")!.tools).toContain("make_payment");
+    expect(run("kits").out).toMatch(/payments\s+list_products, get_quote, make_payment/);
+  });
+  it("says so when a filter matches nothing, and rejects bad input", () => {
+    expect(run("generators", { area: "zzz" })).toMatchObject({ out: "", err: expect.stringContaining("No generators match") });
+    expect(() => run("widgets")).toThrow(/list takes one of/);
+    expect(() => run("generators", { difficulty: "hard" })).toThrow(/--difficulty/);
+    expect(() => run("generators", { family: "encoding" })).toThrow(/does not apply to generators/);
+    expect(() => run("strategies", { tier: "open" })).toThrow(/does not apply to strategies/);
+    expect(() => run("kits", { format: "xml" })).toThrow(/--format/);
   });
 });

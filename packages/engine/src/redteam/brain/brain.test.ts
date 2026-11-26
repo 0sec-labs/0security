@@ -132,7 +132,7 @@ describe("requestScenarios", () => {
   it("falls back, without printing the token, when the token is wrong", async () => {
     mock = createMockBrain({ token: "right" }); const url = await mock.start();
     const result = await requestScenarios(request, { url }, live({ ZERO_BRAIN_TOKEN: "wrong-token" }));
-    expect(result.source).toBe("starter-pack");
+    expect(result.source).toBe("open-catalog");
     expect(result.note).toContain("401");
     expect(result.note).not.toContain("wrong-token");
   });
@@ -141,7 +141,7 @@ describe("requestScenarios", () => {
     const deps = live({ ZERO_BRAIN_TOKEN: "tok-echo" });
     deps.fetch = async () => { throw new Error("connect failed for Bearer tok-echo"); };
     const result = await requestScenarios(request, { url }, deps);
-    expect(result.source).toBe("starter-pack");
+    expect(result.source).toBe("open-catalog");
     expect(result.note).not.toContain("tok-echo");
   });
   it("refuses a redirect and falls back", async () => {
@@ -149,34 +149,34 @@ describe("requestScenarios", () => {
     const target = await odd((_req, res) => { followed = true; res.end("{}"); });
     const url = await (async () => { const old = extra; const u = await odd((_req, res) => { res.writeHead(302, { location: target }); res.end(); }); void old; return u; })();
     const result = await requestScenarios(request, { url }, live());
-    expect(result.source).toBe("starter-pack");
+    expect(result.source).toBe("open-catalog");
     expect(result.note).toContain("redirect");
     expect(followed).toBe(false);
   });
   it("treats a valid reply with zero scenarios as a failure and says so", async () => {
     const url = await odd((_req, res) => { res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify({ v: 1, task: "scenarios", scenarios: [] })); });
     const result = await requestScenarios(request, { url }, live());
-    expect(result.source).toBe("starter-pack");
+    expect(result.source).toBe("open-catalog");
     expect(result.scenarios.length).toBeGreaterThan(0);
     expect(result.note).toContain("no scenarios");
-    expect(result.note).toContain("starter pack");
+    expect(result.note).toContain("open catalog");
   });
   it("refuses an oversize response", async () => {
     const url = await odd((_req, res) => { res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify({ pad: "x".repeat(5000) })); });
     const result = await requestScenarios(request, { url, maxBytes: 1000 }, live());
-    expect(result.source).toBe("starter-pack");
+    expect(result.source).toBe("open-catalog");
     expect(result.note).toContain("larger than");
   });
   it("falls back with a note on an invalid response", async () => {
     const url = await odd((_req, res) => { res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify({ v: 1, task: "scenarios", scenarios: [{ id: "x" }] })); });
     const result = await requestScenarios(request, { url }, live());
-    expect(result.source).toBe("starter-pack");
+    expect(result.source).toBe("open-catalog");
     expect(result.note).toContain("contract");
   });
   it("falls back on a timeout", async () => {
     const url = await odd(() => { /* never answers */ });
     const result = await requestScenarios(request, { url, timeoutMs: 100 }, live());
-    expect(result.source).toBe("starter-pack");
+    expect(result.source).toBe("open-catalog");
     expect(result.note).toContain("could not be used");
     extra?.closeAllConnections();
   });
@@ -186,7 +186,7 @@ describe("requestScenarios", () => {
     const envOffline = await requestScenarios(request, {}, { ...deps, env: { ZERO_BRAIN_URL: url, ZERO_OFFLINE: "1" } });
     const enterprise = await requestScenarios(request, {}, { ...deps, env: { ZERO_BRAIN_URL: url, ZERO_ENTERPRISE: "1" } });
     const none = await requestScenarios(request, {}, { ...deps, env: {} });
-    for (const result of [offline, envOffline, enterprise, none]) expect(result.source).toBe("starter-pack");
+    for (const result of [offline, envOffline, enterprise, none]) expect(result.source).toBe("open-catalog");
     expect(offline.note).toMatch(/Offline/);
     expect(envOffline.note).toMatch(/Offline/);
     expect(enterprise.note).toContain("ZERO_ENTERPRISE");
@@ -198,7 +198,7 @@ describe("requestScenarios", () => {
     const deps = live();
     for (const url of ["http://example.com/x", "https://user:pw@example.com/", "https://example.com/?key=1", "ftp://x"]) {
       const result = await requestScenarios(request, { url }, deps);
-      expect(result.source).toBe("starter-pack");
+      expect(result.source).toBe("open-catalog");
     }
     expect(deps.calls).toBe(0);
   });
@@ -212,6 +212,35 @@ describe("requestScenarios", () => {
     expect((await post(JSON.stringify({ ...request, manifest: { tools: [{ name: "../x", privilege: "exec", gate: "none" }], sources: [] } }), "Bearer t")).status).toBe(400);
     expect((await post("{nope", "Bearer t")).status).toBe(400);
     expect((await post(JSON.stringify(request), "Bearer t")).status).toBe(200);
+  });
+  it("the open catalog fallback passes the contract validators and has no leftover canary-free payloads", async () => {
+    const result = await requestScenarios(request, { offline: true, seed: "seed-1" }, live());
+    expect(result.source).toBe("open-catalog");
+    expect(result.note).toContain("open catalog");
+    expect(result.scenarios.length).toBeGreaterThan(0);
+    expect(validateResponse({ v: 1, task: "scenarios", scenarios: result.scenarios }).ok).toBe(true);
+    for (const scenario of result.scenarios) expect(scenario.payload + scenario.success).toContain("AGENT-CANARY-0");
+  });
+  it("honours count, filters by generator, area and difficulty, and is reproducible per seed", async () => {
+    const wide = { ...request, manifest: { tools: [{ name: "send_email", privilege: "network-out", gate: "none" }, { name: "run", privilege: "exec", gate: "none" }, { name: "read_file", privilege: "read-local", gate: "none" }], sources: [] } };
+    const all = await requestScenarios({ ...wide, count: 20 }, { offline: true, seed: "a" }, live());
+    expect(all.scenarios.length).toBeGreaterThan(3);
+    expect((await requestScenarios({ ...wide, count: 3 }, { offline: true, seed: "a" }, live())).scenarios).toHaveLength(3);
+    expect((await requestScenarios({ ...wide, count: 3 }, { offline: true, seed: "a" }, live())).scenarios.map(s => s.id)).toEqual((await requestScenarios({ ...wide, count: 3 }, { offline: true, seed: "a" }, live())).scenarios.map(s => s.id));
+    const one = all.scenarios[0]!;
+    const byId = await requestScenarios({ ...wide, count: 20 }, { offline: true, filter: { generators: [one.id] } }, live());
+    expect(byId.scenarios.map(s => s.id)).toEqual([one.id]);
+    const basic = await requestScenarios({ ...wide, count: 20 }, { offline: true, filter: { difficulties: ["basic"] } }, live());
+    expect(basic.scenarios.length).toBeGreaterThan(0);
+    expect(basic.scenarios.every(s => s.difficulty === "basic")).toBe(true);
+    const none = await requestScenarios({ ...wide, count: 20 }, { offline: true, filter: { areas: ["no-such-area"] } }, live());
+    expect(none.scenarios).toEqual([]);
+    expect(none.note).toContain("no scenario that matches");
+  });
+  it("uses the starter pack only when the catalog has nothing for the manifest and no filter was given", async () => {
+    const result = await requestScenarios({ ...request, manifest: { tools: [], sources: [] } }, { offline: true }, live());
+    expect(result.source).toBe("starter-pack");
+    expect(result.note).toContain("starter pack");
   });
 });
 

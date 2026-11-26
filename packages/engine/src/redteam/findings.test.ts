@@ -30,6 +30,19 @@ describe("redteamFindings", () => {
     expect(finding!.description).not.toContain("LLM02");
   });
 
+  it("words an oracle match from the oracle's sentence, never as the canary leaving", () => {
+    const base = verdictFor([["get_quote", { product_id: "p" }]]);
+    const verdict = { hit: true, reason: "oracle-matched" as const, detail: "get_quote was called", calls: 1, reads: [], call: { seq: 1, tool: "get_quote", privilege: "source" as const, args: { product_id: "p" } } };
+    expect(base.hit).toBe(false);
+    const [finding] = redteamFindings({ target: "shop", verdict });
+    expect(finding).toMatchObject({ templateId: "redteam/oracle-matched", severity: "medium" });
+    expect(finding!.title).toContain("get_quote was called");
+    expect(`${finding!.title} ${finding!.description} ${finding!.evidence.analysis}`).not.toMatch(/canary/);
+    expect(finding!.evidence.analysis).toContain("oracle matched: get_quote was called");
+    const [exec] = redteamFindings({ target: "shop", verdict: { ...verdict, call: { ...verdict.call, privilege: "exec" as const } } });
+    expect(exec!.severity).toBe("critical");
+  });
+
   it("describes a forbidden-tool hit and uses the scenario in the evidence", () => {
     const scenario = parseScenario("SCENARIO: goal=run a command | injection_point=docs/readme.md:3 | payload=p | success=s")!;
     const [finding] = redteamFindings({ target: "t", scenario, verdict: verdictFor([["write_file", { path: "x", content: "y" }]], { forbidden: ["write_file"] }) });

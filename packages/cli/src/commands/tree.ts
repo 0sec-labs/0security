@@ -55,6 +55,7 @@ import { registerSbomCommand } from "./sbom.js";
 import { registerEvidenceCommand } from "./evidence.js";
 import { registerProbeCommand } from "./probe.js";
 import { registerRedteamCommand } from "./redteam.js";
+import { registerEvalCommand } from "./eval.js";
 
 export function registerCommandTree(program: Command): void {
   registerScanCommand(program);
@@ -62,6 +63,7 @@ export function registerCommandTree(program: Command): void {
   registerSbomCommand(program);
   registerProbeCommand(program);
   registerRedteamCommand(program);
+  registerEvalCommand(program);
   // Evidence.
   registerReportsCommand(program);
   registerFindingsCommand(program);

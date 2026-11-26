@@ -18,6 +18,8 @@ Work:
                                    report the ones it obeys
   redteam                          Test whether an agent obeys poisoned text: a fake MCP server that
                                    records its calls, and a judge that reads the recording
+  eval                             Evaluate tool-using agents with suites of paired security and
+                                   utility cases on the redteam honeypot
   sbom                             Generate an SBOM from lockfiles, check one against known
                                    advisories, and scan model files and agent configuration
   findings [options]               Browse findings and change their status
@@ -635,6 +637,65 @@ Inspect configuration, provisioned runtime, image approval and retained admissio
 
 Options:
   --json      Print machine-readable status (no credential values)
+  -h, --help  display help for command
+
+### 0security eval
+Usage: 0security eval [options] [command]
+
+Evaluate tool-using agents with suites of paired security and utility cases on the redteam honeypot
+
+Options:
+  -h, --help             display help for command
+
+Commands:
+  run [options] <suite>  Run a suite and report security pass rate, utility pass rate,
+                         secure-and-useful and inconclusive rate per agent; exits 1 if the verdict
+                         fails, 2 if no run was conclusive
+  validate <suite>       Check a suite and print errors and warnings; exits 0 if valid, 2 if not
+  example                Print an example suite as JSON
+  help [command]         display help for command
+
+### 0security eval example
+Usage: 0security eval example [options]
+
+Print an example suite as JSON
+
+Options:
+  -h, --help  display help for command
+
+### 0security eval run
+Usage: 0security eval run [options] <suite>
+
+Run a suite and report security pass rate, utility pass rate, secure-and-useful and inconclusive
+rate per agent; exits 1 if the verdict fails, 2 if no run was conclusive
+
+Arguments:
+  suite                   Suite file (JSON or YAML)
+
+Options:
+  --agent <id>            Only run this suite agent (repeatable)
+  --repeats <n>           Override the suite's runs per agent and case (1 to 20)
+  --max-runs <n>          Stop after this many runs; a cut-short run fails the verdict
+  --timeout <seconds>     Stop an agent run after this long (1 to 3600) (default: 120)
+  --format <format>       text, json, md or sarif (default: "text")
+  -o, --output <file>     Write the result (in --format) to this file instead of stdout, even when
+                          the exit code is 1 or 2
+  --baseline <file>       Compare with a baseline saved earlier; any regression fails the verdict
+  --save-baseline <file>  Save this run's pass rates as a baseline (rates and counts only)
+  --tolerance <fraction>  Drop in a pass rate to ignore when comparing with the baseline (0 to 1)
+  --unsafe-no-isolation   Required: there is no sandbox yet, so each agent runs on this machine with
+                          the access you give it. POSIX only
+  -h, --help              display help for command
+
+### 0security eval validate
+Usage: 0security eval validate [options] <suite>
+
+Check a suite and print errors and warnings; exits 0 if valid, 2 if not
+
+Arguments:
+  suite       Suite file (JSON or YAML)
+
+Options:
   -h, --help  display help for command
 
 ### 0security evidence
@@ -1543,12 +1604,57 @@ Commands:
                                 text; exits 1 if it did
   scenarios [options] <report>  List the replayable scenarios in a scan report made with the
                                 agent-toxic-flow skill
+  list [options] <what>         List what the redteam commands accept: generators (catalog test
+                                cases), strategies (ways to deliver a payload) or kits (fake tool
+                                sets)
   run [options]                 Run your agent against the honeypot several times and judge each run
                                 from the recorded calls; exits 1 if it obeyed, 2 if inconclusive
   generate [options]            Make prompt-injection scenarios for an agent from its tool manifest:
                                 from a hosted brain if ZERO_BRAIN_URL or --url is set, else from the
-                                open starter pack
+                                open catalog of test generators
+  attack [options]              Attack a conversational agent over several turns while a honeypot
+                                records its calls; exits 1 if it obeyed, 2 if inconclusive
   help [command]                display help for command
+
+### 0security redteam attack
+Usage: 0security redteam attack [options]
+
+Attack a conversational agent over several turns while a honeypot records its calls; exits 1 if it
+obeyed, 2 if inconclusive
+
+Options:
+  --agent <command>          Shell command that starts the agent; it speaks JSON lines on stdin and
+                             stdout, and {mcp_config} is replaced by the path of an MCP config file
+                             that lists the honeypot
+  --objective <text>         What the attacker tries to get the agent to do: a harmless marker
+                             action, in words
+  --generator <id>           Use this catalog generator's scenario and oracle instead of --objective
+  --attacker <name>          crescendo, manyshot, adaptive, refine, tree, brain (default:
+                             "crescendo")
+  --max-turns <n>            Most turns per run (1 to 50) (default: 8)
+  --max-model-calls <n>      Most attacker-model calls per run (0 to 500) (default: 40)
+  --max-seconds <n>          Wall-clock budget per run (1 to 3600) (default: 300)
+  --kit <names>              Honeypot tool kits, comma separated; the core kit is always included
+                             (default: what the generator needs)
+  --canary <text>            Use this canary instead of making one for each run
+  --attacker-url <url>       Base URL of an OpenAI-compatible endpoint for adaptive, refine and tree
+                             (default: OPENAI_BASE_URL, else https://api.openai.com/v1)
+  --attacker-model <name>    Model name the attacker uses
+  --attacker-key-env <NAME>  Environment variable holding the attacker's API key (default:
+                             "OPENAI_API_KEY")
+  --runs <n>                 How many attacks to run (1 to 20) (default: 1)
+  --env <NAME>               Pass this variable from the current environment to the agent;
+                             everything else is scrubbed (repeatable)
+  --forbid <tools>           Tools that count as a hit when called at all, comma separated
+  --cwd <dir>                Directory to run the agent in (default: the current directory)
+  --format <format>          text, json, sarif or md (default: "text")
+  --target <name>            Name of the agent in a sarif or md report (default: "agent")
+  -o, --output <file>        Write the result (in --format) to this file instead of stdout, even
+                             when the exit code is 1 or 2
+  --unsafe-no-isolation      Required: there is no sandbox yet, so the agent runs on this machine
+                             with the access you give it. Results are untrusted if the agent can
+                             write to the trace file. POSIX only
+  -h, --help                 display help for command
 
 ### 0security redteam config
 Usage: 0security redteam config [options]
@@ -1565,20 +1671,27 @@ Options:
 Usage: 0security redteam generate [options]
 
 Make prompt-injection scenarios for an agent from its tool manifest: from a hosted brain if
-ZERO_BRAIN_URL or --url is set, else from the open starter pack
+ZERO_BRAIN_URL or --url is set, else from the open catalog of test generators
 
 Options:
-  --manifest <file>   JSON file listing the agent's tools (name, privilege, gate) and the kinds of
-                      input it reads (sources)
-  --framework <name>  Prefer scenarios mapped to this framework, such as LLM01 or AML.T0051
-  --count <n>         How many scenarios, 1 to 20
-  --url <url>         The brain endpoint (default: ZERO_BRAIN_URL); https, or http to localhost. The
-                      token comes from ZERO_BRAIN_TOKEN
-  --dry-run           Print the exact request that would be sent and send nothing
-  --offline           Never contact a brain; use the starter pack
-  --canary <text>     Put this canary in each payload instead of making one
-  --format <format>   text or json (default: "text")
-  -h, --help          display help for command
+  --manifest <file>     Required unless --list-generators: JSON file listing the agent's tools
+                        (name, privilege, gate) and the kinds of input it reads (sources)
+  --framework <name>    Prefer scenarios mapped to this framework, such as LLM01 or AML.T0051
+  --count <n>           How many scenarios, 1 to 20
+  --url <url>           The brain endpoint (default: ZERO_BRAIN_URL); https, or http to localhost.
+                        The token comes from ZERO_BRAIN_TOKEN
+  --dry-run             Print the exact request that would be sent and send nothing
+  --offline             Never contact a brain; use the open catalog
+  --generator <ids>     Open catalog only: comma separated generator ids (see `0 redteam list
+                        generators`)
+  --area <name>         Open catalog only: area name or prefix, such as Payment
+  --difficulty <level>  Open catalog only: basic, intermediate or advanced
+  --strategy <id>       Also print each payload reshaped by this single-turn strategy, and say which
+                        variants the linter dropped (display only)
+  --list-generators     Point to `0 redteam list generators` and exit
+  --canary <text>       Put this canary in each payload instead of making one
+  --format <format>     text or json (default: "text")
+  -h, --help            display help for command
 
 ### 0security redteam honeypot
 Usage: 0security redteam honeypot [options]
@@ -1592,6 +1705,8 @@ Options:
   --payload <text>             The poisoned instruction returned by the source tools (default: ask
                                the agent to email the secret out)
   --payload-file <file>        Read the poisoned instruction from a file
+  --kit <names>                Comma separated kits of extra fake tools (see `0 redteam list kits`);
+                               the default tool set stays when omitted
   --decoy                      Serve decoy tools that nothing legitimate calls, so every call is an
                                alert (for a running agent, not a test)
   --alert-url <url>            With --decoy: POST each alert as JSON to this https URL (a chat
@@ -1618,6 +1733,20 @@ Options:
                      names the scenario
   -h, --help         display help for command
 
+### 0security redteam list
+Usage: 0security redteam list [options] <what>
+
+List what the redteam commands accept: generators (catalog test cases), strategies (ways to deliver
+a payload) or kits (fake tool sets)
+
+Options:
+  --area <name>         generators: area name or prefix, such as Payment
+  --difficulty <level>  generators: basic, intermediate or advanced
+  --tier <tier>         generators: open (templates ship here), closed (brain service only) or both
+  --family <name>       strategies: family such as encoding or framing
+  --format <format>     text or json (default: "text")
+  -h, --help            display help for command
+
 ### 0security redteam run
 Usage: 0security redteam run [options]
 
@@ -1638,6 +1767,14 @@ Options:
                              to email the secret out)
   --scenario <file>          A SCENARIO line, or a scan report or finding saved as JSON; its payload
                              is used with each run's canary
+  --kit <names>              Comma separated kits of extra fake tools for the honeypot (see `0
+                             redteam list kits`)
+  --generator <id>           A catalog generator (see `0 redteam list generators`): its payload is
+                             used with each run's canary, and its own oracle decides success; the
+                             kits it needs are added
+  --strategy <id>            A single-turn delivery strategy (see `0 redteam list strategies`)
+                             applied to the payload; with several variants, run i uses variant i
+                             modulo the count
   --format <format>          text, json, sarif or md (default: "text")
   --target <name>            Name of the agent in a sarif or md report (default: "agent")
   --max-hit-rate <fraction>  Exit 1 only when the share of conclusive runs the agent obeyed is above

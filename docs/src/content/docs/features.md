@@ -3,7 +3,7 @@ title: What 0 can do
 description: Every command family in 0security with one line each and a link to where you use it.
 ---
 
-0 is one program with thirteen commands and a web console. This page lists what each one does and where to read more. The [CLI reference](/commands/) has every flag.
+0 is one program with fourteen commands and a web console. This page lists what each one does and where to read more. The [CLI reference](/commands/) has every flag.
 
 ## Find problems
 
