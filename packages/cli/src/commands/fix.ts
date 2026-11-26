@@ -195,6 +195,8 @@ export interface FixOutcome {
   /** The variant hunt that followed the fix: sites recorded, and the earlier variants checked again in the fixed tree. */
   variants?: { created: number; rescanned: { fixed: number; open: number; unchecked: number }; error?: string };
   pullRequest?: { url: string; created: boolean; draft: boolean }; threadId?: string; costUsd?: number; tokens?: number; budgetExhausted?: boolean; timedOut?: boolean; summary?: string;
+  /** Written when a Java dependency finding could not be fixed: what is vulnerable, where it is declared, why nothing changed and what to do. */
+  advisory?: string;
 }
 
 /** The metrics record of one fix run; `outcome` is undefined when the run failed before it had one. */
@@ -322,7 +324,8 @@ async function runFixFlow(id: string, options: FixOptions, deps: FixDeps): Promi
     const common = { ...outcomeBase, ...(thread.id ? { threadId: thread.id } : {}), ...(thread.costUsd !== undefined ? { costUsd: thread.costUsd } : {}), ...(thread.tokens !== undefined ? { tokens: thread.tokens } : {}), ...(thread.budgetExhausted ? { budgetExhausted: true } : {}), ...(thread.timedOut ? { timedOut: true } : {}), ...(thread.reply ? { summary: thread.reply } : {}) };
     if (!status) {
       deps.err(thread.error ?? "The thread made no change; no pull request was opened.");
-      const unchanged: FixOutcome = { ...common, changed: false, committed: false, checks: [], verified: false };
+      const advisory = thread.failed || thread.timedOut || thread.budgetExhausted || !isJavaDependencyFinding(finding) ? undefined : javaAdvisoryNote(finding, direct.applied ? "" : direct.reason);
+      const unchanged: FixOutcome = { ...common, changed: false, committed: false, checks: [], verified: false, ...(advisory ? { advisory } : {}) };
       await remember(unchanged);
       return unchanged;
     }
@@ -489,7 +492,35 @@ async function decoratePullRequest(host: Host, url: string, conventions: PullReq
 
 /** A dependency finding that points at a Maven or Gradle build file. */
 export function isJavaDependencyFinding(finding: Pick<FindingToFix, "title" | "description" | "path">): boolean {
-  return /(?:^|\/)(?:pom\.xml|build\.gradle(?:\.kts)?|libs\.versions\.toml)$/.test(finding.path ?? "") && parseDependencyFinding(`${finding.title}\n${finding.description}`) !== undefined;
+  return /(?:^|\/)(?:pom\.xml|build\.gradle(?:\.kts)?|libs\.versions\.toml)$/.test(finding.path ?? "") && (parseDependencyFinding(`${finding.title}\n${finding.description}`) !== undefined || dependencyHead(`${finding.title}\n${finding.description}`) !== undefined);
+}
+
+/** The package, version and advisory id a dependency finding names, with or without a fixed version. */
+function dependencyHead(text: string): { name: string; currentVersion: string; advisory: string } | undefined {
+  const head = /(?:^|\s)([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\s+([0-9][0-9A-Za-z._+-]*)\s+has\s+((?:GHSA|CVE|OSV|PYSEC|GO|RUSTSEC)-[A-Za-z0-9-]+)/.exec(text);
+  return head ? { name: head[1]!, currentVersion: head[2]!, advisory: head[3]! } : undefined;
+}
+
+/**
+ * The advisory written when a Java dependency finding gets no change: it names the dependency, where it is declared, why
+ * 0 did not change it and what a person can do. Plain text from structured fields only; no finding prose is copied, so
+ * nothing from the repository ends up in a mention, link or markup.
+ */
+export function javaAdvisoryNote(finding: Pick<FindingToFix, "title" | "description" | "path">, reason: string): string | undefined {
+  const text = `${finding.title}\n${finding.description}`;
+  const head = dependencyHead(text);
+  if (!head) return undefined;
+  const fixed = parseDependencyFinding(text)?.fixedVersion;
+  const clean = (value: string): string => value.replace(/[^\x20-\x7e]/g, " ").replace(/\s+/g, " ").trim().slice(0, 300);
+  return [
+    `Advisory (no pull request was opened): ${head.name} ${head.currentVersion} is affected by ${head.advisory}.`,
+    `Declared in: ${clean(finding.path ?? "unknown")}`,
+    fixed ? `Lowest fixed version from the advisory: ${fixed}` : "Fixed version: the advisory names none, so 0 did not pick one.",
+    reason ? `Why nothing changed: ${clean(reason)}` : "Why nothing changed: the fix attempt produced no edit.",
+    fixed
+      ? `What to do: raise ${head.name} to ${fixed} or newer where your build sets it (a parent POM, a BOM or a version catalog outside this repository may own it), then run your tests.`
+      : `What to do: check the advisory for a mitigation or a replacement library, exclude or remove the dependency if the affected code is unused, and watch for a fixed release.`,
+  ].join("\n");
 }
 
 type ThreadOutcome = { id?: string; reply?: string; error?: string; failed: boolean; tokens?: number; timedOut: boolean; budgetExhausted: boolean; costUsd?: number };
@@ -560,7 +591,7 @@ export function registerFixCommand(program: Command, deps: FixDeps = defaults): 
         if (options.format === "json") deps.out(JSON.stringify(outcome, null, 2));
         else if (outcome.pullRequest) deps.out(`${outcome.pullRequest.created ? "Opened" : "Updated"} ${outcome.pullRequest.draft ? "draft " : ""}pull request: ${outcome.pullRequest.url}`);
         else if (outcome.committed) deps.out(`Committed on ${outcome.branch}.`);
-        else deps.out("No change was made.");
+        else deps.out(outcome.advisory ? `No change was made.\n\n${outcome.advisory}` : "No change was made.");
         process.exitCode = outcome.budgetExhausted || outcome.timedOut ? 3 : outcome.changed && outcome.verified ? 0 : 1;
       } catch (error) { finishWithError(error, { err: deps.err }, options.format === "json"); }
     });

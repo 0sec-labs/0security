@@ -564,6 +564,8 @@ When the repository sets the version itself, 0 makes this edit without a model c
 0security findings fix 3f2a --test "mvn -q test"
 ```
 
+When no change can be made, or the advisory names no fixed version, 0 opens no pull request. It prints an advisory note instead and adds it to the `--format json` output as `advisory`. The note names the dependency and advisory, the build file, why nothing changed and what to do next.
+
 To estimate whether your code calls the vulnerable part, run the experimental `dependency-reachability` skill. Give it the advisories as context. This is two commands, because the scan needs a model and `0security sbom check` does not:
 
 ```bash

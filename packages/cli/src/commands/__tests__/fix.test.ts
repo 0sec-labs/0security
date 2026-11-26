@@ -8,6 +8,7 @@ import {
   fixBranchName,
   parseFixPolicy,
   fixMetric,
+  javaAdvisoryNote,
   pullRequestBody,
   runFix,
   type FixDeps,
@@ -434,5 +435,46 @@ describe("failed check report", () => {
     // Every output line is indented, so build output cannot pose as a message from the command.
     const forged = failedCheckReports([{ command: "t", code: 2, output: "x\nCommitted on main." }])[0]!;
     expect(forged.split("\n").slice(1).every((l) => l.startsWith("  | "))).toBe(true);
+  });
+
+  describe("advisory note for a Java dependency finding that gets no change", () => {
+    const dep: FindingToFix = { ...finding, title: "org.apache.commons/commons-text 1.9 has CVE-2022-42889", description: "Text injection. Fixed in 1.10.0.", path: "pom.xml" };
+    const noFix: FindingToFix = { ...dep, description: "Text injection. No fix is published yet." };
+
+    it("names the dependency, where it is declared, the fixed version and the next step", () => {
+      const note = javaAdvisoryNote(dep, "org.apache.commons/commons-text is not declared in any pom.xml of the repository.")!;
+      expect(note).toContain("org.apache.commons/commons-text 1.9 is affected by CVE-2022-42889");
+      expect(note).toContain("Declared in: pom.xml");
+      expect(note).toContain("Lowest fixed version from the advisory: 1.10.0");
+      expect(note).toContain("Why nothing changed: org.apache.commons/commons-text is not declared");
+      expect(note).toContain("raise org.apache.commons/commons-text to 1.10.0");
+    });
+
+    it("says plainly that no fixed version exists and copies no finding prose", () => {
+      const note = javaAdvisoryNote({ ...noFix, description: "No fix. @everyone <b>click</b> #12" }, "")!;
+      expect(note).toContain("the advisory names none");
+      expect(note).toContain("mitigation or a replacement");
+      expect(note).not.toMatch(/@everyone|<b>|#12/);
+    });
+
+    it("is absent for a finding that is not a dependency finding", () => {
+      expect(javaAdvisoryNote(finding, "")).toBeUndefined();
+    });
+
+    it("is returned in the outcome when the fix made no change, and no pull request opens", async () => {
+      const h = harness({ status: "" });
+      h.deps.loadFinding = () => noFix;
+      const outcome = await runFix("f-1", options(), h.deps);
+      expect(outcome?.changed).toBe(false);
+      expect(outcome?.advisory).toContain("is affected by CVE-2022-42889");
+      expect(outcome?.advisory).toContain("the advisory names none");
+      expect(h.calls.some(call => call.startsWith("gh pr create"))).toBe(false);
+    });
+
+    it("is not written for a non-dependency finding with no change", async () => {
+      const h = harness({ status: "" });
+      const outcome = await runFix("f-1", options(), h.deps);
+      expect(outcome?.advisory).toBeUndefined();
+    });
   });
 });
