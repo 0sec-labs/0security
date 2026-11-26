@@ -40,6 +40,8 @@ import { join } from "node:path";
 
 import { homeStateDir } from "@0/engine/shared";
 
+import { htmlSecurityHeaders } from "../web/dashboard-csp.js";
+import { signInCompletePageHtml } from "../web/standalone-page.js";
 import { defaultOpenBrowser } from "../open-browser.js";
 import {
   accountEnvPatch,
@@ -274,8 +276,9 @@ const defaultServerFactory: LoopbackServerFactory = async ({ onRedirect }) => {
     const code = requestUrl.searchParams.get("code") ?? undefined;
     const error = requestUrl.searchParams.get("error") ?? undefined;
     res.statusCode = 200;
-    res.setHeader("Content-Type", "text/html; charset=utf-8");
-    res.end("<!doctype html><meta charset=utf-8><title>0</title><body>Sign-in complete — you can close this tab and return to 0.</body>");
+    const page = signInCompletePageHtml(error === undefined);
+    res.writeHead(200, { ...htmlSecurityHeaders(page), "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+    res.end(page);
     // Only the first redirect matters; ignore stray probes after it.
     if (delivered) return;
     delivered = true;

@@ -172,6 +172,7 @@ describe("server mode sign-in", () => {
     guard().sendLoginPage(fakeReq({}), res, ctx, noTeam());
     expect(state.status).toBe(200);
     expect(state.body).toContain("Access token");
+    expect(state.body).toContain("Sign in to 0security");
     expect(state.body).not.toMatch(/0-control-token/);
     expect(String(state.headers["content-security-policy"])).toContain("script-src 'self' 'sha256-");
     expect(state.headers["cache-control"]).toBe("no-store");
