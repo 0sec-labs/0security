@@ -85,6 +85,7 @@ describe("checkSarifForConsumers rejects", () => {
     expect(errorsOf((l) => { l.runs[0]!.results[0]!.locations[0]!.physicalLocation.artifactLocation.uri = "src/my file.ts"; })).toContain("valid URI");
     expect(errorsOf((l) => { l.runs[0]!.results[0]!.locations[0]!.physicalLocation.artifactLocation.uri = "src\\a.ts"; })).toContain("valid URI");
   });
+  it("a uri with a control character", () => { expect(errorsOf((l) => { l.runs[0]!.results[0]!.locations[0]!.physicalLocation.artifactLocation.uri = "a\u001b[2Jb"; })).toContain("valid URI"); });
   it("a fingerprint that is not a string", () => { expect(errorsOf((l) => { (l.runs[0]!.results[0] as Record<string, unknown>)["partialFingerprints"] = { primary: 1 }; })).toContain("partialFingerprints"); });
   it("a fix with no replacement region", () => {
     expect(errorsOf((l) => { (l.runs[0]!.results[0] as Record<string, unknown>)["fixes"] = [{ artifactChanges: [{ artifactLocation: { uri: "a" }, replacements: [{}] }] }]; })).toContain("deletedRegion");

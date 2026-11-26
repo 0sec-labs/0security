@@ -24,7 +24,7 @@ const SUPPRESSION_STATUS = new Set(["accepted", "underReview", "rejected"]);
 /** GitHub code scanning upload limits, per run. */
 export const CODE_SCANNING_LIMITS = { results: 25_000, rules: 25_000, locationsPerResult: 1_000 } as const;
 
-const validUriReference = (uri: string): boolean => uri.length > 0 && !/[\s\\<>"{}|^`]/.test(uri);
+const validUriReference = (uri: string): boolean => uri.length > 0 && !/[\s\\<>"{}|^`\u0000-\u001f\u007f]/.test(uri);
 /** A path inside the repository: not a URL with a scheme, not rooted and not climbing out. */
 const repoRelative = (uri: string): boolean => !/^[A-Za-z][A-Za-z0-9+.-]*:/.test(uri) && !uri.startsWith("/") && !uri.split("/").includes("..");
 
