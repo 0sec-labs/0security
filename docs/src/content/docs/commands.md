@@ -2362,7 +2362,7 @@ The archive schema is `0.findings-rollup.history.v1`: `snapshots` contains v1 ex
 
 The JSON report keeps the `--since` comparison in `trend` and adds a chronological `snapshotTrend` array, snapshot provenance and current per-repository `observations`. Each repository's latest `exportedAt` supplies its current rows; different repositories can have different observation dates. Each `snapshotTrend` point lists only the repositories actually observed at that timestamp. A change in observed coverage does not establish that findings were fixed. `--export` writes a current consolidated snapshot; `--history` retains the original observation times.
 
-CSV is a stable long-form table: `schema,snapshot_at,scope,dimension,label,count,repositories,sources`. `scope=current` means the view assembled from the latest snapshot per repository; `scope=snapshot` means an actual captured timestamp. The final two columns contain JSON arrays. These JSON/CSV exports do not establish a remote dashboard connection. Verify DefectDojo or Dependency-Track importers separately using their supported scanner formats.
+CSV is a stable long-form table: `schema,snapshot_at,scope,dimension,label,count,repositories,sources`. `scope=current` means the view assembled from the latest snapshot per repository; `scope=snapshot` means an actual captured timestamp. The final two columns contain JSON arrays. These JSON and CSV files stay local. To load findings into DefectDojo, see [findings export](#findings-export).
 
 
 With a business context (`--context` or the `findingsContext` setting) the rollup adds a list of the open findings to look at first. It matches rules for a repository against the repository name of each row, so pass `--repository acme/api` to name a database's repository in full. The counts by severity stay real. Rollup export files carry no file paths, so only findings read from a database or a SARIF file match rules that have a `match`.
@@ -2669,6 +2669,16 @@ Export selected findings, or a whole scan, as `json`, `md`, `sarif`, `html` or `
 0security findings export --scan 20260101-abc --format pdf -o report.pdf
 ```
 
+`--format defectdojo` writes a file for DefectDojo's Generic Findings Import scan type. Each finding has a title, severity, description, repository-relative file path and line, a stable `unique_id_from_tool`, and its active, verified, false-positive and risk-accepted state. Evidence and proof steps are left out. A path that is absolute or leaves the repository is dropped. Upload the file in DefectDojo, or use its API:
+
+```bash
+0security findings export --format defectdojo -o findings.defectdojo.json
+```
+
+DefectDojo also reads the SARIF file from `--format sarif`. For an organisation view across repositories, load either file there. 0 does not call DefectDojo. The file is tested against its documented field names, not against a running DefectDojo.
+
+Dependency-Track takes SBOMs, not findings. Make a CycloneDX file with [sbom generate](#sbom-generate) and upload it to Dependency-Track yourself. That path is not tested here either.
+
 | Argument | Required | Description |
 | --- | --- | --- |
 | `ids` | No |  |
@@ -2676,7 +2686,7 @@ Export selected findings, or a whole scan, as `json`, `md`, `sarif`, `html` or `
 | Option | Registered default | Description |
 | --- | --- | --- |
 | `--scan <id>` | — | Export every finding of this scan instead of selected IDs |
-| `--format <format>` | `json` | json, md, sarif, html or pdf |
+| `--format <format>` | `json` | json, md, sarif, html, pdf or defectdojo |
 | `-o, --output <file>` | — | Write to a file instead of stdout |
 | `--severity <severity>` | — | With no IDs: only this severity |
 | `--category <category>` | — | With no IDs: only this category |

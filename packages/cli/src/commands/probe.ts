@@ -99,7 +99,7 @@ export async function runProbe(url: string, options: ProbeOptions, deps: ProbeDe
   if (errors.length) deps.err(`${errors.length} of ${run.requests} requests failed (${errors[0]!.error}); those probes were not judged.`);
   const report = toReport(url, run.results, started, new Date(), findings, run.scope);
   const format = options.format === "md" ? "markdown" : options.format;
-  if (!isReportExportFormat(format)) throw new UsageError(`--format must be one of: ${FORMATS.join(", ")}.`);
+  if (!isReportExportFormat(format) || format === "defectdojo") throw new UsageError(`--format must be one of: ${FORMATS.join(", ")}.`);
   const body = options.format === "json" ? `${JSON.stringify(report, null, 2)}\n` : (await exportReport(report, format, `0-probe-${host}`)).body;
   if (options.output) { const bytes = typeof body === "string" ? new TextEncoder().encode(body) : body; deps.writeBytes(resolve(options.output), bytes); deps.err(`Wrote ${options.output} (${bytes.byteLength} bytes)`); } else deps.out(body);
   if (options.save && deps.save && findings.length) deps.err(`saved ${findings.length} findings as ${deps.save(url, findings).slice(0, 8)}; see \`0security findings list\``);
