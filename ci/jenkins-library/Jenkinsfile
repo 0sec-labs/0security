@@ -9,7 +9,7 @@ pipeline {
       steps {
         zeroSecurity scanLabel: 'ephemeral-security-scan', publishLabel: 'trusted-security-publisher',
           modelCredential: 'openai-api-key', bitbucketCredential: 'bitbucket-token',
-          repo: 'PROJECT/repo', bitbucketUrl: 'https://bitbucket.example.com', version: '0.45.0'
+          repo: 'PROJECT/repo', bitbucketUrl: 'https://bitbucket.example.com', version: '0.46.0'
       }
     }
   }

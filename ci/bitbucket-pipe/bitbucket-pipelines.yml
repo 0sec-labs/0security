@@ -7,7 +7,7 @@ pipelines:
       - step:
           name: Scan without publisher token
           script:
-            - pipe: docker://ghcr.io/0sec-labs/0security-pipe:0.45.0
+            - pipe: docker://ghcr.io/0sec-labs/0security-pipe:0.46.0
               variables:
                 MODE: scan
                 OPENAI_API_KEY: $OPENAI_API_KEY
@@ -21,7 +21,7 @@ pipelines:
           clone:
             enabled: false
           script:
-            - pipe: docker://ghcr.io/0sec-labs/0security-pipe:0.45.0
+            - pipe: docker://ghcr.io/0sec-labs/0security-pipe:0.46.0
               variables:
                 MODE: publish
                 BITBUCKET_TOKEN: $BITBUCKET_TOKEN

@@ -12,29 +12,64 @@ on the GitHub Release tag.
 
 ## [Unreleased]
 
+## [0.46.0] - 2026-11-26
+
 ### Added
 
 - Foxguard, the static analysis engine `0 scan` runs first, now lives in this repository as `crates/foxguard` (history preserved) and builds from source in the release workflow. Releases publish `foxguard-darwin-arm64`, `foxguard-linux-x64`, `foxguard-linux-arm64` and `foxguard-windows-x64.exe` next to `0`, listed in the same `checksums.txt` with the same attestation and signature. `install.sh` installs it next to `0` and verifies it against that file; `INSTALL_FOXGUARD=0` still skips it and `ZERO_FOXGUARD_PATH` still overrides it.
 - A docs page, "Use 0 from Claude Code or Codex", shows how another coding agent drives 0 through its shell: scan, read findings, ask a question, exit codes. 0 has no MCP server for this; the CLI does the job.
 - Findings can carry a structured root cause (bug class, unsafe pattern, missing guard, design origin). `0security findings verify` records one on a true-positive verdict, and it seeds a hunt for variants: the same bug at other sites, stored as findings with a `variantOf` link that `findings show` and `findings list` display. `0security findings fix` rescans the recorded variants in the fixed tree and marks each fixed or still open, then hunts. New command `0security findings variants` runs a hunt or `--rescan` by hand; `--no-variants` turns the automatic runs off. Stored findings and exports are unchanged when these fields are absent.
-- Anonymous lifecycle events go to PostHog: `first_run`, `command_invoked` (a command name from a fixed list, otherwise `other`), `update` (the two versions) and `error_exit` (an error category only). They go straight to PostHog from the CLI. `DO_NOT_TRACK=1` turns them off.
-- The `usage` event has `finding_class_counts`, findings counted by a fixed list of vulnerability classes. Titles, descriptions, evidence and targets are still never sent.
-
-- Executed PoC opt-in is easier: `0security scan --poc-image <image@sha256:...>` or `0security config set executedPocImage <image@sha256:...>` (the `ZERO_POC_IMAGE` variable still works). The image must be pinned by digest and a tag is refused with a message. The web findings list and detail now show the PoC outcome: script matched, script unmatched or static only (a matching script is not a reproduction). A gated test runs the real container path when Docker or podman is available.
 - A variant that a rescan finds fixed in the fix work tree is now `fixed-pending-merge`. It becomes `fixed` when its fix pull request is seen merged, by `findings variants --rescan` or `findings export-fixes --check-merged`.
 - `findings export` in JSON and SARIF now includes a finding's `rootCause` and `variantOf`, and SARIF carries the full executed-PoC record. Importing a 0 JSON report restores the root cause and variant links inside the file, never an executed result. Older reports still import.
+- Executed PoC opt-in is easier: `0security scan --poc-image <image@sha256:...>` or `0security config set executedPocImage <image@sha256:...>` (the `ZERO_POC_IMAGE` variable still works). The image must be pinned by digest and a tag is refused with a message. The web findings list and detail now show the PoC outcome: script matched, script unmatched or static only (a matching script is not a reproduction). A gated test runs the real container path when Docker or podman is available.
+- Findings can carry a proof. Proposed steps are labelled "not run". A reproduction result appears only when a harness ran the recipe in a container and recorded it. `findings reproduce` replays a path traversal recipe in a container with a read-only root and records the result.
+- `0security findings import` reads results from ZAP, Strix and Nuclei (SARIF, and Nuclei JSON Lines). Web findings keep their method and URL instead of a file, with the CWE and any proof text. See "Use Nuclei, ZAP or Strix with 0security".
+- `0security scan --scanner nuclei --target-url <url>` runs Nuclei, which you install, against one target you name in a scope file or by typing its host, and saves the results as findings. Public hosts need the typed host, metadata addresses are always refused, and `ZERO_ENTERPRISE` allows loopback only.
+- `0security sbom agent-config` is a local check of rules, MCP and settings files that AI coding tools read, for hidden Unicode, unpinned launchers, secrets, broad permissions and hooks. Each rule explanation cites a primary source, and settings that no vendor documents are not reported. `sbom generate --ai` now also flags `bunx`, `pipx run` and `docker run` launchers and reads more tool folders.
+- `sbom generate --ai` writes a CycloneDX 1.6 ML-BOM: model and data files with SHA-256 hashes, header facts for safetensors, GGUF and ONNX, Hub references with revision pinning, licences from a model card or LICENSE file beside the model, and a `modelCard` filled only from facts found.
+- `0security sbom check --registry` flags npm and PyPI dependencies that look invented or planted: names missing from the public registry, brand-new packages and look-alikes of popular packages. It sends package names only and is refused offline.
+- `sbom check --usage <folder>` labels each Maven advisory imported, symbol-imported, test-only or not-imported from your source imports. `--ignore-not-imported` keeps not-imported advisories out of the exit code. This is evidence only; severity is unchanged.
+- A benchmark for AI-security detection lives in `scripts/bench`: planted agent-config and LLM-app fixtures, a deterministic score for `sbom agent-config` that runs in CI, and a first result.
+- `findings show`, `findings export`, `reports export`, `findings export-fixes`, `findings report-draft` and `findings rollup` now take `--context` and order by business context, with the reason shown. A context file can hold rules per repository (`--repository`). `0security config set findingsContext <path>` sets a default file. `0security findings context check <file>` shows which rules match which findings and which match nothing. Severity, `--fail-on` and the exit code do not change.
+- `findings rollup` shows a trend with `--since`, groups by team and tier with `--labels`, and reads SARIF files directly.
+- Sentinels can review Bitbucket Cloud and Data Center pull requests with a new `bitbucket-pr` trigger, by poll or signed webhook.
+- Sentinels can send findings to GitHub code scanning, a pull request comment or both with the new `results` setting on pull request, release and check triggers. It is off by default.
+- Anonymous lifecycle events go to PostHog: `first_run`, `command_invoked` (a command name from a fixed list, otherwise `other`), `update` (the two versions) and `error_exit` (an error category only). They go straight to PostHog from the CLI. `DO_NOT_TRACK=1` turns them off. They are not sent for help, version, shell completion, CI or machine-output runs unless `analyticsLevel usage` is set explicitly.
+- The `usage` event has `finding_class_counts`, findings counted by a fixed list of vulnerability classes. Titles, descriptions, evidence and targets are still never sent.
+- Owners can make, list and revoke SCIM tokens from the Members page in the web console.
+- The finding page shows the code location (with a copyable `path:line`) and the fix that `0security findings fix` recorded: branch, pull request link, draft or ready, local checks, and the diff when the branch is on this machine.
+- Spend limits for Sentinels and triggers, and usage by Sentinel. Code index tools give the agent callers, callees, routes and a trace to a sink. A Jira export, fix explanations and a threat map were added, and Jira leaves info-level findings out by default.
 
 ### Changed
 
+- `DO_NOT_TRACK=1` is now the single telemetry switch (`ZERO_ENTERPRISE=1` also blocks telemetry and crash reports as part of no-egress mode), `ZERO_NO_TELEMETRY` and `ZERO_OFFLINE` no longer control telemetry, and the `commands` and `full` analytics levels and the cloud analytics path are removed. The telemetry docs and egress inventory list exactly what is sent.
+- Licenses are now verified against a new signing key (k2). The earlier key was never used to issue a license.
 - With `--json` or `--format json`, a failure in `findings show`, in `0security -p`, or an unexpected error now prints one `{"error": "..."}` line on standard error instead of coloured text. The exit codes are unchanged.
 - The security policy is one file, `.github/SECURITY.md`. It no longer says extensions and MCP servers are never sandboxed or mentions the removed `save_workflow` operation, and it now says an extension can declare an OS sandbox.
-- `DO_NOT_TRACK=1` is now the single telemetry switch (`ZERO_ENTERPRISE=1` also blocks telemetry and crash reports as part of no-egress mode), `ZERO_NO_TELEMETRY` and `ZERO_OFFLINE` no longer control telemetry, and the `commands` and `full` analytics levels and the cloud analytics path are removed.
+- `0security sbom java-usage` is listed in `sbom --help`. The `findings fix` exit codes are described exactly: 0 means a change was committed and no check failed, so with no `--test` it does not mean verified. Dependency audit docs explain checking a CycloneDX file from another tool with `sbom check`.
+- `0 scan --known` now matches paths in a SARIF report written by 0 itself.
+- Web console: finding titles in the list and board are real links, the What's new card shows the release title, empty Members, Sentinels and Findings API pages explain themselves, a refused environment key says it was refused, and the server sign-in page is redesigned.
 
 ### Removed
 
 - The pinned download of an external Foxguard release is gone from `install.sh`, the container images and CI. The images build Foxguard from `crates/foxguard`. The Foxguard GitHub App, VS Code extension, Claude Code plugin, website, pre-commit hook, composite action and Python and npm packaging are not part of this repository.
 - `0verse scan --cloud`, `--scan-id`, `--sink` and `--timeout`, and the `ZERO_CLOUD_*` settings they read. They streamed findings to the 0cloud orchestrator, which is gone.
 - The 0cloud integration is gone. `0` is one product with no hosted account: cloud sign-in and cloud credentials (`ZERO_CLOUD_TOKEN`, `~/.0/cloud.env`), feedback sent to a cloud account, opt-in run contributions and the cloud Windows evidence worker no longer exist. Feedback goes only to your own `ZERO_FEEDBACK_URL`.
+
+### Fixed
+
+- Gradle version catalog dependency bumps are correct, pinned Hugging Face SBOM metadata and TOML values with quoted comments are kept, host-only IPv6 scope entries match, SARIF rule descriptor indices resolve, a leading UTF-8 BOM in SARIF and Nuclei JSONL import is ignored, and findings with rejected suppressions are kept.
+
+### Security
+
+- `0security probe` refuses public hosts unless you pass `--i-own-this <host>`, always refuses link-local and cloud metadata addresses, connects to the address it checked, stops on a redirect to another origin, and records the target and confirmation in its output.
+- SCIM tokens can be made, listed and revoked only by a workspace owner. A role with `users.manage` is no longer enough, and that role can no longer escalate to owner.
+- The node permission layer applies through `env` with assignments and options, and 0 refuses launchers that would hide node from it. Flag injection and an `env node` bypass are closed.
+- RBAC and repository scope are enforced after the local proxy rewrite.
+- HTML report links reject unsafe URL schemes, `mcp_server_start` approval prompts are cleaned of control and bidi characters, and threat-interview scope rejects glob comma and metacharacter injection.
+- A scanned folder's `.git/config` can no longer run commands on the host, and pre-pass scanners run in an empty folder so they cannot load config from where 0 was started.
+- A webhook check trigger runs only for a commit GitHub confirms is on the watched branch.
+- The console control token is delivered in the launch URL fragment, not in page HTML. The code index no longer hangs on hostile files and labels repository text as untrusted. The executed PoC never pulls its image and keeps credentials out of its sandbox.
 
 ## [0.45.0] - 2026-11-24
 

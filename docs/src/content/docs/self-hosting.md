@@ -140,7 +140,7 @@ Add your domain and network settings to `/opt/zero/.env`:
 ZERO_DOMAIN=zero.internal.yourcompany.com
 ZERO_PUBLIC_URL=https://zero.internal.yourcompany.com
 ZERO_ALLOWED_HOSTS=zero.internal.yourcompany.com
-ZERO_IMAGE_TAG=v0.45.0
+ZERO_IMAGE_TAG=v0.46.0
 COMPOSE_FILE=docker-compose.yml:docker-compose.data-disk.yml
 ZERO_DATA_DIR=/data
 ```
@@ -169,7 +169,7 @@ ls -l /data/.0/0.db                          # the database file is on the mount
 Use ECS to avoid managing host operating systems.
 
 1. Create an ECS cluster with the EC2 launch type, which allows EBS attachments.
-2. Define one container task using `ghcr.io/0sec-labs/0security:v0.45.0`:
+2. Define one container task using `ghcr.io/0sec-labs/0security:v0.46.0`:
    - Mount host `/data` at container `/data`.
    - Map `secrets` from Secrets Manager or SSM Parameter Store to environment variables such as `ZERO_ACCESS_TOKEN` and `ANTHROPIC_API_KEY`.
    - Set the health check to `curl -fsS http://127.0.0.1:48123/healthz || exit 1`.
@@ -406,7 +406,7 @@ The install script runs this check when `cosign` is installed and the release ha
 Each image pushed to `ghcr.io/0sec-labs/0security` is signed by digest, with a CycloneDX SBOM attached as a signed attestation. Verify both before you pull by tag:
 
 ```bash
-IMAGE=ghcr.io/0sec-labs/0security:v0.45.0
+IMAGE=ghcr.io/0sec-labs/0security:v0.46.0
 cosign verify "$IMAGE" \
   --certificate-identity-regexp '^https://github\.com/0sec-labs/0security/\.github/workflows/docker-publish\.yml@refs/heads/main$' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
@@ -443,7 +443,7 @@ To report a vulnerability, see the [security policy](https://github.com/0sec-lab
 
 ### Rollbacks
 
-Migrations only go forward, so a rollback needs the pre-upgrade database. Pin the previous tag in `/opt/zero/.env`, for example `ZERO_IMAGE_TAG=v0.45.0`. Then run the [restore procedure](#4-restore-procedure) with the pre-upgrade backup. Step 5 runs `docker compose up -d`, which applies the pinned tag.
+Migrations only go forward, so a rollback needs the pre-upgrade database. Pin the previous tag in `/opt/zero/.env`, for example `ZERO_IMAGE_TAG=v0.46.0`. Then run the [restore procedure](#4-restore-procedure) with the pre-upgrade backup. Step 5 runs `docker compose up -d`, which applies the pinned tag.
 
 ---
 
@@ -513,7 +513,7 @@ It starts a stub model on `127.0.0.1`, runs 0 with `ZERO_ENTERPRISE=1`, and fail
 ```bash
 docker run --rm --network none --tmpfs /tmp:size=300m --entrypoint node \
   -v "$PWD/scripts/airgap:/airgap:ro" \
-  ghcr.io/0sec-labs/0security:v0.45.0 /airgap/verify-no-egress.mjs --cli /app/dist/0.js
+  ghcr.io/0sec-labs/0security:v0.46.0 /airgap/verify-no-egress.mjs --cli /app/dist/0.js
 ```
 
 ### Update
