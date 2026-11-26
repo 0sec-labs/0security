@@ -34,6 +34,8 @@ import { loadScope, loadSteering, type Steering } from "../scan-steering.js";
 import { applyTierSettings, loadTierMap, repoIdentifier, resolveTier, settingsSentence, tierSentence, type ResolvedTier } from "../scan-tiers.js";
 import { knownIn, leadsToFindings, loadKnown, type KnownSet } from "../scan-known.js";
 import { finishWithError, UsageError } from "./output.js";
+import { applyPocImage } from "../executed-poc-image.js";
+import { loadSettings } from "../state/settings.js";
 import { appendRunMetric, type RunMetric } from "../run-metrics.js";
 import { applyWorkflowDefaults } from "../workflow-defaults.js";
 import { importSarif } from "../report-import.js";
@@ -217,6 +219,7 @@ interface ScanOptions extends ConsoleTransportOptions {
   scope?: string; repoScope?: boolean; scopeSarif?: string;
   targetUrl?: string; scopeFile?: string; acknowledgeHost?: string; rateLimit?: string; templates?: string;
   batches?: string; batchSize?: string; concurrency?: string; resume?: string; force?: boolean; coverage?: string | boolean; allowPartial?: boolean; plan?: boolean;
+  pocImage?: string;
   tiers?: string; failOnSkip?: boolean; known?: string[]; onlyNew?: boolean;
   retries?: string; batchTimeout?: string; coverageRounds?: string;
   /** The option names the person typed (budget, batches, skill). Tier settings never override these. When unset, an option that differs from its default counts as typed. */
@@ -848,6 +851,9 @@ export async function runScan(target: string | undefined, options: ScanOptions, 
   let batched: BatchedSetup | undefined;
   try {
     validate(target, options);
+    // Opt in to the executed PoC: the flag or the setting becomes ZERO_POC_IMAGE, which the console this scan starts inherits.
+    const pocImage = applyPocImage(options.pocImage, loadSettings().executedPocImage);
+    if (pocImage) deps.err("Executed PoC is on: high and critical findings get their proof of concept run in a container with the network off.");
     resolved = await resolveScanTarget(target?.trim() ? target : ".", deps);
     // The operator's tier map decides budget, batches and skill unless a flag was typed, and may skip the scan.
     let tier: ResolvedTier | undefined;
@@ -1020,6 +1026,7 @@ export function registerScanCommand(program: Command, deps: ScanDeps = defaultSc
     .option("--scope-sarif <mode>", "With --scope: label (default) writes the scope as result properties; suppress also marks out-of-scope results suppressed, which GitHub code scanning then dismisses", "label")
     .option("--repo-context", "Also read .0/threat-model.md from the scanned folder as context. Off by default: a change under review can edit that file; in CI pass the base branch's copy with --context instead")
     .option("--repo-ignores", "Also let the pre-pass scanners read their configuration and ignore files from the scanned folder (.foxguard.yml, .semgrepignore, .gitleaks.toml, .gitleaksignore, .trivyignore, osv-scanner.toml, .checkov.yaml). Off by default: a change under review can use them to hide findings. Inline suppressions such as nosemgrep always apply")
+    .option("--poc-image <image>", "Run the proof of concept of each high or critical finding in this container image, network off, and label the finding executed-proven, executed-failed or static-only. Must be pinned by digest (name@sha256:...). Default: the ZERO_POC_IMAGE variable or `0security config set executedPocImage`; otherwise off. Needs Docker or podman")
     .option("--skill <id>", "Skill that holds the scan method", "scan")
     .option("--model <model>", `Model for the scan thread (default: ${DEFAULT_SCAN_MODEL})`)
     .option("--provider <id>", "Explicit model provider for this scan (use with --model)")

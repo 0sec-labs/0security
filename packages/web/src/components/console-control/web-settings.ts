@@ -48,6 +48,8 @@ const terminalSettings = new Set([
   "allowDevSourceUpdates",
   // A file path on the machine that runs the engine; set it with `0security config set findingsContext <path>`.
   "findingsContext",
+  // Names the image that runs a finding's PoC; a web or team session must not choose what runs. Set it with `0security config set executedPocImage <image@sha256:...>`.
+  "executedPocImage",
 ]);
 const browserSettings = new Set(["web-theme", "web-color-theme", "web-accent", "web-font-size", "web-motion"]);
 export function settingSurface(key: string): "shared" | "browser" | "terminal" | "unsupported" {

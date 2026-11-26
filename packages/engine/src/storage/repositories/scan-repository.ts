@@ -6,6 +6,7 @@ import * as schema from "../schema.js";
 import { type SQLiteScanId } from "../types.js";
 import { Repository } from "./base.js";
 import { serializeFindingReviewAnnotation } from "../finding-helpers.js";
+import { parseStoredRootCause } from "../../shared/root-cause.js";
 
 export class ScanRepository extends Repository {
 
@@ -83,6 +84,9 @@ export class ScanRepository extends Repository {
           reviewAnnotation: serializeFindingReviewAnnotation(finding.reviewAnnotation),
           evidenceRequest: finding.evidence.request, evidenceResponse: finding.evidence.response, evidenceAnalysis: finding.evidence.analysis ?? null,
           status: "discovered", triageStatus: "new", workflowStatus: "backlog", workflowAssignee: null,
+          // Descriptive links only, and only when complete. There is no executedPoc here on purpose: an import cannot confer an executed result.
+          ...(parseStoredRootCause(finding.rootCause) ? { rootCause: JSON.stringify(parseStoredRootCause(finding.rootCause)) } : {}),
+          ...(finding.variantOf ? { variantOf: finding.variantOf } : {}),
         }).run();
       }
       this.owner.logEvent({

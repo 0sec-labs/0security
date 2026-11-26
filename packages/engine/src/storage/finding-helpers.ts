@@ -5,6 +5,8 @@ import type { Finding, SourceVerificationSummary, VerificationResult } from "../
 import { parseFindingBusinessContext, type FindingBusinessContext } from "../shared/business-context.js";
 import { parseFindingReproduction, type FindingReproduction } from "../shared/reproduction.js";
 import { parseExecutedPoc, type ExecutedPoc } from "../shared/executed-poc.js";
+import { parseStoredRootCause } from "../shared/root-cause.js";
+import type { RootCause } from "../shared/types.js";
 import { findingWorkflowStatuses, type FindingWorkflowStatusDB } from "./schema.js";
 
 
@@ -51,6 +53,10 @@ export interface PersistedFindingReviewFields {
   sourceVerification?: SourceVerificationSummary;
   reproduction?: FindingReproduction;
   executedPoc?: ExecutedPoc;
+  /** Complete root cause only; a half-filled record is absent. */
+  rootCause?: RootCause;
+  /** The finding this one is a variant of. */
+  variantOf?: string;
 }
 
 
@@ -209,6 +215,8 @@ export function restoreFindingReviewFields(
     reproduction?: unknown;
     businessContext?: unknown;
     executedPoc?: unknown;
+    rootCause?: unknown;
+    variantOf?: unknown;
   } | null | undefined,
 ): PersistedFindingReviewFields {
   if (!row) return {};
@@ -218,6 +226,8 @@ export function restoreFindingReviewFields(
   const reproduction = parseFindingReproduction(row.reproduction);
   const businessContext = parseFindingBusinessContext(row.businessContext);
   const executedPoc = parseExecutedPoc(row.executedPoc);
+  const rootCause = parseStoredRootCause(row.rootCause);
+  const variantOf = typeof row.variantOf === "string" && row.variantOf ? row.variantOf : undefined;
   return {
     ...(verificationResult ? { verification_result: verificationResult } : {}),
     ...(reviewAnnotation ? { reviewAnnotation } : {}),
@@ -225,6 +235,8 @@ export function restoreFindingReviewFields(
     ...(reproduction ? { reproduction } : {}),
     ...(businessContext ? { businessContext } : {}),
     ...(executedPoc ? { executedPoc } : {}),
+    ...(rootCause ? { rootCause } : {}),
+    ...(variantOf ? { variantOf } : {}),
   };
 }
 

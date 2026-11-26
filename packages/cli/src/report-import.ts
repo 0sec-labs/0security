@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { osecDB } from "@0/engine/storage";
-import { locationLabel, looksLikeNucleiJsonl, parseScannerOutput, type Finding, type ScanReport } from "@0/engine/shared";
+import { locationLabel, looksLikeNucleiJsonl, parseScannerOutput, parseStoredRootCause, type Finding, type ScanReport } from "@0/engine/shared";
 
 const MAX_REPORT_BYTES = 20 * 1024 * 1024;
 const MAX_METADATA_BYTES = 64 * 1024;
@@ -87,6 +87,8 @@ export function prepareCiReportImport(reportJson: string, metadataJson?: string)
   const scanId = `ci-${digest}`;
   const findings: Finding[] = [];
   const sourceIds = new Set<string>();
+  const importedIds = new Map<string, string>();
+  const variantParents: Array<[Finding, string]> = [];
   for (const value of original.findings) {
     const finding = object(value, "finding");
     const sourceId = text(finding.id, "finding id", 512, false);
@@ -96,7 +98,11 @@ export function prepareCiReportImport(reportJson: string, metadataJson?: string)
     const evidence = object(finding.evidence, "finding evidence");
     const findingTimestamp = finite(finding.timestamp, "finding timestamp");
     if (!Number.isFinite(new Date(findingTimestamp).getTime())) throw new Error("Invalid finding timestamp.");
-    findings.push({
+    // Passive descriptive fields of 0's own report. An older report has neither; a malformed value is dropped, never an error.
+    // executedPoc is deliberately not read: a file cannot confer an executed result, and a re-run is the only way to earn one.
+    const rootCause = parseStoredRootCause(finding.rootCause);
+    const variantOf = typeof finding.variantOf === "string" && finding.variantOf ? finding.variantOf : undefined;
+    const imported: Finding = {
       id: `${scanId}-${hash(sourceId)}`, fingerprint: `${scanId}:${hash(sourceId)}`,
       templateId: text(finding.templateId, "finding templateId", 512, false),
       title: text(finding.title, "finding title", 4096, false),
@@ -106,8 +112,14 @@ export function prepareCiReportImport(reportJson: string, metadataJson?: string)
       evidence: { request: text(evidence.request, "evidence request"), response: text(evidence.response, "evidence response"),
         analysis: `Imported CI evidence; not independently verified by this engine.${evidence.analysis === undefined ? "" : `\n\n${text(evidence.analysis, "evidence analysis")}`}` },
       timestamp: findingTimestamp, status: "discovered", triageStatus: "new", workflowStatus: "backlog",
-    });
+      ...(rootCause ? { rootCause } : {}),
+    };
+    importedIds.set(sourceId, imported.id);
+    if (variantOf) variantParents.push([imported, variantOf]);
+    findings.push(imported);
   }
+  // A variant link survives only when its parent is in the same file: ids are rewritten on import, and a link to a finding that is not here would point at nothing.
+  for (const [variant, parent] of variantParents) { const mapped = importedIds.get(parent); if (mapped && mapped !== variant.id) variant.variantOf = mapped; }
   const failed = original.executionSuccessful === false || Boolean(original.error) || original.costCeilingExceeded === true ||
     (Boolean(original.exitReason) && original.exitReason !== "completed") || !completedAt ||
     (Array.isArray(original.attempts) && original.attempts.some(attempt => (attempt as Record<string, unknown>).status !== "completed")) ||

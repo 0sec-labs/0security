@@ -25,6 +25,7 @@ import type { FindingFamilyResponse, FindingGroup } from "@/types";
 import { SeverityIcon, StatusIcon } from "./finding-icons";
 import { useMissionHrefs } from "./use-mission-href";
 import { useOrgOverview } from "./findings-org";
+import { ExecutedPocSection } from "./finding-executed-poc-view";
 import { provenanceLabel } from "./finding-provenance";
 import { CodeLocationSection, FixSection } from "./finding-code-fix";
 import {
@@ -97,6 +98,8 @@ export function FindingDetail(props: FindingDetailProps) {
           <EvidenceSection group={group} latest={latest} workflow={workflow} fingerprint={fingerprint} />
 
           <ProofSection reproduction={latest.reproduction ?? null} />
+
+          <ExecutedPocSection executedPoc={latest.executedPoc} />
 
           <FixSection fix={family?.fix} findingId={latest.id} onRefresh={() => void familyQuery.refetch()} refreshing={familyQuery.isFetching} />
 

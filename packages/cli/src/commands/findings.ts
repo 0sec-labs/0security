@@ -13,7 +13,7 @@ import {
 import { buildFindingConsoleCommand } from "../finding-handoff.js";
 import { resolveFindingId, shortFindingId, shortFingerprint } from "../finding-id.js";
 import { rowVerification, verificationPhrase } from "../finding-verification.js";
-import { readVariantLinks, rowRootCause, rowVariantOf, variantLines, type VariantLink } from "../finding-variants.js";
+import { readVariantLinks, VARIANT_FIXED_PENDING_MERGE, rowRootCause, rowVariantOf, variantLines, type VariantLink } from "../finding-variants.js";
 import { executedPocPhrase, rowExecutedPoc, reproductionDetail, reproductionPhrase, rowReproduction } from "../finding-reproduction.js";
 import { auditTriage, buildTriageRequest, triageLabel, type TriageFlags } from "./findings-triage.js";
 import { UsageError, errorLine } from "./output.js";
@@ -242,7 +242,7 @@ async function renderFindingsList(opts: FindingsListOptions): Promise<void> {
   const context = await loadContextFor(opts);
   const choice = (name: string, value: string | undefined, allowed: readonly string[]): void => { if (value !== undefined && !allowed.includes(value)) throw new Error(`Unknown ${name} "${value}". Use one of: ${allowed.join(", ")}.`); };
   choice("severity", opts.severity, ["critical", "high", "medium", "low", "info"]);
-  choice("status", opts.status, ["discovered", "verified", "confirmed", "scored", "reported", "fixed", "false-positive"]);
+  choice("status", opts.status, ["discovered", "verified", "confirmed", "scored", "reported", "fixed", "fixed-pending-merge", "false-positive"]);
   choice("triage", opts.triage, ["new", "accepted", "suppressed"]);
   choice("scope", opts.scope, ["in", "out", "all"]);
   let expiringDays: number | undefined;
@@ -440,10 +440,12 @@ export function registerFindingsCommand(program: Command): void {
         }
         const variantRows = db.listVariantLinks().filter(link => link.variantOf === finding.id);
         if (variantRows.length) {
-          console.log(`  ${chalk.gray("Variants:")} ${variantRows.length} (${variantRows.filter(link => link.status !== "fixed").length} open, ${variantRows.filter(link => link.status === "fixed").length} fixed)`);
+          const pendingRows = variantRows.filter(link => link.status === VARIANT_FIXED_PENDING_MERGE).length;
+          const fixedRows = variantRows.filter(link => link.status === "fixed").length;
+          console.log(`  ${chalk.gray("Variants:")} ${variantRows.length} (${variantRows.length - pendingRows - fixedRows} open, ${pendingRows ? `${pendingRows} fixed pending merge, ` : ""}${fixedRows} fixed)`);
           for (const link of variantRows.slice(0, 20)) {
             const row = all.find(candidate => candidate.id === link.id);
-            console.log(`  ${chalk.gray(shortFindingId(link.id))} ${link.status === "fixed" ? chalk.green("fixed") : chalk.yellow("open")} ${row?.title ?? ""}`);
+            console.log(`  ${chalk.gray(shortFindingId(link.id))} ${link.status === "fixed" ? chalk.green("fixed") : link.status === VARIANT_FIXED_PENDING_MERGE ? chalk.cyan("fixed, pending merge") : chalk.yellow("open")} ${row?.title ?? ""}`);
           }
         }
         const proofDetail = reproductionDetail(finding as { reproduction?: unknown; pocSteps?: unknown });
