@@ -1,0 +1,13 @@
+{
+  "note": "What a correct dependency-reachability run records for this folder: one finding per advisory, titled with the verdict. Advisory ids are format-valid test data. A scan of this folder is a regression check, not an accuracy claim.",
+  "findings": [
+    { "id": "f1", "title": "[reachable] commons-text 1.9: GHSA-599f-7c49-w659", "severity": "critical", "path": "src/main/java/demo/App.java", "line": 7 },
+    { "id": "f2", "title": "[not-reached] snakeyaml 1.30: GHSA-3mc7-4q67-w48m", "severity": "info", "path": "pom.xml", "line": 5 },
+    { "id": "f3", "title": "[not-reached] snakeyaml 1.30: GHSA-98wm-3w3q-mw94", "severity": "info", "path": "pom.xml", "line": 5 },
+    { "id": "f4", "title": "[not-reached] snakeyaml 1.30: GHSA-c4r9-r8fh-9vj2", "severity": "info", "path": "pom.xml", "line": 5 },
+    { "id": "f5", "title": "[not-reached] snakeyaml 1.30: GHSA-hhhw-99gj-p3c3", "severity": "info", "path": "pom.xml", "line": 5 },
+    { "id": "f6", "title": "[not-reached] snakeyaml 1.30: GHSA-mjmj-j48q-9wg2", "severity": "info", "path": "pom.xml", "line": 5 },
+    { "id": "f7", "title": "[not-reached] snakeyaml 1.30: GHSA-w37g-rhq8-7m4j", "severity": "info", "path": "pom.xml", "line": 5 },
+    { "id": "f8", "title": "[not-reached] snakeyaml 1.30: GHSA-9w3m-gqgf-c4p9", "severity": "info", "path": "pom.xml", "line": 5 }
+  ]
+}
