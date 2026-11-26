@@ -375,4 +375,12 @@ describe("a scan that hit a limit never says not-imported", () => {
     mkdirSync(deep, { recursive: true });
     expect(attachJavaUsage([advisory()], dir).scan.skipped).toBe(1);
   });
+  it("a listed class used only in test code is test-only, never not-imported, even when no package prefix matches", () => {
+    const dir = mkdtempSync(join(tmpdir(), "0-usage-testsym-"));
+    mkdirSync(join(dir, "src/test/java"), { recursive: true });
+    writeFileSync(join(dir, "src/test/java/T.java"), "class T { Object o = new weird.pkg.Vuln(); }\n");
+    const usage = attachJavaUsage([advisory(["weird.pkg.Vuln"])], dir).advisories[0]!.usage!;
+    expect(usage.status).toBe("test-only");
+    expect(usage.locations[0]).toMatchObject({ path: "src/test/java/T.java", line: 1, name: "weird.pkg.Vuln", test: true });
+  });
 });

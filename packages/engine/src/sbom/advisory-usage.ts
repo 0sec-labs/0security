@@ -68,6 +68,7 @@ export function attachJavaUsage(advisories: Advisory[], folder: string, limits?:
     if (!item || advisory.malicious) return advisory;
     const wanted = advisory.vulnerableSymbols ?? [];
     const symbolHits = wanted.flatMap(hitsOf).filter(hit => !hit.test);
+    const testSymbolHits = wanted.flatMap(hitsOf).filter(hit => hit.test);
     const nonTest = item.imports.filter(entry => !entry.test);
     const incomplete = !scanIsComplete(scan) || advisory.vulnerableSymbolsTruncated === true;
     const base = (status: AdvisoryUsageStatus, locations: UsageLocation[], match?: "package" | "group"): AdvisoryUsage => ({
@@ -77,7 +78,7 @@ export function attachJavaUsage(advisories: Advisory[], folder: string, limits?:
     let usage: AdvisoryUsage;
     if (symbolHits.length) usage = base("symbol-imported", symbolHits.map(hit => place(hit, hit.symbol)));
     else if (nonTest.length) usage = base("imported", nonTest.map(entry => place(entry, entry.import)), item.verdict === "imported-by-group" ? "group" : "package");
-    else if (item.imports.length) usage = base("test-only", item.imports.map(entry => place(entry, entry.import)), item.verdict === "imported-by-group" ? "group" : "package");
+    else if (item.imports.length || testSymbolHits.length) usage = base("test-only", [...item.imports.map(entry => place(entry, entry.import)), ...testSymbolHits.map(hit => place(hit, hit.symbol))], item.imports.length ? (item.verdict === "imported-by-group" ? "group" : "package") : undefined);
     else usage = base(incomplete ? "unknown" : "not-imported", []);
     return { ...advisory, usage };
   });
