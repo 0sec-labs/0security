@@ -45,6 +45,21 @@ describe("lazy start and progressive disclosure (stdio)", () => {
   });
 });
 
+describe("files re-checked at launch (stdio)", () => {
+  it("does not start a server whose files changed after the extension loaded", async () => {
+    const ext = { ...stdioExtension("docs", "v1"), reverify: () => ({ ok: false as const, error: "docs: folder content differs from the pinned revision" }) };
+    const { host, connector } = track(makeHost([ext], { approve: yes }));
+    const r = await host.loadServer("mcp__x-docs-fake");
+    expect(r.ok).toBe(false); expect(r.message).toMatch(/files changed since they were approved/);
+    expect(connector.launches).toHaveLength(0);
+  });
+  it("starts normally when the files still match", async () => {
+    const ext = { ...stdioExtension("docs", "v1"), reverify: () => ({ ok: true as const }) };
+    const { host, connector } = track(makeHost([ext], { approve: yes }));
+    expect((await host.loadServer("mcp__x-docs-fake")).ok).toBe(true); expect(connector.launches).toHaveLength(1);
+  });
+});
+
 describe("per-tool hash pinning (stdio)", () => {
   let dir: string; afterAll(() => cleanup(dir));
   it("blocks a tool whose description changed between connections until the operator approves again", async () => {

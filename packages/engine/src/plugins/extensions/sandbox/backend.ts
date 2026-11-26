@@ -178,8 +178,17 @@ export function planSandbox(req: SandboxRequest, options: PlanOptions = {}): San
   const usesWorkspace = [...decl.readPaths, ...decl.writePaths].includes(WORKSPACE_TOKEN);
   const workspace = usesWorkspace ? req.workspace : null;
   if (!req.argv[0] || !path.isAbsolute(program)) return { kind: "refused", error: `cannot start ${req.label} in a sandbox: ${req.argv[0] ?? "(nothing)"} was not found in PATH` };
+  const decl0 = req.decl ?? DEFAULT_DECL;
+  // Per-binary allowlist: each declared name must resolve to a program on PATH, or the run is refused (fail closed).
+  const namedPaths: string[] = [];
+  for (const name of decl0.programs) {
+    const p = whichIn(name, pathEnv);
+    if (!p) return { kind: "refused", error: `cannot start ${req.label} in a sandbox: it declares the program ${JSON.stringify(name)}, which was not found in PATH` };
+    namedPaths.push(p, real(p));
+  }
+  if (!detected.backend && decl0.programs.length && nodeSupport?.supported) return { kind: "refused", error: `cannot start ${req.label} in a sandbox: it declares programs it may start, and node's permission layer cannot limit which programs start. That needs an OS sandbox (macOS Seatbelt or Linux bubblewrap)` };
   const interpreterPaths = req.interpreters.flatMap(n => { const p = whichIn(n, pathEnv); return p ? [p, real(p)] : []; });
-  const execAllow = [program, real(program), ...interpreterPaths, "/usr/bin/env", real("/usr/bin/env"), "/bin/sh", real("/bin/sh"), "/bin/bash", real("/bin/bash")].filter(p => fs.existsSync(p));
+  const execAllow = [program, real(program), ...interpreterPaths, ...namedPaths, "/usr/bin/env", real("/usr/bin/env"), "/bin/sh", real("/bin/sh"), "/bin/bash", real("/bin/bash")].filter(p => fs.existsSync(p));
 
   let scratch: string;
   try { scratch = fs.mkdtempSync(path.join(real(options.scratchRoot ?? os.tmpdir()), "0-sandbox-")); } catch (e) { return { kind: "refused", error: `cannot create a scratch folder for ${req.label}: ${e instanceof Error ? e.message : String(e)}` }; }

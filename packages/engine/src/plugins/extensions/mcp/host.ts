@@ -166,6 +166,9 @@ export class ExtensionMcpHost implements McpToolHost {
         if (!ok) { const r = "you did not approve starting it"; this.#block(server, token, r); return fail(r); }
       }
       // OS sandbox (ZERO_SANDBOX). The approval and the gate above saw the real command; only the process start is wrapped.
+      // The folder was hashed when the extension loaded. Hash it again now: it may have changed since, and an edited entry file must not start.
+      const still = ext.reverify?.();
+      if (still && !still.ok) { const r = `its files changed since they were approved (${still.error})`; this.#block(server, token, r); return fail(r); }
       let started = launch; let cleanup: (() => void) | undefined; this.#sandboxStatus.delete(server.id);
       if (launch.kind === "stdio") {
         const sb = planSandbox({ decl: ext.manifest.sandbox, extensionDir: ext.dir, workspace: operator?.cwd ?? null, argv: [launch.command, ...launch.args], interpreters: TRUSTED_INTERPRETER_NAMES, env: launch.env, cwd: launch.cwd, label: `MCP server ${decl.name} of extension ${ext.name}` }, { env: this.#o.parentEnv ?? process.env });

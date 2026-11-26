@@ -70,7 +70,7 @@ export function canDoLines(c: Capabilities): string[] {
     const l = s.command ? inspectLauncher(s.command, s.args) : null;
     if (l) out.push(`downloads ${l.spec ? JSON.stringify(l.spec.slice(0, 80)) : "a package"} from ${l.hosts[0]} each time MCP server ${s.name} starts via ${l.launcher}${l.pinned ? " (exact version pinned)" : ": NOT pinned to an exact version, so it will be refused at launch until the extension pins one"}`);
   }
-  if (c.sandbox) out.push(`runs its scripts and MCP servers in an OS sandbox: network ${c.sandbox.network ? "ALLOWED" : "off"}, programs ${c.sandbox.process ? "from system folders" : "limited to interpreters"}${c.sandbox.readPaths.length ? `, may read ${c.sandbox.readPaths.join(", ")}` : ""}${c.sandbox.writePaths.length ? `, may write ${c.sandbox.writePaths.join(", ")}` : ""}`);
+  if (c.sandbox) out.push(`runs its scripts and MCP servers in an OS sandbox: network ${c.sandbox.network ? "ALLOWED" : "off"}, programs ${c.sandbox.process ? "from system folders" : c.sandbox.programs.length ? `limited to interpreters and ${c.sandbox.programs.join(", ")}` : "limited to interpreters"}${c.sandbox.readPaths.length ? `, may read ${c.sandbox.readPaths.join(", ")}` : ""}${c.sandbox.writePaths.length ? `, may write ${c.sandbox.writePaths.join(", ")}` : ""}`);
   if (c.verify) out.push(`adds rules: verifier (${c.verify})`);
   if (c.env.length) out.push(`receives environment variables: ${c.env.join(", ")} (model provider keys are never passed unless listed here)`);
   if (c.ignored.length) out.push(`ignored, never run: ${c.ignored.join(", ")}`);

@@ -19,6 +19,8 @@ export interface LoadedExtension {
   connected(parent?: Readonly<Record<string, string | undefined>>): Record<string, string | undefined>;
   /** Declared variable names the operator's approval does not cover. A script or server of this extension must not run while any exist. */
   unapprovedEnv: readonly string[];
+  /** Hashes the folder again against its pin. A long-lived caller (an MCP server that starts later) calls this right before it starts a process. */
+  reverify?(): { ok: true } | { ok: false; error: string };
 }
 export type RefusalCode = "tampered" | "capabilities_changed" | "not_approved" | "missing" | "legacy" | "state";
 export interface LoadResult { extensions: LoadedExtension[]; builtins: string[]; refused: Array<{ name: string; code: RefusalCode; reason: string }> }
@@ -52,7 +54,8 @@ export function loadable(store: ExtensionStore, projectKey: string | null, secre
     if (capabilityKey(capabilities) !== record.approvedCapabilityKey) { out.refused.push({ name: entry.name, code: "capabilities_changed", reason: "its capabilities differ from what was approved" }); continue; }
     const dir = store.revisionPath(entry.name, entry.active, record.location); const approvedEnv = record.approvedEnv;
     const connected = (parent: Readonly<Record<string, string | undefined>> = process.env) => connectionFill(entry.name, manifest.value.connector?.env ?? [], approvedEnv, secrets, parent);
-    out.extensions.push({ name: entry.name, revision: entry.active, dir, manifest: manifest.value, capabilities, approvedEnv, connected, unapprovedEnv: capabilities.env.filter(n => !approvedEnv.includes(n)), env: (parent = process.env) => extensionEnv({ declared: capabilities.env, approved: approvedEnv, parent: connected(parent), extra: { ZERO_EXTENSION_NAME: entry.name, ZERO_EXTENSION_DIR: dir } }) });
+    const reverify = (): { ok: true } | { ok: false; error: string } => { const again = readVerified(store, entry, entry.active!); return again.ok ? { ok: true } : { ok: false, error: again.error.message }; };
+    out.extensions.push({ reverify, name: entry.name, revision: entry.active, dir, manifest: manifest.value, capabilities, approvedEnv, connected, unapprovedEnv: capabilities.env.filter(n => !approvedEnv.includes(n)), env: (parent = process.env) => extensionEnv({ declared: capabilities.env, approved: approvedEnv, parent: connected(parent), extra: { ZERO_EXTENSION_NAME: entry.name, ZERO_EXTENSION_DIR: dir } }) });
   }
   return out;
 }

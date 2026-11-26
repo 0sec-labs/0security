@@ -14,8 +14,8 @@ const ext = path.join(tmp, "ext"); const outside = path.join(tmp, "outside"); co
 beforeAll(() => { for (const d of [ext, outside, data]) fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(outside, "secret.txt"), "outside-secret"); fs.writeFileSync(path.join(ext, "in.txt"), "own-data"); });
 afterAll(() => { fs.rmSync(tmp, { recursive: true, force: true }); });
 
-const decl = (over: Partial<SandboxDecl> = {}): SandboxDecl => ({ network: false, process: false, readPaths: [], writePaths: [], ...over });
-const policy = (over: Partial<ResolvedSandbox> = {}): ResolvedSandbox => ({ extensionDir: "/e", scratchDir: "/s", workspace: null, network: false, process: false, readPaths: [], writePaths: [], execAllow: [], limits: {}, ...over });
+const decl = (over: Partial<SandboxDecl> = {}): SandboxDecl => ({ network: false, process: false, programs: [], readPaths: [], writePaths: [], ...over });
+const policy = (over: Partial<ResolvedSandbox> = {}): ResolvedSandbox => ({ extensionDir: "/e", scratchDir: "/s", workspace: null, network: false, process: false, programs: [], readPaths: [], writePaths: [], execAllow: [], limits: {}, ...over });
 const supported: NodePermissionSupport = { supported: true, flag: "--permission", detail: "node --permission" };
 const noOs: SandboxStatus = { platform: "linux", seatbelt: { present: false, detail: "" }, bwrap: { present: false, detail: "bwrap not found in PATH" }, docker: { present: false, detail: "" }, backend: null, reason: "bwrap not found in PATH" };
 const osStatus: SandboxStatus = { ...noOs, backend: "bwrap", bwrap: { present: true, path: "/usr/bin/bwrap", usable: true, detail: "works" } };
