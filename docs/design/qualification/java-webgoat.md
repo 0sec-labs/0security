@@ -12,6 +12,14 @@ git clone --depth 1 https://github.com/WebGoat/WebGoat.git /tmp/qualify/webgoat
 0security scan /tmp/qualify/webgoat --budget 1.5 --timeout 1500 --format sarif -o scan.sarif
 ```
 
+Check the same file offline against what viewers and GitHub code scanning need (the engine must be built):
+
+```bash
+node scripts/check-sarif.mjs scan.sarif
+```
+
+The check reports errors (the file breaks the SARIF 2.1.0 spec) and warnings (a result a consumer may drop or fail to show: no location, no line, a path outside the repository, more than the code scanning limits per run). It is written from the spec and GitHub's documented upload limits. It is not the official schema and not an import. A scan of a folder given as a relative path gives repository-relative paths; an absolute scan path gives file URIs, which the check warns about.
+
 Continue a stopped scan with the command it prints, for example `0security scan /tmp/qualify/webgoat --resume <scan-id>`.
 
 Check the SARIF against the official 2.1.0 schema. In this run a Draft 4 validator reported 0 errors:
@@ -46,7 +54,7 @@ python3 -I -c "import json,jsonschema; jsonschema.Draft4Validator(json.load(open
 
 ## Not done
 
-- SARIF import into a viewer. Only the schema check was done.
+- SARIF import into a viewer. Only the schema check was done. An offline consumer check now exists (`scripts/check-sarif.mjs`, tested on 0's own output and on other tools' SARIF), but it was not run on this scan's file, which is not kept, and it is not an import into a real viewer or into GitHub code scanning. That needs a viewer (VS Code SARIF Viewer) or a repository with code scanning enabled.
 - Findings with fixes. The scan report carries no fixes; the SARIF has none. A fix run (`0security fix`) was not part of this run.
 - The scan was not resumed to completion, and no second model or concurrency setting was tried. This is one run.
 - The issue asks for a project of this kind with SARIF "and fixes"; this run covers scan and SARIF only.
