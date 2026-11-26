@@ -273,5 +273,19 @@
     },
     "scope": "These non-model regression scopes overlap previous runs; no unique aggregate is asserted. Later upstream features and subsequent financial follow-up fixes are not paid-qualified by the bb7bf model evidence."
   },
-  "sourceCheckpointDefinition": "Checkpoint for the corrected scan transport and strengthened fixture; the initial fixture revision is recorded separately."
+  "sourceCheckpointDefinition": "Checkpoint for the corrected scan transport and strengthened fixture; the initial fixture revision is recorded separately.",
+  "postVariantIntegrationValidation": {
+    "sourceRevision": "0ff5a2ab8",
+    "mergedMain": "b54750fd38fe2f2efcaed2b63fa2dc2fc53fe8a0",
+    "globalBuild": "passed",
+    "focusedTests": {
+      "cliPassed": 102,
+      "enginePassed": 294,
+      "benchmarkHarnessPassed": 17,
+      "scope": "413 distinct tests in these scopes; overlaps earlier validation groups."
+    },
+    "staticChecksPassed": 19,
+    "behavior": "Follow-up variant threads share the remaining command budget. Known costs and tokens are aggregated; incomplete totals remain unknown and unavailable costs stop further paid launches. Single-fix benchmarks explicitly disable variant hunts.",
+    "limits": "Receipt-based estimated-spend gates can overshoot in flight; these later code changes were regression-tested without additional paid requests and are not part of the bb7bf model snapshot."
+  }
 }
