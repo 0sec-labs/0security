@@ -9,7 +9,7 @@
  * Needs cargo. It reads Cargo.lock (`--locked`), so it works offline once the crates are cached.
  */
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -51,6 +51,13 @@ const lines = [
   "",
 ];
 const text = lines.join("\n");
+
+// The output path sits in a checkout that may come from an untrusted change: never write through a link.
+const outputKind = (() => { try { return lstatSync(output); } catch { return undefined; } })();
+if (outputKind && !outputKind.isFile()) {
+  console.error(`${output} is not a regular file (a symbolic link or a folder); refusing to touch it.`);
+  process.exit(1);
+}
 
 if (process.argv.includes("--check")) {
   if (!existsSync(output) || readFileSync(output, "utf8") !== text) {
