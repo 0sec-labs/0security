@@ -18,7 +18,7 @@ export interface JavaSymbolHit { symbol: string; path: string; line: number; tes
 export interface JavaUsageReport { usage: JavaUsage[]; filesScanned: number; truncated: boolean; /** Source files or links that were not read: over the size cap, unreadable, or a symbolic link. */ skipped: number; symbolHits?: JavaSymbolHit[] }
 export interface JavaUsageOptions {
   /** Fully qualified classes or symbols to look for in imports and in fully qualified uses. */ symbols?: string[];
-  /** Lower limits than the defaults, for tests of a hostile tree. */ limits?: { maxFiles?: number; maxTotalBytes?: number; maxSymbols?: number; maxEntries?: number };
+  /** Lower limits than the defaults, for tests of a hostile tree. */ limits?: { maxFiles?: number; maxTotalBytes?: number; maxSymbols?: number; maxEntries?: number; maxSymbolChecks?: number };
 }
 
 const SOURCE = /\.(?:java|kt|kts|scala|groovy)$/;
@@ -34,6 +34,8 @@ const MAX_HITS_PER_SYMBOL = 20;
 const MAX_ENTRIES = 300_000;
 const MAX_IMPORTS_TOTAL = 400_000;
 const MAX_IMPORTS_PER_FILE = 5000;
+/** Line-by-symbol comparisons in one scan (lines times symbols), so many symbols over a large tree cannot run unbounded. */
+const MAX_SYMBOL_CHECKS = 50_000_000;
 /** A line longer than this is minified or hostile text: it is not searched for symbols. */
 const MAX_LINE_CHARS = 4000;
 
@@ -153,6 +155,9 @@ export function scanJavaUsage(folder: string, components: Array<{ name: string; 
     hitCount.set(key, count + 1);
     symbolHits.push(hit);
   };
+  const maxChecks = options.limits?.maxSymbolChecks ?? MAX_SYMBOL_CHECKS;
+  let checks = 0;
+  let searching = symbols.length > 0;
   const imports: JavaImport[] = [];
   let scanned = 0;
   let bytes = 0;
@@ -174,13 +179,15 @@ export function scanJavaUsage(folder: string, components: Array<{ name: string; 
       if (imports.length >= MAX_IMPORTS_TOTAL) { limit.truncated = true; break; }
       imports.push({ path, line: item.line, import: item.name, test });
     }
-    if (!symbols.length) continue;
+    if (!searching) continue;
     const importLines = new Set(found.map(item => item.line));
     for (const item of found) for (const symbol of symbols) if (importNames(item.name, symbol)) addHit({ symbol, path, line: item.line, test, kind: "import" });
     const lines = text.split(/\r?\n/);
     for (let index = 0; index < lines.length; index += 1) {
       const line = lines[index]!;
       if (line.length > MAX_LINE_CHARS || importLines.has(index + 1)) continue;
+      checks += symbols.length;
+      if (checks > maxChecks) { searching = false; limit.truncated = true; limit.skipped += files.length - position; break; }
       const trimmed = line.trimStart();
       if (trimmed.startsWith("//") || trimmed.startsWith("*") || trimmed.startsWith("/*")) continue;
       for (const symbol of symbols) if (line.includes(symbol) && mentionsQualified(line, symbol)) addHit({ symbol, path, line: index + 1, test, kind: "qualified" });

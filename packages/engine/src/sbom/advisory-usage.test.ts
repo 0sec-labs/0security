@@ -307,4 +307,12 @@ describe("a scan that hit a limit never says not-imported", () => {
     expect(report.truncated).toBe(true);
     expect(report.filesScanned).toBeLessThan(10);
   });
+  it("bounds the cumulative symbol search and says the scan is incomplete", () => {
+    const dir = tree(20, 80);
+    const report = scanJavaUsage(dir, [], { symbols: ["a.b.C", "a.b.D"], limits: { maxSymbolChecks: 10 } });
+    expect(report.truncated).toBe(true);
+    expect(report.skipped).toBeGreaterThan(0);
+    const advisoryWithSymbol: Advisory = { ...advisory(["a.b.C"]) };
+    expect(attachJavaUsage([advisoryWithSymbol], dir, { maxSymbolChecks: 1 }).advisories[0]!.usage!.status).toBe("unknown");
+  });
 });
