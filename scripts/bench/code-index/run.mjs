@@ -45,7 +45,7 @@ const here = join(benchDir, "code-index");
 const RATE_LIMIT = /rate[- ]?limit|too many requests|\b429\b|usage limit|quota/i;
 
 export function parseArgs(argv) {
-  const o = { mode: "scan", run: false, dryRun: false, repeat: 3, arms: Object.keys(ARMS), fixtures: ["ts-shop", "java-bank", "medium-app"], fixturesDirs: [join(here, "fixtures"), join(benchDir, "fixtures")], model: "gpt-6-luna", budget: 1, timeout: 900, maxRuns: 30, maxMinutes: 180, concurrency: 1, out: join(here, "results"), cli: defaultCli, label: "" };
+  const o = { mode: "scan", run: false, dryRun: false, repeat: 3, arms: Object.keys(ARMS), fixtures: ["ts-shop", "java-bank", "medium-app"], fixturesDirs: [join(here, "fixtures"), join(benchDir, "fixtures")], variantsDir: join(here, "variants"), model: "gpt-6-luna", budget: 1, timeout: 900, maxRuns: 30, maxMinutes: 180, concurrency: 1, out: join(here, "results"), cli: defaultCli, label: "" };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const next = () => { if (i + 1 >= argv.length) throw new Error(`${a} needs a value`); return argv[++i]; };
@@ -56,6 +56,7 @@ export function parseArgs(argv) {
     else if (a === "--arms") o.arms = next().split(",");
     else if (a === "--fixtures") o.fixtures = next().split(",");
     else if (a === "--fixtures-dir") o.fixturesDirs = next().split(",").map((d) => resolve(repoRoot, d));
+    else if (a === "--variants-dir") o.variantsDir = resolve(repoRoot, next());
     else if (a === "--model") o.model = next();
     else if (a === "--budget") o.budget = Number(next());
     else if (a === "--timeout") o.timeout = Number(next());
@@ -138,6 +139,10 @@ function exec(args, { env, cwd, timeoutSeconds }) {
   });
 }
 
+// What is kept of each finding in the raw results: enough to score it again (title, category, description, location).
+const keep = (f) => ({ title: f.title, category: f.category, severity: f.severity, location: f.location, description: typeof f.description === "string" ? f.description.slice(0, 1200) : undefined });
+// The #710 scoring (5-line proximity, no oracle), kept next to the strict score so the two can be compared.
+const looseKey = (answer) => ({ ...answer, cleanPaths: [], items: answer.items.map(({ oracle, ...rest }) => rest), decoys: answer.decoys.map(({ category, ...rest }) => rest) });
 const slim = (score) => ({ planted: score.planted, found: score.found, foundIds: score.foundIds, missedIds: score.missedIds, recall: score.recall, findings: score.findings, falsePositives: score.falsePositives, decoyHits: score.decoyHits, unmatched: score.unmatched, nearMisses: score.nearMisses });
 const isAuthz = (item) => [].concat(item.category).includes("authz");
 const authzOf = (answer, score) => { const ids = answer.items.filter(isAuthz).map((i) => i.id); return { planted: ids.length, found: ids.filter((id) => score.foundIds.includes(id)).length }; };
@@ -163,8 +168,8 @@ async function scanRun(fx, arm, rep, o) {
     provider: sessions.providers, model: sessions.models, coverage: report?.coverage?.statement ?? null,
     // From the report itself: its token total includes helper threads; `children` lists them (absent in reports of older builds).
     reportTokens: report?.tokens ?? null, children: report?.children?.count ?? 0, childTurns: report?.children?.turns ?? 0, childTokens: report?.children ? (report.children.inputTokens ?? 0) + (report.children.outputTokens ?? 0) : 0, warnings: report?.warnings ?? [],
-    score: slim(score), authz: authzOf(fx.answer, score),
-    findings: (report?.findings ?? []).map((f) => ({ title: f.title, category: f.category, severity: f.severity, location: f.location })),
+    score: slim(score), authz: authzOf(fx.answer, score), loose: (({ found, foundIds, falsePositives }) => ({ found, foundIds, falsePositives }))(scoreFindings(looseKey(fx.answer), report?.findings ?? [])),
+    findings: (report?.findings ?? []).map(keep),
     rateLimited: RATE_LIMIT.test(`${proc.stderr}\n${report?.error ?? ""}`) && !report,
   };
   if (result.status !== "complete") result.error = String(report?.error ?? proc.stderr).replace(/\s+/g, " ").slice(-300);
@@ -193,14 +198,14 @@ async function variantsRun(fx, arm, rep, o) {
   const seconds = (Date.now() - started) / 1000;
   const after = await exec([o.cli, "findings", "list", "--db-path", db, "--format", "json"], { env, cwd: repoRoot, timeoutSeconds: 60 });
   let rows = []; try { const j = JSON.parse(after.stdout); rows = j.findings ?? []; } catch { /* none */ }
-  const variants = rows.filter((r) => r.id !== seedId).map((r) => ({ title: r.title, category: r.category, severity: r.severity, location: r.location ?? r.reviewAnnotation, variantOf: r.variantOf ?? null }));
+  const variants = rows.filter((r) => r.id !== seedId).map((r) => ({ ...keep(r), location: r.location ?? r.reviewAnnotation, variantOf: r.variantOf ?? null }));
   let report; try { report = JSON.parse(hunt.stdout); } catch { /* text */ }
   const score = scoreFindings(fx.answer, variants);
   const sessions = sessionTotals(home);
   return {
     kind: "variants", fixture: fx.name, arm, repeat: rep + 1, status: report?.hunt?.error ? `error: ${report.hunt.error}` : hunt.status === 0 ? "complete" : `exit ${hunt.status}`, seconds,
     costUsd: report?.hunt?.costUsd ?? null, tokens: report?.hunt?.tokens ?? null, threads: sessions.threads, turns: sessions.turns, toolCalls: sessions.tools, provider: sessions.providers, model: sessions.models,
-    rootCauseSource: report?.hunt?.rootCauseSource ?? null, skipped: report?.hunt?.skipped ?? null, score: slim(score), findings: variants,
+    rootCauseSource: report?.hunt?.rootCauseSource ?? null, skipped: report?.hunt?.skipped ?? null, score: slim(score), loose: (({ found, foundIds, falsePositives }) => ({ found, foundIds, falsePositives }))(scoreFindings(looseKey(fx.answer), variants)), findings: variants,
     rateLimited: RATE_LIMIT.test(`${hunt.stderr}${report?.hunt?.error ?? ""}`) && !variants.length,
   };
 }
@@ -227,13 +232,21 @@ export function renderMarkdown(rows, meta) {
   return `${L.join("\n")}\n`;
 }
 
+/** Line counts of every file an answer key points at (items, alsoAt spots, decoys, cleanPaths), to catch a key that drifted. */
+function fileLinesOf(dir, answer) {
+  const paths = new Set([...answer.items, ...answer.decoys].flatMap((e) => [e.path, ...(e.alsoAt ?? []).map((a) => a.path)]).concat(answer.cleanPaths ?? []));
+  const lines = {};
+  for (const p of paths) { const f = join(dir, p); if (existsSync(f)) lines[p] = readFileSync(f, "utf8").split("\n").length - (readFileSync(f, "utf8").endsWith("\n") ? 1 : 0); }
+  return lines;
+}
+
 async function dryRun(o) {
   let bad = 0;
-  const dirs = o.mode === "variants" ? [join(here, "variants")] : o.fixturesDirs;
+  const dirs = o.mode === "variants" ? [o.variantsDir] : o.fixturesDirs;
   for (const d of dirs) for (const fx of loadFixtures(o.fixtures, d)) {
-    const problems = validateAnswer(fx.answer);
+    const problems = validateAnswer(fx.answer, { fileLines: fileLinesOf(fx.dir, fx.answer) });
     if (o.mode === "variants" && !fx.answer.seed) problems.push("a variant fixture needs a seed");
-    const findings = fx.answer.items.map((it, i) => ({ id: `s${i}`, title: `synthetic ${[].concat(it.category)[0]}`, category: [].concat(it.category)[0] === "authn" ? "broken-authentication" : "other", location: { path: it.path, startLine: it.startLine + 1 } }));
+    const findings = fx.answer.items.map((it, i) => ({ id: `s${i}`, title: `synthetic ${[].concat(it.category)[0]}`, description: it.description, category: [].concat(it.category)[0] === "authn" ? "broken-authentication" : "other", location: { path: it.path, startLine: it.startLine + 1 } }));
     const score = scoreFindings(fx.answer, findings);
     if (score.found !== fx.answer.items.length) problems.push(`synthetic findings found ${score.found}/${fx.answer.items.length}`);
     console.log(`${problems.length ? "FAIL" : "ok  "} ${fx.name}: ${fx.answer.items.length} planted, ${fx.answer.decoys.length} decoys`);
@@ -246,7 +259,7 @@ async function dryRun(o) {
 
 async function realRun(o) {
   if (!existsSync(o.cli)) throw new Error(`${o.cli} not found: pnpm build`);
-  const dirs = o.mode === "variants" ? [join(here, "variants")] : o.fixturesDirs;
+  const dirs = o.mode === "variants" ? [o.variantsDir] : o.fixturesDirs;
   const fixtures = dirs.flatMap((d) => loadFixtures(o.fixtures, d));
   const plan = [];
   for (let rep = 0; rep < o.repeat; rep++) for (const fx of fixtures) for (const arm of o.arms) plan.push({ fx, arm, rep });

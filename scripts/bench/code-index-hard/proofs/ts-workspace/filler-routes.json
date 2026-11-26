@@ -1,0 +1,951 @@
+[
+  {
+    "module": "label",
+    "method": "GET",
+    "path": "/api/labels/label_a1",
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      200
+    ]
+  },
+  {
+    "module": "label",
+    "method": "PUT",
+    "path": "/api/labels/label_a1",
+    "body": {
+      "name": "sample name",
+      "color": "sample color"
+    },
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      403
+    ]
+  },
+  {
+    "module": "label",
+    "method": "DELETE",
+    "path": "/api/labels/label_a1",
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      403
+    ]
+  },
+  {
+    "module": "milestone",
+    "method": "GET",
+    "path": "/api/milestones/milestone_a1",
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      200
+    ]
+  },
+  {
+    "module": "milestone",
+    "method": "PUT",
+    "path": "/api/milestones/milestone_a1",
+    "body": {
+      "title": "sample title",
+      "dueOn": "sample dueOn"
+    },
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      403
+    ]
+  },
+  {
+    "module": "milestone",
+    "method": "DELETE",
+    "path": "/api/milestones/milestone_a1",
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      403
+    ]
+  },
+  {
+    "module": "milestone",
+    "method": "POST",
+    "path": "/api/milestones/milestone_a1/archive",
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      403
+    ]
+  },
+  {
+    "module": "note",
+    "method": "GET",
+    "path": "/api/notes/note_a1",
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      200
+    ]
+  },
+  {
+    "module": "note",
+    "method": "PUT",
+    "path": "/api/notes/note_a1",
+    "body": {
+      "title": "sample title",
+      "body": "sample body"
+    },
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      403
+    ]
+  },
+  {
+    "module": "note",
+    "method": "DELETE",
+    "path": "/api/notes/note_a1",
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      403
+    ]
+  },
+  {
+    "module": "note",
+    "method": "POST",
+    "path": "/api/notes/note_a1/archive",
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      403
+    ]
+  },
+  {
+    "module": "sprint",
+    "method": "GET",
+    "path": "/api/sprints/sprint_a1",
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      200
+    ]
+  },
+  {
+    "module": "sprint",
+    "method": "PUT",
+    "path": "/api/sprints/sprint_a1",
+    "body": {
+      "name": "sample name",
+      "goal": "sample goal",
+      "capacity": 3
+    },
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      403
+    ]
+  },
+  {
+    "module": "sprint",
+    "method": "DELETE",
+    "path": "/api/sprints/sprint_a1",
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      403
+    ]
+  },
+  {
+    "module": "epic",
+    "method": "GET",
+    "path": "/api/epics/epic_a1",
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      200
+    ]
+  },
+  {
+    "module": "epic",
+    "method": "PUT",
+    "path": "/api/epics/epic_a1",
+    "body": {
+      "name": "sample name",
+      "summary": "sample summary"
+    },
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      403
+    ]
+  },
+  {
+    "module": "epic",
+    "method": "DELETE",
+    "path": "/api/epics/epic_a1",
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      403
+    ]
+  },
+  {
+    "module": "reminder",
+    "method": "GET",
+    "path": "/api/reminders/reminder_a1",
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      200
+    ]
+  },
+  {
+    "module": "reminder",
+    "method": "PUT",
+    "path": "/api/reminders/reminder_a1",
+    "body": {
+      "message": "sample message",
+      "remindAt": "sample remindAt"
+    },
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      403
+    ]
+  },
+  {
+    "module": "reminder",
+    "method": "DELETE",
+    "path": "/api/reminders/reminder_a1",
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      403
+    ]
+  },
+  {
+    "module": "tag",
+    "method": "GET",
+    "path": "/api/tags/tag_a1",
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      200
+    ]
+  },
+  {
+    "module": "tag",
+    "method": "PUT",
+    "path": "/api/tags/tag_a1",
+    "body": {
+      "name": "sample name"
+    },
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      403
+    ]
+  },
+  {
+    "module": "tag",
+    "method": "DELETE",
+    "path": "/api/tags/tag_a1",
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      403
+    ]
+  },
+  {
+    "module": "tag",
+    "method": "POST",
+    "path": "/api/tags/tag_a1/archive",
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      403
+    ]
+  },
+  {
+    "module": "template",
+    "method": "GET",
+    "path": "/api/templates/template_a1",
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      200
+    ]
+  },
+  {
+    "module": "template",
+    "method": "PUT",
+    "path": "/api/templates/template_a1",
+    "body": {
+      "name": "sample name",
+      "body": "sample body"
+    },
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      403
+    ]
+  },
+  {
+    "module": "template",
+    "method": "DELETE",
+    "path": "/api/templates/template_a1",
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      403
+    ]
+  },
+  {
+    "module": "template",
+    "method": "POST",
+    "path": "/api/templates/template_a1/archive",
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      403
+    ]
+  },
+  {
+    "module": "automation",
+    "method": "GET",
+    "path": "/api/automations/automation_a1",
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      200
+    ]
+  },
+  {
+    "module": "automation",
+    "method": "PUT",
+    "path": "/api/automations/automation_a1",
+    "body": {
+      "name": "sample name",
+      "trigger": "sample trigger",
+      "enabled": true
+    },
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      403
+    ]
+  },
+  {
+    "module": "automation",
+    "method": "DELETE",
+    "path": "/api/automations/automation_a1",
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      403
+    ]
+  },
+  {
+    "module": "integrationLink",
+    "method": "GET",
+    "path": "/api/integration-links/integration-link_a1",
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      200
+    ]
+  },
+  {
+    "module": "integrationLink",
+    "method": "PUT",
+    "path": "/api/integration-links/integration-link_a1",
+    "body": {
+      "provider": "sample provider",
+      "externalId": "sample externalId"
+    },
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      403
+    ]
+  },
+  {
+    "module": "integrationLink",
+    "method": "DELETE",
+    "path": "/api/integration-links/integration-link_a1",
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      403
+    ]
+  },
+  {
+    "module": "apiKey",
+    "method": "GET",
+    "path": "/api/api-keys/api-key_a1",
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      200
+    ]
+  },
+  {
+    "module": "apiKey",
+    "method": "PUT",
+    "path": "/api/api-keys/api-key_a1",
+    "body": {
+      "label": "sample label",
+      "scope": "sample scope"
+    },
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      403
+    ]
+  },
+  {
+    "module": "apiKey",
+    "method": "DELETE",
+    "path": "/api/api-keys/api-key_a1",
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      403
+    ]
+  },
+  {
+    "module": "notification",
+    "method": "GET",
+    "path": "/api/notifications/notification_a1",
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      200
+    ]
+  },
+  {
+    "module": "notification",
+    "method": "PUT",
+    "path": "/api/notifications/notification_a1",
+    "body": {
+      "title": "sample title",
+      "channel": "sample channel"
+    },
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      403
+    ]
+  },
+  {
+    "module": "notification",
+    "method": "DELETE",
+    "path": "/api/notifications/notification_a1",
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      403
+    ]
+  },
+  {
+    "module": "notification",
+    "method": "POST",
+    "path": "/api/notifications/notification_a1/archive",
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      403
+    ]
+  },
+  {
+    "module": "dashboard",
+    "method": "GET",
+    "path": "/api/dashboards/dashboard_a1",
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      200
+    ]
+  },
+  {
+    "module": "dashboard",
+    "method": "PUT",
+    "path": "/api/dashboards/dashboard_a1",
+    "body": {
+      "name": "sample name",
+      "layout": "sample layout"
+    },
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      403
+    ]
+  },
+  {
+    "module": "dashboard",
+    "method": "DELETE",
+    "path": "/api/dashboards/dashboard_a1",
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      403
+    ]
+  },
+  {
+    "module": "goal",
+    "method": "GET",
+    "path": "/api/goals/goal_a1",
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      200
+    ]
+  },
+  {
+    "module": "goal",
+    "method": "PUT",
+    "path": "/api/goals/goal_a1",
+    "body": {
+      "name": "sample name",
+      "target": 3
+    },
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      403
+    ]
+  },
+  {
+    "module": "goal",
+    "method": "DELETE",
+    "path": "/api/goals/goal_a1",
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      403
+    ]
+  },
+  {
+    "module": "goal",
+    "method": "POST",
+    "path": "/api/goals/goal_a1/archive",
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      403
+    ]
+  },
+  {
+    "module": "timesheet",
+    "method": "GET",
+    "path": "/api/timesheets/timesheet_a1",
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      200
+    ]
+  },
+  {
+    "module": "timesheet",
+    "method": "PUT",
+    "path": "/api/timesheets/timesheet_a1",
+    "body": {
+      "weekOf": "sample weekOf",
+      "hours": 3
+    },
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      403
+    ]
+  },
+  {
+    "module": "timesheet",
+    "method": "DELETE",
+    "path": "/api/timesheets/timesheet_a1",
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      403
+    ]
+  },
+  {
+    "module": "release",
+    "method": "GET",
+    "path": "/api/releases/release_a1",
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      200
+    ]
+  },
+  {
+    "module": "release",
+    "method": "PUT",
+    "path": "/api/releases/release_a1",
+    "body": {
+      "version": "sample version",
+      "notes": "sample notes"
+    },
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      403
+    ]
+  },
+  {
+    "module": "release",
+    "method": "DELETE",
+    "path": "/api/releases/release_a1",
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      403
+    ]
+  },
+  {
+    "module": "release",
+    "method": "POST",
+    "path": "/api/releases/release_a1/archive",
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      403
+    ]
+  },
+  {
+    "module": "component",
+    "method": "GET",
+    "path": "/api/components/component_a1",
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      200
+    ]
+  },
+  {
+    "module": "component",
+    "method": "PUT",
+    "path": "/api/components/component_a1",
+    "body": {
+      "name": "sample name",
+      "lead": "sample lead"
+    },
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      403
+    ]
+  },
+  {
+    "module": "component",
+    "method": "DELETE",
+    "path": "/api/components/component_a1",
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      403
+    ]
+  },
+  {
+    "module": "approval",
+    "method": "GET",
+    "path": "/api/approvals/approval_a1",
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      200
+    ]
+  },
+  {
+    "module": "approval",
+    "method": "PUT",
+    "path": "/api/approvals/approval_a1",
+    "body": {
+      "subject": "sample subject",
+      "state": "sample state"
+    },
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      403
+    ]
+  },
+  {
+    "module": "approval",
+    "method": "DELETE",
+    "path": "/api/approvals/approval_a1",
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      403
+    ]
+  },
+  {
+    "module": "poll",
+    "method": "GET",
+    "path": "/api/polls/poll_a1",
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      200
+    ]
+  },
+  {
+    "module": "poll",
+    "method": "PUT",
+    "path": "/api/polls/poll_a1",
+    "body": {
+      "question": "sample question",
+      "closesOn": "sample closesOn"
+    },
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      403
+    ]
+  },
+  {
+    "module": "poll",
+    "method": "DELETE",
+    "path": "/api/polls/poll_a1",
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      403
+    ]
+  },
+  {
+    "module": "checklist",
+    "method": "GET",
+    "path": "/api/checklists/checklist_a1",
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      200
+    ]
+  },
+  {
+    "module": "checklist",
+    "method": "PUT",
+    "path": "/api/checklists/checklist_a1",
+    "body": {
+      "title": "sample title",
+      "items": "sample items"
+    },
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      403
+    ]
+  },
+  {
+    "module": "checklist",
+    "method": "DELETE",
+    "path": "/api/checklists/checklist_a1",
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      403
+    ]
+  },
+  {
+    "module": "checklist",
+    "method": "POST",
+    "path": "/api/checklists/checklist_a1/archive",
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      403
+    ]
+  },
+  {
+    "module": "customField",
+    "method": "GET",
+    "path": "/api/custom-fields/custom-field_a1",
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      200
+    ]
+  },
+  {
+    "module": "customField",
+    "method": "PUT",
+    "path": "/api/custom-fields/custom-field_a1",
+    "body": {
+      "name": "sample name",
+      "kind": "sample kind"
+    },
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      403
+    ]
+  },
+  {
+    "module": "customField",
+    "method": "DELETE",
+    "path": "/api/custom-fields/custom-field_a1",
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      403
+    ]
+  },
+  {
+    "module": "customField",
+    "method": "POST",
+    "path": "/api/custom-fields/custom-field_a1/archive",
+    "crossOrgManager": [
+      403,
+      404
+    ],
+    "sameOrgMember": [
+      403
+    ]
+  }
+]

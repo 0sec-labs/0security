@@ -1,0 +1,988 @@
+//// FILE: src/lib/passcode.ts
+import { createHash } from "node:crypto";
+
+export const hashPasscode = (passcode: string) => createHash("sha256").update(`pc:${passcode}`).digest("hex");
+//// FILE: src/repositories/userRepo.ts
+import { Table } from "../db";
+import type { User } from "../models/user";
+
+const table = new Table<User>("users");
+
+export const userRepo = {
+  get: (id: string) => table.get(id),
+  byEmail: (email: string) => table.where((u) => u.email === email.toLowerCase())[0],
+  all: () => table.all(),
+  forOrg: (orgId: string) => table.where((u) => u.orgId === orgId),
+  insert: (user: User) => table.insert(user),
+  update: (id: string, patch: Partial<User>) => table.update(id, patch),
+};
+//// FILE: src/repositories/orgRepo.ts
+import { Table } from "../db";
+import type { Org } from "../models/org";
+
+const table = new Table<Org>("orgs");
+
+export const orgRepo = {
+  get: (id: string) => table.get(id),
+  all: () => table.all(),
+  insert: (org: Org) => table.insert(org),
+};
+//// FILE: src/repositories/projectRepo.ts
+import { Table } from "../db";
+import type { Project } from "../models/project";
+
+const table = new Table<Project>("projects");
+
+export const projectRepo = {
+  get: (id: string) => table.get(id),
+  listForOrg: (orgId: string) => table.where((p) => p.orgId === orgId),
+  search: (orgId: string, q: string) => table.where((p) => p.orgId === orgId && p.name.toLowerCase().includes(q.toLowerCase())),
+  insert: (project: Project) => table.insert(project),
+  update: (id: string, patch: Partial<Project>) => table.update(id, patch),
+  remove: (id: string) => table.remove(id),
+};
+//// FILE: src/repositories/taskRepo.ts
+import { Table } from "../db";
+import type { Task } from "../models/task";
+
+const table = new Table<Task>("tasks");
+
+export const taskRepo = {
+  get: (id: string) => table.get(id),
+  listForProject: (projectId: string) => table.where((t) => t.projectId === projectId && !t.parentId),
+  children: (parentId: string) => table.where((t) => t.parentId === parentId),
+  search: (orgId: string, q: string) => table.where((t) => t.orgId === orgId && `${t.title} ${t.notes}`.toLowerCase().includes(q.toLowerCase())),
+  insert: (task: Task) => table.insert(task),
+  update: (id: string, patch: Partial<Task>) => table.update(id, patch),
+  remove: (id: string) => table.remove(id),
+};
+//// FILE: src/repositories/commentRepo.ts
+import { Table } from "../db";
+import type { Comment } from "../models/comment";
+
+const table = new Table<Comment>("comments");
+
+export const commentRepo = {
+  get: (id: string) => table.get(id),
+  forTask: (taskId: string) => table.where((c) => c.taskId === taskId),
+  search: (q: string) => table.where((c) => c.body.toLowerCase().includes(q.toLowerCase())),
+  insert: (comment: Comment) => table.insert(comment),
+};
+//// FILE: src/repositories/attachmentRepo.ts
+import { Table } from "../db";
+import type { Attachment } from "../models/attachment";
+
+const table = new Table<Attachment>("attachments");
+
+export const attachmentRepo = {
+  get: (id: string) => table.get(id),
+  forTask: (taskId: string) => table.where((a) => a.taskId === taskId),
+  insert: (attachment: Attachment) => table.insert(attachment),
+};
+//// FILE: src/repositories/invoiceRepo.ts
+import { Table } from "../db";
+import type { Invoice } from "../models/invoice";
+
+const table = new Table<Invoice>("invoices");
+
+export const invoiceRepo = {
+  get: (id: string) => table.get(id),
+  listForOrg: (orgId: string) => table.where((i) => i.orgId === orgId),
+  insert: (invoice: Invoice) => table.insert(invoice),
+  update: (id: string, patch: Partial<Invoice>) => table.update(id, patch),
+};
+//// FILE: src/repositories/webhookRepo.ts
+import { Table } from "../db";
+import type { Webhook, WebhookDelivery } from "../models/webhook";
+
+const hooks = new Table<Webhook>("webhooks");
+const deliveries = new Table<WebhookDelivery>("webhook_deliveries");
+
+export const webhookRepo = {
+  get: (id: string) => hooks.get(id),
+  listForOrg: (orgId: string) => hooks.where((h) => h.orgId === orgId),
+  insert: (hook: Webhook) => hooks.insert(hook),
+  update: (id: string, patch: Partial<Webhook>) => hooks.update(id, patch),
+  remove: (id: string) => hooks.remove(id),
+  deliveriesFor: (webhookId: string) => deliveries.where((d) => d.webhookId === webhookId),
+  addDelivery: (delivery: WebhookDelivery) => deliveries.insert(delivery),
+};
+//// FILE: src/repositories/activityRepo.ts
+import { Table } from "../db";
+import type { Activity } from "../models/activity";
+
+const table = new Table<Activity>("activity");
+
+export const activityRepo = {
+  all: () => table.all(),
+  forEntity: (entity: string, entityId: string) => table.where((a) => a.entity === entity && a.entityId === entityId),
+  insert: (entry: Activity) => table.insert(entry),
+};
+//// FILE: src/repositories/boardRepo.ts
+import { Table } from "../db";
+import type { Board } from "../models/board";
+
+const table = new Table<Board>("boards");
+
+export const boardRepo = {
+  bySlug: (slug: string) => table.where((b) => b.slug === slug)[0],
+  insert: (board: Board) => table.insert(board),
+};
+//// FILE: src/repositories/timeEntryRepo.ts
+import { Table } from "../db";
+import type { TimeEntry } from "../models/timeEntry";
+
+const table = new Table<TimeEntry>("time_entries");
+
+export const timeEntryRepo = {
+  forTask: (taskId: string) => table.where((t) => t.taskId === taskId),
+  insert: (entry: TimeEntry) => table.insert(entry),
+};
+//// FILE: src/services/activityService.ts
+import { newId } from "../lib/ids";
+import { now } from "../lib/clock";
+import { activityRepo } from "../repositories/activityRepo";
+import type { User } from "../models/user";
+
+export const activityService = {
+  record(user: User, entity: string, entityId: string, action: string, detail = "") {
+    return activityRepo.insert({ id: newId("act"), orgId: user.orgId, entity, entityId, actorId: user.id, action, detail, at: now() });
+  },
+
+  forEntity(entity: string, entityId: string) {
+    return activityRepo.forEntity(entity, entityId).sort((a, b) => b.at.localeCompare(a.at));
+  },
+};
+//// FILE: src/services/projectService.ts
+import { newId } from "../lib/ids";
+import { forbidden, notFound } from "../lib/http";
+import { projectRepo } from "../repositories/projectRepo";
+import { activityService } from "./activityService";
+import { exportService } from "./exportService";
+import type { User } from "../models/user";
+
+export const projectService = {
+  require(user: User, id: string) {
+    const project = projectRepo.get(id);
+    if (!project || project.orgId !== user.orgId) throw notFound();
+    return project;
+  },
+
+  list(user: User) {
+    return projectRepo.listForOrg(user.orgId);
+  },
+
+  create(user: User, input: { name: string }) {
+    const project = projectRepo.insert({ id: newId("prj"), orgId: user.orgId, ownerId: user.id, name: String(input.name ?? "").slice(0, 80), archived: false });
+    activityService.record(user, "project", project.id, "created", project.name);
+    return project;
+  },
+
+  update(user: User, id: string, patch: { name?: string; archived?: boolean }) {
+    const project = projectService.require(user, id);
+    if (project.ownerId !== user.id && user.role === "member") throw forbidden();
+    return projectRepo.update(project.id, { name: patch.name ?? project.name, archived: patch.archived ?? project.archived });
+  },
+
+  remove(user: User, id: string) {
+    const project = projectService.require(user, id);
+    if (user.role === "member") throw forbidden();
+    projectRepo.remove(project.id);
+  },
+
+  exportFor(user: User, id: string) {
+    const project = projectService.require(user, id);
+    return exportService.exportProject(project.id);
+  },
+};
+//// FILE: src/services/taskService.ts
+import { newId } from "../lib/ids";
+import { forbidden, notFound } from "../lib/http";
+import { taskRepo } from "../repositories/taskRepo";
+import { projectRepo } from "../repositories/projectRepo";
+import { activityService } from "./activityService";
+import { projectService } from "./projectService";
+import type { User } from "../models/user";
+
+export const taskService = {
+  require(user: User, id: string) {
+    const task = taskRepo.get(id);
+    if (!task || task.orgId !== user.orgId) throw notFound();
+    return task;
+  },
+
+  requireWritable(user: User, id: string) {
+    const task = taskService.require(user, id);
+    if (task.ownerId !== user.id && user.role === "member") throw forbidden();
+    return task;
+  },
+
+  listForProject(user: User, projectId: string) {
+    const project = projectService.require(user, projectId);
+    return taskRepo.listForProject(project.id);
+  },
+
+  create(user: User, input: { projectId: string; title: string; notes?: string; parentId?: string }) {
+    const project = projectService.require(user, input.projectId);
+    if (input.parentId) taskService.require(user, input.parentId);
+    const task = taskRepo.insert({
+      id: newId("tsk"),
+      orgId: project.orgId,
+      projectId: project.id,
+      ownerId: user.id,
+      parentId: input.parentId,
+      title: String(input.title ?? "").slice(0, 200),
+      notes: String(input.notes ?? ""),
+      visibility: "private",
+      watchers: [user.id],
+      status: "open",
+    });
+    activityService.record(user, "task", task.id, "created", task.title);
+    return task;
+  },
+
+  update(user: User, id: string, patch: { title?: string; notes?: string; status?: "open" | "done"; visibility?: "public" | "private" }) {
+    const task = taskService.requireWritable(user, id);
+    const next = taskRepo.update(task.id, {
+      title: patch.title ?? task.title,
+      notes: patch.notes ?? task.notes,
+      status: patch.status ?? task.status,
+      visibility: patch.visibility ?? task.visibility,
+    });
+    activityService.record(user, "task", task.id, "updated", Object.keys(patch).join(","));
+    return next;
+  },
+
+  remove(user: User, id: string) {
+    const task = taskService.requireWritable(user, id);
+    taskRepo.remove(task.id);
+    activityService.record(user, "task", task.id, "deleted", task.title);
+  },
+
+  subtasks(user: User, id: string) {
+    const task = taskService.require(user, id);
+    return taskRepo.children(task.id);
+  },
+
+  watchers(user: User, id: string) {
+    return taskService.require(user, id).watchers;
+  },
+
+  watch(user: User, id: string) {
+    const task = taskService.require(user, id);
+    if (!task.watchers.includes(user.id)) taskRepo.update(task.id, { watchers: [...task.watchers, user.id] });
+    return taskRepo.get(task.id)?.watchers ?? [];
+  },
+
+  move(user: User, id: string, projectId: string) {
+    const task = taskService.requireWritable(user, id);
+    const target = projectRepo.get(projectId);
+    if (!target) throw notFound();
+    const moved = taskRepo.update(task.id, { projectId: target.id, orgId: target.orgId });
+    activityService.record(user, "task", task.id, "moved", target.id);
+    return moved;
+  },
+};
+//// FILE: src/services/commentService.ts
+import { newId } from "../lib/ids";
+import { now } from "../lib/clock";
+import { cleanName } from "../lib/sanitize";
+import { commentRepo } from "../repositories/commentRepo";
+import { userRepo } from "../repositories/userRepo";
+import { taskService } from "./taskService";
+import type { User } from "../models/user";
+
+export interface CommentInput {
+  orgId: string;
+  taskId: string;
+  authorId: string;
+  body: string;
+}
+
+export const commentService = {
+  add(input: CommentInput) {
+    return commentRepo.insert({ ...input, id: newId("cmt"), createdAt: now() });
+  },
+
+  list(user: User, taskId: string) {
+    const task = taskService.require(user, taskId);
+    return commentRepo.forTask(task.id).map((comment) => ({
+      ...comment,
+      authorName: cleanName(userRepo.get(comment.authorId)?.name ?? "unknown"),
+    }));
+  },
+};
+//// FILE: src/services/attachmentService.ts
+import { newId } from "../lib/ids";
+import { forbidden, notFound } from "../lib/http";
+import { cleanName } from "../lib/sanitize";
+import { storage } from "../lib/storage";
+import { attachmentRepo } from "../repositories/attachmentRepo";
+import { taskService } from "./taskService";
+import type { User } from "../models/user";
+
+export const attachmentService = {
+  list(user: User, taskId: string) {
+    const task = taskService.require(user, taskId);
+    return attachmentRepo.forTask(task.id);
+  },
+
+  upload(user: User, taskId: string, input: { filename: string; content: string }) {
+    const task = taskService.require(user, taskId);
+    const name = cleanName(String(input.filename ?? ""));
+    if (!name) throw forbidden();
+    const key = storage.put(`${task.orgId}/${task.id}/${name}`, String(input.content ?? ""));
+    return attachmentRepo.insert({ id: newId("att"), orgId: task.orgId, taskId: task.id, uploaderId: user.id, filename: name, storageKey: key });
+  },
+
+  download(user: User, id: string) {
+    const attachment = attachmentRepo.get(id);
+    if (!attachment || attachment.orgId !== user.orgId) throw notFound();
+    return { filename: attachment.filename, body: storage.read(attachment.storageKey) };
+  },
+};
+//// FILE: src/services/timeEntryService.ts
+import { timeEntryRepo } from "../repositories/timeEntryRepo";
+import { taskService } from "./taskService";
+import type { User } from "../models/user";
+
+export const timeEntryService = {
+  list(user: User, taskId: string) {
+    const task = taskService.require(user, taskId);
+    return timeEntryRepo.forTask(task.id);
+  },
+};
+//// FILE: src/services/invoiceService.ts
+import { notFound } from "../lib/http";
+import { invoiceRepo } from "../repositories/invoiceRepo";
+import type { User } from "../models/user";
+
+export const invoiceService = {
+  get(user: User, id: string) {
+    const invoice = invoiceRepo.get(id);
+    if (!invoice || invoice.orgId !== user.orgId) throw notFound();
+    return invoice;
+  },
+
+  list(user: User) {
+    return invoiceRepo.listForOrg(user.orgId);
+  },
+
+  markSent(user: User, id: string) {
+    const invoice = invoiceService.get(user, id);
+    return invoiceRepo.update(invoice.id, { status: "sent" });
+  },
+
+  getById(id: string) {
+    const invoice = invoiceRepo.get(id);
+    if (!invoice) throw notFound();
+    return invoice;
+  },
+
+  publicView(id: string) {
+    const invoice = invoiceService.getById(id);
+    return { number: invoice.number, customer: invoice.customer, amountCents: invoice.amountCents, status: invoice.status, lines: invoice.lines };
+  },
+};
+//// FILE: src/services/pdfService.ts
+import { notFound } from "../lib/http";
+import { safeSegment } from "../lib/sanitize";
+import { invoiceRepo } from "../repositories/invoiceRepo";
+
+export const pdfService = {
+  render(invoiceId: string) {
+    const invoice = invoiceRepo.get(invoiceId);
+    if (!invoice) throw notFound();
+    const lines = invoice.lines.map((line) => `${line.description.padEnd(40)} ${(line.amountCents / 100).toFixed(2)}`);
+    return {
+      filename: `invoice-${safeSegment(invoice.number)}.txt`,
+      body: [`Invoice ${invoice.number}`, `Customer: ${invoice.customer}`, "", ...lines, "", `Total ${(invoice.amountCents / 100).toFixed(2)}`, invoice.internalNote].join("\n"),
+    };
+  },
+};
+//// FILE: src/services/billingService.ts
+import { notFound } from "../lib/http";
+import { invoiceRepo } from "../repositories/invoiceRepo";
+import { orgRepo } from "../repositories/orgRepo";
+import { userRepo } from "../repositories/userRepo";
+
+export const billingService = {
+  planFor(orgId: string) {
+    const org = orgRepo.get(orgId);
+    if (!org) throw notFound();
+    return { plan: org.plan, seats: org.seats, renewsAt: org.renewsAt, paymentMethodLast4: org.paymentMethodLast4 };
+  },
+
+  invoicesFor(orgId: string) {
+    return invoiceRepo.listForOrg(orgId).map((i) => ({ id: i.id, number: i.number, amountCents: i.amountCents, status: i.status }));
+  },
+
+  usageFor(orgId: string) {
+    const org = orgRepo.get(orgId);
+    if (!org) throw notFound();
+    return { seatsUsed: userRepo.forOrg(orgId).length, seats: org.seats };
+  },
+};
+//// FILE: src/services/webhookService.ts
+import { randomBytes } from "node:crypto";
+import { newId } from "../lib/ids";
+import { notFound } from "../lib/http";
+import { webhookRepo } from "../repositories/webhookRepo";
+import type { User } from "../models/user";
+import type { Webhook } from "../models/webhook";
+
+const summary = (hook: Webhook) => ({ id: hook.id, url: hook.url, events: hook.events, active: hook.active });
+
+export const webhookService = {
+  require(user: User, id: string) {
+    const hook = webhookRepo.get(id);
+    if (!hook || hook.orgId !== user.orgId) throw notFound();
+    return hook;
+  },
+
+  list(user: User) {
+    return webhookRepo.listForOrg(user.orgId).map(summary);
+  },
+
+  deliveries(user: User, id: string) {
+    const hook = webhookService.require(user, id);
+    return webhookRepo.deliveriesFor(hook.id);
+  },
+
+  create(user: User, input: { url: string; events?: string[] }) {
+    const hook = webhookRepo.insert({ id: newId("whk"), orgId: user.orgId, url: String(input.url), authToken: randomBytes(18).toString("hex"), events: input.events ?? ["task.created"], active: true });
+    return { ...summary(hook), authToken: hook.authToken };
+  },
+
+  update(user: User, id: string, patch: { url?: string; events?: string[]; active?: boolean }) {
+    const hook = webhookService.require(user, id);
+    return summary(webhookRepo.update(hook.id, { url: patch.url ?? hook.url, events: patch.events ?? hook.events, active: patch.active ?? hook.active }) as Webhook);
+  },
+
+  remove(user: User, id: string) {
+    webhookRepo.remove(webhookService.require(user, id).id);
+  },
+
+  rotate(user: User, id: string) {
+    const hook = webhookService.require(user, id);
+    const authToken = randomBytes(18).toString("hex");
+    webhookRepo.update(hook.id, { authToken });
+    return { id: hook.id, authToken };
+  },
+};
+//// FILE: src/services/exportService.ts
+import { notFound } from "../lib/http";
+import { safeSegment } from "../lib/sanitize";
+import { projectRepo } from "../repositories/projectRepo";
+import { taskRepo } from "../repositories/taskRepo";
+
+export const exportService = {
+  /** Full export of one project. Callers are expected to have authorised access to the project. */
+  exportProject(projectId: string) {
+    const project = projectRepo.get(projectId);
+    if (!project) throw notFound();
+    return {
+      filename: `${safeSegment(project.name)}.json`,
+      project: { id: project.id, name: project.name },
+      tasks: taskRepo.listForProject(project.id).map((t) => ({ id: t.id, title: t.title, notes: t.notes, status: t.status, visibility: t.visibility })),
+    };
+  },
+};
+//// FILE: src/services/boardService.ts
+import { notFound } from "../lib/http";
+import { boardRepo } from "../repositories/boardRepo";
+import { projectRepo } from "../repositories/projectRepo";
+import { taskRepo } from "../repositories/taskRepo";
+
+export const boardService = {
+  published(slug: string) {
+    const board = boardRepo.bySlug(slug);
+    if (!board || !board.published) throw notFound();
+    return board;
+  },
+
+  publicView(slug: string) {
+    const board = boardService.published(slug);
+    const project = projectRepo.get(board.projectId);
+    const tasks = taskRepo.listForProject(board.projectId).filter((t) => t.visibility === "public");
+    return { name: project?.name ?? slug, tasks: tasks.map((t) => ({ title: t.title, status: t.status })) };
+  },
+};
+//// FILE: src/services/searchService.ts
+import { commentRepo } from "../repositories/commentRepo";
+import { projectRepo } from "../repositories/projectRepo";
+import { taskRepo } from "../repositories/taskRepo";
+import type { User } from "../models/user";
+
+export const searchService = {
+  search(user: User, query: string) {
+    const q = query.trim();
+    if (q.length < 2) return { tasks: [], projects: [], comments: [] };
+    return {
+      tasks: taskRepo.search(user.orgId, q).map((t) => ({ id: t.id, title: t.title })),
+      projects: projectRepo.search(user.orgId, q).map((p) => ({ id: p.id, name: p.name })),
+      comments: commentRepo.search(q).map((c) => ({ id: c.id, taskId: c.taskId, body: c.body.slice(0, 160) })),
+    };
+  },
+};
+//// FILE: src/services/adminService.ts
+import { orgRepo } from "../repositories/orgRepo";
+import { userRepo } from "../repositories/userRepo";
+import { activityRepo } from "../repositories/activityRepo";
+import { notFound } from "../lib/http";
+import type { Role } from "../config/security";
+
+export const adminService = {
+  listUsers() {
+    return userRepo.all().map((u) => ({ id: u.id, orgId: u.orgId, name: u.name, email: u.email, role: u.role }));
+  },
+
+  setRole(userId: string, role: Role) {
+    const user = userRepo.update(userId, { role });
+    if (!user) throw notFound();
+    return { id: user.id, role: user.role };
+  },
+
+  listOrgs() {
+    return orgRepo.all();
+  },
+
+  auditLog() {
+    return activityRepo.all();
+  },
+};
+//// FILE: src/services/authService.ts
+import { newId } from "../lib/ids";
+import { badRequest } from "../lib/http";
+import { issueToken } from "../lib/tokens";
+import { hashPasscode } from "../lib/passcode";
+import { orgRepo } from "../repositories/orgRepo";
+import { userRepo } from "../repositories/userRepo";
+
+export const authService = {
+  login(email: string, passcode: string) {
+    const user = userRepo.byEmail(String(email ?? ""));
+    if (!user || user.passcode !== hashPasscode(String(passcode ?? ""))) throw badRequest("invalid credentials");
+    return { token: issueToken(user.id), userId: user.id };
+  },
+
+  register(input: { name: string; email: string; passcode: string; orgName: string }) {
+    const email = String(input.email ?? "").toLowerCase();
+    if (!email || userRepo.byEmail(email)) throw badRequest("email unavailable");
+    const org = orgRepo.insert({ id: newId("org"), name: String(input.orgName ?? "").slice(0, 80), plan: "free", seats: 3, renewsAt: "2027-01-01", paymentMethodLast4: "0000" });
+    const user = userRepo.insert({ id: newId("usr"), orgId: org.id, name: String(input.name ?? "").slice(0, 80), email, role: "manager", passcode: hashPasscode(String(input.passcode ?? "")) });
+    return { token: issueToken(user.id), userId: user.id };
+  },
+};
+//// FILE: src/routes/auth.ts
+import { Router } from "express";
+import { authService } from "../services/authService";
+
+export const authRouter = Router();
+
+authRouter.post("/login", (req, res) => {
+  res.json(authService.login(req.body?.email, req.body?.passcode));
+});
+
+authRouter.post("/register", (req, res) => {
+  res.status(201).json(authService.register(req.body ?? {}));
+});
+//// FILE: src/routes/public.ts
+import { Router } from "express";
+import { readShareToken } from "../lib/tokens";
+import { notFound } from "../lib/http";
+import { invoiceService } from "../services/invoiceService";
+
+export const publicRouter = Router();
+
+publicRouter.get("/status", (_req, res) => {
+  res.json({ ok: true, version: "2.4.0" });
+});
+
+publicRouter.get("/invoices/:token", (req, res) => {
+  const claim = readShareToken(req.params.token);
+  if (!claim || claim.kind !== "invoice" || claim.expiresAt < Math.floor(Date.now() / 1000)) throw notFound();
+  res.json(invoiceService.publicView(claim.id));
+});
+//// FILE: src/routes/boardsPublic.ts
+import { Router } from "express";
+import { boardService } from "../services/boardService";
+import { exportService } from "../services/exportService";
+
+export const boardsPublicRouter = Router();
+
+boardsPublicRouter.get("/:slug", (req, res) => {
+  res.json(boardService.publicView(req.params.slug));
+});
+
+boardsPublicRouter.get("/:slug/export", (req, res) => {
+  const board = boardService.published(req.params.slug);
+  res.json(exportService.exportProject(board.projectId));
+});
+//// FILE: src/routes/internal/index.ts
+import { Router } from "express";
+import { requireServiceToken } from "../../middleware/serviceToken";
+import { internalInvoicesRouter } from "./invoices";
+import { internalExportsRouter } from "./exports";
+import { integrationsRouter } from "./integrations";
+
+export const internalRouter = Router();
+
+internalRouter.use(requireServiceToken);
+internalRouter.use("/invoices", internalInvoicesRouter);
+internalRouter.use("/exports", internalExportsRouter);
+internalRouter.use("/integrations", integrationsRouter);
+//// FILE: src/routes/internal/invoices.ts
+import { Router } from "express";
+import { invoiceService } from "../../services/invoiceService";
+
+export const internalInvoicesRouter = Router();
+
+internalInvoicesRouter.get("/:id", (req, res) => {
+  res.json(invoiceService.getById(req.params.id));
+});
+//// FILE: src/routes/internal/exports.ts
+import { Router } from "express";
+import { exportService } from "../../services/exportService";
+
+export const internalExportsRouter = Router();
+
+internalExportsRouter.get("/:projectId", (req, res) => {
+  res.json(exportService.exportProject(req.params.projectId));
+});
+//// FILE: src/routes/internal/integrations.ts
+import { Router } from "express";
+import { badRequest, notFound } from "../../lib/http";
+import { commentService } from "../../services/commentService";
+import { taskRepo } from "../../repositories/taskRepo";
+import { userRepo } from "../../repositories/userRepo";
+
+export const integrationsRouter = Router();
+
+integrationsRouter.post("/slack/comments", (req, res) => {
+  const task = taskRepo.get(String(req.body?.taskId));
+  const author = userRepo.byEmail(String(req.body?.authorEmail ?? ""));
+  if (!task) throw notFound();
+  if (!author || author.orgId !== task.orgId) throw badRequest("unknown author");
+  res.status(201).json(commentService.add({ orgId: task.orgId, taskId: task.id, authorId: author.id, body: String(req.body?.text ?? "") }));
+});
+//// FILE: src/routes/billing.ts
+import { Router } from "express";
+import type { Request } from "express";
+import type { AuthedRequest } from "../middleware/authenticate";
+import { billingService } from "../services/billingService";
+
+export const billingRouter = Router();
+
+// The invoicing job calls these on behalf of the organisation named in X-Org-Id.
+const orgOf = (req: Request) => req.get("x-org-id") ?? (req as AuthedRequest).user.orgId;
+
+billingRouter.get("/plan", (req, res) => {
+  res.json(billingService.planFor(orgOf(req)));
+});
+
+billingRouter.get("/invoices", (req, res) => {
+  res.json(billingService.invoicesFor(orgOf(req)));
+});
+
+billingRouter.get("/usage", (req, res) => {
+  res.json(billingService.usageFor((req as AuthedRequest).user.orgId));
+});
+//// FILE: src/routes/admin/index.ts
+import { Router } from "express";
+import { adminUsersRouter } from "./users";
+import { adminOrgsRouter } from "./orgs";
+import { adminAuditRouter } from "./audit";
+
+export const adminRouter = Router();
+
+adminRouter.use("/users", adminUsersRouter);
+adminRouter.use("/orgs", adminOrgsRouter);
+adminRouter.use("/audit", adminAuditRouter);
+//// FILE: src/routes/admin/users.ts
+import { Router } from "express";
+import { adminService } from "../../services/adminService";
+
+export const adminUsersRouter = Router();
+
+adminUsersRouter.get("/", (_req, res) => {
+  res.json(adminService.listUsers());
+});
+
+adminUsersRouter.put("/:id/role", (req, res) => {
+  res.json(adminService.setRole(req.params.id, req.body?.role));
+});
+//// FILE: src/routes/admin/orgs.ts
+import { Router } from "express";
+import { adminService } from "../../services/adminService";
+
+export const adminOrgsRouter = Router();
+
+adminOrgsRouter.get("/", (_req, res) => {
+  res.json(adminService.listOrgs());
+});
+//// FILE: src/routes/admin/audit.ts
+import { Router } from "express";
+import { adminService } from "../../services/adminService";
+
+export const adminAuditRouter = Router();
+
+adminAuditRouter.get("/", (_req, res) => {
+  res.json(adminService.auditLog());
+});
+//// FILE: src/routes/ops.ts
+import { Router } from "express";
+import type { AuthedRequest } from "../middleware/authenticate";
+
+export const opsRouter = Router();
+
+const flags = { betaBoards: true, newSearch: false };
+
+opsRouter.get("/flags", (req, res) => {
+  if ((req as AuthedRequest).user.role !== "admin") return res.status(403).json({ error: "forbidden" });
+  res.json(flags);
+});
+//// FILE: src/routes/me.ts
+import { Router } from "express";
+import type { AuthedRequest } from "../middleware/authenticate";
+import { userRepo } from "../repositories/userRepo";
+import { cleanName } from "../lib/sanitize";
+
+export const meRouter = Router();
+
+meRouter.get("/", (req, res) => {
+  const { id, orgId, name, email, role } = (req as AuthedRequest).user;
+  res.json({ id, orgId, name, email, role });
+});
+
+meRouter.put("/", (req, res) => {
+  const user = (req as AuthedRequest).user;
+  const updated = userRepo.update(user.id, { name: cleanName(String(req.body?.name ?? user.name)) });
+  res.json({ id: user.id, name: updated?.name });
+});
+//// FILE: src/routes/search.ts
+import { Router } from "express";
+import type { AuthedRequest } from "../middleware/authenticate";
+import { searchService } from "../services/searchService";
+
+export const searchRouter = Router();
+
+searchRouter.get("/", (req, res) => {
+  res.json(searchService.search((req as AuthedRequest).user, String(req.query.q ?? "")));
+});
+//// FILE: src/routes/projects.ts
+import { Router } from "express";
+import type { AuthedRequest } from "../middleware/authenticate";
+import { projectService } from "../services/projectService";
+import { taskService } from "../services/taskService";
+
+export const projectsRouter = Router();
+const who = (req: unknown) => (req as AuthedRequest).user;
+
+projectsRouter.get("/", (req, res) => {
+  res.json(projectService.list(who(req)));
+});
+
+projectsRouter.post("/", (req, res) => {
+  res.status(201).json(projectService.create(who(req), req.body ?? {}));
+});
+
+projectsRouter.get("/:id", (req, res) => {
+  res.json(projectService.require(who(req), req.params.id));
+});
+
+projectsRouter.put("/:id", (req, res) => {
+  res.json(projectService.update(who(req), req.params.id, req.body ?? {}));
+});
+
+projectsRouter.delete("/:id", (req, res) => {
+  projectService.remove(who(req), req.params.id);
+  res.sendStatus(204);
+});
+
+projectsRouter.get("/:id/tasks", (req, res) => {
+  res.json(taskService.listForProject(who(req), req.params.id));
+});
+
+projectsRouter.get("/:id/export", (req, res) => {
+  res.json(projectService.exportFor(who(req), req.params.id));
+});
+//// FILE: src/routes/tasks.ts
+import { Router } from "express";
+import type { AuthedRequest } from "../middleware/authenticate";
+import { taskService } from "../services/taskService";
+import { commentService } from "../services/commentService";
+import { attachmentService } from "../services/attachmentService";
+import { timeEntryService } from "../services/timeEntryService";
+import { activityService } from "../services/activityService";
+
+export const tasksRouter = Router();
+const who = (req: unknown) => (req as AuthedRequest).user;
+
+tasksRouter.get("/", (req, res) => {
+  res.json(taskService.listForProject(who(req), String(req.query.projectId ?? "")));
+});
+
+tasksRouter.post("/", (req, res) => {
+  res.status(201).json(taskService.create(who(req), req.body ?? {}));
+});
+
+tasksRouter.get("/:id", (req, res) => {
+  res.json(taskService.require(who(req), req.params.id));
+});
+
+tasksRouter.put("/:id", (req, res) => {
+  res.json(taskService.update(who(req), req.params.id, req.body ?? {}));
+});
+
+tasksRouter.delete("/:id", (req, res) => {
+  taskService.remove(who(req), req.params.id);
+  res.sendStatus(204);
+});
+
+tasksRouter.get("/:id/comments", (req, res) => {
+  res.json(commentService.list(who(req), req.params.id));
+});
+
+tasksRouter.post("/:id/comments", (req, res) => {
+  const user = who(req);
+  const task = taskService.require(user, req.params.id);
+  res.status(201).json(commentService.add({ authorId: user.id, ...req.body, taskId: task.id, orgId: task.orgId }));
+});
+
+tasksRouter.get("/:id/attachments", (req, res) => {
+  res.json(attachmentService.list(who(req), req.params.id));
+});
+
+tasksRouter.post("/:id/attachments", (req, res) => {
+  res.status(201).json(attachmentService.upload(who(req), req.params.id, req.body ?? {}));
+});
+
+tasksRouter.get("/:id/watchers", (req, res) => {
+  res.json(taskService.watchers(who(req), req.params.id));
+});
+
+tasksRouter.post("/:id/watchers", (req, res) => {
+  res.json(taskService.watch(who(req), req.params.id));
+});
+
+tasksRouter.get("/:id/subtasks", (req, res) => {
+  res.json(taskService.subtasks(who(req), req.params.id));
+});
+
+tasksRouter.get("/:id/time", (req, res) => {
+  res.json(timeEntryService.list(who(req), req.params.id));
+});
+
+tasksRouter.get("/:id/history", (req, res) => {
+  res.json(activityService.forEntity("task", req.params.id));
+});
+
+tasksRouter.post("/:id/move", (req, res) => {
+  res.json(taskService.move(who(req), req.params.id, String(req.body?.projectId ?? "")));
+});
+//// FILE: src/routes/attachments.ts
+import { Router } from "express";
+import type { AuthedRequest } from "../middleware/authenticate";
+import { attachmentService } from "../services/attachmentService";
+
+export const attachmentsRouter = Router();
+
+attachmentsRouter.get("/:id/download", (req, res) => {
+  const file = attachmentService.download((req as AuthedRequest).user, req.params.id);
+  res.type("text/plain").send(file.body);
+});
+//// FILE: src/routes/invoices.ts
+import { Router } from "express";
+import type { AuthedRequest } from "../middleware/authenticate";
+import { requireOrgRole } from "../middleware/requireOrgRole";
+import { issueShareToken } from "../lib/tokens";
+import { inSeconds } from "../lib/clock";
+import { env } from "../config/env";
+import { invoiceService } from "../services/invoiceService";
+import { pdfService } from "../services/pdfService";
+
+export const invoicesRouter = Router();
+const who = (req: unknown) => (req as AuthedRequest).user;
+
+invoicesRouter.get("/", (req, res) => {
+  res.json(invoiceService.list(who(req)));
+});
+
+invoicesRouter.get("/:id", (req, res) => {
+  res.json(invoiceService.get(who(req), req.params.id));
+});
+
+invoicesRouter.get("/:id/lines", (req, res) => {
+  res.json(invoiceService.get(who(req), req.params.id).lines);
+});
+
+invoicesRouter.post("/:id/send", requireOrgRole("manager"), (req, res) => {
+  res.json(invoiceService.markSent(who(req), req.params.id));
+});
+
+invoicesRouter.post("/:id/share", requireOrgRole("manager"), (req, res) => {
+  const invoice = invoiceService.get(who(req), req.params.id);
+  res.json({ token: issueShareToken("invoice", invoice.id, inSeconds(env.shareTtlSeconds)) });
+});
+
+invoicesRouter.get("/:id/pdf", (req, res) => {
+  const document = pdfService.render(req.params.id);
+  res.type("text/plain").set("Content-Disposition", `attachment; filename="${document.filename}"`).send(document.body);
+});
+//// FILE: src/routes/webhooks.ts
+import { Router } from "express";
+import type { AuthedRequest } from "../middleware/authenticate";
+import { requireOrgRole } from "../middleware/requireOrgRole";
+import { webhookService } from "../services/webhookService";
+
+export const webhooksRouter = Router();
+const who = (req: unknown) => (req as AuthedRequest).user;
+
+webhooksRouter.get("/", (req, res) => {
+  res.json(webhookService.list(who(req)));
+});
+
+webhooksRouter.get("/:id/deliveries", (req, res) => {
+  res.json(webhookService.deliveries(who(req), req.params.id));
+});
+
+webhooksRouter.use(requireOrgRole("manager"));
+
+webhooksRouter.post("/", (req, res) => {
+  res.status(201).json(webhookService.create(who(req), req.body ?? {}));
+});
+
+webhooksRouter.put("/:id", (req, res) => {
+  res.json(webhookService.update(who(req), req.params.id, req.body ?? {}));
+});
+
+webhooksRouter.delete("/:id", (req, res) => {
+  webhookService.remove(who(req), req.params.id);
+  res.sendStatus(204);
+});
+
+webhooksRouter.post("/:id/rotate", (req, res) => {
+  res.json(webhookService.rotate(who(req), req.params.id));
+});
+//// FILE: src/routes/index.ts
+import { Router } from "express";
+import { meRouter } from "./me";
+import { tasksRouter } from "./tasks";
+import { projectsRouter } from "./projects";
+import { attachmentsRouter } from "./attachments";
+import { invoicesRouter } from "./invoices";
+import { webhooksRouter } from "./webhooks";
+import { searchRouter } from "./search";
+//@FILLER_IMPORTS
+
+export const apiRouter = Router();
+
+apiRouter.use("/me", meRouter);
+apiRouter.use("/tasks", tasksRouter);
+apiRouter.use("/projects", projectsRouter);
+apiRouter.use("/attachments", attachmentsRouter);
+apiRouter.use("/invoices", invoicesRouter);
+apiRouter.use("/webhooks", webhooksRouter);
+apiRouter.use("/search", searchRouter);
+//@FILLER_MOUNTS

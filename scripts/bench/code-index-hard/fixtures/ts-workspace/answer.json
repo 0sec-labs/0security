@@ -1,0 +1,663 @@
+{
+  "fixture": "ts-workspace",
+  "skill": null,
+  "cleanPaths": [
+    "src/models/label.ts",
+    "src/repositories/labelRepo.ts",
+    "src/services/labelService.ts",
+    "src/routes/labels.ts",
+    "src/validators/label.ts",
+    "src/models/milestone.ts",
+    "src/repositories/milestoneRepo.ts",
+    "src/services/milestoneService.ts",
+    "src/routes/milestones.ts",
+    "src/validators/milestone.ts",
+    "src/models/note.ts",
+    "src/repositories/noteRepo.ts",
+    "src/services/noteService.ts",
+    "src/routes/notes.ts",
+    "src/validators/note.ts",
+    "src/models/sprint.ts",
+    "src/repositories/sprintRepo.ts",
+    "src/services/sprintService.ts",
+    "src/routes/sprints.ts",
+    "src/validators/sprint.ts",
+    "src/models/epic.ts",
+    "src/repositories/epicRepo.ts",
+    "src/services/epicService.ts",
+    "src/routes/epics.ts",
+    "src/validators/epic.ts",
+    "src/models/reminder.ts",
+    "src/repositories/reminderRepo.ts",
+    "src/services/reminderService.ts",
+    "src/routes/reminders.ts",
+    "src/validators/reminder.ts",
+    "src/models/tag.ts",
+    "src/repositories/tagRepo.ts",
+    "src/services/tagService.ts",
+    "src/routes/tags.ts",
+    "src/validators/tag.ts",
+    "src/models/template.ts",
+    "src/repositories/templateRepo.ts",
+    "src/services/templateService.ts",
+    "src/routes/templates.ts",
+    "src/validators/template.ts",
+    "src/models/automation.ts",
+    "src/repositories/automationRepo.ts",
+    "src/services/automationService.ts",
+    "src/routes/automations.ts",
+    "src/validators/automation.ts",
+    "src/models/integrationLink.ts",
+    "src/repositories/integrationLinkRepo.ts",
+    "src/services/integrationLinkService.ts",
+    "src/routes/integrationLinks.ts",
+    "src/validators/integrationLink.ts",
+    "src/models/apiKey.ts",
+    "src/repositories/apiKeyRepo.ts",
+    "src/services/apiKeyService.ts",
+    "src/routes/apiKeys.ts",
+    "src/validators/apiKey.ts",
+    "src/models/notification.ts",
+    "src/repositories/notificationRepo.ts",
+    "src/services/notificationService.ts",
+    "src/routes/notifications.ts",
+    "src/validators/notification.ts",
+    "src/models/dashboard.ts",
+    "src/repositories/dashboardRepo.ts",
+    "src/services/dashboardService.ts",
+    "src/routes/dashboards.ts",
+    "src/validators/dashboard.ts",
+    "src/models/goal.ts",
+    "src/repositories/goalRepo.ts",
+    "src/services/goalService.ts",
+    "src/routes/goals.ts",
+    "src/validators/goal.ts",
+    "src/models/timesheet.ts",
+    "src/repositories/timesheetRepo.ts",
+    "src/services/timesheetService.ts",
+    "src/routes/timesheets.ts",
+    "src/validators/timesheet.ts",
+    "src/models/release.ts",
+    "src/repositories/releaseRepo.ts",
+    "src/services/releaseService.ts",
+    "src/routes/releases.ts",
+    "src/validators/release.ts",
+    "src/models/component.ts",
+    "src/repositories/componentRepo.ts",
+    "src/services/componentService.ts",
+    "src/routes/components.ts",
+    "src/validators/component.ts",
+    "src/models/approval.ts",
+    "src/repositories/approvalRepo.ts",
+    "src/services/approvalService.ts",
+    "src/routes/approvals.ts",
+    "src/validators/approval.ts",
+    "src/models/poll.ts",
+    "src/repositories/pollRepo.ts",
+    "src/services/pollService.ts",
+    "src/routes/polls.ts",
+    "src/validators/poll.ts",
+    "src/models/checklist.ts",
+    "src/repositories/checklistRepo.ts",
+    "src/services/checklistService.ts",
+    "src/routes/checklists.ts",
+    "src/validators/checklist.ts",
+    "src/models/customField.ts",
+    "src/repositories/customFieldRepo.ts",
+    "src/services/customFieldService.ts",
+    "src/routes/customFields.ts",
+    "src/validators/customField.ts",
+    "src/routes/projects.ts",
+    "src/services/projectService.ts",
+    "src/services/timeEntryService.ts",
+    "src/services/boardService.ts",
+    "src/middleware/requireOrgRole.ts",
+    "src/middleware/serviceToken.ts",
+    "src/routes/me.ts"
+  ],
+  "items": [
+    {
+      "id": "tw-task-history",
+      "path": "src/routes/tasks.ts",
+      "startLine": 67,
+      "endLine": 69,
+      "category": [
+        "authz",
+        "secret"
+      ],
+      "description": "GET /tasks/:id/history returns the activity entries of any task id: the nine sibling task routes resolve the task through taskService.require (organisation check) first, this one goes straight to activityService.forEntity and the repository, which filter by entity and id only.",
+      "alsoAt": [
+        {
+          "path": "src/services/activityService.ts",
+          "startLine": 11,
+          "endLine": 13
+        },
+        {
+          "path": "src/repositories/activityRepo.ts",
+          "startLine": 8,
+          "endLine": 8
+        }
+      ],
+      "oracle": {
+        "mention": [
+          "history",
+          "activity",
+          "audit (log|trail)"
+        ],
+        "lineSlack": 3
+      }
+    },
+    {
+      "id": "tw-invoice-pdf",
+      "path": "src/routes/invoices.ts",
+      "startLine": 34,
+      "endLine": 37,
+      "category": [
+        "authz",
+        "secret"
+      ],
+      "description": "GET /invoices/:id/pdf renders any invoice by id: the other invoice routes go through invoiceService.get (organisation check), the pdf route calls pdfService.render, which loads the invoice from the repository directly.",
+      "alsoAt": [
+        {
+          "path": "src/services/pdfService.ts",
+          "startLine": 6,
+          "endLine": 14
+        }
+      ],
+      "oracle": {
+        "mention": [
+          "pdf",
+          "render"
+        ],
+        "lineSlack": 3
+      }
+    },
+    {
+      "id": "tw-webhook-deliveries",
+      "path": "src/routes/webhooks.ts",
+      "startLine": 13,
+      "endLine": 15,
+      "category": [
+        "authz",
+        "secret"
+      ],
+      "description": "GET /webhooks/:id/deliveries is registered before webhooksRouter.use(requireOrgRole('manager')), so any member can read delivery logs, which contain the Authorization header sent to the target (the webhook auth token).",
+      "alsoAt": [
+        {
+          "path": "src/routes/webhooks.ts",
+          "startLine": 17,
+          "endLine": 17
+        },
+        {
+          "path": "src/services/webhookService.ts",
+          "startLine": 21,
+          "endLine": 24
+        }
+      ],
+      "oracle": {
+        "mention": [
+          "deliver"
+        ],
+        "lineSlack": 3
+      }
+    },
+    {
+      "id": "tw-public-export",
+      "path": "src/routes/boardsPublic.ts",
+      "startLine": 11,
+      "endLine": 14,
+      "category": [
+        "authz",
+        "secret"
+      ],
+      "description": "The public board export calls exportService.exportProject, which returns every task of the project including private ones and their notes; only the public board view filters on visibility.",
+      "alsoAt": [
+        {
+          "path": "src/services/exportService.ts",
+          "startLine": 8,
+          "endLine": 16
+        }
+      ],
+      "oracle": {
+        "mention": [
+          "export"
+        ],
+        "lineSlack": 3
+      }
+    },
+    {
+      "id": "tw-billing-org-header",
+      "path": "src/routes/billing.ts",
+      "startLine": 8,
+      "endLine": 9,
+      "category": [
+        "authz",
+        "secret"
+      ],
+      "description": "Billing routes take the organisation from the X-Org-Id header without checking membership (the router is mounted before resolveOrg), so any manager can read another organisation's plan, payment method and invoices.",
+      "alsoAt": [
+        {
+          "path": "src/routes/billing.ts",
+          "startLine": 11,
+          "endLine": 13
+        },
+        {
+          "path": "src/routes/billing.ts",
+          "startLine": 15,
+          "endLine": 17
+        },
+        {
+          "path": "src/app.ts",
+          "startLine": 27,
+          "endLine": 28
+        }
+      ],
+      "oracle": {
+        "mention": [
+          "x-org-id",
+          "org(anisation)? header",
+          "billing"
+        ],
+        "lineSlack": 3
+      }
+    },
+    {
+      "id": "tw-attachment-filename",
+      "path": "src/services/attachmentService.ts",
+      "startLine": 17,
+      "endLine": 19,
+      "category": [
+        "path-traversal"
+      ],
+      "description": "Attachment upload builds the storage key from cleanName(filename); cleanName only strips markup characters, so ../ sequences survive and storage.put writes outside the upload root.",
+      "alsoAt": [
+        {
+          "path": "src/routes/tasks.ts",
+          "startLine": 47,
+          "endLine": 49
+        },
+        {
+          "path": "src/lib/sanitize.ts",
+          "startLine": 6,
+          "endLine": 8
+        },
+        {
+          "path": "src/lib/storage.ts",
+          "startLine": 6,
+          "endLine": 11
+        }
+      ],
+      "oracle": {
+        "mention": [
+          "attachment",
+          "upload",
+          "file ?name",
+          "cleanName",
+          "traversal"
+        ],
+        "lineSlack": 3
+      }
+    },
+    {
+      "id": "tw-security-case",
+      "path": "src/middleware/securityRules.ts",
+      "startLine": 5,
+      "endLine": 12,
+      "category": [
+        "authz"
+      ],
+      "description": "securityRules matches the request path with a case-sensitive startsWith on the lower-case prefixes while Express routes case-insensitively, so /API/ADMIN/... skips the admin rule; the admin handlers rely on that rule alone and have no role check of their own.",
+      "alsoAt": [
+        {
+          "path": "src/config/security.ts",
+          "startLine": 9,
+          "endLine": 13
+        },
+        {
+          "path": "src/routes/admin/users.ts",
+          "startLine": 6,
+          "endLine": 8
+        },
+        {
+          "path": "src/routes/admin/users.ts",
+          "startLine": 10,
+          "endLine": 12
+        },
+        {
+          "path": "src/routes/admin/orgs.ts",
+          "startLine": 6,
+          "endLine": 8
+        },
+        {
+          "path": "src/routes/admin/audit.ts",
+          "startLine": 6,
+          "endLine": 8
+        }
+      ],
+      "oracle": {
+        "mention": [
+          "case",
+          "upper",
+          "lower-?case",
+          "startsWith",
+          "prefix",
+          "normali[sz]",
+          "bypass"
+        ],
+        "lineSlack": 3
+      }
+    },
+    {
+      "id": "tw-search-comments",
+      "path": "src/services/searchService.ts",
+      "startLine": 13,
+      "endLine": 13,
+      "category": [
+        "authz",
+        "secret"
+      ],
+      "description": "Search filters tasks and projects by the caller's organisation but searches comments across all organisations (commentRepo.search has no organisation argument).",
+      "alsoAt": [
+        {
+          "path": "src/repositories/commentRepo.ts",
+          "startLine": 9,
+          "endLine": 9
+        }
+      ],
+      "oracle": {
+        "mention": [
+          "comment"
+        ],
+        "lineSlack": 3
+      }
+    },
+    {
+      "id": "tw-comment-author",
+      "path": "src/routes/tasks.ts",
+      "startLine": 37,
+      "endLine": 41,
+      "category": [
+        "authz",
+        "mass-assignment",
+        "business-logic"
+      ],
+      "description": "The user comment route spreads req.body after authorId, so a caller can post as any user; the integration route sets authorId legitimately, and commentService.add trusts the input.",
+      "alsoAt": [
+        {
+          "path": "src/services/commentService.ts",
+          "startLine": 17,
+          "endLine": 19
+        }
+      ],
+      "oracle": {
+        "mention": [
+          "comment",
+          "author",
+          "spread",
+          "impersonat",
+          "spoof"
+        ],
+        "lineSlack": 3
+      }
+    },
+    {
+      "id": "tw-task-move",
+      "path": "src/services/taskService.ts",
+      "startLine": 79,
+      "endLine": 86,
+      "category": [
+        "authz"
+      ],
+      "description": "taskService.move checks that the caller may write the task but loads the target project without an organisation check and stores the target's orgId on the task, so a caller can move tasks into another organisation's project.",
+      "alsoAt": [
+        {
+          "path": "src/routes/tasks.ts",
+          "startLine": 71,
+          "endLine": 73
+        }
+      ],
+      "oracle": {
+        "mention": [
+          "move",
+          "target project",
+          "projectId"
+        ],
+        "lineSlack": 3
+      }
+    }
+  ],
+  "decoys": [
+    {
+      "id": "tw-d-comments-list",
+      "path": "src/routes/tasks.ts",
+      "startLine": 33,
+      "endLine": 35,
+      "category": "authz",
+      "description": "comments list resolves the task through taskService.require"
+    },
+    {
+      "id": "tw-d-attachments-list",
+      "path": "src/routes/tasks.ts",
+      "startLine": 43,
+      "endLine": 45,
+      "category": "authz",
+      "description": "attachment list resolves the task through taskService.require"
+    },
+    {
+      "id": "tw-d-watchers",
+      "path": "src/routes/tasks.ts",
+      "startLine": 51,
+      "endLine": 53,
+      "category": "authz",
+      "description": "watchers resolve the task through taskService.require"
+    },
+    {
+      "id": "tw-d-subtasks",
+      "path": "src/routes/tasks.ts",
+      "startLine": 59,
+      "endLine": 61,
+      "category": "authz",
+      "description": "subtasks resolve the task through taskService.require"
+    },
+    {
+      "id": "tw-d-time",
+      "path": "src/routes/tasks.ts",
+      "startLine": 63,
+      "endLine": 65,
+      "category": "authz",
+      "description": "time entries resolve the task through taskService.require"
+    },
+    {
+      "id": "tw-d-task-get",
+      "path": "src/routes/tasks.ts",
+      "startLine": 20,
+      "endLine": 22,
+      "category": "authz",
+      "description": "task read goes through taskService.require"
+    },
+    {
+      "id": "tw-d-task-require",
+      "path": "src/services/taskService.ts",
+      "startLine": 16,
+      "endLine": 20,
+      "category": "authz",
+      "description": "organisation and owner checks in the service"
+    },
+    {
+      "id": "tw-d-task-create",
+      "path": "src/services/taskService.ts",
+      "startLine": 27,
+      "endLine": 44,
+      "category": "authz",
+      "description": "create resolves the project (and parent) through the checked services"
+    },
+    {
+      "id": "tw-d-invoice-get",
+      "path": "src/routes/invoices.ts",
+      "startLine": 17,
+      "endLine": 19,
+      "category": "authz",
+      "description": "invoice read goes through invoiceService.get"
+    },
+    {
+      "id": "tw-d-invoice-lines",
+      "path": "src/routes/invoices.ts",
+      "startLine": 21,
+      "endLine": 23,
+      "category": "authz",
+      "description": "invoice lines go through invoiceService.get"
+    },
+    {
+      "id": "tw-d-invoice-share",
+      "path": "src/routes/invoices.ts",
+      "startLine": 29,
+      "endLine": 32,
+      "category": "authz",
+      "description": "share token issuance is manager only and checks the invoice's organisation"
+    },
+    {
+      "id": "tw-d-internal-invoice",
+      "path": "src/routes/internal/invoices.ts",
+      "startLine": 6,
+      "endLine": 8,
+      "category": "authz",
+      "description": "internal route, service token required by internalRouter.use(requireServiceToken); getById has no check by design"
+    },
+    {
+      "id": "tw-d-internal-export",
+      "path": "src/routes/internal/exports.ts",
+      "startLine": 6,
+      "endLine": 8,
+      "category": "authz",
+      "description": "internal route behind the service token"
+    },
+    {
+      "id": "tw-d-public-invoice",
+      "path": "src/routes/public.ts",
+      "startLine": 12,
+      "endLine": 16,
+      "category": "authz",
+      "description": "public share link: the signed claim carries the invoice id, kind and expiry, and the id used is the claim's"
+    },
+    {
+      "id": "tw-d-project-export",
+      "path": "src/routes/projects.ts",
+      "startLine": 34,
+      "endLine": 36,
+      "category": "authz",
+      "description": "project export resolves the project through projectService.require first"
+    },
+    {
+      "id": "tw-d-board-public",
+      "path": "src/routes/boardsPublic.ts",
+      "startLine": 7,
+      "endLine": 9,
+      "category": "authz",
+      "description": "public board view filters to public tasks of a published board"
+    },
+    {
+      "id": "tw-d-billing-usage",
+      "path": "src/routes/billing.ts",
+      "startLine": 19,
+      "endLine": 21,
+      "category": "authz",
+      "description": "usage uses the caller's own organisation"
+    },
+    {
+      "id": "tw-d-webhook-list",
+      "path": "src/routes/webhooks.ts",
+      "startLine": 9,
+      "endLine": 11,
+      "category": "authz",
+      "description": "list returns summaries (no secrets) for the caller's organisation on purpose"
+    },
+    {
+      "id": "tw-d-webhook-rotate",
+      "path": "src/routes/webhooks.ts",
+      "startLine": 32,
+      "endLine": 34,
+      "category": "authz",
+      "description": "registered after the manager guard"
+    },
+    {
+      "id": "tw-d-attachment-download",
+      "path": "src/routes/attachments.ts",
+      "startLine": 7,
+      "endLine": 10,
+      "category": "authz",
+      "description": "organisation check and the stored key, not the client name"
+    },
+    {
+      "id": "tw-d-comment-display",
+      "path": "src/services/commentService.ts",
+      "startLine": 21,
+      "endLine": 27,
+      "category": "xss",
+      "description": "cleanName used for a display name (HTML sink), which is what it is for"
+    },
+    {
+      "id": "tw-d-integration-comment",
+      "path": "src/routes/internal/integrations.ts",
+      "startLine": 9,
+      "endLine": 15,
+      "category": "authz",
+      "description": "service-token route; the author must belong to the task's organisation"
+    },
+    {
+      "id": "tw-d-ops-flags",
+      "path": "src/routes/ops.ts",
+      "startLine": 8,
+      "endLine": 11,
+      "category": "authz",
+      "description": "inline admin check on top of the URL rule"
+    },
+    {
+      "id": "tw-d-register",
+      "path": "src/services/authService.ts",
+      "startLine": 15,
+      "endLine": 21,
+      "category": "mass-assignment",
+      "description": "role is fixed server side and not read from the body"
+    },
+    {
+      "id": "tw-d-me-update",
+      "path": "src/routes/me.ts",
+      "startLine": 13,
+      "endLine": 17,
+      "category": "authz",
+      "description": "self only"
+    },
+    {
+      "id": "tw-d-search-scoped",
+      "path": "src/services/searchService.ts",
+      "startLine": 11,
+      "endLine": 12,
+      "category": "authz",
+      "description": "tasks and projects are scoped to the caller's organisation"
+    },
+    {
+      "id": "tw-d-pdf-filename",
+      "path": "src/services/pdfService.ts",
+      "startLine": 11,
+      "endLine": 11,
+      "category": "path-traversal",
+      "description": "safeSegment for the download file name"
+    },
+    {
+      "id": "tw-d-export-filename",
+      "path": "src/services/exportService.ts",
+      "startLine": 12,
+      "endLine": 12,
+      "category": "path-traversal",
+      "description": "safeSegment for the export file name"
+    },
+    {
+      "id": "tw-d-resolve-org",
+      "path": "src/middleware/resolveOrg.ts",
+      "startLine": 5,
+      "endLine": 13,
+      "category": "authz",
+      "description": "header accepted only for the caller's own organisation or a platform admin"
+    }
+  ]
+}
