@@ -43,7 +43,7 @@ import { homeStateDir, VERSION } from "@0/engine/shared";
 import { getSettings } from "../state/settings-store.js";
 import { UpdateManager } from "../web/update-manager.js";
 import { restartCommand, spawnRestart } from "../web/self-restart.js";
-import { assertLocalEngineAvailable, registerLocalEngine, discoverLocalEngine } from "../local-engine.js";
+import { assertLocalEngineAvailable, registerLocalEngine } from "../local-engine.js";
 import { loadManagedWorker, validateWorkerOptions, type WorkerDeployResult } from "../worker-deploy.js";
 import { discoverSshHosts } from "../worker-hosts.js";
 import { WebRequestError, errorStatusCode, authorizeWebRequest, json, text, sendFile, readJson, readForm, requireControlToken, isLoopbackDashboardHost } from "../web/dashboard-http.js";
@@ -90,11 +90,6 @@ function openBrowser(url: string): void {
   const cmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "cmd" : "xdg-open";
   const args = process.platform === "win32" ? ["/c", "start", "", url] : [url];
   execFile(cmd, args, () => {});
-}
-
-/** Carry the control token to the browser in the URL fragment, which is never sent to the server or written to logs, so it need not be embedded in the page HTML. */
-function launchUrl(base: string, controlToken: string | undefined): string {
-  return controlToken ? `${base}#0t=${encodeURIComponent(controlToken)}` : base;
 }
 
 const STATIC_ASSET_EXTENSION = /^\.(?:js|mjs|cjs|css|map|json|txt|xml|html?|wasm|webmanifest|png|jpe?g|gif|svg|ico|webp|avif|bmp|woff2?|ttf|otf|eot|mp3|mp4|webm|ogg|pdf|zip|gz|md|passwd)$/i;
@@ -158,7 +153,7 @@ export function registerDashboardCommand(program: Command): void {
       if (!serverMode && port !== 0 && !opts.dbPath && !opts.assetDir && !opts.devUrl && !opts.enginesConfig && !opts.engineTokenEnv && !opts.engineWorkspace && !opts.engineAllowApply && !opts.engineTimeCap && !opts.engineCostCap && await findDashboardInstance(origin)) {
         console.log(chalk.gray(`  0 is already running: ${origin}`));
         if (opts.readyJson) console.log(`ZERO_DASHBOARD_READY ${JSON.stringify({ url: origin })}`);
-        if (opts.open !== false) openBrowser(launchUrl(`${origin}/chats`, discoverLocalEngine()?.token));
+        if (opts.open !== false) openBrowser(`${origin}/chats`);
         return;
       }
 
@@ -622,7 +617,9 @@ export function registerDashboardCommand(program: Command): void {
               const contentType = response.headers.get("content-type") ?? "application/octet-stream";
               const data = Buffer.from(await response.arrayBuffer());
               if (data.length > 16_000_000) throw new WebRequestError("Development asset is too large.", 413);
-              const body = data;
+              const body = contentType.includes("text/html")
+                ? data.toString("utf8").replace("</head>", `<meta name="0-control-token" content="${controlToken}"></head>`)
+                : data;
               res.writeHead(response.status, { "Content-Type": contentType, "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer", ...frameProtectionHeaders() });
               res.end(req.method === "HEAD" ? undefined : body);
               return;
@@ -630,7 +627,7 @@ export function registerDashboardCommand(program: Command): void {
             if (!assetDir) { json(res, 404, { error: "This console serves the API only; the web app is not installed." }); return; }
             const explicitAsset = resolveAssetPath(assetDir, requestUrl.pathname);
             if (explicitAsset) {
-              sendFile(res, explicitAsset);
+              sendFile(res, explicitAsset, controlToken);
               return;
             }
 
@@ -640,9 +637,8 @@ export function registerDashboardCommand(program: Command): void {
               return;
             }
 
-            // SPA fallback: serve the bootstrap document. The browser already holds the
-            // control token from the launch URL fragment, so nothing is embedded here.
-            sendFile(res, join(assetDir, "index.html"));
+            // Inject the control token into HTML so the dashboard JS can read it.
+            sendFile(res, join(assetDir, "index.html"), controlToken);
           } catch (err) {
             if (res.headersSent) { res.destroy(); return; }
             json(res, errorStatusCode(err), { error: err instanceof Error ? err.message : "Web application request failed." });
@@ -700,7 +696,7 @@ export function registerDashboardCommand(program: Command): void {
           if (opts.readyJson || serverMode) console.log(`ZERO_DASHBOARD_READY ${JSON.stringify({ url: serverMode && publicUrl ? publicUrl : url, ...(serverMode ? { mode: "server" } : {}) })}`);
           console.log(chalk.gray("  Ctrl+C to stop"));
           updates.start();
-          if (opts.open !== false && !serverMode) openBrowser(launchUrl(`${url}/chats`, controlToken));
+          if (opts.open !== false && !serverMode) openBrowser(`${url}/chats`);
         };
         server.listen(port, host, onListening);
 

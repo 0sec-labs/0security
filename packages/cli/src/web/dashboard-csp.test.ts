@@ -40,21 +40,21 @@ describe("dashboard CSP", () => {
   describe("sendFile", () => {
     const dirs: string[] = [];
     afterEach(() => { for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true }); });
-    const serve = (name: string, body: string) => {
+    const serve = (name: string, body: string, token?: string) => {
       const dir = mkdtempSync(join(tmpdir(), "csp-"));
       dirs.push(dir);
       const file = join(dir, name);
       writeFileSync(file, body);
       let status = 0; let headers: Record<string, string> = {}; let out = "";
-      sendFile({ writeHead: (s: number, h: Record<string, string>) => { status = s; headers = h; }, end: (b: Buffer | string) => { out = b.toString(); } } as never, file);
+      sendFile({ writeHead: (s: number, h: Record<string, string>) => { status = s; headers = h; }, end: (b: Buffer | string) => { out = b.toString(); } } as never, file, token);
       return { status, headers, out };
     };
 
-    it("sets CSP and COOP on HTML and does not embed the control token", () => {
-      const r = serve("index.html", html);
+    it("sets CSP on HTML and keeps the token meta outside script", () => {
+      const r = serve("index.html", html, "tok123");
       expect(r.headers["Content-Security-Policy"]).toContain(hash);
       expect(r.headers["Cross-Origin-Opener-Policy"]).toBe("same-origin");
-      expect(r.out).not.toContain("0-control-token");
+      expect(r.out).toContain('<meta name="0-control-token" content="tok123">');
     });
 
     it("does not put CSP on assets", () => {

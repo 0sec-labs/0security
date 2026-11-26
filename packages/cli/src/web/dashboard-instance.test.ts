@@ -14,11 +14,11 @@ async function serve(body: string, status = 200) {
   return `http://127.0.0.1:${address.port}`;
 }
 it("recognizes the existing dashboard", async () => {
-  expect(await findDashboardInstance(await serve('<meta name="0-console" content="1">'))).toBe(true);
+  expect(await findDashboardInstance(await serve('<meta name="0-control-token" content="test-token">'))).toBe(true);
 });
 it("does not reuse an unrelated server or error response", async () => {
   expect(await findDashboardInstance(await serve("Other application"))).toBe(false);
-  expect(await findDashboardInstance(await serve('<meta name="0-console" content="1">', 500))).toBe(false);
+  expect(await findDashboardInstance(await serve('<meta name="0-control-token" content="test-token">', 500))).toBe(false);
 });
 it("handles a closed port", async () => {
   const origin = await serve("");

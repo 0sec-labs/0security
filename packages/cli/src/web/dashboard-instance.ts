@@ -11,7 +11,7 @@ export function findDashboardInstance(origin: string): Promise<boolean> {
         if (html.length > 256_000) request.destroy(new Error("Response too large"));
       });
       response.on("end", () => resolve(response.statusCode === 200
-        && /<meta\s+name="0-console"\s+content="[^"]*"/.test(html)));
+        && /<meta\s+name="0-control-token"\s+content="[^"]+"/.test(html)));
       response.on("error", () => resolve(false));
     });
     request.setTimeout(2_000, () => { resolve(false); request.destroy(); });

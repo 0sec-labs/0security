@@ -27,36 +27,34 @@ import type {
 } from "./types";
 export { useBackendApi } from "./backend-context";
 
-const CONTROL_TOKEN_KEY = "0-control-token";
-let inMemoryControlToken: string | null = null;
-
-/**
- * The CLI opens the browser with the control token in the URL fragment (`#0t=...`).
- * Capture it once, keep it for this origin, and strip it from the URL so it never
- * lingers in history or a copied link. The token is no longer embedded in the page
- * HTML, so a request from another local process cannot read it.
- */
-export function captureLaunchControlToken(): void {
-  try {
-    const raw = window.location.hash.startsWith("#") ? window.location.hash.slice(1) : window.location.hash;
-    const token = new URLSearchParams(raw).get("0t");
-    if (!token) return;
-    inMemoryControlToken = token;
-    try { window.localStorage.setItem(CONTROL_TOKEN_KEY, token); } catch { /* private mode: keep it in memory only */ }
-    window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}` || "/");
-  } catch { /* no window or malformed URL: nothing to capture */ }
-}
-
-/** The control token the dashboard server accepts on /api/ routes, delivered once at launch and kept locally. */
+/** Read the per-session control token injected by the dashboard server. */
 function getControlToken(): string | null {
-  if (inMemoryControlToken) return inMemoryControlToken;
-  try { return window.localStorage.getItem(CONTROL_TOKEN_KEY); } catch { return null; }
+  const meta = document.querySelector('meta[name="0-control-token"]');
+  return meta?.getAttribute("content") ?? null;
 }
 
-/** Re-read the stored token (another tab may have refreshed it). A token invalidated by a server restart cannot be recovered silently; re-running `0` re-opens the console with a fresh token. */
+let refreshingControlToken: Promise<string | null> | undefined;
+
+/** Recover after a local server restart using its same-origin HTML bootstrap. */
 function refreshControlToken(): Promise<string | null> {
-  try { const stored = window.localStorage.getItem(CONTROL_TOKEN_KEY); if (stored) inMemoryControlToken = stored; } catch { /* ignore */ }
-  return Promise.resolve(getControlToken());
+  return refreshingControlToken ??= (async () => {
+    const response = await fetch("/", {
+      credentials: "same-origin", cache: "no-store", redirect: "error",
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!response.ok || !response.headers.get("content-type")?.includes("text/html")) return null;
+    const bootstrap = new DOMParser().parseFromString(await response.text(), "text/html");
+    const token = bootstrap.querySelector('meta[name="0-control-token"]')?.getAttribute("content");
+    if (!token) return null;
+    let meta = document.querySelector('meta[name="0-control-token"]');
+    if (!meta) {
+      meta = document.createElement("meta");
+      meta.setAttribute("name", "0-control-token");
+      document.head.append(meta);
+    }
+    meta.setAttribute("content", token);
+    return token;
+  })().finally(() => { refreshingControlToken = undefined; });
 }
 
 export async function localControlFetch(path: string, init?: RequestInit): Promise<Response> {
