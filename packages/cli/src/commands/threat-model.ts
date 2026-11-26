@@ -19,7 +19,7 @@ import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import { Command } from "commander";
-import { buildInventory } from "@0/engine";
+import { buildInventory, untrustedGitConfig } from "@0/engine";
 import { parseScope, THREAT_MODEL_PATH, threatModelPrompt } from "@0/engine/shared";
 import { consoleTransportOptions, type ConsoleClient, type ConsoleTransportOptions } from "../console-client.js";
 import { connect, DEFAULT_SCAN_MODEL, defaultScanDeps, registerScanCommand, waitForThread, type ScanDeps } from "./scan.js";
@@ -77,6 +77,12 @@ export function openStdioTerminal(): InterviewIO & { close(): void } {
     ask: question => { process.stderr.write(question); return queue.length ? Promise.resolve(queue.shift()) : closed ? Promise.resolve(undefined) : new Promise(resolve => waiting.push(resolve)); },
     close: () => rl.close(),
   };
+}
+
+/** `git status` of the folder being modelled, or undefined. Its own .git/config must not run fsmonitor or filter commands. */
+async function folderStatus(deps: Pick<ThreatModelDeps, "git">, folder: string): Promise<string | undefined> {
+  try { return await deps.git(folder, [...untrustedGitConfig(folder), "status", "--porcelain", "--untracked-files=all", "--ignore-submodules=all"]); }
+  catch { return undefined; }
 }
 
 export const defaultThreatModelDeps: ThreatModelDeps = {
@@ -299,7 +305,7 @@ export async function runThreatModel(folderArg: string | undefined, options: Thr
     // The scope section is read as data only: its presence adds a link to the threat model, nothing else.
     const scopeFound = securityBefore !== undefined && parseScope(securityBefore).found;
     // Without --pr the thread edits the folder itself, so remember what was already changed there.
-    const dirtyBefore = !options.pr ? await deps.git(workFolder, ["status", "--porcelain", "--untracked-files=all"]).catch(() => undefined) : undefined;
+    const dirtyBefore = !options.pr ? await folderStatus(deps, workFolder) : undefined;
     if (!options.pr) mkdirSync(dirname(target), { recursive: true });
 
     // The interview's terminal is also where --scan shows its cost and asks before it runs.
@@ -407,7 +413,7 @@ export async function runThreatModel(folderArg: string | undefined, options: Thr
     if (draftError !== undefined && text === undefined) problems.splice(0, problems.length);
 
     if (!options.pr) {
-      const dirtyAfter = await deps.git(workFolder, ["status", "--porcelain", "--untracked-files=all"]).catch(() => undefined);
+      const dirtyAfter = await folderStatus(deps, workFolder);
       if (dirtyBefore !== undefined && dirtyAfter !== undefined) {
         const earlier = new Set(dirtyBefore.split("\n"));
         const others = dirtyAfter.split("\n").filter(line => line && !earlier.has(line) && !line.endsWith(rel) && !(wroteSecurity && line.endsWith(SECURITY_FILE)));

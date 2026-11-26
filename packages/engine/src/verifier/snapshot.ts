@@ -6,17 +6,19 @@ import { cpSync, lstatSync, mkdirSync, mkdtempSync, readlinkSync, rmSync, symlin
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { exec } from "./process.js";
+import { UNTRUSTED_GIT_BASE_CONFIG, untrustedGitConfig } from "./untrusted-git.js";
 
 export interface Snapshot { dir: string; cleanup(): void }
 
+// The repository may carry its own .git/config: its fsmonitor and filter drivers would otherwise run here.
 async function git(cwd: string, args: string[], env?: NodeJS.ProcessEnv): Promise<string> {
-  const r = await exec("git", args, { cwd, timeoutMs: 60_000, env: { ...process.env, ...env, GIT_OPTIONAL_LOCKS: "0" } });
+  const r = await exec("git", [...untrustedGitConfig(cwd), ...args], { cwd, timeoutMs: 60_000, env: { ...process.env, ...env, GIT_OPTIONAL_LOCKS: "0" } });
   if (r.code !== 0) throw new Error(`git ${args[0]} failed`);
   return r.output;
 }
 
 export async function isGitRepo(dir: string): Promise<boolean> {
-  const r = await exec("git", ["rev-parse", "--is-inside-work-tree"], { cwd: dir, timeoutMs: 10_000 });
+  const r = await exec("git", [...UNTRUSTED_GIT_BASE_CONFIG, "rev-parse", "--is-inside-work-tree"], { cwd: dir, timeoutMs: 10_000 });
   return r.code === 0 && r.output.trim() === "true";
 }
 

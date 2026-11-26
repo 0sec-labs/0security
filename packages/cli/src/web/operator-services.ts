@@ -6,7 +6,7 @@ import { bedrockRegion, hasBedrockCredentialSignals, createNativeApiRuntime, isA
   createConsoleRuntime, CodexCatalogRefreshError,
   TOOL_DEFINITIONS, getToolsForRole,
   listProjectReviewChecks, updateProjectReviewChecks,
-  recommendModels, type NativeRuntime, type RuntimeConfig, type ReviewCheckMutation } from "@0/engine";
+  recommendModels, untrustedGitConfig, type NativeRuntime, type RuntimeConfig, type ReviewCheckMutation } from "@0/engine";
 import { VERSION, modelProvider, type ConsoleRuntimeSelection, type ConsoleRuntimeSnapshot } from "@0/engine/shared";
 import {
   credentialEnvPatch, loadCredentials, accountEnvPatch, loadAccountStore, saveAccountStore,
@@ -863,7 +863,8 @@ export class WebOperatorServices {
         try {
           git.root = execFileSync("git", ["--no-optional-locks", "-c", "core.fsmonitor=false", "-C", projectPath, "rev-parse", "--show-toplevel"], { encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"] }).trim();
           git.branch = execFileSync("git", ["--no-optional-locks", "-c", "core.fsmonitor=false", "-C", projectPath, "branch", "--show-current"], { encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"] }).trim() || null;
-          git.dirty = Boolean(execFileSync("git", ["--no-optional-locks", "-c", "core.fsmonitor=false", "-C", projectPath, "status", "--porcelain"], { encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"], maxBuffer: 1_048_576 }).trim());
+          // core.fsmonitor=false alone leaves the folder's own filter drivers live; status would run them.
+          git.dirty = Boolean(execFileSync("git", ["--no-optional-locks", "-C", projectPath, ...untrustedGitConfig(projectPath), "status", "--porcelain", "--ignore-submodules=all"], { encoding: "utf8", timeout: 5_000, stdio: ["ignore", "pipe", "ignore"], maxBuffer: 1_048_576 }).trim());
         } catch { git.error = "Git metadata is unavailable for this directory."; }
         data = { path: projectPath, name: basename(projectPath), git };
       } else if (path === "checks" && method === "GET") data = listProjectReviewChecks(query.get("path") ?? process.cwd());
