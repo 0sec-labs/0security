@@ -239,30 +239,49 @@ The first time you run the CLI or the console, 0security prints one notice to st
 
 ### Usage metrics
 
-When `analyticsLevel` is `usage`, a release build sends anonymous counts directly to 0security's PostHog project in the EU (`https://eu.i.posthog.com`). You need no account or cloud token. Each `usage` event carries exactly these fields:
+When `analyticsLevel` is `usage`, a release build sends anonymous events directly to 0security's PostHog project in the EU (`https://eu.i.posthog.com`). You need no account or cloud token. There are five event types, and each carries only the fields listed for it.
+
+Every event also carries these common fields:
+
+| Field | Meaning |
+| --- | --- |
+| `version`, `channel` | 0security version and release channel (`beta` or `dev`). |
+| `surface` | `web` for the console, otherwise `cli`. |
+| `os`, `arch`, `runtime` | Operating system, CPU architecture, and `node` or `bun`. |
+| `$lib`, `$geoip_disable`, `$process_person_profile`, `$ip` | Fixed values (`0security`, `true`, `false`, `null`) that turn off IP lookup and person profiles. |
+
+**`usage`** is sent while a command or the console does work:
 
 | Field | Meaning |
 | --- | --- |
 | `tool_counts` | How many times each built-in tool ran. MCP tools count as `mcp`, any other name as `other`. |
 | `error_counts` | Tool failures by category (`timeout`, `network`, `permission`, `not-found`, `rate-limit`, `parse`, `resource`, `nonzero-exit`, `stream-incomplete`, `tool-error`, `other`). |
 | `finding_severity_counts` | Findings by severity (`critical`, `high`, `medium`, `low`, `info`, `unknown`, `other`). |
+| `finding_class_counts` | Findings by vulnerability class: `sql-injection`, `xss`, `ssrf`, `rce`, `path-traversal`, `auth`, `crypto`, `secrets`, `deserialization`, `misconfiguration`, `dependency` or `other`. Counts only. |
 | `turn_count`, `duration_ms`, `cost_usd` | Agent turns, time spent, and model spend in USD when known. |
-| `version`, `channel` | 0security version and release channel (`beta` or `dev`). |
-| `surface` | `web` for the console, otherwise `cli`. |
-| `os`, `arch`, `runtime` | Operating system, CPU architecture, and `node` or `bun`. |
-| `$lib`, `$geoip_disable`, `$process_person_profile`, `$ip` | Fixed values (`0security`, `true`, `false`, `null`) that turn off IP lookup and person profiles. |
 
-The event also has a timestamp and a `distinct_id`, which is a random UUID (the install ID). It is not derived from your name, email, hostname, MAC address or machine ID. 0 sends counts as increments, shortly after they happen and when the process exits. A send has a 3 second limit and no retries, and failures are silent.
+**Lifecycle events** say that something happened, not what it was about:
+
+| Event | When | Fields |
+| --- | --- | --- |
+| `first_run` | Once, the first time an install runs. | None beyond the common fields. |
+| `command_invoked` | Each time you start a command or the console. | `command`: the command name from a fixed list of known commands. Anything else is `other`. Arguments are never sent. |
+| `update` | The first run after the version changed. | `from_version`, `to_version`. |
+| `error_exit` | A command ends with an error. | `error_category`: one of the error categories above. The message is never sent. |
+
+Each event also has a timestamp and a `distinct_id`, which is a random UUID (the install ID). It is not derived from your name, email, hostname, MAC address or machine ID. 0 sends counts as increments, shortly after they happen and when the process exits. A send has a 3 second limit and no retries, and failures are silent.
 
 PostHog discards IP addresses, and 0security disables GeoIP lookup. To get a new install ID, delete `~/.0/analytics-id`. `~/.0/analytics-sent.log` records every payload sent, without the project key.
 
-If you are signed in with a 0security cloud token (`ZERO_CLOUD_TOKEN` or `~/.0/cloud.env`), usage goes to the authenticated cloud endpoint instead. Nothing goes to PostHog, so nothing is counted twice. The `commands` and `full` levels of `ZERO_ANALYTICS_LEVEL` exist only for that path.
+The opt-outs are the same for every event: `analyticsLevel off`, `ZERO_NO_TELEMETRY`, `DO_NOT_TRACK`, `ZERO_OFFLINE` and `ZERO_ENTERPRISE`.
+
+If you are signed in with a 0security cloud token (`ZERO_CLOUD_TOKEN` or `~/.0/cloud.env`), `usage` goes to the authenticated cloud endpoint instead of PostHog, so it is not counted twice. The lifecycle events have no cloud counterpart and still go to PostHog, so a signed-in install is counted too. The `commands` and `full` levels of `ZERO_ANALYTICS_LEVEL` exist only for the cloud path.
 
 ### What is never collected
 
 No telemetry includes any of these: targets, URLs, hostnames, IP addresses, file paths, finding titles, descriptions or evidence, prompts, model output, chat messages, tool arguments or results, source code, credentials, environment variables, usernames, or error message text.
 
-Every string passes through one redaction step before it leaves the process. The usage fields above are an explicit allowlist, so a new field cannot be sent without a deliberate change.
+Every string passes through one redaction step before it leaves the process. The fields above are an explicit allowlist per event, so a new field or event cannot be sent without a deliberate change.
 
 ### Crash reports
 

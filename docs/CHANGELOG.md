@@ -12,6 +12,11 @@ on the GitHub Release tag.
 
 ## [Unreleased]
 
+### Added
+
+- Anonymous lifecycle events go to PostHog: `first_run`, `command_invoked` (a command name from a fixed list, otherwise `other`), `update` (the two versions) and `error_exit` (an error category only). They are sent even with a cloud token, so signed-in installs are counted, and the same opt-outs turn them off.
+- The `usage` event has `finding_class_counts`, findings counted by a fixed list of vulnerability classes. Titles, descriptions, evidence and targets are still never sent.
+
 ## [0.45.0] - 2026-11-24
 
 ### Added

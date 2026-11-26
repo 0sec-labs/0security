@@ -20,7 +20,7 @@ export const TELEMETRY_NOTICE_FILENAME = "telemetry-notice";
 
 export const TELEMETRY_DOCS_URL = "https://docs.0.security/configuration/#telemetry";
 
-export const TELEMETRY_NOTICE_TEXT = `Anonymous usage counts, crash reports and update checks are on (never code or findings). Turn off: ZERO_OFFLINE=1 · ${TELEMETRY_DOCS_URL}`;
+export const TELEMETRY_NOTICE_TEXT = `Anonymous usage counts, command names, crash reports and update checks are on (never code or findings). Turn off: ZERO_OFFLINE=1 · ${TELEMETRY_DOCS_URL}`;
 
 const MACHINE_FLAGS = new Set(["--json", "--ndjson", "--jsonl", "--ready-json", "--sarif"]);
 const MACHINE_FORMAT = /json|sarif|csv|xml|yaml|junit/i;

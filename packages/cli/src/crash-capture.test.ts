@@ -47,6 +47,22 @@ describe("installCrashCapture", () => {
     expect(Object.keys(reports[0]!)).not.toContain("exitOutput");
   });
 
+  it("runs the optional onCrash hook inside the budget, and a failing hook still exits 1", async () => {
+    const ok = fakeProcess();
+    const calls: string[] = [];
+    installCrashCapture({ surface: "cli", proc: ok.proc as never, stderr: () => {}, version: "1", report: async () => "dropped", onCrash: async () => { calls.push("hook"); } });
+    ok.handlers.get("uncaughtException")!(new Error("kaboom"));
+    await settle();
+    expect(calls).toEqual(["hook"]);
+    expect(ok.exit).toHaveBeenCalledExactlyOnceWith(1);
+
+    const bad = fakeProcess();
+    installCrashCapture({ surface: "cli", proc: bad.proc as never, stderr: () => {}, version: "1", report: async () => "dropped", onCrash: async () => { throw new Error("hook"); } });
+    bad.handlers.get("uncaughtException")!(new Error("kaboom"));
+    await settle();
+    expect(bad.exit).toHaveBeenCalledExactlyOnceWith(1);
+  });
+
   it("handles unhandled rejections like an uncaught exception, including non-errors", async () => {
     const { handlers, exit, proc } = fakeProcess();
     const stderr: string[] = [];

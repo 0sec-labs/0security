@@ -63,6 +63,8 @@ export interface CrashCaptureOptions {
   proc?: Pick<NodeJS.Process, "on" | "argv" | "version" | "platform" | "arch"> & { exit(code?: number): never | void };
   stderr?: (text: string) => void;
   report?: (info: DiagnosticInfo) => Promise<DiagnosticOutcome>;
+  /** Extra budgeted work on a crash (anonymous `error_exit` usage event). Failures are ignored. */
+  onCrash?: () => Promise<void>;
   budgetMs?: number;
   version?: string;
   now?: () => Date;
@@ -108,7 +110,7 @@ export function installCrashCapture(options: CrashCaptureOptions): () => void {
         ...(() => { const command = crashCommandFromArgv(proc.argv); return command ? { command } : {}; })(),
       };
       await report(info);
-    })().catch(() => {});
+    })().catch(() => {}).then(() => options.onCrash?.()).catch(() => {});
     const deadline = new Promise<void>((resolve) => { timer = setTimeout(resolve, budget); });
     void Promise.race([capture, deadline]).then(() => { if (timer) clearTimeout(timer); exit(); }, exit);
   };
