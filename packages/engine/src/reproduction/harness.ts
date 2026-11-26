@@ -47,11 +47,10 @@ export interface ReproduceInput {
 const MAX_START = 500;
 
 /**
- * Limits for every reproduction container: the app is untrusted code. Processes, memory, CPU and writable storage are
- * capped, /tmp is a small tmpfs, and the run has a wall-clock timeout. The writable-storage cap fails closed: when the
- * storage driver cannot apply it, the run is refused unless the operator allowed it. The root file system is not read-only: the
- * snapshot is copied into the container and the canary is planted in the app folder's parent, both of which need
- * writable space, and `docker cp` cannot write into a tmpfs.
+ * Limits for every reproduction container: the app is untrusted code. Processes, memory and CPU are capped, the root
+ * file system is read-only, /tmp is a small tmpfs, and the run has a wall-clock timeout. The app folder and its parent
+ * (where the canary goes) sit on a size-capped tmpfs at /sandbox. The snapshot is streamed in as a tar archive,
+ * because `docker cp` refuses a read-only root. A tmpfs cap is enforced by every daemon, so no run goes unbounded.
  */
 export const REPRODUCTION_LIMITS: ContainerLimits = {
   pidsLimit: 128,
@@ -59,6 +58,7 @@ export const REPRODUCTION_LIMITS: ContainerLimits = {
   cpus: "1",
   tmpfs: ["/tmp:rw,size=64m,noexec,nosuid"],
   storageSize: "256m",
+  readOnlyRoot: true,
 };
 export const REPRODUCTION_TIMEOUT_MS = 120_000;
 

@@ -11,9 +11,17 @@ export interface ContainerLimits {
   cpus?: string;
   /** Size-capped tmpfs mounts, like `/tmp:rw,size=64m,noexec,nosuid`. */
   tmpfs?: string[];
-  /** Cap on the writable layer, like `256m`. Needs a storage driver that supports it; the runner retries without it when the daemon refuses. */
+  /**
+   * Cap on writable storage, like `256m`. With `readOnlyRoot` it is the size of the tmpfs that holds the work folder,
+   * which every daemon enforces. Without it, it caps the writable layer: only some storage drivers enforce that, and the
+   * runner retries without it when the daemon refuses.
+   */
   storageSize?: string;
-  /** Mount the root file system read-only. */
+  /**
+   * Mount the root file system read-only. The work folder then lives on a tmpfs at `/sandbox/app` (its parent
+   * `/sandbox` is also writable), and the snapshot is streamed in as a tar archive because `docker cp` refuses a
+   * read-only root.
+   */
   readOnlyRoot?: boolean;
   /** Run even when the writable-layer cap cannot be applied. Off by default: the run is refused instead. */
   allowUnboundedStorage?: boolean;

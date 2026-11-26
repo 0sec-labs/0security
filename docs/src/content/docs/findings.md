@@ -582,13 +582,15 @@ To keep the checks offline without building your own image, add a setup step. It
 ```bash
 0security findings fix 3f2a \
   --sandbox docker --sandbox-image maven@sha256:<digest> \
-  --sandbox-setup "mvn -q dependency:go-offline" \
-  --test "mvn -o -q test"
+  --sandbox-setup "mvn -q test" \
+  --test "mvn -o test"
 ```
+
+The setup step runs the tests once, with the network on. That downloads the test runner Maven loads when the tests start, which `mvn dependency:go-offline` does not fetch. With `go-offline`, the offline check fails with "surefire-junit-platform ... has not been downloaded". Setup runs your build with the network on, so use it only on code you trust.
 
 Before the checks, 0 runs a canary in the same container settings. It passes only when the container has no network interface other than loopback. If setup or the canary fails, the checks do not run and the pull request is a draft. The cache folder is deleted when the run ends. `ZERO_ENTERPRISE` refuses `--sandbox-setup`, and you cannot combine it with `--sandbox-network`.
 
-Name the image by digest to pin it. A tag such as `maven:3-eclipse-temurin-21` can change. The pull request says whether the image is pinned. Get a digest with `docker buildx imagetools inspect <image>`.
+Name the image by digest to pin it. A tag such as `maven:3-eclipse-temurin-21` can change. The pull request says whether the image is pinned. Get a digest with `docker buildx imagetools inspect <image>`. The Maven recipe was run with `maven@sha256:6fdc855a6ed81d288ca7ca37ac6ff5e9308b612485c0801d70b25a858c83d237` (Maven 3.9.11, Java 21.0.9, arm64, 833 MB).
 
 The first run pulls the image if it is not on your machine. A Maven JDK image is several hundred megabytes, so the Docker VM needs that much free disk. A full disk makes the pull fail, which counts as a failed check.
 
@@ -597,12 +599,11 @@ Docker pulls the image when it is not on your machine. Use a local image if noth
 Limits:
 
 - The sandbox is Docker's isolation. A flaw in Docker is outside what this gives you.
-- The setup step and canary were run for real with an Alpine Node image. A Maven image was not run for real, because the Docker VM had no disk for the pull.
+- The setup step, canary and offline test were run for real on a one-module Maven project with a JUnit 5 test and a direct `commons-text` dependency, on Docker through Colima. Gradle, multi-module builds and private registries were not run.
 - Disk use inside the container is not limited.
 - The checks run in a copy, so files they write (such as build output) are not in the commit.
 - Only the `docker` mode exists. Private-repository credentials are not passed into the container.
 - `0security findings burndown` does not take `--sandbox`.
-- The mechanism was tested with a real container (an Alpine Node image, no network). The Maven image was not run for real in this build, only through a fake `docker`.
 
 ## See what runs cost
 

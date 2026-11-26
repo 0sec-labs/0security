@@ -1,3 +1,6 @@
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { OciRunner, STORAGE_LIMIT_UNAVAILABLE, buildCreateArgs } from "./docker-runner.js";
 import type { ExecResult } from "./process.js";
@@ -28,9 +31,46 @@ describe("create arguments", () => {
     expect(args).toEqual(expect.arrayContaining(["--cap-drop", "ALL", "--security-opt", "no-new-privileges"]));
   });
 
-  it("can mount the root file system read-only, and leave out the storage cap on request", () => {
-    expect(buildCreateArgs("c1", request({ limits: { readOnlyRoot: true } }))).toContain("--read-only");
+  it("mounts the root read-only with a size-capped tmpfs work folder, and leaves out the storage cap", () => {
+    const args = buildCreateArgs("c1", request({ limits: { ...limits, readOnlyRoot: true } }));
+    const mounts = args.flatMap((a, i) => (args[i - 1] === "--tmpfs" ? [a] : []));
+    expect(args).toContain("--read-only");
+    expect(mounts).toEqual(["/sandbox:rw,size=256m,noexec,nosuid,mode=755", "/tmp:rw,size=64m,noexec,nosuid"]);
+    expect(args[args.indexOf("--workdir") + 1]).toBe("/sandbox/app");
+    expect(args).not.toContain("--storage-opt");
+    expect(args.slice(-3)).toEqual([expect.any(String), "-c", "sleep 86400"]);
+  });
+
+  it("can leave out the storage cap on request", () => {
     expect(buildCreateArgs("c1", request({ limits }), { storage: false })).not.toContain("--storage-opt");
+  });
+});
+
+const snapshot = () => { const d = mkdtempSync(join(tmpdir(), "oci-unit-")); writeFileSync(join(d, "a.txt"), "x"); return d; };
+
+describe("OciRunner with a read-only root", () => {
+  it("starts first, streams the snapshot in over stdin, and never calls cp", async () => {
+    const calls: Array<{ args: string[]; stdin: boolean }> = [];
+    const exec = async (_f: string, args: string[], options: { stdin?: unknown }): Promise<ExecResult> => {
+      calls.push({ args, stdin: Boolean(options.stdin) });
+      (options.stdin as { resume?: () => void } | undefined)?.resume?.();
+      await new Promise((r) => setTimeout(r, 50));
+      return { code: 0, output: args[0] === "exec" && args.includes("-i") ? "" : "done", timedOut: false };
+    };
+    const runner = new OciRunner({ exec: exec as never, binaries: ["docker"] });
+    const outcome = await runner.run(request({ dir: snapshot(), limits: { ...limits, readOnlyRoot: true } }));
+    const verbs = calls.map((c) => c.args[0]);
+    expect(verbs).toEqual(["info", "create", "start", "exec", "exec", "rm"]);
+    expect(calls[3]).toMatchObject({ stdin: true });
+    expect(calls[3]!.args).toEqual(expect.arrayContaining(["-i", "sh", "-c"]));
+    expect(calls[4]!.args.slice(0, 4)).toEqual(["exec", "-w", "/sandbox/app", expect.any(String)]);
+    expect(outcome).toMatchObject({ exitCode: 0, output: "done" });
+  });
+
+  it("reports a failed unpack as an infrastructure error and runs nothing", async () => {
+    const exec = async (_f: string, args: string[]): Promise<ExecResult> => (args[0] === "exec" && args.includes("-i") ? { code: 1, output: "tar: no space left", timedOut: false } : { code: 0, output: "", timedOut: false });
+    const outcome = await new OciRunner({ exec: exec as never, binaries: ["docker"] }).run(request({ dir: snapshot(), limits: { ...limits, readOnlyRoot: true } }));
+    expect(outcome.infraError).toBe("could not copy the snapshot: tar: no space left");
   });
 });
 
