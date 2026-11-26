@@ -1,0 +1,41 @@
+{
+  "_comment": "Hand-built in the OSV schema (https://ossf.github.io/osv-schema/), not recorded from the service. Real Maven records rarely carry affected[].ecosystem_specific.imports; the log4j-core record carries it here to exercise the symbol-level path.",
+  "GHSA-jfh8-c2jp-5v3q": {
+    "id": "GHSA-jfh8-c2jp-5v3q",
+    "aliases": ["CVE-2021-44228"],
+    "summary": "Remote code injection in Log4j",
+    "database_specific": { "severity": "CRITICAL" },
+    "affected": [{
+      "package": { "ecosystem": "Maven", "name": "org.apache.logging.log4j:log4j-core", "purl": "pkg:maven/org.apache.logging.log4j/log4j-core" },
+      "ranges": [{ "type": "ECOSYSTEM", "events": [{ "introduced": "2.0-beta9" }, { "fixed": "2.15.0" }] }],
+      "ecosystem_specific": { "imports": [{ "path": "org.apache.logging.log4j.core.lookup", "symbols": ["JndiLookup"] }] }
+    }]
+  },
+  "GHSA-599f-7c49-w659": {
+    "id": "GHSA-599f-7c49-w659",
+    "aliases": ["CVE-2022-42889"],
+    "summary": "Arbitrary code execution in Apache Commons Text",
+    "database_specific": { "severity": "CRITICAL" },
+    "affected": [{
+      "package": { "ecosystem": "Maven", "name": "org.apache.commons:commons-text", "purl": "pkg:maven/org.apache.commons/commons-text" },
+      "ranges": [{ "type": "ECOSYSTEM", "events": [{ "introduced": "1.5" }, { "fixed": "1.10.0" }] }],
+      "ecosystem_specific": { "imports": [{ "path": "org.apache.commons.text.lookup", "symbols": ["ScriptStringLookup"] }] }
+    }]
+  },
+  "GHSA-mjmj-j48q-9wg2": {
+    "id": "GHSA-mjmj-j48q-9wg2",
+    "aliases": ["CVE-2022-1471"],
+    "summary": "SnakeYaml Constructor Deserialization Remote Code Execution",
+    "database_specific": { "severity": "HIGH" },
+    "affected": [{
+      "package": { "ecosystem": "Maven", "name": "org.yaml:snakeyaml", "purl": "pkg:maven/org.yaml/snakeyaml" },
+      "ranges": [{ "type": "ECOSYSTEM", "events": [{ "introduced": "0" }, { "fixed": "2.0" }] }]
+    }]
+  },
+  "GHSA-lodash": {
+    "id": "GHSA-lodash",
+    "summary": "Prototype pollution in lodash",
+    "database_specific": { "severity": "HIGH" },
+    "affected": [{ "package": { "ecosystem": "npm", "name": "lodash", "purl": "pkg:npm/lodash" }, "ranges": [{ "type": "SEMVER", "events": [{ "introduced": "0" }, { "fixed": "4.17.21" }] }] }]
+  }
+}

@@ -1481,6 +1481,8 @@ Look every component of an SBOM up in the public OSV database and list the advis
 
 Each advisory is listed under its component with its aliases, severity, the version that fixes it and a one-line summary, most severe first. Exit 0 when there are no advisories and 1 when there are, so a scheduled job can fail or open an issue.
 
+Add `--usage <folder>` to label each Maven advisory as imported, symbol-imported, test-only, not-imported or unknown, from the import lines of your source. The label is evidence, not reachability, and never changes a severity. `--ignore-not-imported` keeps not-imported advisories out of the exit code. See [Is the vulnerable library used?](/dependency-audit/#is-the-vulnerable-library-used).
+
 ```bash
 0security sbom generate . -o sbom.cdx.json
 0security sbom check sbom.cdx.json
@@ -1541,6 +1543,8 @@ The network use is the lookup at `https://api.osv.dev`: package URLs go out and 
 | `--new-days <days>` | — | With --registry: a package first published fewer days ago than this is new (default 30) |
 | `--private <name>` | — | With --registry: a package name, or @scope/*, to treat as private and skip; repeat the option or separate names with commas |
 | `--fail-on <severity>` | — | With --registry: exit 1 when a registry finding is at or above this severity: critical, high, medium, low or info |
+| `--usage <folder>` | — | Add import evidence to each Maven advisory: read the Java, Kotlin, Scala and Groovy source in this folder as text (nothing is sent anywhere) |
+| `--ignore-not-imported` | — | With --usage: advisories with no import found are still listed but do not set the exit code (default off) |
 
 #### sbom licenses
 

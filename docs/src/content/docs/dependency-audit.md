@@ -76,15 +76,44 @@ The argument is an SBOM or a folder. Licenses come from the SBOM, which holds wh
 
 Add `--resolve` to look up unknown licenses at `api.deps.dev`. This sends package names and versions. The output is information from lockfiles and registries, not legal advice.
 
-## See where your code uses a package
+## Is the vulnerable library used?
 
-For Maven projects, list where your source imports each component:
+`sbom check --usage` adds import evidence to each Maven advisory. Point it at the folder with your Java, Kotlin, Scala or Groovy source:
+
+```bash
+0security sbom check sbom.cdx.json --usage .
+```
+
+Each Maven advisory gets one of five labels:
+
+- imported: application code has an import of a package of the component.
+- symbol-imported: application code imports or writes out in full a class that the advisory lists as vulnerable.
+- test-only: only test code imports the component.
+- not-imported: no import was found in the scanned source. A transitive or reflection use is not ruled out.
+- unknown: the scan did not cover all your source, so 0 makes no statement.
+
+Each label lists up to 10 files and lines. The JSON output has a `usage` field on each advisory, and SARIF results have a `usage` property.
+
+The label is evidence and never a verdict. An import shows that a package is named, not that a vulnerable method runs. No label means the code is unreachable, and no label changes a severity. Advisories for other ecosystems get no label.
+
+Most OSV records for Maven do not list vulnerable classes, so symbol-imported is rare. When a record lists them in `imports` under `ecosystem_specific` or `database_specific`, 0 looks for those classes in imports and in fully qualified uses. A class used through a wildcard import or reflection is missed.
+
+The exit code stays 1 when any advisory is found. To leave not-imported advisories out of the exit code, add `--ignore-not-imported`. They are still listed. Malicious packages always count. 
+The scan has limits on depth, files, bytes and folder entries. A file over the size cap, an unreadable folder and a symbolic link are skipped. When any limit is reached or anything is skipped, the output says so, for example `Scan limit reached: 20 files not scanned.` Every advisory that would be not-imported is then marked unknown. An advisory whose record lists more vulnerable symbols than 0 searches is marked unknown too. `--ignore-not-imported` never ignores unknown, so those advisories still set the exit code.
+
+```bash
+0security sbom check sbom.cdx.json --usage . --ignore-not-imported
+```
+
+Source files are read as text, with limits on depth, file count and file size. Symbolic links are not followed. Nothing runs, and the scan sends nothing. Only the OSV lookup from `sbom check` goes out, as without `--usage`.
+
+Not tested: Kotlin, Scala and Groovy sources beyond import lines, and records from OSV that list vulnerable classes for Maven.
+
+To list every import without checking advisories, run `sbom java-usage`:
 
 ```bash
 0security sbom java-usage sbom.cdx.json .
 ```
-
-It reads source files as text and sends nothing. An import shows that a package is named, not that a vulnerable method runs.
 
 For an estimate with a model, run the experimental `dependency-reachability` skill. See [Dependencies](/findings/#dependencies).
 
@@ -114,13 +143,13 @@ The GitHub Action has an `sbom` mode with an optional license preset. See [SBOM 
 | `sbom check --outdated` | `api.deps.dev` | Package names. |
 | `sbom licenses --resolve` | `api.deps.dev` | Package names and versions of components with no license. |
 | `findings evidence --check-advisories` | `api.osv.dev` | Package URLs. |
-| `sbom java-usage`, `sbom licenses` without `--resolve` | None | Nothing. |
+| `sbom check --usage`, `sbom java-usage`, `sbom licenses` without `--resolve` | None | Nothing. |
 
 With `ZERO_ENTERPRISE=1`, the OSV and deps.dev lookups and `--resolve` are refused. `--resolve-from` still works. See [Data flow](/data-flow/) for every destination.
 
 ## What a dependency audit does not do
 
 - It reads lockfiles and manifests. It misses vendored code and system packages unless you use syft or trivy.
-- It does not show that a vulnerable function is called. A clean result is not proof that the project is safe.
+- It does not show that a vulnerable function is called. A clean result is not proof that the project is safe. See [Is the vulnerable library used?](#is-the-vulnerable-library-used).
 - It does not check private registries or advisories that OSV does not list.
 - Model files are a separate check. See [AI security](/ai-security/).

@@ -5,8 +5,9 @@ import { assertEgressAllowed } from "../policy/enterprise.js";
  * Check an SBOM's components against the public OSV database (https://osv.dev). The SBOM and the responses are untrusted
  * text: package URLs are validated and bounded, and every string that comes back is cleaned and truncated before use.
  */
-import { fixesFor, severityOf, type AdvisorySeverity } from "./advisory-facts.js";
+import { fixesFor, severityOf, vulnerableSymbolsFor, type AdvisorySeverity } from "./advisory-facts.js";
 export type { AdvisorySeverity } from "./advisory-facts.js";
+import type { AdvisoryUsage } from "./advisory-usage.js";
 
 export interface Advisory {
   /** Optional package-level source evidence. Vulnerable-code reachability remains unknown. */
@@ -26,6 +27,12 @@ export interface Advisory {
   fixed: string[];
   /** The lowest fixing version above the installed one. Absent when the record names none. */
   fixedVersion?: string;
+  /** Fully qualified classes or symbols the record names as vulnerable (Maven only), when it lists any. */
+  vulnerableSymbols?: string[];
+  /** True when the record lists more symbols than `vulnerableSymbols` keeps. */
+  vulnerableSymbolsTruncated?: boolean;
+  /** Where the application's own source imports this component. Only set by `0 sbom check --usage`: evidence, not reachability. */
+  usage?: AdvisoryUsage;
 }
 export interface OsvOptions {
   fetch?: typeof fetch;
@@ -34,6 +41,7 @@ export interface OsvOptions {
   maxDetails?: number;
 }
 
+const MAX_SYMBOLS_PER_ADVISORY = 20;
 const BATCH = 1000;
 const MAX_COMPONENTS = 20_000;
 const MAX_DETAILS = 500;
@@ -60,6 +68,12 @@ function unresolvedOf(bom: unknown): string[] {
   const metadata = isObject(bom) && isObject(bom.metadata) ? bom.metadata : {};
   const properties = Array.isArray(metadata.properties) ? metadata.properties : [];
   return properties.flatMap(property => isObject(property) && property.name === "0:unresolved" ? [clean(property.value, 400)] : []).filter(Boolean);
+}
+
+function symbolsField(affected: unknown[], purl: string): { vulnerableSymbols?: string[]; vulnerableSymbolsTruncated?: boolean } {
+  if (!purl.startsWith("pkg:maven/")) return {};
+  const symbols = vulnerableSymbolsFor(affected, purl);
+  return symbols.length ? { vulnerableSymbols: symbols.slice(0, MAX_SYMBOLS_PER_ADVISORY), ...(symbols.length > MAX_SYMBOLS_PER_ADVISORY ? { vulnerableSymbolsTruncated: true } : {}) } : {};
 }
 
 export async function checkBomAgainstOsv(bom: unknown, options: OsvOptions = {}): Promise<{ checked: number; advisories: Advisory[]; withoutDetails: number; unresolved: string[] }> {
@@ -110,7 +124,7 @@ export async function checkBomAgainstOsv(bom: unknown, options: OsvOptions = {})
     const detail = details.get(id) ?? { aliases: [], summary: "", severity: "unknown" as AdvisorySeverity, affected: [] };
     const malicious = id.startsWith("MAL-");
     for (const purl of [...hits.get(id)!].sort()) {
-      advisories.push({ purl, id, aliases: detail.aliases, summary: detail.summary, severity: malicious ? "critical" : detail.severity, ...(detail.cvss !== undefined ? { cvss: detail.cvss } : {}), malicious, ...fixesFor(detail.affected, purl) });
+      advisories.push({ purl, id, aliases: detail.aliases, summary: detail.summary, severity: malicious ? "critical" : detail.severity, ...(detail.cvss !== undefined ? { cvss: detail.cvss } : {}), malicious, ...fixesFor(detail.affected, purl), ...symbolsField(detail.affected, purl) });
     }
   }
   return { checked: purls.length, advisories, withoutDetails: ids.length - detailIds.length + detailIds.filter(id => !details.has(id)).length, unresolved: unresolvedOf(bom) };

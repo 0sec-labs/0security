@@ -106,3 +106,31 @@ export function fixesFor(affected: unknown[], purl: string): { fixed: string[]; 
   const above = installed ? sorted.find(version => compareVersions(version, installed) > 0) : sorted[0];
   return { fixed: sorted.slice(0, 5), ...(above ? { fixedVersion: above } : {}) };
 }
+
+const SYMBOL = /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+$/;
+
+/**
+ * The classes or symbols a Maven advisory names as vulnerable, as fully qualified names. OSV puts them in
+ * `ecosystem_specific.imports` or `database_specific.imports` as `{ path, symbols }` (the shape the Go ecosystem uses).
+ * A symbol that starts with a capital letter is qualified with the entry's `path`; a name that cannot be qualified is dropped, never guessed.
+ */
+export function vulnerableSymbolsFor(affected: unknown[], purl: string): string[] {
+  const found = new Set<string>();
+  for (const entry of matching(affected, purl)) {
+    for (const holder of [entry.ecosystem_specific, entry.database_specific]) {
+      if (!isObject(holder) || !Array.isArray(holder.imports)) continue;
+      for (const item of holder.imports.slice(0, 200)) {
+        if (!isObject(item)) continue;
+        const path = typeof item.path === "string" ? item.path.trim() : "";
+        for (const symbol of (Array.isArray(item.symbols) ? item.symbols : []).slice(0, 200)) {
+          if (typeof symbol !== "string" || symbol.length > 200) continue;
+          const bare = symbol.trim();
+          // `Server.Serve` is a class and method under the path; `a.b.C` is already qualified.
+          const name = !path || /^[a-z]/.test(bare) ? bare : `${path}.${bare}`;
+          if (SYMBOL.test(name)) found.add(name);
+        }
+      }
+    }
+  }
+  return [...found].sort();
+}

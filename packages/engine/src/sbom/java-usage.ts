@@ -7,19 +7,35 @@
  * `imported-by-group` mean source lines name the package, `no-import-found` means this scan found none (it does not mean
  * the component is unused: a transitive dependency has no import of its own).
  */
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { opendirSync, readFileSync, statSync, type Dirent } from "node:fs";
 import { join, relative } from "node:path";
 
 export type JavaUsageVerdict = "imported" | "imported-by-group" | "no-import-found";
 export interface JavaImport { path: string; line: number; import: string; test: boolean }
 export interface JavaUsage { purl: string; name: string; version: string; verdict: JavaUsageVerdict; imports: JavaImport[] }
-export interface JavaUsageReport { usage: JavaUsage[]; filesScanned: number; truncated: boolean }
+/** A place a vulnerable class or symbol that an advisory lists appears in source: in an import, or written out in full. */
+export interface JavaSymbolHit { symbol: string; path: string; line: number; test: boolean; kind: "import" | "qualified" }
+export interface JavaUsageReport { usage: JavaUsage[]; filesScanned: number; truncated: boolean; /** Source files or links that were not read: over the size cap, unreadable, or a symbolic link. */ skipped: number; symbolHits?: JavaSymbolHit[] }
+export interface JavaUsageOptions {
+  /** Fully qualified classes or symbols to look for in imports and in fully qualified uses. */ symbols?: string[];
+  /** Lower limits than the defaults, for tests of a hostile tree. */ limits?: { maxFiles?: number; maxTotalBytes?: number; maxSymbols?: number };
+}
 
 const SOURCE = /\.(?:java|kt|kts|scala|groovy)$/;
 const SKIP = new Set(["node_modules", ".git", "dist", "build", "target", "vendor", ".gradle", ".idea", "out"]);
 const MAX_FILES = 20000;
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 const MAX_IMPORTS_PER_COMPONENT = 50;
+const MAX_DEPTH = 40;
+const MAX_TOTAL_BYTES = 256 * 1024 * 1024;
+const MAX_SYMBOLS = 200;
+const MAX_HITS_PER_SYMBOL = 20;
+/** Directory entries looked at in one scan, and imports kept (in total and per file), so a hostile tree cannot use unbounded time or memory. */
+const MAX_ENTRIES = 300_000;
+const MAX_IMPORTS_TOTAL = 400_000;
+const MAX_IMPORTS_PER_FILE = 5000;
+/** A line longer than this is minified or hostile text: it is not searched for symbols. */
+const MAX_LINE_CHARS = 4000;
 
 /** Libraries whose classes live under a package that differs from group and artifact. Only well-known ones; the rest match by group. */
 const KNOWN_PACKAGES: Record<string, string[]> = {
@@ -58,16 +74,27 @@ export function parseImports(text: string): Array<{ line: number; name: string }
   return found;
 }
 
-function walk(folder: string, limit: { left: number; truncated: boolean }): string[] {
+function walk(folder: string, limit: { left: number; truncated: boolean; skipped: number; entries: number }): string[] {
   const files: string[] = [];
-  const visit = (dir: string): void => {
-    let entries;
-    try { entries = readdirSync(dir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1)); } catch { limit.truncated = true; return; }
+  const visit = (dir: string, depth = 0): void => {
+    if (depth > MAX_DEPTH) { limit.truncated = true; limit.skipped += 1; return; }
+    const entries: Dirent[] = [];
+    try {
+      const handle = opendirSync(dir);
+      try {
+        for (let entry = handle.readSync(); entry; entry = handle.readSync()) {
+          limit.entries += 1;
+          if (limit.entries > MAX_ENTRIES) { limit.truncated = true; break; }
+          entries.push(entry);
+        }
+      } finally { handle.closeSync(); }
+    } catch { limit.truncated = true; limit.skipped += 1; }
+    entries.sort((a, b) => (a.name < b.name ? -1 : 1));
     for (const entry of entries) {
-      if (entry.isSymbolicLink()) continue;
-      if (entry.isDirectory()) { if (!SKIP.has(entry.name) && !entry.name.startsWith(".")) visit(join(dir, entry.name)); continue; }
+      if (entry.isSymbolicLink()) { limit.skipped += 1; continue; }
+      if (entry.isDirectory()) { if (!SKIP.has(entry.name) && !entry.name.startsWith(".")) visit(join(dir, entry.name), depth + 1); continue; }
       if (!entry.isFile() || !SOURCE.test(entry.name)) continue;
-      if (limit.left <= 0) { limit.truncated = true; return; }
+      if (limit.left <= 0) { limit.truncated = true; limit.skipped += 1; continue; }
       limit.left -= 1;
       files.push(join(dir, entry.name));
     }
@@ -88,19 +115,74 @@ function prefixes(name: string): { artifact: string[]; group: string } {
 }
 const startsWithPackage = (name: string, prefix: string): boolean => name === prefix || name.startsWith(`${prefix}.`);
 
-/** Match the Maven components (`group/artifact` names) against the imports of the sources under `folder`. */
-export function scanJavaUsage(folder: string, components: Array<{ name: string; version: string; purl: string }>): JavaUsageReport {
-  const limit = { left: MAX_FILES, truncated: false };
+const isIdentChar = (char: string | undefined): boolean => char !== undefined && /[\w$]/.test(char);
+/** True when `symbol` is written out in full on the line: not as the tail of a longer name, not as the head of a longer identifier. */
+function mentionsQualified(line: string, symbol: string): boolean {
+  let from = 0;
+  for (;;) {
+    const at = line.indexOf(symbol, from);
+    if (at < 0) return false;
+    const before = at > 0 ? line[at - 1] : undefined;
+    const after = line[at + symbol.length];
+    if (!isIdentChar(before) && before !== "." && !isIdentChar(after)) return true;
+    from = at + 1;
+  }
+}
+/** An import names the symbol when it is the symbol, a member of it, or the class that owns a method symbol. */
+const importNames = (name: string, symbol: string): boolean => name === symbol || name.startsWith(`${symbol}.`) || symbol.startsWith(`${name}.`);
+
+/** Match the Maven components (`group/artifact` names) against the imports of the sources under `folder`, and optionally look for fully qualified symbols. */
+export function scanJavaUsage(folder: string, components: Array<{ name: string; version: string; purl: string }>, options: JavaUsageOptions = {}): JavaUsageReport {
+  const limit = { left: options.limits?.maxFiles ?? MAX_FILES, truncated: false, skipped: 0, entries: 0 };
   const files = walk(folder, limit);
+  const wanted = [...new Set(options.symbols ?? [])];
+  // Symbols beyond the cap are never searched, so the scan cannot call their advisories not imported.
+  const maxSymbols = options.limits?.maxSymbols ?? MAX_SYMBOLS;
+  const maxTotalBytes = options.limits?.maxTotalBytes ?? MAX_TOTAL_BYTES;
+  if (wanted.length > maxSymbols) limit.truncated = true;
+  const symbols = wanted.slice(0, maxSymbols);
+  const symbolHits: JavaSymbolHit[] = [];
+  const hitCount = new Map<string, number>();
+  const addHit = (hit: JavaSymbolHit): void => {
+    // Counted apart for test and application code, so test hits cannot crowd out an application hit.
+    const key = `${hit.symbol}\u0000${hit.test}`;
+    const count = hitCount.get(key) ?? 0;
+    if (count >= MAX_HITS_PER_SYMBOL) return;
+    hitCount.set(key, count + 1);
+    symbolHits.push(hit);
+  };
   const imports: JavaImport[] = [];
   let scanned = 0;
-  for (const file of files) {
+  let bytes = 0;
+  for (const [position, file] of files.entries()) {
     let text: string;
-    try { if (statSync(file).size > MAX_FILE_BYTES) { limit.truncated = true; continue; } text = readFileSync(file, "utf8"); } catch { limit.truncated = true; continue; }
+    try {
+      const size = statSync(file).size;
+      if (size > MAX_FILE_BYTES) { limit.truncated = true; limit.skipped += 1; continue; }
+      bytes += size;
+      if (bytes > maxTotalBytes) { limit.truncated = true; limit.skipped += files.length - position; break; }
+      text = readFileSync(file, "utf8");
+    } catch { limit.truncated = true; limit.skipped += 1; continue; }
     scanned += 1;
     const path = relative(folder, file).split("\\").join("/");
     const test = isTestPath(path);
-    for (const item of parseImports(text)) imports.push({ path, line: item.line, import: item.name, test });
+    const found = parseImports(text);
+    if (found.length > MAX_IMPORTS_PER_FILE) { limit.skipped += 1; limit.truncated = true; }
+    for (const item of found.slice(0, MAX_IMPORTS_PER_FILE)) {
+      if (imports.length >= MAX_IMPORTS_TOTAL) { limit.truncated = true; break; }
+      imports.push({ path, line: item.line, import: item.name, test });
+    }
+    if (!symbols.length) continue;
+    const importLines = new Set(found.map(item => item.line));
+    for (const item of found) for (const symbol of symbols) if (importNames(item.name, symbol)) addHit({ symbol, path, line: item.line, test, kind: "import" });
+    const lines = text.split(/\r?\n/);
+    for (let index = 0; index < lines.length; index += 1) {
+      const line = lines[index]!;
+      if (line.length > MAX_LINE_CHARS || importLines.has(index + 1)) continue;
+      const trimmed = line.trimStart();
+      if (trimmed.startsWith("//") || trimmed.startsWith("*") || trimmed.startsWith("/*")) continue;
+      for (const symbol of symbols) if (line.includes(symbol) && mentionsQualified(line, symbol)) addHit({ symbol, path, line: index + 1, test, kind: "qualified" });
+    }
   }
   const artifactPrefixes = components.flatMap(component => prefixes(component.name).artifact);
   // Do not credit an exact artifact import to every sibling with the same Maven group.
@@ -109,15 +191,15 @@ export function scanJavaUsage(folder: string, components: Array<{ name: string; 
     const { artifact, group } = prefixes(component.name);
     const exact = imports.filter(item => artifact.some(prefix => startsWithPackage(item.import, prefix)));
     const byGroup = exact.length || KNOWN_PACKAGES[component.name] ? [] : groupCandidates.filter(item => startsWithPackage(item.import, group));
-    const hits = exact.length ? exact : byGroup;
-    if (hits.length > MAX_IMPORTS_PER_COMPONENT) limit.truncated = true;
+    // Application code first, so the cap never hides the lines that matter behind test imports.
+    const hits = [...(exact.length ? exact : byGroup)].sort((a, b) => Number(a.test) - Number(b.test));
     return {
       purl: component.purl, name: component.name, version: component.version,
       verdict: exact.length ? "imported" : byGroup.length ? "imported-by-group" : "no-import-found",
       imports: hits.slice(0, MAX_IMPORTS_PER_COMPONENT),
     };
   });
-  return { usage, filesScanned: scanned, truncated: limit.truncated };
+  return { usage, filesScanned: scanned, truncated: limit.truncated, skipped: limit.skipped, ...(symbols.length ? { symbolHits } : {}) };
 }
 
 /** Text for a terminal: one block per component that is imported, then a count of the others. */
