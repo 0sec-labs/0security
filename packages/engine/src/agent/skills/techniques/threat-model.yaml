@@ -31,7 +31,7 @@ content: |
 
   ### 3. File structure (fixed)
 
-  Start with front matter, then these sections in this order, with these exact headings:
+  Start with front matter, then these ten sections in this order, with these exact headings:
 
   ```
   ---
@@ -51,6 +51,7 @@ content: |
   ## Authorization and business rules
   ## Data flows
   ## Open questions
+  ## Threat map
   ```
 
   - **Summary:** what the system does in 3 sentences, and the stack.
@@ -63,9 +64,11 @@ content: |
   - **Data flows:** the main flows as short numbered chains (source, steps, sink) for personal data, credentials and money, naming every third party that receives data, with the fields sent when visible.
   - **Open questions:** everything marked `unknown: confirm with the team`, as a checklist the team can answer.
 
+  - **Threat map:** the last section, one fenced ```mermaid block with a `flowchart LR`, for readers who are not developers. Draw only what the other sections already state, from things you opened: one node per component, external actor and data store you named; one `subgraph` per trust boundary or zone (for example "Internet", "Application", "Data stores", "Third parties"), titled as in Trust boundaries; arrows for the main data flows, labelled with the data (never secrets or real values). Mark an entry point whose authorization check is `none seen` with `:::unchecked` and add `classDef unchecked stroke:#d33,stroke-width:3px;`. Keep it to about 25 nodes: merge minor items rather than invent detail. Use simple ids (`api`, `db`) and quoted labels (`api["API server"]`), no HTML, no click handlers, no external links. Add one line after the block: `Drawn from the sections above; it shows no findings.` If you cannot support a node or arrow from the code, leave it out. The block must open with ```mermaid, close with ```, and every `subgraph` needs an `end`.
+
   ### 4. Update, do not overwrite
 
-  If the threat-model file exists, read it first and keep it. Any section, paragraph, table row or bullet that follows a line `<!-- human -->` (up to the next heading or the next `<!-- /human -->`) was written or approved by a person: copy it unchanged, in place. This includes a `## Scope decisions` section: it records answers a person gave and is not one of the nine fixed sections, so keep it where it is. Do not delete, reword, merge or "correct" it. If the code now contradicts it, leave it and add a line under Open questions: `The code at <path:line> differs from the human-written rule "<first words>": confirm which is right`. For everything not marked human, refresh it from the code: add what is new, remove what no longer exists, and update `generated` and `commit`. Never remove the front matter fields. If the existing file does not follow this structure, keep its text under a final heading `## Previous notes` marked `<!-- human -->` and write the new structure above it.
+  If the threat-model file exists, read it first and keep it. Any section, paragraph, table row or bullet that follows a line `<!-- human -->` (up to the next heading or the next `<!-- /human -->`) was written or approved by a person: copy it unchanged, in place. This includes a `## Scope decisions` section: it records answers a person gave and is not one of the fixed sections, so keep it where it is. Do not delete, reword, merge or "correct" it. If the code now contradicts it, leave it and add a line under Open questions: `The code at <path:line> differs from the human-written rule "<first words>": confirm which is right`. For everything not marked human, refresh it from the code: add what is new, remove what no longer exists, and update `generated` and `commit`. Never remove the front matter fields. If the existing file does not follow this structure, keep its text under a final heading `## Previous notes` marked `<!-- human -->` and write the new structure above it.
 
   ### 4b. Declared scope
 
@@ -73,4 +76,4 @@ content: |
 
   ### 5. Finish
 
-  Write the file with the file-writing tool, then re-read it and check: front matter present, all nine headings in order, no invented component, every unknown marked. End with a short summary: the path, how many rules and entry points it lists, how many unknowns, and whether human sections were preserved. Record no findings, even if you notice a bug; mention it in one line of the summary instead.
+  Write the file with the file-writing tool, then re-read it and check: front matter present, all nine headings in order plus the Threat map with a closed mermaid block starting with `flowchart`, no invented component, every unknown marked. End with a short summary: the path, how many rules and entry points it lists, how many unknowns, and whether human sections were preserved. Record no findings, even if you notice a bug; mention it in one line of the summary instead.

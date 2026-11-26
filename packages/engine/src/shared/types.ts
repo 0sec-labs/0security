@@ -712,6 +712,11 @@ export interface Finding {
     /** Replacement text for a provider-native suggestion block. */
     suggestion?: string;
     /**
+     * Plain-language explanation of the fix (at most 600 characters): what to change and why it closes the hole.
+     * Stored inside the existing reviewAnnotation JSON column, so it needs no migration; absent on older findings.
+     */
+    fixExplanation?: string;
+    /**
      * Exact cited source lines contain a maintainer-awareness marker
      * (TODO/FIXME/XXX/HACK or a known-limitation note). The cloud holds
      * automatic disclosure promotion; this never drops the finding.

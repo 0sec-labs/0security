@@ -35,7 +35,7 @@ import { classifyToolRisk } from "./destructive-classifier.js";
 import { fetchScoped } from "../http.js";
 import { buildAuthHeaders } from "./prompts.js";
 import { formatTruncated } from "./output-truncation.js";
-import { isRepoRelativePath, isSuggestionAcceptable, probeFileRefTarget } from "../findings-parser.js";
+import { isRepoRelativePath, isSuggestionAcceptable, parseFixExplanation, probeFileRefTarget } from "../findings-parser.js";
 import type { osecDB } from "../storage/index.js";
 import { searchParallel } from "./tools/web-search-parallel.js";
 import { searchKeenable, selectedWebSearchProvider } from "./tools/web-search-keenable.js";
@@ -662,6 +662,11 @@ export class ToolExecutor {
         },
       ]);
     }
+    // fix_explanation is bounded plain text; a mismatch is returned to the model so it can shorten and resubmit.
+    const fixExplanation = parseFixExplanation(args.fix_explanation);
+    if (fixExplanation.error) {
+      return buildValidationFailureResult([{ field: "fix_explanation", reason: fixExplanation.error }]);
+    }
     const evidencePaths = parseEvidencePathsArg(args.evidence_paths);
     const draft: FindingDraft = {
       cve: typeof args.cve === "string" ? args.cve : undefined,
@@ -821,6 +826,7 @@ export class ToolExecutor {
         isSuggestionAcceptable(suggestion)
           ? { suggestion }
           : {}),
+        ...(fixExplanation.value ? { fixExplanation: fixExplanation.value } : {}),
         ...(citedSourceHasKnownMarker(
           sourceAbsolute,
           startLine as number,

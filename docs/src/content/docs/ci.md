@@ -651,9 +651,38 @@ sh ci/rehearsal/bitbucket-cloud.sh
 
 Run it with `--dry-run` to see the plan without sending anything. The script has not been run against a live workspace. Record the date and the Bitbucket plan in the issue when you do.
 
+## Create Jira issues from findings
+
+`0security findings upload --to jira-cloud` (or `--to jira-dc` for Jira Data Center) creates one Jira issue for each open finding. Scan with `--format json` so the issue can carry the impact and the fix advice.
+
+```sh
+0security scan --format json -o scan.json
+# See what would be created. This sends nothing and needs no token.
+0security findings upload scan.json --to jira-cloud --jira-project SEC --url https://your-site.atlassian.net --dry-run
+# Create the issues.
+export JIRA_EMAIL=you@example.com JIRA_TOKEN=...   # Jira Cloud: account email and API token
+0security findings upload scan.json --to jira-cloud --jira-project SEC --jira-issue-type Bug --jira-label team-a --url https://your-site.atlassian.net
+# Data Center: a personal access token, sent as a bearer token. No email.
+export JIRA_TOKEN=...
+0security findings upload scan.json --to jira-dc --jira-project SEC --url https://jira.internal.example.com
+```
+
+What you get:
+
+- One issue per finding that is still open. Findings that are false-positive, fixed or suppressed are skipped.
+- The summary is the finding's title. The description holds the severity, location, weakness, description, impact, the suggested fix and the finding id.
+- The labels are `0security`, the severity, `0-finding-<id>` and any `--jira-label` you add. Issue type defaults to `Task`.
+- Running it again creates only what is new. Before creating, it searches the project for each `0-finding-<id>` label. An issue you closed in Jira still has its label, so it is not reopened or created again. If you remove the label, the finding gets a new issue.
+- `JIRA_PROJECT` and `JIRA_URL` can replace `--jira-project` and `--url`. The token is read only from `JIRA_TOKEN`, sent only in the Authorization header and removed from error messages. A plain `http://` URL is refused unless it is this machine or you pass `--allow-insecure-http`.
+- `ZERO_ENTERPRISE` blocks it. There is no exception setting. `--dry-run` still works.
+
+The Jira search index can lag by a few seconds on Cloud. Two runs started at the same moment can create the same issue twice, so run it from one job at a time.
+
+This has been tested only against a stand-in server on this machine that answers like Jira's published API, not against a live Jira. The project key, issue type and required fields of your Jira are not checked in advance. If your project needs extra required fields, Jira will refuse the issue and the error is shown.
+
 ## Review Bitbucket pull requests on your own machine
 
-`0security sentinels bitbucket` reviews Bitbucket pull requests from a machine you run, on Bitbucket Cloud and Data Center. It needs no hosted service and no pipeline. Run `watch` to review pull requests as they open or change, or `review` for one.
+`0security sentinels bitbucket` reviews Bitbucket pull requests from a machine you run, on Bitbucket Cloud and Data Center. It needs no hosted service and no pipeline. Run `watch` to review pull requests as they open or change, or `review` for one. Run `doctor` first to check your setup.
 
 Each review scans only the files the pull request changes. It then publishes a Code Insights report for the head commit, keeps one summary comment up to date, and adds up to ten inline comments on changed lines.
 
@@ -668,6 +697,27 @@ export OPENAI_API_KEY=...
 For Data Center, pass `--platform dc`, the repository as `PROJECT/repo` and `--url https://bitbucket.example.com`.
 
 To run the same review from a Sentinel, see the [Bitbucket pull request trigger](/sentinels/#bitbucket-pull-request-trigger).
+
+### Check your setup first
+
+`doctor` tells you in one command whether a Sentinel will work, before it fails in the middle of a review. It prints a PASS, FAIL or SKIP line per check and ends with the exact setting or scope to fix. It exits 1 when a required check fails, and `--json` prints the same result as JSON.
+
+```bash
+export BITBUCKET_TOKEN=...
+0security sentinels bitbucket doctor --platform cloud --repo workspace/repo --checkout ~/code/repo
+```
+
+For Data Center, pass `--platform dc`, `--repo PROJECT/repo` and `--url https://bitbucket.example.com`. It checks:
+
+- `BITBUCKET_TOKEN` is set. It prints only the length, never the token.
+- Bitbucket accepts the token and the repository is visible. It names a 401 (bad or expired token), a 403 (a missing permission) or a 404 (the token cannot see the repository).
+- The token can list pull requests.
+- The token can write Code Insights. It creates a report named `0-doctor-<random>` on the repository's newest commit and deletes it again. Pass `--read-only` to skip this and write nothing.
+- The token can post and delete a pull request comment. This runs only with `--pr <number>`: it posts one marker comment and deletes it right away.
+- With `--checkout <folder>`: the folder is a git clone whose `origin` is the Bitbucket repository, and `git ls-remote origin` works. Git uses your own credentials and never gets `BITBUCKET_TOKEN`.
+- A model provider is configured. This reads local settings and makes no model call.
+- With `BITBUCKET_WEBHOOK_SECRET` set (or `--listen <host:port>` given): the secret has at least 16 characters, and the listen address is this machine or needs a TLS proxy in front.
+- `ZERO_ENTERPRISE` is not set. When it is, every Bitbucket request is refused unless `ZERO_BITBUCKET_URL` names your server.
 
 ### Use a webhook
 

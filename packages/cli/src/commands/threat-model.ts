@@ -27,6 +27,7 @@ import { planScan } from "../scan-plan.js";
 import { DEFAULT_BATCH_SIZE } from "../scan-batched.js";
 import { findingsFromReport, latestScanFindings, loadReportFile, MAX_SCAN_AGE_DAYS, type ScanSnapshot } from "../threat-interview-findings.js";
 import { finishWithError, UsageError } from "./output.js";
+import { checkThreatMap } from "./threat-map.js";
 import { asJson, finishedThread, usageLine } from "./thread-output.js";
 import { ensureScopeLink, runInterview, scopeLinkFor, upsertScopeDecisions, type InterviewIO, type InterviewModel, type InterviewResult } from "../threat-interview.js";
 
@@ -400,6 +401,7 @@ export async function runThreatModel(folderArg: string | undefined, options: Thr
 
     const text = deps.readFile(target);
     const problems = checkThreatModel(text);
+    for (const warning of checkThreatMap(text)) notices.push(`diagram: ${warning}`);
     const humanKept = before !== undefined ? humanBlocks(before).every(block => text !== undefined && text.includes(block)) : undefined;
     const costUsd = (thread?.costUsd ?? 0) + interviewCost + scanCost;
     const common = {

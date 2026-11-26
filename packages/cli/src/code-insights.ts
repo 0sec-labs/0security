@@ -43,6 +43,8 @@ export interface InsightFinding {
   verdict?: string;
   rationale?: string;
   fix?: string;
+  /** The agent's plain-language explanation of the fix: what to change and why it closes the hole. */
+  fixExplanation?: string;
 }
 
 type Json = Record<string, unknown>;
@@ -81,6 +83,7 @@ export function readInsightFindings(text: string): InsightFinding[] {
     const evidence = isObject(raw.evidence) ? raw.evidence : {};
     const impact = isObject(raw.impact) ? raw.impact : {};
     const fix = isObject(raw.suggestedFix) ? str(raw.suggestedFix.replacement) : "";
+    const fixExplanation = isObject(raw.suggestedFix) ? str(raw.suggestedFix.explanation) : "";
     const analysis = str(evidence.analysis);
     const path = normalizePath(str(location.path));
     const confidence = typeof raw.confidence === "number" ? `, confidence ${Math.round(raw.confidence * 100)}%` : "";
@@ -92,6 +95,7 @@ export function readInsightFindings(text: string): InsightFinding[] {
       ...(path ? { path } : {}), line: typeof location.startLine === "number" && location.startLine > 0 ? Math.floor(location.startLine) : 0,
       ...(cwe ? { cwe } : {}), description: str(raw.description),
       ...(verdict ? { verdict } : {}), ...(rationale ? { rationale } : {}), ...(fix ? { fix: `Suggested replacement:\n${fix}` } : {}),
+      ...(fixExplanation ? { fixExplanation } : {}),
     };
   });
 }
@@ -126,7 +130,9 @@ function detailText(finding: InsightFinding): string {
   if (finding.verdict) lines.push(`Verdict: ${finding.verdict}`);
   if (finding.description) lines.push("", finding.description);
   if (finding.rationale && finding.rationale !== finding.description) lines.push("", `Rationale: ${finding.rationale}`);
-  if (finding.fix) lines.push("", `Fix: ${finding.fix}`);
+  // The explanation leads: it is the part a developer reads first, and the replacement code is cut first if the text is long.
+  if (finding.fixExplanation) lines.push("", `Fix: ${finding.fixExplanation}`);
+  if (finding.fix) lines.push("", finding.fixExplanation ? finding.fix : `Fix: ${finding.fix}`);
   return lines.join("\n");
 }
 

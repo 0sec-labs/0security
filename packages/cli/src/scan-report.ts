@@ -114,6 +114,14 @@ function reportFinding(finding: Finding, roots: readonly string[]): Finding {
 /** A finding that more than one pass found, merged: how many of the passes did, and which other findings it absorbed. */
 export type MergedFinding = Finding & { foundInPasses?: number; mergedFindingIds?: string[] };
 
+const ADVISORY_ID = /\b(?:GHSA(?:-[a-z0-9]{4}){3}|CVE-\d{4}-\d{4,})\b/gi;
+const advisoryIds = (title: string): Set<string> => new Set(title.match(ADVISORY_ID)?.map(id => id.toUpperCase()) ?? []);
+/** Findings that name different advisories are separate records, even on one manifest line. */
+const namesDifferentAdvisories = (a: string, b: string): boolean => {
+  const left = advisoryIds(a), right = advisoryIds(b);
+  return left.size > 0 && right.size > 0 && ![...left].some(id => right.has(id));
+};
+
 interface Cluster { path: string | undefined; title: string; start: number; end: number; passes: Set<number>; best: Finding; members: { finding: Finding; pass: number }[] }
 
 const weight = (finding: Finding): number => (SEVERITIES.length - rank(finding.severity)) * 1_000_000 + finding.description.length + finding.evidence.request.length + finding.evidence.response.length + (finding.evidence.analysis?.length ?? 0);
@@ -139,9 +147,9 @@ export function mergePasses(passes: readonly (readonly Finding[])[], roots: read
       const title = finding.title.trim().toLowerCase();
       const match = clusters.find(cluster => {
         if (!location || !cluster.path) return !location && !cluster.path && !cluster.passes.has(pass) && cluster.title === title;
-        return cluster.members.some(member => member.pass === pass
+        return cluster.members.some(member => !namesDifferentAdvisories(member.finding.title, finding.title) && (member.pass === pass
           ? member.finding.reviewAnnotation !== undefined && linesWithin(member.finding.reviewAnnotation, location, 0) && sameFlaw(asInput(member.finding), asInput(finding))
-          : sameFlaw(asInput(member.finding), asInput(finding), { nearWithoutTitle: true }));
+          : sameFlaw(asInput(member.finding), asInput(finding), { nearWithoutTitle: true })));
       });
       if (match) {
         match.passes.add(pass);
@@ -293,7 +301,11 @@ export function scanJson(outcome: ScanOutcome, stored: readonly Finding[]): Reco
       ...(finding.cvssScore !== undefined ? { cvssScore: finding.cvssScore } : {}),
       ...(finding.cvssVector ? { cvssVector: finding.cvssVector } : {}),
       ...(finding.impactAssessment ? { impact: finding.impactAssessment } : {}),
-      ...(finding.reviewAnnotation?.suggestion ? { suggestedFix: { replacement: finding.reviewAnnotation.suggestion } } : {}),
+      // `explanation` is plain-language advice and may appear without a replacement; `replacement` is code for the cited lines.
+      ...(finding.reviewAnnotation?.suggestion || finding.reviewAnnotation?.fixExplanation ? { suggestedFix: {
+        ...(finding.reviewAnnotation.suggestion ? { replacement: finding.reviewAnnotation.suggestion } : {}),
+        ...(finding.reviewAnnotation.fixExplanation ? { explanation: finding.reviewAnnotation.fixExplanation } : {}),
+      } } : {}),
     })),
   };
 }

@@ -30,7 +30,7 @@ export function findingPresentation(finding: Finding): FindingPresentation {
     .replace(/^(?:critical|high|medium|low|info|IDOR)\s*:\s*/i, "")
     .replace(/\s*[—–]\s*repo(?:[- ]tracked|\s).*$/i, "")
     .replace(/\s*\((?:app|src)\/.*\)$/, "");
-  const action = [finding.evidence.analysis, finding.description].filter(Boolean).join("\n").match(/(?:Remediation|Suggested remediation|Fix):\s*([^\n]+)/i)?.[1]?.trim();
+  const action = finding.reviewAnnotation?.fixExplanation?.trim() || [finding.evidence.analysis, finding.description].filter(Boolean).join("\n").match(/(?:Remediation|Suggested remediation|Fix):\s*([^\n]+)/i)?.[1]?.trim();
   return { title, summary: findingSummary(finding), action };
 }
 export function targetLabel(target: string): string {

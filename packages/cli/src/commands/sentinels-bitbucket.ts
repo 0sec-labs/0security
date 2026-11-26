@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import type { Command } from "commander";
+import { renderDoctor, runDoctor } from "../bitbucket/doctor.js";
 import { reviewPullRequest } from "../bitbucket/review.js";
 import { fileState } from "../bitbucket/runner.js";
 import { PLATFORMS, createReviewer, splitRepo, type PlatformName } from "../bitbucket/service.js";
@@ -49,6 +50,8 @@ function setup(options: CommonOptions) {
 }
 
 const log = (line: string) => process.stderr.write(`${line}\n`);
+
+interface DoctorFlags { platform?: string; repo?: string; url?: string; checkout?: string; pr?: string; readOnly?: boolean; listen?: string; allowInsecureHttp?: boolean; json?: boolean }
 
 /** `0 sentinels bitbucket review` and `watch`: review Bitbucket pull requests from your own machine, no hosted service. */
 export function registerSentinelsBitbucketCommands(group: Command): void {
@@ -107,5 +110,31 @@ export function registerSentinelsBitbucketCommands(group: Command): void {
         setInterval(() => { void poll(); }, interval * 1000);
         await new Promise<void>(() => undefined);
       } catch (error) { finishWithError(error, { err: log }, false); }
+    });
+
+  bitbucket.command("doctor")
+    .description("Check that a Bitbucket Sentinel will work: token, scopes, Code Insights, clone, model key and webhook settings")
+    .requiredOption("--platform <platform>", "cloud or dc (Data Center)")
+    .requiredOption("--repo <repo>", "workspace/repo on Cloud, PROJECT/repo on Data Center")
+    .option("--url <url>", "Data Center base URL (default: BITBUCKET_URL)")
+    .option("--checkout <folder>", "Also check this local clone: its origin must be the Bitbucket repository and git ls-remote must work")
+    .option("--pr <number>", "Also post and delete a marker comment on this pull request")
+    .option("--read-only", "Write nothing: skip the Code Insights report test")
+    .option("--listen <host:port>", "The address you plan to give watch --listen")
+    .option("--allow-insecure-http", "Send the token to an http:// URL that is not on this machine (default: refuse)")
+    .option("--json", "Print JSON")
+    .action(async (options: DoctorFlags) => {
+      try {
+        const name = options.platform ?? "";
+        if (!Object.hasOwn(PLATFORMS, name)) throw new UsageError("--platform must be cloud or dc.");
+        const platform = PLATFORMS[name as PlatformName];
+        if (!splitRepo(options.repo ?? "")) throw new UsageError(`Name the repository with --repo ${platform === "bitbucket-cloud" ? "workspace/repo" : "PROJECT/repo"}.`);
+        const report = await runDoctor({
+          platform: name as PlatformName, repo: options.repo!, url: options.url, checkout: options.checkout, readOnly: options.readOnly === true, listen: options.listen,
+          allowInsecureHttp: options.allowInsecureHttp === true, ...(options.pr !== undefined ? { pr: positive("--pr", options.pr, 0) } : {}),
+        });
+        process.stdout.write(options.json ? `${JSON.stringify(report, null, 2)}\n` : `${renderDoctor(report)}\n`);
+        if (!report.ok) process.exitCode = 1;
+      } catch (error) { finishWithError(error, { err: log }, options.json); }
     });
 }

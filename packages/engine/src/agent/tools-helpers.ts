@@ -116,6 +116,20 @@ export function sourceLocationOf(candidate: FindingSimilarityCandidate): { path:
   return { path, start: startLine, end: typeof endLine === "number" && endLine >= startLine ? endLine : startLine };
 }
 
+const ADVISORY_ID = /\b(?:GHSA(?:-[a-z0-9]{4}){3}|CVE-\d{4}-\d{4,})\b/gi;
+
+/** Advisory ids a title names. Two findings that name different advisories are different records even on one line. */
+function advisoryIds(title: string | null | undefined): Set<string> {
+  return new Set((title ?? "").match(ADVISORY_ID)?.map(id => id.toUpperCase()) ?? []);
+}
+
+function namesDifferentAdvisories(a: FindingSimilarityCandidate, b: FindingSimilarityCandidate): boolean {
+  const left = advisoryIds(a.title);
+  const right = advisoryIds(b.title);
+  if (!left.size || !right.size) return false;
+  return ![...left].some(id => right.has(id));
+}
+
 /** Same file and the cited lines come within `gap` lines of each other (0: they overlap). */
 function sameLocation(a: FindingSimilarityCandidate, b: FindingSimilarityCandidate, gap: number): boolean {
   const left = sourceLocationOf(a);
@@ -158,6 +172,7 @@ export function findMatchingFindingCandidate<T extends FindingSimilarityCandidat
   const incomingPrefix = evidenceRequestPrefix(getFindingCandidateEvidenceRequest(incoming));
 
   return candidates.find((existing) => {
+    if (namesDifferentAdvisories(existing, incoming)) return false;
     if (options.byLocation && sameLocation(existing, incoming, existing.category === incomingCategory ? SAME_LOCATION_LINE_GAP : 0)) return true;
     if (!existing.category || existing.category !== incomingCategory) return false;
     const existingPrefix = evidenceRequestPrefix(getFindingCandidateEvidenceRequest(existing));

@@ -65,7 +65,7 @@ content: |
 
   If the task tells you to end with a json block and not to call the tool, do that instead: the caller records the variants and links each to the seed finding. When the task gives a `rootCause` for the seed, use its unsafe pattern and missing guard as your starting searches in step 2 and correct it if the code shows it is wrong; also return the root cause you used as `root_cause` (bug class, unsafe pattern with sink and source, missing guard, design origin = where the control should live).
 
-  Call `finding` once for each variant with: a title that names the flaw and where it is; severity based on impact and reach; one of the listed categories; `source_path`, `source_start_line` and `source_end_line`; a description that says "variant of <the fix>" and gives the chain from input to sink; the evidence; and a `suggested_replacement` that applies the same guard the fix used. If several sites share one helper, record the helper once and list the callers.
+  Call `finding` once for each variant with: a title that names the flaw and where it is; severity based on impact and reach; one of the listed categories; `source_path`, `source_start_line` and `source_end_line`; a description that says "variant of <the fix>" and gives the chain from input to sink; the evidence; and a `suggested_replacement` together with `fix_explanation` (at most 600 characters, plain words: what to change and why it closes the hole, using only names and lines you read) that applies the same guard the fix used. If several sites share one helper, record the helper once and list the callers.
 
   ### 6. Finish
 

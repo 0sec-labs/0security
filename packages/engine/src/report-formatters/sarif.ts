@@ -29,6 +29,8 @@ interface SarifResult {
     }>;
   }>;
   /** SARIF 2.1.0 section 3.27.23: an accepted risk or a dismissal recorded outside the code. */
+  /** SARIF 2.1.0 section 3.27.30: a proposed change, described in words and as a replacement of the cited lines. */
+  fixes?: Array<{ description: { text: string }; artifactChanges: Array<{ artifactLocation: { uri: string }; replacements: Array<{ deletedRegion: { startLine: number; endLine?: number }; insertedContent: { text: string } }> }> }>;
   suppressions?: Array<{ kind: "external"; status: "accepted"; justification?: string; properties?: Record<string, unknown> }>;
   properties?: Record<string, unknown>;
 }
@@ -181,6 +183,16 @@ function findingToResult(finding: Finding, target: string, suppressOutOfScope = 
     }
   }
 
+  const fixExplanation = finding.reviewAnnotation?.fixExplanation;
+  const replacement = finding.reviewAnnotation?.suggestion;
+  if (fixExplanation && replacement) {
+    // A SARIF fix needs a concrete change; the explanation alone goes in the result properties below.
+    const place = findingLocation(finding, target);
+    if (place.region) {
+      result.fixes = [{ description: { text: fixExplanation }, artifactChanges: [{ artifactLocation: { uri: place.artifactLocation.uri }, replacements: [{ deletedRegion: place.region, insertedContent: { text: replacement.endsWith("\n") ? replacement : `${replacement}\n` } }] }] }];
+    }
+  }
+
   result.properties = {
     findingId: finding.id,
     category: finding.category,
@@ -191,6 +203,7 @@ function findingToResult(finding: Finding, target: string, suppressOutOfScope = 
   if (finding.scope) result.properties["scope"] = finding.scope;
   if (finding.scopeReason) result.properties["scopeReason"] = finding.scopeReason;
   if (finding.scopeSource) result.properties["scopeSource"] = finding.scopeSource;
+  if (fixExplanation) result.properties["fixExplanation"] = fixExplanation;
   if (finding.ruleSource) result.properties["ruleSource"] = finding.ruleSource;
   if (finding.knownStatus) result.properties["knownStatus"] = finding.knownStatus;
   if (finding.knownBy) result.properties["knownBy"] = finding.knownBy;
