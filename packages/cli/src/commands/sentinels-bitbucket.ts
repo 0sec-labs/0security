@@ -2,9 +2,9 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import type { Command } from "commander";
-import { BitbucketClient, type Platform } from "../bitbucket/client.js";
-import { reviewPullRequest, type ReviewOptions } from "../bitbucket/review.js";
-import { fileState, gitScanRunner } from "../bitbucket/runner.js";
+import { reviewPullRequest } from "../bitbucket/review.js";
+import { fileState } from "../bitbucket/runner.js";
+import { PLATFORMS, createReviewer, splitRepo, type PlatformName } from "../bitbucket/service.js";
 import { createWebhookServer, pollOnce, ReviewQueue } from "../bitbucket/watch.js";
 import { finishWithError, UsageError } from "./output.js";
 
@@ -15,7 +15,6 @@ interface CommonOptions {
 interface ReviewFlags extends CommonOptions { pr?: string }
 interface WatchFlags extends CommonOptions { interval?: string; listen?: string; once?: boolean; maxReviews?: string }
 
-const PLATFORMS: Record<string, Platform> = { cloud: "bitbucket-cloud", dc: "bitbucket-dc" };
 const REPORT_ID = /^[A-Za-z0-9._-]{1,100}$/;
 
 function positive(name: string, value: string | undefined, fallback: number): number {
@@ -26,28 +25,27 @@ function positive(name: string, value: string | undefined, fallback: number): nu
 }
 
 function setup(options: CommonOptions) {
-  const platform = PLATFORMS[options.platform ?? ""];
-  if (!platform) throw new UsageError("--platform must be cloud or dc.");
-  const [owner, repo, extra] = (options.repo ?? "").split("/");
-  if (!owner || !repo || extra !== undefined) throw new UsageError(`Name the repository with --repo ${platform === "bitbucket-cloud" ? "workspace/repo" : "PROJECT/repo"}.`);
+  const name = options.platform ?? "";
+  if (!Object.hasOwn(PLATFORMS, name)) throw new UsageError("--platform must be cloud or dc.");
+  const platform = PLATFORMS[name as PlatformName];
+  if (!splitRepo(options.repo ?? "")) throw new UsageError(`Name the repository with --repo ${platform === "bitbucket-cloud" ? "workspace/repo" : "PROJECT/repo"}.`);
   if (!options.checkout) throw new UsageError("Name a local clone of the repository with --checkout <folder>.");
   const token = (process.env["BITBUCKET_TOKEN"] ?? "").trim();
   if (!token) throw new UsageError("Set BITBUCKET_TOKEN to a token that can read pull requests, write comments and write Code Insights.");
   const url = options.url || process.env["BITBUCKET_URL"] || undefined;
   const reportId = options.reportId ?? "0-security";
   if (!REPORT_ID.test(reportId)) throw new UsageError("--report-id may hold letters, digits, dots, dashes and underscores (at most 100).");
-  const client = new BitbucketClient({ platform, token, ...(url ? { baseUrl: url } : {}), allowInsecureHttp: options.allowInsecureHttp === true });
-  const runner = gitScanRunner({ checkout: resolve(options.checkout), budget: String(options.budget ?? "2"), ...(options.model ? { model: options.model } : {}) });
+  const reviewer = createReviewer({
+    platform: name as PlatformName, repo: options.repo!, checkout: options.checkout, token, baseUrl: url, allowInsecureHttp: options.allowInsecureHttp === true,
+    budget: String(options.budget ?? "2"), model: options.model, maxFiles: positive("--max-files", options.maxFiles, 50), maxInline: positive("--max-inline", options.maxInline, 10),
+    reportId, comments: options.comments !== false, insights: options.insights !== false,
+  });
   const statePath = resolve(options.state ?? join(homedir(), ".0", "bitbucket-review.json"));
   const state = fileState(statePath, {
     read: path => { try { return readFileSync(path, "utf8"); } catch { return undefined; } },
     write: (path, text) => { mkdirSync(dirname(path), { recursive: true }); const temp = `${path}.${process.pid}.tmp`; writeFileSync(temp, text, { mode: 0o600 }); renameSync(temp, path); },
   });
-  const review: ReviewOptions = {
-    reportId, maxFiles: positive("--max-files", options.maxFiles, 50), maxInline: positive("--max-inline", options.maxInline, 10),
-    comments: options.comments !== false, insights: options.insights !== false,
-  };
-  return { platform, owner, repo, client, runner, state, review };
+  return { platform, owner: reviewer.owner, repo: reviewer.repo, client: reviewer.client, runner: reviewer.runner, state, review: reviewer.review };
 }
 
 const log = (line: string) => process.stderr.write(`${line}\n`);

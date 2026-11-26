@@ -38,7 +38,7 @@ export class ReviewQueue {
         this.#current = key;
         try {
           const outcome = await this.deps.review(pr);
-          this.deps.log(`${key}: ${describe(outcome)}`);
+          this.deps.log(`${key}: ${describeOutcome(outcome)}`);
         } catch (error) {
           this.deps.log(`${key}: review failed: ${(error instanceof Error ? error.message : String(error)).split("\n")[0]!.slice(0, 300)}`);
         }
@@ -48,7 +48,7 @@ export class ReviewQueue {
   }
 }
 
-function describe(outcome: ReviewOutcome): string {
+export function describeOutcome(outcome: ReviewOutcome): string {
   if (outcome.status === "skipped") return `skipped (${outcome.reason})`;
   if (outcome.status === "too-large") return `skipped, ${outcome.files} files is too many`;
   return `reviewed ${outcome.sha.slice(0, 7)}, ${outcome.total} finding(s)${outcome.partial ? ", partial" : ""}${outcome.warnings.length ? `, ${outcome.warnings.length} warning(s): ${outcome.warnings.join(" | ")}` : ""}`;

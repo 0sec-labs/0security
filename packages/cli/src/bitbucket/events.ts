@@ -46,3 +46,9 @@ export function parseDelivery(platform: Platform, eventKey: string, payload: unk
   const pr = dcPullRequest(request, project, slug);
   return pr ? { ok: true, pr } : { ok: false, reason: "payload_shape" };
 }
+
+/** Which trigger event a delivery is: a new pull request or new commits on one. Cloud and Data Center name them differently. */
+export function deliveryEvent(platform: Platform, eventKey: string): "opened" | "updated" | undefined {
+  if (!PULL_REQUEST_EVENTS[platform].includes(eventKey)) return undefined;
+  return eventKey === "pullrequest:created" || eventKey === "pr:opened" ? "opened" : "updated";
+}

@@ -4478,8 +4478,8 @@ Add a trigger for an automation the Sentinel owns; disabled unless --enable --ye
 | Option | Registered default | Description |
 | --- | --- | --- |
 | `--automation <id>` | — | What the trigger starts (default: the only one this Sentinel owns) |
-| `--kind <kind>` | — | schedule \| manual \| github-pr \| release \| check-completed \| webhook |
-| `--file <path>` | — | Trigger JSON object with schedule, github, release or check settings |
+| `--kind <kind>` | — | schedule \| manual \| github-pr \| bitbucket-pr \| release \| check-completed \| webhook |
+| `--file <path>` | — | Trigger JSON object with schedule, github, bitbucket, release or check settings |
 | `--enable` | — | Enable immediately |
 | `--yes` | — | Confirm that an enabled trigger was reviewed |
 | `--frequency <frequency>` | — | schedule: minutes, hourly, daily, weekdays, weekly, cron |
@@ -4488,11 +4488,18 @@ Add a trigger for an automation the Sentinel owns; disabled unless --enable --ye
 | `--weekday <day>` | — | schedule, weekly: sun, mon, ... or 0-6 |
 | `--cron <expression>` | — | schedule, cron: five fields |
 | `--timezone <zone>` | — | schedule: IANA timezone (default UTC) |
-| `--repo <owner/name>` | — | github-pr: repository to watch |
+| `--repo <owner/name>` | — | github-pr: repository to watch; bitbucket-pr: workspace/repo (Cloud) or PROJECT/repo (Data Center) |
 | `--base-branch <branch>` | — | github-pr: only pull requests into this branch |
 | `--comment` | — | github-pr: comment on each pull request with one short summary, edited in place on later pushes (default: off) |
 | `--include-forks` | — | github-pr: also review pull requests from forks, marked untrusted (default: skipped) |
 | `--label <text>` | — | webhook: a name for this webhook (default: webhook) |
+| `--platform <platform>` | — | bitbucket-pr: cloud or dc (Data Center) |
+| `--url <url>` | — | bitbucket-pr, Data Center: server URL, for example https://bitbucket.example.com |
+| `--checkout <folder>` | — | bitbucket-pr: absolute path of a local clone whose origin is the Bitbucket repository |
+| `--token-env <name>` | — | bitbucket-pr: name of the environment variable that holds the token (default: BITBUCKET_TOKEN) |
+| `--events <list>` | — | bitbucket-pr: opened, updated or opened,updated (default: both) |
+| `--max-files <n>` | — | bitbucket-pr: skip a pull request that changes more files than this (default: 50) |
+| `--budget <usd>` | — | bitbucket-pr: spend limit for one pull request scan (default: 2) |
 | `--json` | — | Print machine-readable JSON |
 | `--db-path <path>` | — | Control database (default: the user database) |
 | `--format <format>` | — | Output: text or json Choices: text, json. |

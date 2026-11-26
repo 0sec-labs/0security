@@ -138,6 +138,43 @@ automations:
     s.close();
   });
 
+  it("accepts bitbucket-pr triggers, creates them disabled, round trips through export and rejects inline secrets", () => {
+    const s = setup();
+    const file = (extra: string) => `name: Bitbucket review
+instructions: Review pull requests.
+automations:
+  - name: On pull request
+    template: repository-review
+    triggers:
+      - kind: bitbucket-pr
+        bitbucket:
+          platform: dc
+          repo: PRJ/app
+          baseUrl: https://bitbucket.example.com
+          checkout: /srv/clones/app
+          tokenEnv: BITBUCKET_DC_TOKEN
+          events: [updated]
+          maxFiles: 20
+          budgetUsd: 0.5${extra}
+`;
+    s.write("bb.yaml", file(""));
+    expect(planSync(loadDefinitions(s.defs), s.stores)[0]).toMatchObject({ action: "create" });
+    applySync(loadDefinitions(s.defs), s.stores);
+    const trigger = s.stores.sentinels.listTriggers()[0]!;
+    expect(trigger).toMatchObject({ kind: "bitbucket-pr", enabled: false });
+    expect(trigger.bitbucket).toMatchObject({ platform: "dc", repo: "PRJ/app", tokenEnv: "BITBUCKET_DC_TOKEN", events: ["updated"], maxFiles: 20, budgetUsd: 0.5, pollMs: 120_000, comments: true, insights: true, reportId: "0-security" });
+    expect(planSync(loadDefinitions(s.defs), s.stores)[0]).toMatchObject({ action: "unchanged" });
+    s.write("bb.yaml", exportDefinition(s.stores.sentinels.list()[0]!, s.stores));
+    expect(planSync(loadDefinitions(s.defs), s.stores)[0]).toMatchObject({ action: "unchanged" });
+    s.write("bb.yaml", file("").replace("maxFiles: 20", "maxFiles: 30"));
+    expect(planSync(loadDefinitions(s.defs), s.stores)[0]!.changes).toEqual(["triggers of On pull request"]);
+    for (const bad of ["\n          token: abc", "\n          tokenEnv: OPENAI_API_KEY"]) {
+      s.write("bb.yaml", file(bad).replace("          tokenEnv: BITBUCKET_DC_TOKEN\n", bad.includes("tokenEnv") ? "" : "          tokenEnv: BITBUCKET_DC_TOKEN\n"));
+      expect(() => loadDefinitions(s.defs)).toThrow("bb.yaml");
+    }
+    s.close();
+  });
+
   it("rejects a release trigger with an unknown reporting mode or a stray key", () => {
     const s = setup();
     const file = (body: string) => `name: X\nautomations:\n  - name: A\n    template: repository-review\n    triggers:\n      - kind: release\n        release: { repo: o/r${body} }\n`;

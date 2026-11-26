@@ -14,6 +14,9 @@ import {
 } from "@0/engine/shared";
 import { consoleExecutionProfile } from "../console-execution.js";
 import { AgentTurnDelivery, type TurnResult } from "./agent-turns.js";
+import { runBitbucketTrigger, type BitbucketRunDeps, type DeliveredPullRequest } from "./sentinel-bitbucket.js";
+import { deliveryEvent, parseDelivery } from "../bitbucket/events.js";
+import { PLATFORMS } from "../bitbucket/service.js";
 
 const MAX_SEED_FILE_CHARS = 16_000;
 /** An occurrence older than this when the engine wakes up is skipped, never replayed. */
@@ -125,6 +128,10 @@ export class SentinelRunner {
   #ticking = false;
   #closed = false;
   #pending: Promise<void> | undefined;
+  /** Bitbucket reviews run for minutes, so they run beside the scheduler; the trigger's claim is held until the review is done. */
+  readonly #bitbucketRuns = new Map<string, Promise<void>>();
+  readonly #bitbucketEnv: NodeJS.ProcessEnv | undefined;
+  readonly #bitbucketReviewer: BitbucketRunDeps["reviewer"];
   readonly #commentLog: number[] = [];
   readonly #commentLast = new Map<string, number>();
 
@@ -133,7 +140,8 @@ export class SentinelRunner {
   readonly #persistent: () => boolean;
   readonly #turns: AgentTurnDelivery;
 
-  constructor(options: { store: SentinelStore; workflows: SecurityWorkflowStore; missions: SentinelMissionRuntime; gh?: SentinelGhClient; now?: () => number; executionProfile?: () => "local" | "smolvm"; checkout?: (repo: string) => Promise<string | undefined>; persistentThread?: () => boolean }) {
+  constructor(options: { store: SentinelStore; workflows: SecurityWorkflowStore; missions: SentinelMissionRuntime; gh?: SentinelGhClient; now?: () => number; executionProfile?: () => "local" | "smolvm"; checkout?: (repo: string) => Promise<string | undefined>; persistentThread?: () => boolean; bitbucket?: { env?: NodeJS.ProcessEnv; reviewer?: BitbucketRunDeps["reviewer"] } }) {
+    this.#bitbucketEnv = options.bitbucket?.env; this.#bitbucketReviewer = options.bitbucket?.reviewer;
     this.#store = options.store; this.#workflows = options.workflows; this.#missions = options.missions;
     this.#executionProfile = options.executionProfile ?? (() => { try { return consoleExecutionProfile(); } catch { return "local"; } });
     this.#checkout = options.checkout ?? findCheckout;
@@ -153,10 +161,14 @@ export class SentinelRunner {
     this.#closed = true;
     if (this.#timer) clearInterval(this.#timer);
     await this.#pending;
+    await this.settled();
     for (const watch of this.#watches.values()) watch.dispose();
     this.#watches.clear();
     this.#turns.dispose();
   }
+
+  /** Resolves when the Bitbucket reviews started so far have finished (shutdown and tests). */
+  async settled(): Promise<void> { while (this.#bitbucketRuns.size) await Promise.allSettled([...this.#bitbucketRuns.values()]); }
 
   // ---------- scheduler ----------
 
@@ -213,6 +225,29 @@ export class SentinelRunner {
     const due = this.#store.requestCheck(triggerId, nowMs);
     if (!due) return false;
     await this.#fire(due, nowMs, "webhook", undefined, input);
+    return true;
+  }
+
+  /**
+   * Starts one bitbucket-pr trigger for a signed delivery. The delivery only names a pull request; what is reviewed, and how, comes from the
+   * trigger's own settings. Resolves false when the trigger is off, busy or not a Bitbucket trigger; true when the delivery was handled or ignored on purpose.
+   */
+  async deliverBitbucket(triggerId: string, input: { eventKey: string; payload: unknown }): Promise<boolean> {
+    if (this.#closed) return false;
+    const current = this.#store.getTrigger(triggerId);
+    const config = current?.bitbucket;
+    if (!current || current.kind !== "bitbucket-pr" || !config) return false;
+    const platform = PLATFORMS[config.platform];
+    const event = deliveryEvent(platform, input.eventKey);
+    if (!event || !config.events.includes(event)) return true;
+    const parsed = parseDelivery(platform, input.eventKey, input.payload);
+    if (!parsed.ok) return true;
+    const [owner, repo] = config.repo.split("/");
+    if (parsed.pr.owner.toLowerCase() !== owner?.toLowerCase() || parsed.pr.repo.toLowerCase() !== repo?.toLowerCase()) return true;
+    const nowMs = this.#now();
+    const due = this.#store.requestCheck(triggerId, nowMs);
+    if (!due) return false;
+    await this.#fire(due, nowMs, "webhook", undefined, undefined, { pr: parsed.pr, event });
     return true;
   }
 
@@ -288,11 +323,11 @@ export class SentinelRunner {
     }
   }
 
-  async #fire(due: SentinelTrigger, nowMs: number, via: "poll" | "check" | "webhook" = "poll", pushed?: GithubEvent, signed?: { key: string; fields: Record<string, string | number> }): Promise<void> {
+  async #fire(due: SentinelTrigger, nowMs: number, via: "poll" | "check" | "webhook" = "poll", pushed?: GithubEvent, signed?: { key: string; fields: Record<string, string | number> }, bitbucket?: DeliveredPullRequest): Promise<void> {
     const sentinel = this.#store.get(due.sentinelId);
     if (!sentinel) { this.#store.deleteTrigger(due.id); return; }
     const nextFireAt = due.kind === "schedule" && due.schedule ? isoAt(nextSentinelFire(due.schedule, nowMs))
-      : (due.kind === "github-pr" || due.kind === "release" || due.kind === "check-completed") && sentinelPollMs(due) !== undefined ? isoAt(nowMs + sentinelPollMs(due)!) : null;
+      : (due.kind === "github-pr" || due.kind === "release" || due.kind === "check-completed" || due.kind === "bitbucket-pr") && sentinelPollMs(due) !== undefined ? isoAt(nowMs + sentinelPollMs(due)!) : null;
     const claimed = this.#store.claimTrigger(due.id, nextFireAt, nowMs);
     if (!claimed?.activeClaim) return;
     const release = (update: Parameters<SentinelStore["releaseTrigger"]>[2]) => this.#store.releaseTrigger(claimed.id, claimed.activeClaim!, update, this.#now());
@@ -303,6 +338,7 @@ export class SentinelRunner {
       if (sentinel.status !== "active") { release({ lastStatus: "paused" }); return; }
       if (sentinelNeedsReview(sentinel)) { release({ lastStatus: "needs_review", lastError: "Model, tools or skills changed. Review and acknowledge the Sentinel before it runs on its own." }); return; }
       if (due.kind === "github-pr") { await this.#pollPullRequests(claimed, sentinel, automation, release, via); return; }
+      if (due.kind === "bitbucket-pr") { this.#startBitbucket(claimed, sentinel, automation, release, via, bitbucket); return; }
       if (due.kind === "webhook") { await this.#runSignedWebhook(claimed, sentinel, automation, release, signed); return; }
       if (due.kind === "release" || due.kind === "check-completed") { await this.#runGithubEvents(claimed, sentinel, automation, release, via, pushed); return; }
       if (this.#persistent()) {
@@ -315,6 +351,24 @@ export class SentinelRunner {
     } catch (error) {
       release({ lastStatus: "error", lastError: message(error) });
     }
+  }
+
+  /** Runs a Bitbucket review beside the scheduler. A trigger whose review is still running is left alone. */
+  #startBitbucket(trigger: SentinelTrigger, sentinel: Sentinel, automation: SecurityWorkflow, release: (update: { lastStatus?: string; lastError?: string; cursor?: Record<string, string> }) => unknown, via: "poll" | "check" | "webhook", delivered?: DeliveredPullRequest): void {
+    if (this.#bitbucketRuns.has(trigger.id)) { release({}); return; }
+    const deps: BitbucketRunDeps = {
+      store: this.#store, sentinel, trigger, automationId: automation.id, via, now: this.#now, isEnabled: () => this.#store.getTrigger(trigger.id)?.enabled === true,
+      ...(this.#bitbucketEnv ? { env: this.#bitbucketEnv } : {}), ...(this.#bitbucketReviewer ? { reviewer: this.#bitbucketReviewer } : {}),
+    };
+    const work: Promise<void> = (async () => {
+      try {
+        const result = await runBitbucketTrigger(deps, delivered);
+        const current = this.#store.getTrigger(trigger.id);
+        if (current && !current.enabled && current.lastStatus === "failing") release({ ...(result.cursor ? { cursor: result.cursor } : {}) });
+        else release({ lastStatus: result.lastStatus, lastError: result.lastError, ...(result.cursor ? { cursor: result.cursor } : {}) });
+      } catch (error) { release({ lastStatus: "error", lastError: message(error) }); }
+    })().finally(() => { this.#bitbucketRuns.delete(trigger.id); });
+    this.#bitbucketRuns.set(trigger.id, work);
   }
 
   async #deliverSafely(request: Parameters<AgentTurnDelivery["deliver"]>[0]): Promise<TurnResult> {

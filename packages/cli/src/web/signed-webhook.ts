@@ -10,6 +10,7 @@
 //     https://docs.gitlab.com/user/project/integrations/webhooks/
 //   X-0-Signature-256: sha256=<hex> with X-0-Timestamp: <unix seconds>
 //     HMAC-SHA256 of "<timestamp>.<raw body>". For your own scripts. Rejected outside a five minute window.
+// A Bitbucket pull request trigger uses the same route and secret: the payload only names a pull request (see sentinel-bitbucket.ts).
 // Checks, cheapest first and always before the body is parsed: method, rate limit, secret exists, content type,
 // Content-Length cap, streamed body cap and deadline, signature (constant-time), global limit, replay (delivery id,
 // or a digest of the body), JSON. The payload never chooses a trigger or authorises anything: it is reduced to a few
@@ -93,7 +94,7 @@ export function verifyDelivery(headers: Headers, raw: Buffer, secrets: readonly 
 
 /** Delivery id the sender gave us, else a digest of the exact bytes (a replayed body is a replayed delivery). */
 export function deliveryKey(headers: Headers, raw: Buffer): string {
-  for (const name of ["x-0-delivery", "x-github-delivery", "x-request-uuid", "x-gitlab-event-uuid", "x-gitlab-webhook-uuid"]) {
+  for (const name of ["x-0-delivery", "x-github-delivery", "x-request-uuid", "x-request-id", "x-gitlab-event-uuid", "x-gitlab-webhook-uuid"]) {
     const value = header(headers, name);
     if (value !== undefined && DELIVERY_SHAPE.test(value)) return `id-${value}`;
   }
@@ -117,7 +118,7 @@ export function webhookFields(headers: Headers, payload: unknown, scheme: string
 
 export interface SignedWebhookDispatcher {
   /** Starts the trigger. Resolves false when it is missing, off, not a webhook trigger or busy. */
-  deliver(triggerId: string, input: { key: string; fields: Record<string, string | number> }): Promise<boolean>;
+  deliver(triggerId: string, input: { key: string; fields: Record<string, string | number>; eventKey?: string; payload?: unknown }): Promise<boolean>;
 }
 export interface SignedWebhookOptions {
   secrets: SignedWebhookSecrets;
@@ -198,7 +199,8 @@ export class SignedWebhookReceiver {
     reply(res, 202, { ok: true });
     const fields = webhookFields(req.headers, payload, checked.scheme);
     const work = (async () => {
-      try { if (!await dispatcher.deliver(triggerId, { key, fields })) this.dedupe.release(claim); }
+      const eventKey = cleanField(header(req.headers, "x-event-key"), 60);
+      try { if (!await dispatcher.deliver(triggerId, { key, fields, ...(eventKey ? { eventKey } : {}), payload })) this.dedupe.release(claim); }
       catch { this.dedupe.release(claim); }
     })().finally(() => { this.pending.delete(work); });
     this.pending.add(work);

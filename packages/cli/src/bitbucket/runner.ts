@@ -42,6 +42,8 @@ export interface RunnerOptions {
   budget?: string;
   model?: string;
   exec?: Exec;
+  /** Environment variables to hide from the scan in addition to the default Bitbucket ones, for example the variable a trigger names for its token. */
+  secretVariables?: string[];
   /** Time limit for the scan, default 30 minutes. */
   scanTimeoutMs?: number;
 }
@@ -56,7 +58,8 @@ export function gitScanRunner(options: RunnerOptions): ReviewRunner {
   const exec = options.exec ?? defaultExec;
   const command = options.scanCommand ?? [process.execPath, process.argv[1] ?? "0security"];
   /** The environment as it is when a scan starts, without the secrets. */
-  const cleanEnv = () => Object.fromEntries(Object.entries(process.env).filter(([name]) => !SECRET_VARIABLES.includes(name)));
+  const hidden = [...SECRET_VARIABLES, ...(options.secretVariables ?? [])];
+  const cleanEnv = () => Object.fromEntries(Object.entries(process.env).filter(([name]) => !hidden.includes(name)));
   const git = async (args: string[], timeoutMs = 120_000) => {
     const result = await exec("git", ["-C", options.checkout, ...args], { env: cleanEnv(), timeoutMs });
     if (result.code !== 0) throw new Error(`git ${args[0]} failed (exit ${result.code}).`);

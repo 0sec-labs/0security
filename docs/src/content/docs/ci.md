@@ -666,6 +666,8 @@ export OPENAI_API_KEY=...
 
 For Data Center, pass `--platform dc`, the repository as `PROJECT/repo` and `--url https://bitbucket.example.com`.
 
+To run the same review from a Sentinel, see the [Bitbucket pull request trigger](/sentinels/#bitbucket-pull-request-trigger).
+
 ### Use a webhook
 
 Polling needs nothing else. For faster reviews, add a webhook and let `watch` listen for it.

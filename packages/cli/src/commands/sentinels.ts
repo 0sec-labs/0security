@@ -15,7 +15,7 @@ const webhookText = (view: WebhookView): string => !view.serverMode ? "Not avail
     + (view.deliveries?.length ? `\n\n${renderTable(view.deliveries, [{ header: "TIME", value: d => d.at }, { header: "RESULT", value: d => d.result }, { header: "EVENT", value: d => d.event }, { header: "REASON", value: d => d.reason }])}` : "");
 
 interface Sentinel { id: string; name: string; mission?: string; automationIds?: string[]; status: string; version: number; attention?: { needsYou: boolean; reason?: string } }
-interface Trigger { id: string; automationId: string; kind: string; enabled: boolean; version: number; nextFireAt: string | null; summary?: string; lastStatus?: string; github?: { repo: string; commentOnPr?: boolean; includeForks?: boolean } }
+interface Trigger { id: string; automationId: string; kind: string; enabled: boolean; version: number; nextFireAt: string | null; summary?: string; lastStatus?: string; bitbucket?: { repo: string; platform: string }; github?: { repo: string; commentOnPr?: boolean; includeForks?: boolean } }
 interface SentinelFile { path: string; revision: number; content?: string; updatedAt?: string }
 
 async function sentinel(client: ConsoleClient, reference: string): Promise<Sentinel> {
@@ -51,7 +51,7 @@ function scheduleFrom(options: { frequency?: string; every?: string; at?: string
 }
 const triggerTable = (rows: Trigger[]) => renderTable(rows, [
   { header: "ID", value: t => t.id }, { header: "KIND", value: t => t.kind }, { header: "AUTOMATION", value: t => t.automationId },
-  { header: "ENABLED", value: t => (t.enabled ? "yes" : "no") }, { header: "WHEN", value: t => t.summary ?? (t.github ? `${t.github.repo}${t.github.commentOnPr ? ", comments on" : ""}${t.github.includeForks ? ", forks" : ""}` : t.nextFireAt) ?? "-" },
+  { header: "ENABLED", value: t => (t.enabled ? "yes" : "no") }, { header: "WHEN", value: t => t.summary ?? (t.bitbucket ? t.bitbucket.repo : t.github ? `${t.github.repo}${t.github.commentOnPr ? ", comments on" : ""}${t.github.includeForks ? ", forks" : ""}` : t.nextFireAt) ?? "-" },
 ]);
 
 /** `0 sentinels`: everything the Sentinels page does. Reads and edits work offline; runs need the engine. */
@@ -173,31 +173,43 @@ export function registerSentinelsCommand(program: Command, deps: ConsoleCommandD
   const triggers = group.command("triggers").description("Control what starts a Sentinel's automations");
   consoleFlags(triggers.command("list <id>").description("List triggers"))
     .action((id: string, options: ConsoleFlags) => withConsole(options, deps, async client => ((await client.request("GET", `${ROOT}/${enc((await sentinel(client, id)).id)}/triggers`)) as { triggers: Trigger[] }).triggers, triggerTable));
-  consoleFlags(triggers.command("add <id>").description("Add a schedule, github-pr, release, check-completed or webhook trigger; it stays disabled unless --enable --yes")
-    .option("--automation <id>", "What the trigger starts (default: the only one this Sentinel owns)").option("--kind <kind>", "schedule | manual | github-pr | release | check-completed | webhook")
-    .option("--file <path>", "Trigger JSON object with schedule, github, release or check settings").option("--enable", "Enable immediately").option("--yes", "Confirm that an enabled trigger was reviewed")
+  consoleFlags(triggers.command("add <id>").description("Add a schedule, github-pr, bitbucket-pr, release, check-completed or webhook trigger; it stays disabled unless --enable --yes")
+    .option("--automation <id>", "What the trigger starts (default: the only one this Sentinel owns)").option("--kind <kind>", "schedule | manual | github-pr | bitbucket-pr | release | check-completed | webhook")
+    .option("--file <path>", "Trigger JSON object with schedule, github, bitbucket, release or check settings").option("--enable", "Enable immediately").option("--yes", "Confirm that an enabled trigger was reviewed")
     .option("--frequency <frequency>", `schedule: ${SCHEDULE_FREQUENCIES.join(", ")}`).option("--every <minutes>", "schedule, minutes: interval (5 or more)")
     .option("--at <HH:MM>", "schedule, daily, weekdays, weekly: time of day in --timezone (default UTC)").option("--weekday <day>", "schedule, weekly: sun, mon, ... or 0-6").option("--cron <expression>", "schedule, cron: five fields").option("--timezone <zone>", "schedule: IANA timezone (default UTC)")
-    .option("--repo <owner/name>", "github-pr: repository to watch").option("--base-branch <branch>", "github-pr: only pull requests into this branch")
+    .option("--repo <owner/name>", "github-pr: repository to watch; bitbucket-pr: workspace/repo (Cloud) or PROJECT/repo (Data Center)").option("--base-branch <branch>", "github-pr: only pull requests into this branch")
     .option("--comment", "github-pr: comment on each pull request with one short summary, edited in place on later pushes (default: off)")
     .option("--include-forks", "github-pr: also review pull requests from forks, marked untrusted (default: skipped)")
-    .option("--label <text>", "webhook: a name for this webhook (default: webhook)"))
-    .action((id: string, options: ConsoleFlags & { automation?: string; kind?: string; file?: string; enable?: boolean; yes?: boolean; repo?: string; baseBranch?: string; comment?: boolean; includeForks?: boolean; label?: string; frequency?: string; every?: string; at?: string; weekday?: string; cron?: string; timezone?: string }) => withConsole(options, deps, async client => {
+    .option("--label <text>", "webhook: a name for this webhook (default: webhook)")
+    .option("--platform <platform>", "bitbucket-pr: cloud or dc (Data Center)").option("--url <url>", "bitbucket-pr, Data Center: server URL, for example https://bitbucket.example.com")
+    .option("--checkout <folder>", "bitbucket-pr: absolute path of a local clone whose origin is the Bitbucket repository")
+    .option("--token-env <name>", "bitbucket-pr: name of the environment variable that holds the token (default: BITBUCKET_TOKEN)")
+    .option("--events <list>", "bitbucket-pr: opened, updated or opened,updated (default: both)")
+    .option("--max-files <n>", "bitbucket-pr: skip a pull request that changes more files than this (default: 50)")
+    .option("--budget <usd>", "bitbucket-pr: spend limit for one pull request scan (default: 2)"))
+    .action((id: string, options: ConsoleFlags & { automation?: string; kind?: string; file?: string; enable?: boolean; yes?: boolean; repo?: string; baseBranch?: string; comment?: boolean; includeForks?: boolean; label?: string; platform?: string; url?: string; checkout?: string; tokenEnv?: string; events?: string; maxFiles?: string; budget?: string; frequency?: string; every?: string; at?: string; weekday?: string; cron?: string; timezone?: string }) => withConsole(options, deps, async client => {
       const fromFile = options.file ? await readJsonObject(options.file, "Trigger definition") : {};
       const flags = { ...(options.repo ? { repo: options.repo } : {}), ...(options.baseBranch ? { baseBranch: options.baseBranch } : {}), ...(options.comment ? { commentOnPr: true } : {}), ...(options.includeForks ? { includeForks: true } : {}) };
       const scheduled = [options.frequency, options.every, options.at, options.weekday, options.cron, options.timezone].some(value => value !== undefined);
       const kind = options.kind ?? (scheduled ? "schedule" : undefined) ?? fromFile.kind;
       if (scheduled && kind !== "schedule") throw new UsageError("--frequency, --every, --at, --weekday, --cron and --timezone apply to --kind schedule.");
       const schedule = scheduled ? { schedule: scheduleFrom(options, fromFile.schedule) } : {};
-      if (Object.keys(flags).length && kind !== "github-pr") throw new UsageError("--repo, --base-branch, --comment and --include-forks apply to --kind github-pr.");
-      const github = Object.keys(flags).length ? { github: { ...(fromFile.github && typeof fromFile.github === "object" ? fromFile.github : {}), ...flags } } : {};
+      const { repo: repoFlag, ...githubOnly } = flags;
+      if (Object.keys(githubOnly).length && kind !== "github-pr") throw new UsageError("--base-branch, --comment and --include-forks apply to --kind github-pr.");
+      if (repoFlag && kind !== "github-pr" && kind !== "bitbucket-pr") throw new UsageError("--repo applies to --kind github-pr and bitbucket-pr.");
+      const bitbucketFlags = { ...(options.platform ? { platform: options.platform } : {}), ...(repoFlag ? { repo: repoFlag } : {}), ...(options.url ? { baseUrl: options.url } : {}), ...(options.checkout ? { checkout: options.checkout } : {}), ...(options.tokenEnv ? { tokenEnv: options.tokenEnv } : {}),
+        ...(options.events ? { events: options.events.split(",").map(item => item.trim()).filter(Boolean) } : {}), ...(options.maxFiles !== undefined ? { maxFiles: positive("--max-files", options.maxFiles) } : {}), ...(options.budget !== undefined ? { budgetUsd: positive("--budget", options.budget) } : {}) };
+      if (kind !== "bitbucket-pr" && Object.keys(bitbucketFlags).some(key => key !== "repo")) throw new UsageError("--platform, --url, --checkout, --token-env, --events, --max-files and --budget apply to --kind bitbucket-pr.");
+      const bitbucket = kind === "bitbucket-pr" ? { bitbucket: { ...(fromFile.bitbucket && typeof fromFile.bitbucket === "object" ? fromFile.bitbucket : {}), ...bitbucketFlags } } : {};
+      const github = Object.keys(flags).length && kind === "github-pr" ? { github: { ...(fromFile.github && typeof fromFile.github === "object" ? fromFile.github : {}), ...flags } } : {};
       const owner = await sentinel(client, id);
       const owned = owner.automationIds ?? [];
       const automationId = options.automation ?? (typeof fromFile.automationId === "string" ? fromFile.automationId : owned.length === 1 ? owned[0] : undefined);
       if (options.label !== undefined && kind !== "webhook") throw new UsageError("--label applies to --kind webhook.");
       const webhookSettings = kind === "webhook" ? { webhook: { ...(fromFile.webhook && typeof fromFile.webhook === "object" ? fromFile.webhook : {}), ...(options.label !== undefined ? { label: options.label } : {}) } } : {};
-      const body = { ...fromFile, ...github, ...schedule, ...webhookSettings, ...(automationId ? { automationId } : {}), ...(kind ? { kind } : {}) };
-      if (!body.kind) throw new UsageError("Say what kind: --kind schedule | manual | github-pr | release | check-completed | webhook (a schedule also needs --frequency; release and check-completed take their settings with --file).");
+      const body = { ...fromFile, ...github, ...bitbucket, ...schedule, ...webhookSettings, ...(automationId ? { automationId } : {}), ...(kind ? { kind } : {}) };
+      if (!body.kind) throw new UsageError("Say what kind: --kind schedule | manual | github-pr | bitbucket-pr | release | check-completed | webhook (a schedule also needs --frequency; bitbucket-pr needs --platform, --repo and --checkout; release and check-completed take their settings with --file).");
       if (!body.automationId) throw new UsageError(owned.length ? `This Sentinel owns ${owned.length} things a trigger can start. Pick one with --automation <id>: ${owned.join(", ")}.` : "A trigger needs something to start, and this Sentinel owns nothing yet that the CLI can list. Create it from a YAML file with `0security sentinels sync <folder> --apply`, which can include a schedule, or add the automation in the console and pass its full id with --automation <id>.");
       if (options.enable) requireYes(options.yes, "Enabling a trigger lets the Sentinel start runs unattended.");
       return ((await client.request("POST", `${ROOT}/${enc(owner.id)}/triggers`, { ...body, enabled: options.enable === true, ...(options.enable ? { approval: "enable-reviewed-trigger" } : {}) })) as { trigger: Trigger }).trigger;
@@ -218,14 +230,14 @@ export function registerSentinelsCommand(program: Command, deps: ConsoleCommandD
       const found = resolveId(((await client.request("GET", `${ROOT}/${enc(owner.id)}/triggers`)) as { triggers: Trigger[] }).triggers, triggerId, "Trigger");
       return ((await client.request("POST", `${ROOT}/${enc(owner.id)}/triggers/${enc(found.id)}/check`, {})) as { trigger: Trigger }).trigger;
     }, value => triggerTable([value]), { requireHost: "Checking a pull request trigger" }));
-  consoleFlags(triggers.command("secret <id> <trigger-id>").description("Create or replace the secret of a webhook trigger; the old one keeps working for 5 minutes. Printed once.").option("--yes", "Confirm; update the calling system afterwards"))
+  consoleFlags(triggers.command("secret <id> <trigger-id>").description("Create or replace the secret of a webhook or bitbucket-pr trigger; the old one keeps working for 5 minutes. Printed once.").option("--yes", "Confirm; update the calling system afterwards"))
     .action((id: string, triggerId: string, options: ConsoleFlags & { yes?: boolean }) => withConsole(options, deps, async client => {
       requireYes(options.yes, "A new secret means the calling system must be updated with it.");
       const owner = await sentinel(client, id);
       const found = resolveId(((await client.request("GET", `${ROOT}/${enc(owner.id)}/triggers`)) as { triggers: Trigger[] }).triggers, triggerId, "Trigger");
-      if (found.kind !== "webhook") throw new UsageError("Only webhook triggers have a secret.");
+      if (found.kind !== "webhook" && found.kind !== "bitbucket-pr") throw new UsageError("Only webhook and bitbucket-pr triggers have a secret.");
       return (await client.request("POST", `${WEBHOOK_ROOT}/triggers/${enc(found.id)}/secret`, {})) as { secret: string; graceSeconds?: number; webhook: { path: string; url?: string } };
-    }, value => [`Secret (shown once, store it now): ${value.secret}`, ...(value.graceSeconds ? [`The previous secret still works for ${value.graceSeconds / 60} minutes.`] : []), `URL: ${value.webhook.url ?? value.webhook.path}`, "Content type: application/json", "Send the secret as X-Gitlab-Token, or sign the body with it (X-Hub-Signature-256 or X-0-Signature-256)."].join("\n"), { requireHost: "Creating a webhook secret" }));
+    }, value => [`Secret (shown once, store it now): ${value.secret}`, ...(value.graceSeconds ? [`The previous secret still works for ${value.graceSeconds / 60} minutes.`] : []), `URL: ${value.webhook.url ?? value.webhook.path}`, "Content type: application/json", "Send the secret as X-Gitlab-Token, or sign the body with it (X-Hub-Signature for Bitbucket, X-Hub-Signature-256 or X-0-Signature-256). Use it as the secret of the Bitbucket webhook."].join("\n"), { requireHost: "Creating a webhook secret" }));
   // Server mode only; hidden because most installs poll. The secret is shown once by `secret rotate` and never again.
   const webhook = group.command("webhook", { hidden: true }).description("GitHub webhook for pull request Sentinels (server mode)");
   consoleFlags(webhook.command("status").description("Show whether the webhook is set up and the last deliveries"))
