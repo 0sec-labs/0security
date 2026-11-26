@@ -307,17 +307,17 @@ export const FINDING_CLASSES = [
 ] as const;
 
 const FINDING_CLASS_PATTERNS: ReadonlyArray<readonly [string, RegExp]> = [
-  ["sql-injection", /sql.?inj|sqli|nosql/],
-  ["xss", /xss|cross.?site.?script/],
-  ["ssrf", /ssrf|server.?side.?request/],
-  ["deserialization", /deseriali/],
-  ["rce", /\brce\b|remote.?code|command.?inj|code.?inj|code.?exec|os.?command/],
-  ["path-traversal", /path.?trav|directory.?trav|\blfi\b|zip.?slip/],
-  ["secrets", /secret|credential|api.?key|hardcoded|password/],
-  ["crypto", /crypto|cipher|\btls\b|weak.?hash|random/],
-  ["auth", /auth|access.?control|\bidor\b|privilege|\bjwt\b|session|csrf/],
-  ["dependency", /depend|vulnerable.?component|\bsca\b|\bcve\b|outdated/],
-  ["misconfiguration", /misconfig|\bcors\b|header|insecure.?default/],
+  ["sql-injection", /\bsql[\s_-]?inj|\bsqli\b|\bnosql[\s_-]?inj/],
+  ["xss", /\bxss\b|\bcross[\s_-]?site[\s_-]?script/],
+  ["ssrf", /\bssrf\b|\bserver[\s_-]?side[\s_-]?request/],
+  ["deserialization", /\bdeserializ|\binsecure[\s_-]?deserializ/],
+  ["rce", /\brce\b|\bremote[\s_-]?code|\bcommand[\s_-]?inj|\bcode[\s_-]?inj|\bcode[\s_-]?exec|\bos[\s_-]?command/],
+  ["path-traversal", /\bpath[\s_-]?trav|\bdirectory[\s_-]?trav|\blfi\b|\bzip[\s_-]?slip\b/],
+  ["secrets", /\bsecrets?\b|\bcredentials?\b|\bapi[\s_-]?keys?\b|\bhard[\s_-]?coded\b|\bpasswords?\b/],
+  ["crypto", /\bcrypto(?:graph)?|\bcipher|\btls\b|\bweak[\s_-]?(?:hash|random)|\binsecure[\s_-]?random|\b(?:predictable|insufficient)[\s_-]?random/],
+  ["auth", /\bauth(?:n|z|entication|orization|orisation)?\b|\bbroken[\s_-]?auth|\baccess[\s_-]?control|\bidor\b|\bprivilege|\bjwt\b|\bsession[\s_-]?(?:fixation|hijack|management)|\bcsrf\b/],
+  ["dependency", /\bdependenc(?:y|ies)\b|\bvulnerable[\s_-]?component|\bsca\b|\bcve\b|\boutdated/],
+  ["misconfiguration", /\bmisconfig|\bcors\b|\b(?:security|http|missing)[\s_-]?headers?\b|\binsecure[\s_-]?default/],
 ];
 
 /**
@@ -656,8 +656,20 @@ class AnalyticsPipeline {
   // nothing is queued and no install id is minted otherwise) and reduced to
   // finite values here.
 
+  private lifecycleSuppressed = false;
+
+  /**
+   * The CLI sets this for runs where the first-run notice is never shown and
+   * the user has not opted in explicitly (CI, machine output, `--help`,
+   * `--version`, shell completion). While set, no lifecycle event is queued and
+   * no install id is minted.
+   */
+  setLifecycleSuppressed(suppressed: boolean): void {
+    this.lifecycleSuppressed = suppressed;
+  }
+
   private lifecycleAllowed(): boolean {
-    return levelAtLeast(this.effectiveLevel(), "usage") && resolvePostHogDestination() !== null;
+    return !this.lifecycleSuppressed && levelAtLeast(this.effectiveLevel(), "usage") && resolvePostHogDestination() !== null;
   }
 
   /**

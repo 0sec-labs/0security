@@ -17,7 +17,6 @@
  * multi-byte character at the split boundary is dropped whole rather than
  * turned into a lone surrogate.
  */
-import { currentRunContribution } from "../telemetry/run-contribution.js";
 
 /** Flat bytes-per-token estimate. Matches Codex; no tokenizer involved. */
 export const BYTES_PER_TOKEN = 4;
@@ -158,7 +157,6 @@ export function formatTruncated(text: string, policy: TruncateOptions = {}): str
   // fits the caller's advertised cap.
   if (headerBytes >= byteBudget) {
     const result = headSlice(header, byteBudget);
-    currentRunContribution()?.record("truncation", { reason: "tool_output", policy: "middle-out-v1", originalTokens: initial.originalTokens, originalLines: initial.originalLines, byteBudget, retainedBytes: Buffer.byteLength(result, "utf8"), headerOnly: true });
     return result;
   }
   let bodyBudget = byteBudget - headerBytes;
@@ -173,6 +171,5 @@ export function formatTruncated(text: string, policy: TruncateOptions = {}): str
   const result = Buffer.byteLength(rendered, "utf8") <= byteBudget
     ? rendered
     : headSlice(rendered, byteBudget);
-  currentRunContribution()?.record("truncation", { reason: "tool_output", policy: "middle-out-v1", originalTokens: initial.originalTokens, originalLines: initial.originalLines, byteBudget, retainedBytes: Buffer.byteLength(result, "utf8"), truncatedTokens: body.truncatedTokens });
   return result;
 }

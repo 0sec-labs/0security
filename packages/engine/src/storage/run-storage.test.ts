@@ -46,29 +46,6 @@ describe("run-scoped local storage", () => {
     );
   });
 
-  it("binds managed worker state to the orchestrator scan id", () => {
-    const homeDir = mkdtempSync(join(tmpdir(), "0-managed-run-"));
-    temporaryDirectories.push(homeDir);
-    const runDir = join(homeDir, "sandbox-run");
-
-    const storage = resolveOsecRunStorage({
-      homeDir,
-      env: {
-        "ZERO_CLOUD_SCAN_ID": "scan-123",
-        "ZERO_RUN_DIR": runDir,
-        "ZERO_DB_PATH": join(runDir, "state.sqlite"),
-        "ZERO_REPORT_PATH": join(runDir, "final.json"),
-      },
-    });
-
-    expect(storage).toEqual({
-      runId: "scan-123",
-      runDir,
-      dbPath: join(runDir, "state.sqlite"),
-      reportPath: join(runDir, "final.json"),
-    });
-  });
-
   it("resolves an unambiguous abbreviated run id for resume", () => {
     const homeDir = mkdtempSync(join(tmpdir(), "0-resume-storage-"));
     temporaryDirectories.push(homeDir);

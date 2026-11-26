@@ -41,7 +41,7 @@ beforeEach(() => {
   captured = [];
   home = mkdtempSync(join(tmpdir(), "0-analytics-pipeline-"));
   dirs.push(home);
-  for (const name of ["ZERO_CLOUD_TOKEN", "ZERO_CLOUD_HOST", "ZERO_ANALYTICS_LEVEL", "ZERO_OFFLINE", "ZERO_NO_TELEMETRY", "DO_NOT_TRACK"]) {
+  for (const name of ["ZERO_ANALYTICS_LEVEL", "ZERO_OFFLINE", "ZERO_NO_TELEMETRY", "DO_NOT_TRACK"]) {
     vi.stubEnv(name, undefined);
   }
   vi.stubEnv("ZERO_ANALYTICS_POSTHOG_KEY", FAKE_KEY);

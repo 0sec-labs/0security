@@ -19,7 +19,6 @@ export ZERO_ENTERPRISE=1
 
 Any value except empty, `0`, `false` or `no` turns it on. With it on, 0:
 
-- sends no run contributions and never loads cloud credentials;
 - makes no update check and refuses `0security doctor upgrade`;
 - skips the public model catalog and price lookups, so models without a built-in price show no cost;
 - removes the `web_search` tool and refuses the advisory lookup, remote extension sources, the sandbox runtime download, GitHub repository and skills directory reads, SARIF upload through `gh`, and remote worker provisioning;
@@ -39,7 +38,7 @@ export BITBUCKET_URL="$ZERO_BITBUCKET_URL"
 
 `ZERO_BITBUCKET_URL` comes only from the process environment. It authorizes that exact origin (scheme, host and port) and its context path, including REST and HTTPS git endpoints. It does not enable any other outbound destination. HTTPS is required except on loopback for local testing. Pagination and redirects cannot move credentials outside that origin or context path. Git reviews reject URL rewrites and mismatched repository origins and disable HTTP redirects; use a direct HTTPS origin such as `https://bitbucket.internal.example/bitbucket/scm/PROJECT/repo.git`. Supply git credentials through the runner's trusted credential setup; the review scan does not receive the Bitbucket API token.
 
-This is an application allowlist, not a network firewall. Configure DNS, TLS trust and network policy for the installation you approved. Public advisory lookup and other automatic third-party calls stay disabled. Cloud's separate API and git origins are not implicitly enabled by this setting.
+This is an application allowlist, not a network firewall. Configure DNS, TLS trust and network policy for the installation you approved. Public advisory lookup and other automatic third-party calls stay disabled. Bitbucket Cloud's separate API and git origins are not implicitly enabled by this setting.
 
 The switch is off by default. An ordinary install keeps its current behavior. For a container, set it in the container environment; for a managed laptop, set it in the shell profile or the device policy.
 
@@ -59,14 +58,13 @@ One switch, `DO_NOT_TRACK=1`, stops every row here. `ZERO_ENTERPRISE` and `ZERO_
 
 | Entry | Destination | When | What is sent | How to disable |
 | --- | --- | --- | --- | --- |
-| `usage-analytics-posthog` | `eu.i.posthog.com` | Batched while a command or the console runs, in a release build. | Anonymous counters, plus lifecycle events (`first_run`, `command_invoked`, `update`, `error_exit`) that name a known command or an error category and nothing else. The field list is under [Usage metrics](/configuration/#usage-metrics). | `DO_NOT_TRACK`. |
+| `usage-analytics-posthog` | `eu.i.posthog.com` | Batched while a command or the console runs, in a release build. Lifecycle events are skipped for `--help`, `--version`, shell completion, `config`, and CI or machine-output runs unless you set `analyticsLevel usage` yourself. | Anonymous counters, plus lifecycle events (`first_run`, `command_invoked`, `update`, `error_exit`) that name a known command or an error category and nothing else. The field list is under [Usage metrics](/configuration/#usage-metrics). | `DO_NOT_TRACK`. |
 | `crash-and-feedback` | Sentry (embedded project or `ZERO_SENTRY_DSN`), the feedback endpoint | A crash with `diagnosticReporting automatic`, or feedback you send. | A redacted crash envelope or the feedback text you reviewed. | `diagnosticReporting off`, `DO_NOT_TRACK`. |
 
 ## Blocked by `ZERO_ENTERPRISE`
 
 | Entry | Destination | When | What is sent | How to disable without the switch |
 | --- | --- | --- | --- | --- |
-| `run-contribution` | `cloud.0.security` | Only with a cloud token and a contribution permission. | A sealed run capture. | `ZERO_ENTERPRISE`, `DO_NOT_TRACK`. |
 | `update-check` | `api.github.com`, `github.com`, `raw.githubusercontent.com` | Interactive start-up, console update status, `0security doctor upgrade`. | A GET for the latest release tag; the installer on upgrade. | `updatePolicy off`, `ZERO_NO_UPDATE_CHECK`, `ZERO_OFFLINE`. |
 | `model-catalog-sync` | `models.dev` | Console model picker refresh. | A GET of a public list. | `DO_NOT_TRACK`, `ZERO_OFFLINE`. |
 | `pricing-discovery` | `openrouter.ai` | A model has no built-in price. | A GET of a public list. | The same. |
@@ -83,7 +81,6 @@ One switch, `DO_NOT_TRACK=1`, stops every row here. `ZERO_ENTERPRISE` and `ZERO_
 | `skills-catalog` | `api.github.com` | Previewing or installing from the console skills directory. | Read-only API calls through your `gh` login. | Do not use the directory. |
 | `github-repository-list` | `api.github.com` | The console repository picker and GitHub account status. | Read-only API calls through your `gh` login. | Use local paths. |
 | `github-gh-commands` | GitHub, through `gh` | `0security findings upload` and host integrations. | The request you asked for. | Do not run them. |
-| `windows-evidence-worker` | The base URL in a cloud-issued grant | A cloud Windows evidence job. | A bounded evidence envelope. | Do not accept cloud jobs. |
 | `remote-worker-provisioning` | `nodejs.org`, apt and npm registries, from the remote computer | `0security computers add`. | Package downloads. | Prepare the remote computer yourself. |
 
 ## Dependency audit

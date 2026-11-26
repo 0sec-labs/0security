@@ -195,10 +195,10 @@ export async function handleDiagnosticReport(info: DiagnosticInfo, options: Diag
     if (policy !== "ask" && policy !== "automatic") return "dropped";
     const payload = buildDiagnosticFeedback(info);
     // Opt-out env vars, an invalid destination, or no destination at all: neither send nor store.
-    if (submissionBlockedReason(env, { allowCloud: false }, payload) !== null) return "dropped";
+    if (submissionBlockedReason(env, payload) !== null) return "dropped";
     if (policy === "ask") return savePendingReport(payload, options) ? "pending" : "dropped";
     const result = await (options.submit ?? submitFeedback)(payload, env, {
-      allowCloud: false, timeoutMs: options.timeoutMs ?? DEFAULT_AUTOMATIC_TIMEOUT_MS,
+      timeoutMs: options.timeoutMs ?? DEFAULT_AUTOMATIC_TIMEOUT_MS,
       diagnosticConsent: { policy: "automatic" },
     });
     return result.ok ? "submitted" : "failed";

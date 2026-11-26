@@ -35,11 +35,11 @@ describe("allowlistedChildEnv", () => {
     const env = sanitizedEnv({
       PATH: "/bin",
       ANTHROPIC_API_KEY: "sk-ant-x",
-      "ZERO_CLOUD_TOKEN": "tok",
+      "ZERO_GITHUB_TOKEN": "tok",
     });
     expect(env.PATH).toBe("/bin");
     expect(env.ANTHROPIC_API_KEY).toBeUndefined();
-    expect(env["ZERO_CLOUD_TOKEN"]).toBeUndefined();
+    expect(env["ZERO_GITHUB_TOKEN"]).toBeUndefined();
   });
 });
 

@@ -1861,8 +1861,6 @@ A matching finding shows `Operator business context (unverified): ranked higher 
 
 0 reads context only from the path explicitly passed. The file is limited to 64 KB; it is never discovered automatically in a scanned repository. Use one file per scanned repository. Stored labels carry that scan's repository label; they do not establish a global multi-repository policy. Without a stored declaration or an explicit list context, ordering remains technical severity. `scan --context` continues to mean prose background and is a separate option.
 
-The context applies to `findings list`. Scans, `findings burndown` and exports do not use it yet.
-
 | Option | Registered default | Description |
 | --- | --- | --- |
 | `--all` | — | Show raw finding rows instead of grouped fingerprints |
@@ -2361,7 +2359,7 @@ Count open findings across repositories by severity, category, age and owner, fr
 0security findings rollup api.json web.json --format html -o rollup.html
 ```
 
-Run it once per repository with `--export` to write a rollup export. Put the files in one place, then run it again with the files as inputs. An input is an export file or a findings database. With no input, it reads the databases on this machine. It reads local files only and sends nothing.
+Run it once per repository with `--export` to write a rollup export. Put the files in one place, then run it again with the files as inputs. An input is an export file, a SARIF file or a findings database. With no input, it reads the databases on this machine. It reads local files only and sends nothing.
 
 How it counts:
 
@@ -2377,17 +2375,29 @@ The `--owners` file is a JSON object that maps a repository name to an owner or 
 { "api": "payments", "web": "growth" }
 ```
 
-An export has the schema `0.findings-rollup.v1`: `schema`, `exportedAt` and `findings`. Each finding has `repository`, `fingerprint`, `title`, `severity`, `category`, `status`, `triage` (new, accepted or suppressed), `owner` (a string or null), `firstSeen` and `lastSeen` (ISO times). To bring in another scanner's results first, use [findings import](#findings-import).
+An export has the schema `0.findings-rollup.v1`: `schema`, `exportedAt` and `findings`. Each finding has `repository`, `fingerprint`, `title`, `severity`, `category`, `status`, `triage` (new, accepted or suppressed), `owner` (a string or null), `firstSeen` and `lastSeen` (ISO times). It can also have `team` and `tier`; files without them still read. To bring in another scanner's results first, use [findings import](#findings-import).
 
-Use `--labels labels.json` to fill missing `team` and `tier` labels from explicit operator input:
+To see what changed, keep the export of each run and compare a later rollup with an earlier export:
 
-```json
-{ "api": { "team": "payments", "tier": "tier-1" }, "web": { "team": "growth", "tier": "tier-2" } }
+```bash
+0security findings rollup api.json web.json --since last-month.json
 ```
 
-Existing labels on historical rows win. Labels are not inferred from source files. Old exports with no labels still work and count as unassigned. A v1 export can include a `repositories` array, including repositories with zero findings; this lets a later clean snapshot replace its older findings. When exporting an empty database, supply `--repository` to retain its identity.
+The trend shows opened, fixed and net findings per severity and per repository. A finding is opened if it is open now and was not open then. It is fixed if it was open then and is not open now. That includes findings now marked false positive, accepted or suppressed, and findings gone from the file. Net is opened minus fixed. A repository that is in only one of the two files is listed, not counted as fixed. `--since` takes a rollup export, not a database.
 
-Keep dated source snapshots with `--history`, then add later exports to that archive:
+To group by team and tier, pass a labels file. It is JSON or YAML and maps a repository name or glob to a team, a tier or both:
+
+```yaml
+api: { team: payments, tier: 1 }
+"pay-*": { team: payments, tier: 2 }
+"path:src/vault/**": { team: security }
+```
+
+For each of team and tier, the most specific match wins: a `path:` rule, then an exact repository name, then the repository glob with the most literal characters. A `path:` rule applies only to findings read from a SARIF file, because only those have a file path. A label from the file replaces a label stored in an export. A finding with no match counts as unlabelled. 0 reads only the file you name, never labels from a scanned repository. Exports keep team and tier but not file paths.
+
+A SARIF file is read with the same limits as [findings import](#findings-import), including the credential scrubbing, and nothing goes into the findings database. The repository is the `--repository` name, else the repository in the SARIF file, else the file name. SARIF has no first-seen time, so the file's modified time sets the age. Results with an active suppression are skipped.
+
+For dated source snapshots, use `--history` in addition to the comparison and label options above:
 
 ```bash
 0security findings rollup api-2026-11-01.json web-2026-11-01.json --history history.json
@@ -2395,11 +2405,12 @@ Keep dated source snapshots with `--history`, then add later exports to that arc
 0security findings rollup history-next.json --format csv -o dashboard-counts.csv
 ```
 
-The archive schema is `0.findings-rollup.history.v1`: `snapshots` contains v1 exports plus each input’s basename as `source`. It retains captured timestamps and states; it contains finding titles and labels, but no evidence or absolute input paths. `--export` writes a consolidated current snapshot at the time of this command; use `--history` to preserve original observation times.
+The archive schema is `0.findings-rollup.history.v1`: `snapshots` contains v1 exports with each input's basename as `source`. Captured timestamps, states and repository identity are retained; absolute input paths and evidence are not. An optional `repositories` array in a v1 export records repositories with zero findings, so a newer clean snapshot can replace older findings. Supply `--repository` when exporting an empty database to preserve its identity.
 
-The JSON report schema is `0.findings-rollup.report.v1`. Existing top-level counts remain, with `byTeam`, `byTier`, snapshot provenance, current per-repository `observations`, and a chronological `trend`. Each trend point includes only repositories observed at that timestamp, listed explicitly; changes in coverage are not interpreted as fixes. Each repository’s most recent snapshot supplies the current view, so repositories in it can have different observation dates. Empty repositories still count as observed.
+The JSON report keeps the `--since` comparison in `trend` and adds a chronological `snapshotTrend` array, snapshot provenance and current per-repository `observations`. Each repository's latest `exportedAt` supplies its current rows; different repositories can have different observation dates. Each `snapshotTrend` point lists only the repositories actually observed at that timestamp. A change in observed coverage does not establish that findings were fixed. `--export` writes a current consolidated snapshot; `--history` retains the original observation times.
 
-CSV uses the same report schema in a stable long-form table: `schema,snapshot_at,scope,dimension,label,count,repositories,sources`. `scope=current` means a view assembled from the latest snapshot per repository at report-generation time; `scope=snapshot` means the timestamp was actually captured. `dimension` is `headline`, `excluded` or a grouping such as `byTeam` or `byTier`. The final two columns are JSON arrays inside CSV cells. Import JSON or CSV into your dashboard; this command does not connect to DefectDojo or Dependency-Track. For those tools’ own scanner formats, use the existing SARIF or CycloneDX exports and verify their importer separately. Direct SARIF input to rollup is not supported; import it into a findings database first.
+CSV is a stable long-form table: `schema,snapshot_at,scope,dimension,label,count,repositories,sources`. `scope=current` means the view assembled from the latest snapshot per repository; `scope=snapshot` means an actual captured timestamp. The final two columns contain JSON arrays. These JSON/CSV exports do not establish a remote dashboard connection. Verify DefectDojo or Dependency-Track importers separately using their supported scanner formats.
+
 
 | Argument | Required | Description |
 | --- | --- | --- |
@@ -2409,9 +2420,10 @@ CSV uses the same report schema in a stable long-form table: `schema,snapshot_at
 | --- | --- | --- |
 | `--export <file>` | — | Also write these findings as a rollup export file that another rollup can read |
 | `--history <file>` | — | Write a reusable dated snapshot archive, preserving the input timestamps and provenance |
-| `--labels <file>` | — | JSON repository-to-team/tier map; fills missing labels without overwriting historical labels |
 | `--owners <file>` | — | JSON file mapping repository names to owners, used when a finding has no assignee |
-| `--repository <name>` | — | Repository name for findings read from a database (default: the scan target's folder name) |
+| `--labels <file>` | — | JSON or YAML file mapping repository names or globs (or path: globs) to a team and tier, shown as extra breakdowns |
+| `--since <file>` | — | An earlier rollup export to compare with: shows findings opened and fixed since then |
+| `--repository <name>` | — | Repository name for findings read from a database or a SARIF file (default: the scan target's folder name, or the SARIF's repository) |
 | `--format <format>` | — | Output: text, json, html or csv Choices: text, json, html, csv. |
 | `-o, --output <file>` | — | Write the rollup to a file instead of stdout |
 

@@ -25,8 +25,6 @@ import type { ConsoleSessionCheckpoint } from "../session-checkpoint.js";
 import { drainInbox } from "../../hub/mailbox.js";
 import { renderInboundBatch } from "../../agent/agent-messaging.js";
 import type { MessagingRuntime } from "../../agent/agent-messaging.js";
-import { captureNativeRuntime, currentContributionAgent, currentRunContribution, getConfiguredRunContributionClient, withRunContribution, type RunCapture, type RunManifest } from "../../telemetry/run-contribution.js";
-import { registerSignalCleanup } from "../../agent/signal-cleanup.js";
 import { type ConsoleCompactionEvent, type ConsoleRenderCallbacks, type ConsoleUsageReport, type ConsoleTurnBudget, type ConsoleTurnOutcome, type ConsoleSendOptions, type ConsoleSessionConfig, type ConsoleSourceLesson, type ConsoleSourceContext, type ConsoleSession } from "./types.js";
 import { DEFAULT_MAX_TOOL_ITERATIONS, DEFAULT_MAX_TURN_TOKENS, CONSOLE_SUMMARIZER_INSTRUCTION, buildConsoleSystemPrompt, describeCaughtError } from "./prompt-and-runtime.js";
 import { stringifyToolResult, WORKFLOW_LIFECYCLE_NAMES, getWorkflowLifecycleTools, WORKFLOW_TOOL_NAMES, WORKFLOW_AUTHORING_TOOLS, LIST_CONVERSATIONS_NAME, READ_CONVERSATION_NAME, LIST_CONVERSATIONS_DEF, READ_CONVERSATION_DEF, dispatchConversationHistoryTool } from "./console-tools.js";
@@ -71,14 +69,6 @@ export function createConsoleSession(config: ConsoleSessionConfig): ConsoleSessi
   // The thread folder is where tools run; nothing but the folder itself is ever granted.
   let sessionFolder: string | undefined = isDangerousLocalRoot(workspaceRoot) ? undefined : workspaceRoot;
 
-  let contribution = config.contribution ?? currentRunContribution();
-  const contributionParentId = currentContributionAgent() ?? null;
-  const contributionAgentId = `console-${randomUUID()}`;
-  let contributionStop: RunManifest["termination"] = "unknown";
-  let contributionExecution: RunManifest["execution"] = "running";
-  let unregisterContribution: (() => void) | undefined;
-  let capturedRuntime: NativeRuntime | undefined;
-  const pendingModelCalls = new Set<Promise<NativeRuntimeResult>>();
   // A worker may outlive its spawning turn. Resolve the observer when usage
   // arrives so later work reports to the current renderer, never an obsolete
   // turn callback. Retiring closes this subscription; late provider charges
@@ -128,18 +118,10 @@ export function createConsoleSession(config: ConsoleSessionConfig): ConsoleSessi
           return observeDelegatedRuntime(await target.forkForSubagent!(...args));
         };
       }
-      if (key === "executeNative") return (...args: Parameters<NativeRuntime["executeNative"]>) => {
-        if (!contribution) return target.executeNative(...args);
-        capturedRuntime ??= captureNativeRuntime(target, contribution);
-        const request = withRunContribution(contribution, contributionAgentId, contributionParentId, () => capturedRuntime!.executeNative(...args));
-        pendingModelCalls.add(request);
-        return request.finally(() => pendingModelCalls.delete(request));
-      };
       const value = Reflect.get(target, key, target);
       return typeof value === "function" ? value.bind(target) : value;
     },
   });
-  const effectiveContributionScope = () => ({ scopePath: sessionFolder ?? null, approvals });
 
   const toolContext: ToolContext = {
     target: "",
@@ -496,19 +478,7 @@ export function createConsoleSession(config: ConsoleSessionConfig): ConsoleSessi
     assertAuthority?: () => void,
   ): Promise<ToolResult> {
     toolContext.delegationSystemPrompt = systemPrompt;
-    const capture = contribution;
-    if (!capture) return dispatchAuthorizedInternal(call, notify, signal, assertAuthority);
-    const callId = randomUUID();
-    const startedAt = Date.now();
-    capture.record("tool_call", { callId, tool: call.name, arguments: call.arguments, effectiveScope: effectiveContributionScope() });
-    try {
-      const result = await dispatchAuthorizedInternal(call, notify, signal, assertAuthority);
-      capture.record("tool_result", { callId, tool: call.name, result, durationMs: Date.now() - startedAt, effectiveScope: effectiveContributionScope() });
-      return result;
-    } catch (error) {
-      capture.record("tool_result", { callId, tool: call.name, error: describeCaughtError(error), durationMs: Date.now() - startedAt });
-      throw error;
-    }
+    return dispatchAuthorizedInternal(call, notify, signal, assertAuthority);
   }
 
   async function dispatchAuthorizedInternal(call: ToolCall, notify?: (message: string) => void, signal?: AbortSignal, assertAuthority?: () => void): Promise<ToolResult> {
@@ -574,10 +544,10 @@ export function createConsoleSession(config: ConsoleSessionConfig): ConsoleSessi
   let turnInProgress = false;
 
   function send(userText: string, callbacks?: ConsoleRenderCallbacks, opts?: ConsoleSendOptions): Promise<ConsoleTurnOutcome> {
-    return sendWithContribution(userText, callbacks, opts);
+    return sendTurn(userText, callbacks, opts);
   }
 
-  async function sendWithContribution(
+  async function sendTurn(
     userText: string,
     callbacks?: ConsoleRenderCallbacks,
     opts?: ConsoleSendOptions,
@@ -585,35 +555,7 @@ export function createConsoleSession(config: ConsoleSessionConfig): ConsoleSessi
     if (customSystemPrompt === undefined && !turnInProgress) {
       systemPrompt = buildConsoleSystemPrompt({ scanId, approvals, developmentSourceRoot: config.developmentSourceRoot});
     }
-    if (!contribution && !opts?.signal?.aborted && !closing && !turnInProgress) {
-      try {
-        contribution = getConfiguredRunContributionClient()?.begin({
-          runId: scanId, model: runtime.resolvedModel?.() ?? config.costModel ?? "unknown",
-          scope: effectiveContributionScope(), objective: userText, versions: { loop: "console-v1" },
-        }) ?? undefined;
-      } catch { process.stderr.write("[0] Console contribution unavailable: private spool or enrollment could not be opened.\n"); }
-    }
-    if (!contribution) return sendInternal(userText, callbacks, opts);
-    const capture = contribution;
-    if (!contributionParentId) capture.setInitialScope({ context: capture.manifest.scope, ...effectiveContributionScope() });
-    unregisterContribution ??= registerSignalCleanup(() => {
-      if (!contributionParentId) withRunContribution(capture, contributionAgentId, contributionParentId, () => capture.finish("interrupted", "operator_cancelled"));
-    });
-    return withRunContribution(capture, contributionAgentId, contributionParentId, async () => {
-      capture.record("routing", { source: "console_turn", model: runtime.resolvedModel?.() ?? config.costModel ?? "unknown", effectiveScope: effectiveContributionScope() });
-      if (cp || config.initialMessages?.length) capture.record("resume", { source: cp ? "console_checkpoint" : "console_history", scanId, messageCount: messages.length, sideEffectsReplayed: false });
-      try {
-        const outcome = await sendInternal(userText, callbacks, opts);
-        contributionStop = outcome.stopReason === "cancelled" ? "operator_cancelled" : outcome.stopReason === "error" ? "provider_error" : outcome.stopReason === "end_turn" ? "plan_exhausted" : "run_resource_limit";
-        contributionExecution = outcome.stopReason === "error" ? "failed" : outcome.stopReason === "cancelled" ? "interrupted" : "completed";
-        capture.record("checkpoint", { source: "console_turn", scanId, messageCount: messages.length, stopReason: outcome.stopReason, effectiveScope: effectiveContributionScope(), durable: false });
-        return outcome;
-      } catch (error) {
-        contributionStop = "harness_error"; contributionExecution = "failed";
-        capture.record("termination", { source: "console_turn", error: describeCaughtError(error), termination: contributionStop });
-        throw error;
-      }
-    });
+    return sendInternal(userText, callbacks, opts);
   }
 
   async function sendInternal(userText: string, callbacks?: ConsoleRenderCallbacks, opts?: ConsoleSendOptions): Promise<ConsoleTurnOutcome> {
@@ -1251,17 +1193,8 @@ export function createConsoleSession(config: ConsoleSessionConfig): ConsoleSessi
       catch (error) { warnings.push(`Worker drain: ${String(error)}`); }
       await executor.cleanup();
     })());
-    const modelTrack = contribution ? settleWithin("Contribution model drain", Promise.allSettled([...pendingModelCalls])) : Promise.resolve();
     retirement = (async () => {
-      await Promise.all([executorTrack, modelTrack]);
-      if (contribution) {
-        withRunContribution(contribution, contributionAgentId, contributionParentId, () => {
-          if (contributionParentId) contribution!.record("termination", { source: "console", execution: contributionExecution, termination: contributionStop });
-          else contribution!.finish(warnings.length ? "interrupted" : contributionExecution === "running" ? "interrupted" : contributionExecution, warnings.length ? "harness_error" : contributionStop);
-        });
-        unregisterContribution?.();
-        if (!contributionParentId && !config.contribution && pendingModelCalls.size === 0) await contribution.client.upload(contribution);
-      }
+      await executorTrack;
       return warnings.length ? { warnings } : {};
     })();
     return retirement;
@@ -1272,7 +1205,6 @@ export function createConsoleSession(config: ConsoleSessionConfig): ConsoleSessi
   return {
     scanId,
     ready,
-    get contribution(): RunCapture | undefined { return contribution; },
     get systemPrompt(): string { return systemPrompt; },
     get sourceContext(): ConsoleSourceContext { return structuredClone(sourceContext); },
     // Inspector catalog includes connected tools even while model-facing MCP
@@ -1349,7 +1281,6 @@ export function createConsoleSession(config: ConsoleSessionConfig): ConsoleSessi
       tokensAtLastCompaction = undefined;
       plannerEstimateAtUsage = undefined;
       lastPlannerInputTokens = 0;
-      contribution?.record("truncation", { reason: "operator_clear_conversation", retainedMessages: 0 }, contributionAgentId, contributionParentId);
     },
     send,
     stopPersistentAgent: (agentId) => executor.stopPersistentAgent(agentId),
@@ -1358,7 +1289,6 @@ export function createConsoleSession(config: ConsoleSessionConfig): ConsoleSessi
       if (turnInProgress || closing) {
         throw new Error("Cannot export checkpoint before readiness, during a turn, or after retirement.");
       }
-      contribution?.record("checkpoint", { source: "console_export_checkpoint", scanId, messageCount: messages.length, effectiveScope: effectiveContributionScope(), durable: false }, contributionAgentId, contributionParentId);
       return Object.freeze<ConsoleSessionCheckpoint>({
         version: 1,
         scanId,

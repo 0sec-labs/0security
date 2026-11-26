@@ -7,9 +7,7 @@ const snapshotSchema = rollupExportSchema.extend({ source: z.string().min(1).max
 const historySchema = z.object({ schema: z.literal(HISTORY_SCHEMA), snapshots: z.array(snapshotSchema).max(10_000) });
 export type RollupSnapshot = z.infer<typeof snapshotSchema>;
 export type TrendPoint = { at: string; sources: string[]; repositories: string[]; summary: RollupSummary };
-export type RollupReport = RollupSummary & { schema: typeof REPORT_SCHEMA; snapshots: Array<{ at: string; source: string; repositories: string[] }>; observations: Array<{ repository: string; at: string; sources: string[] }>; trend: TrendPoint[] };
-export type RepositoryLabels = Record<string, { team?: string; tier?: string }>;
-export const labelsSchema = z.record(z.string().min(1).max(200), z.object({ team: z.string().min(1).max(100).optional(), tier: z.string().min(1).max(100).optional() }).strict());
+export type RollupReport = RollupSummary & { schema: typeof REPORT_SCHEMA; snapshots: Array<{ at: string; source: string; repositories: string[] }>; observations: Array<{ repository: string; at: string; sources: string[] }>; snapshotTrend: TrendPoint[] };
 
 export function parseHistory(value: unknown): RollupSnapshot[] {
   const parsed = historySchema.safeParse(value);
@@ -40,14 +38,7 @@ export function latestSnapshotRows(snapshots: RollupSnapshot[]): { rows: RollupR
   return { rows: mergeRows([...latest.values()].flatMap(item => item.rows)), repositories: [...latest.keys()].sort() };
 }
 
-/** Labels fill missing metadata only. Historical labels are not overwritten by today's operator map. */
-export function labelSnapshot(snapshot: RollupSnapshot, labels: RepositoryLabels): RollupSnapshot {
-  return { ...snapshot, findings: snapshot.findings.map(item => {
-    const label = Object.hasOwn(labels, item.repository) ? labels[item.repository] : undefined;
-    return { ...item, ...(item.team == null && label?.team ? { team: label.team } : {}), ...(item.tier == null && label?.tier ? { tier: label.tier } : {}) };
-  }) };
-}
-export function buildRollupReport(snapshots: RollupSnapshot[], now: Date): RollupReport {
+export function buildRollupReport(snapshots: RollupSnapshot[], now: Date, earlier?: RollupExport): RollupReport {
   const current = latestSnapshotRows(snapshots);
   const groups = new Map<string, RollupSnapshot[]>();
   for (const snapshot of snapshots) {
@@ -68,17 +59,17 @@ export function buildRollupReport(snapshots: RollupSnapshot[], now: Date): Rollu
     }
   }
   const observations = [...observed.values()].sort((a, b) => a.repository.localeCompare(b.repository)).map(item => ({ ...item, sources: item.sources.sort() }));
-  return { ...summarise(current.rows, now), repositories: current.repositories.length, schema: REPORT_SCHEMA, observations, snapshots: snapshots.map(item => ({ at: item.exportedAt, source: item.source, repositories: snapshotRepositories(item) })), trend };
+  return { ...summarise(current.rows, now, earlier, current.repositories), repositories: current.repositories.length, schema: REPORT_SCHEMA, observations, snapshots: snapshots.map(item => ({ at: item.exportedAt, source: item.source, repositories: snapshotRepositories(item) })), snapshotTrend: trend };
 }
 const clean = (value: string) => value.replace(/[\u0000-\u001f\u007f]/g, " ");
 export function trendText(report: RollupReport): string {
-  return `\nCurrent repository observations: ${report.observations.map(item => `${clean(item.repository)} at ${item.at}`).join("; ")}\nSnapshot trend (only repositories observed at each timestamp; coverage may differ):\n${report.trend.map(point => `  ${point.at}  ${point.summary.open} open  ${point.summary.bySeverity.find(item => item.name === "critical")?.count ?? 0} critical  repositories: ${point.repositories.map(clean).join(", ")}  sources: ${point.sources.map(clean).join(", ")}`).join("\n")}`;
+  return `\nCurrent repository observations: ${report.observations.map(item => `${clean(item.repository)} at ${item.at}`).join("; ")}\nSnapshot trend (only repositories observed at each timestamp; coverage may differ):\n${report.snapshotTrend.map(point => `  ${point.at}  ${point.summary.open} open  ${point.summary.bySeverity.find(item => item.name === "critical")?.count ?? 0} critical  repositories: ${point.repositories.map(clean).join(", ")}  sources: ${point.sources.map(clean).join(", ")}`).join("\n")}`;
 }
 /** Stable long-form counts: directly importable by spreadsheets and dashboard CSV readers, no remote connector implied. */
 export function rollupCsv(report: RollupReport): string {
   const rows: string[][] = [["schema", "snapshot_at", "scope", "dimension", "label", "count", "repositories", "sources"]];
   const quote = (value: string) => `"${(/^\s*[=+@-]/.test(value) ? "'" : "") + value.replace(/"/g, '""')}"`;
-  const points = [{ at: report.generatedAt, repositories: [...new Set(report.snapshots.flatMap(item => item.repositories))].sort(), sources: [...new Set(report.observations.flatMap(item => item.sources))].sort(), summary: report, scope: "current" }, ...report.trend.map(point => ({ ...point, scope: "snapshot" }))];
+  const points = [{ at: report.generatedAt, repositories: [...new Set(report.snapshots.flatMap(item => item.repositories))].sort(), sources: [...new Set(report.observations.flatMap(item => item.sources))].sort(), summary: report, scope: "current" }, ...report.snapshotTrend.map(point => ({ ...point, scope: "snapshot" }))];
   for (const point of points) {
     const prefix = [REPORT_SCHEMA, point.at, point.scope]; const suffix = [JSON.stringify(point.repositories), JSON.stringify(point.sources)];
     rows.push([...prefix, "headline", "open", String(point.summary.open), ...suffix]);
@@ -86,6 +77,13 @@ export function rollupCsv(report: RollupReport): string {
       for (const item of point.summary[dimension]) rows.push([...prefix, dimension, item.name, String(item.count), ...suffix]);
     }
     for (const [label, count] of Object.entries(point.summary.excluded)) rows.push([...prefix, "excluded", label, String(count), ...suffix]);
+  }
+  if (report.trend) {
+    const suffix = [JSON.stringify(report.observations.map(item => item.repository)), JSON.stringify([`since ${report.trend.since}`])];
+    for (const label of ["opened", "fixed", "net"] as const) rows.push([REPORT_SCHEMA, report.generatedAt, "comparison", "trend", label, String(report.trend[label]), ...suffix]);
+    for (const dimension of ["bySeverity", "byRepository"] as const) for (const item of report.trend[dimension]) {
+      for (const label of ["opened", "fixed", "net"] as const) rows.push([REPORT_SCHEMA, report.generatedAt, "comparison", `trend.${dimension}`, `${item.name}:${label}`, String(item[label]), ...suffix]);
+    }
   }
   return `${rows.map(row => row.map(quote).join(",")).join("\n")}\n`;
 }

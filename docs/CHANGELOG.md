@@ -22,6 +22,10 @@ on the GitHub Release tag.
 - `DO_NOT_TRACK=1` is now the one telemetry switch. It stops usage counts, lifecycle events and crash reports. `ZERO_NO_TELEMETRY`, `ZERO_OFFLINE` and `ZERO_ENTERPRISE` no longer control telemetry (`ZERO_OFFLINE` and `ZERO_ENTERPRISE` keep their other jobs), so a no-egress install should set `DO_NOT_TRACK=1` too. The Helm chart does this for you.
 - Usage counts go only to PostHog. The CLI no longer sends analytics to a 0security cloud account, and the `commands` and `full` levels are gone.
 
+### Removed
+
+- The 0cloud integration is gone. `0` is one product with no hosted account: cloud sign-in and cloud credentials (`ZERO_CLOUD_TOKEN`, `~/.0/cloud.env`), feedback sent to a cloud account, opt-in run contributions and the cloud Windows evidence worker no longer exist. Feedback goes only to your own `ZERO_FEEDBACK_URL`.
+
 ## [0.45.0] - 2026-11-24
 
 ### Added

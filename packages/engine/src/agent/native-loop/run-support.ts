@@ -2,7 +2,6 @@ import * as fs from "node:fs";
 import type { NativeMessage } from "../../runtime/types.js";
 import type { ToolContext } from "../types.js";
 import { features } from "../features.js";
-import { currentRunContribution } from "../../telemetry/run-contribution.js";
 import { loadJournal, rehydrateContext, renderSeedMessages } from "../journal/index.js";
 import { formatJitSkillsInstruction } from "../skills/index.js";
 import type { osecDB } from "../../storage/index.js";
@@ -170,5 +169,4 @@ export function persistSession(
     toolContext,
     status,
   });
-  if (state.messages.length > maxStoredMessages) currentRunContribution()?.record("truncation", { reason: "session_storage", originalMessages: state.messages.length, retainedMessages: maxStoredMessages });
 }

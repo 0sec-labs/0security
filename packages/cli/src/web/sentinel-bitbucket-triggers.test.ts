@@ -107,7 +107,7 @@ describe("settings and storage", () => {
     expect(dc.status).toBe(201);
     const listed = (await h.call("GET", `${P}/${h.sentinelId}/triggers`)).data.triggers as Array<{ kind: string; bitbucket: Record<string, unknown> }>;
     expect(listed.map(item => item.kind)).toEqual(["bitbucket-pr", "bitbucket-pr"]);
-    expect(listed.find(item => item.bitbucket.platform === "dc")?.bitbucket).toMatchObject({ platform: "dc", baseUrl: "https://bitbucket.example.com", tokenEnv: "BITBUCKET_DC_TOKEN", events: ["updated"], maxFiles: 20, budgetUsd: 0.5 });
+    expect(listed.find(item => item.bitbucket["platform"] === "dc")!.bitbucket).toMatchObject({ platform: "dc", baseUrl: "https://bitbucket.example.com", tokenEnv: "BITBUCKET_DC_TOKEN", events: ["updated"], maxFiles: 20, budgetUsd: 0.5 });
     expect(h.service.isWebhookTrigger(cloud.data.trigger.id)).toBe(true);
   });
 

@@ -171,11 +171,9 @@ export function isRemovedProvider(id: string | undefined | null): boolean {
   return typeof id === "string" && REMOVED_PROVIDER_IDS.includes(id.trim().toLowerCase());
 }
 /**
- * Azure Foundry deployment ids used by 0cloud. The worker can inject both
- * the Azure primary key and a direct-DeepSeek fallback key; route a Foundry
- * deployment to Azure before the env-priority fallback sees that second key.
- *
- * Keep this table aligned with the worker's AZURE_FOUNDRY_DEPLOYMENT_IDS.
+ * Azure Foundry deployment ids. An environment can hold both the Azure
+ * primary key and a direct-DeepSeek fallback key; route a Foundry deployment
+ * to Azure before the env-priority fallback sees that second key.
  */
 export const AZURE_FOUNDRY_DEPLOYMENT_IDS: Record<string, true> = {
   "deepseek-v4-flash": true,

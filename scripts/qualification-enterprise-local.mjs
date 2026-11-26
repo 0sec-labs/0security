@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Native-process qualification: real HTTP access controls and online SQLite backup/restore.
 // Uses disposable synthetic findings; no model calls, cloud deployment, mock server or license bypass.
-// After building engine, enterprise, CLI and web: node scripts/qualification-enterprise-local.mjs [receipt.json]
+// After building engine, enterprise, CLI and web: node scripts/qualification-enterprise-local.mjs [--receipt] [receipt.json]
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -11,6 +11,11 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { DatabaseSync, backup } from "node:sqlite";
 
+const args = process.argv.slice(2);
+const receiptFile = args[0] === "--receipt" ? args[1] : args[0];
+if (args[0] === "--receipt" ? args.length !== 2 || !receiptFile : args.length > 1 || receiptFile?.startsWith("-")) {
+  throw new Error("Usage: node scripts/qualification-enterprise-local.mjs [--receipt] [receipt.json]");
+}
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const { osecDB } = await import(pathToFileURL(join(repo, "packages/engine/dist/storage/index.js")));
 const directory = await mkdtemp(join(tmpdir(), "zero-enterprise-local-"));
@@ -99,6 +104,6 @@ try {
   receipt.checks.push("authenticated-http-report-export-retains-restored-finding");
   receipt.completedAt = new Date().toISOString();
   receipt.outcome = "passed";
-  if (process.argv[2]) await writeFile(resolve(process.argv[2]), JSON.stringify(receipt, null, 2) + "\n", { mode: 0o600 });
+  if (receiptFile) await writeFile(resolve(receiptFile), JSON.stringify(receipt, null, 2) + "\n", { mode: 0o600 });
   console.log(JSON.stringify(receipt));
 } finally { await stop(); await rm(directory, { recursive: true, force: true }); }

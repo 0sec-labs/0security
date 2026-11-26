@@ -700,7 +700,8 @@ Commands:
   metrics [options]                 Show what scan, fix and verify runs cost and produced: cost per
                                     proposed fix and the share that passed their checks
   rollup [options] [inputs...]      Count open findings across repositories by severity, category,
-                                    age and owner, from export files and findings databases
+                                    age, owner, team and tier, from export files, SARIF files and
+                                    findings databases
   evidence [options] <folder>       Write one folder of findings, SARIF, SBOM and fix branches, with
                                     a README that says what it does and does not show
   export-fixes [options]            Report what happened to the fixes 0 proposed, per repository:
@@ -841,51 +842,40 @@ Usage: 0security findings fix [options] <finding>
 Fix one finding in an isolated git work tree and open a pull request for review
 
 Options:
-  --host <host>                    Code host: github, bitbucket-cloud or bitbucket-dc (inferred from
-                                   origin)
-  --bitbucket-url <url>            Bitbucket Data Center HTTPS base URL, including any context path
-                                   (or BITBUCKET_URL)
-  --repo <dir>                     Git repository the finding is in (default: the current directory)
-  --base <branch>                  Branch to start from and open the pull request against (default:
-                                   the remote's default branch)
-  --test <command>                 Check to run after the change; repeat for several. A failing
-                                   check makes the pull request a draft
-  --ready                          Open the pull request ready for review even when no --test ran.
-                                   Without it, a pull request with no checks is a draft
-  --sandbox <mode>                 Run the --test commands in a container instead of on this machine
-                                   (docker) (choices: "docker")
-  --sandbox-profile <profile>      Use the pinned Maven/JDK 21 verifier: online dependency setup
-                                   then offline verify (java)
-  --sandbox-maven-settings <file>  Owner-only short-lived Maven credentials outside the repository;
-                                   read-only mount for online setup only; setup output withheld
-  --sandbox-image <image>          Image for --sandbox docker, for example
-                                   maven:3-eclipse-temurin-21. It must hold the tools and
-                                   dependencies the tests need
-  --sandbox-network                Give the sandbox network access (to download dependencies). Off
-                                   by default
-  --sandbox-setup <command>        With --sandbox docker: run this once with the network on to
-                                   download dependencies (for example mvn -q dependency:go-offline),
-                                   then run the --test checks with the network off; repeat for
-                                   several
-  --policy <file>                  Policy file (.json or .yaml) of approved libraries and fix rules;
-                                   any path you name, relative to the current directory. Default:
-                                   ~/.0/fix-policy.json|yaml|yml
-  --ticket <key>                   Ticket key such as SEC-123 for the {ticket} placeholder in your
-                                   policy's pull request settings
-  --repo-policy                    Also read fix-policy.* or .zero/fix-policy.* from the repository
-                                   being fixed (untrusted content; off by default)
-  --no-pr                          Commit on the fix branch but do not push or open a pull request
-  --budget <usd>                   Stop when the estimated spend reaches this many USD (default:
-                                   "3")
-  --model <model>                  Model for the fix thread (default: gpt-6-luna)
-  --timeout <seconds>              Maximum seconds to wait for the fix (default: "1800")
-  --format <format>                Output: text or json (choices: "text", "json")
-  --engine-url <url>               Attach directly to a running trusted engine
-  --engine-token-env <name>        Environment variable holding the attached engine token
-  --computer <id>                  Use a registered remote computer
-  --computers-config <path>        Operator computer connection registry JSON file
-  --db-path <path>                 Control database of the local engine to attach to
-  -h, --help                       display help for command
+  --repo <dir>               Git repository the finding is in (default: the current directory)
+  --base <branch>            Branch to start from and open the pull request against (default: the
+                             remote's default branch)
+  --test <command>           Check to run after the change; repeat for several. A failing check
+                             makes the pull request a draft
+  --ready                    Open the pull request ready for review even when no --test ran. Without
+                             it, a pull request with no checks is a draft
+  --sandbox <mode>           Run the --test commands in a container instead of on this machine
+                             (docker) (choices: "docker")
+  --sandbox-image <image>    Image for --sandbox docker, for example maven:3-eclipse-temurin-21. It
+                             must hold the tools and dependencies the tests need
+  --sandbox-network          Give the sandbox network access (to download dependencies). Off by
+                             default
+  --sandbox-setup <command>  With --sandbox docker: run this once with the network on to download
+                             dependencies (for example mvn -q dependency:go-offline), then run the
+                             --test checks with the network off; repeat for several
+  --policy <file>            Policy file (.json or .yaml) of approved libraries and fix rules; any
+                             path you name, relative to the current directory. Default:
+                             ~/.0/fix-policy.json|yaml|yml
+  --ticket <key>             Ticket key such as SEC-123 for the {ticket} placeholder in your
+                             policy's pull request settings
+  --repo-policy              Also read fix-policy.* or .zero/fix-policy.* from the repository being
+                             fixed (untrusted content; off by default)
+  --no-pr                    Commit on the fix branch but do not push or open a pull request
+  --budget <usd>             Stop when the estimated spend reaches this many USD (default: "3")
+  --model <model>            Model for the fix thread (default: gpt-6-luna)
+  --timeout <seconds>        Maximum seconds to wait for the fix (default: "1800")
+  --format <format>          Output: text or json (choices: "text", "json")
+  --engine-url <url>         Attach directly to a running trusted engine
+  --engine-token-env <name>  Environment variable holding the attached engine token
+  --computer <id>            Use a registered remote computer
+  --computers-config <path>  Operator computer connection registry JSON file
+  --db-path <path>           Control database of the local engine to attach to
+  -h, --help                 display help for command
 
 ### 0security findings import
 Usage: 0security findings import [options] [file]
@@ -1005,16 +995,12 @@ Show what scan, fix and verify runs cost and produced: cost per proposed fix and
 passed their checks
 
 Options:
-  --refresh-host         Read current PR lifecycle and CI for up to 20 recorded PRs (requires
-                         --repo; no host writes)
-  --repo <checkout>      Explicit local checkout for --refresh-host
-  --bitbucket-url <url>  Bitbucket Data Center server base for the explicit checkout
-  --since <when>         Only runs since then: 36h, 7d, 2w or a date such as 2026-11-01
-  --command <name>       Only this command: scan, fix, verify, sentinel
-  --by <group>           One row per command, week (Monday start), model, Sentinel or trigger
-                         (choices: "command", "week", "model", "sentinel", "trigger")
-  --format <format>      Output: text, json, or csv (with --by) (choices: "text", "json", "csv")
-  -h, --help             display help for command
+  --since <when>     Only runs since then: 36h, 7d, 2w or a date such as 2026-11-01
+  --command <name>   Only this command: scan, fix, verify
+  --by <group>       One row per command, week (Monday start) or model (choices: "command", "week",
+                     "model")
+  --format <format>  Output: text, json, or csv (with --by) (choices: "text", "json", "csv")
+  -h, --help         display help for command
 
 ### 0security findings reopen (hidden)
 Usage: 0security findings reopen [options] <id>
@@ -1118,21 +1104,21 @@ Options:
 ### 0security findings rollup
 Usage: 0security findings rollup [options] [inputs...]
 
-Count open findings across repositories by severity, category, age and owner, from export files and
-findings databases
+Count open findings across repositories by severity, category, age, owner, team and tier, from
+export files, SARIF files and findings databases
 
 Options:
   --export <file>      Also write these findings as a rollup export file that another rollup can
                        read
-  --history <file>     Write a reusable dated snapshot archive, preserving the input timestamps and
-                       provenance
-  --labels <file>      JSON repository-to-team/tier map; fills missing labels without overwriting
-                       historical labels
   --owners <file>      JSON file mapping repository names to owners, used when a finding has no
                        assignee
-  --repository <name>  Repository name for findings read from a database (default: the scan target's
-                       folder name)
-  --format <format>    Output: text, json, html or csv (choices: "text", "json", "html", "csv")
+  --labels <file>      JSON or YAML file mapping repository names or globs (or path: globs) to a
+                       team and tier, shown as extra breakdowns
+  --since <file>       An earlier rollup export to compare with: shows findings opened and fixed
+                       since then
+  --repository <name>  Repository name for findings read from a database or a SARIF file (default:
+                       the scan target's folder name, or the SARIF's repository)
+  --format <format>    Output: text, json or html (choices: "text", "json", "html")
   -o, --output <file>  Write the rollup to a file instead of stdout
   -h, --help           display help for command
 
@@ -1434,8 +1420,6 @@ Commands:
                                             launchers, secrets and broad permissions
   java-usage [options] <file> [folder]      List which Maven components of an SBOM your Java,
                                             Kotlin, Scala or Groovy source imports
-  reachability [options] <file> [folder]    Inspect JVM source-import and dependency-path evidence
-                                            offline; vulnerable-code reachability stays unknown
   help [command]                            display help for command
 
 ### 0security sbom agent-config
@@ -1469,8 +1453,6 @@ Options:
   --format <format>     Output: text, json or sarif (SARIF imports with `0security findings import`)
                         (default: "text")
   -o, --output <file>   Write the result to a file instead of stdout
-  --source <folder>     Attach JVM source-import and dependency-path evidence; does not suppress
-                        advisories or establish vulnerable-code reachability
   --outdated            Also list components with a newer version (looks packages up at
                         https://api.deps.dev; information only, not a vulnerability)
   --registry            Also look each npm and PyPI package up on its public registry for invented
@@ -1562,20 +1544,6 @@ Options:
   --format <format>    Output: text, json or sarif (default: "text")
   -h, --help           display help for command
 
-### 0security sbom reachability
-Usage: 0security sbom reachability [options] <file> [folder]
-
-Inspect JVM source-import and dependency-path evidence offline; vulnerable-code reachability stays
-unknown
-
-Arguments:
-  file               CycloneDX SBOM (JSON), including the resolved dependency graph when available
-  folder             Source folder to read (default: .)
-
-Options:
-  --format <format>  Output: text or json (default: "text")
-  -h, --help         display help for command
-
 ### 0security sbom scan-models
 Usage: 0security sbom scan-models [options] <path>
 
@@ -1626,8 +1594,6 @@ Options:
                              for several. Replaces the default rules and needs --scanner semgrep or
                              opengrep. Rules are never read from the scanned folder unless you name
                              them
-  --business-context <file>  Operator-owned JSON tags and notes for investigation and work ordering;
-                             keeps technical severity unchanged
   --context <file>           Give the scan this file (a threat model, notes on who may do what) as
                              lower-priority background; repeat for several. It can steer what the
                              scan weighs but cannot change how it works
@@ -1657,14 +1623,9 @@ Options:
                              hide findings. Inline suppressions such as nosemgrep always apply
   --skill <id>               Skill that holds the scan method (default: "scan")
   --model <model>            Model for the scan thread (default: gpt-6-luna)
-  --provider <id>            Explicit model provider for this scan (use with --model)
-  --reasoning <effort>       Reasoning effort for a model that supports it
   --batches <mode>           auto reviews a large folder in batches, one thread per group of entry
                              points, and records what each batch covered; on always does; off keeps
                              one thread (default: "auto")
-  --codeowners <file>        Group batches by an operator-provided CODEOWNERS file as well as build
-                             module; reads no ownership file automatically and never skips unowned
-                             code
   --batch-size <n>           Entry points one batch reviews (1 to 50); a folder with more than this
                              many is split under --batches auto (default: "8")
   --retries <n>              Run a batch again when it fails for a reason that may pass: a dropped

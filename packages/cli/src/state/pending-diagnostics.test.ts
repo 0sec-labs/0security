@@ -53,9 +53,8 @@ describe("handleDiagnosticReport consent model", () => {
     expect(await handleDiagnosticReport(info(), { policy: () => "automatic", env: { ZERO_SENTRY_DSN: DSN }, homeDir: home, submit: submit as never })).toBe("submitted");
     expect(submit).toHaveBeenCalledTimes(1);
     expect(files()).toEqual([]);
-    const [payload, , options] = submit.mock.calls[0] as unknown as [{ message: string }, unknown, { timeoutMs: number; allowCloud: boolean }];
+    const [payload, , options] = submit.mock.calls[0] as unknown as [{ message: string }, unknown, { timeoutMs: number }];
     expect(options.timeoutMs).toBeLessThanOrEqual(2000);
-    expect(options.allowCloud).toBe(false);
     expect(JSON.stringify(payload)).not.toMatch(new RegExp(`${SECRET}|${HOST}|alice|acme|scan-output`));
   });
 

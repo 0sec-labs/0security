@@ -62,7 +62,7 @@ beforeEach(() => {
   posts = [];
   home = mkdtempSync(join(tmpdir(), "0-posthog-"));
   dirs.push(home);
-  for (const name of ["ZERO_CLOUD_TOKEN", "0SEC_CLOUD_TOKEN", "ZERO_CLOUD_HOST", "ZERO_ANALYTICS_LEVEL", "ZERO_OFFLINE", "ZERO_NO_TELEMETRY", "DO_NOT_TRACK", "ZERO_ANALYTICS_POSTHOG_HOST"]) {
+  for (const name of ["ZERO_ANALYTICS_LEVEL", "ZERO_OFFLINE", "ZERO_NO_TELEMETRY", "DO_NOT_TRACK", "ZERO_ANALYTICS_POSTHOG_HOST"]) {
     vi.stubEnv(name, undefined);
   }
   vi.stubEnv("ZERO_ANALYTICS_POSTHOG_KEY", FAKE_KEY);
@@ -230,17 +230,6 @@ describe("anonymous usage to PostHog", () => {
     expect(posts).toHaveLength(0);
   });
 
-  it("a cloud token changes nothing: usage goes to PostHog and never to a cloud endpoint", async () => {
-    vi.stubEnv("ZERO_CLOUD_TOKEN", "test-token");
-    vi.stubEnv("ZERO_CLOUD_HOST", "https://analytics.test");
-    analyticsPipeline.setLevel("usage");
-    emitUsage();
-    await analyticsPipeline.flushNow();
-    expect(posts).toHaveLength(1);
-    expect(posts[0].url).toBe(`${FAKE_HOST}/batch/`);
-    expect(posts.some((p) => p.url.includes("analytics.test"))).toBe(false);
-  });
-
   it("failure and timeout are silent and never throw", async () => {
     analyticsPipeline.configure({ fetchImpl: fakeFetch("fail") });
     analyticsPipeline.setLevel("usage");
@@ -283,6 +272,21 @@ describe("finding classes on the usage event", () => {
     expect(posts[0].body).not.toContain("login.php");
     for (const name of Object.keys(event.properties.finding_class_counts as object)) expect(FINDING_CLASSES as readonly string[]).toContain(name);
   });
+  it("does not match class words inside unrelated words", () => {
+    for (const raw of ["random", "random number display", "session", "session list", "header", "page header", "author", "authors page", "authority", "authored by", "dependable", "secretary", "keyboard"]) {
+      expect(classifyFindingClass(raw), raw).toBe("other");
+    }
+  });
+  it("still matches the specific class phrases", () => {
+    const cases: Array<[string, string]> = [
+      ["Weak random number generator", "crypto"], ["Insecure randomness", "crypto"], ["insecure random", "crypto"],
+      ["Session fixation", "auth"], ["Broken authentication", "auth"], ["missing authorization check", "auth"], ["auth bypass", "auth"], ["CSRF", "auth"],
+      ["Missing security headers", "misconfiguration"], ["CORS wildcard", "misconfiguration"],
+      ["Hardcoded API key", "secrets"], ["Hardcoded password", "secrets"], ["SQL injection", "sql-injection"], ["Stored XSS", "xss"],
+      ["outdated dependency", "dependency"], ["Cryptographic failure", "crypto"],
+    ];
+    for (const [raw, expected] of cases) expect(classifyFindingClass(raw), raw).toBe(expected);
+  });
   it("classifyFindingClass only ever returns a member of the fixed list", () => {
     for (const raw of ["ssrf", "Remote Code Execution", "path traversal", "hardcoded secret", "jwt none alg", "weak tls cipher", "unsafe deserialization", "vulnerable dependency", "cors misconfig", "???", ""]) {
       expect(FINDING_CLASSES as readonly string[]).toContain(classifyFindingClass(raw));
@@ -292,6 +296,20 @@ describe("finding classes on the usage event", () => {
 
 describe("lifecycle events (PostHog only)", () => {
   const LIFECYCLE = ["first_run", "command_invoked", "update", "error_exit"];
+
+  afterEach(() => analyticsPipeline.setLifecycleSuppressed(false));
+
+  it("a suppressed run queues no lifecycle event and mints no install id", async () => {
+    analyticsPipeline.setLevel("usage");
+    analyticsPipeline.setLifecycleSuppressed(true);
+    analyticsPipeline.recordStartup({ command: "scan" });
+    analyticsPipeline.recordLifecycle({ event: "error_exit", category: "crash" });
+    expect(analyticsPipeline.hasPending()).toBe(false);
+    await analyticsPipeline.flushNow();
+    expect(posts).toHaveLength(0);
+    expect(existsSync(join(home, ".0", "analytics-id"))).toBe(false);
+    expect(existsSync(join(home, ".0", ANALYTICS_LAST_VERSION_FILENAME))).toBe(false);
+  });
 
   it("a fresh install sends first_run then command_invoked, each with only its allowlisted properties", async () => {
     analyticsPipeline.configure({ knownCommandNames: ["scan", "scan web"] });
@@ -372,18 +390,6 @@ describe("lifecycle events (PostHog only)", () => {
     expect(allEvents().map((e) => e.properties.error_category)).toEqual(["timeout", "other", "crash", "other"]);
     const body = posts.map((p) => p.body).join("");
     for (const planted of ["10.1.2.3", "alice", "hunter2", "victim.example", "free text"]) expect(body).not.toContain(planted);
-  });
-
-  it("with a cloud token everything still goes to PostHog only", async () => {
-    vi.stubEnv("ZERO_CLOUD_TOKEN", "test-token");
-    vi.stubEnv("ZERO_CLOUD_HOST", "https://analytics.test");
-    analyticsPipeline.setLevel("usage");
-    emitUsage();
-    analyticsPipeline.recordStartup({ command: "web" });
-    await analyticsPipeline.flushNow();
-    expect(posts.every((p) => p.url === `${FAKE_HOST}/batch/`)).toBe(true);
-    const names = posts.flatMap((p) => (JSON.parse(p.body) as { batch: Array<{ event: string }> }).batch.map((e) => e.event));
-    expect(names).toEqual(expect.arrayContaining(["usage", "first_run", "command_invoked"]));
   });
 
   for (const [name, value] of [["DO_NOT_TRACK", "1"]] as const) {

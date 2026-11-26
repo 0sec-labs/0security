@@ -756,7 +756,7 @@ export class WebOperatorServices {
     const report = readPendingReport(id);
     if (!report) throw new OperatorError(404, "unknown_report", "No such pending report.");
     if (body.action === "preview") {
-      const preview = buildSubmitPreview(report.payload, process.env, { allowCloud: false });
+      const preview = buildSubmitPreview(report.payload, process.env);
       if (!preview) throw new OperatorError(409, "submission_unavailable", "Reporting is opted out or no supported HTTPS destination is available.");
       const previewId = randomUUID();
       this.#feedback = { id: previewId, payload: report.payload, preview, pendingId: id };
@@ -765,7 +765,7 @@ export class WebOperatorServices {
     if (body.action === "send") {
       const staged = this.#feedback;
       if (!staged || staged.pendingId !== id || body.previewId !== staged.id) throw new OperatorError(409, "review_required", "Preview and confirm this report before sending.");
-      const result = await submitFeedback(staged.payload, process.env, { allowCloud: false, expectedPreview: staged.preview, diagnosticConsent: { policy: "ask", confirmed: true } });
+      const result = await submitFeedback(staged.payload, process.env, { expectedPreview: staged.preview, diagnosticConsent: { policy: "ask", confirmed: true } });
       if (!result.ok) throw new OperatorError(409, "submission_failed", result.error ?? "The report could not be sent.");
       this.#feedback = null;
       deletePendingReport(id);

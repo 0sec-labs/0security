@@ -24,7 +24,7 @@ export const TELEMETRY_NOTICE_TEXT = `Anonymous usage counts, command names, cra
 
 const MACHINE_FLAGS = new Set(["--json", "--ndjson", "--jsonl", "--ready-json", "--sarif"]);
 const MACHINE_FORMAT = /json|sarif|csv|xml|yaml|junit/i;
-const QUIET_COMMANDS = new Set(["config", "reports", "workbench"]);
+export const QUIET_COMMANDS = new Set(["config", "reports", "workbench"]);
 const INFO_FLAGS = new Set(["-h", "--help", "-V", "--version"]);
 
 function truthy(value: string | undefined): boolean {

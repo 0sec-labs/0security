@@ -18,7 +18,7 @@ import { readFileSync } from "node:fs";
 import { parse as parseYaml } from "yaml";
 import type { SkillDefinition } from "./types.js";
 
-// ── Contract types (mirrored from 0cloud contracts w/ limits) ──
+// ── Contract types (with limits) ──
 
 interface BundleManifest {
   schema: string;

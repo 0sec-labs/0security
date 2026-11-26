@@ -73,7 +73,7 @@ function installEgressGuard(): void {
   restore.push(() => syncBuiltinESMExports());
 }
 
-const NETWORK_ENV = ["ZERO_OFFLINE", "DO_NOT_TRACK", "ZERO_NO_UPDATE_CHECK", "ZERO_UPDATE_ORIGIN", "CI", "ZERO_FEEDBACK_URL", "ZERO_SENTRY_DSN", "ZERO_CLOUD_TOKEN"];
+const NETWORK_ENV = ["ZERO_OFFLINE", "DO_NOT_TRACK", "ZERO_NO_UPDATE_CHECK", "ZERO_UPDATE_ORIGIN", "CI", "ZERO_FEEDBACK_URL", "ZERO_SENTRY_DSN"];
 const enterprise = () => { for (const name of NETWORK_ENV) vi.stubEnv(name, undefined); vi.stubEnv(ENTERPRISE_ENV, "1"); };
 
 let home: string;

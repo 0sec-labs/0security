@@ -131,7 +131,7 @@ export function resolveWorkbenchGuestSettings(settings: TuiSettings, env: Readon
     executionProfile: "local",
     updatePolicy: "off",
     analyticsLevel: levelAtLeast(environmentLevel, settings.analyticsLevel) ? settings.analyticsLevel : environmentLevel,
-    diagnosticReporting: submissionBlockedReason(privacy, { allowCloud: false }) === "opt-out" ? "off" : settings.diagnosticReporting,
+    diagnosticReporting: submissionBlockedReason(privacy) === "opt-out" ? "off" : settings.diagnosticReporting,
   });
 }
 

@@ -10,12 +10,12 @@ import {
   analyticsOptedOut,
   TOOL_DEFINITIONS,
   createHerdrEventSink,
-  configureRunContributionsFromEnvironment,
   eventBus,
   maybeSubscribeOperationalEventSink,
   presentationEventSink,
 } from "@0/engine";
-import { getSettings } from "./state/settings-store.js";
+import { getSettings, getSettingSources } from "./state/settings-store.js";
+import { lifecycleSuppressed } from "./lifecycle-gate.js";
 import { maybeLoadCodexAuth } from "./codex-auth.js";
 import { presentationEventBus } from "./presentation/event-bus.js";
 import {
@@ -76,6 +76,12 @@ try {
     knownToolNames: Object.values(TOOL_DEFINITIONS).map((tool) => tool.name),
   });
   const settings = getSettings();
+  // Lifecycle events follow the notice: none for help, version, completion, CI or machine output
+  // unless `analyticsLevel usage` was set in a settings file.
+  analyticsPipeline.setLifecycleSuppressed(lifecycleSuppressed({
+    args: process.argv.slice(2),
+    explicitOptIn: settings.analyticsLevel === "usage" && getSettingSources().analyticsLevel !== "default",
+  }));
   // Telemetry is automatic by default: say so once, on stderr, for interactive runs only.
   maybePrintTelemetryNotice({
     args: process.argv.slice(2),
@@ -84,9 +90,6 @@ try {
 } catch {
   analyticsPipeline.setLevel("off");
 }
-// Independent, purpose-specific enrollment. Missing configuration does not enroll.
-try { configureRunContributionsFromEnvironment(); }
-catch { process.stderr.write("[0] Run contribution unavailable: invalid private enrollment configuration.\n"); }
 
 // Operational NDJSON stderr sink (ZERO_LOG_FORMAT=json). Opt-in metadata-
 // only logging — writes one NDJSON line per allowlisted lifecycle / cost

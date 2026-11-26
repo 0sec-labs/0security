@@ -11,23 +11,9 @@
       "files": [
         "packages/engine/src/telemetry/analytics-pipeline.ts"
       ],
-      "when": "Batched while a command or the console runs, when analyticsLevel is usage and the build embeds a key. Also one small event at first run, at each command, on a version change and on an error exit.",
+      "when": "Batched while a command or the console runs, when analyticsLevel is usage and the build embeds a key. Also one small event at first run, at each command, on a version change and on an error exit; not for --help, --version, shell completion, config, or CI and machine-output runs unless analyticsLevel usage is set in a settings file.",
       "sent": "Anonymous counters and lifecycle events: version, OS, command name from a fixed list, outcome class, finding class counts.",
       "disable": "DO_NOT_TRACK."
-    },
-    {
-      "id": "run-contribution",
-      "class": "automatic",
-      "enterprise": "blocked",
-      "destinations": [
-        "cloud.0.security"
-      ],
-      "files": [
-        "packages/engine/src/telemetry/run-contribution.ts"
-      ],
-      "when": "Only with cloud credentials and an explicit contribution permission.",
-      "sent": "A sealed run capture the organization opted into.",
-      "disable": "DO_NOT_TRACK; ZERO_ENTERPRISE."
     },
     {
       "id": "crash-and-feedback",
@@ -35,7 +21,7 @@
       "enterprise": "allowed",
       "destinations": [
         "Sentry ingest (embedded DSN or ZERO_SENTRY_DSN)",
-        "ZERO_FEEDBACK_URL or cloud.0.security"
+        "ZERO_FEEDBACK_URL"
       ],
       "files": [
         "packages/cli/src/state/feedback.ts"
@@ -204,20 +190,6 @@
       "when": "findings upload (SARIF), sentinel and host integrations that run through the shared gh runner.",
       "sent": "The SARIF or API request the operator asked for.",
       "disable": "ZERO_ENTERPRISE refuses to start gh from this runner."
-    },
-    {
-      "id": "windows-evidence-worker",
-      "class": "feature",
-      "enterprise": "blocked",
-      "destinations": [
-        "cloud worker base URL from a grant"
-      ],
-      "files": [
-        "packages/engine/src/cloud/windows-evidence-worker.ts"
-      ],
-      "when": "A cloud-issued Windows evidence job.",
-      "sent": "A bounded evidence envelope for that job.",
-      "disable": "ZERO_ENTERPRISE refuses the request."
     },
     {
       "id": "remote-worker-provisioning",
@@ -600,7 +572,6 @@
     "auth.openai.com",
     "auth.x.ai",
     "chatgpt.com",
-    "cloud.0.security",
     "code.claude.com",
     "code.visualstudio.com",
     "cognitiveservices.azure.com",

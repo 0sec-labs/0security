@@ -1494,10 +1494,10 @@ describe("ToolExecutor", () => {
 // `sanitizedEnv()` strips a name denylist from the env handed to `bash` and to
 // the scanner subprocesses. Two things need pinning:
 //
-//   1. The ZERO_* credentials the worker-controller injects per scan are
-//      actually filtered. Before #134 the denylist named only
-//      ZERO_CLOUD_TOKEN, so the Codex refresh token and the git tokens
-//      reached the agent shell in plain `env` output.
+//   1. The ZERO_* credentials a managed worker injects per scan are
+//      actually filtered. Before #134 the denylist named only one of them, so
+//      the Codex refresh token and the git tokens reached the agent shell in
+//      plain `env` output.
 //   2. AUTH_HEADER / AUTH_VALUE / AUTH_CURL_FLAG SURVIVE. They are merged in
 //      deliberately by `buildAuthEnvVars()` and are how the agent
 //      authenticates to the target — filtering them breaks every
@@ -1509,7 +1509,6 @@ describe("ToolExecutor", () => {
 
 describe("sanitizedEnv — child-process credential filtering (0#134)", () => {
   const INJECTED_CREDENTIALS = [
-    "ZERO_CLOUD_TOKEN",
     "ZERO_CHATGPT_ACCESS_TOKEN",
     "ZERO_CHATGPT_OAUTH_REFRESH_TOKEN",
     "ZERO_GITHUB_TOKEN",
