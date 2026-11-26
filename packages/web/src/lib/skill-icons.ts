@@ -39,7 +39,7 @@ export const SKILL_FAMILIES: readonly Family[] = [
   { icon: "MessageSquareWarning", ids: ["llm-prompt-injection"], words: ["prompt injection", "jailbreak"] },
   { icon: "BrainCircuit", ids: ["llm-rag-poisoning"], words: ["rag", "embedding", "vector", "poisoning"] },
   { icon: "Sparkles", ids: ["llm-insecure-output-handling"], words: ["output handling", "generative"] },
-  { icon: "ShieldAlert", ids: ["llm-excessive-agency"], words: ["excessive agency", "agency"] },
+  { icon: "ShieldAlert", ids: ["llm-excessive-agency", "agent-toxic-flow"], words: ["excessive agency", "agency", "toxic flow"] },
   { icon: "Plug", ids: ["mcp-server-review"], words: ["mcp", "plugin", "connector"] },
   { icon: "Bot", ids: ["llm-app-review"], words: ["llm", "ai", "gpt", "copilot"] },
   { icon: "FileText", ids: ["advisory-disclosure"], words: ["report", "disclosure", "advisory", "evidence", "writeup", "cve"] },

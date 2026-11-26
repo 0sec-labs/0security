@@ -11,7 +11,8 @@ import { registerCommandTree } from "../tree.js";
 /** Nouns that make no sense in a chat composer. */
 // Reads lockfiles and calls an advisory database; there is no thread to talk to.
 // threat-model writes a file (and with --pr a branch and a pull request) on this machine; a chat thread has no such flow.
-const CLI_ONLY = new Set<string>(["sbom", "probe", "threat-model", "evidence"]);
+// redteam serves a fake MCP server over stdio for another agent to connect to; a chat thread has no such flow.
+const CLI_ONLY = new Set<string>(["sbom", "probe", "threat-model", "evidence", "redteam"]);
 
 const isHidden = (command: Command): boolean => (command as unknown as { _hidden?: boolean })._hidden === true;
 
