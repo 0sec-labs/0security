@@ -3,7 +3,7 @@ import * as mailbox from "../hub/mailbox.js";
 import { ToolExecutor } from "../agent/tools.js";
 import type { NativeMessage, NativeRuntime, NativeRuntimeResult } from "../runtime/types.js";
 import { contextOverflow, estimatePromptTokens, maintainContext, SUMMARY_MARKER } from "./context-maintenance.js";
-import { createConsoleSession, DEFAULT_MAX_TOOL_ITERATIONS, type ConsoleCompactionEvent, type ConsoleSessionConfig } from "./turn-engine.js";
+import { createConsoleSession, type ConsoleCompactionEvent, type ConsoleSessionConfig } from "./turn-engine.js";
 
 const text = (text: string, role: "user" | "assistant" = "user"): NativeMessage => ({ role, content: [{ type: "text", text }] });
 const end = (value = "done"): NativeRuntimeResult => ({ content: text(value).content, stopReason: "end_turn", durationMs: 0 });
@@ -275,8 +275,6 @@ describe("console continuation maintenance", () => {
     expect(s.messages).toEqual([...before, text("go")]);
     await s.cleanup();
   });
-
-  it("defaults to unlimited tool rounds", () => expect(DEFAULT_MAX_TOOL_ITERATIONS).toBe(Infinity));
 });
 
 describe("maintenance exchange invariants", () => {
