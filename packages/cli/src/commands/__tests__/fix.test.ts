@@ -334,9 +334,12 @@ describe("failed check report", () => {
     const reports = failedCheckReports([{ command: "mvn -o test", code: 1, output }, { command: "ok", code: 0, output: "fine" }]);
     expect(reports).toHaveLength(1);
     expect(reports[0]).toContain("check failed (exit 1): mvn -o test");
-    expect(reports[0]).toContain("line 7");
+    expect(reports[0]).toContain("  | line 7");
     expect(reports[0]).not.toContain("line 6\n");
     expect(reports[0]).not.toMatch(/[\u001b\u0007]/);
-    expect(reports[0]).toContain("[31mred[0m");
+    expect(reports[0]).toContain("  | [31mred[0m");
+    // Every output line is indented, so build output cannot pose as a message from the command.
+    const forged = failedCheckReports([{ command: "t", code: 2, output: "x\nCommitted on main." }])[0]!;
+    expect(forged.split("\n").slice(1).every((l) => l.startsWith("  | "))).toBe(true);
   });
 });

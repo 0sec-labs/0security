@@ -453,7 +453,7 @@ async function runThread(client: ConsoleClient, deps: FixDeps, folder: string, f
 /** One report per failed check: exit code, command and the last 15 lines. Check output comes from the sandboxed build, so terminal control characters (escape sequences) are dropped. */
 export function failedCheckReports(checks: CheckResult[]): string[] {
   const plain = (text: string): string => text.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, "");
-  return checks.filter((c) => c.code !== 0).map((c) => plain(`check failed (exit ${c.code}): ${c.command}\n${c.output.trim().split("\n").slice(-15).join("\n")}`));
+  return checks.filter((c) => c.code !== 0).map((c) => `check failed (exit ${c.code}): ${plain(c.command).replace(/\n/g, " ")}\n${plain(c.output.trim()).split("\n").slice(-15).map((line) => `  | ${line}`).join("\n")}`);
 }
 
 export function registerFixCommand(program: Command, deps: FixDeps = defaults): void {
