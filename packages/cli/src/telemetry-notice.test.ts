@@ -29,10 +29,10 @@ function run(h: string, over: Partial<Parameters<typeof maybePrintTelemetryNotic
 }
 
 describe("first-run telemetry notice", () => {
-  it("is one short line that names what is sent and ZERO_OFFLINE=1", () => {
+  it("is one short line that names what is sent and DO_NOT_TRACK=1", () => {
     expect(TELEMETRY_NOTICE_TEXT).not.toContain("\n");
     expect(TELEMETRY_NOTICE_TEXT.length).toBeLessThan(180);
-    for (const part of ["usage counts", "command names", "crash reports", "update checks", "never code or findings", "ZERO_OFFLINE=1"]) {
+    for (const part of ["usage counts", "command names", "crash reports", "update checks", "never code or findings", "DO_NOT_TRACK=1"]) {
       expect(TELEMETRY_NOTICE_TEXT).toContain(part);
     }
   });
