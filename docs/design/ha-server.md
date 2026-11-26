@@ -1,6 +1,6 @@
 # High availability for server mode
 
-Tracking issue: #476 (R61). Status: design, with phase 1 built.
+Tracking issue: #476 (R61). Status: design, with phase 1 and the job queue built. The delivery steps that followed phase 1 are listed under "Delivery steps after phase 1".
 
 Server mode runs as one process on one SQLite file. This page lists the state that blocks a second replica, picks the storage approach, and splits the work into phases that each ship alone.
 
@@ -199,3 +199,17 @@ Do not claim HA in the docs before phase 7. Until then, `server-mode.md` keeps s
 - Tests: one contract suite (`web/__fixtures__/session-store-contract.ts`) runs against SQLite always and against PostgreSQL when `ZERO_TEST_POSTGRES_URL` is set. Enterprise tests cover the URL rules, concurrent migrations, rollback and hashed storage.
 
 Why sessions first: they are the first thing a second replica breaks, they have a small surface (create, read, delete, delete by account), and they hold no findings, so a mistake cannot lose evidence. API keys and SCIM tokens came next in the ranking, but the keys sit in a file store with a lock file and need a larger change.
+
+## Delivery steps after phase 1
+
+The remaining work shipped as small steps in this order: durable job queue, leader election, health and readiness, graceful drain, Helm and compose wiring, docs. They are numbered 2 to 7 in issue #476 and are separate from the storage phases in the table above. The storage phases (accounts, audit, findings, Threads) are not done, so a second replica still cannot share findings.
+
+### Job queue as built
+
+- Migration 2 creates `zero_ha_jobs`: kind, JSON payload, optional dedupe key, status (`queued`, `running`, `done`, `dead`), attempts, owner, lease time and last error.
+- `PostgresJobQueue` in `enterprise/src/ha/job-queue.ts` claims one job with `FOR UPDATE SKIP LOCKED`, renews leases, completes, fails with a retry delay, releases and reaps lapsed leases. All times are database time.
+- A unique index on kind and dedupe key, for jobs that are queued or running, makes a repeated enqueue return the open job.
+- A job that used its attempts becomes `dead` and stays for inspection until it is purged.
+- `JobWorker` in `enterprise/src/ha/job-worker.ts` runs handlers by kind with a concurrency limit, renews each lease, aborts a handler whose lease was lost and drops its result. `stop` waits, then returns unfinished jobs to the queue without using an attempt.
+- `openHaJobs` in `packages/cli/src/ha-bridge.ts` checks the license and returns the queue and a worker factory. The server does not enqueue anything yet: Sentinel and workflow runs move onto it when their stores move to the database.
+- Tests: a worker against an in-memory queue, and the Postgres queue with competing claimers, dedupe races, lapsed leases and purge. The Postgres tests run only where `ZERO_TEST_POSTGRES_URL` is set.

@@ -7,3 +7,7 @@ export { createHaPool, setHaSchema } from "./postgres.js";
 export type { ConnectOptions } from "./postgres.js";
 export { PostgresSessionStore, SessionConflictError } from "./postgres-session-store.js";
 export type { HaNewSession, HaSessionRecord } from "./postgres-session-store.js";
+export { JobQueueError, PostgresJobQueue } from "./job-queue.js";
+export type { EnqueueOptions, FailOutcome, Job, JobQueue, QueueStats } from "./job-queue.js";
+export { JobWorker } from "./job-worker.js";
+export type { JobHandler, JobWorkerOptions, StopResult } from "./job-worker.js";

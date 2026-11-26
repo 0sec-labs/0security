@@ -33,6 +33,30 @@ export const MIGRATIONS: readonly Migration[] = [
     CREATE INDEX zero_ha_sessions_user ON zero_ha_sessions(user_id);
     CREATE INDEX zero_ha_sessions_expires ON zero_ha_sessions(expires_at);`,
   },
+  {
+    version: 2,
+    name: "durable job queue",
+    sql: `CREATE TABLE zero_ha_jobs (
+      id BIGSERIAL PRIMARY KEY,
+      kind TEXT NOT NULL,
+      payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+      dedupe_key TEXT,
+      status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'running', 'done', 'dead')),
+      attempts INTEGER NOT NULL DEFAULT 0,
+      max_attempts INTEGER NOT NULL DEFAULT 5,
+      run_after TIMESTAMPTZ NOT NULL DEFAULT now(),
+      owner TEXT,
+      lease_expires_at TIMESTAMPTZ,
+      last_error TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      finished_at TIMESTAMPTZ
+    );
+    CREATE INDEX zero_ha_jobs_ready ON zero_ha_jobs (run_after, id) WHERE status = 'queued';
+    CREATE INDEX zero_ha_jobs_leases ON zero_ha_jobs (lease_expires_at) WHERE status = 'running';
+    CREATE INDEX zero_ha_jobs_finished ON zero_ha_jobs (finished_at) WHERE finished_at IS NOT NULL;
+    CREATE UNIQUE INDEX zero_ha_jobs_open_dedupe ON zero_ha_jobs (kind, dedupe_key) WHERE dedupe_key IS NOT NULL AND status IN ('queued', 'running');`,
+  },
 ];
 
 /** Apply pending migrations. Returns the versions applied by this call. */

@@ -594,7 +594,7 @@
         "enterprise/src/ha/postgres.ts"
       ],
       "when": "Server mode with the ha license feature, only when ZERO_HA_DATABASE_URL or ZERO_HA_DATABASE_URL_FILE is set in the process environment. Off by default. Never read from a repository, a project file or the database.",
-      "sent": "SQL over a connection to your database: server sign-in sessions as hashed keys, account ids, roles and expiry times, and the schema migration table. A server on another machine must use TLS (sslmode require, verify-ca or verify-full). The connection string holds a password and is never logged or sent anywhere else.",
+      "sent": "SQL over a connection to your database: server sign-in sessions as hashed keys, account ids, roles and expiry times; queued jobs (kind, JSON payload, status, lease owner and times, last error text); and the schema migration table. A server on another machine must use TLS (sslmode require, verify-ca or verify-full). The connection string holds a password and is never logged or sent anywhere else.",
       "disable": "Leave both variables unset."
     },
     {
