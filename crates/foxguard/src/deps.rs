@@ -245,6 +245,18 @@ pub fn scan_dependency_vulnerabilities(
     })
 }
 
+/// True when the environment says nothing may leave the machine: `ZERO_ENTERPRISE` or `ZERO_OFFLINE` set to
+/// anything but empty, `0`, `false` or `no`. The OSV lookup is the only network call in this crate, so it checks
+/// this before it sends package names and versions.
+fn network_forbidden(var: impl Fn(&str) -> Option<String>) -> bool {
+    ["ZERO_ENTERPRISE", "ZERO_OFFLINE"].iter().any(|name| {
+        var(name).is_some_and(|value| {
+            let value = value.trim().to_ascii_lowercase();
+            !(value.is_empty() || value == "0" || value == "false" || value == "no")
+        })
+    })
+}
+
 fn vulnerability_source(
     packages: &[PackageRef],
     options: &DependencyScanOptions,
@@ -259,7 +271,14 @@ fn vulnerability_source(
         return Ok(match_local_advisories(packages, &advisories));
     }
 
-    if options.offline {
+    let blocked_by_env = network_forbidden(|name| std::env::var(name).ok());
+    if blocked_by_env {
+        notices.push(
+            "SCA: network lookups are off because ZERO_ENTERPRISE or ZERO_OFFLINE is set; OSV is not queried"
+                .to_string(),
+        );
+    }
+    if options.offline || blocked_by_env {
         if let Some(path) = options.cache_path.as_ref() {
             if path.exists() {
                 notices.push(format!("SCA: using OSV cache {}", path.display()));
@@ -1305,6 +1324,24 @@ fn advance_line_offset(source: &str, line_end: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn network_is_forbidden_by_enterprise_or_offline_mode() {
+        let with = |pairs: &'static [(&'static str, &'static str)]| {
+            move |name: &str| {
+                pairs
+                    .iter()
+                    .find(|(key, _)| *key == name)
+                    .map(|(_, value)| value.to_string())
+            }
+        };
+        assert!(network_forbidden(with(&[("ZERO_ENTERPRISE", "1")])));
+        assert!(network_forbidden(with(&[("ZERO_OFFLINE", "true")])));
+        assert!(!network_forbidden(with(&[])));
+        assert!(!network_forbidden(with(&[("ZERO_ENTERPRISE", "0")])));
+        assert!(!network_forbidden(with(&[("ZERO_OFFLINE", " ")])));
+        assert!(!network_forbidden(with(&[("ZERO_OFFLINE", "False")])));
+    }
+
     use super::*;
 
     fn vuln(ecosystem: &str, name: &str, version: &str) -> OsvVulnerability {

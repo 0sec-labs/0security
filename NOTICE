@@ -10,4 +10,5 @@ crates/foxguard is the Foxguard static analysis engine, imported with its histor
 from https://github.com/0sec-labs/foxguard. It is available under MIT OR Apache-2.0
 (crates/foxguard/LICENSE-MIT, copyright (c) 2026 Peak Twilight, and
 crates/foxguard/LICENSE-APACHE). Its bundled tree-sitter grammars under
-crates/foxguard/vendor keep their own licenses.
+crates/foxguard/vendor keep their own licenses. The Rust crates built into the
+binary are listed in crates/foxguard/THIRD-PARTY-LICENSES.md.

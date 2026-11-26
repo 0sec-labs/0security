@@ -1,6 +1,6 @@
 ---
 title: Third-party notices
-description: Attribution and licenses for the color palettes, brand logos and skill owner avatars bundled in the browser app.
+description: Attribution and licenses for the color palettes, brand logos and skill owner avatars bundled in the browser app, and for the grammars and Rust crates built into the foxguard binary.
 ---
 
 The browser app has ten color themes under Settings, Appearance. Zero is our own. The other nine use palette color values (a few hex codes each) from the projects below. Each is MIT licensed, and its copyright line is reproduced here as the license requires. The full text is in the `LICENSE` file at each source.
@@ -47,3 +47,18 @@ Logos and avatars are bundled with the app and served from the same origin. The 
 | What | Source | Terms |
 |---|---|---|
 | Skill owner avatars | GitHub profile pictures of the nine publishers in the skills directory, downloaded once at 88 px by `scripts/refresh-skills-catalog.mjs` and embedded in `skills-catalog.generated.json` | Shown as attribution next to those owners' public skills. Avatars and names belong to their owners. |
+
+## Foxguard
+
+The foxguard binary, built from `crates/foxguard`, is available under MIT OR Apache-2.0. It bundles tree-sitter grammars and Rust crates.
+
+The grammars are vendored in `crates/foxguard/vendor`. Each keeps its own MIT `LICENSE` file.
+
+| Grammar | Copyright | License |
+|---|---|---|
+| tree-sitter-bash | Copyright (c) 2017 Max Brunsfeld | MIT |
+| tree-sitter-c | Copyright (c) 2014 Max Brunsfeld | MIT |
+| tree-sitter-javascript | Copyright (c) 2014 Max Brunsfeld | MIT |
+| tree-sitter-typescript (typescript and tsx) | Copyright (c) 2017 Max Brunsfeld | MIT |
+
+`crates/foxguard/THIRD-PARTY-LICENSES.md` lists every Rust crate built into the binary with its version, license and source. Regenerate it with `node scripts/generate-rust-notices.mjs` after a dependency change.

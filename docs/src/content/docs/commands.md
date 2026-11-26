@@ -261,7 +261,7 @@ To review a change instead of the whole folder, pass `--diff <ref>`, for example
 
 If FoxGuard is installed, the scan runs it first. It takes seconds and costs nothing. The thread treats its hits as leads, checks each against the code, records only the real ones and says which it rejected. A pattern scanner cannot see logic bugs such as a missing ownership check, so the thread still reviews the entry points itself.
 
-FoxGuard ships next to `0security`. The install script installs it (set `INSTALL_FOXGUARD=0` to skip it), and a source checkout builds it with `cargo build --release -p foxguard`. Set `ZERO_FOXGUARD_PATH` to use another copy. Pass `--prepass off` to skip it. `--scanner` chooses the scanners (`foxguard`, `semgrep`, `opengrep`, `gitleaks`, `trivy`, `osv-scanner`); repeat the flag or separate ids with commas to run several. A scanner that is not installed is skipped, and 0 says how to install it. A Semgrep rule pack such as `p/default` is downloaded when it runs.
+FoxGuard ships next to `0security`. The install script installs it (set `INSTALL_FOXGUARD=0` to skip it). It keeps a `foxguard` you put in the install folder yourself; set `INSTALL_FOXGUARD=force` to replace it. A source checkout builds it with `cargo build --release -p foxguard`. Set `ZERO_FOXGUARD_PATH` to use another copy. Pass `--prepass off` to skip it. `--scanner` chooses the scanners (`foxguard`, `semgrep`, `opengrep`, `gitleaks`, `trivy`, `osv-scanner`); repeat the flag or separate ids with commas to run several. A scanner that is not installed is skipped, and 0 says how to install it. A Semgrep rule pack such as `p/default` is downloaded when it runs.
 
 ```bash
 0security scan ~/code/app --scanner foxguard,gitleaks,trivy
@@ -297,7 +297,7 @@ Nuclei runs at 10 requests per second and 5 templates at once. Change them with 
 
 The report says what authorised the run. The findings are saved for triage as unverified, and no model reviews them. See [Use Nuclei, ZAP or Strix](/use-dynamic-scanners/).
 
-FoxGuard ships next to `0security`. The install script installs it (set `INSTALL_FOXGUARD=0` to skip it), and a source checkout builds it with `cargo build --release -p foxguard`. Set `ZERO_FOXGUARD_PATH` to use another copy. Pass `--prepass off` to skip it. `--scanner` adds or replaces scanners (`foxguard`, `semgrep`, `opengrep`, `checkov`); repeat the flag for several. A scanner that is not installed is skipped. A Semgrep rule pack such as `p/default` is downloaded when it runs.
+FoxGuard ships next to `0security`. The install script installs it (set `INSTALL_FOXGUARD=0` to skip it). It keeps a `foxguard` you put in the install folder yourself; set `INSTALL_FOXGUARD=force` to replace it. A source checkout builds it with `cargo build --release -p foxguard`. Set `ZERO_FOXGUARD_PATH` to use another copy. Pass `--prepass off` to skip it. `--scanner` adds or replaces scanners (`foxguard`, `semgrep`, `opengrep`, `checkov`); repeat the flag for several. A scanner that is not installed is skipped. A Semgrep rule pack such as `p/default` is downloaded when it runs.
 
 `--rules <file-or-folder>` gives Semgrep or OpenGrep your own rules for the pre-pass. Repeat it for several. The scanner runs only those rules, not its default pack, so add `--scanner semgrep` or `--scanner opengrep`. FoxGuard has its own rule format and does not read them, so `--rules` alone is a usage error.
 
