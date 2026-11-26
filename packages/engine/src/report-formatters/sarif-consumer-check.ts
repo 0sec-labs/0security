@@ -67,10 +67,12 @@ export function checkSarifForConsumers(log: unknown): SarifConsumerReport {
     if (!isObject(driver) || typeof driver["name"] !== "string" || !driver["name"]) errors.push(`${at}.tool.driver.name is required`);
     const ruleList = isObject(driver) && Array.isArray(driver["rules"]) ? driver["rules"] : [];
     const ruleIds: string[] = [];
+    const ruleIdSet = new Set<string>(); // set lookups keep a log with many rules and results linear
     ruleList.forEach((rule, i) => {
       if (!isObject(rule) || typeof rule["id"] !== "string" || !rule["id"]) { errors.push(`${at}.tool.driver.rules[${i}].id is required`); return; }
-      if (ruleIds.includes(rule["id"])) errors.push(`${at}: rule id ${rule["id"]} appears twice`);
+      if (ruleIdSet.has(rule["id"])) errors.push(`${at}: rule id ${rule["id"]} appears twice`);
       ruleIds.push(rule["id"]);
+      ruleIdSet.add(rule["id"]);
     });
     rules += ruleList.length;
     if (ruleList.length > CODE_SCANNING_LIMITS.rules) warnings.push(`${at}: ${ruleList.length} rules; code scanning accepts ${CODE_SCANNING_LIMITS.rules} per run`);
@@ -86,7 +88,7 @@ export function checkSarifForConsumers(log: unknown): SarifConsumerReport {
       if (!isObject(message) || (typeof message["text"] !== "string" && typeof message["id"] !== "string") || message["text"] === "") errors.push(`${rat}: message.text is required`);
       const ruleId = result["ruleId"];
       if (ruleId !== undefined && typeof ruleId !== "string") errors.push(`${rat}: ruleId must be a string`);
-      else if (typeof ruleId === "string" && ruleList.length && !ruleIds.includes(ruleId)) errors.push(`${rat}: ruleId ${ruleId} is not in tool.driver.rules`);
+      else if (typeof ruleId === "string" && ruleList.length && !ruleIdSet.has(ruleId)) errors.push(`${rat}: ruleId ${ruleId} is not in tool.driver.rules`);
       if (result["ruleIndex"] !== undefined) {
         const idx = result["ruleIndex"];
         if (!Number.isInteger(idx) || (idx as number) < 0 || (idx as number) >= ruleList.length) errors.push(`${rat}: ruleIndex is out of range`);

@@ -10,8 +10,8 @@ const engine = join(dirname(fileURLToPath(import.meta.url)), "../packages/engine
 const files = process.argv.slice(2);
 if (!files.length) { console.error("usage: node scripts/check-sarif.mjs <file.sarif>..."); process.exit(2); }
 const { checkSarifForConsumers } = await import(pathToFileURL(engine).href).catch(() => { console.error(`${engine} not found: run pnpm --filter @0/engine build`); process.exit(2); });
-// Messages quote strings from the file under test: show control characters as escapes so a crafted file cannot rewrite the terminal.
-const safe = (text) => String(text).replace(/[\u0000-\u001f\u007f-\u009f]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`);
+// Messages quote strings from the file under test: show control and bidirectional-text characters as escapes so a crafted file cannot rewrite the terminal.
+const safe = (text) => String(text).replace(/[\u0000-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`);
 let failed = false;
 for (const file of files) {
   const report = checkSarifForConsumers(JSON.parse(readFileSync(file, "utf8")));
