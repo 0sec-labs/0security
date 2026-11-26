@@ -3,7 +3,7 @@ name: zero
 description: The 0 web console on Kubernetes. One replica and one volume, or several replicas on a shared PostgreSQL database (preview).
 type: application
 version: 0.1.0
-appVersion: "0.45.0"
+appVersion: "0.46.0"
 kubeVersion: ">=1.27.0-0"
 home: https://github.com/0sec-labs/0security
 sources:
