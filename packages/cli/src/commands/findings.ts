@@ -1,6 +1,6 @@
 import type { Command } from "commander";
 import chalk from "chalk";
-import { acceptanceExpiresWithin, describeAttackerImpact, compareFindingsBySeverity, effectiveTriageStatus } from "@0/engine/shared";
+import { executedPocLine, acceptanceExpiresWithin, describeAttackerImpact, compareFindingsBySeverity, effectiveTriageStatus } from "@0/engine/shared";
 import type { Finding, FindingTriageStatus, LayerVerdict } from "@0/engine/shared";
 import { writePresentationLine, writePresentationErrorLine } from "../presentation/process-output.js";
 import {
@@ -13,7 +13,7 @@ import {
 import { buildFindingConsoleCommand } from "../finding-handoff.js";
 import { resolveFindingId, shortFindingId, shortFingerprint } from "../finding-id.js";
 import { rowVerification, verificationPhrase } from "../finding-verification.js";
-import { reproductionDetail, reproductionPhrase, rowReproduction } from "../finding-reproduction.js";
+import { executedPocPhrase, rowExecutedPoc, reproductionDetail, reproductionPhrase, rowReproduction } from "../finding-reproduction.js";
 import { auditTriage, buildTriageRequest, triageLabel, type TriageFlags } from "./findings-triage.js";
 import { UsageError } from "./output.js";
 import { foldSimilarGroups } from "./findings-dedupe.js";
@@ -56,6 +56,8 @@ type FindingRow = {
   modelVerification?: string | null;
   /** JSON of the proposed proof and harness result; null until either exists. */
   reproduction?: string | null;
+  /** JSON of the executed-PoC outcome and run record; null until a PoC attempt is recorded. */
+  executedPoc?: string | null;
   pocSteps?: string | null;
   timestamp: number;
   score?: number | null;
@@ -198,6 +200,8 @@ function renderVerification(row: FindingRow, withProof = true): void {
   if (phrase) console.log(`  ${chalk.gray(phrase)}`);
   const proof = withProof ? reproductionPhrase(row as { reproduction?: unknown; pocSteps?: unknown }) : undefined;
   if (proof) console.log(`  ${chalk.gray(`proof: ${proof}`)}`);
+  const executed = withProof ? executedPocPhrase(row as { executedPoc?: unknown; severity?: string }) : undefined;
+  if (executed) console.log(`  ${chalk.gray(`poc: ${executed}`)}`);
 }
 /** Orders by severity moved by your business context, then as without it. Severity itself is never changed. */
 function contextComparer(context: LoadedContext): (a: FindingRow, b: FindingRow) => number {
@@ -371,11 +375,12 @@ export function registerFindingsCommand(program: Command): void {
         const related = finding.fingerprint ? db.getRelatedFindings(finding.fingerprint) as FindingRow[] : [finding];
 
         if (opts.json) {
-          const { modelVerification: _raw, reproduction: _rawRepro, ...plain } = finding as FindingRow & { reproduction?: unknown };
+          const { modelVerification: _raw, reproduction: _rawRepro, executedPoc: _rawExec, ...plain } = finding as FindingRow & { reproduction?: unknown; executedPoc?: unknown };
+          const executedRecord = rowExecutedPoc(finding as { executedPoc?: unknown; severity?: string });
           const stored = rowVerification(finding);
           const proofRecord = rowReproduction(finding as { reproduction?: unknown; pocSteps?: unknown });
           const why = context ? adjustmentFor(context.context, findingPath((finding as { reviewAnnotation?: unknown }).reviewAnnotation), context.repository) : undefined;
-          console.log(JSON.stringify({ ...plain, ...(why?.tags.length ? { ranking: { shift: why.shift, tags: why.tags, notes: why.notes } } : {}), ...(stored ? { verification: stored } : {}), ...(proofRecord ? { reproduction: proofRecord } : {}), related: related.map((row) => ({ id: row.id, scanId: row.scanId, status: row.status, triage: row.triageStatus ?? "new" })) }, null, 2));
+          console.log(JSON.stringify({ ...plain, ...(why?.tags.length ? { ranking: { shift: why.shift, tags: why.tags, notes: why.notes } } : {}), ...(stored ? { verification: stored } : {}), ...(proofRecord ? { reproduction: proofRecord } : {}), ...(executedRecord ? { executedPoc: executedRecord } : {}), related: related.map((row) => ({ id: row.id, scanId: row.scanId, status: row.status, triage: row.triageStatus ?? "new" })) }, null, 2));
           return;
         }
         console.log("");
@@ -409,6 +414,11 @@ export function registerFindingsCommand(program: Command): void {
         }
         const proofDetail = reproductionDetail(finding as { reproduction?: unknown; pocSteps?: unknown });
         if (proofDetail) console.log(`  ${chalk.gray(`${proofDetail.label}:`)}        ${proofDetail.line}`);
+        const executedRow = rowExecutedPoc(finding as { executedPoc?: unknown; severity?: string });
+        if (executedRow) {
+          console.log(`  ${chalk.gray("PoC execution:")} ${executedRow.outcome}. ${executedPocLine(executedRow)}`);
+          if (executedRow.run) console.log(`  ${chalk.dim(`run: ${executedRow.run.status} (${executedRow.run.reason}), ${executedRow.run.isolation}, ${(executedRow.run.durationMs / 1000).toFixed(1)}s`)}`);
+        }
         console.log("");
         console.log(`  ${chalk.gray("Description:")}`);
         console.log(`  ${finding.description}`);

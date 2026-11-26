@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import type { Finding, SourceVerificationSummary, VerificationResult } from "../shared/index.js";
 import { parseFindingBusinessContext, type FindingBusinessContext } from "../shared/business-context.js";
 import { parseFindingReproduction, type FindingReproduction } from "../shared/reproduction.js";
+import { parseExecutedPoc, type ExecutedPoc } from "../shared/executed-poc.js";
 import { findingWorkflowStatuses, type FindingWorkflowStatusDB } from "./schema.js";
 
 
@@ -49,6 +50,7 @@ export interface PersistedFindingReviewFields {
   reviewAnnotation?: FindingReviewAnnotation;
   sourceVerification?: SourceVerificationSummary;
   reproduction?: FindingReproduction;
+  executedPoc?: ExecutedPoc;
 }
 
 
@@ -206,6 +208,7 @@ export function restoreFindingReviewFields(
     sourceVerification?: unknown;
     reproduction?: unknown;
     businessContext?: unknown;
+    executedPoc?: unknown;
   } | null | undefined,
 ): PersistedFindingReviewFields {
   if (!row) return {};
@@ -214,12 +217,14 @@ export function restoreFindingReviewFields(
   const sourceVerification = parseFindingSourceVerification(row.sourceVerification);
   const reproduction = parseFindingReproduction(row.reproduction);
   const businessContext = parseFindingBusinessContext(row.businessContext);
+  const executedPoc = parseExecutedPoc(row.executedPoc);
   return {
     ...(verificationResult ? { verification_result: verificationResult } : {}),
     ...(reviewAnnotation ? { reviewAnnotation } : {}),
     ...(sourceVerification ? { sourceVerification } : {}),
     ...(reproduction ? { reproduction } : {}),
     ...(businessContext ? { businessContext } : {}),
+    ...(executedPoc ? { executedPoc } : {}),
   };
 }
 
@@ -347,5 +352,12 @@ export function serializeFindingModelVerification(value: FindingModelVerificatio
  */
 export function serializeFindingReproduction(value: unknown): string | null {
   const usable = parseFindingReproduction(value);
+  return usable ? JSON.stringify(usable) : null;
+}
+
+
+/** Stored text for an executed-PoC record, or NULL when it is not a complete harness record. */
+export function serializeExecutedPoc(value: unknown): string | null {
+  const usable = parseExecutedPoc(value);
   return usable ? JSON.stringify(usable) : null;
 }

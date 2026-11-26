@@ -467,6 +467,8 @@ export interface ToolContext {
    */
   agentMessaging?: unknown;
   persistFindings?: boolean;
+  /** Executed PoC for high and critical findings after they are saved. Absent: no PoC is attempted. */
+  executedPoc?: import("../executed-poc/run.js").ExecutedPocRuntime;
   /**
    * Which stored findings count as duplicates of a new one. Unset: every finding in the database
    * (one run per database, the original design). `"scan"`: only this scan's own, for threads, which
