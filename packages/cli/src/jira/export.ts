@@ -4,7 +4,7 @@
  * what is new. Issues that were closed in Jira still hold their label, so a closed issue is not reopened or recreated.
  */
 import { JiraClient, type JiraPlatform } from "./client.js";
-import { findingLabel, readJiraFindings, type JiraFinding } from "./findings.js";
+import { findingLabel, readJiraFindings, type JiraFinding, type JiraSeverity } from "./findings.js";
 import type { FetchLike } from "../code-insights.js";
 import { UsageError } from "../commands/output.js";
 
@@ -16,6 +16,8 @@ export interface JiraExportOptions {
   url?: string;
   dryRun?: boolean;
   allowInsecureHttp?: boolean;
+  /** Findings below this severity get no issue. Default `low`: info-level notes such as a not-reached advisory stay out of Jira. */
+  minSeverity?: JiraSeverity;
 }
 export interface JiraExportDeps { env: Record<string, string | undefined>; fetch: FetchLike; readText(path: string): string }
 
@@ -25,9 +27,13 @@ export interface JiraExportResult {
   created: Array<{ findingId: string; key?: string; summary: string }>;
   existing: Array<{ findingId: string; key: string }>;
   skipped: number;
+  /** Open findings left out because they are below the minimum severity. */
+  belowMinimum: number;
   planned?: PlannedIssue[];
 }
 
+const RANK: Record<JiraSeverity, number> = { critical: 4, high: 3, medium: 2, low: 1, info: 0 };
+export const JIRA_SEVERITIES = Object.keys(RANK) as JiraSeverity[];
 const PROJECT = /^[A-Za-z][A-Za-z0-9_]{1,19}$/;
 const LABEL = /^[^\s"\\]{1,255}$/;
 const SUMMARY_MAX = 255;
@@ -64,10 +70,14 @@ export async function runJiraExport(file: string, options: JiraExportOptions, de
   let parsed;
   try { parsed = readJiraFindings(deps.readText(file)); }
   catch (error) { if (error instanceof UsageError) throw error; throw new UsageError(`${error instanceof Error ? error.message : String(error)} Make one with \`0security scan --format json -o scan.json\`.`); }
-  const planned = parsed.open.map(finding => planIssue(finding, extra));
+  const minimum = options.minSeverity ?? "low";
+  if (!(minimum in RANK)) throw new UsageError(`--jira-min-severity is one of ${JIRA_SEVERITIES.join(", ")}.`);
+  const wanted = parsed.open.filter(finding => RANK[finding.severity] >= RANK[minimum]);
+  const belowMinimum = parsed.open.length - wanted.length;
+  const planned = wanted.map(finding => planIssue(finding, extra));
 
   if (options.dryRun) {
-    return { dryRun: true, created: planned.map(issue => ({ findingId: issue.findingId, summary: issue.summary })), existing: [], skipped: parsed.skipped, planned };
+    return { dryRun: true, created: planned.map(issue => ({ findingId: issue.findingId, summary: issue.summary })), existing: [], skipped: parsed.skipped, belowMinimum, planned };
   }
 
   const token = (deps.env.JIRA_TOKEN ?? "").trim();
@@ -79,7 +89,7 @@ export async function runJiraExport(file: string, options: JiraExportOptions, de
 
   const client = new JiraClient({ platform, baseUrl, token, ...(email ? { email } : {}), fetch: deps.fetch, ...(options.allowInsecureHttp ? { allowInsecureHttp: true } : {}), env: deps.env as NodeJS.ProcessEnv });
   const known = planned.length ? await client.findExisting(project, planned.map(issue => issue.label)) : new Map<string, string>();
-  const result: JiraExportResult = { dryRun: false, created: [], existing: [], skipped: parsed.skipped };
+  const result: JiraExportResult = { dryRun: false, created: [], existing: [], skipped: parsed.skipped, belowMinimum };
   for (const issue of planned) {
     const key = known.get(issue.label);
     if (key) { result.existing.push({ findingId: issue.findingId, key }); continue; }

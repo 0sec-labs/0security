@@ -74,4 +74,20 @@ describe("jira export", () => {
     expect((error as Error).message).not.toContain(TOKEN);
     expect((error as Error).message).not.toContain(cloudAuth.slice(6));
   });
+  it("leaves info-level findings out by default and honours --jira-min-severity", async () => {
+    const mixed = JSON.stringify({ findings: [
+      { id: "m-1", title: "Reachable advisory", severity: "critical", status: "reported", category: "supply-chain", description: "Called.", location: { path: "pom.xml", startLine: 5 } },
+      { id: "m-2", title: "Not-reached advisory", severity: "info", status: "reported", category: "supply-chain", description: "Never imported.", location: { path: "pom.xml", startLine: 6 } },
+      { id: "m-3", title: "Medium note", severity: "medium", status: "reported", category: "x", description: "n" },
+    ] });
+    const run = (minSeverity?: "critical" | "high" | "medium" | "low" | "info") => runJiraExport("scan.json", { to: "jira-cloud", project: "SEC", dryRun: true, ...(minSeverity ? { minSeverity } : {}) }, { ...deps({}), readText: () => mixed });
+    const byDefault = await run();
+    expect(byDefault.planned!.map(i => i.findingId)).toEqual(["m-1", "m-3"]);
+    expect(byDefault.belowMinimum).toBe(1);
+    expect((await run("info")).planned!.map(i => i.findingId)).toEqual(["m-1", "m-2", "m-3"]);
+    const high = await run("high");
+    expect(high.planned!.map(i => i.findingId)).toEqual(["m-1"]);
+    expect(high.belowMinimum).toBe(2);
+    await expect(run("urgent" as never)).rejects.toThrow(/--jira-min-severity is one of/);
+  });
 });

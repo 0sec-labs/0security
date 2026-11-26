@@ -14,6 +14,7 @@ import { selectHost } from "../host/index.js";
 import { buildCodeInsights, postCodeInsights, readInsightFindings, type CodeInsightsPlatform, type FetchLike } from "../code-insights.js";
 import { finishWithError, UsageError } from "./output.js";
 import { runJiraExport } from "../jira/export.js";
+import type { JiraSeverity } from "../jira/findings.js";
 import { isServerTarget, runServerUpload, serverUploadDefaults } from "./findings-server-upload.js";
 
 const exec = promisify(execFile);
@@ -74,7 +75,7 @@ export function withoutOutOfScope(text: string): { text: string; dropped: number
   return dropped ? { text: JSON.stringify(document), dropped } : { text, dropped: 0 };
 }
 
-export interface UploadOptions { includeOutOfScope?: boolean; repo?: string; commit?: string; ref?: string; wait: boolean; tool?: string; format?: string; to?: string; url?: string; source?: string; reportId?: string; print?: boolean; allowInsecureHttp?: boolean; jiraProject?: string; jiraIssueType?: string; jiraLabel?: string[]; dryRun?: boolean }
+export interface UploadOptions { includeOutOfScope?: boolean; repo?: string; commit?: string; ref?: string; wait: boolean; tool?: string; format?: string; to?: string; url?: string; source?: string; reportId?: string; print?: boolean; allowInsecureHttp?: boolean; jiraProject?: string; jiraIssueType?: string; jiraLabel?: string[]; jiraMinSeverity?: string; dryRun?: boolean }
 
 const BITBUCKET_TARGETS: Record<string, CodeInsightsPlatform> = { "bitbucket-cloud": "bitbucket-cloud", "bitbucket-dc": "bitbucket-dc" };
 const SLUG = /^[A-Za-z0-9._~-]{1,200}$/;
@@ -175,6 +176,7 @@ export function registerFindingsUploadCommand(parent: Command, deps: UploadDeps 
     .option("--report-id <id>", "Bitbucket report id or key", "0-security")
     .option("--jira-project <key>", "Jira: project key for the new issues (default: JIRA_PROJECT)")
     .option("--jira-issue-type <name>", "Jira: issue type name", "Task")
+    .option("--jira-min-severity <level>", "Jira: lowest severity that gets an issue (critical, high, medium, low or info)", "low")
     .option("--jira-label <label>", "Jira: extra label on every issue (repeatable)", (value: string, previous: string[] = []) => [...previous, value])
     .option("--dry-run", "Jira: print the issues that would be created and send nothing")
     .option("--print", "Bitbucket: print the report and annotation payload instead of posting it (also the behaviour without BITBUCKET_TOKEN)")
@@ -195,11 +197,11 @@ export function registerFindingsUploadCommand(parent: Command, deps: UploadDeps 
           return;
         }
         if (options.to === "jira-cloud" || options.to === "jira-dc") {
-          const jira = await runJiraExport(file, { to: options.to, ...(options.jiraProject ? { project: options.jiraProject } : {}), ...(options.jiraIssueType ? { issueType: options.jiraIssueType } : {}), ...(options.jiraLabel ? { labels: options.jiraLabel } : {}), ...(options.url ? { url: options.url } : {}), ...(options.dryRun ? { dryRun: true } : {}), ...(options.allowInsecureHttp ? { allowInsecureHttp: true } : {}) },
+          const jira = await runJiraExport(file, { to: options.to, ...(options.jiraProject ? { project: options.jiraProject } : {}), ...(options.jiraIssueType ? { issueType: options.jiraIssueType } : {}), ...(options.jiraLabel ? { labels: options.jiraLabel } : {}), ...(options.jiraMinSeverity ? { minSeverity: options.jiraMinSeverity as JiraSeverity } : {}), ...(options.url ? { url: options.url } : {}), ...(options.dryRun ? { dryRun: true } : {}), ...(options.allowInsecureHttp ? { allowInsecureHttp: true } : {}) },
             { env: deps.env ?? process.env, fetch: deps.fetch ?? ((url, init) => fetch(url, init)), readText: deps.readText });
           if (options.format === "json") deps.out(JSON.stringify(jira, null, 2));
-          else if (jira.dryRun) { deps.out(`Dry run: ${jira.planned!.length} Jira issue(s) would be created; ${jira.skipped} suppressed, fixed or false-positive finding(s) skipped. Nothing was sent.`); for (const issue of jira.planned!) deps.out(`  [${issue.labels[1]}] ${issue.summary} (${issue.label})`); }
-          else deps.out(`Jira: created ${jira.created.length} issue(s)${jira.created.length ? ` (${jira.created.map(c => c.key).join(", ")})` : ""}; ${jira.existing.length} already had one (${jira.existing.map(e => e.key).join(", ") || "none"}); ${jira.skipped} suppressed, fixed or false-positive finding(s) skipped.`);
+          else if (jira.dryRun) { deps.out(`Dry run: ${jira.planned!.length} Jira issue(s) would be created; ${jira.skipped} suppressed, fixed or false-positive finding(s) skipped${jira.belowMinimum ? `; ${jira.belowMinimum} below --jira-min-severity left out` : ""}. Nothing was sent.`); for (const issue of jira.planned!) deps.out(`  [${issue.labels[1]}] ${issue.summary} (${issue.label})`); }
+          else deps.out(`Jira: created ${jira.created.length} issue(s)${jira.created.length ? ` (${jira.created.map(c => c.key).join(", ")})` : ""}; ${jira.existing.length} already had one (${jira.existing.map(e => e.key).join(", ") || "none"}); ${jira.skipped} suppressed, fixed or false-positive finding(s) skipped${jira.belowMinimum ? `; ${jira.belowMinimum} below --jira-min-severity left out` : ""}.`);
           return;
         }
         if (options.to && options.to !== "github") {

@@ -670,6 +670,7 @@ export JIRA_TOKEN=...
 What you get:
 
 - One issue per finding that is still open. Findings that are false-positive, fixed or suppressed are skipped.
+- Findings below `--jira-min-severity` (default `low`) get no issue, so info-level notes such as an advisory the agent judged not reached stay out of Jira. Pass `--jira-min-severity info` to create issues for them too. The dry run and the summary say how many were left out.
 - The summary is the finding's title. The description holds the severity, location, weakness, description, impact, the suggested fix and the finding id.
 - The labels are `0security`, the severity, `0-finding-<id>` and any `--jira-label` you add. Issue type defaults to `Task`.
 - Running it again creates only what is new. Before creating, it searches the project for each `0-finding-<id>` label. An issue you closed in Jira still has its label, so it is not reopened or created again. If you remove the label, the finding gets a new issue.
