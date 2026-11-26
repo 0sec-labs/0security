@@ -746,6 +746,7 @@ Options:
   --category <category>           Only this category
   --tool <name>                   Only findings reported by this tool
   --source <name>                 Alias of --tool
+  --scan <id>                     Only findings of this scan (id prefix)
   --fingerprint <prefix>          Only findings whose fingerprint or id starts with this
   --limit <n>                     Attempt at most this many findings in this run; the next run
                                   continues with the rest
@@ -778,7 +779,8 @@ Options:
                                   --min-attempts) (default: "0.5")
   --min-attempts <n>              Fixes to attempt before the failure share can stop the run
                                   (default: "4")
-  --model <model>                 Model for the fix threads (default: gpt-6-luna)
+  --model <model>                 Model for the fix threads (default: gpt-6-luna; ZERO_MODEL or a
+                                  pinned provider's default when set)
   --timeout <seconds>             Maximum seconds to wait for one fix (default: "1800")
   --retry                         Work again on findings that already have a fix branch or pull
                                   request
@@ -810,6 +812,7 @@ List which rules of a context file match which current findings, and which match
 
 Options:
   --db-path <path>     Path to SQLite database
+  --scan <scanId>      Only the findings of this scan
   --repository <name>  Repository name the context rules are matched against (default: the git
                        remote of the current folder)
   --format <format>    Output: text or json (choices: "text", "json")
@@ -829,6 +832,7 @@ Options:
                       details)
   --sign <key>        Sign the folder with your Ed25519 private key (PEM file). Needs an enterprise
                       license
+  --scan <id>         Only the findings of this scan
   --name <name>       Name of the application the SBOM describes (default: the repository folder's
                       name)
   --db-path <path>    Path to SQLite database
@@ -841,6 +845,7 @@ Usage: 0security findings export [options] [ids...]
 Export findings, a whole scan or, with no IDs, every finding as json, md, sarif, html or pdf
 
 Options:
+  --scan <id>            Export every finding of this scan instead of selected IDs
   --format <format>      json, md, sarif, html or pdf (default: "json")
   -o, --output <file>    Write to a file instead of stdout
   --severity <severity>  With no IDs: only this severity
@@ -923,7 +928,8 @@ Options:
   --no-pr                          Commit on the fix branch but do not push or open a pull request
   --budget <usd>                   Stop when the estimated spend reaches this many USD (default:
                                    "3")
-  --model <model>                  Model for the fix thread (default: gpt-6-luna)
+  --model <model>                  Model for the fix thread (default: gpt-6-luna; ZERO_MODEL or a
+                                   pinned provider's default when set)
   --timeout <seconds>              Maximum seconds to wait for the fix (default: "1800")
   --format <format>                Output: text or json (choices: "text", "json")
   --engine-url <url>               Attach directly to a running trusted engine
@@ -1030,6 +1036,7 @@ List findings from the database
 Options:
   --all                  Show raw finding rows instead of grouped fingerprints
   --db-path <path>       Path to SQLite database
+  --scan <scanId>        Filter by scan ID
   --severity <severity>  Filter by severity: critical, high, medium, low, info
   --category <category>  Filter by attack category
   --status <status>      Filter by status: discovered, verified, confirmed, scored, reported, fixed,
@@ -1301,7 +1308,8 @@ Options:
   --rescan                   Check the variants already recorded for this finding and mark each
                              fixed or still open; hunt for no new ones
   --budget <usd>             Spend cap for the thread, in USD (default: "1")
-  --model <model>            Model for the thread (default: gpt-6-luna)
+  --model <model>            Model for the thread (default: gpt-6-luna; ZERO_MODEL or a pinned
+                             provider's default when set)
   --timeout <seconds>        Maximum seconds to wait for the thread (default: "600")
   --format <format>          Output: text or json (choices: "text", "json")
   --engine-url <url>         Attach directly to a running trusted engine
@@ -1323,6 +1331,7 @@ Options:
                                   comma-separated)
   --category <category>           Only this category
   --tool <name>                   Only findings reported by this tool
+  --scan <id>                     Only findings of this scan (id prefix)
   --limit <n>                     Check at most this many findings in this run; the next run
                                   continues with the rest
   --force                         Check findings again that already have a verdict
@@ -1335,7 +1344,8 @@ Options:
   --per-finding <usd>             Spend cap for one finding, in USD (default: "0.3")
   --max-consecutive-failures <n>  Stop after this many checks in a row that return no verdict
                                   (default: "3")
-  --model <model>                 Model for the threads (default: gpt-6-luna)
+  --model <model>                 Model for the threads (default: gpt-6-luna; ZERO_MODEL or a pinned
+                                  provider's default when set)
   --timeout <seconds>             Maximum seconds to wait for one thread (default: "600")
   --no-variants                   Do not hunt for the same bug at other sites after a true-positive
                                   verdict
@@ -1769,7 +1779,8 @@ Options:
                              (name@sha256:...). Default: the ZERO_POC_IMAGE variable or `0security
                              config set executedPocImage`; otherwise off. Needs Docker or podman
   --skill <id>               Skill that holds the scan method (default: "scan")
-  --model <model>            Model for the scan thread (default: gpt-6-luna)
+  --model <model>            Model for the scan thread (default: gpt-6-luna; ZERO_MODEL or a pinned
+                             provider's default when set)
   --provider <id>            Explicit model provider for this scan (use with --model)
   --reasoning <effort>       Reasoning effort for a model that supports it
   --batches <mode>           auto reviews a large folder in batches, one thread per group of entry
@@ -2960,7 +2971,8 @@ Options:
                              (default: .0/threat-model.md); for example THREAT_MODEL.md
   --format <format>          json prints the outcome as JSON
   --budget <usd>             Stop when the estimated spend reaches this many USD (default: "3")
-  --model <model>            Model for the thread (default: gpt-6-luna)
+  --model <model>            Model for the thread (default: gpt-6-luna; ZERO_MODEL or a pinned
+                             provider's default when set)
   --timeout <seconds>        Maximum seconds to wait (default: "1800")
   --engine-url <url>         Attach directly to a running trusted engine
   --engine-token-env <name>  Environment variable holding the attached engine token

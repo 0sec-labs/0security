@@ -48,6 +48,28 @@ const SEVERITIES = ["critical", "high", "medium", "low", "info"] as const;
 const DEFAULT_BUDGET_USD = 5;
 /** Chosen by measurement: on the same one-file scan it finished in 26s and $0.0014 and recorded its finding first try; glm-5.3-flash took minutes and rejected a dozen `finding` calls. */
 export const DEFAULT_SCAN_MODEL = "gpt-6-luna";
+
+/**
+ * The model to request when `--model` is absent. A pinned provider other than OpenAI, `--provider` or `ZERO_MODEL` means the operator
+ * already chose where models come from, so no model is sent and the engine resolves it (`ZERO_MODEL`, then the provider's own default).
+ * An explicit model would beat `ZERO_MODEL` and, being an OpenAI id, switch a Bedrock-pinned run to OpenAI.
+ */
+export function defaultScanModel(options: { provider?: string | undefined }, env: NodeJS.ProcessEnv = process.env): string | undefined {
+  const pinned = (env["ZERO_FORCE_PROVIDER"] ?? env["ZERO_SELECTED_PROVIDER"])?.trim().toLowerCase();
+  if (options.provider || env["ZERO_MODEL"]?.trim() || (pinned && pinned !== "openai")) return undefined;
+  return DEFAULT_SCAN_MODEL;
+}
+
+/** The `model` member of a session's runtime request: the flag, else the provider-aware default, else nothing. */
+export function scanModelField(options: { model?: string | undefined; provider?: string | undefined }, env: NodeJS.ProcessEnv = process.env): { model?: string } {
+  const model = options.model ?? defaultScanModel(options, env);
+  return model ? { model } : {};
+}
+
+/** The model as shown in metrics and reports when the engine picks it. */
+export function scanModelLabel(options: { model?: string | undefined; provider?: string | undefined }, env: NodeJS.ProcessEnv = process.env): string {
+  return options.model ?? defaultScanModel(options, env) ?? env["ZERO_MODEL"]?.trim() ?? (env["ZERO_SELECTED_PROVIDER"]?.trim().toLowerCase() === "bedrock" ? env["ZERO_BEDROCK_MODEL"]?.trim() : undefined) ?? "provider default";
+}
 const DEFAULT_TIMEOUT_SECONDS = 3600;
 /** The longest one batch may run. A batch that passes it is cancelled and stays pending; the scan goes on with the next one. */
 export const DEFAULT_BATCH_TIMEOUT_SECONDS = 900;
@@ -420,7 +442,7 @@ async function runPass(ctx: PassContext, index: number, extra: PassExtra = {}): 
   const { client, deps, resolved, options, total, deadline } = ctx;
   const budget = extra.budget ?? ctx.budget;
   const prePass = "prePass" in extra ? extra.prePass : ctx.prePass;
-  const runtime = { runtime: { model: options.model ?? DEFAULT_SCAN_MODEL, ...(options.provider ? { providerId: options.provider } : {}), ...(options.reasoning ? { reasoningEffort: options.reasoning } : {}) } };
+  const runtime = { runtime: { ...scanModelField(options), ...(options.provider ? { providerId: options.provider } : {}), ...(options.reasoning ? { reasoningEffort: options.reasoning } : {}) } };
   const part = extra.batch ? `batch ${extra.batch.index + 1} of ${extra.batch.total}` : total > 1 ? `pass ${index + 1} of ${total}` : "";
   const title = part ? `Scan ${resolved.label} (${part})` : `Scan ${resolved.label}`;
   const created = asJson(asJson(await client.request("POST", "/api/console/sessions", { ...runtime, title, costCeilingUsd: budget })).session);
@@ -433,7 +455,7 @@ async function runPass(ctx: PassContext, index: number, extra: PassExtra = {}): 
     // A thread that never started is no use to anyone; do not leave it in the list.
     const removed = await client.request("POST", `${path}/delete`, {}).then(() => true, () => false);
     const reason = error instanceof Error ? error.message : String(error);
-    const hint = /model/i.test(reason) && !/No provider credential found/i.test(reason) ? ` Pick another with --model (default ${DEFAULT_SCAN_MODEL}).` : "";
+    const hint = /model/i.test(reason) && !/No provider credential found/i.test(reason) ? ` Pick another with --model (default ${scanModelLabel(options)}).` : "";
     throw new Error(`${reason}${hint}${removed ? "" : ` (thread ${id} was created; remove it with \`0security threads delete ${id} --yes\`)`}`);
   }
   deps.err(`scanning ${resolved.label} in thread ${id} (${part ? `${part}, ` : ""}budget $${Number(budget.toFixed(4))})`);
@@ -518,7 +540,7 @@ async function writeReport(outcome: ScanOutcome, merged: ReturnType<typeof merge
   // An empty-diff scan (thread "none") writes no line. A tier skip and a pre-pass-only run do: they are runs the operator chose.
   if (outcome.threadId !== "none" || outcome.tier?.skipped || outcome.tier?.prepassOnly) {
     const status = outcome.failed ? "failed" : outcome.tier?.skipped ? "skipped" : outcome.tier?.prepassOnly ? "prepass_only" : outcome.timedOut ? "timeout" : outcome.budgetExhausted ? "budget" : "ok";
-    deps.metrics?.({ at: outcome.startedAt, command: "scan", model: options.model ?? DEFAULT_SCAN_MODEL, budgetUsd: outcome.budgetUsd, costUsd: outcome.costUsd ?? null, durationSeconds: Math.max(0, Math.round((Date.parse(outcome.completedAt) - Date.parse(outcome.startedAt)) / 1000)), findingsAttempted: null, findingsProposed: merged.length, checksPassed: null, tokens: outcome.tokens ?? null, status, findingIds: merged.map(finding => finding.id) });
+    deps.metrics?.({ at: outcome.startedAt, command: "scan", model: scanModelLabel(options), budgetUsd: outcome.budgetUsd, costUsd: outcome.costUsd ?? null, durationSeconds: Math.max(0, Math.round((Date.parse(outcome.completedAt) - Date.parse(outcome.startedAt)) / 1000)), findingsAttempted: null, findingsProposed: merged.length, checksPassed: null, tokens: outcome.tokens ?? null, status, findingIds: merged.map(finding => finding.id) });
   }
   if (outcome.scope) {
     const labelled = applyScope(outcome, merged).filter(finding => finding.scope);
@@ -1028,7 +1050,7 @@ export function registerScanCommand(program: Command, deps: ScanDeps = defaultSc
     .option("--repo-ignores", "Also let the pre-pass scanners read their configuration and ignore files from the scanned folder (.foxguard.yml, .semgrepignore, .gitleaks.toml, .gitleaksignore, .trivyignore, osv-scanner.toml, .checkov.yaml). Off by default: a change under review can use them to hide findings. Inline suppressions such as nosemgrep always apply")
     .option("--poc-image <image>", "Run the proof of concept of each high or critical finding in this container image, network off, and label the finding script-matched, script-unmatched or static-only. Must be pinned by digest (name@sha256:...). Default: the ZERO_POC_IMAGE variable or `0security config set executedPocImage`; otherwise off. Needs Docker or podman")
     .option("--skill <id>", "Skill that holds the scan method", "scan")
-    .option("--model <model>", `Model for the scan thread (default: ${DEFAULT_SCAN_MODEL})`)
+    .option("--model <model>", `Model for the scan thread (default: ${DEFAULT_SCAN_MODEL}; ZERO_MODEL or a pinned provider's default when set)`)
     .option("--provider <id>", "Explicit model provider for this scan (use with --model)")
     .option("--reasoning <effort>", "Reasoning effort for a model that supports it")
     .option("--batches <mode>", "auto reviews a large folder in batches, one thread per group of entry points, and records what each batch covered; on always does; off keeps one thread", "auto")

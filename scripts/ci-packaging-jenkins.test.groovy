@@ -42,12 +42,13 @@ def runLibrary = { Map config, boolean samePhysicalNode = false ->
     assert shell.contains('RELEASE_BASE_URL=') && shell.contains('releases/download/v${VERSION}')
     if (shell.contains('0-ci-scan.sh')) {
       assert environment.NODE_NAME == 'scan' || samePhysicalNode
-      assert environment.OPENAI_API_KEY == 'credential:model'
+      assert environment.OPENAI_API_KEY == 'credential:model' || environment.AWS_BEARER_TOKEN_BEDROCK == 'credential:model' || environment.ZERO_SELECTED_PROVIDER == 'bedrock'
       assert !environment.BITBUCKET_TOKEN
       events << 'scan'
     } else {
       assert environment.NODE_NAME == 'publish'
       assert !environment.OPENAI_API_KEY
+      assert !environment.AWS_BEARER_TOKEN_BEDROCK
       assert environment.BITBUCKET_TOKEN == 'credential:bitbucket'
       events << 'publish'
     }
@@ -63,7 +64,10 @@ def runLibrary = { Map config, boolean samePhysicalNode = false ->
 }
 Map valid = [scanLabel: 'scan', publishLabel: 'publish', modelCredential: 'model', bitbucketCredential: 'bitbucket', repo: 'P/r', bitbucketUrl: 'https://code.example']
 assert runLibrary(valid).contains('publish')
-for (Map invalid : [valid + [version: 'latest'], valid + [scanLabel: 'publish'], valid + [modelCredential: '']]) {
+Map bedrock = valid - [modelCredential: 'model'] + [modelEnv: [ZERO_SELECTED_PROVIDER: 'bedrock', ZERO_MODEL: 'eu.anthropic.example-v1:0', AWS_REGION: 'eu-central-1']]
+assert runLibrary(bedrock).contains('publish')
+assert runLibrary(valid + [modelCredentialVariable: 'AWS_BEARER_TOKEN_BEDROCK']).contains('publish')
+for (Map invalid : [valid + [version: 'latest'], valid + [scanLabel: 'publish'], valid + [modelCredential: ''], valid + [modelEnv: [PATH: '/tmp']], valid + [modelCredentialVariable: 'PATH']]) {
   try { runLibrary(invalid); assert false : 'invalid configuration should fail' } catch (IllegalStateException expected) { }
 }
 try { runLibrary(valid, true); assert false : 'same physical node should fail' } catch (IllegalStateException expected) { assert expected.message.contains('different Jenkins node') }

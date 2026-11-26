@@ -23,9 +23,9 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: 0sec-labs/0security@v0.45.0
+      - uses: 0sec-labs/0security@v0.46.0
         with:
-          version: 0.45.0 # Pin the CLI
+          version: 0.46.0 # Pin the CLI
           fail-on: high
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -101,9 +101,9 @@ Pass Semgrep rules you already write with `rules`. Rules, tier maps, context, po
         with:
           repository: your-org/security-rules
           path: security-rules
-      - uses: 0sec-labs/0security@v0.45.0
+      - uses: 0sec-labs/0security@v0.46.0
         with:
-          version: 0.45.0 # Pin the CLI
+          version: 0.46.0 # Pin the CLI
           scanner: semgrep
           rules: security-rules/semgrep
 ```
@@ -124,9 +124,9 @@ Use the base branch's copy, never the pull request's. A change could otherwise e
           ref: ${{ github.base_ref }}
           path: base
       - uses: actions/checkout@v4
-      - uses: 0sec-labs/0security@v0.45.0
+      - uses: 0sec-labs/0security@v0.46.0
         with:
-          version: 0.45.0 # Pin the CLI
+          version: 0.46.0 # Pin the CLI
           scope: base/SECURITY.md
           fail-on: high
 ```
@@ -142,9 +142,9 @@ A tier map decides how much a repository gets scanned, or whether it is skipped.
         with:
           repository: your-org/security-config
           path: security-config
-      - uses: 0sec-labs/0security@v0.45.0
+      - uses: 0sec-labs/0security@v0.46.0
         with:
-          version: 0.45.0 # Pin the CLI
+          version: 0.46.0 # Pin the CLI
           tiers: security-config/scan-tiers.yaml
 ```
 
@@ -166,9 +166,9 @@ Give the scan what another tool already found. It looks for other classes of bug
 `mode: sbom` generates a CycloneDX SBOM from the lockfiles in `target`, checks every component against the public OSV database and uploads the advisories to code scanning as `0 sbom`. It also uploads the SBOM as the `0-sbom` artifact. It needs no model key.
 
 ```yaml
-      - uses: 0sec-labs/0security@v0.45.0
+      - uses: 0sec-labs/0security@v0.46.0
         with:
-          version: 0.45.0 # Pin the CLI
+          version: 0.46.0 # Pin the CLI
           mode: sbom
           licenses-preset: no-copyleft
           fail-on: high
@@ -211,9 +211,9 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: 0sec-labs/0security@v0.45.0 # pin to the release's commit SHA for a stricter pin
+      - uses: 0sec-labs/0security@v0.46.0 # pin to the release's commit SHA for a stricter pin
         with:
-          version: 0.45.0 # Pin the CLI
+          version: 0.46.0 # Pin the CLI
           fail-on: high
           budget: "3"
         env:
@@ -244,9 +244,9 @@ jobs:
         with:
           persist-credentials: false
       - id: zero
-        uses: 0sec-labs/0security@v0.45.0 # pin to the release's commit SHA for a stricter pin
+        uses: 0sec-labs/0security@v0.46.0 # pin to the release's commit SHA for a stricter pin
         with:
-          version: 0.45.0 # Pin the CLI
+          version: 0.46.0 # Pin the CLI
           budget: "20"
           fail-on: critical
           allow-partial: true
@@ -278,9 +278,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: 0sec-labs/0security@v0.45.0 # pin to the release's commit SHA for a stricter pin
+      - uses: 0sec-labs/0security@v0.46.0 # pin to the release's commit SHA for a stricter pin
         with:
-          version: 0.45.0 # Pin the CLI
+          version: 0.46.0 # Pin the CLI
           mode: sbom
           licenses-preset: no-copyleft
           fail-on: high
@@ -307,9 +307,9 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       # Your existing Semgrep or CodeQL step runs here and writes results/other-tool.sarif.
-      - uses: 0sec-labs/0security@v0.45.0 # pin to the release's commit SHA for a stricter pin
+      - uses: 0sec-labs/0security@v0.46.0 # pin to the release's commit SHA for a stricter pin
         with:
-          version: 0.45.0 # Pin the CLI
+          version: 0.46.0 # Pin the CLI
           known-sarif: results/other-tool.sarif
           only-new: true
           fail-on: high
@@ -342,9 +342,9 @@ jobs:
           repository: your-org/security-config
           path: security-config
           persist-credentials: false
-      - uses: 0sec-labs/0security@v0.45.0 # pin to the release's commit SHA for a stricter pin
+      - uses: 0sec-labs/0security@v0.46.0 # pin to the release's commit SHA for a stricter pin
         with:
-          version: 0.45.0 # Pin the CLI
+          version: 0.46.0 # Pin the CLI
           tiers: security-config/scan-tiers.yaml
           fail-on: high
         env:
@@ -365,10 +365,12 @@ jobs:
     runs-on: [self-hosted, linux, 0-scan]
     steps:
       - uses: actions/checkout@v4
-      - uses: 0sec-labs/0security@v0.45.0
+      - uses: 0sec-labs/0security@v0.46.0
+        id: scan
         with:
-          version: 0.44.0
+          version: 0.46.0
           fail-on: high
+          upload: "false"
         env:
           ZERO_ENTERPRISE: "1"
           DO_NOT_TRACK: "1"
@@ -376,12 +378,19 @@ jobs:
           AZURE_OPENAI_AUTH: entra
           AZURE_OPENAI_BASE_URL: https://your-resource.openai.azure.com/openai/v1
           ZERO_MODEL: your-deployment-id
+      - name: Upload to code scanning
+        if: ${{ always() && steps.scan.outputs.sarif != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: 0 findings upload "${{ steps.scan.outputs.sarif }}"
 ```
+
+`ZERO_ENTERPRISE` refuses every `gh` call, and the action uploads with `gh`. The example sets `upload: "false"` and uploads in a later step that does not set `ZERO_ENTERPRISE`. Add `security-events: write` to the job permissions.
 
 Keep these boundaries:
 
 - Give the runner's machine identity access to the model, as in [Azure OpenAI](/models/#azure-openai) or an AWS role for [Amazon Bedrock](/models/#amazon-bedrock). No model key is stored in GitHub.
-- `ZERO_ENTERPRISE` keeps every automatic outbound call off, including telemetry and crash reports, except the model endpoint you configured and the destinations you name. `DO_NOT_TRACK` adds a second switch for telemetry. The action's SARIF upload goes to GitHub with the job's token. See [Data flow](/data-flow/). A Sentinel can upload its findings the same way from your machine: see [Send findings to GitHub](/sentinels/#send-findings-to-github).
+- `ZERO_ENTERPRISE` keeps every automatic outbound call off, including telemetry and crash reports, except the model endpoint you configured and the destinations you name. `DO_NOT_TRACK` adds a second switch for telemetry. The upload step sends SARIF to GitHub with the job's token. See [Data flow](/data-flow/). A Sentinel can upload its findings the same way from your machine: see [Send findings to GitHub](/sentinels/#send-findings-to-github).
 - Install `cosign` on the runner image, so the installer verifies the release [signature](/self-hosting/#verify-the-signature). Or put a pinned, verified binary in the runner image and skip the install.
 - Only run the job on trusted events. Do not run a self-hosted runner for pull requests from forks.
 
@@ -450,7 +459,7 @@ image: node:22
 definitions:
   scripts:
     - &install |
-      VERSION=0.45.0 # Pin the CLI
+      VERSION=0.46.0 # Pin the CLI
       RAW="https://raw.githubusercontent.com/0sec-labs/0security/v${VERSION}"
       tools="$(mktemp -d)" && export INSTALL_DIR="$tools" PATH="$tools:$PATH"
       curl -fsSL -o "$tools/install.sh" "$RAW/install.sh"
@@ -491,7 +500,7 @@ The scan records the pull request's own commit. When Jenkins checks out the merg
 pipeline {
   agent any
   environment {
-    VERSION = '0.45.0' // Pin the CLI
+    VERSION = '0.46.0' // Pin the CLI
     BITBUCKET_URL = 'https://bitbucket.example.com' // Data Center server
     ZEROCI_REPO = 'PROJECT/repo'
   }
@@ -547,7 +556,7 @@ pr:
     include: [main]
 
 variables:
-  VERSION: 0.45.0 # Pin the CLI
+  VERSION: 0.46.0 # Pin the CLI
 
 pool:
   vmImage: ubuntu-latest
@@ -607,7 +616,7 @@ zero-security:
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
   variables:
-    VERSION: 0.45.0 # Pin the CLI
+    VERSION: 0.46.0 # Pin the CLI
     GIT_DEPTH: "0"
     ZEROCI_FAIL_ON: high
   script:
@@ -770,7 +779,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install 0
         run: |
-          VERSION=0.45.0 # Pin the CLI
+          VERSION=0.46.0 # Pin the CLI
           RELEASE_BASE_URL="https://github.com/0sec-labs/0security/releases/download/v${VERSION}" INSTALL_DIR="$RUNNER_TEMP/0" sh <(curl -fsSL "https://raw.githubusercontent.com/0sec-labs/0security/v${VERSION}/install.sh")
           echo "$RUNNER_TEMP/0" >> "$GITHUB_PATH"
       - run: 0security sbom generate . -o sbom.cdx.json
@@ -860,5 +869,9 @@ Article 14 of the Regulation is the starting point. Confirm current requirements
 ## Packaged Bitbucket Pipe and Jenkins library
 
 The repository includes a buildable Bitbucket Pipe in `ci/bitbucket-pipe/` and an exportable Jenkins Shared Library in `ci/jenkins-library/`. The Pipe installs a pinned release with its published SHA-256 verification. Both integrations use separate scan and publish execution: the untrusted scan gets the model key, and the trusted publisher gets the Bitbucket token. The Jenkins library requires separate physical nodes.
+
+The Pipe's scan step passes these model settings when you set them: `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, `ZERO_SELECTED_PROVIDER`, `ZERO_MODEL`, `ZERO_BEDROCK_MODEL`, `BEDROCK_BASE_URL` and the AWS variables Amazon Bedrock reads (`AWS_REGION`, `AWS_DEFAULT_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_BEARER_TOKEN_BEDROCK`, `AWS_ROLE_ARN`, `AWS_WEB_IDENTITY_TOKEN_FILE`, `AWS_ROLE_SESSION_NAME`). The publish step gets none of them. A named `AWS_PROFILE` is not passed, because the Pipe has no AWS config files.
+
+The Jenkins library takes non-secret model settings in `modelEnv`, for example `modelEnv: [ZERO_SELECTED_PROVIDER: 'bedrock', ZERO_MODEL: 'eu.anthropic.claude-sonnet-4-5-20250929-v1:0', AWS_REGION: 'eu-central-1']`. With an instance role, leave out `modelCredential`. To bind a credential to another variable, set `modelCredentialVariable` to `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY` or `AWS_BEARER_TOKEN_BEDROCK`. These changes are tested with stand-ins only, not against a real Bedrock endpoint (see [Amazon Bedrock](/models/#amazon-bedrock)).
 
 Build, configure and qualify them with [the packaging guide](https://github.com/0sec-labs/0security/tree/main/ci/packaging). The guide includes a manual Bitbucket qualification pipeline, a Jenkins example and an actual scanner/image rehearsal with an optional paid model stage. The image and library artifacts require release publication; source files and local tests do not establish live Bitbucket, Jenkins or Azure qualification. The existing Azure Pipelines template above remains available without an extension.

@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_SCAN_MODEL, headlessConsoleArgs, resolveScanTarget, resolveSkillId, runScan, withoutCredentials, type ScanDeps } from "../scan.js";
+import { DEFAULT_SCAN_MODEL, defaultScanModel, scanModelField, scanModelLabel, headlessConsoleArgs, resolveScanTarget, resolveSkillId, runScan, withoutCredentials, type ScanDeps } from "../scan.js";
 import { UsageError } from "../output.js";
 import { ConsoleGateway } from "../../web/console-gateway.js";
 import { loadSession } from "../../state/session-store.js";
@@ -212,6 +212,19 @@ describe("runScan", () => {
       await runScan(folder(), options(extra), deps);
       expect(requests.find(([method, path]) => method === "POST" && path === "/api/console/sessions")![2]).toMatchObject({ runtime: { model: expected } });
     }
+  });
+
+  it("sends no model when the operator already chose the provider or the model", () => {
+    expect(defaultScanModel({}, {})).toBe(DEFAULT_SCAN_MODEL);
+    expect(defaultScanModel({}, { ZERO_SELECTED_PROVIDER: "openai" })).toBe(DEFAULT_SCAN_MODEL);
+    expect(defaultScanModel({}, { ZERO_SELECTED_PROVIDER: "bedrock" })).toBeUndefined();
+    expect(defaultScanModel({}, { ZERO_FORCE_PROVIDER: "azure" })).toBeUndefined();
+    expect(defaultScanModel({}, { ZERO_MODEL: "claude-bedrock" })).toBeUndefined();
+    expect(defaultScanModel({ provider: "bedrock" }, {})).toBeUndefined();
+    expect(scanModelField({}, { ZERO_SELECTED_PROVIDER: "bedrock" })).toEqual({});
+    expect(scanModelField({ model: "explicit" }, { ZERO_SELECTED_PROVIDER: "bedrock" })).toEqual({ model: "explicit" });
+    expect(scanModelLabel({}, { ZERO_SELECTED_PROVIDER: "bedrock", ZERO_MODEL: "eu.anthropic.example" })).toBe("eu.anthropic.example");
+    expect(scanModelLabel({}, { ZERO_SELECTED_PROVIDER: "bedrock" })).toBe("provider default");
   });
 
   it("deletes the thread and hints at --model when setup fails", async () => {

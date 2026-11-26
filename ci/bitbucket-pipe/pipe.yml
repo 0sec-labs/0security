@@ -1,5 +1,5 @@
 name: 0security scan and publish
-image: ghcr.io/0sec-labs/0security-pipe:0.45.0
+image: ghcr.io/0sec-labs/0security-pipe:0.46.0
 category: Security
 description: Scan a pull request, then publish its recorded findings in a separate trusted step.
 repository: https://github.com/0sec-labs/0security
@@ -42,4 +42,30 @@ variables:
   - name: ANTHROPIC_API_KEY
     default: ''
   - name: GOOGLE_API_KEY
+    default: ''
+  - name: ZERO_SELECTED_PROVIDER
+    default: ''
+  - name: ZERO_MODEL
+    default: ''
+  - name: ZERO_BEDROCK_MODEL
+    default: ''
+  - name: BEDROCK_BASE_URL
+    default: ''
+  - name: AWS_REGION
+    default: ''
+  - name: AWS_DEFAULT_REGION
+    default: ''
+  - name: AWS_ACCESS_KEY_ID
+    default: ''
+  - name: AWS_SECRET_ACCESS_KEY
+    default: ''
+  - name: AWS_SESSION_TOKEN
+    default: ''
+  - name: AWS_BEARER_TOKEN_BEDROCK
+    default: ''
+  - name: AWS_ROLE_ARN
+    default: ''
+  - name: AWS_WEB_IDENTITY_TOKEN_FILE
+    default: ''
+  - name: AWS_ROLE_SESSION_NAME
     default: ''
