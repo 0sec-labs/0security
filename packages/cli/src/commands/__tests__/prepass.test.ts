@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -305,4 +305,62 @@ describe("in-repo files do not hide findings from the real tools", () => {
     rmSync(join(folder, ".checkov.yaml"));
     expect((await runPrePass(folder, ["checkov"], [], { env: realEnv, timeoutSeconds: 120 }))?.total ?? 0).toBeGreaterThan(0);
   }, 150_000);
+});
+
+describe("where the scanners run", () => {
+  /**
+   * A stand-in scanner that runs on every platform: node with a preload that records the folder it was started in and what that
+   * folder holds, prints an empty SARIF log and exits before node reads the scanner arguments.
+   */
+  function nodeScanner(envName: string) {
+    const dir = tmp(); const log = join(dir, "where.json"); const preload = join(dir, "preload.cjs").replaceAll("\\", "/");
+    writeFileSync(preload, `const fs = require("fs"); fs.writeFileSync(${JSON.stringify(log)}, JSON.stringify({ cwd: process.cwd(), entries: fs.readdirSync(".") })); process.stdout.write(${JSON.stringify(sarif("x", []))}); process.exit(0);\n`);
+    return {
+      env: { ...process.env, [envName]: process.execPath, NODE_OPTIONS: `--require "${preload}"` },
+      where: () => JSON.parse(readFileSync(log, "utf8")) as { cwd: string; entries: string[] },
+    };
+  }
+  const started = process.cwd();
+  afterEach(() => process.chdir(started));
+
+  it("runs a scanner in an empty folder, not in the folder 0 was started in", async () => {
+    const tool = nodeScanner("ZERO_TRIVY_PATH");
+    const folder = tmp();
+    expect(await runPrePass(folder, ["trivy"], [], { env: tool.env })).toEqual({ tools: ["trivy"], leads: [], total: 0 });
+    expect(tool.where().cwd).not.toBe(process.cwd());
+    expect(tool.where().entries).toEqual([]);
+  });
+
+  it("does not run a scanner in the repository 0 was started in when a subfolder is scanned", async () => {
+    // `cd repo && 0 scan ./src`: scanners also read their config from their working folder. Checkov reads .checkov.yaml there as
+    // well as from -d, and that file can name external-checks-dir, which runs Python from the repository.
+    const repo = tmp();
+    mkdirSync(join(repo, "src"));
+    writeFileSync(join(repo, ".checkov.yaml"), "external-checks-dir:\n  - checks\n");
+    writeFileSync(join(repo, "trivy.yaml"), "scan:\n  skip-dirs: [\"**\"]\n");
+    const tool = nodeScanner("ZERO_TRIVY_PATH");
+    process.chdir(repo);
+    await runPrePass(join(repo, "src"), ["trivy"], [], { env: tool.env });
+    expect(tool.where().cwd).not.toBe(process.cwd());
+    expect(tool.where().entries).toEqual([]);
+  });
+
+  it("keeps the caller's folder and the operator's choice", async () => {
+    const tool = nodeScanner("ZERO_TRIVY_PATH");
+    const folder = tmp(); const cwd = tmp();
+    await runPrePass(folder, ["trivy"], [], { env: tool.env, cwd });
+    expect(tool.where().cwd).toBe(realpathSync(cwd));
+    process.chdir(cwd);
+    await runPrePass(folder, ["trivy"], [], { env: tool.env, repoIgnores: true });
+    expect(tool.where().cwd).toBe(realpathSync(cwd));
+  });
+
+  it("still skips checkov when the folder it runs in holds a .checkov.yaml", async () => {
+    const tool = nodeScanner("ZERO_CHECKOV_PATH");
+    const folder = tmp(); const cwd = tmp();
+    writeFileSync(join(cwd, ".checkov.yml"), "external-checks-dir:\n  - checks\n");
+    const notes: string[] = [];
+    expect(await runPrePass(folder, ["checkov"], [], { env: tool.env, cwd, note: text => notes.push(text) })).toBeUndefined();
+    expect(notes[0]).toContain("always reads .checkov.yml");
+  });
 });

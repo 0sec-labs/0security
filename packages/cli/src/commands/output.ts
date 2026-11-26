@@ -12,6 +12,21 @@ export function renderTable<T>(rows: readonly T[], columns: readonly TableColumn
   return [line(columns.map(column => column.header)), ...rows.map(row => line(columns.map(column => cell(column, row))))].join("\n");
 }
 
+/** True when the command line asks for machine-readable output (`--json`, or `--format json` or `ndjson`), so a failure can be reported the same way. */
+export function wantsJsonOutput(argv: readonly string[]): boolean {
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i]!;
+    if (arg === "--") return false;
+    if (arg === "--json" || arg === "--format=json" || arg === "--format=ndjson") return true;
+    if (arg === "--format" && (argv[i + 1] === "json" || argv[i + 1] === "ndjson")) return true;
+  }
+  return false;
+}
+/** The text for an error on stderr: one `{"error": ...}` line for machine-readable output, red text otherwise. */
+export function errorLine(message: string, json: boolean, paint: (text: string) => string = text => text): string {
+  return json ? JSON.stringify({ error: message }) : paint(message);
+}
+
 /** A usage problem (bad flag value, missing --yes); exits 2. Everything else that fails exits 1. */
 export class UsageError extends Error {}
 export function finishWithError(error: unknown, deps: { err(text: string): void }, json: boolean | undefined): void {

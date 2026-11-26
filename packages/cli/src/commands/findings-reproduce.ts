@@ -10,7 +10,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { resolve } from "node:path";
 import type { Command } from "commander";
-import { OciRunner, isGitRepo, isPinnedImage, reproduceFinding, snapshotHead, type ContainerRunner } from "@0/engine";
+import { OciRunner, UNTRUSTED_GIT_BASE_CONFIG, isGitRepo, isPinnedImage, reproduceFinding, snapshotHead, untrustedGitConfig, type ContainerRunner } from "@0/engine";
 import { reproductionLine, type FindingReproduction, type ReproductionResult } from "@0/engine/shared";
 import { osecDB, resolveOsecDbPath } from "@0/engine/storage";
 import { resolveFindingId } from "../finding-id.js";
@@ -39,8 +39,8 @@ const defaults: ReproduceDeps = {
   runner: () => new OciRunner(),
   async head(folder) {
     if (!(await isGitRepo(folder))) return undefined;
-    const commit = (await run("git", ["-C", folder, "rev-parse", "HEAD"], { timeout: 10_000 })).stdout.trim();
-    const dirty = (await run("git", ["-C", folder, "status", "--porcelain"], { timeout: 30_000 })).stdout.trim().length > 0;
+    const commit = (await run("git", ["-C", folder, ...UNTRUSTED_GIT_BASE_CONFIG, "rev-parse", "HEAD"], { timeout: 10_000 })).stdout.trim();
+    const dirty = (await run("git", ["-C", folder, ...untrustedGitConfig(folder), "status", "--porcelain", "--ignore-submodules=all"], { timeout: 30_000 })).stdout.trim().length > 0;
     return { commit, dirty };
   },
   snapshot: (folder) => snapshotHead(folder),

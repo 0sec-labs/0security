@@ -534,6 +534,21 @@ export class SentinelRunner {
     return checksFromPoll(config.repo, branch, await run(["api", "--paginate", `repos/${config.repo}/commits/${branch}/check-runs?per_page=100`, "--jq", CHECKS_JQ])).filter(event => matchesCheck(config, event));
   }
 
+  /**
+   * True when the delivered commit is on the branch this check trigger watches (the configured branch, else the default branch,
+   * as the poll reads it): GitHub's compare of branch...commit says the commit is the tip or behind it. Any doubt is a no.
+   */
+  async #commitOnBranch(config: NonNullable<SentinelTrigger["check"]>, event: GithubEvent): Promise<boolean> {
+    if (!event.sha || !isCommitSha(event.sha)) return false;
+    try {
+      const run = async (args: string[]) => (await this.#gh.run(args)).stdout.trim();
+      const branch = config.branch ?? await run(["api", `repos/${config.repo}`, "--jq", ".default_branch"]);
+      if (!isSafeRef(branch) || event.branch !== branch) return false;
+      const status = await run(["api", `repos/${config.repo}/compare/${branch}...${event.sha}`, "--jq", ".status"]);
+      return status === "identical" || status === "behind";
+    } catch { return false; }
+  }
+
   /** Where this trigger's result goes, or nothing when reporting is off (the default). */
   #reportTarget(trigger: SentinelTrigger, event: GithubEvent, polled: boolean): SummaryTarget | undefined {
     const config = trigger.release ?? trigger.check;
@@ -587,6 +602,13 @@ export class SentinelRunner {
       // Only what this trigger's own settings accept: a delivery is never trusted to say which trigger it is for.
       const fits = trigger.release ? matchesRelease(trigger.release, pushed) : trigger.check ? matchesCheck(trigger.check, pushed) : false;
       if (!fits) { release({}); return; }
+      // A check_run delivery also comes for a fork pull request's CI: its head_branch is whatever the fork named its branch
+      // and its pull_requests list is empty. Only a commit GitHub confirms is on the trigger's branch may start a run.
+      if (trigger.check && !(await this.#commitOnBranch(trigger.check, pushed))) {
+        audit({ actor: `sentinel:${sentinel.id}`, action: "sentinel.github.event", subject: `${pushed.repo}@${(pushed.sha ?? "").slice(0, 40)}`, outcome: "denied", detail: { sentinelId: sentinel.id, reason: "commit_not_on_branch" } });
+        release({});
+        return;
+      }
       events = [pushed];
     } else {
       try {

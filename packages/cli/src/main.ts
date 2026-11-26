@@ -30,6 +30,7 @@ import { surfaceFromArgv } from "./surface.js";
 import { createRootProgram } from "./program.js";
 import { invokedProgramName } from "./program-name.js";
 import { registerLazyCommandTree } from "./commands/lazy-tree.js";
+import { errorLine, wantsJsonOutput } from "./commands/output.js";
 import { applyErrorPolicy } from "./commands/layout.js";
 import { getReleaseChannel } from "./state/runtime.js";
 import { maybePrintTelemetryNotice } from "./telemetry-notice.js";
@@ -158,7 +159,7 @@ process.once("beforeExit", () => {
 // The anonymous `error_exit` event carries a finite category only (never the message) and is
 // flushed within a short budget so the exit is never held up.
 function exitWithCommandError(err: unknown): void {
-  console.error(chalk.red(err instanceof Error ? err.message : String(err)));
+  console.error(errorLine(err instanceof Error ? err.message : String(err), wantsJsonOutput(process.argv), chalk.red));
   if (process.env["ZERO_DEBUG"] && err instanceof Error) console.error(err.stack);
   try {
     analyticsPipeline.recordLifecycle({ event: "error_exit", error: err, command: crashCommandFromArgv(process.argv) });

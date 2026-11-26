@@ -52,7 +52,7 @@ For `scan`, an agent can rely on these:
 | 2 | Usage error: fix the command and run it again. |
 | 3 | Not finished. The scan stopped at its budget or time limit, so the report is partial. Findings so far are kept, and `--resume` continues. |
 
-See [the scan reference](/commands/#scan) for the details and `--allow-partial`. Any other command that fails with an error message, for example an unexpected failure, prints the message to standard error and exits 2.
+See [the scan reference](/commands/#scan) for the details and `--allow-partial`. Any other command that fails with an error message, for example an unexpected failure, prints the message to standard error and exits 2. With `--json` or `--format json`, a failure is one line of `{"error": "..."}` on standard error instead of plain text.
 
 ## Tell the agent about it
 

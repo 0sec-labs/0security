@@ -3,7 +3,7 @@
  * into leads. A scanner that is missing, fails or times out is skipped with a note, except where `--rules` needs it.
  */
 import { execFile } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -18,7 +18,10 @@ export interface PrePassIo {
   note?: (text: string) => void;
   /** Overrides every scanner's time limit (tests). */
   timeoutSeconds?: number;
-  /** The folder the scanners run in (default: this process's). Trivy reads `.trivyignore` from there. */
+  /**
+   * The folder the scanners run in. Scanners read their own config from there too (Checkov's `.checkov.yaml` can load Python
+   * checks), so by default they run in an empty scratch folder, and in this process's folder only with `repoIgnores`.
+   */
   cwd?: string;
   /** When true, honors in-repo scanner config and ignore files (.gitleaks.toml, .trivyignore). Off by default. */
   repoIgnores?: boolean;
@@ -38,6 +41,7 @@ export async function runPrePass(folder: string, scanners: string[], rules: stri
   let emptyConfig = "";
   let emptyIgnore = "";
   let gitleaksConfig = "";
+  let emptyCwd: string | undefined;
 
   if (!repoIgnores) {
     scratch = mkdtempSync(join(tmpdir(), "0-prepass-isolation-"));
@@ -46,7 +50,11 @@ export async function runPrePass(folder: string, scanners: string[], rules: stri
     gitleaksConfig = join(scratch, "gitleaks.toml");
     writeFileSync(emptyConfig, "");
     writeFileSync(gitleaksConfig, 'title = "0 default gitleaks config"\n\n[extend]\nuseDefault = true\n');
+    // 0 may have been started in the repository itself (`0 scan ./src` from its root): no scanner may pick its config up there.
+    emptyCwd = join(scratch, "cwd");
+    mkdirSync(emptyCwd);
   }
+  const scannerCwd = io.cwd ?? emptyCwd;
 
   // Scanners that were not found. They are reported after the run: one line when none ran, else one line each.
   const absent: Array<NonNullable<ReturnType<typeof scannerById>>> = [];
@@ -62,7 +70,7 @@ export async function runPrePass(folder: string, scanners: string[], rules: stri
         return undefined;
       };
       if (!binary) return missing();
-      const forced = repoIgnores ? undefined : spec.repoConfigFiles?.find(name => existsSync(join(folder, name)));
+      const forced = repoIgnores ? undefined : spec.repoConfigFiles?.find(name => [folder, ...(scannerCwd ? [scannerCwd] : [])].some(dir => existsSync(join(dir, name))));
       if (forced) {
         note(`${spec.id} was skipped: it always reads ${forced} from the scanned folder and cannot be told not to. Pass --repo-ignores to run it anyway.`);
         return undefined;
@@ -74,7 +82,7 @@ export async function runPrePass(folder: string, scanners: string[], rules: stri
       try {
         let stdout: string;
         const isolationOptions = { repoIgnores, emptyConfig, emptyIgnore, gitleaksConfig };
-        try { stdout = (await exec(binary, scannerArguments(spec, folder, useRules ? rules : undefined, out, isolationOptions), { env, cwd: io.cwd, timeout: seconds * 1000, maxBuffer: 128 * 1024 * 1024, windowsHide: true })).stdout; if (spec.outputFile) stdout = report() ?? stdout; }
+        try { stdout = (await exec(binary, scannerArguments(spec, folder, useRules ? rules : undefined, out, isolationOptions), { env, cwd: scannerCwd, timeout: seconds * 1000, maxBuffer: 128 * 1024 * 1024, windowsHide: true })).stdout; if (spec.outputFile) stdout = report() ?? stdout; }
         // A scanner that exits non-zero because it found something still wrote its report.
         catch (error) {
           const failure = error as { stdout?: string; killed?: boolean; signal?: string; code?: string };
