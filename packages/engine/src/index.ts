@@ -250,6 +250,8 @@ export type {
 // both pass.
 export { parseVerifySpec, inlineVerifySpec, verificationLine, isVerified, gateDone, claimsFixed, runVerifier, OciRunner, HostRunner, snapshotWorktree, snapshotHead, isGitRepo, isPinnedImage } from "./verifier/index.js";
 export type { VerifySpec, VerifierResult, ContainerRunner } from "./verifier/index.js";
+export { planPocSpec, executePocForFinding, createExecutedPoc, executedPocConfigFromEnv, executedPocForScan, ExecutedPocBudget } from "./executed-poc/index.js";
+export type { ExecutedPocConfig, ExecutedPocRuntime } from "./executed-poc/index.js";
 export { reproduceFinding } from "./reproduction/index.js";
 export type { ReproduceInput } from "./reproduction/index.js";
 

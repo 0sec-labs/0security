@@ -1,6 +1,6 @@
 import { businessContextLabel } from "../shared/business-context.js";
 import { posix, win32 } from "node:path";
-import { attackerImpactSentence, describeAttackerImpact, compareFindingsByBusinessContext, reproductionFor, reproductionLine, proofLine } from "../shared/index.js";
+import { executedPocFor, executedPocLine, attackerImpactSentence, describeAttackerImpact, compareFindingsByBusinessContext, reproductionFor, reproductionLine, proofLine } from "../shared/index.js";
 import type { PocStep, ScanReport, Finding, Severity } from "../shared/index.js";
 import { VERSION } from "../shared/index.js";
 
@@ -212,6 +212,8 @@ function findingToResult(finding: Finding, target: string, suppressOutOfScope = 
       ...(reproduction.result ? { result: reproduction.result, resultLabel: reproductionLine(reproduction.result) } : {}),
     };
   }
+  const executedPoc = executedPocFor(finding, finding.executedPoc);
+  if (executedPoc) result.properties["executedPoc"] = { outcome: executedPoc.outcome, reason: executedPoc.reason, label: executedPocLine(executedPoc), ...(executedPoc.run ? { run: executedPoc.run } : {}) };
   if (finding.inlineValidation) result.properties["inlineValidation"] = finding.inlineValidation;
   if (finding.supplyChain) result.properties["supplyChain"] = finding.supplyChain;
   if (finding.kernelExploit) result.properties["kernelExploit"] = finding.kernelExploit;

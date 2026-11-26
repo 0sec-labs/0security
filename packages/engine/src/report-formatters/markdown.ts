@@ -1,5 +1,5 @@
 import { businessContextLabel } from "../shared/business-context.js";
-import { reproductionFor, reproductionLine, proofLine, describeAttackerImpact, compareFindingsByBusinessContext, orderByScope, splitByScope } from "../shared/index.js";
+import { executedPocFor, executedPocLine, reproductionFor, reproductionLine, proofLine, describeAttackerImpact, compareFindingsByBusinessContext, orderByScope, splitByScope } from "../shared/index.js";
 import type { ScanReport, Finding, FindingRemediation, PocStep } from "../shared/index.js";
 
 /**
@@ -293,6 +293,12 @@ function formatFinding(finding: Finding): string {
   const repro = reproductionFor(finding, finding.reproduction);
   if (repro) {
     lines.push(`**Proof:** ${repro.result ? reproductionLine(repro.result) : proofLine(repro.proof)}.`);
+    lines.push("");
+  }
+
+  const executed = executedPocFor(finding, finding.executedPoc);
+  if (executed) {
+    lines.push(`**PoC execution:** \`${executed.outcome}\`. ${executedPocLine(executed)}.`);
     lines.push("");
   }
 

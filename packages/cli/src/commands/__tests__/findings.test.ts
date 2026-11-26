@@ -773,3 +773,45 @@ describe("findings accept/suppress/reopen — triage transitions", () => {
     expect(updates[0]!.args.slice(0, 3)).toEqual([id, "accepted", "verified manually"]);
   });
 });
+
+// ── Tests: executed PoC label ───────────────────────────────────────────────
+
+describe("findings list and show — executed PoC label", () => {
+  const record = (outcome: string, run?: object) => JSON.stringify({
+    schemaVersion: 1, harness: "0security-executed-poc/1", outcome, reason: outcome === "static-only" ? "no-runnable-steps" : "x", stepIds: ["s"],
+    ...(run ? { run } : {}), startedAt: "2026-01-01T00:00:00.000Z", finishedAt: "2026-01-01T00:00:02.000Z",
+  });
+  const digest = `sha256:${"a".repeat(64)}`;
+  const out = () => logSpy.mock.calls.map((c: unknown[]) => String(c[0])).join("\n");
+
+  it("labels proven, failed and static-only in the list, and a high finding with no record as static-only", async () => {
+    dbState.rows.push(
+      { ...makeRow({ id: "aaaa0000aaaa0001", title: "Proven one" }), executedPoc: record("executed-proven", { status: "pass", reason: "criteria-met", command: "c", isolation: "container", imageDigest: digest, durationMs: 5, logTail: "" }) } as FakeFindingRow,
+      { ...makeRow({ id: "aaaa0000aaaa0002", title: "Failed one" }), executedPoc: record("executed-failed", { status: "fail", reason: "output-did-not-match", command: "c", isolation: "container", imageDigest: digest, durationMs: 5, logTail: "" }) } as FakeFindingRow,
+      { ...makeRow({ id: "aaaa0000aaaa0003", title: "Static one" }), executedPoc: record("static-only") } as FakeFindingRow,
+      makeRow({ id: "aaaa0000aaaa0004", title: "Never attempted" }),
+      makeRow({ id: "aaaa0000aaaa0005", title: "Low one", severity: "low" }),
+    );
+    expect(await runCli(["findings", "list"])).toBeUndefined();
+    const text = out();
+    expect(text).toContain("poc: executed-proven");
+    expect(text).toContain("poc: executed-failed");
+    expect((text.match(/poc: static-only/g) ?? []).length).toBe(2);
+    expect((text.match(/poc: /g) ?? []).length).toBe(4);
+  });
+
+  it("show prints the outcome line and run record, and a forged proven record reads as static-only", async () => {
+    dbState.rows.push(
+      { ...makeRow({ id: "bbbb0000bbbb0001" }), executedPoc: record("executed-proven", { status: "pass", reason: "criteria-met", command: "c", isolation: "container", imageDigest: digest, durationMs: 2500, logTail: "" }) } as FakeFindingRow,
+      // Proven without a container run: the parser drops it, so the high finding shows as static-only.
+      { ...makeRow({ id: "bbbb0000bbbb0002" }), executedPoc: record("executed-proven", { status: "pass", reason: "criteria-met", command: "c", isolation: "host", durationMs: 1, logTail: "" }) } as FakeFindingRow,
+    );
+    expect(await runCli(["findings", "show", "bbbb0000bbbb0001"])).toBeUndefined();
+    expect(out()).toMatch(/PoC execution: executed-proven\. Executed, proven/);
+    expect(out()).toMatch(/run: pass \(criteria-met\), container, 2\.5s/);
+    logSpy.mockClear();
+    expect(await runCli(["findings", "show", "bbbb0000bbbb0002"])).toBeUndefined();
+    expect(out()).toMatch(/PoC execution: static-only\. Static only: not proven by execution \(not attempted\)/);
+    expect(out()).not.toMatch(/executed-proven/);
+  });
+});

@@ -81,6 +81,7 @@ CREATE TABLE IF NOT EXISTS findings (
   sourceVerification TEXT,
   modelVerification TEXT,
   reproduction TEXT,
+  executedPoc TEXT,
   tool TEXT,
   repo TEXT,
   source TEXT,
@@ -463,6 +464,10 @@ export function migrateLegacySchema(sqlite: ShimmedDatabase): void {
   // Declared scope label from `0 scan --scope`. Additive and nullable.
   for (const column of ["scope", "scopeReason", "scopeSource"]) {
     if (!colNames.has(column)) sqlite.exec(`ALTER TABLE findings ADD COLUMN ${column} TEXT`);
+  }
+  // Executed proof of concept outcome and run record. Additive and nullable.
+  if (!colNames.has("executedPoc")) {
+    sqlite.exec("ALTER TABLE findings ADD COLUMN executedPoc TEXT");
   }
   // Backfill NULL fingerprint / triageStatus / workflowStatus for rows
   // created before those columns existed.

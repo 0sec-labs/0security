@@ -47,3 +47,4 @@ export { scanPrompt, prePassBlock, scopeBlock, batchBlock, threatModelPrompt, sc
 export * from "./reproduction.js";
 
 export * from "./finding-display-id.js";
+export * from "./executed-poc.js";

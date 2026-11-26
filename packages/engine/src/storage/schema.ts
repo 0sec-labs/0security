@@ -203,6 +203,8 @@ export const findings = sqliteTable(
      * `0 findings reproduce`. NULL until either exists. Additive: old rows are unaffected.
      */
     reproduction: text("reproduction"),
+    /** JSON ExecutedPoc: outcome (executed-proven, executed-failed, static-only) and the sandbox run record. NULL until a PoC attempt is recorded. */
+    executedPoc: text("executedPoc"),
     /** Scanner that produced the finding when it was imported (for example `CodeQL`); NULL for findings 0 found itself. */
     tool: text("tool"),
     /** Repository a finding was sent from (`owner/name`), set only by the shared findings server's ingest. NULL otherwise. */
