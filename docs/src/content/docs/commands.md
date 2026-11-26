@@ -2321,7 +2321,7 @@ Count open findings across repositories by severity, category, age and owner, fr
 0security findings rollup api.json web.json --format html -o rollup.html
 ```
 
-Run it once per repository with `--export` to write a rollup export. Put the files in one place, then run it again with the files as inputs. An input is an export file or a findings database. With no input, it reads the databases on this machine. It reads local files only and sends nothing.
+Run it once per repository with `--export` to write a rollup export. Put the files in one place, then run it again with the files as inputs. An input is an export file, a SARIF file or a findings database. With no input, it reads the databases on this machine. It reads local files only and sends nothing.
 
 How it counts:
 
@@ -2337,9 +2337,27 @@ The `--owners` file is a JSON object that maps a repository name to an owner or 
 { "api": "payments", "web": "growth" }
 ```
 
-An export has the schema `0.findings-rollup.v1`: `schema`, `exportedAt` and `findings`. Each finding has `repository`, `fingerprint`, `title`, `severity`, `category`, `status`, `triage` (new, accepted or suppressed), `owner` (a string or null), `firstSeen` and `lastSeen` (ISO times). To bring in another scanner's results first, use [findings import](#findings-import).
+An export has the schema `0.findings-rollup.v1`: `schema`, `exportedAt` and `findings`. Each finding has `repository`, `fingerprint`, `title`, `severity`, `category`, `status`, `triage` (new, accepted or suppressed), `owner` (a string or null), `firstSeen` and `lastSeen` (ISO times). It can also have `team` and `tier`; files without them still read. To bring in another scanner's results first, use [findings import](#findings-import).
 
-The rollup does not keep history, so it shows no trend. Keep the JSON output of each run to compare them.
+To see what changed, keep the export of each run and compare a later rollup with an earlier export:
+
+```bash
+0security findings rollup api.json web.json --since last-month.json
+```
+
+The trend shows opened, fixed and net findings per severity and per repository. A finding is opened if it is open now and was not open then. It is fixed if it was open then and is not open now. That includes findings now marked false positive, accepted or suppressed, and findings gone from the file. Net is opened minus fixed. A repository that is in only one of the two files is listed, not counted as fixed. `--since` takes a rollup export, not a database.
+
+To group by team and tier, pass a labels file. It is JSON or YAML and maps a repository name or glob to a team, a tier or both:
+
+```yaml
+api: { team: payments, tier: 1 }
+"pay-*": { team: payments, tier: 2 }
+"path:src/vault/**": { team: security }
+```
+
+For each of team and tier, the most specific match wins: a `path:` rule, then an exact repository name, then the repository glob with the most literal characters. A `path:` rule applies only to findings read from a SARIF file, because only those have a file path. A label from the file replaces a label stored in an export. A finding with no match counts as unlabelled. 0 reads only the file you name, never labels from a scanned repository. Exports keep team and tier but not file paths.
+
+A SARIF file is read with the same limits as [findings import](#findings-import), including the credential scrubbing, and nothing goes into the findings database. The repository is the `--repository` name, else the repository in the SARIF file, else the file name. SARIF has no first-seen time, so the file's modified time sets the age. Results with an active suppression are skipped.
 
 | Argument | Required | Description |
 | --- | --- | --- |
@@ -2349,7 +2367,9 @@ The rollup does not keep history, so it shows no trend. Keep the JSON output of 
 | --- | --- | --- |
 | `--export <file>` | — | Also write these findings as a rollup export file that another rollup can read |
 | `--owners <file>` | — | JSON file mapping repository names to owners, used when a finding has no assignee |
-| `--repository <name>` | — | Repository name for findings read from a database (default: the scan target's folder name) |
+| `--labels <file>` | — | JSON or YAML file mapping repository names or globs (or path: globs) to a team and tier, shown as extra breakdowns |
+| `--since <file>` | — | An earlier rollup export to compare with: shows findings opened and fixed since then |
+| `--repository <name>` | — | Repository name for findings read from a database or a SARIF file (default: the scan target's folder name, or the SARIF's repository) |
 | `--format <format>` | — | Output: text, json or html Choices: text, json, html. |
 | `-o, --output <file>` | — | Write the rollup to a file instead of stdout |
 
