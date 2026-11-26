@@ -94,6 +94,17 @@ describe("checkSarifForConsumers rejects", () => {
   it("a non-boolean executionSuccessful", () => { expect(errorsOf((l) => { (l.runs[0] as Record<string, unknown>)["invocations"] = [{ executionSuccessful: "yes" }]; })).toContain("executionSuccessful"); });
 });
 
+describe("checkSarifForConsumers on a large log", () => {
+  it("stays fast with many rules and results", () => {
+    const rules = Array.from({ length: 20_000 }, (_, i) => ({ id: `r${i}` }));
+    const results = Array.from({ length: 20_000 }, (_, i) => ({ ruleId: `r${i}`, message: { text: "m" }, locations: [{ physicalLocation: { artifactLocation: { uri: "a.ts" }, region: { startLine: 1 } } }] }));
+    const started = Date.now();
+    const out = checkSarifForConsumers({ version: "2.1.0", runs: [{ tool: { driver: { name: "t", rules } }, results }] });
+    expect(out.errors).toEqual([]);
+    expect(Date.now() - started).toBeLessThan(2_000);
+  });
+});
+
 describe("checkSarifForConsumers warns", () => {
   it("about more results than code scanning accepts per run", () => {
     const results = Array.from({ length: 25_001 }, () => ({ ruleId: "r1", message: { text: "m" }, locations: [{ physicalLocation: { artifactLocation: { uri: "a.ts" }, region: { startLine: 1 } } }] }));
