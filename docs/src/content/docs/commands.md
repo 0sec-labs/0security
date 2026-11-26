@@ -458,7 +458,13 @@ An already-known finding also gets `confirmedIndependently: true` when the scan 
 
 `--known` is not stored with a batched scan. When you continue one with `--resume`, pass `--known` again, or the remaining batches run without it.
 
-Paths in a known file must be relative to the scanned folder, or absolute inside it. Items outside it, or with no location, are given to the scan but never matched. How much `--known` helps depends on the code and the baseline: see the [benchmark](https://github.com/0sec-labs/0security/blob/main/docs/design/benchmark.md#second-opinion-with---known).
+Paths in a known file must be relative to the scanned folder, or absolute inside it. Items outside it, or with no location, are given to the scan but never matched.
+
+You can pass 0's own earlier SARIF report as the known set. Paths written as the folder name followed by the file path match when you scan that folder.
+
+##### When a second opinion helps
+
+`--known` makes a report that lists only new findings. In these tests it did not find more of what the other tool missed than a plain second scan did. On 7 small test apps, with one model and 3 repeats, a plain second scan found 60 to 72% of the items foxguard missed, and a scan with `--known` found 56 to 64%. After a previous scan by 0 itself, the two found 0 to 33% and 11 to 17%. These ranges overlap, so the flag shows no recall gain. The share of new findings in the report rose from 28 to 52% to 82 to 92%. Use `--known` to keep a report free of repeats, not to search harder. Read the [benchmark](https://github.com/0sec-labs/0security/blob/main/docs/design/benchmark.md#rerun-against-a-plain-second-scan-2026-11-25).
 
 | Argument | Required | Description |
 | --- | --- | --- |

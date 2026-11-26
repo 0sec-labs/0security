@@ -3,8 +3,8 @@
  * scanner leads turned into findings that say no model reviewed them.
  */
 import { createHash } from "node:crypto";
-import { readFileSync, statSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { basename, join, resolve } from "node:path";
 import { locationLabel, parseSarif, type Finding, type ImportedFinding, type KnownItem } from "@0/engine/shared";
 import { UsageError } from "./commands/output.js";
 
@@ -26,13 +26,29 @@ export function loadKnown(files: readonly string[], roots: readonly string[]): K
     if (size > MAX_KNOWN_FILE_BYTES) throw new UsageError(`--known ${raw} is ${size} bytes; the limit is ${MAX_KNOWN_FILE_BYTES}.`);
     try {
       const parsed = parseSarif(readFileSync(path, "utf8"), { roots });
-      items.push(...parsed.findings);
+      items.push(...parsed.findings.map(item => withoutFolderPrefix(item, roots)));
       for (const tool of parsed.tools) tools.add(tool);
     } catch (error) { throw new UsageError(`--known ${raw}: ${error instanceof Error ? error.message : String(error)}`); }
     used.push(path);
   }
   if (items.length > MAX_KNOWN_ITEMS) throw new UsageError(`--known files hold ${items.length} items; the limit is ${MAX_KNOWN_ITEMS}.`);
   return { items, tools: [...tools], files: used };
+}
+
+/**
+ * A report written by 0 names files as `<scanned folder name>/<path>`. When that is how an item is written and the file
+ * is not there but the shorter path is, use the shorter path, so 0's own earlier SARIF matches the same scan.
+ */
+export function withoutFolderPrefix<T extends { path?: string | undefined }>(item: T, roots: readonly string[]): T {
+  const path = item.path;
+  if (!path) return item;
+  for (const root of roots) {
+    const prefix = `${basename(root)}/`;
+    if (!path.startsWith(prefix) || existsSync(join(root, path))) continue;
+    const shorter = path.slice(prefix.length);
+    if (shorter && existsSync(join(root, shorter))) return { ...item, path: shorter };
+  }
+  return item;
 }
 
 /** The known items that sit in these files (a batch lists only its own), keeping those without a location out of it. */

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseArgs, relativize, sarifFindings } from "./second-opinion.mjs";
+import { parseArgs, relativize, sarifFindings, withAnnotations } from "./second-opinion.mjs";
 
 const sarif = {
   version: "2.1.0",
@@ -37,4 +37,14 @@ test("parseArgs needs exactly one of --run and --dry-run unless it only runs the
   assert.deepEqual(o.fixtures, ["go-http", "llm-app"]);
   assert.throws(() => parseArgs(["--run", "--tools", "bandit"]));
   assert.throws(() => parseArgs(["--run", "--bogus"]));
+});
+
+test("withAnnotations gives a flattened report location back to the finding so SARIF can name the file", () => {
+  const out = withAnnotations({ findings: [{ id: "a", location: { path: "server.js", startLine: 3 } }, { id: "b" }] });
+  assert.deepEqual(out.findings[0].reviewAnnotation, { path: "server.js", startLine: 3, endLine: undefined });
+  assert.equal(out.findings[1].reviewAnnotation, undefined);
+});
+
+test("parseArgs accepts self as a baseline", () => {
+  assert.deepEqual(parseArgs(["--dry-run", "--tools", "foxguard,self"]).tools, ["foxguard", "self"]);
 });

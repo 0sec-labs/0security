@@ -204,6 +204,25 @@ Share of the reported findings that are new (not matching a known item by file, 
 - Which items count as missed comes from the benchmark matcher applied to the tool's SARIF, so a tool finding that the matcher does not credit counts as a miss. A generic run failed on `crypto-app` and one on `llm-app` (the thread's answer was not backed by its checks), and the `medium-app` run with the flag stopped partial; they are included.
 - The same limits as above apply: tiny synthetic fixtures with textbook bugs, an answer key we wrote, and a model that varies between runs.
 
+### Rerun against a plain second scan, 2026-11-25
+
+The first measurement compared a scan with `--known` to a plain scan of the same fixture. It did not give a plain second scan after another AI scan, and it had 2 repeats. This rerun adds both: the baseline "self" is one plain scan of the fixture, and its SARIF is the known set. It uses 3 repeats on 7 fixtures (`llm-app-2` included) and counts false positives and cost. The runner is `node scripts/bench/second-opinion.mjs --run --tools foxguard,self --repeat 3`. Rows and settings are in `scripts/bench/results/second-opinion-2026-11-25.md`. Model cost of all runs was about $1.2.
+
+Items the baseline missed that the second scan found, with the lowest and highest recall of the 3 repeats:
+
+| baseline | plain second scan | second scan with `--known` |
+|---|---|---|
+| foxguard, 7 fixtures | 50 of 75 (67%, 60-72%) | 44 of 75 (59%, 56-60%) |
+| foxguard, 6 fixtures, second run | 50 of 75 (67%, 64-68%) | 47 of 75 (63%, 60-64%) |
+| a previous plain scan of the same fixture | 6 of 30 (20%, 0-33%) | 4 of 30 (13%, 11-17%) |
+
+- `--known` did not beat a plain second scan on recall in any of the three comparisons. The differences are inside the spread, except `crypto-app`, where the flag lost 3 of 12 items in both runs.
+- A prompt that says "review everything and only skip recording listed items" found 49 of 75 (65%), the same as the plain scan. It was tried and not kept.
+- The share of new findings in the report is the real effect: 82% to 92% with `--known` against 28% to 52% for a plain scan.
+- False positives stayed at 0 to 3 across all runs. The cost per scan is the same to within a cent, except after a previous scan, where the `--known` scan costs about 60% of a plain one because it stops early and reports far fewer findings.
+- Limits: one model, small fixtures with textbook bugs, an answer key we wrote, and a first pass that finds almost everything on most fixtures. The real applications were not run.
+- A bug found on the way: 0's own SARIF names files as `<folder name>/<path>`, so it did not match when passed back as `--known`. Such paths now match when the file exists only without the folder name.
+
 ## Real applications
 
 The synthetic fixtures are small and textbook-shaped. This section measures `0security scan` on three public, intentionally vulnerable applications whose bugs their own projects document. Code: `scripts/bench/real-apps.mjs`, keys in `scripts/bench/real-apps/`.
