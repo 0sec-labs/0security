@@ -12,6 +12,7 @@ import {
 import { workflowTransitionRejection } from "./dashboard-api.js";
 import { hasFindingsServer, suppressionReasonError, triageHistoryAction } from "../findings-server-bridge.js";
 import type { TargetFilter } from "./findings-scope.js";
+import { findingFixInfo, locationOf } from "./finding-fix.js";
 
 type Persisted = { id: string; kind: string; title?: string; label?: string; owner?: string | null; status?: string; summary?: string | null; content?: string | null };
 
@@ -104,7 +105,11 @@ export async function handleFindingFamilyRequest(
   const workItems = parts.flatMap(part => part.workItems);
   const artifacts = parts.flatMap(part => part.artifacts);
   const merged = (await findings.list()).families.find(family => family.key === fingerprint);
+  // Optional and additive: older clients ignore both. Neither reads a file from the repository.
+  const location = locationOf(rows as Array<{ reviewAnnotation?: unknown }>);
+  const fix = await findingFixInfo(fingerprint, String(rows[0]!.id), scope);
   json(res, 200, {
+    location, fix,
     consoleCommand: buildFindingConsoleCommand(rows[0]!, dbPath),
     fingerprint, case: familyCase, latest: rows[0], rows, workflow,
     provenance: merged?.provenance ?? null,

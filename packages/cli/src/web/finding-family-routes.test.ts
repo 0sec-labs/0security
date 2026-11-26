@@ -1,5 +1,5 @@
 import { createServer, type Server } from "node:http";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -78,6 +78,43 @@ describe("findings API over scan run databases", () => {
     expect(detail.provenance).toMatchObject({ kind: "scan", scanId: "run-a" });
     const scan = await (await call("/api/scans/run-a/findings")).json() as { findings: Array<{ id: string }> };
     expect(scan.findings.map(f => f.id)).toEqual(["a1"]);
+  });
+
+  it("adds the code location and the recorded fix to one finding's detail, and nothing when none exist", async () => {
+    seed(runDb("run-a"), "run-a", "/work/app", [
+      finding("a1", "high", { fingerprint: "fp-a", reviewAnnotation: { path: "src/a.ts", startLine: 4, endLine: 6 } }),
+      finding("a2", "low", { fingerprint: "fp-plain" }),
+    ]);
+    mkdirSync(join(home, ".0"), { recursive: true });
+    writeFileSync(join(home, ".0", "burndown.json"), JSON.stringify({ version: 1, runs: [], findings: { "/work/app\u0000fp-a": { finding: "a1", branch: "0/fix-a1", result: "pr-opened", pullRequestUrl: "https://github.com/o/r/pull/7", draft: false, checksPassing: true, runId: "r", updatedAt: "2026-03-01T10:00:00.000Z" } } }));
+    const fixed = await (await call("/api/finding-family/fp-a")).json() as { location: unknown; fix: { command: string; records: Array<Record<string, unknown>> } };
+    expect(fixed.location).toEqual({ path: "src/a.ts", startLine: 4, endLine: 6 });
+    expect(fixed.fix.command).toBe("0security findings fix a1");
+    expect(fixed.fix.records).toEqual([expect.objectContaining({ branch: "0/fix-a1", pullRequestUrl: "https://github.com/o/r/pull/7", draft: false, checksPassing: true })]);
+    expect(JSON.stringify(fixed.fix)).not.toContain("/work/app");
+    const plain = await (await call("/api/finding-family/fp-plain")).json() as { location: unknown; fix: { records: unknown[] } };
+    expect(plain.location).toBeNull();
+    expect(plain.fix.records).toEqual([]);
+  });
+
+  it("keeps the location and fix inside a scoped account's repositories", async () => {
+    seed(runDb("run-a"), "run-a", "/work/app", [finding("a1", "high", { fingerprint: "fp-a", reviewAnnotation: { path: "src/a.ts", startLine: 4 } })]);
+    mkdirSync(join(home, ".0"), { recursive: true });
+    writeFileSync(join(home, ".0", "burndown.json"), JSON.stringify({ version: 1, runs: [], findings: { "/work/app\u0000fp-a": { finding: "a1", branch: "0/fix-a1", result: "committed", runId: "r", updatedAt: "2026-03-01T10:00:00.000Z" } } }));
+    const scoped = (allowed: string) => new Promise<{ url: string; close: () => void }>(done => {
+      const srv = createServer((req, res) => { void handleApiRequest(req, res, new URL(req.url ?? "/", "http://x").pathname, undefined, TOKEN, undefined, undefined, undefined, target => target === allowed).then(() => undefined); });
+      srv.listen(0, "127.0.0.1", () => done({ url: `http://127.0.0.1:${(srv.address() as { port: number }).port}`, close: () => srv.close() }));
+    });
+    const outside = await scoped("/work/other");
+    const inside = await scoped("/work/app");
+    try {
+      const denied = await fetch(`${outside.url}/api/finding-family/fp-a`, { headers: { "x-0-control-token": TOKEN } });
+      expect(denied.status).toBe(404);
+      expect(await denied.text()).not.toContain("src/a.ts");
+      const allowed = await (await fetch(`${inside.url}/api/finding-family/fp-a`, { headers: { "x-0-control-token": TOKEN } })).json() as { location: unknown; fix: { records: unknown[] } };
+      expect(allowed.location).toMatchObject({ path: "src/a.ts" });
+      expect(allowed.fix.records).toHaveLength(1);
+    } finally { outside.close(); inside.close(); }
   });
 
   it("attributes a triage decision to the authenticated team member, not a shared identity", async () => {
