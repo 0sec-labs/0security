@@ -150,11 +150,11 @@ describe("hostile source trees", () => {
     expect(statusIn(dir)).toBe("unknown");
     expect(attachJavaUsage([log4jAdvisory()], dir).scan.skipped).toBe(1);
   });
-  it("does not search a very long line for symbols, and finishes fast", () => {
+  it("does not search a very long line for symbols, finishes fast, and calls the result unknown", () => {
     const dir = fresh();
     writeFileSync(join(dir, "src/main/java/Min.java"), `class M { ${"a.".repeat(100_000)}org.apache.logging.log4j.core.lookup.JndiLookup }\n`);
     const started = Date.now();
-    expect(statusIn(dir)).toBe("not-imported");
+    expect(statusIn(dir)).toBe("unknown");
     expect(Date.now() - started).toBeLessThan(3000);
   });
   it("does not count look-alike names, longer identifiers or comments as a listed class", () => {

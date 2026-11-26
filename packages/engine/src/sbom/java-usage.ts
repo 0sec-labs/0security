@@ -158,6 +158,7 @@ export function scanJavaUsage(folder: string, components: Array<{ name: string; 
   const maxChecks = options.limits?.maxSymbolChecks ?? MAX_SYMBOL_CHECKS;
   let checks = 0;
   let searching = symbols.length > 0;
+  let longLine = false;
   const imports: JavaImport[] = [];
   let scanned = 0;
   let bytes = 0;
@@ -185,7 +186,9 @@ export function scanJavaUsage(folder: string, components: Array<{ name: string; 
     const lines = text.split(/\r?\n/);
     for (let index = 0; index < lines.length; index += 1) {
       const line = lines[index]!;
-      if (line.length > MAX_LINE_CHARS || importLines.has(index + 1)) continue;
+      if (importLines.has(index + 1)) continue;
+      // A line this long is not searched, and a symbol could hide in it: the scan is then incomplete, never a not-imported answer.
+      if (line.length > MAX_LINE_CHARS) { if (!longLine) { longLine = true; limit.truncated = true; } limit.skipped += 1; continue; }
       checks += symbols.length;
       if (checks > maxChecks) { searching = false; limit.truncated = true; limit.skipped += files.length - position; break; }
       const trimmed = line.trimStart();
