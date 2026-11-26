@@ -178,7 +178,7 @@ function fixOne(c, repeatIndex, o) {
 
   const tests = testFiles(repo, c);
   const rulesBefore = scanRules(repo);
-  const args = ["findings", "fix", id, "--repo", repo, "--test", testCommandLine(repo, c), "--no-pr", "--budget", String(o.budget), "--timeout", String(o.timeout), "--format", "json"];
+  const args = ["findings", "fix", id, "--repo", repo, "--test", testCommandLine(repo, c), "--no-pr", "--no-variants", "--budget", String(o.budget), "--timeout", String(o.timeout), "--format", "json"];
   if (o.model) args.push("--model", o.model);
   const started = Date.now();
   const proc = cli(args, o.timeout + 180);

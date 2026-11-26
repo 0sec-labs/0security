@@ -10,18 +10,19 @@ const cand = (id: string, extra: Partial<VerifyCandidate> = {}): VerifyCandidate
 const block = (o: unknown) => `\`\`\`json\n${JSON.stringify(o)}\n\`\`\``;
 const options = (extra: Partial<VerifyOptions> = {}): VerifyOptions => ({ folder: "/work", budget: "2", perFinding: "0.3", concurrency: "1", batch: "1", maxConsecutiveFailures: "3", timeout: "60", ...extra });
 
-function harness(candidates: VerifyCandidate[], answer: (message: string, thread: number) => string | undefined, overrides: Partial<{ missing: string[] }> = {}) {
+function harness(candidates: VerifyCandidate[], answer: (message: string, thread: number) => string | undefined, overrides: Partial<{ missing: string[]; costs: Array<number | undefined> }> = {}) {
   const saved = new Map<string, FindingModelVerification>();
   const suppressed: Array<[string, string]> = [];
   const messages: string[] = [];
+  const caps: number[] = [];
   let threads = 0;
   const sessions = new Map<string, string | undefined>();
-  const client = { request: async (method: string, path: string, body?: { text?: string }) => {
-    if (method === "POST" && path.endsWith("/sessions")) { threads++; return { session: { id: `t${threads}` } }; }
+  const client = { request: async (method: string, path: string, body?: { text?: string; costCeilingUsd?: number }) => {
+    if (method === "POST" && path.endsWith("/sessions")) { threads++; caps.push(body!.costCeilingUsd!); return { session: { id: `t${threads}` } }; }
     if (method === "POST" && path.endsWith("/messages")) { messages.push(body!.text!); sessions.set(path.split("/")[4]!, answer(body!.text!, threads)); return {}; }
     if (method === "GET") {
       const reply = sessions.get(path.split("/")[4]!);
-      return { snapshot: { session: { status: "ready" }, messages: reply ? [{ role: "assistant", content: [{ type: "text", text: reply }] }] : [], lastOutcome: {}, usage: { costUsd: 0.1 } } };
+      return { snapshot: { session: { status: "ready" }, messages: reply ? [{ role: "assistant", content: [{ type: "text", text: reply }] }] : [], lastOutcome: {}, usage: { inputTokens: 10, outputTokens: 5, costUsd: overrides.costs ? overrides.costs[threads - 1] : 0.1 } } };
     }
     return {};
   } };
@@ -33,12 +34,33 @@ function harness(candidates: VerifyCandidate[], answer: (message: string, thread
     exists: (_folder, relative) => !(overrides.missing ?? []).includes(relative),
     now: () => new Date("2026-11-22T00:00:00Z"),
   };
-  return { deps, saved, suppressed, messages };
+  return { deps, saved, suppressed, messages, caps };
 }
 
 const idIn = (message: string) => /"id": "([^"]+)"/.exec(message)![1]!;
 
 describe("runVerify", () => {
+  it("stops new verification and variant threads when the base receipt is unavailable", async () => {
+    const h = harness([cand("a"), cand("b")], m => block({ finding: idIn(m), verdict: "true-positive", reasoning: "src/a.ts:3" }), { costs: [undefined] });
+    h.deps.variants = { variantsOf: () => [], saveRootCause: () => {}, saveVariant: () => "new", markFixed: () => {} };
+    const report = await runVerify([], options({ budget: "0.5" }), h.deps);
+    expect(h.caps).toHaveLength(1);
+    expect(report.costUsd).toBeNull();
+    expect(report.stoppedReason).toMatch(/receipt unavailable/);
+    expect(report.items[1]!.result).toBe("skipped");
+  });
+
+  it.each([false, true])("bounds variant hunts by the global remaining receipt budget (unknown=%s)", async unknown => {
+    const h = harness([cand("a"), cand("b")], m => m.includes("<seed>") ? block({ variants: [] }) : block({ finding: idIn(m), verdict: "true-positive", reasoning: "Unsafe sink src/a.ts:3." }), { costs: [0.1, 0.1, unknown ? undefined : 0.3] });
+    h.deps.variants = { variantsOf: () => [], saveRootCause: () => {}, saveVariant: () => "new", markFixed: () => {} };
+    const report = await runVerify([], options({ budget: "0.5" }), h.deps);
+    expect(h.caps).toHaveLength(3);
+    expect(h.caps[2]).toBeCloseTo(0.3);
+    expect(report.costUsd).toBe(unknown ? null : 0.5);
+    expect(report.tokens).toBe(45);
+    expect(report.items[1]!.variants!.error).toMatch(unknown ? /receipt unavailable/ : /budget exhausted/);
+  });
+
   it("stores a verdict per finding by id and leaves severity and status alone", async () => {
     const h = harness([cand("a"), cand("b", { path: "src/b.ts" })], m => block({ finding: idIn(m), verdict: "true-positive", severity: "low", reasoning: "Attack built through a.ts:3." }));
     const report = await runVerify([], options(), h.deps);

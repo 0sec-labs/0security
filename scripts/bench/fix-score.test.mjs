@@ -196,7 +196,7 @@ test("the actual harness forwards a clamped budget to child CLI processes and wr
   writeFileSync(cli, `import { appendFileSync } from "node:fs";
 const args = process.argv.slice(2);
 if (args[1] === "list") console.log(JSON.stringify({ findings: [{ id: "fixture-finding" }] }));
-else if (args[1] === "fix") { const budget = Number(args[args.indexOf("--budget") + 1]); appendFileSync(${JSON.stringify(log)}, JSON.stringify(budget) + "\\n"); console.log(JSON.stringify({ committed: false, costUsd: budget })); }
+else if (args[1] === "fix") { if (!args.includes("--no-variants")) throw new Error("benchmark must disable variant threads"); const budget = Number(args[args.indexOf("--budget") + 1]); appendFileSync(${JSON.stringify(log)}, JSON.stringify(budget) + "\\n"); console.log(JSON.stringify({ committed: false, costUsd: budget })); }
 else console.log("{}");
 `);
   const env = Object.fromEntries(["PATH", "HOME", "TMPDIR", "LANG"].filter(key => process.env[key] !== undefined).map(key => [key, process.env[key]]));

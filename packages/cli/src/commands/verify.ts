@@ -15,7 +15,7 @@ import { consoleTransportOptions, type ConsoleClient, type ConsoleTransportOptio
 import { resolveFindingId, shortFindingId } from "../finding-id.js";
 import { connect, DEFAULT_SCAN_MODEL, defaultScanDeps, waitForThread, type ScanDeps } from "./scan.js";
 import { finishWithError, UsageError } from "./output.js";
-import { defaultVariantStore, DEFAULT_VARIANT_BUDGET_USD, huntVariants, type HuntResult, type VariantParent, type VariantStore } from "./variants.js";
+import { VariantBudget, defaultVariantStore, DEFAULT_VARIANT_BUDGET_USD, huntVariants, type HuntResult, type VariantParent, type VariantStore } from "./variants.js";
 import { appendRunMetric, type RunMetric } from "../run-metrics.js";
 import { applyWorkflowDefaults } from "../workflow-defaults.js";
 import { asJson, finishedThread } from "./thread-output.js";
@@ -68,7 +68,7 @@ export interface VerifyItem {
 
 export interface VerifyReport {
   folder: string; dryRun: boolean; selected: number; verified: number; failed: number; skipped: number;
-  counts: Record<ModelVerdict, number>; applied: number; costUsd: number; tokens?: number; stoppedReason?: string; items: VerifyItem[]; variantsCreated?: number;
+  counts: Record<ModelVerdict, number>; applied: number; costUsd: number | null; tokens?: number; stoppedReason?: string; items: VerifyItem[]; variantsCreated?: number;
 }
 
 /** The metrics record of one verify run, or undefined when no thread ran (a dry run, or nothing selected). */
@@ -235,7 +235,7 @@ async function runThread(client: ConsoleClient, deps: VerifyDeps, folder: string
   await client.request("POST", `${path}/messages`, { text: verifyPrompt(prompt) });
   const { snapshot, timedOut } = await waitForThread(client, deps, id, Date.now() + Number(options.timeout) * 1000);
   const done = finishedThread(snapshot);
-  const costUsd = typeof done.usage.costUsd === "number" ? done.usage.costUsd : undefined;
+  const costUsd = done.usage.costUnavailable !== true && typeof done.usage.costUsd === "number" && Number.isFinite(done.usage.costUsd) && done.usage.costUsd >= 0 ? done.usage.costUsd : undefined;
   const tokens = typeof done.usage.inputTokens === "number" && typeof done.usage.outputTokens === "number" ? done.usage.inputTokens + done.usage.outputTokens : undefined;
   return { id, ...(done.reply ? { reply: done.reply } : {}), ...(done.error ? { error: done.error } : {}), ...(costUsd !== undefined ? { costUsd } : {}), ...(tokens !== undefined ? { tokens } : {}), budgetExhausted: asJson(done.session).costCeilingExceeded === true, timedOut };
 }
@@ -251,6 +251,8 @@ export async function runVerify(ids: string[], options: VerifyOptions, deps: Ver
 async function runVerifyFlow(ids: string[], options: VerifyOptions, deps: VerifyDeps, preset?: { client: ConsoleClient }): Promise<VerifyReport> {
   const concurrency = parseNumber("--concurrency", options.concurrency, n => Number.isInteger(n) && n >= 1 && n <= MAX_VERIFY_CONCURRENCY, `a whole number from 1 to ${MAX_VERIFY_CONCURRENCY}`);
   const total = parseNumber("--budget", options.budget, n => n > 0, "a positive number of USD");
+  const variantCap = parseNumber("--variant-budget", options.variantBudget ?? String(DEFAULT_VARIANT_BUDGET_USD), n => n > 0, "a positive number of USD");
+  const gate = new VariantBudget(total);
   const perFinding = parseNumber("--per-finding", options.perFinding, n => n > 0, "a positive number of USD");
   const batch = parseNumber("--batch", options.batch, n => Number.isInteger(n) && n >= 1 && n <= MAX_VERIFY_FINDINGS_PER_PROMPT, `a whole number from 1 to ${MAX_VERIFY_FINDINGS_PER_PROMPT}`);
   const maxConsecutive = parseNumber("--max-consecutive-failures", options.maxConsecutiveFailures, n => Number.isInteger(n) && n >= 1, "a whole number of at least 1");
@@ -276,6 +278,7 @@ async function runVerifyFlow(ids: string[], options: VerifyOptions, deps: Verify
   if (!options.dryRun && groups.length && !client) { const connection = await connect(options, deps); client = connection.client; stop = connection.stop; }
 
   let stoppedReason: string | undefined;
+  let tokensKnown = true;
   let spent = 0, reserved = 0, next = 0, consecutive = 0, finished = 0, tokens = 0;
   const waiting: Array<() => void> = [];
 
@@ -330,9 +333,11 @@ async function runVerifyFlow(ids: string[], options: VerifyOptions, deps: Verify
       next++; reserved += allowance;
       let thread: ThreadOutcome = {};
       let failure: string | undefined;
-      try { thread = await runThread(client, deps, folder, group, options, Number(allowance.toFixed(4))); }
+      try { thread = await runThread(client, deps, folder, group, options, allowance); }
       catch (error) { failure = error instanceof Error ? error.message.split("\n")[0]! : String(error); }
-      reserved -= allowance; spent += thread.costUsd ?? 0; tokens += thread.tokens ?? 0;
+      reserved -= allowance; gate.record(thread.costUsd); spent = gate.spent; tokens += thread.tokens ?? 0;
+      if (thread.tokens === undefined) tokensKnown = false;
+      if (!gate.known) stoppedReason = gate.stoppedReason;
       let failed = false;
       if (failure || !thread.reply) {
         // The thread itself did not run to an answer: nothing is stored, so the next run tries again.
@@ -360,9 +365,18 @@ async function runVerifyFlow(ids: string[], options: VerifyOptions, deps: Verify
       for (const group of groups) for (const c of group) {
         const item = items.get(c.id);
         if (item?.verdict !== "true-positive" || c.variantOf) continue;
-        const hunt = await huntVariants(client, { store: deps.variants, err: deps.err, sleep: deps.sleep }, folder, toParent(c, c.rootCause), { timeout: options.timeout, budget: options.variantBudget ?? String(DEFAULT_VARIANT_BUDGET_USD), ...(options.model ? { model: options.model } : {}) });
+        const allowance = gate.allowance(variantCap);
+        if (allowance <= 0) {
+          item.variants = { created: [], skipped: 0, error: gate.stoppedReason };
+          deps.err(`variants skipped: ${gate.stoppedReason}`);
+          continue;
+        }
+        const hunt = await huntVariants(client, { store: deps.variants, err: deps.err, sleep: deps.sleep }, folder, toParent(c, c.rootCause), { timeout: options.timeout, budget: String(allowance), ...(options.model ? { model: options.model } : {}) });
         item.variants = hunt;
-        spent += hunt.costUsd ?? 0;
+        gate.record(hunt.costUsd); spent = gate.spent;
+        if (hunt.tokens === undefined) tokensKnown = false;
+        else tokens += hunt.tokens;
+        if (!gate.known) stoppedReason = gate.stoppedReason;
         deps.err(`variants of ${shortFindingId(c.id)}: ${hunt.error && !hunt.created.length ? `hunt failed (${hunt.error})` : `${hunt.created.length} recorded`}`);
       }
     }
@@ -379,7 +393,7 @@ async function runVerifyFlow(ids: string[], options: VerifyOptions, deps: Verify
     folder, dryRun: Boolean(options.dryRun), selected: selectedAll.length,
     verified: ordered.filter(i => i.result === "verified").length, failed: ordered.filter(i => i.result === "failed").length,
     skipped: ordered.filter(i => i.result === "skipped").length, counts, applied: ordered.filter(i => i.applied).length,
-    costUsd: Number(spent.toFixed(6)), ...(tokens ? { tokens } : {}), ...(stoppedReason ? { stoppedReason } : {}), items: ordered,
+    costUsd: gate.known ? Number(spent.toFixed(6)) : null, ...(tokensKnown && tokens ? { tokens } : {}), ...(stoppedReason ? { stoppedReason } : {}), items: ordered,
     ...(ordered.some(i => i.variants) ? { variantsCreated: ordered.reduce((n, i) => n + (i.variants?.created.length ?? 0), 0) } : {}),
   };
 }
@@ -391,7 +405,7 @@ export function renderVerifyReport(report: VerifyReport): string {
     `Selected ${report.selected}, verified ${report.verified}, failed ${report.failed}, skipped ${report.skipped}`,
     `true-positive ${c["true-positive"]}, false-positive ${c["false-positive"]}, fixed ${c.fixed}, uncertain ${c.uncertain}, duplicate ${c.duplicate}${report.applied ? `, suppressed by --apply ${report.applied}` : ""}`,
     ...(report.variantsCreated !== undefined ? [`Variants recorded: ${report.variantsCreated} (see \`0security findings show\`)`] : []),
-    `Cost $${report.costUsd.toFixed(4)}${report.stoppedReason ? `, stopped: ${report.stoppedReason}` : ""}`,
+    `Cost ${report.costUsd === null ? "unavailable" : `$${report.costUsd.toFixed(4)}`}${report.stoppedReason ? `, stopped: ${report.stoppedReason}` : ""}`,
   ];
   if (report.items.length) lines.push("");
   for (const i of report.items) {

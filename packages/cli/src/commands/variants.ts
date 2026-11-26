@@ -22,6 +22,21 @@ import { finishWithError, UsageError } from "./output.js";
 import { asJson, finishedThread } from "./thread-output.js";
 
 export const DEFAULT_VARIANT_BUDGET_USD = 1;
+/** Receipt-based launch gate; an in-flight provider request can exceed its estimate. */
+export class VariantBudget {
+  spent = 0;
+  known = true;
+  constructor(readonly total: number) {}
+  record(cost: number | undefined): void {
+    if (cost === undefined || !Number.isFinite(cost) || cost < 0) this.known = false;
+    else {
+      this.spent += cost;
+      if (!Number.isFinite(this.spent)) this.known = false;
+    }
+  }
+  allowance(cap: number): number { return this.known ? Math.max(0, Math.min(cap, this.total - this.spent)) : 0; }
+  get stoppedReason(): string { return this.known ? "overall budget exhausted" : "cost receipt unavailable; further paid work stopped"; }
+}
 const DEFAULT_TIMEOUT_SECONDS = 600;
 /** Findings with this status are the ones a rescan leaves alone. */
 const DONE_STATUS = "fixed";
@@ -54,12 +69,12 @@ export interface VariantDeps extends Pick<ScanDeps, "open" | "err" | "sleep" | "
 export interface VariantRunOptions { model?: string; timeout: string; budget: string }
 
 export interface HuntResult {
-  threadId?: string; costUsd?: number; created: string[]; skipped: number; rootCause?: RootCause; rootCauseSource?: "stored" | "derived"; error?: string;
+  threadId?: string; costUsd?: number; tokens?: number; created: string[]; skipped: number; rootCause?: RootCause; rootCauseSource?: "stored" | "derived"; error?: string;
 }
 export interface RescanItem { id: string; title: string; state: RescanState | "unchecked"; reasoning?: string }
-export interface RescanResult { threadId?: string; costUsd?: number; items: RescanItem[]; error?: string }
+export interface RescanResult { threadId?: string; costUsd?: number; tokens?: number; items: RescanItem[]; error?: string }
 
-interface PromptThread { id: string; reply?: string; error?: string; costUsd?: number; failed: boolean }
+interface PromptThread { id: string; reply?: string; error?: string; costUsd?: number; tokens?: number; failed: boolean }
 
 async function runPromptThread(client: ConsoleClient, deps: Pick<ScanDeps, "sleep" | "err">, folder: string, title: string, prompt: string, options: VariantRunOptions): Promise<PromptThread> {
   const created = asJson(asJson(await client.request("POST", "/api/console/sessions", { runtime: { model: options.model ?? DEFAULT_SCAN_MODEL }, title: title.slice(0, 120), costCeilingUsd: Number(options.budget) })).session);
@@ -69,8 +84,9 @@ async function runPromptThread(client: ConsoleClient, deps: Pick<ScanDeps, "slee
   await client.request("POST", `${path}/messages`, { text: prompt });
   const { snapshot, timedOut } = await waitForThread(client, deps, id, Date.now() + Number(options.timeout) * 1000);
   const done = finishedThread(snapshot);
-  const costUsd = typeof done.usage.costUsd === "number" ? done.usage.costUsd : undefined;
-  return { id, ...(done.reply ? { reply: done.reply } : {}), ...(done.error || timedOut ? { error: done.error ?? "the thread timed out" } : {}), ...(costUsd !== undefined ? { costUsd } : {}), failed: done.failed || timedOut };
+  const costUsd = done.usage.costUnavailable !== true && typeof done.usage.costUsd === "number" && Number.isFinite(done.usage.costUsd) && done.usage.costUsd >= 0 ? done.usage.costUsd : undefined;
+  const tokens = typeof done.usage.inputTokens === "number" && typeof done.usage.outputTokens === "number" && Number.isFinite(done.usage.inputTokens + done.usage.outputTokens) && done.usage.inputTokens >= 0 && done.usage.outputTokens >= 0 ? done.usage.inputTokens + done.usage.outputTokens : undefined;
+  return { id, ...(tokens !== undefined ? { tokens } : {}), ...(done.reply ? { reply: done.reply } : {}), ...(done.error || timedOut ? { error: done.error ?? "the thread timed out" } : {}), ...(costUsd !== undefined ? { costUsd } : {}), failed: done.failed || timedOut };
 }
 
 const overlaps = (a: { path?: string; startLine?: number; endLine?: number }, b: { path?: string; startLine?: number; endLine?: number }): boolean =>
@@ -92,7 +108,7 @@ export async function huntVariants(client: ConsoleClient, deps: Pick<VariantDeps
   } catch (error) {
     return { created: [], skipped: 0, error: error instanceof Error ? error.message.split("\n")[0]! : String(error) };
   }
-  const base = { threadId: thread.id, ...(thread.costUsd !== undefined ? { costUsd: thread.costUsd } : {}) };
+  const base = { threadId: thread.id, ...(thread.tokens !== undefined ? { tokens: thread.tokens } : {}), ...(thread.costUsd !== undefined ? { costUsd: thread.costUsd } : {}) };
   if (!thread.reply) return { ...base, created: [], skipped: 0, error: thread.error ?? "the thread returned no answer" };
   const report = parseVariantReport(thread.reply);
   const rootCause = seedCause ?? report.rootCause;
@@ -119,7 +135,7 @@ export async function rescanVariants(client: ConsoleClient, deps: Pick<VariantDe
   } catch (error) {
     return { items: pending.map(v => ({ id: v.id, title: v.title, state: "unchecked" as const })), error: error instanceof Error ? error.message.split("\n")[0]! : String(error) };
   }
-  const base = { threadId: thread.id, ...(thread.costUsd !== undefined ? { costUsd: thread.costUsd } : {}) };
+  const base = { threadId: thread.id, ...(thread.tokens !== undefined ? { tokens: thread.tokens } : {}), ...(thread.costUsd !== undefined ? { costUsd: thread.costUsd } : {}) };
   const answers = thread.reply ? parseRescan(thread.reply, pending.map(v => v.id)) : new Map();
   const items = pending.map((v): RescanItem => {
     const answer = answers.get(v.id);

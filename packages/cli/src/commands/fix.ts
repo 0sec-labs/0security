@@ -18,7 +18,7 @@ import { fixPrompt, type FixPolicy, type FixPromptFinding, type RootCause } from
 import { loadFixPolicyFile, type FixPolicyOptions, type LoadedFixPolicy } from "./fix-policy.js";
 import { osecDB, resolveOsecDbPath } from "@0/engine/storage";
 import { consoleTransportOptions, type ConsoleClient, type ConsoleTransportOptions } from "../console-client.js";
-import { defaultVariantStore, DEFAULT_VARIANT_BUDGET_USD, huntVariants, rescanSummary, rescanVariants, type VariantParent, type VariantStore } from "./variants.js";
+import { VariantBudget, defaultVariantStore, DEFAULT_VARIANT_BUDGET_USD, huntVariants, rescanSummary, rescanVariants, type VariantParent, type VariantStore } from "./variants.js";
 import { connect, DEFAULT_SCAN_MODEL, defaultScanDeps, waitForThread, type ScanDeps } from "./scan.js";
 import { resolveFindingId, shortFindingId } from "../finding-id.js";
 import type { Host } from "../host/index.js";
@@ -264,6 +264,8 @@ async function runFixFlow(id: string, options: FixOptions, deps: FixDeps): Promi
     const budget = Number(options.budget);
     if (!Number.isFinite(budget) || budget <= 0) throw new UsageError("--budget must be a positive number of USD.");
     if (!Number.isFinite(Number(options.timeout)) || Number(options.timeout) <= 0) throw new UsageError("--timeout must be a positive number of seconds.");
+    const variantCap = Number(options.variantBudget ?? DEFAULT_VARIANT_BUDGET_USD);
+    if (!Number.isFinite(variantCap) || variantCap <= 0) throw new UsageError("--variant-budget must be a positive number of USD.");
     const sandbox = sandboxSpec({ ...options, sandboxProfile: undefined });
     if (options.computer || options.engineUrl) throw new UsageError("0security fix edits files on this machine; run it against the local console.");
     const finding = deps.loadFinding(id, options.dbPath);
@@ -308,7 +310,7 @@ async function runFixFlow(id: string, options: FixOptions, deps: FixDeps): Promi
     let thread: ThreadOutcome;
     if (direct.applied) {
       deps.err(direct.log);
-      thread = { reply: direct.summary, failed: false, timedOut: false, budgetExhausted: false };
+      thread = { costUsd: 0, tokens: 0, reply: direct.summary, failed: false, timedOut: false, budgetExhausted: false };
     } else {
       if (direct.reason) deps.err(`not changed directly (${direct.reason}); asking the model`);
       const { client, stop } = await connect(options, deps);
@@ -366,21 +368,48 @@ async function runFixFlow(id: string, options: FixOptions, deps: FixDeps): Promi
         id: finding.id, dbPath: finding.dbPath, scanId: finding.scanId, title: finding.title, category: finding.category, severity: finding.severity, description: finding.description,
         ...(finding.path ? { path: finding.path } : {}), ...(finding.startLine ? { startLine: finding.startLine } : {}), ...(finding.endLine ? { endLine: finding.endLine } : {}), ...(finding.rootCause ? { rootCause: finding.rootCause } : {}),
       };
-      const run = { timeout: options.timeout, budget: options.variantBudget ?? String(DEFAULT_VARIANT_BUDGET_USD), ...(options.model ? { model: options.model } : {}) };
+      const gate = new VariantBudget(budget);
+      gate.record(done.costUsd);
+      let totalTokens = done.tokens ?? 0;
+      let tokensKnown = done.tokens !== undefined;
+      const recordChild = (child: { costUsd?: number; tokens?: number }) => {
+        gate.record(child.costUsd);
+        if (child.tokens === undefined) tokensKnown = false;
+        else totalTokens += child.tokens;
+      };
+      const run = () => ({ timeout: options.timeout, budget: String(gate.allowance(variantCap)), ...(options.model ? { model: options.model } : {}) });
+      const result = (details: NonNullable<FixOutcome["variants"]>): FixOutcome => {
+        const { costUsd: _cost, tokens: _tokens, ...rest } = done;
+        return { ...rest, ...(tokensKnown ? { tokens: totalTokens } : {}), ...(gate.known ? { costUsd: gate.spent } : {}), variants: details };
+      };
+      const empty = { created: 0, rescanned: { fixed: 0, open: 0, unchecked: 0 } };
+      if (gate.allowance(variantCap) <= 0) {
+        deps.err(`variants skipped: ${gate.stoppedReason}`);
+        return result({ ...empty, error: gate.stoppedReason });
+      }
       try {
         if (!fixClient) { const connection = await connect(options, deps); fixClient = connection.client; stopConsole ??= connection.stop; }
         const store = { store: deps.variants, err: deps.err, sleep: deps.sleep };
         const folder = tree;
-        const rescanned = await rescanVariants(fixClient, store, folder, parent, run);
+        const rescanned = await rescanVariants(fixClient, store, folder, parent, run());
+        // No pending sites means no rescan thread and no spend.
+        if (rescanned.threadId || rescanned.error) recordChild(rescanned);
+        if (gate.allowance(variantCap) <= 0) {
+          deps.err(`variant hunt skipped: ${gate.stoppedReason}`);
+          return result({ created: 0, rescanned: rescanSummary(rescanned), error: gate.stoppedReason });
+        }
         const commit = (await deps.git(tree, ["rev-parse", "HEAD"]).catch(() => "")).trim();
-        const hunt = await huntVariants(fixClient, store, folder, parent, run, commit ? { fixCommit: commit } : {});
-        const error = hunt.error ?? rescanned.error;
+        const hunt = await huntVariants(fixClient, store, folder, parent, run(), commit ? { fixCommit: commit } : {});
+        recordChild(hunt);
+        const error = (!gate.known ? gate.stoppedReason : undefined) ?? hunt.error ?? rescanned.error;
         deps.err(`variants: ${hunt.created.length} recorded, ${rescanned.items.length} checked again${error ? ` (${error})` : ""}`);
-        return { ...done, variants: { created: hunt.created.length, rescanned: rescanSummary(rescanned), ...(error ? { error } : {}) } };
+        return result({ created: hunt.created.length, rescanned: rescanSummary(rescanned), ...(error ? { error } : {}) });
       } catch (error) {
         const message = error instanceof Error ? error.message.split("\n")[0]! : String(error);
         deps.err(`warning: the variant hunt did not run (${message})`);
-        return { ...done, variants: { created: 0, rescanned: { fixed: 0, open: 0, unchecked: 0 }, error: message } };
+        gate.record(undefined);
+        tokensKnown = false;
+        return result({ ...empty, error: message });
       }
     };
     if (!options.pr) { deps.err(`committed on ${branch}; not pushed (--no-pr).`); const done = await followUp(outcome); await remember(done); return done; }
@@ -472,7 +501,7 @@ export function directJavaBump(tree: string, finding: Pick<FindingToFix, "title"
   const result = bumpJavaDependency(tree, { name: parsed.name, fixedVersion: parsed.fixedVersion, currentVersion: parsed.currentVersion });
   if (!result.applied) return { applied: false, reason: result.reason };
   const lines = result.edits.map(edit => `${edit.path}:${edit.line} ${edit.where}: ${edit.was} to ${edit.now}`);
-  return { applied: true, log: `changed ${parsed.name} to ${parsed.fixedVersion} directly (no model call): ${lines.join("; ")}`, summary: `0 changed the version of ${parsed.name} from ${parsed.currentVersion} to the lowest fixed version, ${parsed.fixedVersion}, where the repository sets it. No model was used.\n\n${lines.map(line => `- ${line}`).join("\n")}` };
+  return { applied: true, log: `changed ${parsed.name} to ${parsed.fixedVersion} directly (no model call): ${lines.join("; ")}`, summary: `0 changed the version of ${parsed.name} from ${parsed.currentVersion} to the lowest fixed version, ${parsed.fixedVersion}, where the repository sets it. The version edit used no model.\n\n${lines.map(line => `- ${line}`).join("\n")}` };
 }
 
 async function runThread(client: ConsoleClient, deps: FixDeps, folder: string, finding: FindingToFix, options: FixOptions, budget: number, policy?: FixPolicy, sandboxed = false) {
@@ -484,7 +513,7 @@ async function runThread(client: ConsoleClient, deps: FixDeps, folder: string, f
   deps.err(`working in thread ${id} (budget $${Number(budget.toFixed(4))})`);
   const { snapshot, timedOut } = await waitForThread(client, deps, id, Date.now() + Number(options.timeout) * 1000);
   const done = finishedThread(snapshot);
-  const costUsd = typeof done.usage.costUsd === "number" ? done.usage.costUsd : undefined;
+  const costUsd = done.usage.costUnavailable !== true && typeof done.usage.costUsd === "number" && Number.isFinite(done.usage.costUsd) && done.usage.costUsd >= 0 ? done.usage.costUsd : undefined;
   const tokens = typeof done.usage.inputTokens === "number" && typeof done.usage.outputTokens === "number" ? done.usage.inputTokens + done.usage.outputTokens : undefined;
   return { id, reply: done.reply, error: done.error, failed: done.failed && !timedOut, ...(tokens !== undefined ? { tokens } : {}), timedOut, budgetExhausted: asJson(done.session).costCeilingExceeded === true, usage: usageLine(done.usage), ...(costUsd !== undefined ? { costUsd } : {}) };
 }

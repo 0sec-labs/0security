@@ -20,16 +20,17 @@ import type { StoredVariant, VariantStore } from "../variants.js";
 
 const finding: FindingToFix = { id: "f-1234567890ab", fingerprint: "sarif-x:abc", title: "SQL injection in search", severity: "high", category: "sql-injection", tool: "foxguard", description: "d", path: "src/db.ts", startLine: 10 };
 
-function harness(overrides: Partial<{ status: string; checks: Record<string, number>; pulls: string; remote: string; policy: FixPolicy; fromRepo: boolean; loadPolicyArgs: unknown[]; answer: (message: string) => string; variants: VariantStore }> = {}) {
+function harness(overrides: Partial<{ status: string; checks: Record<string, number>; pulls: string; remote: string; policy: FixPolicy; fromRepo: boolean; loadPolicyArgs: unknown[]; answer: (message: string) => string; variants: VariantStore; costs: Array<number | undefined>; tokens: boolean }> = {}) {
   const calls: string[] = [];
   const requests: Array<[string, string, unknown]> = [];
   const bodies: string[] = [];
+  let threadIndex = -1;
   let lastReply = "Parameterized the query.";
   const client = { request: async (method: string, path: string, body?: unknown) => {
     requests.push([method, path, body]);
-    if (method === "POST" && path.endsWith("/sessions")) return { session: { id: "t1" } };
+    if (method === "POST" && path.endsWith("/sessions")) { threadIndex++; return { session: { id: "t1" } }; }
     if (method === "POST" && path.endsWith("/messages") && overrides.answer) lastReply = overrides.answer((body as { text: string }).text);
-    if (method === "GET") return { snapshot: { session: { status: "ready" }, messages: [{ role: "assistant", content: [{ type: "text", text: lastReply }] }], usage: { costUsd: 0.12 } } };
+    if (method === "GET") return { snapshot: { session: { status: "ready" }, messages: [{ role: "assistant", content: [{ type: "text", text: lastReply }] }], usage: { ...(overrides.tokens === false ? {} : { inputTokens: 10, outputTokens: 5 }), costUsd: overrides.costs ? overrides.costs[threadIndex] : 0.12 } } };
     return {};
   } };
   const deps: FixDeps = {
@@ -124,9 +125,9 @@ describe("0 findings fix", () => {
       const outcome = await runFix("f-1", options({ test: ["mvn -q test"] }), h.deps);
       expect(readFileSync(join(temp, "tree", "pom.xml"), "utf8")).toContain("<version>1.10.0</version>");
       expect(h.requests).toEqual([]); // no console, no thread
-      expect(outcome).toMatchObject({ changed: true, verified: true });
+      expect(outcome).toMatchObject({ changed: true, verified: true, costUsd: 0 });
       expect(outcome?.threadId).toBeUndefined();
-      expect(h.bodies.join("\n")).toContain("No model was used.");
+      expect(h.bodies.join("\n")).toContain("The version edit used no model.");
       expect(h.bodies.join("\n")).toContain("Written by 0 from the edit it made.");
     });
     it("asks the model when the version is set outside the repository", async () => {
@@ -357,6 +358,41 @@ describe("0 findings fix records its outcome for export-fixes", () => {
       expect(String((seeded![2] as { text: string }).text)).toContain("a shared query helper");
       // The fix thread, the rescan and the hunt all ran in the fix work tree, not the user's checkout.
       expect(h.requests.filter(([method, , body]) => method === "PATCH" && (body as { workspacePath?: string }).workspacePath === "/tmp/x/tree")).toHaveLength(3);
+    });
+
+    it("clamps each follow-up to the remaining total and reports all receipts", async () => {
+      const h = harness({ answer, variants: memory().store, costs: [0.2, 0.2, 0.1] });
+      h.deps.loadFinding = () => withLinks;
+      const outcome = await runFix("f-1", options({ budget: "0.5", pr: false }), h.deps);
+      const caps = h.requests.filter(([m, p]) => m === "POST" && p.endsWith("/sessions")).map(([, , b]) => (b as { costCeilingUsd: number }).costCeilingUsd);
+      expect(caps).toHaveLength(3);
+      expect(caps[0]).toBe(0.5);
+      expect(caps[1]).toBeCloseTo(0.3);
+      expect(caps[2]).toBeCloseTo(0.1);
+      expect(outcome!.costUsd).toBeCloseTo(0.5);
+      expect(outcome!.tokens).toBe(45);
+    });
+
+    it("keeps an empty rescan known-zero and omits incomplete aggregate token receipts", async () => {
+      const mem = memory();
+      mem.store.variantsOf = () => [];
+      const h = harness({ answer, variants: mem.store, costs: [0.2, 0.1], tokens: false });
+      h.deps.loadFinding = () => withLinks;
+      const outcome = await runFix("f-1", options({ budget: "0.5", pr: false }), h.deps);
+      expect(outcome!.costUsd).toBeCloseTo(0.3);
+      expect(outcome!.tokens).toBeUndefined();
+      expect(outcome!.variants!.error).toBeUndefined();
+      expect(h.requests.filter(([m, p]) => m === "POST" && p.endsWith("/sessions"))).toHaveLength(2);
+    });
+
+    it.each([[undefined], [NaN], [Infinity], [-1], [0.2, undefined], [0.5]])("stops further paid follow-ups after unknown or exhausted receipts %j", async (...costs) => {
+      const h = harness({ answer, variants: memory().store, costs });
+      h.deps.loadFinding = () => withLinks;
+      const outcome = await runFix("f-1", options({ budget: "0.5", pr: false }), h.deps);
+      expect(h.requests.filter(([m, p]) => m === "POST" && p.endsWith("/sessions"))).toHaveLength(costs.length);
+      expect(outcome!.variants!.error).toMatch(/budget exhausted|receipt unavailable/);
+      if (costs.some(cost => cost === undefined || !Number.isFinite(cost) || cost < 0)) expect(outcome!.costUsd).toBeUndefined();
+      else expect(outcome!.costUsd).toBe(0.5);
     });
 
     it("does nothing extra with --no-variants, and a failed hunt never fails the fix", async () => {
