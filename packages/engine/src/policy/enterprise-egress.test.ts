@@ -13,12 +13,9 @@ import { analyticsOptedOut, resolveAnalyticsLevel } from "../telemetry/analytics
 import { discoverAndRegisterPricing } from "../shared/pricing-discovery.js";
 import { checkBomAgainstOsv } from "../sbom/osv.js";
 import { GitSource } from "../plugins/extensions/adapters/git-source.js";
-import { loadCloudCredentials } from "../cloud/credentials.js";
 import { features as featureFlags } from "../agent/features.js";
 import { ToolExecutor } from "../agent/tools.js";
 import { resolveSmolvmRuntime } from "../runtime/smolvm-provision.js";
-import { WindowsEvidenceWorkerClient } from "../cloud/windows-evidence-worker.js";
-import { createHash } from "node:crypto";
 
 /**
  * Egress test for ZERO_ENTERPRISE=1. Every outbound primitive (fetch, node:http(s), net sockets) is patched to
@@ -96,7 +93,7 @@ afterEach(async () => {
 });
 
 const enterprise = () => {
-  for (const name of ["ZERO_OFFLINE", "DO_NOT_TRACK", "ZERO_ANALYTICS_LEVEL", "ZERO_CLOUD_TOKEN", "0SEC_CLOUD_TOKEN"]) vi.stubEnv(name, undefined);
+  for (const name of ["ZERO_OFFLINE", "DO_NOT_TRACK", "ZERO_ANALYTICS_LEVEL"]) vi.stubEnv(name, undefined);
   vi.stubEnv(ENTERPRISE_ENV, "1");
 };
 
@@ -113,7 +110,7 @@ describe("the egress guard itself", () => {
     expect(attempts.map(a => a.via)).toEqual(["http.request", "https.get"]);
   });
   it("control: without the switch the analytics pipeline does try to leave", async () => {
-    for (const name of ["ZERO_OFFLINE", "DO_NOT_TRACK", "ZERO_ANALYTICS_LEVEL", "ZERO_CLOUD_TOKEN", "0SEC_CLOUD_TOKEN", ENTERPRISE_ENV]) vi.stubEnv(name, undefined);
+    for (const name of ["ZERO_OFFLINE", "DO_NOT_TRACK", "ZERO_ANALYTICS_LEVEL", ENTERPRISE_ENV]) vi.stubEnv(name, undefined);
     vi.stubEnv("ZERO_ANALYTICS_POSTHOG_KEY", "phc_FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE0000");
     vi.stubEnv("ZERO_ANALYTICS_POSTHOG_HOST", "https://ph.example.test");
     const home = mkdtempSync(join(tmpdir(), "0-egress-"));
@@ -151,8 +148,6 @@ describe("ZERO_ENTERPRISE", () => {
     vi.stubEnv("DO_NOT_TRACK", "1");
     vi.stubEnv("ZERO_ANALYTICS_POSTHOG_KEY", "phc_FAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKEFAKE0000");
     vi.stubEnv("ZERO_ANALYTICS_POSTHOG_HOST", "https://ph.example.test");
-    vi.stubEnv("ZERO_CLOUD_TOKEN", "token-that-must-not-be-used");
-    vi.stubEnv("ZERO_CLOUD_HOST", "https://cloud.example.test");
     const home = mkdtempSync(join(tmpdir(), "0-egress-"));
     try {
       analyticsPipeline.__resetForTests();
@@ -163,12 +158,6 @@ describe("ZERO_ENTERPRISE", () => {
       await analyticsPipeline.flushNow();
     } finally { rmSync(home, { recursive: true, force: true }); }
     expect(attempts).toEqual([]);
-  });
-
-  it("cloud credentials never load, so every cloud sender stands down", () => {
-    enterprise();
-    vi.stubEnv("ZERO_CLOUD_TOKEN", "token-that-must-not-be-used");
-    expect(() => loadCloudCredentials()).toThrow(/ZERO_ENTERPRISE/);
   });
 
   it("pricing discovery does not fetch the public catalog", async () => {
@@ -207,18 +196,6 @@ describe("ZERO_ENTERPRISE", () => {
     try {
       await resolveSmolvmRuntime({ stateRoot: root }).catch(() => undefined);
     } finally { rmSync(root, { recursive: true, force: true }); }
-    expect(attempts).toEqual([]);
-  });
-
-  it("a cloud evidence worker request is refused", async () => {
-    enterprise();
-    const now = Date.parse("2026-07-14T10:00:00.000Z");
-    const bytes = new TextEncoder().encode("evidence");
-    const client = new WindowsEvidenceWorkerClient(
-      { baseUrl: "https://worker.example.test/api", jobId: "550e8400-e29b-41d4-a716-446655440000", uploadGrant: "A".repeat(43), uploadGrantExpiresAt: "2026-07-14T10:05:00.000Z" },
-      { now: () => now, maxAttemptsPerRequest: 1 },
-    );
-    await expect(client.uploadBlob({ sha256: createHash("sha256").update(bytes).digest("hex"), sizeBytes: bytes.byteLength, mediaType: "application/octet-stream", bytes })).rejects.toThrow();
     expect(attempts).toEqual([]);
   });
 

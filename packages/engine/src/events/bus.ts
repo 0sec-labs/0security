@@ -2,16 +2,15 @@
  * Pluggable event bus for scanner / agent-loop telemetry.
  *
  * The legacy `ScanListener` API (see `../scanner.ts`) only carried coarse
- * stage:start / stage:end / finding events. The cloud worker-controller and
- * future tracing sinks need richer signal — per-turn agent state, tool calls,
+ * stage:start / stage:end / finding events. Tracing sinks and other consumers
+ * need richer signal — per-turn agent state, tool calls,
  * planner invocations, finding ingests — so this module introduces a
  * fan-out `EventBus` that the rest of the core can `emit()` typed events
  * into, and that any number of `EventSink` consumers can subscribe to.
  *
  * Design goals:
  *
- *   1. Pluggable. Any module that can take an `EventSink` (cloud relay,
- *      in-memory spy for tests, OpenTelemetry exporter, etc.) can subscribe
+ *   1. Pluggable. Any module that can take an `EventSink` (in-memory spy for tests, OpenTelemetry exporter, etc.) can subscribe
  *      at process start without the scanner knowing about it.
  *   2. Backwards-compatible. The existing `ScanListener` public API is
  *      preserved via `scanListenerSink()` — an adapter that maps the new
@@ -19,16 +18,6 @@
  *      shapes so external consumers keep receiving familiar signals.
  *   3. Fail-soft. One buggy sink must never be able to abort a scan;
  *      exceptions thrown by a sink are caught and logged to stderr.
- *   4. Opt-in cloud relay. The `CloudEventSink` is OFF by default so
- *      local CLI runs are not spammed with `ZERO_EVENT_*` lines;
- *      enable via `ZERO_CLOUD_EVENTS=1` (checked at subscribe time).
- *
- * Cloud wire format (matches the cloud worker-controller's
- * `parseEventLines` in `0-cloud/services/worker-controller/src/poller.ts`):
- *
- *     ZERO_EVENT_<TYPE_UPPER> {"…json payload…"}
- *
- * e.g. `ZERO_EVENT_STEP_STARTED {"step":"recon","n":1}`.
  */
 import type { ScanEvent, ScanListener } from "./scan-event.js";
 import type { ToolCall, ToolResult } from "../agent/types.js";
@@ -45,8 +34,7 @@ import {
 // `EventType` alias) before they can be emitted — TypeScript will then
 // enforce payload shapes at every call site.
 //
-// Canonical event types the cloud already understands (schema comment in
-// `0-cloud/services/dashboard/src/db/schema.ts:680`):
+// Canonical event types:
 //
 //   step_started, step_completed, finding_ingested, cost_update,
 //   scan_completed
@@ -102,8 +90,7 @@ export interface CostUpdatePayload {
   input_tokens?: number;
   output_tokens?: number;
   /**
-   * Dual-spelling mirrors of input_tokens / output_tokens. The 0cloud
-   * orchestrator's scan_jobs segment-sum (updateScanCostFromEvent) keys on
+   * Dual-spelling mirrors of input_tokens / output_tokens. Some consumers key on
    * `token_input` / `token_output`, while engine-side consumers
    * (live-agent-state, dashboard live trace) read input_tokens /
    * output_tokens — producers emit BOTH so neither reader sees NULL.
@@ -302,11 +289,10 @@ export interface InlineValidationPayload {
  * finding — mirroring the existing `db.logEvent("pov_oracle")` trace.
  *
  * Why both: `db.logEvent` only writes 0's LOCAL sqlite `pipeline_events`,
- * which the cloud worker never relays. Putting the same signal on the typed
- * bus lets `cloudEventSink` serialize it (→ worker → orchestrator
- * `scan_events`), so the dashboard can join it to the finding by `findingId`
- * and render the "deterministically verified vs heuristic" badge that is the
- * core low-false-positive story.
+ * which no other consumer sees. Putting the same signal on the typed bus lets
+ * any sink join it to the finding by `findingId` and show the
+ * "deterministically verified vs heuristic" badge that is the core
+ * low-false-positive story.
  */
 export interface PovOraclePayload {
   /** Id of the finding the oracle adjudicated. */
@@ -332,7 +318,7 @@ export interface PovOraclePayload {
 }
 
 /**
- * Confirmed OAST out-of-band callback (0#659 / 0cloud#1278). Emitted by the
+ * Confirmed OAST out-of-band callback (0#659). Emitted by the
  * deterministic per-category `oracle` triage layer in `agentic-scanner.ts` when
  * the OAST-callback oracle (SSRF / OOB-RCE / OOB-SQLi …) reproduces a
  * token-matched callback.
@@ -343,14 +329,10 @@ export interface PovOraclePayload {
  * blind-vuln→verify loop can't promote. The `oracle` layer is `(always on)`
  * (FREE_LAYER_SET), so this event fires on every scan that confirms an OAST
  * callback, independent of `features.povGate`. Same {findingId, oracle, hasPov}
- * shape as `PovOraclePayload` so the 0cloud consumer (verify-claim EXISTS +
- * the #570 dashboard badge) reads either uniformly.
- *
- * `findingId` is the SAME engine finding id the `CloudSinkFinding` carries, so
- * the cloud correlates it to the finding row's `engine_finding_id`.
+ * shape as `PovOraclePayload` so a consumer reads either uniformly.
  */
 export interface OastConfirmedPayload {
-  /** Engine finding id — matches CloudSinkFinding.id → findings.engine_finding_id. */
+  /** Engine finding id. */
   findingId: string;
   category?: string;
   /** Always `oast-callback`: this event is only emitted for the OAST oracle. */
@@ -403,10 +385,7 @@ export interface DeltaPayload {
 // Before this event existed the dashboard GUESSED phase boundaries client-
 // side by watching when a turn's `max_turns` changed (see live-trace.tsx
 // `TurnGroup.phaseStart` / `PhaseDivider`). That heuristic can be replaced by
-// reading `phase_started.payload.name` / `.index` directly. Rides the same
-// cloudEventSink → worker → orchestrator `scan_events` → SSE path as every
-// other bus event; the orchestrator accepts the free-form `event_type` and
-// the worker relay has no allow-list, so no cloud redeploy is required.
+// reading `phase_started.payload.name` / `.index` directly.
 
 export interface PhaseStartedPayload {
   /** Canonical phase name: `prepare` | `analyze` | `research` | `verify` | `report`. */
@@ -711,7 +690,7 @@ export interface SessionObjectivePayload {
  * or the multi-modal default gate.
  */
 export interface CrossValidatedLeadEntry {
-  /** Engine finding id — matches CloudSinkFinding.id → findings.engine_finding_id. */
+  /** Engine finding id. */
   findingId: string;
   title: string;
   severity: string;

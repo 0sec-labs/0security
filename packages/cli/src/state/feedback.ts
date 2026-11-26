@@ -44,15 +44,12 @@
  *   - **Centrally disableable.** See {@link submissionBlockedReason} — an
  *     organization can kill egress for every operator with one env var.
  *
- * `User-Agent` the Node HTTP stack attaches. Cloud-authenticated submissions
- * also carry a Bearer token; its header name is previewed but its value is
- * deliberately redacted so credentials never enter the transcript.
+ * `User-Agent` the Node HTTP stack attaches.
  */
 
 import { appendFileSync, mkdirSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
-import { loadCloudCredentials } from "@0/engine";
 import { VERSION, homeStateDir } from "@0/engine/shared";
 import { getReleaseChannel } from "./runtime.js";
 import { getBuiltInSentryDsn } from "./built-in-diagnostics.js";
@@ -178,9 +175,8 @@ interface SubmitResult {
 }
 
 /**
- * Explicit default endpoint. Intentionally empty: an endpoint configured by an
- * operator remains an override, while authenticated 0cloud delivery is derived
- * only from real CLI credentials below.
+ * Explicit default endpoint. Intentionally empty: feedback is only submitted to
+ * an endpoint the operator configures.
  */
 export const DEFAULT_FEEDBACK_URL = "";
 
@@ -190,50 +186,9 @@ const FEEDBACK_URL_ENV = "ZERO_FEEDBACK_URL";
 /** Operator override for the single 0security Sentry project DSN. No dashboard DSN fallback. */
 const SENTRY_DSN_ENV = "ZERO_SENTRY_DSN";
 
-/** The authenticated 0cloud receiver behind the dashboard feedback channel. */
-const CLOUD_FEEDBACK_PATH = "/api/cli-feedback";
-
-interface FeedbackResolveOptions {
-  /**
-   * Test seam for an explicitly configured managed-service account token.
-   * ZERO_FEEDBACK_URL always wins and never consumes this credential.
-   */
-  cloudCredentials?: () => { host: string; token: string } | null;
-  /** Disable cloud-credential fallback for a caller without a reviewed preview. */
-  allowCloud?: boolean;
-}
-
 interface FeedbackTarget {
   url: string;
-  authorization?: string;
   sentryKey?: string;
-}
-
-function defaultCloudCredentials(env: FeedbackEnv): { host: string; token: string } | null {
-  try {
-    const credentials = loadCloudCredentials({
-      env: env as NodeJS.ProcessEnv,
-      warn: () => {},
-    });
-    return { host: credentials.host, token: credentials.token };
-  } catch {
-    return null;
-  }
-}
-
-function cloudFeedbackUrl(host: string): string | null {
-  try {
-    const url = new URL(host);
-    // cloud.0.ai is a legacy redirect. Redirecting a POST can change its
-    // method, so post to the canonical dashboard host directly.
-    if (url.hostname === "cloud.0.ai") url.hostname = "cloud.0.security";
-    url.pathname = CLOUD_FEEDBACK_PATH;
-    url.search = "";
-    url.hash = "";
-    return url.toString();
-  } catch {
-    return null;
-  }
 }
 
 function resolveSentryTarget(dsn: string): FeedbackTarget {
@@ -259,27 +214,20 @@ function resolveSentryTarget(dsn: string): FeedbackTarget {
 function resolveSubmissionTarget(
   payload: FeedbackPayload,
   env: FeedbackEnv,
-  options: FeedbackResolveOptions,
 ): FeedbackTarget | null {
   // Precedence: explicit env (an empty value disables Sentry) > built-in > none.
   const override = env[SENTRY_DSN_ENV];
   const dsn = override === undefined ? getBuiltInSentryDsn() : override.trim();
-  return payload.diagnostic && dsn ? resolveSentryTarget(dsn) : resolveFeedbackTarget(env, options);
+  return payload.diagnostic && dsn ? resolveSentryTarget(dsn) : resolveFeedbackTarget(env);
 }
 
 function resolveFeedbackTarget(
   env: FeedbackEnv = process.env,
-  options: FeedbackResolveOptions = {},
 ): FeedbackTarget | null {
   const configured = env[FEEDBACK_URL_ENV]?.trim();
   if (configured) return { url: configured };
   if (DEFAULT_FEEDBACK_URL) return { url: DEFAULT_FEEDBACK_URL };
-  if (options.allowCloud === false) return null;
-
-  const credentials = (options.cloudCredentials ?? (() => defaultCloudCredentials(env)))();
-  if (!credentials) return null;
-  const url = cloudFeedbackUrl(credentials.host);
-  return url ? { url, authorization: `Bearer ${credentials.token}` } : null;
+  return null;
 }
 
 /**
@@ -319,9 +267,8 @@ function isOptOutSet(value: string | undefined): boolean {
  */
 export function feedbackEndpoint(
   env: FeedbackEnv = process.env,
-  options: FeedbackResolveOptions = {},
 ): string | null {
-  return resolveFeedbackTarget(env, options)?.url ?? null;
+  return resolveFeedbackTarget(env)?.url ?? null;
 }
 
 /**
@@ -330,7 +277,6 @@ export function feedbackEndpoint(
  */
 export function submissionBlockedReason(
   env: FeedbackEnv = process.env,
-  options: FeedbackResolveOptions = {},
   payload?: FeedbackPayload,
 ): SubmitSkipReason | null {
   // Opt-out is checked first and wins over everything, including an
@@ -339,7 +285,7 @@ export function submissionBlockedReason(
   for (const name of FEEDBACK_OPT_OUT_ENV) {
     if (isOptOutSet(env[name])) return "opt-out";
   }
-  return targetBlockedReason(payload ? resolveSubmissionTarget(payload, env, options) : resolveFeedbackTarget(env, options));
+  return targetBlockedReason(payload ? resolveSubmissionTarget(payload, env) : resolveFeedbackTarget(env));
 }
 
 function targetBlockedReason(target: FeedbackTarget | null): SubmitSkipReason | null {
@@ -450,9 +396,6 @@ function requestHeaders(target: FeedbackTarget, redactAuthorization = false): Re
     headers["content-type"] = "application/x-sentry-envelope";
     headers["x-sentry-auth"] = `Sentry sentry_version=7,sentry_key=${redactAuthorization ? "<redacted>" : target.sentryKey},sentry_client=0-cli/${VERSION}`;
   }
-  if (target.authorization) {
-    headers.authorization = redactAuthorization ? "Bearer <redacted>" : target.authorization;
-  }
   return headers;
 }
 
@@ -463,10 +406,9 @@ function requestHeaders(target: FeedbackTarget, redactAuthorization = false): Re
 export function buildSubmitPreview(
   payload: FeedbackPayload,
   env: FeedbackEnv = process.env,
-  options: FeedbackResolveOptions = {},
 ): SubmitPreview | null {
   if (FEEDBACK_OPT_OUT_ENV.some((name) => isOptOutSet(env[name]))) return null;
-  const target = resolveSubmissionTarget(payload, env, options);
+  const target = resolveSubmissionTarget(payload, env);
   if (target === null || targetBlockedReason(target) !== null) return null;
   return {
     url: target.url,
@@ -476,7 +418,7 @@ export function buildSubmitPreview(
   };
 }
 
-interface SubmitOptions extends FeedbackResolveOptions {
+interface SubmitOptions {
   /** Injected transport, matching the repo's `fetchImpl` convention. */
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
@@ -520,7 +462,7 @@ export async function submitFeedback(
   if (payload.diagnostic && opts.diagnosticConsent?.confirmed !== true && opts.diagnosticConsent?.policy !== "automatic") {
     return { ok: false, skipped: "no-consent", error: describeSkip("no-consent") };
   }
-  const target = resolveSubmissionTarget(payload, env, opts);
+  const target = resolveSubmissionTarget(payload, env);
   const targetBlocked = targetBlockedReason(target);
   if (targetBlocked !== null) return { ok: false, skipped: targetBlocked, error: describeSkip(targetBlocked) };
   if (target === null) return { ok: false, skipped: "no-endpoint", error: describeSkip("no-endpoint") };
@@ -531,9 +473,8 @@ export async function submitFeedback(
   }
 
   // Re-derive the current preview shape and reject if it no longer matches
-  // the caller's reviewed preview. The token is never compared — only the
-  // redacted form, so token rotation between preview and send still allows
-  // submission (the redacted form is always "Bearer <redacted>").
+  // the caller's reviewed preview. Keys are never compared, only the redacted
+  // headers.
   const reviewed = opts.expectedPreview;
   if (reviewed !== undefined) {
     const currentHeaders = requestHeaders(target, true);

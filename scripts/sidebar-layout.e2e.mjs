@@ -22,7 +22,7 @@ const session = (id, title, workspacePath, status = 'ready') => ({ id, title, ti
 const sessions = [
   session('t1', 'A remarkably long thread title that cannot possibly fit in the sidebar width', '/work/an-extremely-long-folder-name-for-a-project'),
   session('t2', 'Short', '/work/app'),
-  session('t3', 'Needs an answer about the deploy key rotation schedule', '/work/0cloud', 'waiting'),
+  session('t3', 'Needs an answer about the deploy key rotation schedule', '/work/app', 'waiting'),
   session('t4', 'No folder', undefined),
 ];
 let child, browser;

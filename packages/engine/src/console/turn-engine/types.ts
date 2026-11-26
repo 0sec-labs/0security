@@ -7,7 +7,6 @@ import type { ExtensionRunPort } from "../../agent/types.js";
 import { type osecDB } from "../../storage/index.js";
 import type { AgentRole, OperatorQuestionAnswer, OperatorQuestionRequest, ToolCall, ToolContext, ToolDefinition, ToolResult, ToolRisk } from "../../agent/types.js";
 import type { ConsoleSessionCheckpoint } from "../session-checkpoint.js";
-import { type RunCapture } from "../../telemetry/run-contribution.js";
 import { type ConsoleConversationHistory } from "./console-tools.js";
 
 /**
@@ -256,8 +255,6 @@ export interface ConsoleSessionConfig {
    * passes an `LlmApiRuntime`. Build one with {@link createConsoleRuntime}.
    */
   runtime: NativeRuntime;
-  /** Explicit fixture capture; ordinary console runs require configured enrollment. */
-  contribution?: RunCapture;
   /**
    * Prior conversation to seed the session with. When provided, the session's
    * history starts as a DEFENSIVE COPY of these native messages instead of
@@ -369,7 +366,7 @@ export interface ConsoleSessionConfig {
    * `false` to keep the heuristic only (e.g. to avoid any extra model spend).
    */
   refineObjective?: boolean;
-  /** Actual provider model id, recorded with a contribution. */
+  /** Actual provider model id. */
   costModel?: string;
   /** Captured once for the session. */
   workspaceRoot?: string;
@@ -463,7 +460,6 @@ export interface ConsoleSession {
   readonly scanId: string;
   /** The session is usable after this resolves. */
   readonly ready: Promise<void>;
-  readonly contribution?: RunCapture;
   readonly systemPrompt: string;
   readonly tools: ToolDefinition[];
   /** Source lessons supplied to the last actual planner request, never proof of use. */

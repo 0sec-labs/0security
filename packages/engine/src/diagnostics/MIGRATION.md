@@ -175,7 +175,6 @@ Grouped by file, `file:line` as of this commit.
 These are wire protocols and IPC, not operator messages. Routing them through
 the diagnostics channel would corrupt a parser on the other end.
 
-- `events/bus.ts:680` — `cloudEventSink` writes `ZERO_EVENT_<TYPE> {json}` lines on **stdout**; the cloud worker-controller's `parseEventLines` reads them.
 - `stages/npm-detectors/sandbox-harness.ts:75` — the harness subprocess writes one JSON line on **stdout**; the parent parses the last `{…}` line.
 - `stages/npm-detectors/sandbox-harness.ts:79` — the same subprocess's top-level fault handler, immediately before `process.exit(1)`. It runs in a child process with no diagnostics sinks installed, and stderr is what the parent captures.
 - `src/diagnostics/channel.ts:338` — the channel's own built-in stderr sink. This is the one write in core that is supposed to exist.

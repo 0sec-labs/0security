@@ -10,7 +10,6 @@ import {
   analyticsOptedOut,
   TOOL_DEFINITIONS,
   createHerdrEventSink,
-  configureRunContributionsFromEnvironment,
   eventBus,
   maybeSubscribeOperationalEventSink,
   presentationEventSink,
@@ -91,9 +90,6 @@ try {
 } catch {
   analyticsPipeline.setLevel("off");
 }
-// Independent, purpose-specific enrollment. Missing configuration does not enroll.
-try { configureRunContributionsFromEnvironment(); }
-catch { process.stderr.write("[0] Run contribution unavailable: invalid private enrollment configuration.\n"); }
 
 // Operational NDJSON stderr sink (ZERO_LOG_FORMAT=json). Opt-in metadata-
 // only logging — writes one NDJSON line per allowlisted lifecycle / cost

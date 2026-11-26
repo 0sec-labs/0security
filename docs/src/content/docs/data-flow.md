@@ -19,7 +19,6 @@ export ZERO_ENTERPRISE=1
 
 Any value except empty, `0`, `false` or `no` turns it on. With it on, 0:
 
-- sends no run contributions and never loads cloud credentials;
 - makes no update check and refuses `0security doctor upgrade`;
 - skips the public model catalog and price lookups, so models without a built-in price show no cost;
 - removes the `web_search` tool and refuses the advisory lookup, remote extension sources, the sandbox runtime download, GitHub repository and skills directory reads, SARIF upload through `gh`, and remote worker provisioning;
@@ -52,7 +51,6 @@ One switch, `DO_NOT_TRACK=1`, stops every row here. `ZERO_ENTERPRISE` and `ZERO_
 
 | Entry | Destination | When | What is sent | How to disable without the switch |
 | --- | --- | --- | --- | --- |
-| `run-contribution` | `cloud.0.security` | Only with a cloud token and a contribution permission. | A sealed run capture. | `ZERO_ENTERPRISE`, `DO_NOT_TRACK`. |
 | `update-check` | `api.github.com`, `github.com`, `raw.githubusercontent.com` | Interactive start-up, console update status, `0security doctor upgrade`. | A GET for the latest release tag; the installer on upgrade. | `updatePolicy off`, `ZERO_NO_UPDATE_CHECK`, `ZERO_OFFLINE`. |
 | `model-catalog-sync` | `models.dev` | Console model picker refresh. | A GET of a public list. | `DO_NOT_TRACK`, `ZERO_OFFLINE`. |
 | `pricing-discovery` | `openrouter.ai` | A model has no built-in price. | A GET of a public list. | The same. |
@@ -69,7 +67,6 @@ One switch, `DO_NOT_TRACK=1`, stops every row here. `ZERO_ENTERPRISE` and `ZERO_
 | `skills-catalog` | `api.github.com` | Previewing or installing from the console skills directory. | Read-only API calls through your `gh` login. | Do not use the directory. |
 | `github-repository-list` | `api.github.com` | The console repository picker and GitHub account status. | Read-only API calls through your `gh` login. | Use local paths. |
 | `github-gh-commands` | GitHub, through `gh` | `0security findings upload` and host integrations. | The request you asked for. | Do not run them. |
-| `windows-evidence-worker` | The base URL in a cloud-issued grant | A cloud Windows evidence job. | A bounded evidence envelope. | Do not accept cloud jobs. |
 | `remote-worker-provisioning` | `nodejs.org`, apt and npm registries, from the remote computer | `0security computers add`. | Package downloads. | Prepare the remote computer yourself. |
 
 ## Dependency audit

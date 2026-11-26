@@ -85,7 +85,7 @@
   --intent-bg-solid-hover:var(--intent-solid-hover,color-mix(in srgb,var(--intent-color) 92%,black));
 }
 
-/* 0cloud-compatible semantic aliases; pages never re-skin controls. */
+/* Semantic aliases; pages never re-skin controls. */
 :root {
   --radius:var(--radius-button);
   --ui-control-height:var(--control-height);

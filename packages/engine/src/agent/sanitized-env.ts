@@ -67,8 +67,7 @@ const SENSITIVE_ENV_PATTERNS = [
   "GITLAB_TOKEN",
   "GH_TOKEN",
   "GL_TOKEN",
-  // Per-dispatch secrets injected by 0cloud's worker-controller.
-  "ZERO_CLOUD_TOKEN",
+  // Per-dispatch secrets injected by a managed worker.
   "ZERO_CHATGPT_ACCESS_TOKEN",
   "ZERO_CHATGPT_OAUTH_REFRESH_TOKEN",
   "ZERO_GITHUB_TOKEN",

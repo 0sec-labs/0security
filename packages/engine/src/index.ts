@@ -179,9 +179,6 @@ export {
   resolveAnalyticsLevel,
   levelAtLeast,
 } from "./telemetry/analytics-level.js";
-export {
-  configureRunContributionsFromEnvironment,
-} from "./telemetry/run-contribution.js";
 // Operational NDJSON stderr sink (ZERO_LOG_FORMAT=json). Writes one
 // NDJSON line per allowlisted lifecycle/cost event to stderr, stripped
 // of all sensitive fields (prompts, responses, reasoning, tool args,
@@ -255,11 +252,6 @@ export { parseVerifySpec, inlineVerifySpec, verificationLine, isVerified, gateDo
 export type { VerifySpec, VerifierResult, ContainerRunner } from "./verifier/index.js";
 export { reproduceFinding } from "./reproduction/index.js";
 export type { ReproduceInput } from "./reproduction/index.js";
-
-// Cloud credentials and the independent Windows evidence-worker transport.
-export {
-  loadCloudCredentials,
-} from "./cloud/index.js";
 
 // ── Interactive operator console: unified conversational front-end that drives
 // the full tool registry through the real ToolExecutor + LlmApiRuntime. ──
