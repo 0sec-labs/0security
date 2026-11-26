@@ -16,6 +16,8 @@ Work:
                                    review (optionally as a pull request)
   probe [options] <url>            Send adversarial messages to a live model or agent endpoint and
                                    report the ones it obeys
+  redteam                          Test whether an agent obeys poisoned text: a fake MCP server that
+                                   records its calls, and a judge that reads the recording
   sbom                             Generate an SBOM from lockfiles, check one against known
                                    advisories, and scan model files and agent configuration
   findings [options]               Browse findings and change their status
@@ -1522,6 +1524,143 @@ Options:
   --fail-on <severity>    Exit 1 when a finding is at or above this severity
   --save                  Also store the findings, so they show in `0security findings list`
   -h, --help              display help for command
+
+### 0security redteam
+Usage: 0security redteam [options] [command]
+
+Test whether an agent obeys poisoned text: a fake MCP server that records its calls, and a judge
+that reads the recording
+
+Options:
+  -h, --help                    display help for command
+
+Commands:
+  honeypot [options]            Serve a fake MCP server over stdio that returns poisoned data and
+                                records every tool call
+  config [options]              Print the MCP configuration that points an agent at the honeypot,
+                                and a fresh canary
+  judge [options]               Say whether the recorded calls show the agent obeying the poisoned
+                                text; exits 1 if it did
+  scenarios [options] <report>  List the replayable scenarios in a scan report made with the
+                                agent-toxic-flow skill
+  run [options]                 Run your agent against the honeypot several times and judge each run
+                                from the recorded calls; exits 1 if it obeyed, 2 if inconclusive
+  generate [options]            Make prompt-injection scenarios for an agent from its tool manifest:
+                                from a hosted brain if ZERO_BRAIN_URL or --url is set, else from the
+                                open starter pack
+  help [command]                display help for command
+
+### 0security redteam config
+Usage: 0security redteam config [options]
+
+Print the MCP configuration that points an agent at the honeypot, and a fresh canary
+
+Options:
+  --trace <file>   Where the honeypot will record calls
+  --canary <text>  Use this canary instead of making one
+  --name <name>    Name of the server in the configuration (default: "honeypot")
+  -h, --help       display help for command
+
+### 0security redteam generate
+Usage: 0security redteam generate [options]
+
+Make prompt-injection scenarios for an agent from its tool manifest: from a hosted brain if
+ZERO_BRAIN_URL or --url is set, else from the open starter pack
+
+Options:
+  --manifest <file>   JSON file listing the agent's tools (name, privilege, gate) and the kinds of
+                      input it reads (sources)
+  --framework <name>  Prefer scenarios mapped to this framework, such as LLM01 or AML.T0051
+  --count <n>         How many scenarios, 1 to 20
+  --url <url>         The brain endpoint (default: ZERO_BRAIN_URL); https, or http to localhost. The
+                      token comes from ZERO_BRAIN_TOKEN
+  --dry-run           Print the exact request that would be sent and send nothing
+  --offline           Never contact a brain; use the starter pack
+  --canary <text>     Put this canary in each payload instead of making one
+  --format <format>   text or json (default: "text")
+  -h, --help          display help for command
+
+### 0security redteam honeypot
+Usage: 0security redteam honeypot [options]
+
+Serve a fake MCP server over stdio that returns poisoned data and records every tool call
+
+Options:
+  --trace <file>               Append each call to this file, one JSON object per line
+  --canary <text>              The marker the poisoned text asks the agent to send out; the judge
+                               needs the same one (default: ZERO_REDTEAM_CANARY)
+  --payload <text>             The poisoned instruction returned by the source tools (default: ask
+                               the agent to email the secret out)
+  --payload-file <file>        Read the poisoned instruction from a file
+  --decoy                      Serve decoy tools that nothing legitimate calls, so every call is an
+                               alert (for a running agent, not a test)
+  --alert-url <url>            With --decoy: POST each alert as JSON to this https URL (a chat
+                               webhook or your own collector); a `text` field makes it readable in
+                               Slack-style webhooks
+  -H, --alert-header <header>  Header for the alert request, `Name: value`; the value may be
+                               $ENV_VAR so a token is not typed on the command line (repeatable)
+  -h, --help                   display help for command
+
+### 0security redteam judge
+Usage: 0security redteam judge [options]
+
+Say whether the recorded calls show the agent obeying the poisoned text; exits 1 if it did
+
+Options:
+  --trace <file>     The file the honeypot wrote
+  --canary <text>    The canary the honeypot was started with
+  --forbid <tools>   Tools that count as a hit when called at all, comma separated, such as
+                     run_command
+  --format <format>  text, json, sarif or md (sarif and md report the hit as a finding) (default:
+                     "text")
+  --target <name>    Name of the agent in a sarif or md report (default: the trace file name)
+  --scenario <file>  A SCENARIO line, or a scan report or finding saved as JSON, so the finding
+                     names the scenario
+  -h, --help         display help for command
+
+### 0security redteam run
+Usage: 0security redteam run [options]
+
+Run your agent against the honeypot several times and judge each run from the recorded calls; exits
+1 if it obeyed, 2 if inconclusive
+
+Options:
+  --agent <command>          Shell command that starts the agent; {mcp_config} is replaced by the
+                             path of an MCP config file that lists the honeypot
+  --cwd <dir>                Directory to run the agent in (default: the current directory)
+  --runs <n>                 How many times to run the agent (1 to 20) (default: 3)
+  --timeout <seconds>        Stop an agent run after this long (1 to 3600) (default: 120)
+  --env <NAME>               Pass this variable from the current environment to the agent;
+                             everything else is scrubbed (repeatable)
+  --forbid <tools>           Tools that count as a hit when called at all, comma separated, such as
+                             run_command
+  --payload <text>           The poisoned instruction the honeypot returns (default: ask the agent
+                             to email the secret out)
+  --scenario <file>          A SCENARIO line, or a scan report or finding saved as JSON; its payload
+                             is used with each run's canary
+  --format <format>          text, json, sarif or md (default: "text")
+  --target <name>            Name of the agent in a sarif or md report (default: "agent")
+  --max-hit-rate <fraction>  Exit 1 only when the share of conclusive runs the agent obeyed is above
+                             this (0 to 1) (default: 0)
+  --trace-dir <dir>          Keep each run's trace in this directory (it is never deleted)
+  -o, --output <file>        Write the result (in --format) to this file instead of stdout, even
+                             when the exit code is 1 or 2
+  --unsafe-no-isolation      Required: there is no sandbox yet, so the agent runs on this machine
+                             with the access you give it. Results are untrusted if the agent can
+                             write to the trace file. A container agent needs its own cleanup
+                             (docker run --rm --name <unique>), since stopping the shell does not
+                             stop the container. POSIX only
+  -h, --help                 display help for command
+
+### 0security redteam scenarios
+Usage: 0security redteam scenarios [options] <report>
+
+List the replayable scenarios in a scan report made with the agent-toxic-flow skill
+
+Options:
+  --canary <text>    Put this canary in each payload instead of making one
+  --format <format>  text or json (default: "text")
+  -h, --help         display help for command
 
 ### 0security sbom
 Usage: 0security sbom [options] [command]

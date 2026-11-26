@@ -29,6 +29,10 @@ const SECTIONS: Readonly<Record<string, Build>> = {
     (await import("./probe.js")).registerProbeCommand(root);
   },
 
+  async redteam(root) {
+    (await import("./redteam.js")).registerRedteamCommand(root);
+  },
+
   async sbom(root) {
     (await import("./sbom.js")).registerSbomCommand(root);
   },

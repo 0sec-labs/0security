@@ -47,7 +47,7 @@ Set the key of the provider for your model (see [Models](/models/)). The default
 | Input | Default | Meaning |
 | --- | --- | --- |
 | `version` | required | Release of 0 to install, for example `0.41.0`. |
-| `mode` | `scan` | `scan` reviews the code with a model. `sbom` checks dependencies (see [SBOM mode](#sbom-mode)). |
+| `mode` | `scan` | `scan` reviews the code with a model. `sbom` checks dependencies (see [SBOM mode](#sbom-mode)). `agent-config` checks agent files (see [Check agent files](#check-agent-files)). `redteam` tests an agent (see [Red team an agent](#red-team-an-agent)). |
 | `target` | `.` | Folder to scan, relative to the workspace. It must stay inside the workspace. |
 | `diff-base` | the pull request's base branch | Git ref to compare with. Outside a pull request, empty scans the whole folder. |
 | `model` | the default model | Model for the scan thread. |
@@ -65,6 +65,7 @@ Set the key of the provider for your model (see [Models](/models/)). The default
 | `skill` | the default skill | Skill that holds the scan method. |
 | `allow-partial` | `false` | Pass the job when the scan stops before it reviews everything. |
 | `licenses-preset` | none | `sbom` mode: also check licenses against `permissive` or `no-copyleft`. |
+| `redteam-*` | see below | `redteam` mode only. See [Red team an agent](#red-team-an-agent). |
 | `upload` | `true` | Upload to code scanning. Needs `security-events: write`. |
 | `github-token` | the job's token | Token used for the upload. |
 
@@ -178,13 +179,76 @@ Advisories only warn unless `fail-on` is set, and then any advisory fails the jo
 
 ## Check agent files
 
-A pull request can change the files AI coding tools read: rules, MCP configuration and settings. `0security sbom agent-config` checks them with no model key and no network. Run it in a step of its own. The Action has no mode for it.
+A pull request can change the files AI coding tools read: rules, MCP configuration and settings. `0security sbom agent-config` checks them with no model key and no network. The Action runs it with `mode: agent-config`.
 
 ```yaml
-      - run: 0security sbom agent-config . --format sarif -o agent-config.sarif --fail-on high
+      - uses: 0sec-labs/0security@v0.46.0
+        with:
+          version: 0.46.0 # Pin the CLI
+          mode: agent-config
+          fail-on: high
 ```
 
-Run it after you install `0security` and before any step that uses an AI tool. Upload the SARIF file with `0security findings upload agent-config.sarif`, or import it with `0security findings import agent-config.sarif`. See [Check agent files in a repository](/extensions/#check-agent-files-in-a-repository) for the rules.
+The mode checks `target`, writes SARIF and uploads it to code scanning with the category name 0 agent-config. With `fail-on` set, a finding at or above that severity fails the job. Without it the job never fails on findings. Only `target`, `upload`, `fail-on` and `github-token` apply. Run it before any step that uses an AI tool. You can also run `0security sbom agent-config . --format sarif -o agent-config.sarif --fail-on high` in a step of your own. See [Check agent files in a repository](/extensions/#check-agent-files-in-a-repository) for the rules.
+
+## Red team an agent
+
+`mode: redteam` runs `0security redteam run`: it starts your agent command, gives it a honeypot tool server that returns an injected instruction, and checks whether the agent obeyed it. It needs no model key of its own, but your agent may need one.
+
+**0 does not isolate the agent.** It runs on the runner as a normal process, with the workspace, the network and every variable you pass in `redteam-env`. A badly behaved agent can do real harm there. Use a disposable runner and give it no credentials you cannot lose. The mode fails with a clear message unless you set `redteam-unsafe-no-isolation: true`. It also refuses fork pull requests and every event except `push`, `schedule`, `workflow_dispatch`, `merge_group` and same-repository `pull_request`, because it executes code from the change under test. Exit codes: 0 clear, 1 obeyed (needs a report), 2 inconclusive (see `redteam-inconclusive`); any other code fails the step.
+
+```yaml
+name: agent-redteam
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  security-events: write   # only needed to upload the SARIF report
+
+jobs:
+  redteam:
+    # Never run the agent for a fork: it would execute the fork author's code.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest   # Use a throwaway runner. The agent runs on it unsandboxed.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: 0sec-labs/0security@v0.46.0
+        env:
+          SUPPORT_BOT_KEY: ${{ secrets.SUPPORT_BOT_TEST_KEY }} # A test key with no production access
+        with:
+          version: 0.46.0 # Pin the CLI
+          mode: redteam
+          redteam-agent: node bot/agent.js
+          redteam-env: SUPPORT_BOT_KEY
+          redteam-forbid: shell,send_email
+          redteam-runs: "3"
+          redteam-unsafe-no-isolation: "true"
+```
+
+Never use `pull_request_target`, `workflow_run` or comment triggers for this mode: they run with secrets and write access. The agent runs unsandboxed on the runner with the runner's access, so use a throwaway runner and give it only test credentials. The Action itself refuses every event except `push`, `schedule`, `workflow_dispatch`, `merge_group` and `pull_request` from the same repository.
+
+| Input | Default | Meaning |
+| --- | --- | --- |
+| `redteam-agent` | required | Command that starts the agent. |
+| `redteam-unsafe-no-isolation` | `false` | Must be `true`. Confirms the agent runs with no sandbox. |
+| `redteam-runs` | `3` | Runs, 1 to 20. |
+| `redteam-timeout` | `120` | Seconds per run. |
+| `redteam-env` | none | Variable names to pass to the agent, comma separated. Set the values on the step. |
+| `redteam-forbid` | none | Tools the agent must not call, comma separated. |
+| `redteam-payload` | built-in | The injected instruction as text. Not with `redteam-scenario`. |
+| `redteam-scenario` | none | A scenario file. Take it from the base branch or a separate checkout. |
+| `redteam-max-hit-rate` | `0` | Share of runs, 0 to 1, in which the agent may obey. At the default, one obeyed run fails the job. |
+| `redteam-target` | none | A name for the agent in the report. |
+| `redteam-inconclusive` | `fail` | `warn` lets a run that proved nothing pass with a warning. |
+
+`target` is the folder the agent starts in. The mode writes SARIF and uploads it as `0 redteam`. It does not use `fail-on`. The exit code decides: `0` means the agent did not obey in any conclusive run, `1` means it obeyed more often than `redteam-max-hit-rate` allows and fails the job, and `2` means the run was inconclusive, for example the agent never called the honeypot. Inconclusive fails the job by default. `status` is `complete`, `obeyed` or `inconclusive`.
+
+A pass is not proof of safety. It shows that this agent ignored this payload in these runs. Model output varies, so a few runs can miss a weakness.
 
 ## Examples
 

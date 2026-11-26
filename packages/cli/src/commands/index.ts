@@ -30,6 +30,7 @@ export { registerVerifyCommand } from "./verify.js";
 export { registerEvidenceCommand } from "./evidence.js";
 export { registerSbomCommand } from "./sbom.js";
 export { registerProbeCommand } from "./probe.js";
+export { registerRedteamCommand } from "./redteam.js";
 export { registerFindingsUploadCommand } from "./findings-upload.js";
 export { registerFindingsIssuesCommand } from "./findings-issues.js";
 export { registerFindingsExportFixesCommand } from "./findings-export-fixes.js";

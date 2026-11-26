@@ -584,6 +584,35 @@
       "disable": "Leave ZERO_AUDIT_SINK_URL unset."
     },
     {
+      "id": "redteam-decoy-alert",
+      "class": "operator",
+      "enterprise": "allowed",
+      "destinations": [
+        "the https URL you set with --alert-url (plain http only to this machine)"
+      ],
+      "files": [
+        "packages/cli/src/commands/redteam.ts"
+      ],
+      "when": "Only `0 redteam honeypot --decoy` with `--alert-url`, once per call an agent makes to a decoy tool. Never from a scan, a probe, the judge or any other command.",
+      "sent": "One JSON POST per decoy call: the time, the decoy tool name, its privilege class, the call number, the arguments the agent passed (each cut to 300 characters) and a one-line text. Headers from `--alert-header`, where a value may name an environment variable. No redirect is followed.",
+      "disable": "Do not pass --alert-url; the calls are then only written to the trace file."
+    },
+    {
+      "id": "redteam-brain",
+      "class": "operator",
+      "enterprise": "blocked",
+      "destinations": [
+        "the https URL you set with ZERO_BRAIN_URL or --url (plain http only to this machine); never a default"
+      ],
+      "files": [
+        "packages/engine/src/redteam/brain/client.ts",
+        "packages/cli/src/commands/redteam-generate.ts"
+      ],
+      "when": "Only `0 redteam generate` with a brain URL set and not offline. Never from a scan, a probe, the honeypot, the judge or any other command.",
+      "sent": "One JSON POST: the contract version, the task name, the shape of the agent (tool names, a coarse privilege and gate for each, kinds of input source), and optionally a framework name and a count. The bearer token from ZERO_BRAIN_TOKEN goes in the Authorization header only. Never source code, paths, prompts, secrets or findings: the request schema rejects every other field. No redirect is followed, the reply is size-capped and validated, and a failed or invalid reply falls back to the open starter set and says so.",
+      "disable": "Do not set a URL, pass --offline, or set ZERO_OFFLINE. ZERO_ENTERPRISE also keeps it off."
+    },
+    {
       "id": "ha-shared-database",
       "class": "operator",
       "enterprise": "allowed",
