@@ -182,7 +182,12 @@ export function scanJavaUsage(folder: string, components: Array<{ name: string; 
     }
     if (!searching) continue;
     const importLines = new Set(found.map(item => item.line));
-    for (const item of found) for (const symbol of symbols) if (importNames(item.name, symbol)) addHit({ symbol, path, line: item.line, test, kind: "import" });
+    for (const item of found) {
+      checks += symbols.length;
+      if (checks > maxChecks) break;
+      for (const symbol of symbols) if (importNames(item.name, symbol)) addHit({ symbol, path, line: item.line, test, kind: "import" });
+    }
+    if (checks > maxChecks) { searching = false; limit.truncated = true; limit.skipped += files.length - position; continue; }
     const lines = text.split(/\r?\n/);
     for (let index = 0; index < lines.length; index += 1) {
       const line = lines[index]!;

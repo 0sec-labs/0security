@@ -315,4 +315,11 @@ describe("a scan that hit a limit never says not-imported", () => {
     const advisoryWithSymbol: Advisory = { ...advisory(["a.b.C"]) };
     expect(attachJavaUsage([advisoryWithSymbol], dir, { maxSymbolChecks: 1 }).advisories[0]!.usage!.status).toBe("unknown");
   });
+  it("counts import-line symbol matching against the same work budget", () => {
+    const dir = mkdtempSync(join(tmpdir(), "0-usage-imports-"));
+    mkdirSync(join(dir, "src/main/java"), { recursive: true });
+    writeFileSync(join(dir, "src/main/java/I.java"), Array.from({ length: 50 }, (_, index) => `import x.y.C${index};`).join("\n"));
+    const report = scanJavaUsage(dir, [], { symbols: ["a.b.C", "a.b.D"], limits: { maxSymbolChecks: 20 } });
+    expect(report.truncated).toBe(true);
+  });
 });
