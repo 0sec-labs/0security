@@ -1,5 +1,5 @@
 name: 0 security scan
-description: Scan a pull request with 0 and upload the findings to GitHub code scanning. Can also generate and check an SBOM.
+description: Scan a pull request with 0 and upload the findings to GitHub code scanning. Can also generate and check an SBOM, check agent files, and red team an agent.
 author: 0sec-labs
 branding:
   icon: shield
@@ -33,7 +33,7 @@ inputs:
     description: Token used to upload to code scanning.
     default: ${{ github.token }}
   mode:
-    description: "scan (default) reviews the code with a model. sbom generates a CycloneDX SBOM from lockfiles, checks it against known advisories and uploads it as an artifact. In sbom mode only target, upload, fail-on, licenses-preset and github-token apply."
+    description: "scan (default) reviews the code with a model. sbom generates a CycloneDX SBOM from lockfiles, checks it against known advisories and uploads it as an artifact. In sbom mode only target, upload, fail-on, licenses-preset and github-token apply. agent-config checks AI-tool rule, MCP and settings files with no model (target, upload, fail-on, github-token apply). redteam runs your agent against a honeypot with no isolation and needs the redteam-* inputs."
     default: scan
   scanner:
     description: "Pre-pass scanners, comma separated: foxguard, semgrep, opengrep, gitleaks, trivy, osv-scanner, checkov. Empty uses the CLI default (foxguard)."
@@ -68,6 +68,39 @@ inputs:
   licenses-preset:
     description: "sbom mode: also check licenses against a preset (permissive or no-copyleft). A violation fails the job."
     default: ""
+  redteam-agent:
+    description: "redteam mode: the command that starts your agent. Run as given, with no isolation."
+    default: ""
+  redteam-unsafe-no-isolation:
+    description: "redteam mode: must be true. It confirms you know the agent runs on this runner with no sandbox and with the tools and variables you give it. Use a disposable runner."
+    default: "false"
+  redteam-runs:
+    description: "redteam mode: how many times to run the agent (1 to 20)."
+    default: "3"
+  redteam-timeout:
+    description: "redteam mode: seconds each run may take."
+    default: "120"
+  redteam-env:
+    description: "redteam mode: names of environment variables to pass to the agent, comma separated. Set their values on the step. Everything else is withheld."
+    default: ""
+  redteam-forbid:
+    description: "redteam mode: tools the agent must not call, comma separated."
+    default: ""
+  redteam-payload:
+    description: "redteam mode: the injected instruction, as text. Not with redteam-scenario. Empty uses the built-in payload."
+    default: ""
+  redteam-scenario:
+    description: "redteam mode: a scenario file, relative to the workspace. Not with redteam-payload. Take it from the base branch or a separate checkout, never from the pull request."
+    default: ""
+  redteam-max-hit-rate:
+    description: "redteam mode: the share of runs (0 to 1) in which the agent may obey before the job fails. Default 0: one obeyed run fails."
+    default: "0"
+  redteam-target:
+    description: "redteam mode: a name for the agent under test, shown in the report."
+    default: ""
+  redteam-inconclusive:
+    description: "redteam mode: fail (default) or warn when the run proves nothing, for example the agent never called the honeypot."
+    default: "fail"
 outputs:
   sarif:
     description: Path of the SARIF file the step wrote.
@@ -76,7 +109,7 @@ outputs:
     description: "Exit code of the scan: 0 done, 1 findings at or above fail-on or the scan failed, 2 usage error, 3 not finished (partial). With allow-partial the scan exits 0 or 1 on a partial run, and status says partial."
     value: ${{ steps.scan.outputs.code }}
   status:
-    description: "How the scan ended: complete, partial, skipped, prepass_only or failed."
+    description: "How the scan ended: complete, partial, skipped, prepass_only or failed. In redteam mode: complete (never obeyed), obeyed or inconclusive."
     value: ${{ steps.scan.outputs.status }}
   coverage:
     description: One neutralised sentence on what the scan reviewed.
@@ -122,16 +155,27 @@ runs:
         SKILL: ${{ inputs.skill }}
         ALLOW_PARTIAL: ${{ inputs.allow-partial }}
         LICENSES_PRESET: ${{ inputs.licenses-preset }}
+        REDTEAM_AGENT: ${{ inputs.redteam-agent }}
+        REDTEAM_UNSAFE: ${{ inputs.redteam-unsafe-no-isolation }}
+        REDTEAM_RUNS: ${{ inputs.redteam-runs }}
+        REDTEAM_TIMEOUT: ${{ inputs.redteam-timeout }}
+        REDTEAM_ENV: ${{ inputs.redteam-env }}
+        REDTEAM_FORBID: ${{ inputs.redteam-forbid }}
+        REDTEAM_PAYLOAD: ${{ inputs.redteam-payload }}
+        REDTEAM_SCENARIO: ${{ inputs.redteam-scenario }}
+        REDTEAM_MAX_HIT_RATE: ${{ inputs.redteam-max-hit-rate }}
+        REDTEAM_TARGET: ${{ inputs.redteam-target }}
+        REDTEAM_INCONCLUSIVE: ${{ inputs.redteam-inconclusive }}
         HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
         HEAD_SHA: ${{ github.event.pull_request.head.sha }}
       run: |
         case "$MODE" in
-          scan|sbom) bash "$GITHUB_ACTION_PATH/scripts/action-run.sh" "$MODE" ;;
-          *) echo "::error::Input mode must be scan or sbom."; exit 2 ;;
+          scan|sbom|redteam|agent-config) bash "$GITHUB_ACTION_PATH/scripts/action-run.sh" "$MODE" ;;
+          *) echo "::error::Input mode must be scan, sbom, agent-config or redteam."; exit 2 ;;
         esac
 
     - name: Upload to code scanning
-      if: ${{ inputs.upload == 'true' && steps.scan.outputs.code != '2' && steps.scan.outputs.sarif != '' }}
+      if: ${{ inputs.upload == 'true' && (steps.scan.outputs.code != '2' || inputs.mode == 'redteam') && steps.scan.outputs.sarif != '' }}
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github-token }}
@@ -139,7 +183,7 @@ runs:
         MODE: ${{ inputs.mode }}
       run: |
         tool="0"
-        if [ "$MODE" = sbom ]; then tool="0 sbom"; fi
+        case "$MODE" in sbom) tool="0 sbom" ;; agent-config) tool="0 agent-config" ;; redteam) tool="0 redteam" ;; esac
         0 findings upload "$SARIF" --tool "$tool"
 
     - name: Upload the SBOM
@@ -158,4 +202,5 @@ runs:
         FAIL_ON: ${{ inputs.fail-on }}
         ADVISORIES_CODE: ${{ steps.scan.outputs.advisories-code }}
         LICENSES_CODE: ${{ steps.scan.outputs.licenses-code }}
+        REDTEAM_INCONCLUSIVE: ${{ inputs.redteam-inconclusive }}
       run: bash "$GITHUB_ACTION_PATH/scripts/action-run.sh" result

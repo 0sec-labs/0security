@@ -3,7 +3,7 @@ title: AI security
 description: Find the AI in your code, check model files and agent configuration, review LLM apps and MCP servers, and probe a live model endpoint.
 ---
 
-AI security covers the parts of a project that call models, run agents or give a model tools. You use six commands and skills for it. Three need no model key and make no network request.
+AI security covers the parts of a project that call models, run agents or give a model tools. You use seven commands and skills for it. Three need no model key and make no network request.
 
 ## Find the AI in a project
 
@@ -56,6 +56,41 @@ Bundled skills for prompt injection, insecure output handling, excessive agency,
 Probe sends ten attack messages to a chat endpoint and reports the ones whose reply shows the attack worked. Each message carries a unique canary, so a hit is a check on the reply. A public host is refused unless you type its name with `--i-own-this`. See [probe](/commands/#probe) for the attacks and options.
 
 A miss does not show the endpoint is safe against other attacks.
+
+## Find where an agent can be steered
+
+```bash
+0security scan . --skill agent-toxic-flow
+```
+
+This reads the source of an agent and lists its toxic flows: places where text an attacker can influence reaches a model that holds a powerful tool, with no approval or restriction in between. For each one it writes the path, what an attacker gets, and a scenario that can be replayed. A model does the reading, so a result is a lead to check, not a proof.
+
+## Test whether an agent obeys poisoned text
+
+```bash
+0security redteam config --trace /tmp/redteam.jsonl > mcp.json
+0security redteam judge --trace /tmp/redteam.jsonl --canary <canary from config>
+```
+
+`redteam` serves a fake MCP server whose data carries a poisoned instruction and records every tool call the agent makes. `judge` reads the recording and says whether the agent sent the canary out or called a forbidden tool. No model decides the result. `judge --format sarif` reports a hit as a finding with OWASP LLM Top 10 and MITRE ATLAS tags, and `redteam scenarios report.json` lists the scenarios the skill wrote so you can replay them. See [redteam](/commands/#redteam). Run the agent in a sandbox and only agents you may test.
+
+## Run the test from one command
+
+```bash
+0security redteam run --agent "my-agent --mcp-config {mcp_config}" --runs 5 --unsafe-no-isolation
+```
+
+`redteam run` starts your agent several times with the honeypot as a tool server, judges each run from the recorded calls, and exits 1 if the agent obeyed. A run in which the agent never used the honeypot is reported as inconclusive. There is no isolation yet, so use a throwaway machine; see [redteam run](/commands/#redteam-run). To make scenarios from the shape of your agent, use `redteam generate`; it sends only tool names, a coarse privilege and gate for each, and kinds of input, and never code or secrets. See [redteam generate](/commands/#redteam-generate).
+
+## Catch a steered agent while it runs
+
+```bash
+0security redteam honeypot --decoy --trace /var/log/agent-decoy.jsonl --alert-url https://hooks.example.com/services/abc
+```
+
+Give a running agent the decoy server as one more tool server, next to its real ones. The decoys are tools that nothing legitimate should call, such as a request for administrator credentials or a send to an outside address. If an agent calls one, an alert goes to the URL you named. This is deception: it catches an agent that has been steered into reaching for power it was not given, with very few false alarms, and nothing sits between the agent and its model or tools.
+
+It does not prevent anything. An agent can be steered without ever calling a decoy, and an agent that has been steered may call decoys it was not aimed at. A decoy whose description is too tempting can also be called by an agent doing honest work, so treat the first alerts as a check on the decoys. Use it with testing and with limits on what the agent can do, not instead of them.
 
 ## What 0 does and does not do
 

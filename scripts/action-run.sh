@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The steps of the 0 GitHub Action (action.yml). Usage: action-run.sh scan | sbom | result
+# The steps of the 0 GitHub Action (action.yml). Usage: action-run.sh scan | sbom | redteam | agent-config | result
 #
 # Every input arrives as an environment variable that action.yml sets from `inputs.*`. No input is ever
 # interpolated into script text. Each value is checked here, then passed to 0 as one argv element.
@@ -280,7 +280,8 @@ cmd_scan() {
   "$ZERO" "${args[@]}"
   local code=$?
   read_report "$sarif" "$code"
-  out sarif "$sarif"; out code "$code"; out status "$STATUS"; out coverage "$COVERAGE"
+  [ -s "$sarif" ] && out sarif "$sarif"
+  out code "$code"; out status "$STATUS"; out coverage "$COVERAGE"
   write_summary "$code"
   # Upload first, then the result step decides whether the job fails.
   exit 0
@@ -322,11 +323,132 @@ cmd_sbom() {
   exit 0
 }
 
+# --- agent-config ---------------------------------------------------------------------------------------
+
+# The CLI check of AI-tool rules, MCP configuration and settings. It reads files only: no model, no network.
+cmd_agent_config() {
+  init_roots
+  resolve_path target "${TARGET:-.}"; local target=$REPLY
+  oneof upload "${UPLOAD:-true}" true false
+  [ -z "${FAIL_ON:-}" ] || oneof fail-on "$FAIL_ON" critical high medium low info
+  local sarif="$TMP_REAL/0-agent-config.sarif" args code total=0
+  rm -f "$sarif"
+  args=(sbom agent-config "$target" --format sarif -o "$sarif")
+  [ -z "${FAIL_ON:-}" ] || args+=(--fail-on "$FAIL_ON")
+  "$ZERO" "${args[@]}"; code=$?
+  case $code in 0|1) STATUS=complete ;; *) code=2; STATUS=failed ;; esac
+  [ "$code" = 2 ] || ! command -v jq >/dev/null 2>&1 || total=$(num "$(jq -r '[.runs[0].results[]?] | length' "$sarif" 2>/dev/null)")
+  [ -s "$sarif" ] && out sarif "$sarif"
+  out code "$code"; out status "$STATUS"; out coverage "Agent rule, MCP and settings files were checked by pattern. No model ran."
+  summary "## 0 agent-config check"
+  summary ""
+  summary "- Status: $STATUS"
+  [ "$code" = 2 ] || summary "- Findings: $total"
+  summary ""
+  exit 0
+}
+
+# --- redteam --------------------------------------------------------------------------------------------
+
+# Runs the operator's agent against the honeypot (0security redteam run). The agent is untrusted code that gets
+# real tool access: 0 does not isolate it, so the operator must say so (redteam-unsafe-no-isolation: true) and
+# the runner must be disposable. Every value is checked here and passed as one argv element.
+cmd_redteam() {
+  init_roots
+  if [ "${REDTEAM_UNSAFE:-false}" != true ]; then
+    fail "redteam mode runs your agent with no isolation: the agent can read the workspace and use every tool and variable you give it. Run it only on a disposable runner, then set redteam-unsafe-no-isolation to true."
+  fi
+  # Only events whose code is already trusted may run an agent. A pull request must come from this repository.
+  case "${GITHUB_EVENT_NAME:-}" in
+    push|schedule|workflow_dispatch|merge_group) ;;
+    pull_request)
+      if [ -z "${HEAD_REPO:-}" ] || [ -z "${GITHUB_REPOSITORY:-}" ] || [ "$HEAD_REPO" != "$GITHUB_REPOSITORY" ]; then
+        fail "redteam mode does not run for fork pull requests (the head repository is empty or differs from this repository): it executes code from the change under test."
+      fi ;;
+    *) fail "redteam mode does not run for the event '$(clean "${GITHUB_EVENT_NAME:-}")'. It runs only for push, schedule, workflow_dispatch, merge_group and same-repository pull_request." ;;
+  esac
+  resolve_path target "${TARGET:-.}"; local cwd=$REPLY
+  SCAN_TOP=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null) && SCAN_TOP=$(realdir "$SCAN_TOP") || SCAN_TOP=""
+  oneof upload "${UPLOAD:-true}" true false
+  oneof redteam-inconclusive "${REDTEAM_INCONCLUSIVE:-fail}" fail warn
+  [ -n "${REDTEAM_AGENT:-}" ] || fail "Input redteam-agent is required in redteam mode."
+  # The command is passed as one argument. A leading dash would read as a flag, a newline would split it.
+  if [[ $REDTEAM_AGENT == -* || $REDTEAM_AGENT == *[[:cntrl:]]* ]] || [ ${#REDTEAM_AGENT} -gt 500 ]; then fail "Input redteam-agent has an unsupported value."; fi
+  check redteam-runs "${REDTEAM_RUNS:-3}" '^([1-9]|1[0-9]|20)$'
+  check redteam-timeout "${REDTEAM_TIMEOUT:-120}" '^([1-9][0-9]{0,3})$'
+  check redteam-max-hit-rate "${REDTEAM_MAX_HIT_RATE:-0}" '^([01]|[01]\.[0-9]{1,6}|\.[0-9]{1,6})$'
+  [ -z "${REDTEAM_TARGET:-}" ] || check redteam-target "$REDTEAM_TARGET" '^[A-Za-z0-9._:/@+ -]{1,80}$'
+  [ -z "${REDTEAM_FORBID:-}" ] || check redteam-forbid "$REDTEAM_FORBID" '^[A-Za-z0-9_.*,-]+$'
+  if [ -n "${REDTEAM_PAYLOAD:-}" ] && [ -n "${REDTEAM_SCENARIO:-}" ]; then fail "Set redteam-payload or redteam-scenario, not both."; fi
+  if [ -n "${REDTEAM_PAYLOAD:-}" ]; then
+    if [[ $REDTEAM_PAYLOAD == -* || $REDTEAM_PAYLOAD == *[[:cntrl:]]* ]] || [ ${#REDTEAM_PAYLOAD} -gt 2000 ]; then fail "Input redteam-payload has an unsupported value."; fi
+  fi
+  local scenario="" n
+  if [ -n "${REDTEAM_SCENARIO:-}" ]; then
+    resolve_path redteam-scenario "$REDTEAM_SCENARIO"; scenario=$REPLY
+    trust_check redteam-scenario "$scenario"
+  fi
+  local -a names=()
+  if [ -n "${REDTEAM_ENV:-}" ]; then
+    check redteam-env "$REDTEAM_ENV" '^[A-Z_][A-Z0-9_,]*$'
+    [[ $REDTEAM_ENV == *, || $REDTEAM_ENV == *,,* || $REDTEAM_ENV == *,[0-9]* ]] && fail "Input redteam-env has an unsupported value."
+    IFS=, read -ra names <<< "$REDTEAM_ENV"
+    for n in "${names[@]}"; do
+      [[ $n == ZERO_REDTEAM_* ]] && fail "Input redteam-env must not name ZERO_REDTEAM_ variables."
+      [[ $n =~ ^[A-Z_][A-Z0-9_]*$ ]] || fail "Input redteam-env has an unsupported value."
+    done
+  fi
+
+  local sarif="$TMP_REAL/0-redteam.sarif" traces="$TMP_REAL/redteam-traces" args code total=0
+  rm -f "$sarif"
+  args=(redteam run --agent "$REDTEAM_AGENT" --cwd "$cwd" --runs "${REDTEAM_RUNS:-3}" --timeout "${REDTEAM_TIMEOUT:-120}"
+    --max-hit-rate "${REDTEAM_MAX_HIT_RATE:-0}" --format sarif -o "$sarif" --trace-dir "$traces" --unsafe-no-isolation)
+  for n in ${names[@]+"${names[@]}"}; do args+=(--env "$n"); done
+  [ -z "${REDTEAM_FORBID:-}" ] || args+=(--forbid "$REDTEAM_FORBID")
+  [ -z "${REDTEAM_PAYLOAD:-}" ] || args+=(--payload "$REDTEAM_PAYLOAD")
+  [ -z "$scenario" ] || args+=(--scenario "$scenario")
+  [ -z "${REDTEAM_TARGET:-}" ] || args+=(--target "$REDTEAM_TARGET")
+  "$ZERO" "${args[@]}"; code=$?
+  # Only the documented codes count: 0 clear, 1 obeyed (needs the report), 2 inconclusive. Anything else is a crash.
+  case $code in
+    0) STATUS=complete ;;
+    1)
+      [ -s "$sarif" ] || fail "The CLI failed before producing a report (exit code 1 but no SARIF at the output path). The agent was not shown to obey."
+      STATUS=obeyed ;;
+    2) STATUS=inconclusive ;;
+    *) fail "The red team command failed with unexpected exit code $(num "$code"). Documented codes are 0, 1 and 2." ;;
+  esac
+  [ ! -s "$sarif" ] || ! command -v jq >/dev/null 2>&1 || total=$(num "$(jq -r '[.runs[0].results[]?] | length' "$sarif" 2>/dev/null)")
+  [ -s "$sarif" ] && out sarif "$sarif"
+  out code "$code"; out status "$STATUS"
+  out coverage "Red team: $(num "${REDTEAM_RUNS:-3}") run(s) against a honeypot. No isolation; a clean result is not proof of safety."
+  summary "## 0 agent red team"
+  summary ""
+  summary "- Result: $STATUS (exit code $code)"
+  summary "- Runs: $(num "${REDTEAM_RUNS:-3}"), allowed hit rate: $(clean "${REDTEAM_MAX_HIT_RATE:-0}")"
+  summary "- Findings in the report: $total"
+  summary "- Isolation: none. The agent ran on this runner with the tools and variables you gave it."
+  summary ""
+  exit 0
+}
+
 # --- result ---------------------------------------------------------------------------------------------
 
 cmd_result() {
   local code=${CODE:-2} status=${STATUS:-failed}
   case "${MODE:-scan}" in
+    redteam)
+      case "$code" in
+        0) exit 0 ;;
+        1) echo "::error::The agent obeyed the injected instruction in more runs than redteam-max-hit-rate allows. See the log and the code scanning alert."; exit 1 ;;
+        *)
+          if [ "${REDTEAM_INCONCLUSIVE:-fail}" = warn ]; then warn "The red team run was inconclusive (for example the agent never called the honeypot). Nothing was proven either way."; exit 0; fi
+          echo "::error::The red team run was inconclusive, for example the agent never called the honeypot. Set redteam-inconclusive to warn to accept this."; exit 1 ;;
+      esac ;;
+    agent-config)
+      [ "$code" = 2 ] && { echo "::error::The agent-config check could not finish. See the log above."; exit 1; }
+      [ "$code" = 1 ] && { echo "::error::The agent files have a finding at or above fail-on."; exit 1; }
+      exit 0 ;;
     sbom)
       [ "$code" = 2 ] && { echo "::error::The SBOM step could not finish. See the log above."; exit 1; }
       if [ "${LICENSES_CODE:-0}" = 1 ]; then echo "::error::A component has a license the policy does not allow."; exit 1; fi
@@ -352,6 +474,8 @@ cmd_result() {
 case "${1:-}" in
   scan) cmd_scan ;;
   sbom) cmd_sbom ;;
+  redteam) cmd_redteam ;;
+  agent-config) cmd_agent_config ;;
   result) cmd_result ;;
-  *) echo "usage: action-run.sh scan|sbom|result" >&2; exit 2 ;;
+  *) echo "usage: action-run.sh scan|sbom|redteam|agent-config|result" >&2; exit 2 ;;
 esac
