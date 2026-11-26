@@ -45,13 +45,13 @@ export const traceToSinkSchema = z.object({
   max_paths: z.number().int().min(1).max(20).default(8),
 }).strip();
 
-const FALLBACK = "The index is name-based and covers TypeScript, JavaScript and Python only. For anything it does not show, search with rg and read the code with cat -n.";
+const FALLBACK = "The index is name-based and covers TypeScript, JavaScript and Python, plus Java when the Foxguard binary is installed. For anything it does not show, search with rg and read the code with cat -n.";
 
 export const codeIndexToolDefinitions: Record<string, ToolDefinition> = {
   callers_of: {
     name: "callers_of",
     description:
-      "List who calls a function or method, up to `depth` hops (1-4), and which HTTP routes reach it. Use it to see whether an ownership or auth check is called from a route. Name-based: same-named functions are merged and flagged ambiguous. TypeScript, JavaScript and Python only; otherwise use rg.",
+      "List who calls a function or method, up to `depth` hops (1-4), and which HTTP routes reach it. Use it to see whether an ownership or auth check is called from a route. Name-based: same-named functions are merged and flagged ambiguous. TypeScript, JavaScript and Python (Java with Foxguard installed); otherwise use rg.",
     parameters: {
       symbol: { type: "string", description: "Function name, Class.method or path/to/file.ts:name" },
       depth: { type: "number", description: "Hops to follow, 1-4 (default 1)" },
@@ -62,7 +62,7 @@ export const codeIndexToolDefinitions: Record<string, ToolDefinition> = {
   callees_of: {
     name: "callees_of",
     description:
-      "List what a function or method calls, up to `depth` hops (1-4), marking calls that look like sinks (command, sql, file, network, eval, deserialize, template, redirect). TypeScript, JavaScript and Python only; otherwise use rg.",
+      "List what a function or method calls, up to `depth` hops (1-4), marking calls that look like sinks (command, sql, file, network, eval, deserialize, template, redirect). TypeScript, JavaScript and Python (Java with Foxguard installed); otherwise use rg.",
     parameters: {
       symbol: { type: "string", description: "Function name, Class.method or path/to/file.ts:name" },
       depth: { type: "number", description: "Hops to follow, 1-4 (default 1)" },
@@ -73,7 +73,7 @@ export const codeIndexToolDefinitions: Record<string, ToolDefinition> = {
   routes: {
     name: "routes",
     description:
-      "List HTTP routes and entry points (Express-style, NestJS, Flask, FastAPI, Django URLConf) with their middleware, handler, the sink categories the handler reaches and any auth or ownership signals (middleware or calls named like auth, owner, permission). Set without_auth_signal to list routes where none was found, then confirm each with callers_of and cat -n. A missing signal is a lead, not a finding.",
+      "List HTTP routes and entry points (Express-style, NestJS, Flask, FastAPI, Django URLConf; Spring, JAX-RS and servlets in Java) with their middleware, handler, the sink categories the handler reaches and any auth or ownership signals (middleware or calls named like auth, owner, permission). Set without_auth_signal to list routes where none was found, then confirm each with callers_of and cat -n. A missing signal is a lead, not a finding.",
     parameters: {
       path_contains: { type: "string", description: "Keep routes whose path contains this text" },
       method: { type: "string", description: "HTTP method filter", enum: ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "ANY"] },
@@ -119,7 +119,7 @@ async function indexFor(root: string | undefined): Promise<{ ok: true; index: Aw
     return { ok: false, result: { success: true, output: { supported: false, reason: `The folder could not be indexed (${err instanceof Error ? err.message : String(err)}).`, fallback: FALLBACK } } };
   }
   if (built.index.files === 0) {
-    return { ok: false, result: { success: true, output: { supported: false, reason: "No TypeScript, JavaScript or Python source was found in the folder.", unsupported_files_by_extension: built.index.unsupported, fallback: FALLBACK } } };
+    return { ok: false, result: { success: true, output: { supported: false, reason: built.index.unsupported["java"] ? "Java source was found but the Foxguard binary that indexes it is not available (ZERO_FOXGUARD_PATH or PATH), and no TypeScript, JavaScript or Python source was found." : "No TypeScript, JavaScript or Python source was found in the folder.", unsupported_files_by_extension: built.index.unsupported, fallback: FALLBACK } } };
   }
   return { ok: true, index: built.index, cached: built.cached };
 }

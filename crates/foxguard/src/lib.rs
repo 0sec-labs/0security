@@ -10,6 +10,7 @@ pub mod diff;
 pub mod engine;
 pub mod fix;
 pub mod git;
+pub mod graph;
 pub mod output;
 pub mod path_identity;
 pub mod pr_policy;

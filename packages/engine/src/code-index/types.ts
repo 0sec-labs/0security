@@ -2,7 +2,7 @@
  * Data model of the per-repo code index. The JSON shape is deliberately plain so a Foxguard
  * `index` export (see the proposal in the PR for #659) can be loaded into the same structure.
  */
-export type IndexLanguage = "javascript" | "python";
+export type IndexLanguage = "javascript" | "python" | "java";
 
 export type SinkCategory = "command" | "code-eval" | "sql" | "file" | "network" | "deserialize" | "template" | "redirect";
 
@@ -31,6 +31,10 @@ export interface IndexCall {
   file: string;
   line: number;
   sink?: SinkTag;
+  /** The call is named like an authentication, authorization or ownership check (set by the Foxguard graph). */
+  auth?: boolean;
+  /** Declared type of the receiver (Java, Foxguard graph): narrows the symbols a by-name join can reach. */
+  receiverType?: string;
 }
 
 export interface IndexRoute {
@@ -43,6 +47,8 @@ export interface IndexRoute {
   /** Names passed as middleware, decorators or dependencies before the handler. */
   middleware: string[];
   framework: string;
+  /** Guard annotations or auth-like middleware on the route itself (Foxguard graph). */
+  authSignals?: string[];
 }
 
 export interface CodeIndex {
