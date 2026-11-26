@@ -83,7 +83,6 @@ export default defineConfig({
     "/research/unsolved-eight-investigation": "/findings/",
     "/research/dynamic-routing-design": "/findings/",
     "/research/dynamic-triage-routing": "/findings/",
-    "/agents": "/sentinels/",
   },
   // Allow previewing the dev server over Tailscale (dev-only; ignored by the static build).
   vite: {
