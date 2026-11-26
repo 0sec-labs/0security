@@ -6,13 +6,14 @@ export { toSpdx, type SpdxDocument, type SpdxPackage } from "./spdx.js";
 export { DEFAULT_GENERATOR_TIMEOUT_MS, EXTERNAL_GENERATORS, GeneratorFailedError, GeneratorNotInstalledError, IMAGE_GENERATORS, parseImageSource, runExternalGenerator, type ExternalGenerator, type ImageSource } from "./external.js";
 export { detectAi, type AiComponent, type AiService } from "./ai.js";
 export { checkBomLicenses, judgeComponent, leafText, licensesToSarif, mergePolicies, parseLicenseExpression, policyFromDocument, PRESET_NAMES, PRESETS, validatePolicy, type ComponentVerdict, type LicenseLeaf, type LicenseNode, type LicensePolicy, type LicenseReport, type PackageException, type PresetName, type UnknownMode, type Verdict } from "./license-policy.js";
-export { advisoriesToSarif, advisoriesToText, componentLabel, fixAdvice, sortAdvisories } from "./check-report.js";
+export { advisoriesToSarif, advisoriesToText, componentLabel, fixAdvice, sortAdvisories, usageSummary } from "./check-report.js";
 export { checkOutdated, outdatedToText, OUTDATED_CAP, type OutdatedNote, type OutdatedResult } from "./outdated.js";
 export { analyzeMaven, parseXml, type Unresolved } from "./maven.js";
 export { bumpJavaDependency, parseDependencyFinding, type BumpEdit, type BumpRequest, type BumpResult } from "./java-bump.js";
 export { parseCatalog, parseGradleBuild, parseVersionCatalog } from "./gradle.js";
 export { buildToolEnv, mergeComponents, parseDependencyReport, parseGradleTree, parseMavenTree, ResolveFailedError, resolveJvmDependencies, RESOLVE_TIMEOUT_MS, type ResolveOptions, type ResolveResult } from "./resolve.js";
-export { javaUsageToText, parseImports, scanJavaUsage, type JavaImport, type JavaUsage, type JavaUsageReport, type JavaUsageVerdict } from "./java-usage.js";
+export { attachJavaUsage, scanIsComplete, scanLimitText, type AdvisoryUsage, type AdvisoryUsageStatus, type UsageLocation, type UsageScan } from "./advisory-usage.js";
+export { javaUsageToText, parseImports, scanJavaUsage, type JavaSymbolHit, type JavaUsageOptions, type JavaImport, type JavaUsage, type JavaUsageReport, type JavaUsageVerdict } from "./java-usage.js";
 export { checkSlopsquat, editDistance, lookalikeOf, slopsquatFails, slopsquatSarifParts, slopsquatToText, SLOPSQUAT_CAP, SLOPSQUAT_NEW_DAYS, type SlopFinding, type SlopOptions, type SlopResult } from "./slopsquat.js";
 
 export { assessJavaDependencyReachability, dependencyReachabilityToText, mavenComponents, type DependencyReachability, type JavaReachabilityReport } from "./java-reachability.js";

@@ -94,7 +94,7 @@ const EXAMPLES: Readonly<Record<string, readonly string[]>> = {
   "sbom reachability": ["0security sbom reachability sbom.cdx.json .", "0security sbom check sbom.cdx.json --source . --format json"],
   "sbom java-usage": ["0security sbom java-usage sbom.cdx.json .", "0security sbom java-usage sbom.cdx.json ~/code/app --format json"],
   "sbom licenses": ["0security sbom licenses . --preset permissive", "0security sbom licenses sbom.cdx.json --deny 'GPL-*,AGPL-*'", "0security sbom licenses . --policy license-policy.yaml --resolve --format sarif > licenses.sarif"],
-  "sbom check": ["0security sbom check sbom.cdx.json", "0security sbom check sbom.cdx.json --format json"],
+  "sbom check": ["0security sbom check sbom.cdx.json", "0security sbom check sbom.cdx.json --format json", "0security sbom check sbom.cdx.json --usage ."],
   findings: ["0security findings list --severity high", "0security findings show 3f2a", '0security findings update 3f2a --status accepted --reason "fix scheduled" --expires 90d --approver "security lead"'],
   "findings list": ["0security findings list --expiring 30", "0security findings list --context context.json", "0security findings list --severity high --status verified", "0security findings list --format json", "0security findings list --format sarif -o findings.sarif"],
   "findings show": ["0security findings show 3f2a", "0security findings show 3f2a --context context.json"],
