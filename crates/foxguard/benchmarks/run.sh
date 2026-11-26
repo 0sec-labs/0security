@@ -1,0 +1,270 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPOS_DIR="$SCRIPT_DIR/repos"
+FOXGUARD="${FOXGUARD:-$(dirname "$SCRIPT_DIR")/target/release/foxguard}"
+RESULTS_FILE="${RESULTS_FILE:-$SCRIPT_DIR/results-${BENCH_MODE:-default}.md}"
+SEMGREP_BIN="${SEMGREP:-}"
+OPENGREP_BIN="${OPENGREP:-}"
+BENCH_MODE="${BENCH_MODE:-default}"
+COMPAT_RULES_DIR="$SCRIPT_DIR/compat_rules"
+LOCK_DIR="$SCRIPT_DIR/.benchmark-lock"
+TMP_RESULTS=""
+
+# Colors
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+cleanup() {
+  if [ -n "$TMP_RESULTS" ] && [ -f "$TMP_RESULTS" ]; then
+    rm -f "$TMP_RESULTS"
+  fi
+  if [ -n "$LOCK_DIR" ]; then
+    rmdir "$LOCK_DIR" 2>/dev/null || true
+  fi
+}
+
+trap cleanup EXIT
+
+# Repos to benchmark: name, url, language
+# `sentry` is included as a larger-corpus target (~500k Python LoC) to stress
+# the benchmark beyond small framework repos. Disable it with BENCH_SKIP_LARGE=1
+# when running the quick matrix locally.
+REPOS=(
+  "express|https://github.com/expressjs/express.git|javascript"
+  "flask|https://github.com/pallets/flask.git|python"
+  "gin|https://github.com/gin-gonic/gin.git|go"
+)
+if [ -z "${BENCH_SKIP_LARGE:-}" ]; then
+  REPOS+=("sentry|https://github.com/getsentry/sentry.git|python")
+fi
+
+echo -e "${CYAN}=== foxguard benchmark suite ===${NC}"
+echo ""
+echo -e "benchmark mode: ${BENCH_MODE}"
+echo ""
+
+case "$BENCH_MODE" in
+  default|compat) ;;
+  *)
+    echo "invalid BENCH_MODE: $BENCH_MODE"
+    echo "expected one of: default, compat"
+    exit 1
+    ;;
+esac
+
+if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+  echo "another benchmark run appears to be in progress"
+  echo "remove $LOCK_DIR if it is stale"
+  exit 1
+fi
+
+# Check foxguard binary
+if [ ! -f "$FOXGUARD" ]; then
+  echo "foxguard binary not found at $FOXGUARD"
+  echo "Building foxguard..."
+  (cd "$(dirname "$SCRIPT_DIR")" && cargo build --release)
+fi
+
+echo -e "foxguard: $FOXGUARD"
+echo -e "foxguard version: $($FOXGUARD --version 2>/dev/null || echo 'unknown')"
+echo ""
+
+# Check semgrep
+HAS_SEMGREP=false
+if [ -n "$SEMGREP_BIN" ] && [ -x "$SEMGREP_BIN" ]; then
+  HAS_SEMGREP=true
+elif command -v semgrep &>/dev/null; then
+  HAS_SEMGREP=true
+  SEMGREP_BIN="$(command -v semgrep)"
+fi
+
+if [ "$HAS_SEMGREP" = true ]; then
+  echo -e "semgrep: $SEMGREP_BIN"
+  echo -e "semgrep version: $($SEMGREP_BIN --version 2>/dev/null || echo 'unknown')"
+else
+  echo -e "${YELLOW}semgrep not installed — skipping semgrep benchmarks${NC}"
+fi
+
+# Check opengrep
+HAS_OPENGREP=false
+if [ -n "$OPENGREP_BIN" ] && [ -x "$OPENGREP_BIN" ]; then
+  HAS_OPENGREP=true
+elif command -v opengrep &>/dev/null; then
+  HAS_OPENGREP=true
+  OPENGREP_BIN="$(command -v opengrep)"
+fi
+
+if [ "$HAS_OPENGREP" = true ]; then
+  echo -e "opengrep: $OPENGREP_BIN"
+  echo -e "opengrep version: $($OPENGREP_BIN --version 2>/dev/null | tail -n 1 || echo 'unknown')"
+else
+  echo -e "${YELLOW}opengrep not installed — skipping opengrep benchmarks${NC}"
+fi
+
+# Check tokei for LoC counting. Benchmarks fall back to "N/A" if missing,
+# but the LoC column is the whole point of the upgrade so we complain loudly.
+HAS_TOKEI=false
+if command -v tokei &>/dev/null; then
+  HAS_TOKEI=true
+  echo -e "tokei: $(command -v tokei)"
+  echo -e "tokei version: $(tokei --version 2>/dev/null || echo 'unknown')"
+else
+  echo -e "${YELLOW}tokei not installed — LoC column will show N/A. Install with: brew install tokei${NC}"
+fi
+echo ""
+
+# Clone repos
+mkdir -p "$REPOS_DIR"
+for entry in "${REPOS[@]}"; do
+  IFS='|' read -r name url lang <<< "$entry"
+  if [ ! -d "$REPOS_DIR/$name" ]; then
+    echo -e "${GREEN}Cloning $name...${NC}"
+    git clone --depth 1 "$url" "$REPOS_DIR/$name" 2>/dev/null
+  else
+    echo -e "Using cached $name"
+  fi
+done
+echo ""
+
+count_files() {
+  local dir="$1"
+  find "$dir" -type f \( -name "*.js" -o -name "*.ts" -o -name "*.py" -o -name "*.go" \) | wc -l | tr -d ' '
+}
+
+# Map benchmark `lang` field to the tokei --type argument set. Keeps the
+# LoC count scoped to languages foxguard actually scans on each repo, so
+# `express` doesn't balloon its LoC by counting vendored HTML/JSON fixtures.
+tokei_types_for_lang() {
+  case "$1" in
+    javascript) echo "JavaScript,TypeScript,Jsx,Tsx" ;;
+    python)     echo "Python" ;;
+    go)         echo "Go" ;;
+    *)          echo "" ;;
+  esac
+}
+
+count_loc() {
+  local dir="$1"
+  local lang="$2"
+  if [ "$HAS_TOKEI" != true ]; then
+    echo "N/A"
+    return
+  fi
+  local types
+  types="$(tokei_types_for_lang "$lang")"
+  if [ -z "$types" ]; then
+    echo "N/A"
+    return
+  fi
+  tokei -t "$types" "$dir" --output json 2>/dev/null \
+    | python3 -c 'import json,sys
+try:
+    d = json.load(sys.stdin)
+    print(d.get("Total", {}).get("code", "N/A"))
+except Exception:
+    print("N/A")' \
+    || echo "N/A"
+}
+
+TMP_RESULTS="$(mktemp "$SCRIPT_DIR/results.tmp.XXXXXX")"
+
+cat > "$TMP_RESULTS" << 'HEADER'
+# Benchmark Results
+
+Generated by `benchmarks/run.sh`
+
+## Environment
+
+HEADER
+
+echo "- **Date:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> "$TMP_RESULTS"
+echo "- **OS:** $(uname -s) $(uname -m)" >> "$TMP_RESULTS"
+echo "- **mode:** ${BENCH_MODE}" >> "$TMP_RESULTS"
+echo "- **foxguard:** $($FOXGUARD --version 2>/dev/null || echo 'unknown')" >> "$TMP_RESULTS"
+if [ "$HAS_SEMGREP" = true ]; then
+  echo "- **semgrep:** $($SEMGREP_BIN --version 2>/dev/null || echo 'unknown')" >> "$TMP_RESULTS"
+fi
+if [ "$HAS_OPENGREP" = true ]; then
+  echo "- **opengrep:** $($OPENGREP_BIN --version 2>/dev/null | tail -n 1 || echo 'unknown')" >> "$TMP_RESULTS"
+fi
+echo "" >> "$TMP_RESULTS"
+
+echo "## Results" >> "$TMP_RESULTS"
+echo "" >> "$TMP_RESULTS"
+echo "| Repository | Language | Files | LoC | foxguard Time | foxguard Findings | semgrep Time | semgrep Findings | opengrep Time | opengrep Findings |" >> "$TMP_RESULTS"
+echo "|------------|----------|-------|-----|---------------|-------------------|--------------|------------------|---------------|-------------------|" >> "$TMP_RESULTS"
+
+for entry in "${REPOS[@]}"; do
+  IFS='|' read -r name url lang <<< "$entry"
+  repo_path="$REPOS_DIR/$name"
+  file_count=$(count_files "$repo_path")
+  loc_count=$(count_loc "$repo_path" "$lang")
+
+  echo -e "${CYAN}--- Benchmarking: $name ($lang, $file_count files, $loc_count LoC) ---${NC}"
+
+  echo -n "  foxguard... "
+  fox_start=$(perl -MTime::HiRes=time -e 'printf "%.3f\n", time')
+  if [ "$BENCH_MODE" = "compat" ]; then
+    fox_output=$($FOXGUARD "$repo_path" --format json --no-builtins --rules "$COMPAT_RULES_DIR" 2>/dev/null || true)
+  else
+    fox_output=$($FOXGUARD "$repo_path" --format json 2>/dev/null || true)
+  fi
+  fox_end=$(perl -MTime::HiRes=time -e 'printf "%.3f\n", time')
+  fox_time=$(perl -e "printf '%.3f', $fox_end - $fox_start")
+  fox_findings=$(echo "$fox_output" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d) if isinstance(d, list) else d.get('total_findings', len(d.get('findings', []))))" 2>/dev/null || echo "0")
+  echo "${fox_time}s, ${fox_findings} findings"
+
+  sem_time="N/A"
+  sem_findings="N/A"
+  if [ "$HAS_SEMGREP" = true ]; then
+    echo -n "  semgrep... "
+    sem_start=$(perl -MTime::HiRes=time -e 'printf "%.3f\n", time')
+    if [ "$BENCH_MODE" = "compat" ]; then
+      sem_output=$($SEMGREP_BIN --config "$COMPAT_RULES_DIR" --json --quiet "$repo_path" 2>/dev/null || true)
+    else
+      sem_output=$($SEMGREP_BIN --config auto --json --quiet "$repo_path" 2>/dev/null || true)
+    fi
+    sem_end=$(perl -MTime::HiRes=time -e 'printf "%.3f\n", time')
+    sem_time="$(perl -e "printf '%.3f', $sem_end - $sem_start")s"
+    sem_findings=$(echo "$sem_output" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('results', [])))" 2>/dev/null || echo "0")
+    echo "${sem_time}, ${sem_findings} findings"
+  else
+    echo "  semgrep: skipped"
+  fi
+
+  open_time="N/A"
+  open_findings="N/A"
+  if [ "$HAS_OPENGREP" = true ]; then
+    echo -n "  opengrep... "
+    open_start=$(perl -MTime::HiRes=time -e 'printf "%.3f\n", time')
+    if [ "$BENCH_MODE" = "compat" ]; then
+      open_output=$($OPENGREP_BIN scan --config "$COMPAT_RULES_DIR" --json --quiet "$repo_path" 2>/dev/null || true)
+    else
+      open_output=$($OPENGREP_BIN scan --config auto --json --quiet "$repo_path" 2>/dev/null || true)
+    fi
+    open_end=$(perl -MTime::HiRes=time -e 'printf "%.3f\n", time')
+    open_time="$(perl -e "printf '%.3f', $open_end - $open_start")s"
+    open_findings=$(echo "$open_output" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d.get('results', [])))" 2>/dev/null || echo "0")
+    echo "${open_time}, ${open_findings} findings"
+  else
+    echo "  opengrep: skipped"
+  fi
+
+  echo "| $name | $lang | $file_count | $loc_count | ${fox_time}s | $fox_findings | $sem_time | $sem_findings | $open_time | $open_findings |" >> "$TMP_RESULTS"
+done
+
+echo "" >> "$TMP_RESULTS"
+
+mv "$TMP_RESULTS" "$RESULTS_FILE"
+TMP_RESULTS=""
+rmdir "$LOCK_DIR" 2>/dev/null || true
+LOCK_DIR=""
+
+echo ""
+echo -e "${GREEN}Results written to $RESULTS_FILE${NC}"
+echo ""
+cat "$RESULTS_FILE"

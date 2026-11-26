@@ -1,0 +1,117 @@
+[package]
+name = "foxguard"
+version = "0.14.3"
+edition = "2021"
+rust-version = "1.88"
+description = "A security scanner as fast as a linter, written in Rust. 200+ built-in rules across 12 source languages."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/0sec-labs/foxguard"
+homepage = "https://foxguard.dev"
+keywords = ["security", "linter", "static-analysis", "sast", "vulnerability"]
+categories = ["command-line-utilities", "development-tools"]
+
+[lints.clippy]
+# Declaring the MSRV enables this style-only lint across the existing codebase.
+# Keep the mechanical migration separate from production workflow hardening.
+uninlined_format_args = "allow"
+
+[dependencies]
+clap = { version = "4", features = ["derive"] }
+tree-sitter = "0.25"
+tree-sitter-python = "0.23"
+tree-sitter-go = "0.23"
+tree-sitter-ruby = "0.23"
+tree-sitter-java = "0.23"
+tree-sitter-php = "0.24"
+tree-sitter-rust = "0.24"
+tree-sitter-c-sharp = "0.23"
+tree-sitter-swift = "0.7"
+tree-sitter-kotlin-sg = "0.4"
+tree-sitter-language = "0.1"
+tree-sitter-hcl = "1.1"
+tree-sitter-solidity = "1.2"
+tree-sitter-yaml = "0.7"
+tree-sitter-containerfile = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+colored = "2"
+walkdir = "2"
+rayon = "1"
+ignore = "0.4"
+regex = "1"
+fancy-regex = "0.16"
+serde_yaml_ng = "0.10"
+sha2 = "0.10"
+uuid = { version = "1", features = ["v5"] }
+globset = "0.4"
+tempfile = "3"
+fs2 = "0.4"
+# Use Ratatui's own wrapping measurements to bound terminal scrolling.
+ratatui = { version = "0.30", features = ["unstable-rendered-line-info"] }
+crossterm = "0.29"
+toml = "0.8"
+shlex = "1"
+unicode-segmentation = "1"
+unicode-width = "0.2"
+wait-timeout = "0.2.1"
+include_dir = "0.7"
+reqwest = { version = "0.13.3", default-features = false, features = ["blocking", "json", "rustls"] }
+semver = "1"
+pep440_rs = "0.7"
+# X.509 certificate / key parsing for the `foxguard pqc` cert-scan pass.
+# Pure-Rust, no OpenSSL; used only to extract algorithm identity + public
+# metadata (never private-key bytes). See src/certscan.rs.
+x509-parser = "0.16"
+pem = "3"
+
+# Optional deps for the GitHub App webhook receiver (gated behind the
+# `github-app` feature). Off by default so the core scanner build stays
+# lean. See src/github_app/README.md and issue #246.
+base64 = { version = "0.22", optional = true }
+axum = { version = "0.7", default-features = false, features = ["http1", "tokio", "json", "macros"], optional = true }
+tokio = { version = "1", default-features = false, features = ["macros", "rt-multi-thread", "signal"], optional = true }
+hmac = { version = "0.12", optional = true }
+hex = { version = "0.4", optional = true }
+tower-http = { version = "0.6", default-features = false, features = ["trace", "limit"], optional = true }
+tracing = { version = "0.1", optional = true }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter", "json"], optional = true }
+# Use AWS-LC for RS256 signing; the RustCrypto RSA backend has RUSTSEC-2023-0071.
+jsonwebtoken = { version = "10.4.0", features = ["aws_lc_rs"], optional = true }
+tree-sitter-ocaml = "0.25.0"
+tree-sitter-scala = "0.26.0"
+tree-sitter-elixir = "0.3.5"
+tree-sitter-json = "0.24.8"
+tree-sitter-html = "0.23"
+tree-sitter-xml = "0.7"
+tree-sitter-dart = "0.2"
+tree-sitter-clojure-orchard = "0.2.5"
+tree-sitter-sfapex = "3.0.0"
+tree-sitter-haskell = "0.23.1"
+dekobon-tree-sitter-groovy = "0.3.0"
+
+[features]
+default = []
+# Builds the foxguard-github-app binary plus its dependency closure.
+github-app = ["dep:base64", "dep:axum", "dep:tokio", "dep:hmac", "dep:hex", "dep:tower-http", "dep:tracing", "dep:tracing-subscriber", "dep:jsonwebtoken"]
+
+[[bin]]
+name = "foxguard-mcp"
+path = "src/bin/foxguard_mcp.rs"
+
+[[bin]]
+name = "foxguard-adapter"
+path = "src/bin/foxguard_adapter.rs"
+
+[[bin]]
+name = "foxguard-github-app"
+path = "src/bin/foxguard_github_app.rs"
+required-features = ["github-app"]
+
+[[bin]]
+name = "foxguard_process_test_helper"
+path = "tests/bin/process_test_helper.rs"
+
+[build-dependencies]
+cc = "1.1"
+
+[dev-dependencies]

@@ -1,0 +1,894 @@
+use crate::git::ChangeSelection;
+use crate::pr_policy::{
+    PrBlockingThreshold, PrSecurityPolicyInput, PrSecurityPolicyScope, PrSecurityPolicyVersion,
+};
+use clap::{Args, Parser, Subcommand};
+use serde::Deserialize;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum FileTimeoutPolicy {
+    Fail,
+    Warn,
+}
+
+#[derive(Debug, Clone, Copy, clap::ValueEnum, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum OutputFormat {
+    Terminal,
+    Json,
+    Sarif,
+    Cbom,
+    /// Semgrep CLI-compatible JSON (`results[]` with `check_id`/`extra`),
+    /// for pipelines that consume `semgrep --json`.
+    #[value(name = "semgrep-json")]
+    SemgrepJson,
+}
+
+#[derive(Debug, Clone, Copy, clap::ValueEnum, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SeverityFilter {
+    Low,
+    Medium,
+    High,
+    Critical,
+}
+
+#[derive(Args, Debug, Clone, Default)]
+pub struct ChangeModeArgs {
+    /// Scan changed files only (legacy: staged first, then unstaged/untracked)
+    #[arg(long, default_value_t = false, conflicts_with_all = ["staged", "unstaged", "all_changes"])]
+    pub changed: bool,
+
+    /// Scan staged changes only
+    #[arg(long, default_value_t = false, conflicts_with_all = ["changed", "unstaged", "all_changes"])]
+    pub staged: bool,
+
+    /// Scan unstaged tracked changes and untracked files only
+    #[arg(long, default_value_t = false, conflicts_with_all = ["changed", "staged", "all_changes"])]
+    pub unstaged: bool,
+
+    /// Scan staged, unstaged tracked, and untracked changes
+    #[arg(long = "all-changes", default_value_t = false, conflicts_with_all = ["changed", "staged", "unstaged"])]
+    pub all_changes: bool,
+}
+
+impl ChangeModeArgs {
+    pub fn selection(&self) -> Option<ChangeSelection> {
+        if self.changed {
+            Some(ChangeSelection::Legacy)
+        } else if self.staged {
+            Some(ChangeSelection::Staged)
+        } else if self.unstaged {
+            Some(ChangeSelection::Unstaged)
+        } else if self.all_changes {
+            Some(ChangeSelection::All)
+        } else {
+            None
+        }
+    }
+}
+
+/// Policy controls for a PR security result. These map surface-specific inputs
+/// into the shared resolver rather than implementing severity decisions here.
+#[derive(Args, Debug, Clone, Default)]
+pub struct PrSecurityPolicyArgs {
+    /// Evaluate this scan with the versioned PR security policy.
+    #[arg(long, default_value_t = false)]
+    pub pr_policy: bool,
+
+    /// PR security policy version.
+    #[arg(long = "pr-policy-version", value_enum)]
+    pub policy_version: Option<PrSecurityPolicyVersion>,
+
+    /// Scope evaluated by the PR security policy.
+    #[arg(long = "pr-scope", value_enum)]
+    pub scope: Option<PrSecurityPolicyScope>,
+
+    /// Minimum finding severity included in the PR policy report.
+    #[arg(long = "pr-reporting-threshold", value_enum)]
+    pub reporting_threshold: Option<SeverityFilter>,
+
+    /// Minimum included severity that fails the PR policy; `none` never blocks.
+    #[arg(long = "pr-blocking-threshold", value_enum)]
+    pub blocking_threshold: Option<PrBlockingThreshold>,
+
+    /// Write the effective policy result as JSON.
+    #[arg(long = "pr-policy-output", value_name = "PATH")]
+    pub policy_output: Option<String>,
+}
+
+impl PrSecurityPolicyArgs {
+    pub fn is_enabled(&self) -> bool {
+        self.pr_policy
+            || self.policy_version.is_some()
+            || self.scope.is_some()
+            || self.reporting_threshold.is_some()
+            || self.blocking_threshold.is_some()
+            || self.policy_output.is_some()
+    }
+
+    pub fn input(&self) -> PrSecurityPolicyInput {
+        PrSecurityPolicyInput {
+            version: self.policy_version,
+            scope: self.scope,
+            reporting_threshold: self
+                .reporting_threshold
+                .map(|severity| severity.to_severity()),
+            blocking_threshold: self.blocking_threshold,
+        }
+    }
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct ScanArgs {
+    /// Path to scan
+    #[arg(default_value = ".")]
+    pub path: String,
+
+    /// Path to foxguard config file
+    #[arg(long)]
+    pub config: Option<String>,
+
+    /// Output format
+    #[arg(short, long, value_enum, default_value = "terminal")]
+    pub format: OutputFormat,
+
+    /// Minimum severity to report
+    #[arg(short, long, value_enum)]
+    pub severity: Option<SeverityFilter>,
+
+    /// Path to external YAML rule file or directory
+    #[arg(short, long)]
+    pub rules: Option<String>,
+
+    /// Pre-built CodeQL database for external `engine: codeql` rules.
+    /// When omitted, foxguard auto-builds an ephemeral database against the
+    /// scan target if the `codeql` CLI is on PATH.
+    #[arg(long = "codeql-db")]
+    pub codeql_db: Option<String>,
+
+    /// Disable built-in rules and run only external rules loaded via --rules
+    #[arg(long, default_value_t = false)]
+    pub no_builtins: bool,
+
+    #[command(flatten)]
+    pub changes: ChangeModeArgs,
+
+    /// Scan only the newline-delimited, repo-root-relative paths listed in
+    /// this file, using the scan path as the analysis root so cross-file
+    /// taint context is preserved. Missing (e.g. deleted) files are skipped;
+    /// an empty list produces zero findings without falling back to a
+    /// full-tree scan. Takes precedence over the change-mode flags.
+    #[arg(long = "changed-files-from")]
+    pub changed_files_from: Option<String>,
+
+    /// Exclude scan-relative paths by glob or prefix (repeatable)
+    #[arg(long)]
+    pub exclude: Vec<String>,
+
+    /// Apply a baseline file to suppress known findings
+    #[arg(long)]
+    pub baseline: Option<String>,
+
+    /// Write the current findings to a baseline file
+    #[arg(long)]
+    pub write_baseline: Option<String>,
+
+    /// Show source-to-sink dataflow traces on taint findings
+    #[arg(long, default_value_t = false)]
+    pub explain: bool,
+
+    /// Auto-fix supported taint findings (writes changes to disk)
+    #[arg(long, default_value_t = false)]
+    pub fix: bool,
+
+    /// Post findings as inline review comments on a GitHub PR
+    #[arg(long)]
+    pub github_pr: Option<u64>,
+
+    #[command(flatten)]
+    pub pr_security_policy: PrSecurityPolicyArgs,
+
+    /// Suppress terminal output (exit code still reflects findings)
+    #[arg(short, long)]
+    pub quiet: bool,
+
+    /// Write machine-readable output to a file instead of stdout
+    #[arg(long)]
+    pub output: Option<String>,
+
+    /// Maximum file size in bytes to scan (default: 1 MB)
+    #[arg(long, default_value_t = 1_048_576)]
+    pub max_file_size: u64,
+
+    /// Per-file analysis time budget in seconds; 0 disables (default: 120).
+    /// Files that exceed it are reported as timed out, never dropped silently.
+    #[arg(long, default_value_t = crate::engine::budget::DEFAULT_FILE_TIMEOUT_SECS)]
+    pub file_timeout: u64,
+
+    /// What a timed-out file does to the exit code: `fail` treats the scan as
+    /// incomplete (exit 2), `warn` reports it and exits on findings only.
+    #[arg(long, value_enum, default_value = "fail")]
+    pub on_file_timeout: FileTimeoutPolicy,
+
+    /// Show per-finding confidence scores in terminal output
+    #[arg(long, default_value_t = false)]
+    pub show_confidence: bool,
+
+    #[command(flatten)]
+    pub views: crate::report::views::ViewArgs,
+
+    /// Minimum confidence (0.0–1.0) to report. Findings below this
+    /// threshold are suppressed. Defaults to 0.0 (report all).
+    #[arg(long)]
+    pub min_confidence: Option<f32>,
+
+    /// Internal: set by the `pqc` subcommand to filter to PQ rules only.
+    #[arg(hide = true, long, default_value_t = false)]
+    pub pq_mode: bool,
+
+    /// Query OSV for dependency vulnerabilities in supported lockfiles.
+    #[arg(long, default_value_t = false)]
+    pub sca: bool,
+
+    /// Do not query OSV over the network; use --sca-db or --sca-cache only.
+    #[arg(long, default_value_t = false)]
+    pub sca_offline: bool,
+
+    /// Local OSV advisory JSON/JSONL file or directory for offline SCA runs.
+    #[arg(long)]
+    pub sca_db: Option<String>,
+
+    /// Read/write an OSV query cache for dependency vulnerability scanning.
+    #[arg(long)]
+    pub sca_cache: Option<String>,
+
+    /// Emit CNSA 2.0 compliance annotations on crypto-related findings and
+    /// a migration-readiness summary block in terminal output (issue #241).
+    ///
+    /// When disabled (the default), the scan pipeline still exposes the
+    /// `cnsa2Deadline` field on every applicable finding in SARIF
+    /// `properties` for downstream tooling, but the terminal reporter
+    /// stays silent and no summary block is printed. Also settable via
+    /// `scan.cnsa2 = true` in `.foxguard.yml`.
+    #[arg(long, default_value_t = false)]
+    pub cnsa2: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct InitArgs {
+    /// Repository path where the hook should be installed
+    #[arg(long, default_value = ".")]
+    pub path: String,
+
+    /// Config file path relative to the repo
+    #[arg(long, default_value = ".foxguard.yml")]
+    pub config_path: String,
+
+    /// Hook file path relative to the repo
+    #[arg(long, default_value = ".git/hooks/pre-commit")]
+    pub hook_path: String,
+
+    /// Baseline path relative to the repo
+    #[arg(long, default_value = ".foxguard/baseline.json")]
+    pub baseline: String,
+
+    /// Secrets baseline path relative to the repo
+    #[arg(long, default_value = ".foxguard/secrets-baseline.json")]
+    pub secrets_baseline: String,
+
+    /// Do not create an initial baseline file
+    #[arg(long, default_value_t = false)]
+    pub no_baseline: bool,
+
+    /// Overwrite an existing hook file
+    #[arg(long, default_value_t = false)]
+    pub force: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct BaselineArgs {
+    #[command(flatten)]
+    pub scan: BaselineScanArgs,
+
+    /// Output path for the baseline file
+    #[arg(long, default_value = ".foxguard/baseline.json")]
+    pub output: String,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct BaselineScanArgs {
+    /// Path to scan
+    #[arg(default_value = ".")]
+    pub path: String,
+
+    /// Path to foxguard config file
+    #[arg(long)]
+    pub config: Option<String>,
+
+    /// Output format
+    #[arg(short, long, value_enum, default_value = "terminal")]
+    pub format: OutputFormat,
+
+    /// Minimum severity to report
+    #[arg(short, long, value_enum)]
+    pub severity: Option<SeverityFilter>,
+
+    /// Path to Semgrep YAML rule file or directory
+    #[arg(short, long)]
+    pub rules: Option<String>,
+
+    /// Pre-built CodeQL database for external `engine: codeql` rules.
+    /// When omitted, foxguard auto-builds an ephemeral database against the
+    /// scan target if the `codeql` CLI is on PATH.
+    #[arg(long = "codeql-db")]
+    pub codeql_db: Option<String>,
+
+    /// Disable built-in rules and run only external rules loaded via --rules
+    #[arg(long, default_value_t = false)]
+    pub no_builtins: bool,
+
+    #[command(flatten)]
+    pub changes: ChangeModeArgs,
+
+    /// Exclude scan-relative paths by glob or prefix (repeatable)
+    #[arg(long)]
+    pub exclude: Vec<String>,
+
+    /// Apply a baseline file to suppress known findings
+    #[arg(long)]
+    pub baseline: Option<String>,
+
+    /// Write the current findings to a baseline file
+    #[arg(long)]
+    pub write_baseline: Option<String>,
+
+    /// Show source-to-sink dataflow traces on taint findings
+    #[arg(long, default_value_t = false)]
+    pub explain: bool,
+
+    /// Auto-fix supported taint findings (writes changes to disk)
+    #[arg(long, default_value_t = false)]
+    pub fix: bool,
+
+    /// Post findings as inline review comments on a GitHub PR
+    #[arg(long)]
+    pub github_pr: Option<u64>,
+
+    /// Suppress terminal output (exit code still reflects findings)
+    #[arg(short, long)]
+    pub quiet: bool,
+
+    /// Maximum file size in bytes to scan (default: 1 MB)
+    #[arg(long, default_value_t = 1_048_576)]
+    pub max_file_size: u64,
+
+    /// Show per-finding confidence scores in terminal output
+    #[arg(long, default_value_t = false)]
+    pub show_confidence: bool,
+
+    /// Minimum confidence (0.0–1.0) to report. Findings below this
+    /// threshold are suppressed. Defaults to 0.0 (report all).
+    #[arg(long)]
+    pub min_confidence: Option<f32>,
+
+    /// Internal: set by the `pqc` subcommand to filter to PQ rules only.
+    #[arg(hide = true, long, default_value_t = false)]
+    pub pq_mode: bool,
+
+    /// Query OSV for dependency vulnerabilities in supported lockfiles.
+    #[arg(long, default_value_t = false)]
+    pub sca: bool,
+
+    /// Do not query OSV over the network; use --sca-db or --sca-cache only.
+    #[arg(long, default_value_t = false)]
+    pub sca_offline: bool,
+
+    /// Local OSV advisory JSON/JSONL file or directory for offline SCA runs.
+    #[arg(long)]
+    pub sca_db: Option<String>,
+
+    /// Read/write an OSV query cache for dependency vulnerability scanning.
+    #[arg(long)]
+    pub sca_cache: Option<String>,
+
+    /// Emit CNSA 2.0 compliance annotations on crypto-related findings and
+    /// a migration-readiness summary block in terminal output (issue #241).
+    #[arg(long, default_value_t = false)]
+    pub cnsa2: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct SecretsArgs {
+    /// Path to scan
+    #[arg(default_value = ".")]
+    pub path: String,
+
+    /// Path to foxguard config file
+    #[arg(long)]
+    pub config: Option<String>,
+
+    /// Output format
+    #[arg(short, long, value_enum, default_value = "terminal")]
+    pub format: OutputFormat,
+
+    #[command(flatten)]
+    pub changes: ChangeModeArgs,
+
+    /// Apply a baseline file to suppress known findings
+    #[arg(long)]
+    pub baseline: Option<String>,
+
+    /// Write the current findings to a baseline file
+    #[arg(long)]
+    pub write_baseline: Option<String>,
+
+    /// Write machine-readable output to a file instead of stdout
+    #[arg(long)]
+    pub output: Option<String>,
+
+    /// Exclude a file or directory prefix from secrets scanning (repeatable)
+    #[arg(long = "exclude-path")]
+    pub exclude_paths: Vec<String>,
+
+    /// Load excluded file or directory prefixes from a newline-delimited file
+    #[arg(long)]
+    pub exclude_path_file: Option<String>,
+
+    /// Ignore a specific built-in secrets rule ID (repeatable)
+    #[arg(long = "ignore-rule")]
+    pub ignored_rules: Vec<String>,
+
+    /// Maximum file size in bytes to scan (default: 1 MB)
+    #[arg(long, default_value_t = 1_048_576)]
+    pub max_file_size: u64,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct DiffArgs {
+    /// Target branch to compare against (e.g., "main", "origin/main")
+    #[arg()]
+    pub target: String,
+
+    /// Path to scan
+    #[arg(default_value = ".")]
+    pub path: String,
+
+    /// Path to foxguard config file
+    #[arg(long)]
+    pub config: Option<String>,
+
+    /// Output format
+    #[arg(short, long, value_enum, default_value = "terminal")]
+    pub format: OutputFormat,
+
+    /// Minimum severity to report
+    #[arg(short, long, value_enum)]
+    pub severity: Option<SeverityFilter>,
+
+    /// Path to external YAML rule file or directory
+    #[arg(short, long)]
+    pub rules: Option<String>,
+    /// Pre-built CodeQL database for the base side of this diff. Must be paired with --codeql-head-db.
+    #[arg(long = "codeql-base-db", requires = "codeql_head_db")]
+    pub codeql_base_db: Option<String>,
+
+    /// Pre-built CodeQL database for the head side of this diff. Must be paired with --codeql-base-db.
+    #[arg(long = "codeql-head-db", requires = "codeql_base_db")]
+    pub codeql_head_db: Option<String>,
+
+    /// Disable built-in rules and run only external rules loaded via --rules
+    #[arg(long, default_value_t = false)]
+    pub no_builtins: bool,
+
+    /// Write machine-readable output to a file instead of stdout
+    #[arg(long)]
+    pub output: Option<String>,
+
+    /// Post findings as inline review comments on a GitHub PR
+    #[arg(long)]
+    pub github_pr: Option<u64>,
+
+    #[command(flatten)]
+    pub pr_security_policy: PrSecurityPolicyArgs,
+
+    /// Maximum file size in bytes to scan (default: 1 MB)
+    #[arg(long, default_value_t = 1_048_576)]
+    pub max_file_size: u64,
+
+    #[command(flatten)]
+    pub views: crate::report::views::ViewArgs,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct TuiArgs {
+    /// Path to scan
+    #[arg(default_value = ".")]
+    pub path: String,
+
+    /// Path to foxguard config file
+    #[arg(long)]
+    pub config: Option<String>,
+
+    /// Minimum severity to report
+    #[arg(short, long, value_enum)]
+    pub severity: Option<SeverityFilter>,
+
+    /// Path to external YAML rule file or directory
+    #[arg(short, long)]
+    pub rules: Option<String>,
+
+    /// Disable built-in rules and run only external rules loaded via --rules
+    #[arg(long, default_value_t = false)]
+    pub no_builtins: bool,
+
+    #[command(flatten)]
+    pub changes: ChangeModeArgs,
+
+    /// Exclude scan-relative paths by glob or prefix (repeatable)
+    #[arg(long)]
+    pub exclude: Vec<String>,
+
+    /// Compare findings with a saved baseline, keeping known findings reviewable
+    #[arg(long)]
+    pub baseline: Option<String>,
+
+    /// Show only new findings compared to a target branch
+    #[arg(long, value_name = "TARGET", conflicts_with = "secrets")]
+    pub diff: Option<String>,
+
+    /// Scan repositories and changed files for common secrets
+    #[arg(long, default_value_t = false, conflicts_with = "diff")]
+    pub secrets: bool,
+
+    /// Show source-to-sink dataflow traces in the detail pane when available
+    #[arg(long, default_value_t = false)]
+    pub explain: bool,
+
+    /// Maximum file size in bytes to scan (default: 1 MB)
+    #[arg(long, default_value_t = 1_048_576)]
+    pub max_file_size: u64,
+
+    /// Start the launcher focused on the post-quantum crypto audit mode.
+    /// Not exposed via clap — set programmatically when invoking the TUI
+    /// from the `pqc` subcommand or other PQ-specific entry points.
+    #[arg(skip)]
+    pub pq_mode: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct PqcArgs {
+    /// Path to scan
+    #[arg(default_value = ".")]
+    pub path: String,
+
+    /// Path to foxguard config file
+    #[arg(long)]
+    pub config: Option<String>,
+
+    /// Output format
+    #[arg(short, long, value_enum, default_value = "terminal")]
+    pub format: OutputFormat,
+
+    /// Minimum severity to report
+    #[arg(short, long, value_enum)]
+    pub severity: Option<SeverityFilter>,
+
+    #[command(flatten)]
+    pub changes: ChangeModeArgs,
+
+    /// Exclude scan-relative paths by glob or prefix (repeatable)
+    #[arg(long)]
+    pub exclude: Vec<String>,
+
+    /// Show source-to-sink dataflow traces on taint findings
+    #[arg(long, default_value_t = false)]
+    pub explain: bool,
+
+    /// Suppress terminal output (exit code still reflects findings)
+    #[arg(short, long)]
+    pub quiet: bool,
+
+    /// Maximum file size in bytes to scan (default: 1 MB)
+    #[arg(long, default_value_t = 1_048_576)]
+    pub max_file_size: u64,
+
+    /// Post findings as inline review comments on a GitHub PR
+    #[arg(long)]
+    pub github_pr: Option<u64>,
+
+    /// Write machine-readable output to a file instead of stdout
+    #[arg(long)]
+    pub output: Option<String>,
+
+    /// Apply a baseline file to suppress known findings
+    #[arg(long)]
+    pub baseline: Option<String>,
+
+    /// Show per-finding confidence scores in terminal output
+    #[arg(long, default_value_t = false)]
+    pub show_confidence: bool,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct ScaArgs {
+    /// Path to scan
+    #[arg(default_value = ".")]
+    pub path: String,
+
+    /// Path to foxguard config file
+    #[arg(long)]
+    pub config: Option<String>,
+
+    /// Output format
+    #[arg(short, long, value_enum, default_value = "terminal")]
+    pub format: OutputFormat,
+
+    /// Minimum severity to report
+    #[arg(short, long, value_enum)]
+    pub severity: Option<SeverityFilter>,
+
+    #[command(flatten)]
+    pub changes: ChangeModeArgs,
+
+    /// Exclude scan-relative paths by glob or prefix (repeatable)
+    #[arg(long)]
+    pub exclude: Vec<String>,
+
+    /// Apply a baseline file to suppress known findings
+    #[arg(long)]
+    pub baseline: Option<String>,
+
+    /// Suppress terminal output (exit code still reflects findings)
+    #[arg(short, long)]
+    pub quiet: bool,
+
+    /// Maximum file size in bytes to scan (default: 1 MB)
+    #[arg(long, default_value_t = 1_048_576)]
+    pub max_file_size: u64,
+
+    /// Post findings as inline review comments on a GitHub PR
+    #[arg(long)]
+    pub github_pr: Option<u64>,
+
+    /// Write machine-readable output to a file instead of stdout
+    #[arg(long)]
+    pub output: Option<String>,
+
+    /// Show per-finding confidence scores in terminal output
+    #[arg(long, default_value_t = false)]
+    pub show_confidence: bool,
+
+    /// Minimum confidence (0.0–1.0) to report. Findings below this
+    /// threshold are suppressed. Defaults to 0.0 (report all).
+    #[arg(long)]
+    pub min_confidence: Option<f32>,
+
+    /// Do not query OSV over the network; use --sca-db or --sca-cache only.
+    #[arg(long, default_value_t = false)]
+    pub sca_offline: bool,
+
+    /// Local OSV advisory JSON/JSONL file or directory for offline SCA runs.
+    #[arg(long)]
+    pub sca_db: Option<String>,
+
+    /// Read/write an OSV query cache for dependency vulnerability scanning.
+    #[arg(long)]
+    pub sca_cache: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, clap::ValueEnum)]
+pub enum SemgrepReadinessFormat {
+    Terminal,
+    Json,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct SemgrepReadinessArgs {
+    /// Semgrep YAML rule file or directory to assess with FoxGuard's importer
+    pub rules: String,
+
+    /// Report format
+    #[arg(short, long, value_enum, default_value = "terminal")]
+    pub format: SemgrepReadinessFormat,
+
+    /// Write JSON output to a file instead of stdout
+    #[arg(long)]
+    pub output: Option<String>,
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct InternalAddScanIgnoreRuleArgs {
+    /// Scan root used to resolve relative finding paths.
+    #[arg(long)]
+    pub scan_path: String,
+
+    /// Explicit config path to edit.
+    #[arg(long)]
+    pub config: Option<String>,
+
+    /// Repository-relative file path for the finding to suppress.
+    #[arg(long)]
+    pub file: String,
+
+    /// Rule ID to add under scan.ignore_rules.
+    #[arg(long)]
+    pub rule_id: String,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum InternalCommand {
+    /// Internal helper: add a scan.ignore_rules entry using the Rust config editor.
+    #[command(hide = true, name = "add-scan-ignore-rule")]
+    AddScanIgnoreRule(InternalAddScanIgnoreRuleArgs),
+}
+
+#[derive(Args, Debug, Clone)]
+pub struct InternalArgs {
+    #[command(subcommand)]
+    pub command: InternalCommand,
+}
+
+impl PqcArgs {
+    /// Convert to `ScanArgs` with `pq_mode` enabled.
+    pub fn to_scan_args(&self) -> ScanArgs {
+        ScanArgs {
+            views: Default::default(),
+            path: self.path.clone(),
+            config: self.config.clone(),
+            format: self.format,
+            severity: self.severity,
+            rules: None,
+            codeql_db: None,
+            no_builtins: false,
+            changes: self.changes.clone(),
+            changed_files_from: None,
+            exclude: self.exclude.clone(),
+            baseline: self.baseline.clone(),
+            write_baseline: None,
+            explain: self.explain,
+            fix: false,
+            github_pr: self.github_pr,
+            pr_security_policy: PrSecurityPolicyArgs::default(),
+            quiet: self.quiet,
+            output: self.output.clone(),
+            max_file_size: self.max_file_size,
+            file_timeout: crate::engine::budget::DEFAULT_FILE_TIMEOUT_SECS,
+            on_file_timeout: crate::cli::FileTimeoutPolicy::Fail,
+            show_confidence: self.show_confidence,
+            min_confidence: None,
+            pq_mode: true,
+            sca: false,
+            sca_offline: false,
+            sca_db: None,
+            sca_cache: None,
+            // `pqc` subcommand always shows CNSA 2.0 context — that's
+            // exactly the audience for that command.
+            cnsa2: true,
+        }
+    }
+}
+
+impl ScaArgs {
+    /// Convert to `ScanArgs` with dependency vulnerability scanning enabled.
+    pub fn to_scan_args(&self) -> ScanArgs {
+        ScanArgs {
+            views: Default::default(),
+            path: self.path.clone(),
+            config: self.config.clone(),
+            format: self.format,
+            severity: self.severity,
+            rules: None,
+            codeql_db: None,
+            no_builtins: true,
+            changes: self.changes.clone(),
+            changed_files_from: None,
+            exclude: self.exclude.clone(),
+            baseline: self.baseline.clone(),
+            write_baseline: None,
+            explain: false,
+            fix: false,
+            github_pr: self.github_pr,
+            pr_security_policy: PrSecurityPolicyArgs::default(),
+            quiet: self.quiet,
+            output: self.output.clone(),
+            max_file_size: self.max_file_size,
+            file_timeout: crate::engine::budget::DEFAULT_FILE_TIMEOUT_SECS,
+            on_file_timeout: crate::cli::FileTimeoutPolicy::Fail,
+            show_confidence: self.show_confidence,
+            min_confidence: self.min_confidence,
+            pq_mode: false,
+            sca: true,
+            sca_offline: self.sca_offline,
+            sca_db: self.sca_db.clone(),
+            sca_cache: self.sca_cache.clone(),
+            cnsa2: false,
+        }
+    }
+}
+
+impl BaselineScanArgs {
+    pub fn to_scan_args(&self) -> ScanArgs {
+        ScanArgs {
+            views: Default::default(),
+            path: self.path.clone(),
+            config: self.config.clone(),
+            format: self.format,
+            severity: self.severity,
+            rules: self.rules.clone(),
+            codeql_db: self.codeql_db.clone(),
+            no_builtins: self.no_builtins,
+            changes: self.changes.clone(),
+            changed_files_from: None,
+            exclude: self.exclude.clone(),
+            baseline: self.baseline.clone(),
+            write_baseline: self.write_baseline.clone(),
+            explain: self.explain,
+            fix: self.fix,
+            github_pr: self.github_pr,
+            pr_security_policy: PrSecurityPolicyArgs::default(),
+            quiet: self.quiet,
+            output: None,
+            max_file_size: self.max_file_size,
+            file_timeout: crate::engine::budget::DEFAULT_FILE_TIMEOUT_SECS,
+            on_file_timeout: crate::cli::FileTimeoutPolicy::Fail,
+            show_confidence: self.show_confidence,
+            min_confidence: self.min_confidence,
+            pq_mode: self.pq_mode,
+            sca: self.sca,
+            sca_offline: self.sca_offline,
+            sca_db: self.sca_db.clone(),
+            sca_cache: self.sca_cache.clone(),
+            cnsa2: self.cnsa2,
+        }
+    }
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum Command {
+    /// Install a pre-commit hook for local foxguard runs
+    Init(InitArgs),
+    /// Generate a baseline file from current findings
+    Baseline(BaselineArgs),
+    /// Scan repositories and changed files for common secrets
+    Secrets(SecretsArgs),
+    /// Show only new findings compared to a target branch
+    Diff(DiffArgs),
+    /// Explore scan findings in the interactive terminal TUI
+    Tui(TuiArgs),
+    /// Post-quantum cryptography audit — scan for quantum-vulnerable algorithms
+    Pqc(PqcArgs),
+    /// Dependency vulnerability audit using OSV
+    Sca(ScaArgs),
+    /// Report migration readiness for an imported Semgrep rule pack
+    #[command(name = "semgrep-readiness")]
+    SemgrepReadiness(SemgrepReadinessArgs),
+    /// Internal machine-facing helpers used by editor integrations.
+    #[command(hide = true, name = "internal")]
+    Internal(InternalArgs),
+}
+
+#[derive(Parser, Debug)]
+#[command(
+    name = "foxguard",
+    about = "Fast local security guard for changed files, built-in rules, and external YAML",
+    version
+)]
+pub struct Cli {
+    #[command(subcommand)]
+    pub command: Option<Command>,
+
+    #[command(flatten)]
+    pub scan: ScanArgs,
+}
+
+impl SeverityFilter {
+    pub fn to_severity(&self) -> crate::Severity {
+        match self {
+            SeverityFilter::Low => crate::Severity::Low,
+            SeverityFilter::Medium => crate::Severity::Medium,
+            SeverityFilter::High => crate::Severity::High,
+            SeverityFilter::Critical => crate::Severity::Critical,
+        }
+    }
+}

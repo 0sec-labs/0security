@@ -1,0 +1,695 @@
+use clap::Parser;
+use foxguard::app::{
+    execute_diff, execute_scan, execute_secrets, resolve_scan_args as resolve_app_scan_args,
+    scan_findings_resolved,
+};
+use foxguard::baseline::write_baseline_at_root;
+use foxguard::cli::{
+    BaselineArgs, BaselineScanArgs, ChangeModeArgs, Cli, Command, DiffArgs, InitArgs,
+    InternalAddScanIgnoreRuleArgs, InternalArgs, InternalCommand, OutputFormat, PqcArgs, ScaArgs,
+    ScanArgs, SecretsArgs, SemgrepReadinessArgs, SemgrepReadinessFormat, TuiArgs,
+};
+use foxguard::config::add_scan_ignore_rule;
+use foxguard::config::load_for_scan;
+use foxguard::pr_policy::{
+    evaluate, write_pr_policy_result, PrPolicyEvaluation, PrPolicyNotEvaluated, PrSecurityPolicy,
+};
+use foxguard::tui::run_scan_tui;
+use foxguard::Finding;
+use serde::Serialize;
+use std::path::Path;
+
+fn main() {
+    let cli = Cli::parse();
+
+    if cli.command.is_none() && matches!(cli.scan.format, OutputFormat::Terminal) && !cli.scan.quiet
+    {
+        foxguard::report::terminal::print_banner();
+    }
+    let exit_code = match cli.command {
+        Some(Command::Init(args)) => run_init(&args),
+        Some(Command::Baseline(args)) => run_baseline(&args),
+        Some(Command::Secrets(args)) => run_secrets(&args),
+        Some(Command::Diff(args)) => run_diff_cmd(&args),
+        Some(Command::Tui(args)) => run_tui(&args),
+        Some(Command::Pqc(args)) => run_pqc(&args),
+        Some(Command::Sca(args)) => run_sca(&args),
+        Some(Command::SemgrepReadiness(args)) => run_semgrep_readiness(&args),
+        Some(Command::Internal(args)) => run_internal(&args),
+        None => run_scan(&cli.scan),
+    };
+
+    std::process::exit(exit_code);
+}
+
+fn run_pqc(args: &PqcArgs) -> i32 {
+    let scan = args.to_scan_args();
+    run_scan(&scan)
+}
+
+fn run_sca(args: &ScaArgs) -> i32 {
+    let scan = args.to_scan_args();
+    run_scan(&scan)
+}
+
+fn run_semgrep_readiness(args: &SemgrepReadinessArgs) -> i32 {
+    let report = match foxguard::rules::semgrep_readiness::assess_semgrep_migration_readiness(
+        Path::new(&args.rules),
+    ) {
+        Ok(report) => report,
+        Err(error) => {
+            eprintln!("Error: {}", error);
+            return 2;
+        }
+    };
+
+    match args.format {
+        SemgrepReadinessFormat::Terminal => {
+            if args.output.is_some() {
+                eprintln!("Error: --output requires --format json");
+                return 2;
+            }
+            print!(
+                "{}",
+                foxguard::report::semgrep_migration::render_terminal(&report)
+            );
+        }
+        SemgrepReadinessFormat::Json => {
+            let output = match serde_json::to_string_pretty(&report) {
+                Ok(output) => output,
+                Err(error) => {
+                    eprintln!(
+                        "Error: failed to serialize migration readiness report: {}",
+                        error
+                    );
+                    return 2;
+                }
+            };
+            if let Some(path) = &args.output {
+                if let Err(error) = std::fs::write(path, format!("{}\n", output)) {
+                    eprintln!("Error: failed to write {}: {}", path, error);
+                    return 2;
+                }
+            } else {
+                println!("{}", output);
+            }
+        }
+    }
+
+    0
+}
+fn write_pr_policy_not_evaluated_output(
+    output: Option<&str>,
+    policy: Option<&PrPolicyNotEvaluated>,
+) -> Result<(), String> {
+    match policy {
+        Some(policy) => write_pr_policy_result(output, policy),
+        None => Ok(()),
+    }
+}
+
+fn evaluate_pr_policy(
+    findings: &mut Vec<Finding>,
+    policy: Option<PrSecurityPolicy>,
+    output: Option<&str>,
+) -> Result<Option<PrPolicyEvaluation>, String> {
+    let Some(policy) = policy else {
+        return Ok(None);
+    };
+
+    let evaluation = evaluate(policy, std::mem::take(findings));
+    write_pr_policy_result(output, evaluation.report())?;
+    let report = evaluation.report();
+    eprintln!(
+        "PR security policy {} (scope {}, report >= {}, block >= {}): {} \
+         ({} included, {} blocking)",
+        report.version,
+        report.scope,
+        report.reporting_threshold,
+        report.blocking_threshold,
+        report.decision,
+        report.included_findings,
+        report.blocking_findings
+    );
+    Ok(Some(evaluation))
+}
+
+fn run_scan(scan: &ScanArgs) -> i32 {
+    let mut result = match execute_scan(scan) {
+        Ok(result) => result,
+        Err(error) => {
+            eprintln!("Error: {}", error);
+            return 2;
+        }
+    };
+
+    for notice in &result.notices {
+        eprintln!("{}", notice);
+    }
+
+    let policy_evaluation = match evaluate_pr_policy(
+        &mut result.findings,
+        result.pr_security_policy,
+        result.args.pr_security_policy.policy_output.as_deref(),
+    ) {
+        Ok(evaluation) => evaluation,
+        Err(error) => {
+            eprintln!("Error: {}", error);
+            return 2;
+        }
+    };
+    if let Err(error) = write_pr_policy_not_evaluated_output(
+        result.args.pr_security_policy.policy_output.as_deref(),
+        result.pr_security_policy_not_evaluated.as_ref(),
+    ) {
+        eprintln!("Error: {}", error);
+        return 2;
+    }
+    let findings = policy_evaluation
+        .as_ref()
+        .map(|evaluation| evaluation.findings.as_slice())
+        .unwrap_or(result.findings.as_slice());
+
+    // Apply auto-fixes if --fix is set
+    if scan.fix && !findings.is_empty() {
+        let files_fixed = foxguard::fix::apply_all_fixes(findings, &scan.path);
+        if files_fixed > 0 {
+            eprintln!("Fixed findings in {} file(s)", files_fixed);
+        }
+    }
+
+    match result.args.format {
+        OutputFormat::Terminal => {
+            if result.args.output.is_some() {
+                eprintln!("Error: --output requires a machine-readable format");
+                return 2;
+            }
+            if !result.args.quiet {
+                foxguard::report::terminal::clear_banner();
+                foxguard::report::terminal::print_findings_full(
+                    findings,
+                    result.files_scanned,
+                    result.duration,
+                    foxguard::report::terminal::ReportOptions {
+                        explain: result.args.explain,
+                        show_confidence: result.args.show_confidence,
+                        cnsa2: result.args.cnsa2,
+                    },
+                );
+            }
+        }
+        _ => {
+            if let Err(error) = foxguard::output::emit_scan_report(
+                findings,
+                &result.args,
+                result.files_scanned,
+                result.duration,
+                policy_evaluation
+                    .as_ref()
+                    .map(|evaluation| evaluation.report()),
+                result.pr_security_policy_not_evaluated.as_ref(),
+            ) {
+                eprintln!("Error: {}", error);
+                return 2;
+            }
+        }
+    }
+
+    if let Some(pr_number) = result.args.github_pr {
+        let scan_root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        if let Err(error) =
+            foxguard::report::github_pr::post_pr_review(findings, pr_number, Some(&scan_root))
+        {
+            eprintln!("Warning: failed to post PR review: {}", error);
+        }
+    }
+
+    policy_evaluation
+        .as_ref()
+        .map(|evaluation| evaluation.report().decision.exit_code())
+        .unwrap_or_else(|| if findings.is_empty() { 0 } else { 1 })
+}
+
+fn run_baseline(args: &BaselineArgs) -> i32 {
+    let mut scan = match resolve_app_scan_args(&args.scan.to_scan_args()) {
+        Ok(scan) => scan,
+        Err(error) => {
+            eprintln!("Error: {}", error);
+            return 2;
+        }
+    };
+    scan.write_baseline = None;
+    scan.baseline = None;
+    let scan_path = scan.path.clone();
+    let scan_config = scan.config.clone();
+
+    let result = match scan_findings_resolved(scan) {
+        Ok(result) => result,
+        Err(error) => {
+            eprintln!("Error: {}", error);
+            return 2;
+        }
+    };
+
+    let scan_path_ref = Path::new(&scan_path); // foxguard: ignore[rs/no-path-traversal]
+    let config = match load_for_scan(scan_path_ref, scan_config.as_deref()) {
+        Ok(config) => config,
+        Err(error) => {
+            eprintln!("Error: {}", error);
+            return 2;
+        }
+    };
+    let identity_root = foxguard::path_identity::project_root(
+        scan_path_ref,
+        config.as_ref().map(|config| config.project_root.as_path()),
+    );
+
+    if let Err(e) = write_baseline_at_root(
+        Path::new(&args.output), // foxguard: ignore[rs/no-path-traversal]
+        &result.findings,
+        &identity_root,
+    ) {
+        eprintln!("Error: {}", e);
+        return 2;
+    }
+
+    eprintln!(
+        "Wrote baseline with {} finding(s) to {}",
+        result.findings.len(),
+        args.output
+    );
+    0
+}
+
+fn run_tui(args: &TuiArgs) -> i32 {
+    match run_scan_tui(args) {
+        Ok(code) => code,
+        Err(error) => {
+            eprintln!("Error: {}", error);
+            2
+        }
+    }
+}
+
+fn run_secrets(args: &SecretsArgs) -> i32 {
+    let result = match execute_secrets(args) {
+        Ok(result) => result,
+        Err(error) => {
+            eprintln!("Error: {}", error);
+            return 2;
+        }
+    };
+
+    for notice in &result.notices {
+        eprintln!("{}", notice);
+    }
+
+    match result.args.format {
+        OutputFormat::Terminal => {
+            if result.args.output.is_some() {
+                eprintln!("Error: --output requires a machine-readable format");
+                return 2;
+            }
+            foxguard::report::terminal::print_findings(
+                &result.findings,
+                result.files_scanned,
+                result.duration,
+            );
+        }
+        _ => {
+            if let Err(error) = foxguard::output::emit_secrets_report(
+                &result.findings,
+                &result.args,
+                result.files_scanned,
+                result.duration,
+            ) {
+                eprintln!("Error: {}", error);
+                return 2;
+            }
+        }
+    }
+
+    if !result.findings.is_empty() {
+        return 1;
+    }
+
+    0
+}
+
+fn run_diff_cmd(args: &DiffArgs) -> i32 {
+    let mut result = match execute_diff(args) {
+        Ok(result) => result,
+        Err(error) => {
+            eprintln!("Error: {}", error);
+            return 2;
+        }
+    };
+
+    for notice in &result.notices {
+        eprintln!("{}", notice);
+    }
+
+    let policy_evaluation = match evaluate_pr_policy(
+        &mut result.findings,
+        result.pr_security_policy,
+        result.args.pr_security_policy.policy_output.as_deref(),
+    ) {
+        Ok(evaluation) => evaluation,
+        Err(error) => {
+            eprintln!("Error: {}", error);
+            return 2;
+        }
+    };
+    if let Err(error) = write_pr_policy_not_evaluated_output(
+        result.args.pr_security_policy.policy_output.as_deref(),
+        result.pr_security_policy_not_evaluated.as_ref(),
+    ) {
+        eprintln!("Error: {}", error);
+        return 2;
+    }
+    let findings = policy_evaluation
+        .as_ref()
+        .map(|evaluation| evaluation.findings.as_slice())
+        .unwrap_or(result.findings.as_slice());
+
+    match result.args.format {
+        OutputFormat::Terminal => {
+            if result.args.output.is_some() {
+                eprintln!("Error: --output requires a machine-readable format");
+                return 2;
+            }
+            foxguard::report::terminal::print_findings(
+                findings,
+                result.files_scanned,
+                result.duration,
+            );
+        }
+        _ => {
+            if let Err(error) = foxguard::output::emit_diff_report(
+                findings,
+                &result.args,
+                result.files_scanned,
+                result.duration,
+                policy_evaluation
+                    .as_ref()
+                    .map(|evaluation| evaluation.report()),
+                result.pr_security_policy_not_evaluated.as_ref(),
+            ) {
+                eprintln!("Error: {}", error);
+                return 2;
+            }
+        }
+    }
+
+    if let Some(pr_number) = result.args.github_pr {
+        let scan_root = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        if let Err(error) =
+            foxguard::report::github_pr::post_pr_review(findings, pr_number, Some(&scan_root))
+        {
+            eprintln!("Warning: failed to post PR review: {}", error);
+        }
+    }
+
+    policy_evaluation
+        .as_ref()
+        .map(|evaluation| evaluation.report().decision.exit_code())
+        .unwrap_or_else(|| if findings.is_empty() { 0 } else { 1 })
+}
+
+fn run_init(args: &InitArgs) -> i32 {
+    let repo_root = Path::new(&args.path); // foxguard: ignore[rs/no-path-traversal]
+    if !repo_root.exists() {
+        eprintln!("Error: path '{}' does not exist", args.path);
+        return 2;
+    }
+
+    let hook_path = repo_root.join(&args.hook_path);
+    if hook_path.exists() && !args.force {
+        eprintln!(
+            "Error: hook '{}' already exists; rerun with --force to overwrite",
+            hook_path.display()
+        );
+        return 2;
+    }
+
+    if let Some(parent) = hook_path.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            eprintln!(
+                "Error: failed to create hook directory '{}': {}",
+                parent.display(),
+                e
+            );
+            return 2;
+        }
+    }
+
+    let config_path = repo_root.join(&args.config_path);
+    let config_created = match ensure_init_config(args, &config_path) {
+        Ok(created) => created,
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            return 2;
+        }
+    };
+
+    let config = match load_for_scan(repo_root, Some(config_path.to_string_lossy().as_ref())) {
+        Ok(config) => config,
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            return 2;
+        }
+    };
+
+    let hook_contents = build_init_hook(args, config.as_ref(), config_created);
+
+    if let Err(e) = std::fs::write(&hook_path, hook_contents) {
+        eprintln!(
+            "Error: failed to write hook '{}': {}",
+            hook_path.display(),
+            e
+        );
+        return 2;
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = match std::fs::metadata(&hook_path) {
+            Ok(meta) => meta.permissions(),
+            Err(e) => {
+                eprintln!(
+                    "Error: failed to read hook metadata '{}': {}",
+                    hook_path.display(),
+                    e
+                );
+                return 2;
+            }
+        };
+        perms.set_mode(0o755);
+        if let Err(e) = std::fs::set_permissions(&hook_path, perms) {
+            eprintln!(
+                "Error: failed to mark hook executable '{}': {}",
+                hook_path.display(),
+                e
+            );
+            return 2;
+        }
+    }
+
+    if !args.no_baseline {
+        let baseline_args = BaselineArgs {
+            scan: BaselineScanArgs {
+                path: args.path.clone(),
+                config: None,
+                format: OutputFormat::Json,
+                severity: None,
+                rules: None,
+                codeql_db: None,
+                no_builtins: false,
+                changes: ChangeModeArgs::default(),
+                exclude: Vec::new(),
+                baseline: None,
+                write_baseline: None,
+                explain: false,
+                fix: false,
+                github_pr: None,
+                quiet: false,
+                max_file_size: 1_048_576,
+                show_confidence: false,
+                min_confidence: None,
+                pq_mode: false,
+                sca: false,
+                sca_offline: false,
+                sca_db: None,
+                sca_cache: None,
+                cnsa2: false,
+            },
+            output: repo_root.join(&args.baseline).display().to_string(),
+        };
+
+        let code = run_baseline(&baseline_args);
+        if code != 0 {
+            return code;
+        }
+
+        let secrets_args = SecretsArgs {
+            path: args.path.clone(),
+            config: None,
+            format: OutputFormat::Json,
+            changes: ChangeModeArgs::default(),
+            baseline: None,
+            write_baseline: Some(repo_root.join(&args.secrets_baseline).display().to_string()),
+            exclude_paths: Vec::new(),
+            exclude_path_file: None,
+            ignored_rules: Vec::new(),
+            output: None,
+            max_file_size: 1_048_576,
+        };
+
+        let code = run_secrets(&secrets_args);
+        if code != 0 && code != 1 {
+            return code;
+        }
+    }
+
+    if config_created {
+        eprintln!("Wrote starter config to {}", config_path.display());
+    }
+    eprintln!("Installed pre-commit hook at {}", hook_path.display());
+    0
+}
+
+#[derive(Serialize)]
+struct InternalAddScanIgnoreRuleResult {
+    config_path: String,
+    added: bool,
+}
+
+fn run_internal(args: &InternalArgs) -> i32 {
+    match &args.command {
+        InternalCommand::AddScanIgnoreRule(args) => run_internal_add_scan_ignore_rule(args),
+    }
+}
+
+fn run_internal_add_scan_ignore_rule(args: &InternalAddScanIgnoreRuleArgs) -> i32 {
+    let scan_root = Path::new(&args.scan_path); // foxguard: ignore[rs/no-path-traversal]
+    let finding_file = {
+        let file_path = Path::new(&args.file); // foxguard: ignore[rs/no-path-traversal]
+        if file_path.is_absolute() {
+            file_path.to_path_buf()
+        } else {
+            scan_root.join(file_path)
+        }
+    };
+
+    let finding = Finding {
+        rule_id: args.rule_id.clone(),
+        severity: foxguard::Severity::Low,
+        cwe: None,
+        description: String::new(),
+        file: finding_file.display().to_string(),
+        line: 1,
+        column: 1,
+        end_line: 1,
+        end_column: 1,
+        snippet: String::new(),
+        source_line: None,
+        source_description: None,
+        sink_line: None,
+        sink_description: None,
+        fix_suggestion: None,
+        sink_start_byte: None,
+        sink_end_byte: None,
+        confidence: 1.0,
+        taint_hops: None,
+        tags: Vec::new(),
+        crypto_algorithm: None,
+        cnsa2_deadline: None,
+        dep_name: None,
+        dep_version: None,
+        dep_ecosystem: None,
+        dep_purl: None,
+        dep_vulnerability_id: None,
+        dep_fixed_version: None,
+        dep_source: None,
+        dep_vulnerability_severity: None,
+        dep_path: Vec::new(),
+        crypto_material: None,
+    };
+
+    let result = match add_scan_ignore_rule(scan_root, args.config.as_deref(), &finding) {
+        Ok((config_path, added)) => InternalAddScanIgnoreRuleResult {
+            config_path: config_path.display().to_string(),
+            added,
+        },
+        Err(error) => {
+            eprintln!("Error: {error}");
+            return 2;
+        }
+    };
+
+    match serde_json::to_string(&result) {
+        Ok(json) => {
+            println!("{json}");
+            0
+        }
+        Err(error) => {
+            eprintln!("Error: failed to serialize internal response: {error}");
+            2
+        }
+    }
+}
+
+fn ensure_init_config(args: &InitArgs, config_path: &Path) -> Result<bool, String> {
+    if config_path.exists() {
+        return Ok(false);
+    }
+
+    if let Some(parent) = config_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| {
+            format!(
+                "failed to create config directory '{}': {}",
+                parent.display(),
+                e
+            )
+        })?;
+    }
+
+    let contents = if args.no_baseline {
+        "scan: {}\nsecrets: {}\n".to_string()
+    } else {
+        format!(
+            "scan:\n  baseline: {}\n\nsecrets:\n  baseline: {}\n",
+            args.baseline, args.secrets_baseline
+        )
+    };
+
+    std::fs::write(config_path, contents)
+        .map_err(|e| format!("failed to write config '{}': {}", config_path.display(), e))?;
+
+    Ok(true)
+}
+
+fn build_init_hook(
+    args: &InitArgs,
+    config: Option<&foxguard::config::FoxguardConfig>,
+    config_created: bool,
+) -> String {
+    let uses_config_baselines = args.no_baseline
+        || config_created
+        || config
+            .map(|config| config.scan.baseline.is_some() && config.secrets.baseline.is_some())
+            .unwrap_or(false);
+
+    if uses_config_baselines {
+        format!(
+            "#!/usr/bin/env sh\nset -eu\nfoxguard --config \"{}\" --changed\nfoxguard secrets --config \"{}\" --changed\n",
+            args.config_path, args.config_path
+        )
+    } else {
+        format!(
+            "#!/usr/bin/env sh\nset -eu\nfoxguard --config \"{}\" --changed --baseline \"{}\"\nfoxguard secrets --config \"{}\" --changed --baseline \"{}\"\n",
+            args.config_path, args.baseline, args.config_path, args.secrets_baseline
+        )
+    }
+}

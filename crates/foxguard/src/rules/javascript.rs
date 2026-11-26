@@ -1,0 +1,3727 @@
+use std::collections::HashSet;
+use std::sync::OnceLock;
+
+use regex::Regex;
+
+use crate::impl_rule;
+use crate::rules::common::{
+    get_source_line, hardcoded_secret_re, is_high_signal_secret_name, is_secret_value_long_enough,
+    looks_like_secret_value, make_finding, walk_tree,
+};
+use crate::rules::FileContext;
+use crate::{Finding, Language, Severity};
+
+// ─── Static regex helpers (compiled once) ────────────────────────────────────
+
+const SQL_METHODS: [(&str, &str); 3] = [
+    ("query", "SQL .query() call"),
+    ("execute", "SQL .execute() call"),
+    ("raw", "SQL .raw() call (knex-style)"),
+];
+
+fn js_sql_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(
+            r"(?i)(SELECT\s+.{0,40}\s+FROM|INSERT\s+INTO|UPDATE\s+.{0,40}\s+SET|DELETE\s+FROM|DROP\s+TABLE|ALTER\s+TABLE|CREATE\s+TABLE|EXEC\s+)",
+        )
+        .expect("static JavaScript SQL regex should compile")
+    })
+}
+
+fn js_redos_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        // Only flag a quantified group that itself contains a quantifier, i.e.
+        // a genuine nested quantifier like `(a+)+` / `(a*)*` / `(\d+)+`. Plain
+        // alternation groups such as `(a|b)+` are not catastrophic on their own,
+        // so we no longer flag them (false-positive reduction).
+        Regex::new(r"\([^)]*[+*][^)]*\)[+*]").expect("static ReDoS regex should compile")
+    })
+}
+
+fn js_user_input_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"^req\.(params|query|body|headers)(\b|\[|\.)")
+            .expect("static Express user-input regex should compile")
+    })
+}
+
+fn js_sanitize_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(
+            r"(?i)(escapeHtml|escape|sanitize|encode|encodeURIComponent|encodeURI|htmlEncode|xss|purify|DOMPurify|validator|parseInt|parseFloat|Number|String)\s*\(",
+        )
+        .expect("static JavaScript sanitizer regex should compile")
+    })
+}
+
+// ─── False-positive reduction helpers ────────────────────────────────────────
+
+/// Collect identifiers that are assigned a constant string value via
+/// `const`/`let`/`var x = "literal"` (or a template string with no
+/// interpolation). These are effectively static and safe to treat as such
+/// when passed to URL/redirect/HTML sinks.
+fn collect_const_string_idents(root: tree_sitter::Node, source: &str) -> HashSet<String> {
+    let mut consts = HashSet::new();
+    walk_tree(root, source, &mut |node, src| {
+        if node.kind() != "variable_declarator" {
+            return;
+        }
+        let (Some(name_node), Some(value_node)) = (
+            node.child_by_field_name("name"),
+            node.child_by_field_name("value"),
+        ) else {
+            return;
+        };
+        if name_node.kind() != "identifier" {
+            return;
+        }
+        if value_is_static_string(value_node) {
+            consts.insert(src[name_node.byte_range()].to_string());
+        }
+    });
+    consts
+}
+
+/// True if the node is a plain string literal, or a template string with no
+/// interpolation (i.e. a compile-time-constant string).
+fn value_is_static_string(node: tree_sitter::Node) -> bool {
+    match node.kind() {
+        "string" => true,
+        "template_string" => {
+            let mut cursor = node.walk();
+            let has_sub = node
+                .children(&mut cursor)
+                .any(|c| c.kind() == "template_substitution");
+            !has_sub
+        }
+        _ => false,
+    }
+}
+
+// These proofs retain lexical binding identity. The legacy name-only set above
+// is not suitable for proving an outbound authority or a metadata consumer.
+struct JsBinding<'tree> {
+    name: tree_sitter::Node<'tree>,
+    scope: tree_sitter::Node<'tree>,
+    value: Option<tree_sitter::Node<'tree>>,
+    parameter: bool,
+}
+
+struct JsBindings<'tree, 'source> {
+    root: tree_sitter::Node<'tree>,
+    source: &'source str,
+    bindings: Vec<JsBinding<'tree>>,
+    regexp_unmodified: bool,
+}
+
+fn walk_js_nodes<'tree>(
+    node: tree_sitter::Node<'tree>,
+    visit: &mut impl FnMut(tree_sitter::Node<'tree>),
+) {
+    visit(node);
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        walk_js_nodes(child, visit);
+    }
+}
+
+fn js_function_scope(node: tree_sitter::Node) -> bool {
+    matches!(
+        node.kind(),
+        "function_declaration"
+            | "function_expression"
+            | "generator_function"
+            | "generator_function_declaration"
+            | "arrow_function"
+            | "method_definition"
+    )
+}
+
+fn js_binding_scope(mut node: tree_sitter::Node, function_only: bool) -> tree_sitter::Node {
+    loop {
+        if node.kind() == "program"
+            || js_function_scope(node)
+            || (!function_only
+                && matches!(
+                    node.kind(),
+                    "statement_block"
+                        | "catch_clause"
+                        | "for_statement"
+                        | "for_in_statement"
+                        | "switch_body"
+                ))
+        {
+            return node;
+        }
+        match node.parent() {
+            Some(parent) => node = parent,
+            None => return node,
+        }
+    }
+}
+
+impl<'tree, 'source> JsBindings<'tree, 'source> {
+    fn new(root: tree_sitter::Node<'tree>, source: &'source str) -> Self {
+        let mut result = Self {
+            root,
+            source,
+            bindings: Vec::new(),
+            regexp_unmodified: true,
+        };
+        walk_js_nodes(root, &mut |node| match node.kind() {
+            "variable_declarator" => {
+                if let (Some(name), Some(declaration)) =
+                    (node.child_by_field_name("name"), node.parent())
+                {
+                    let immutable = declaration.child(0).is_some_and(|n| n.kind() == "const");
+                    let scope =
+                        js_binding_scope(declaration, declaration.kind() == "variable_declaration");
+                    let value = if immutable && name.kind() == "identifier" {
+                        node.child_by_field_name("value")
+                    } else {
+                        None
+                    };
+                    result.add_pattern(name, scope, value, false);
+                }
+            }
+            "formal_parameters" => {
+                if let Some(parent) = node.parent() {
+                    result.add_pattern(node, parent, None, true);
+                }
+            }
+            "arrow_function" | "catch_clause" => {
+                if let Some(parameter) = node.child_by_field_name("parameter") {
+                    result.add_pattern(parameter, node, None, true);
+                }
+            }
+            "for_in_statement" => {
+                if let Some(left) = node.child_by_field_name("left") {
+                    let mut cursor = node.walk();
+                    let hoisted = node
+                        .children(&mut cursor)
+                        .any(|child| child.kind() == "var");
+                    let scope = if hoisted {
+                        js_binding_scope(node, true)
+                    } else {
+                        node
+                    };
+                    result.add_pattern(left, scope, None, false);
+                }
+            }
+            "function_declaration"
+            | "generator_function_declaration"
+            | "class_declaration"
+            | "abstract_class_declaration"
+            | "function_signature"
+            | "enum_declaration"
+            | "internal_module" => {
+                if let (Some(name), Some(parent)) =
+                    (node.child_by_field_name("name"), node.parent())
+                {
+                    result.add_pattern(name, js_binding_scope(parent, false), None, false);
+                }
+            }
+            "function_expression" | "generator_function" | "class" => {
+                if let Some(name) = node.child_by_field_name("name") {
+                    result.add_pattern(name, node, None, false);
+                }
+            }
+            "import_statement" => result.add_pattern(node, root, None, false),
+            _ => {}
+        });
+        // Reject writes even to an apparent const (invalid/recovered source).
+        // Mutable declarations already have no usable value.
+        walk_js_nodes(root, &mut |node| {
+            let written = match node.kind() {
+                "assignment_expression" | "augmented_assignment_expression" => {
+                    node.child_by_field_name("left")
+                }
+                "update_expression" => node.child_by_field_name("argument"),
+                _ => None,
+            };
+            if let Some(written) = written {
+                walk_js_nodes(written, &mut |name| {
+                    let global_object = name.child_by_field_name("object").is_some_and(|object| {
+                        matches!(
+                            &source[object.byte_range()],
+                            "globalThis" | "global" | "window"
+                        )
+                    });
+                    let regexp_property = name
+                        .child_by_field_name("property")
+                        .is_some_and(|property| &source[property.byte_range()] == "RegExp");
+                    let regexp_index =
+                        name.child_by_field_name("index").is_some_and(
+                            |index| match js_plain_string(index, source) {
+                                Some(property) => property == "RegExp",
+                                None => true,
+                            },
+                        );
+                    if (matches!(
+                        name.kind(),
+                        "identifier" | "shorthand_property_identifier_pattern"
+                    ) && &source[name.byte_range()] == "RegExp")
+                        || (global_object && (regexp_property || regexp_index))
+                    {
+                        result.regexp_unmodified = false;
+                    }
+                    if matches!(
+                        name.kind(),
+                        "identifier" | "shorthand_property_identifier_pattern"
+                    ) {
+                        if let Some(index) = result.resolve(name) {
+                            result.bindings[index].value = None;
+                            result.bindings[index].parameter = false;
+                        }
+                    }
+                });
+            }
+        });
+        result
+    }
+
+    fn add_pattern(
+        &mut self,
+        pattern: tree_sitter::Node<'tree>,
+        scope: tree_sitter::Node<'tree>,
+        value: Option<tree_sitter::Node<'tree>>,
+        parameter: bool,
+    ) {
+        // Including identifiers in defaults/type annotations is conservative:
+        // ambiguity blocks a proof, never grants one.
+        walk_js_nodes(pattern, &mut |name| {
+            if matches!(
+                name.kind(),
+                "identifier" | "shorthand_property_identifier_pattern"
+            ) {
+                self.bindings.push(JsBinding {
+                    name,
+                    scope,
+                    value,
+                    parameter,
+                });
+            }
+        });
+    }
+
+    fn resolve(&self, reference: tree_sitter::Node<'_>) -> Option<usize> {
+        let name = &self.source[reference.byte_range()];
+        let mut ancestor = Some(reference);
+        let mut nearest = None;
+        while let Some(scope) = ancestor {
+            if scope.kind() == "with_statement" {
+                return None;
+            }
+            if nearest.is_none() {
+                let mut matches = self.bindings.iter().enumerate().filter(|(_, binding)| {
+                    binding.scope == scope && &self.source[binding.name.byte_range()] == name
+                });
+                if let Some((index, _)) = matches.next() {
+                    if matches.next().is_some() {
+                        return None;
+                    }
+                    nearest = Some(index);
+                }
+            }
+            ancestor = scope.parent();
+        }
+        nearest
+    }
+
+    fn literal(&self, reference: tree_sitter::Node<'_>) -> Option<&'source str> {
+        let binding = &self.bindings[self.resolve(reference)?];
+        let value = binding.value?;
+        if value.end_byte() > reference.start_byte() {
+            return None;
+        }
+        js_plain_string(value, self.source)
+    }
+
+    fn model_input(&self, expression: tree_sitter::Node<'_>, depth: usize) -> bool {
+        if depth > 2 {
+            return false;
+        }
+        if expression.kind() == "identifier" {
+            let Some(index) = self.resolve(expression) else {
+                return false;
+            };
+            let binding = &self.bindings[index];
+            if binding.parameter && &self.source[binding.name.byte_range()] == "model" {
+                return true;
+            }
+            return binding.value.is_some_and(|value| {
+                value.end_byte() < expression.start_byte() && self.model_input(value, depth + 1)
+            });
+        }
+        if expression.kind() == "call_expression" {
+            if let (Some(function), Some(arguments)) = (
+                expression.child_by_field_name("function"),
+                expression.child_by_field_name("arguments"),
+            ) {
+                if arguments.named_child_count() == 0 && function.kind() == "member_expression" {
+                    if let (Some(object), Some(property)) = (
+                        function.child_by_field_name("object"),
+                        function.child_by_field_name("property"),
+                    ) {
+                        return matches!(
+                            &self.source[property.byte_range()],
+                            "toLowerCase" | "trim"
+                        ) && self.model_input(object, depth + 1);
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    fn metadata(&self, name: tree_sitter::Node<'_>, value: tree_sitter::Node<'_>) -> bool {
+        let Some(index) = self.resolve(name) else {
+            return false;
+        };
+        if self.bindings[index].value != Some(value) {
+            return false;
+        }
+        let Some(literal) = js_plain_string(value, self.source) else {
+            return false;
+        };
+        let identifier = &self.source[name.byte_range()];
+        if identifier.starts_with("REDACTED_")
+            && literal
+                .strip_prefix('<')
+                .and_then(|s| s.strip_suffix('>'))
+                .is_some_and(|marker| {
+                    marker
+                        .bytes()
+                        .eq(identifier.bytes().map(|b| if b == b'_' { b'-' } else { b }))
+                })
+        {
+            return true;
+        }
+        let model = identifier.ends_with("_MODEL")
+            && !is_high_signal_secret_name(identifier)
+            && literal.contains('-')
+            && literal.bytes().any(|b| b.is_ascii_digit())
+            && literal
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b"-.".contains(&b))
+            && !literal.starts_with("sk-");
+        // Field-name pattern data is not an arbitrary password/token regexp.
+        // Credential-shaped values must remain findings even under metadata names.
+        let pattern = identifier.ends_with("_NAME")
+            && (literal.contains('|') || literal.contains('['))
+            && literal
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b"|[]_-?():".contains(&b));
+        if !model && !pattern {
+            return false;
+        }
+        let mut used = false;
+        let mut safe = true;
+        walk_js_nodes(self.root, &mut |reference| {
+            if !safe
+                || reference == name
+                || !matches!(
+                    reference.kind(),
+                    "identifier" | "shorthand_property_identifier"
+                )
+                || &self.source[reference.byte_range()] != identifier
+                || self.resolve(reference) != Some(index)
+            {
+                return;
+            }
+            used = true;
+            safe = if model {
+                reference.parent().is_some_and(|parent| {
+                    if parent.kind() != "binary_expression" {
+                        return false;
+                    }
+                    let operator = parent.child_by_field_name("operator");
+                    if !operator
+                        .is_some_and(|op| matches!(&self.source[op.byte_range()], "===" | "=="))
+                    {
+                        return false;
+                    }
+                    let other = if parent.child_by_field_name("left") == Some(reference) {
+                        parent.child_by_field_name("right")
+                    } else {
+                        parent.child_by_field_name("left")
+                    };
+                    other.is_some_and(|other| self.model_input(other, 0))
+                })
+            } else {
+                self.regexp_input(reference)
+            };
+        });
+        used && safe
+    }
+
+    fn regexp_input(&self, mut node: tree_sitter::Node<'_>) -> bool {
+        while let Some(parent) = node.parent() {
+            if parent.kind() == "arguments" {
+                if parent.named_child(0) != Some(node) {
+                    return false;
+                }
+                let Some(call) = parent.parent() else {
+                    return false;
+                };
+                let constructor = call
+                    .child_by_field_name("constructor")
+                    .or_else(|| call.child_by_field_name("function"));
+                return matches!(call.kind(), "new_expression" | "call_expression")
+                    && constructor.is_some_and(|constructor| {
+                        constructor.kind() == "identifier"
+                            && &self.source[constructor.byte_range()] == "RegExp"
+                            && self.regexp_unmodified
+                            && !self
+                                .bindings
+                                .iter()
+                                .any(|binding| &self.source[binding.name.byte_range()] == "RegExp")
+                    });
+            }
+            if !matches!(parent.kind(), "template_substitution" | "template_string") {
+                return false;
+            }
+            node = parent;
+        }
+        false
+    }
+}
+
+fn js_plain_string<'source>(node: tree_sitter::Node, source: &'source str) -> Option<&'source str> {
+    if !value_is_static_string(node) {
+        return None;
+    }
+    let text = &source[node.byte_range()];
+    let inner = text.get(1..text.len().checked_sub(1)?)?;
+    // Do not guess at JS escapes or URL-parser whitespace normalization.
+    (!inner.contains('\\') && !inner.chars().any(char::is_control)).then_some(inner)
+}
+
+fn js_fixed_origin_template(node: tree_sitter::Node, bindings: &JsBindings<'_, '_>) -> bool {
+    let mut prefix = String::new();
+    let mut cursor = node.walk();
+    for part in node.named_children(&mut cursor) {
+        match part.kind() {
+            "string_fragment" => prefix.push_str(&bindings.source[part.byte_range()]),
+            "template_substitution" => {
+                if js_complete_authority(&prefix, false) {
+                    return true;
+                }
+                let Some(expression) = part.named_child(0) else {
+                    return false;
+                };
+                let literal = match expression.kind() {
+                    "identifier" => bindings.literal(expression),
+                    "string" => js_plain_string(expression, bindings.source),
+                    _ => None,
+                };
+                let Some(literal) = literal else { return false };
+                prefix.push_str(literal);
+            }
+            _ => return false,
+        }
+    }
+    js_complete_authority(&prefix, true)
+}
+
+fn js_complete_authority(prefix: &str, end_of_template: bool) -> bool {
+    let Some(rest) = prefix
+        .strip_prefix("https://")
+        .or_else(|| prefix.strip_prefix("http://"))
+    else {
+        return false;
+    };
+    if prefix.contains('\\')
+        || prefix.chars().any(char::is_whitespace)
+        || prefix.chars().any(char::is_control)
+    {
+        return false;
+    }
+    // A slash/query/fragment delimiter must end authority BEFORE unknown data:
+    // `https://trusted.example${input}` can still replace/extend the host.
+    let Some(end) = rest
+        .find(['/', '?', '#'])
+        .or_else(|| end_of_template.then_some(rest.len()))
+    else {
+        return false;
+    };
+    let authority = &rest[..end];
+    !authority.is_empty()
+        && !authority.contains('@')
+        && authority
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b".-:[]".contains(&b))
+}
+
+/// True if the call expression node is a recognized sanitizer/encoder call
+/// (e.g. `DOMPurify.sanitize(...)`, `escapeHtml(...)`, `encodeURIComponent(...)`).
+fn is_sanitizer_call(node: tree_sitter::Node, src: &str) -> bool {
+    if node.kind() != "call_expression" {
+        return false;
+    }
+    let Some(func) = node.child_by_field_name("function") else {
+        return false;
+    };
+    js_sanitize_re().is_match(&format!("{}(", &src[func.byte_range()]))
+}
+
+/// True if an argument/value expression is statically safe: a string literal,
+/// a non-interpolated template string, an identifier known to hold a constant
+/// string, or a sanitizer call. Used to suppress URL/redirect/HTML findings.
+fn expr_is_safe(node: tree_sitter::Node, src: &str, consts: &HashSet<String>) -> bool {
+    match node.kind() {
+        "string" => true,
+        "template_string" => value_is_static_string(node),
+        "identifier" => consts.contains(&src[node.byte_range()]),
+        "call_expression" => is_sanitizer_call(node, src),
+        _ => false,
+    }
+}
+
+/// True if a node (typically a template string) interpolates a known-unsafe
+/// user-controlled source such as `req.query`/`req.body`/`req.params`.
+fn interpolates_user_input(node: tree_sitter::Node, src: &str) -> bool {
+    let text = &src[node.byte_range()];
+    text.contains("req.query")
+        || text.contains("req.body")
+        || text.contains("req.params")
+        || text.contains("req.headers")
+}
+
+/// Walk the parent chain from a node looking for an enclosing
+/// `call_expression` whose callee name (last `.`-segment) contains "session"
+/// (case-insensitive). Used so the session-secret rule only fires for an
+/// object pair that is actually an argument to `session({ ... })`.
+fn inside_session_call(node: tree_sitter::Node, src: &str) -> bool {
+    let mut current = node.parent();
+    while let Some(n) = current {
+        if n.kind() == "call_expression" {
+            if let Some(func) = n.child_by_field_name("function") {
+                let func_text = &src[func.byte_range()];
+                let callee = func_text.rsplit('.').next().unwrap_or(func_text);
+                if callee.to_ascii_lowercase().contains("session") {
+                    return true;
+                }
+            }
+        }
+        current = n.parent();
+    }
+    false
+}
+
+// ─── Rule 1: no-eval ─────────────────────────────────────────────────────────
+
+pub struct NoEval;
+
+impl_rule! {
+    NoEval,
+    id = "js/no-eval",
+    severity = Severity::Critical,
+    cwe = Some("CWE-95"),
+    description = "Use of eval() allows arbitrary code execution",
+    language = Language::JavaScript,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            // Look for call_expression where the function is `eval`
+            if node.kind() == "call_expression" {
+                if let Some(func) = node.child_by_field_name("function") {
+                    let func_text = &src[func.byte_range()];
+                    if func_text == "eval" {
+                        findings.push(make_finding(
+                            _self.id(),
+                            _self.severity(),
+                            _self.cwe(),
+                            _self.description(),
+                            node,
+                            src,
+                        ));
+                    }
+                }
+            }
+        });
+        findings
+
+    }
+}
+
+// ─── Rule 2: no-hardcoded-secret ─────────────────────────────────────────────
+
+pub struct NoHardcodedSecret;
+
+impl_rule! {
+    NoHardcodedSecret,
+    id = "js/no-hardcoded-secret",
+    severity = Severity::High,
+    cwe = Some("CWE-798"),
+    description = "Hardcoded secret or credential detected",
+    language = Language::JavaScript,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let mut findings = Vec::new();
+        let secret_pattern = hardcoded_secret_re();
+        let mut bindings = None;
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            // variable_declarator: const password = "hardcoded"
+            if node.kind() == "variable_declarator" {
+                if let (Some(name_node), Some(value_node)) = (
+                    node.child_by_field_name("name"),
+                    node.child_by_field_name("value"),
+                ) {
+                    let name = &src[name_node.byte_range()];
+                    let value_kind = value_node.kind();
+                    if secret_pattern.is_match(name)
+                        && (value_kind == "string" || value_kind == "template_string")
+                        && !((name.starts_with("REDACTED_") || name.ends_with("_MODEL")
+                            || src[value_node.byte_range()].contains(['|', '[']))
+                            && bindings.get_or_insert_with(|| JsBindings::new(tree.root_node(), source))
+                                .metadata(name_node, value_node))
+                    {
+                        let val = &src[value_node.byte_range()];
+                        // Skip empty strings and short placeholders
+                        let inner = val.trim_matches(|c| c == '"' || c == '\'' || c == '`');
+                        if is_secret_value_long_enough(inner, ctx.secret_thresholds)
+                            && (looks_like_secret_value(inner)
+                                || is_high_signal_secret_name(name))
+                        {
+                            findings.push(make_finding(
+                                _self.id(),
+                                _self.severity(),
+                                _self.cwe(),
+                                &format!(
+                                    "Hardcoded secret in variable '{}' — avoid committing credentials",
+                                    name
+                                ),
+                                node,
+                                src,
+                            ));
+                        }
+                    }
+                }
+            }
+
+            // assignment_expression: obj.password = "hardcoded"
+            if node.kind() == "assignment_expression" {
+                if let (Some(left), Some(right)) = (
+                    node.child_by_field_name("left"),
+                    node.child_by_field_name("right"),
+                ) {
+                    let left_text = &src[left.byte_range()];
+                    let right_kind = right.kind();
+                    if secret_pattern.is_match(left_text)
+                        && (right_kind == "string" || right_kind == "template_string")
+                    {
+                        let val = &src[right.byte_range()];
+                        let inner = val.trim_matches(|c| c == '"' || c == '\'' || c == '`');
+                        if is_secret_value_long_enough(inner, ctx.secret_thresholds)
+                            && (looks_like_secret_value(inner)
+                                || is_high_signal_secret_name(left_text))
+                        {
+                            findings.push(make_finding(
+                                _self.id(),
+                                _self.severity(),
+                                _self.cwe(),
+                                &format!(
+                                    "Hardcoded secret assigned to '{}' — use environment variables instead",
+                                    left_text
+                                ),
+                                node,
+                                src,
+                            ));
+                        }
+                    }
+                }
+            }
+        });
+        findings
+
+    }
+}
+
+/// Template tags whose `${}` placeholders become bound parameters rather than
+/// interpolated text: Drizzle / postgres.js / slonik `sql`, Prisma's
+/// `$queryRaw`, and friends. A `.raw`/`.unsafe` escape hatch on the same tag
+/// does interpolate, so those are deliberately excluded.
+fn is_parameterizing_sql_tag(tag: &str) -> bool {
+    let tag = tag.trim();
+    let lowered = tag.to_ascii_lowercase();
+    if lowered.contains("raw")
+        && !lowered.ends_with("$queryraw")
+        && !lowered.ends_with("$executeraw")
+    {
+        return false;
+    }
+    if lowered.contains("unsafe") {
+        return false;
+    }
+    let last = tag.rsplit('.').next().unwrap_or(tag);
+    matches!(
+        last,
+        "sql" | "SQL" | "sqlFragment" | "postgres" | "$queryRaw" | "$executeRaw"
+    )
+}
+
+/// The tag of a tagged template literal, if this template is tagged.
+///
+/// tree-sitter models `` sql`...` `` as a `call_expression` whose `function`
+/// is the tag and whose argument is the `template_string`.
+fn sql_template_tag<'a>(node: tree_sitter::Node<'_>, src: &'a str) -> Option<&'a str> {
+    let parent = node.parent()?;
+    if parent.kind() != "call_expression" {
+        return None;
+    }
+    let function = parent.child_by_field_name("function")?;
+    Some(&src[function.byte_range()])
+}
+
+fn is_sql_execution_argument(mut node: tree_sitter::Node<'_>, source: &str) -> bool {
+    while let Some(parent) = node.parent() {
+        let call = match parent.kind() {
+            "binary_expression" | "parenthesized_expression" => {
+                node = parent;
+                continue;
+            }
+            "arguments" if parent.named_child(0) == Some(node) => parent.parent(),
+            "call_expression" if parent.child_by_field_name("arguments") == Some(node) => {
+                Some(parent)
+            }
+            _ => None,
+        };
+        let Some(call) = call.filter(|call| call.kind() == "call_expression") else {
+            return false;
+        };
+        let Some(property) = call
+            .child_by_field_name("function")
+            .and_then(|function| function.child_by_field_name("property"))
+        else {
+            return false;
+        };
+        let name = &source[property.byte_range()];
+        return SQL_METHODS.iter().any(|(method, _)| *method == name);
+    }
+    false
+}
+
+fn is_sql_literal(text: &str, expression: tree_sitter::Node<'_>, source: &str) -> bool {
+    js_sql_re().find_iter(text).any(|matched| {
+        // EXEC is also a shell builtin. Unlike SELECT ... FROM, the keyword
+        // alone is not SQL evidence; require an actual SQL execution argument.
+        !matched.as_str()[..4].eq_ignore_ascii_case("EXEC")
+            || is_sql_execution_argument(expression, source)
+    })
+}
+
+// ─── Rule 3: no-sql-injection ────────────────────────────────────────────────
+
+pub struct NoSqlInjection;
+
+impl_rule! {
+    NoSqlInjection,
+    id = "js/no-sql-injection",
+    severity = Severity::Critical,
+    cwe = Some("CWE-89"),
+    description = "Potential SQL injection via string concatenation or template literal",
+    language = Language::JavaScript,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+        // Require SQL keyword followed by SQL structure (FROM, INTO, SET, WHERE, TABLE, VALUES)
+        // This avoids matching plain English like res.send('delete ' + name)
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            // Detect: query("SELECT * FROM users WHERE id = " + userId)
+            if node.kind() == "binary_expression" {
+                if let Some(op) = node.child_by_field_name("operator") {
+                    if &src[op.byte_range()] == "+" {
+                        if let Some(left) = node.child_by_field_name("left") {
+                            let left_text = &src[left.byte_range()];
+                            if (left.kind() == "string" || left.kind() == "template_string")
+                                && is_sql_literal(left_text, node, src)
+                            {
+                                findings.push(make_finding(
+                                    _self.id(),
+                                    _self.severity(),
+                                    _self.cwe(),
+                                    "SQL query built with string concatenation — use parameterized queries",
+                                    node,
+                                    src,
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Detect template literals with SQL: `SELECT * FROM users WHERE id = ${id}`
+            if node.kind() == "template_string" {
+                let text = &src[node.byte_range()];
+                // A parameterizing tag (Drizzle/postgres.js `sql`, Prisma
+                // `$queryRaw`) binds every `${}` as a parameter, so the
+                // interpolation below is not a concatenation sink.
+                let parameterized = sql_template_tag(node, src)
+                    .is_some_and(is_parameterizing_sql_tag);
+                if is_sql_literal(text, node, src) && !parameterized {
+                    // Check it has interpolation
+                    let mut cursor = node.walk();
+                    let has_substitution = node
+                        .children(&mut cursor)
+                        .any(|c| c.kind() == "template_substitution");
+                    if has_substitution {
+                        findings.push(make_finding(
+                            _self.id(),
+                            _self.severity(),
+                            _self.cwe(),
+                            "SQL query built with template literal interpolation — use parameterized queries",
+                            node,
+                            src,
+                        ));
+                    }
+                }
+            }
+        });
+        findings
+
+    }
+}
+
+// ─── Rule 4: no-xss-innerhtml ────────────────────────────────────────────────
+
+pub struct NoXssInnerHtml;
+
+impl_rule! {
+    NoXssInnerHtml,
+    id = "js/no-xss-innerhtml",
+    severity = Severity::High,
+    cwe = Some("CWE-79"),
+    description = "Assignment to innerHTML may lead to XSS",
+    language = Language::JavaScript,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+        let consts = collect_const_string_idents(tree.root_node(), source);
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            // assignment_expression where left side ends with .innerHTML
+            if node.kind() == "assignment_expression" {
+                if let Some(left) = node.child_by_field_name("left") {
+                    if left.kind() == "member_expression" {
+                        if let Some(prop) = left.child_by_field_name("property") {
+                            let prop_text = &src[prop.byte_range()];
+                            if prop_text == "innerHTML" || prop_text == "outerHTML" {
+                                // Flag only if the right side is not statically
+                                // safe: string literal, const-bound identifier,
+                                // non-interpolated template, or sanitizer call
+                                // (e.g. DOMPurify.sanitize(...)).
+                                if let Some(right) = node.child_by_field_name("right") {
+                                    if !expr_is_safe(right, src, &consts) {
+                                        findings.push(make_finding(
+                                            _self.id(),
+                                            _self.severity(),
+                                            _self.cwe(),
+                                            &format!(
+                                                "Assignment to {} with dynamic content — use textContent or sanitize HTML",
+                                                prop_text
+                                            ),
+                                            node,
+                                            src,
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        findings
+
+    }
+}
+
+// ─── Rule 5: no-command-injection ────────────────────────────────────────────
+
+pub struct NoCommandInjection;
+
+impl_rule! {
+    NoCommandInjection,
+    id = "js/no-command-injection",
+    severity = Severity::Critical,
+    cwe = Some("CWE-78"),
+    description = "Potential command injection via exec/spawn with dynamic input",
+    language = Language::JavaScript,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+        let dangerous_fns = [
+            "exec",
+            "execSync",
+            "spawn",
+            "spawnSync",
+            "execFile",
+            "execFileSync",
+        ];
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() == "call_expression" {
+                if let Some(func) = node.child_by_field_name("function") {
+                    let func_text = &src[func.byte_range()];
+
+                    // Match child_process.exec(...) or exec(...)
+                    let func_name = func_text.rsplit('.').next().unwrap_or(func_text);
+
+                    // Skip RegExp.prototype.exec() — only flag bare exec()
+                    // or child_process.exec() receivers.
+                    if func_name == "exec" && func_text.contains('.') {
+                        if let Some(dot_index) = func_text.rfind('.') {
+                            let receiver = &func_text[..dot_index];
+                            if !receiver.contains("child_process")
+                                && !["cp", "proc", "subprocess"].contains(&receiver)
+                            {
+                                return;
+                            }
+                        }
+                    }
+
+                    if dangerous_fns.contains(&func_name) {
+                        if let Some(args) = node.child_by_field_name("arguments") {
+                            if let Some(first_arg) = args.named_child(0) {
+                                let kind = first_arg.kind();
+                                // Flag if the argument is not a plain string literal
+                                // (template strings with substitution, identifiers, binary expressions, etc.)
+                                let is_dynamic = match kind {
+                                    "string" => false,
+                                    "template_string" => {
+                                        let mut cursor = first_arg.walk();
+                                        let has_sub = first_arg
+                                            .children(&mut cursor)
+                                            .any(|c| c.kind() == "template_substitution");
+                                        has_sub
+                                    }
+                                    _ => true,
+                                };
+
+                                if is_dynamic {
+                                    findings.push(make_finding(
+                                        _self.id(),
+                                        _self.severity(),
+                                        _self.cwe(),
+                                        &format!(
+                                            "{}() called with dynamic argument — risk of command injection",
+                                            func_name
+                                        ),
+                                        node,
+                                        src,
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        findings
+
+    }
+}
+
+// ─── Rule 6: no-document-write ──────────────────────────────────────────────
+
+pub struct NoDocumentWrite;
+
+impl_rule! {
+    NoDocumentWrite,
+    id = "js/no-document-write",
+    severity = Severity::High,
+    cwe = Some("CWE-79"),
+    description = "document.write() can lead to XSS vulnerabilities",
+    language = Language::JavaScript,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() == "call_expression" {
+                if let Some(func) = node.child_by_field_name("function") {
+                    let func_text = &src[func.byte_range()];
+                    if func_text == "document.write" || func_text == "document.writeln" {
+                        findings.push(make_finding(
+                            _self.id(),
+                            _self.severity(),
+                            _self.cwe(),
+                            "document.write() can inject arbitrary HTML — use DOM APIs instead",
+                            node,
+                            src,
+                        ));
+                    }
+                }
+            }
+        });
+        findings
+
+    }
+}
+
+// ─── Rule 7: no-open-redirect ───────────────────────────────────────────────
+
+pub struct NoOpenRedirect;
+
+impl_rule! {
+    NoOpenRedirect,
+    id = "js/no-open-redirect",
+    severity = Severity::Medium,
+    cwe = Some("CWE-601"),
+    description = "Open redirect via assignment to window.location with user input",
+    language = Language::JavaScript,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+        let consts = collect_const_string_idents(tree.root_node(), source);
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() == "assignment_expression" {
+                if let Some(left) = node.child_by_field_name("left") {
+                    let left_text = &src[left.byte_range()];
+                    if left_text == "window.location"
+                        || left_text == "window.location.href"
+                        || left_text == "location.href"
+                        || left_text == "document.location"
+                        || left_text == "document.location.href"
+                    {
+                        if let Some(right) = node.child_by_field_name("right") {
+                            // Flag if right side is not statically safe (string
+                            // literal, const-bound identifier, or sanitizer call).
+                            if !expr_is_safe(right, src, &consts) {
+                                findings.push(make_finding(
+                                    _self.id(),
+                                    _self.severity(),
+                                    _self.cwe(),
+                                    "Assignment to window.location with dynamic value — risk of open redirect",
+                                    node,
+                                    src,
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        findings
+
+    }
+}
+
+// ─── Rule 8: no-weak-crypto ────────────────────────────────────────────────
+
+pub struct NoWeakCrypto;
+
+impl_rule! {
+    NoWeakCrypto,
+    id = "js/no-weak-crypto",
+    severity = Severity::Medium,
+    cwe = Some("CWE-327"),
+    description = "Use of weak cryptographic hash (MD5/SHA1)",
+    language = Language::JavaScript,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            // Detect: createHash('md5') or createHash('sha1')
+            if node.kind() == "call_expression" {
+                if let Some(func) = node.child_by_field_name("function") {
+                    let func_text = &src[func.byte_range()];
+                    let func_name = func_text.rsplit('.').next().unwrap_or(func_text);
+                    if func_name == "createHash" {
+                        if let Some(args) = node.child_by_field_name("arguments") {
+                            if let Some(first_arg) = args.named_child(0) {
+                                if first_arg.kind() == "string" {
+                                    let val = &src[first_arg.byte_range()];
+                                    let inner = val.trim_matches(|c| c == '"' || c == '\'');
+                                    if inner == "md5" || inner == "sha1" {
+                                        findings.push(make_finding(
+                                            _self.id(),
+                                            _self.severity(),
+                                            _self.cwe(),
+                                            &format!(
+                                                "createHash('{}') uses a weak hash — use sha256 or stronger",
+                                                inner
+                                            ),
+                                            node,
+                                            src,
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        findings
+
+    }
+}
+
+// ─── Rule: pq-vulnerable-crypto ───────────────────────────────────────────
+
+pub struct PqVulnerableCrypto;
+
+impl_rule! {
+    PqVulnerableCrypto,
+    id = "js/pq-vulnerable-crypto",
+    severity = Severity::High,
+    cwe = Some("CWE-327"),
+    description = "Use of quantum-vulnerable cryptographic algorithm (RSA/ECDSA/ECDH/DH/Ed25519)",
+    language = Language::JavaScript,
+    // CNSA 2.0 class: web/cloud (exclusive-use 2033). See
+    // `src/compliance.rs` for the NSA FAQ citation.
+    cnsa2_deadline = "2033",
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() == "call_expression" {
+                if let Some(func) = node.child_by_field_name("function") {
+                    let func_text = &src[func.byte_range()];
+                    let func_name = func_text.rsplit('.').next().unwrap_or(func_text);
+
+                    // crypto.generateKeyPair('rsa'|'ec'|'dsa'|'ed25519'|'ed448')
+                    // crypto.generateKeyPairSync(...)
+                    if (func_name == "generateKeyPair" || func_name == "generateKeyPairSync") && func_text.starts_with("crypto.") {
+                        if let Some(args) = node.child_by_field_name("arguments") {
+                            if let Some(first_arg) = args.named_child(0) {
+                                if first_arg.kind() == "string" {
+                                    let val = &src[first_arg.byte_range()];
+                                    let inner = val.trim_matches(|c| c == '"' || c == '\'' || c == '`');
+                                    let (algo, canonical_algo, replacement) = match inner.to_lowercase().as_str() {
+                                            "rsa" => ("RSA", "RSA", "General use (FIPS category III): X25519MLKEM768 hybrid KEM (or HQC for code-based diversity, draft) for encryption, ML-DSA-65 (FIPS 204) / FN-DSA (FIPS 206, draft) with hybrid cert chains for signatures. CNSA 2.0 / NSS: ML-KEM-1024 for key establishment, ML-DSA-87 for signatures."),
+                                            "ec" => ("EC", "ECDSA", "General use (FIPS category III): X25519MLKEM768 hybrid KEM (or HQC, draft) for encryption, ML-DSA-65 (FIPS 204) / FN-DSA (FIPS 206, draft) with hybrid cert chains for signatures. CNSA 2.0 / NSS: ML-KEM-1024 for key establishment, ML-DSA-87 for signatures."),
+                                            "dsa" => ("DSA", "DSA", "General use (FIPS category III): ML-DSA-65 (FIPS 204) or FN-DSA (FIPS 206, draft) for smaller signatures, with hybrid certificate chains during transition. CNSA 2.0 / NSS: ML-DSA-87 for signatures."),
+                                            "ed25519" => ("Ed25519", "Ed25519", "General use (FIPS category III): ML-DSA-65 (FIPS 204) or FN-DSA (FIPS 206, draft) for smaller signatures, with hybrid certificate chains during transition. CNSA 2.0 / NSS: ML-DSA-87 for signatures."),
+                                            "ed448" => ("Ed448", "Ed448", "General use (FIPS category III): ML-DSA-65 (FIPS 204) or FN-DSA (FIPS 206, draft) for smaller signatures, with hybrid certificate chains during transition. CNSA 2.0 / NSS: ML-DSA-87 for signatures."),
+                                            _ => return,
+                                        };
+                                    let mut f = make_finding(
+                                        _self.id(),
+                                        _self.severity(),
+                                        _self.cwe(),
+                                        &format!(
+                                            "generateKeyPair('{}') uses quantum-vulnerable {} — migrate to {}",
+                                            inner, algo, replacement
+                                        ),
+                                        node,
+                                        src,
+                                    );
+                                    f.tags = vec!["PQ".into()];
+                                    f.crypto_algorithm = Some(canonical_algo.to_string());
+                                    findings.push(f);
+                                }
+                            }
+                        }
+                    }
+
+                    // crypto.createDiffieHellman, crypto.createDiffieHellmanGroup
+                    if (func_name == "createDiffieHellman" || func_name == "createDiffieHellmanGroup") && func_text.starts_with("crypto.") {
+                        let mut f = make_finding(
+                            _self.id(),
+                            _self.severity(),
+                            _self.cwe(),
+                            "Diffie-Hellman is quantum-vulnerable — General use (FIPS category III): migrate to X25519MLKEM768 hybrid KEM (FIPS 203), or HQC (code-based diversity hedge, draft) as a non-lattice alternative. CNSA 2.0 / NSS: ML-KEM-1024 for key establishment.",
+                            node,
+                            src,
+                        );
+                        f.tags = vec!["PQ".into()];
+                        f.crypto_algorithm = Some("DH".to_string());
+                        findings.push(f);
+                    }
+
+                    // crypto.createECDH
+                    if func_name == "createECDH" && func_text.starts_with("crypto.") {
+                        let mut f = make_finding(
+                            _self.id(),
+                            _self.severity(),
+                            _self.cwe(),
+                            "ECDH is quantum-vulnerable — General use (FIPS category III): migrate to X25519MLKEM768 hybrid KEM (FIPS 203), or HQC (code-based diversity hedge, draft) as a non-lattice alternative. CNSA 2.0 / NSS: ML-KEM-1024 for key establishment.",
+                            node,
+                            src,
+                        );
+                        f.tags = vec!["PQ".into()];
+                        f.crypto_algorithm = Some("ECDH".to_string());
+                        findings.push(f);
+                    }
+
+                    // crypto.sign / crypto.verify with ed25519/ed448 algorithm string
+                    // Require member expression (contains dot) to avoid matching bare sign()/verify() calls
+                    if (func_name == "sign" || func_name == "verify") && func_text.starts_with("crypto.") {
+                        if let Some(args) = node.child_by_field_name("arguments") {
+                            if let Some(first_arg) = args.named_child(0) {
+                                if first_arg.kind() == "string" {
+                                    let val = &src[first_arg.byte_range()];
+                                    let inner = val.trim_matches(|c| c == '"' || c == '\'' || c == '`').to_lowercase();
+                                    if inner == "ed25519" || inner == "ed448" {
+                                        let canonical_algo = if inner == "ed25519" { "Ed25519" } else { "Ed448" };
+                                        let mut f = make_finding(
+                                            _self.id(),
+                                            _self.severity(),
+                                            _self.cwe(),
+                                            &format!(
+                                                "{}('{}') uses a quantum-vulnerable signature algorithm — General use (FIPS category III): ML-DSA-65 (FIPS 204) or FN-DSA (FIPS 206, draft) for smaller signatures, with hybrid certificate chains during transition. CNSA 2.0 / NSS: ML-DSA-87 for signatures.",
+                                                func_name, inner
+                                            ),
+                                            node,
+                                            src,
+                                        );
+                                        f.tags = vec!["PQ".into()];
+                                        f.crypto_algorithm = Some(canonical_algo.to_string());
+                                        findings.push(f);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        findings
+
+    }
+}
+
+/// Returns `true` when every leaf of a binary expression is a string literal
+/// or the identifier `__dirname` — i.e. the concatenation is fully static.
+fn is_static_concat(node: tree_sitter::Node, src: &str) -> bool {
+    match node.kind() {
+        "string" => true,
+        "identifier" => &src[node.byte_range()] == "__dirname",
+        "binary_expression" => {
+            let left = node.child_by_field_name("left");
+            let right = node.child_by_field_name("right");
+            match (left, right) {
+                (Some(l), Some(r)) => is_static_concat(l, src) && is_static_concat(r, src),
+                _ => false,
+            }
+        }
+        _ => false,
+    }
+}
+
+// ─── Rule: pq-ready-crypto (informational) ────────────────────────────────
+
+pub struct PqReadyCrypto;
+
+impl_rule! {
+    PqReadyCrypto,
+    id = "js/pq-ready-crypto",
+    severity = Severity::Low,
+    cwe = None,
+    description = "Post-quantum / hybrid cryptographic algorithm in use (ML-KEM, ML-DSA, SLH-DSA, FN-DSA, HQC, or hybrid KEM)",
+    language = Language::JavaScript,
+    fn check(_self, source, _tree) {
+        crate::rules::pq::pq_ready_findings(_self.id(), source, _self.language())
+    }
+}
+
+// ─── Rule 9: no-path-traversal ─────────────────────────────────────────────
+
+pub struct NoPathTraversal;
+
+impl_rule! {
+    NoPathTraversal,
+    id = "js/no-path-traversal",
+    severity = Severity::High,
+    cwe = Some("CWE-22"),
+    description = "Potential path traversal via fs operations with user input",
+    language = Language::JavaScript,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+        let fs_fns = [
+            "readFile",
+            "readFileSync",
+            "writeFile",
+            "writeFileSync",
+            "appendFile",
+            "appendFileSync",
+            "createReadStream",
+            "createWriteStream",
+            "readdir",
+            "readdirSync",
+            "unlink",
+            "unlinkSync",
+            "stat",
+            "statSync",
+            "access",
+            "accessSync",
+        ];
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() == "call_expression" {
+                if let Some(func) = node.child_by_field_name("function") {
+                    let func_text = &src[func.byte_range()];
+                    let func_name = func_text.rsplit('.').next().unwrap_or(func_text);
+                    if fs_fns.contains(&func_name) {
+                        if let Some(args) = node.child_by_field_name("arguments") {
+                            if let Some(first_arg) = args.named_child(0) {
+                                // Flag if path argument uses concatenation or template
+                                let kind = first_arg.kind();
+                                if kind == "binary_expression" || kind == "template_string" {
+                                    findings.push(make_finding(
+                                        _self.id(),
+                                        _self.severity(),
+                                        _self.cwe(),
+                                        &format!(
+                                            "{}() called with dynamic path — validate and sanitize to prevent path traversal",
+                                            func_name
+                                        ),
+                                        node,
+                                        src,
+                                    ));
+                                }
+                            }
+                        }
+                    }
+
+                    if func_name == "sendFile" || func_name == "download" {
+                        if let Some(args) = node.child_by_field_name("arguments") {
+                            if let Some(first_arg) = args.named_child(0) {
+                                let is_dynamic = match first_arg.kind() {
+                                    "call_expression" => {
+                                        // Whitelist path.join/path.resolve with all-static args
+                                        let safe = (|| {
+                                            let func = first_arg.child_by_field_name("function")?;
+                                            let ft = &src[func.byte_range()];
+                                            if ft != "path.join" && ft != "path.resolve" {
+                                                return None;
+                                            }
+                                            let a = first_arg.child_by_field_name("arguments")?;
+                                            let mut c = a.walk();
+                                            let all_static = a.named_children(&mut c).all(|arg| {
+                                                arg.kind() == "string"
+                                                    || (arg.kind() == "identifier"
+                                                        && &src[arg.byte_range()] == "__dirname")
+                                            });
+                                            Some(all_static)
+                                        })();
+                                        !safe.unwrap_or(false)
+                                    }
+                                    "binary_expression" => !is_static_concat(first_arg, src),
+                                    "template_string" => {
+                                        let mut cursor = first_arg.walk();
+                                        let has_sub = first_arg
+                                            .children(&mut cursor)
+                                            .any(|c| c.kind() == "template_substitution");
+                                        has_sub
+                                    }
+                                    "identifier" | "member_expression"
+                                    | "subscript_expression" => true,
+                                    _ => false,
+                                };
+                                if is_dynamic {
+                                    findings.push(make_finding(
+                                        _self.id(),
+                                        _self.severity(),
+                                        _self.cwe(),
+                                        &format!(
+                                            "{}() called with dynamic path — validate and sanitize to prevent path traversal",
+                                            func_name
+                                        ),
+                                        node,
+                                        src,
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        findings
+
+    }
+}
+
+// ─── Rule 10: no-prototype-pollution ────────────────────────────────────────
+
+pub struct NoSsrf;
+
+impl_rule! {
+    NoSsrf,
+    id = "js/no-ssrf",
+    severity = Severity::High,
+    cwe = Some("CWE-918"),
+    description = "Potential SSRF via dynamic outbound request URL",
+    language = Language::JavaScript,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+        let request_fns = [
+            "fetch",
+            "axios",
+            "axios.get",
+            "axios.post",
+            "axios.put",
+            "axios.delete",
+            "axios.request",
+            "got",
+            "got.get",
+            "got.post",
+            "got.put",
+            "got.delete",
+            "superagent.get",
+            "superagent.post",
+            "http.get",
+            "http.request",
+            "https.get",
+            "https.request",
+        ];
+        let mut bindings = None;
+
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() != "call_expression" {
+                return;
+            }
+
+            let Some(func) = node.child_by_field_name("function") else {
+                return;
+            };
+            let func_text = &src[func.byte_range()];
+            if !request_fns.contains(&func_text) {
+                return;
+            }
+
+            let Some(args) = node.child_by_field_name("arguments") else {
+                return;
+            };
+            let Some(first_arg) = args.named_child(0) else {
+                return;
+            };
+
+            let is_dynamic = match first_arg.kind() {
+                "string" => false,
+                "identifier" => bindings.get_or_insert_with(|| JsBindings::new(tree.root_node(), source))
+                    .literal(first_arg).is_none(),
+                "object" => {
+                    let arg_text = &src[first_arg.byte_range()];
+                    arg_text.contains("url:")
+                        && !arg_text.contains("url: \"")
+                        && !arg_text.contains("url: '")
+                }
+                "template_string" => {
+                    let mut cursor = first_arg.walk();
+                    let has_sub = first_arg
+                        .children(&mut cursor)
+                        .any(|c| c.kind() == "template_substitution");
+                    has_sub && !js_fixed_origin_template(
+                        first_arg,
+                        bindings.get_or_insert_with(|| JsBindings::new(tree.root_node(), source)),
+                    )
+                }
+                "binary_expression"
+                | "member_expression"
+                | "call_expression"
+                | "subscript_expression" => true,
+                _ => false,
+            };
+
+            if is_dynamic {
+                findings.push(make_finding(
+                    _self.id(),
+                    _self.severity(),
+                    _self.cwe(),
+                    &format!(
+                        "{} called with dynamic URL — validate and allowlist outbound destinations to prevent SSRF",
+                        func_text
+                    ),
+                    node,
+                    src,
+                ));
+            }
+        });
+
+        findings
+
+    }
+}
+
+// ─── Rule 10: no-prototype-pollution ────────────────────────────────────────
+
+pub struct NoPrototypePollution;
+
+impl_rule! {
+    NoPrototypePollution,
+    id = "js/no-prototype-pollution",
+    severity = Severity::High,
+    cwe = Some("CWE-1321"),
+    description = "Potential prototype pollution via dynamic property assignment",
+    language = Language::JavaScript,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            // Detect: obj[key][subkey] = value where keys are identifiers (not literals)
+            if node.kind() == "assignment_expression" {
+                if let Some(left) = node.child_by_field_name("left") {
+                    if left.kind() == "subscript_expression" {
+                        if let Some(index) = left.child_by_field_name("index") {
+                            // Flag if the index is a variable (not a string/number literal)
+                            if index.kind() == "identifier" {
+                                // Check if it's nested: obj[a][b] = value
+                                if let Some(object) = left.child_by_field_name("object") {
+                                    if object.kind() == "subscript_expression" {
+                                        findings.push(make_finding(
+                                            _self.id(),
+                                            _self.severity(),
+                                            _self.cwe(),
+                                            "Nested dynamic property assignment — risk of prototype pollution",
+                                            node,
+                                            src,
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        findings
+
+    }
+}
+
+// ─── Rule 11: no-unsafe-regex ───────────────────────────────────────────────
+
+pub struct NoUnsafeRegex;
+
+impl_rule! {
+    NoUnsafeRegex,
+    id = "js/no-unsafe-regex",
+    severity = Severity::Medium,
+    cwe = Some("CWE-1333"),
+    description = "Potentially catastrophic backtracking regex pattern",
+    language = Language::JavaScript,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+        // Patterns known to cause catastrophic backtracking: nested quantifiers
+        let dangerous_pattern = js_redos_re();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            // Detect regex literals: /pattern/
+            if node.kind() == "regex" {
+                let regex_text = &src[node.byte_range()];
+                if dangerous_pattern.is_match(regex_text) {
+                    findings.push(make_finding(
+                        _self.id(),
+                        _self.severity(),
+                        _self.cwe(),
+                        "Regex with nested quantifiers may cause catastrophic backtracking (ReDoS)",
+                        node,
+                        src,
+                    ));
+                }
+            }
+
+            // Detect: new RegExp("pattern")
+            if node.kind() == "new_expression" {
+                if let Some(constructor) = node.child_by_field_name("constructor") {
+                    let ctor_text = &src[constructor.byte_range()];
+                    if ctor_text == "RegExp" {
+                        if let Some(args) = node.child_by_field_name("arguments") {
+                            if let Some(first_arg) = args.named_child(0) {
+                                if first_arg.kind() == "string" {
+                                    let pattern_text = &src[first_arg.byte_range()];
+                                    if dangerous_pattern.is_match(pattern_text) {
+                                        findings.push(make_finding(
+                                            _self.id(),
+                                            _self.severity(),
+                                            _self.cwe(),
+                                            "RegExp with nested quantifiers may cause catastrophic backtracking (ReDoS)",
+                                            node,
+                                            src,
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        findings
+
+    }
+}
+
+// ─── Rule 12: express-no-hardcoded-session-secret ─────────────────────────
+
+pub struct ExpressNoHardcodedSessionSecret;
+
+impl_rule! {
+    ExpressNoHardcodedSessionSecret,
+    id = "js/express-no-hardcoded-session-secret",
+    severity = Severity::High,
+    cwe = Some("CWE-798"),
+    description = "Hardcoded session secret in express-session configuration",
+    language = Language::JavaScript,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let mut findings = Vec::new();
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            // Detect: session({ secret: "literal" }) — look for a pair with key "secret"
+            // inside a call to session()
+            if node.kind() == "pair" {
+                if let (Some(key), Some(value)) = (
+                    node.child_by_field_name("key"),
+                    node.child_by_field_name("value"),
+                ) {
+                    let key_text = &src[key.byte_range()];
+                    let key_inner = key_text.trim_matches(|c| c == '"' || c == '\'');
+                    if key_inner == "secret" && value.kind() == "string" {
+                        // Only flag when this pair is actually an argument to a
+                        // session(...) call — a bare `{ secret: "..." }` object
+                        // (e.g. mock data) is not a session-secret finding.
+                        let val = &src[value.byte_range()];
+                        let inner = val.trim_matches(|c| c == '"' || c == '\'');
+                        if is_secret_value_long_enough(inner, ctx.secret_thresholds)
+                            && inside_session_call(node, src)
+                        {
+                            findings.push(make_finding(
+                                _self.id(),
+                                _self.severity(),
+                                _self.cwe(),
+                                "Hardcoded session secret — use an environment variable instead",
+                                node,
+                                src,
+                            ));
+                        }
+                    }
+                }
+            }
+        });
+        findings
+
+    }
+}
+
+// ─── Rule 13: express-cookie-no-secure ────────────────────────────────────
+
+pub struct ExpressCookieNoSecure;
+
+impl_rule! {
+    ExpressCookieNoSecure,
+    id = "js/express-cookie-no-secure",
+    severity = Severity::Medium,
+    cwe = Some("CWE-614"),
+    description = "Cookie configuration missing secure flag",
+    language = Language::JavaScript,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            // Look for object literals with a "cookie" key whose value is an object
+            // that does NOT contain secure: true
+            if node.kind() == "pair" {
+                if let (Some(key), Some(value)) = (
+                    node.child_by_field_name("key"),
+                    node.child_by_field_name("value"),
+                ) {
+                    let key_text = &src[key.byte_range()];
+                    let key_inner = key_text.trim_matches(|c| c == '"' || c == '\'');
+                    if key_inner == "cookie" && value.kind() == "object" {
+                        let obj_text = &src[value.byte_range()];
+                        if !obj_text.contains("secure")
+                            || obj_text.contains("secure: false")
+                            || obj_text.contains("secure:false")
+                        {
+                            findings.push(make_finding(
+                                _self.id(),
+                                _self.severity(),
+                                _self.cwe(),
+                                "Cookie configuration missing 'secure: true' — cookies may be sent over HTTP",
+                                node,
+                                src,
+                            ));
+                        }
+                    }
+                }
+            }
+        });
+        findings
+
+    }
+}
+
+// ─── Rule 14: express-cookie-no-httponly ───────────────────────────────────
+
+pub struct ExpressCookieNoHttpOnly;
+
+impl_rule! {
+    ExpressCookieNoHttpOnly,
+    id = "js/express-cookie-no-httponly",
+    severity = Severity::Medium,
+    cwe = Some("CWE-1004"),
+    description = "Cookie configuration missing httpOnly flag",
+    language = Language::JavaScript,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() == "pair" {
+                if let (Some(key), Some(value)) = (
+                    node.child_by_field_name("key"),
+                    node.child_by_field_name("value"),
+                ) {
+                    let key_text = &src[key.byte_range()];
+                    let key_inner = key_text.trim_matches(|c| c == '"' || c == '\'');
+                    if key_inner == "cookie" && value.kind() == "object" {
+                        let obj_text = &src[value.byte_range()];
+                        if !obj_text.contains("httpOnly")
+                            || obj_text.contains("httpOnly: false")
+                            || obj_text.contains("httpOnly:false")
+                        {
+                            findings.push(make_finding(
+                                _self.id(),
+                                _self.severity(),
+                                _self.cwe(),
+                                "Cookie configuration missing 'httpOnly: true' — cookies accessible to JavaScript",
+                                node,
+                                src,
+                            ));
+                        }
+                    }
+                }
+            }
+        });
+        findings
+
+    }
+}
+
+// ─── Rule 15: express-cookie-no-samesite ──────────────────────────────────
+
+pub struct ExpressCookieNoSameSite;
+
+impl_rule! {
+    ExpressCookieNoSameSite,
+    id = "js/express-cookie-no-samesite",
+    severity = Severity::Medium,
+    cwe = Some("CWE-352"),
+    description = "Cookie configuration missing sameSite protection",
+    language = Language::JavaScript,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() == "pair" {
+                if let (Some(key), Some(value)) = (
+                    node.child_by_field_name("key"),
+                    node.child_by_field_name("value"),
+                ) {
+                    let key_text = &src[key.byte_range()];
+                    let key_inner = key_text.trim_matches(|c| c == '"' || c == '\'');
+                    if key_inner == "cookie" && value.kind() == "object" {
+                        let obj_text = &src[value.byte_range()];
+                        let has_same_site = obj_text.contains("sameSite");
+                        let none_mode = obj_text.contains("sameSite: \"none\"")
+                            || obj_text.contains("sameSite:'none'")
+                            || obj_text.contains("sameSite: 'none'")
+                            || obj_text.contains("sameSite:\"none\"")
+                            || obj_text.contains("sameSite: false")
+                            || obj_text.contains("sameSite:false");
+                        if !has_same_site || none_mode {
+                            findings.push(make_finding(
+                                _self.id(),
+                                _self.severity(),
+                                _self.cwe(),
+                                "Cookie configuration missing a safe sameSite setting — set sameSite to 'lax' or 'strict'",
+                                node,
+                                src,
+                            ));
+                        }
+                    }
+                }
+            }
+        });
+        findings
+
+    }
+}
+
+// ─── Rule 16: express-session-saveuninitialized-true ──────────────────────
+
+pub struct ExpressSessionSaveUninitializedTrue;
+
+impl_rule! {
+    ExpressSessionSaveUninitializedTrue,
+    id = "js/express-session-saveuninitialized-true",
+    severity = Severity::Medium,
+    cwe = Some("CWE-359"),
+    description = "express-session configured with saveUninitialized: true",
+    language = Language::JavaScript,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() != "pair" {
+                return;
+            }
+
+            let (Some(key), Some(value)) = (
+                node.child_by_field_name("key"),
+                node.child_by_field_name("value"),
+            ) else {
+                return;
+            };
+
+            let key_text = &src[key.byte_range()];
+            let key_inner = key_text.trim_matches(|c| c == '"' || c == '\'');
+            let value_text = &src[value.byte_range()];
+            if key_inner == "saveUninitialized" && value_text == "true" {
+                findings.push(make_finding(
+                    _self.id(),
+                    _self.severity(),
+                    _self.cwe(),
+                    "express-session saveUninitialized: true stores sessions before consent or login state is established",
+                    node,
+                    src,
+                ));
+            }
+        });
+        findings
+
+    }
+}
+
+// ─── Rule 17: express-session-resave-true ─────────────────────────────────
+
+pub struct ExpressSessionResaveTrue;
+
+impl_rule! {
+    ExpressSessionResaveTrue,
+    id = "js/express-session-resave-true",
+    severity = Severity::Medium,
+    cwe = Some("CWE-384"),
+    description = "express-session configured with resave: true",
+    language = Language::JavaScript,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() != "pair" {
+                return;
+            }
+
+            let (Some(key), Some(value)) = (
+                node.child_by_field_name("key"),
+                node.child_by_field_name("value"),
+            ) else {
+                return;
+            };
+
+            let key_text = &src[key.byte_range()];
+            let key_inner = key_text.trim_matches(|c| c == '"' || c == '\'');
+            let value_text = &src[value.byte_range()];
+            if key_inner == "resave" && value_text == "true" {
+                findings.push(make_finding(
+                    _self.id(),
+                    _self.severity(),
+                    _self.cwe(),
+                    "express-session resave: true can overwrite sessions unnecessarily — prefer resave: false unless your store requires it",
+                    node,
+                    src,
+                ));
+            }
+        });
+        findings
+
+    }
+}
+
+// ─── Rule 18: express-direct-response-write ───────────────────────────────
+
+pub struct ExpressDirectResponseWrite;
+
+impl_rule! {
+    ExpressDirectResponseWrite,
+    id = "js/express-direct-response-write",
+    severity = Severity::High,
+    cwe = Some("CWE-79"),
+    description = "XSS via direct response write with user input",
+    language = Language::JavaScript,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+        // Match user-controlled input objects
+        let user_input_re = js_user_input_re();
+        // Sanitization wrappers that neutralise XSS risk
+        let sanitize_re = js_sanitize_re();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            // Detect: res.send(req.query.foo), res.write(req.body.bar)
+            if node.kind() == "call_expression" {
+                if let Some(func) = node.child_by_field_name("function") {
+                    if func.kind() == "member_expression" {
+                        if let Some(obj) = func.child_by_field_name("object") {
+                            let obj_text = &src[obj.byte_range()];
+                            // Only flag res.send/write/end, not arbitrary objects
+                            if obj_text != "res" && !obj_text.ends_with(".res") {
+                                return;
+                            }
+                        }
+                        if let Some(prop) = func.child_by_field_name("property") {
+                            let prop_text = &src[prop.byte_range()];
+                            if prop_text == "send" || prop_text == "write" {
+                                if let Some(args) = node.child_by_field_name("arguments") {
+                                    let args_text = &src[args.byte_range()];
+                                    // Skip if any sanitization wrapper is present
+                                    if sanitize_re.is_match(args_text) {
+                                        return;
+                                    }
+                                    // Check each direct argument for user input
+                                    let mut cursor = args.walk();
+                                    for arg in args.children(&mut cursor) {
+                                        // Skip punctuation (parens, commas)
+                                        if arg.kind() == "("
+                                            || arg.kind() == ")"
+                                            || arg.kind() == ","
+                                        {
+                                            continue;
+                                        }
+                                        // Only flag when the argument is a direct member/subscript
+                                        // expression starting with req.params/query/body/headers.
+                                        // Binary expressions (concatenation), call expressions
+                                        // (wrapping functions), and template literals are NOT
+                                        // direct -- they mix or transform the input.
+                                        let kind = arg.kind();
+                                        if kind != "member_expression" && kind != "identifier" {
+                                            continue;
+                                        }
+                                        let arg_text = &src[arg.byte_range()];
+                                        if user_input_re.is_match(arg_text.trim()) {
+                                            findings.push(make_finding(
+                                                _self.id(),
+                                                _self.severity(),
+                                                _self.cwe(),
+                                                &format!(
+                                                    "res.{}() called with user input — risk of reflected XSS, sanitize before sending",
+                                                    prop_text
+                                                ),
+                                                node,
+                                                src,
+                                            ));
+                                            break; // one finding per call
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        findings
+
+    }
+}
+
+// ─── Rule 19: jwt-hardcoded-secret ────────────────────────────────────────
+
+pub struct JwtHardcodedSecret;
+
+impl_rule! {
+    JwtHardcodedSecret,
+    id = "js/jwt-hardcoded-secret",
+    severity = Severity::High,
+    cwe = Some("CWE-798"),
+    description = "JWT signing or verification with a hardcoded secret",
+    language = Language::JavaScript,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() != "call_expression" {
+                return;
+            }
+
+            let Some(func) = node.child_by_field_name("function") else {
+                return;
+            };
+            let func_text = &src[func.byte_range()];
+            if func_text != "jwt.sign"
+                && func_text != "jwt.verify"
+                && func_text != "jsonwebtoken.sign"
+                && func_text != "jsonwebtoken.verify"
+            {
+                return;
+            }
+
+            let Some(args) = node.child_by_field_name("arguments") else {
+                return;
+            };
+            let Some(secret_arg) = args.named_child(1) else {
+                return;
+            };
+            if secret_arg.kind() != "string" && secret_arg.kind() != "template_string" {
+                return;
+            }
+
+            let secret = &src[secret_arg.byte_range()];
+            let inner = secret.trim_matches(|c| c == '"' || c == '\'' || c == '`');
+            if !is_secret_value_long_enough(inner, ctx.secret_thresholds) {
+                return;
+            }
+
+            findings.push(make_finding(
+                _self.id(),
+                _self.severity(),
+                _self.cwe(),
+                "JWT secret is hardcoded — load signing keys from environment or a secrets manager",
+                node,
+                src,
+            ));
+        });
+
+        findings
+
+    }
+}
+
+// ─── Rule 20: jwt-none-algorithm ───────────────────────────────────────────
+
+pub struct JwtNoneAlgorithm;
+
+impl_rule! {
+    JwtNoneAlgorithm,
+    id = "js/jwt-none-algorithm",
+    severity = Severity::High,
+    cwe = Some("CWE-347"),
+    description = "JWT configured to use the 'none' algorithm",
+    language = Language::JavaScript,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() != "call_expression" {
+                return;
+            }
+
+            let Some(func) = node.child_by_field_name("function") else {
+                return;
+            };
+            let func_text = &src[func.byte_range()];
+            if func_text != "jwt.sign"
+                && func_text != "jwt.verify"
+                && func_text != "jsonwebtoken.sign"
+                && func_text != "jsonwebtoken.verify"
+            {
+                return;
+            }
+
+            let Some(args) = node.child_by_field_name("arguments") else {
+                return;
+            };
+            let Some(options_arg) = args.named_child(2) else {
+                return;
+            };
+            if options_arg.kind() != "object" {
+                return;
+            }
+
+            let options_text = &src[options_arg.byte_range()];
+            let uses_none = options_text.contains("algorithm: \"none\"")
+                || options_text.contains("algorithm:'none'")
+                || options_text.contains("algorithm: 'none'")
+                || options_text.contains("algorithm:\"none\"")
+                || options_text.contains("algorithms: [\"none\"]")
+                || options_text.contains("algorithms:['none']")
+                || options_text.contains("algorithms: ['none']")
+                || options_text.contains("algorithms:[\"none\"]");
+            if !uses_none {
+                return;
+            }
+
+            findings.push(make_finding(
+                _self.id(),
+                _self.severity(),
+                _self.cwe(),
+                "JWT configured with algorithm 'none' — require a signed algorithm such as HS256 or RS256",
+                node,
+                src,
+            ));
+        });
+
+        findings
+
+    }
+}
+
+// ─── Rule 21: jwt-ignore-expiration ────────────────────────────────────────
+
+pub struct JwtIgnoreExpiration;
+
+impl_rule! {
+    JwtIgnoreExpiration,
+    id = "js/jwt-ignore-expiration",
+    severity = Severity::High,
+    cwe = Some("CWE-613"),
+    description = "JWT verification configured to ignore token expiration",
+    language = Language::JavaScript,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() != "call_expression" {
+                return;
+            }
+
+            let Some(func) = node.child_by_field_name("function") else {
+                return;
+            };
+            let func_text = &src[func.byte_range()];
+            if func_text != "jwt.verify" && func_text != "jsonwebtoken.verify" {
+                return;
+            }
+
+            let Some(args) = node.child_by_field_name("arguments") else {
+                return;
+            };
+            let Some(options_arg) = args.named_child(2) else {
+                return;
+            };
+            if options_arg.kind() != "object" {
+                return;
+            }
+
+            let options_text = &src[options_arg.byte_range()];
+            let ignores_expiration = options_text.contains("ignoreExpiration: true")
+                || options_text.contains("ignoreExpiration:true");
+            if !ignores_expiration {
+                return;
+            }
+
+            findings.push(make_finding(
+                _self.id(),
+                _self.severity(),
+                _self.cwe(),
+                "JWT verification ignores expiration — reject expired tokens instead of setting ignoreExpiration: true",
+                node,
+                src,
+            ));
+        });
+
+        findings
+
+    }
+}
+
+// ─── Rule 22: jwt-decode-without-verify ────────────────────────────────────
+
+pub struct JwtDecodeWithoutVerify;
+
+impl_rule! {
+    JwtDecodeWithoutVerify,
+    id = "js/jwt-decode-without-verify",
+    severity = Severity::High,
+    cwe = Some("CWE-347"),
+    description = "JWT decoded without signature verification",
+    language = Language::JavaScript,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() != "call_expression" {
+                return;
+            }
+
+            let Some(func) = node.child_by_field_name("function") else {
+                return;
+            };
+            let func_text = &src[func.byte_range()];
+            if func_text != "jwt.decode" && func_text != "jsonwebtoken.decode" {
+                return;
+            }
+
+            findings.push(make_finding(
+                _self.id(),
+                _self.severity(),
+                _self.cwe(),
+                "JWT decoded without verification — use jwt.verify() when authenticity matters",
+                node,
+                src,
+            ));
+        });
+
+        findings
+
+    }
+}
+
+// ─── Rule 23: jwt-verify-missing-algorithms ───────────────────────────────
+
+pub struct JwtVerifyMissingAlgorithms;
+
+impl_rule! {
+    JwtVerifyMissingAlgorithms,
+    id = "js/jwt-verify-missing-algorithms",
+    severity = Severity::High,
+    cwe = Some("CWE-347"),
+    description = "JWT verification without an explicit algorithms allowlist",
+    language = Language::JavaScript,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() != "call_expression" {
+                return;
+            }
+
+            let Some(func) = node.child_by_field_name("function") else {
+                return;
+            };
+            let func_text = &src[func.byte_range()];
+            if func_text != "jwt.verify" && func_text != "jsonwebtoken.verify" {
+                return;
+            }
+
+            let Some(args) = node.child_by_field_name("arguments") else {
+                return;
+            };
+
+            let Some(options_arg) = args.named_child(2) else {
+                findings.push(make_finding(
+                    _self.id(),
+                    _self.severity(),
+                    _self.cwe(),
+                    "JWT verification does not restrict allowed algorithms — pass an explicit algorithms allowlist",
+                    node,
+                    src,
+                ));
+                return;
+            };
+
+            if options_arg.kind() != "object" {
+                return;
+            }
+
+            let options_text = &src[options_arg.byte_range()];
+            if !options_text.contains("algorithms") {
+                findings.push(make_finding(
+                    _self.id(),
+                    _self.severity(),
+                    _self.cwe(),
+                    "JWT verification does not restrict allowed algorithms — pass an explicit algorithms allowlist",
+                    node,
+                    src,
+                ));
+            }
+        });
+
+        findings
+
+    }
+}
+
+// ─── Rule 24: no-cors-star ─────────────────────────────────────────────────
+
+pub struct NoCorsStar;
+
+impl_rule! {
+    NoCorsStar,
+    id = "js/no-cors-star",
+    severity = Severity::Medium,
+    cwe = Some("CWE-942"),
+    description = "CORS misconfiguration allowing all origins",
+    language = Language::JavaScript,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            // Detect: setHeader("Access-Control-Allow-Origin", "*")
+            if node.kind() == "call_expression" {
+                if let Some(func) = node.child_by_field_name("function") {
+                    let func_text = &src[func.byte_range()];
+                    let func_name = func_text.rsplit('.').next().unwrap_or(func_text);
+                    if func_name == "setHeader" || func_name == "set" || func_name == "header" {
+                        if let Some(args) = node.child_by_field_name("arguments") {
+                            let arg_count = args.named_child_count();
+                            if arg_count >= 2 {
+                                if let (Some(first), Some(second)) =
+                                    (args.named_child(0), args.named_child(1))
+                                {
+                                    if first.kind() == "string" && second.kind() == "string" {
+                                        let header_name = &src[first.byte_range()];
+                                        let header_val = &src[second.byte_range()];
+                                        let name_inner =
+                                            header_name.trim_matches(|c| c == '"' || c == '\'');
+                                        let val_inner =
+                                            header_val.trim_matches(|c| c == '"' || c == '\'');
+                                        if name_inner
+                                            .eq_ignore_ascii_case("Access-Control-Allow-Origin")
+                                            && val_inner == "*"
+                                        {
+                                            findings.push(make_finding(
+                                                _self.id(),
+                                                _self.severity(),
+                                                _self.cwe(),
+                                                "Access-Control-Allow-Origin set to '*' — restrict to specific origins",
+                                                node,
+                                                src,
+                                            ));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Detect: { origin: "*" } in cors config objects
+            if node.kind() == "pair" {
+                if let (Some(key), Some(value)) = (
+                    node.child_by_field_name("key"),
+                    node.child_by_field_name("value"),
+                ) {
+                    let key_text = &src[key.byte_range()];
+                    let key_inner = key_text.trim_matches(|c| c == '"' || c == '\'');
+                    if key_inner == "origin" && value.kind() == "string" {
+                        let val_text = &src[value.byte_range()];
+                        let val_inner = val_text.trim_matches(|c| c == '"' || c == '\'');
+                        if val_inner == "*" {
+                            findings.push(make_finding(
+                                _self.id(),
+                                _self.severity(),
+                                _self.cwe(),
+                                "CORS origin set to '*' — restrict to specific origins",
+                                node,
+                                src,
+                            ));
+                        }
+                    }
+                }
+            }
+        });
+        findings
+
+    }
+}
+
+// ─── Rule: no-unsafe-format-string ───────────────────────────────────────────
+
+pub struct NoUnsafeFormatString;
+
+impl_rule! {
+    NoUnsafeFormatString,
+    id = "js/no-unsafe-format-string",
+    severity = Severity::Medium,
+    cwe = Some("CWE-134"),
+    description = "Template literal with variables in console/logging function may enable log injection",
+    language = Language::JavaScript,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() == "call_expression" {
+                if let Some(func) = node.child_by_field_name("function") {
+                    let func_text = &src[func.byte_range()];
+                    // console.error, console.log, console.warn, console.info, util.format
+                    if matches!(
+                        func_text,
+                        "console.error"
+                            | "console.log"
+                            | "console.warn"
+                            | "console.info"
+                            | "util.format"
+                    ) {
+                        if let Some(args) = node.child_by_field_name("arguments") {
+                            let mut cursor = args.walk();
+                            for arg in args.children(&mut cursor) {
+                                if arg.kind() == "template_string" {
+                                    // Only flag when the template interpolates a
+                                    // known user-controlled source (req.query /
+                                    // req.body / req.params / req.headers).
+                                    // Interpolating arbitrary locals is benign.
+                                    let mut has_interpolation = false;
+                                    let mut inner_cursor = arg.walk();
+                                    for child in arg.children(&mut inner_cursor) {
+                                        if child.kind() == "template_substitution" {
+                                            has_interpolation = true;
+                                            break;
+                                        }
+                                    }
+                                    if has_interpolation && interpolates_user_input(arg, src) {
+                                        findings.push(make_finding(
+                                            _self.id(),
+                                            _self.severity(),
+                                            _self.cwe(),
+                                            "Template literal with variables in logging function — user-controlled values may forge log entries",
+                                            node,
+                                            src,
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        findings
+
+    }
+}
+
+// ─── Rule: no-unsafe-deserialization ───────────────────────────────────────
+
+pub struct NoUnsafeDeserialization;
+
+impl_rule! {
+    NoUnsafeDeserialization,
+    id = "js/no-unsafe-deserialization",
+    severity = Severity::Critical,
+    cwe = Some("CWE-502"),
+    description = "Unsafe deserialization of untrusted data",
+    language = Language::JavaScript,
+    fn check(_self, source, tree) {
+
+        let mut findings = Vec::new();
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() != "call_expression" {
+                return;
+            }
+
+            let Some(func) = node.child_by_field_name("function") else {
+                return;
+            };
+            let func_text = &src[func.byte_range()];
+
+            // node-serialize: serialize.unserialize() / unserialize()
+            if func_text == "serialize.unserialize"
+                || func_text == "unserialize"
+                || func_text == "cryo.parse"
+                || func_text == "funcster.deepDeserialize"
+            {
+                findings.push(make_finding(
+                    _self.id(),
+                    _self.severity(),
+                    _self.cwe(),
+                    "Avoid deserializing untrusted data with node-serialize. Use JSON.parse() for structured data.",
+                    node,
+                    src,
+                ));
+                return;
+            }
+
+            // yaml.load() / jsyaml.load() without safe schema
+            if func_text == "yaml.load" || func_text == "jsyaml.load" {
+                // Check if a safe schema option is provided
+                if let Some(args) = node.child_by_field_name("arguments") {
+                    let args_text = &src[args.byte_range()];
+                    // Safe if schema is explicitly set to a safe variant
+                    if args_text.contains("SAFE_SCHEMA")
+                        || args_text.contains("JSON_SCHEMA")
+                        || args_text.contains("FAILSAFE_SCHEMA")
+                        || args_text.contains("safeLoad")
+                    {
+                        return;
+                    }
+                }
+                findings.push(make_finding(
+                    _self.id(),
+                    _self.severity(),
+                    _self.cwe(),
+                    "Avoid deserializing untrusted data with node-serialize. Use JSON.parse() for structured data.",
+                    node,
+                    src,
+                ));
+            }
+        });
+
+        findings
+
+    }
+}
+
+// ─── Rule: hardcoded-crypto-algorithm ──────────────────────────────────────
+
+pub struct HardcodedCryptoAlgorithm;
+
+impl_rule! {
+    HardcodedCryptoAlgorithm,
+    id = "js/hardcoded-crypto-algorithm",
+    severity = Severity::Low,
+    cwe = Some("CWE-327"),
+    description = "Hardcoded algorithm string in crypto API call hinders crypto agility",
+    language = Language::JavaScript,
+    // CNSA 2.0 class: web/cloud (exclusive-use 2033).
+    cnsa2_deadline = "2033",
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let mut findings = Vec::new();
+        let crypto_methods = [
+            "createHash",
+            "createCipher",
+            "createCipheriv",
+            "createDecipher",
+            "createDecipheriv",
+            "createHmac",
+            "createSign",
+            "createVerify",
+        ];
+
+        walk_tree(tree.root_node(), source, &mut |node, src| {
+            if node.kind() == "call_expression" {
+                if let Some(func) = node.child_by_field_name("function") {
+                    let func_text = &src[func.byte_range()];
+                    // Resolve the callee through the alias table so that
+                    // `const c = require('crypto'); c.createHash(...)` is
+                    // recognised as `crypto.createHash`.
+                    let resolved = match ctx.javascript_aliases {
+                        Some(aliases) => aliases.resolve(func_text),
+                        None => std::borrow::Cow::Borrowed(func_text),
+                    };
+                    let (receiver, func_name) = match resolved.rsplit_once('.') {
+                        Some((recv, name)) => (Some(recv), name),
+                        None => (None, resolved.as_ref()),
+                    };
+                    let is_crypto = match receiver {
+                        Some(r) => r == "crypto",
+                        None => false, // bare call without receiver — skip
+                    };
+                    if is_crypto && crypto_methods.contains(&func_name) {
+                        if let Some(args) = node.child_by_field_name("arguments") {
+                            if let Some(first_arg) = args.named_child(0) {
+                                let is_hardcoded = if first_arg.kind() == "string" {
+                                    true
+                                } else if first_arg.kind() == "template_string" {
+                                    // Only treat as hardcoded if no interpolation.
+                                    first_arg.named_child_count() == 0
+                                } else {
+                                    false
+                                };
+                                if is_hardcoded {
+                                    let val = &src[first_arg.byte_range()];
+                                    let inner = val.trim_matches(|c| c == '"' || c == '\'' || c == '`');
+                                    // Skip weak algorithms — js/no-weak-crypto owns those.
+                                    if inner == "md5" || inner == "sha1" {
+                                        return;
+                                    }
+                                    findings.push(make_finding(
+                                        _self.id(),
+                                        _self.severity(),
+                                        _self.cwe(),
+                                        &format!(
+                                            "{}(\"{}\") uses a hardcoded algorithm — externalize to configuration for crypto agility",
+                                            func_name, inner
+                                        ),
+                                        node,
+                                        src,
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        findings
+
+    }
+}
+
+// ─── js/taint-xss-innerhtml ───────────────────────────────────────────────
+//
+// Intraprocedural taint rule: fires when untrusted Express-style input
+// (`req.body`, `req.query`, ...) reaches an `innerHTML`/`outerHTML`
+// assignment or a `document.write` call. Uses the engine in
+// `javascript_taint` the same way `python::TaintPickleDeserialization`
+// uses `python_taint`.
+
+use crate::rules::javascript_taint::{
+    self, javascript_taint_sources, NodeMatcher as JsNodeMatcher, TaintSpec as JsTaintSpec,
+};
+
+struct JsTaintRuleMeta<'a> {
+    rule_id: &'a str,
+    severity: Severity,
+    cwe: Option<&'a str>,
+    fix_suggestion: Option<&'a str>,
+}
+
+fn map_js_taint_findings(
+    meta: &JsTaintRuleMeta<'_>,
+    source: &str,
+    tree: &tree_sitter::Tree,
+    ctx: &FileContext<'_>,
+    spec: &JsTaintSpec,
+    format_description: impl Fn(&str, &str) -> String,
+) -> Vec<Finding> {
+    // Build cross-file info if both summaries and import paths are available.
+    let cross_file_info = match (ctx.cross_file_summaries, ctx.javascript_import_paths) {
+        (Some(summaries), Some(import_paths)) => Some(javascript_taint::CrossFileInfo {
+            import_to_path: import_paths,
+            summaries,
+            rule_filter: javascript_taint::RuleFilter::Single(meta.rule_id),
+        }),
+        _ => None,
+    };
+    let raw = javascript_taint::analyze_tree_with_cross_file(
+        tree.root_node(),
+        source,
+        spec,
+        ctx.javascript_aliases,
+        cross_file_info.as_ref(),
+    );
+    raw.into_iter()
+        .map(|t| Finding {
+            rule_id: meta.rule_id.to_string(),
+            severity: meta.severity,
+            cwe: meta.cwe.map(|s| s.to_string()),
+            description: format_description(&t.source_description, &t.sink_description),
+            file: String::new(),
+            line: t.sink_line,
+            column: t.sink_column,
+            end_line: t.sink_end_line,
+            end_column: t.sink_end_column,
+            snippet: get_source_line(source, t.sink_start_byte),
+            source_line: Some(t.source_line),
+            source_description: Some(t.source_description),
+            sink_line: Some(t.sink_line),
+            sink_description: Some(t.sink_description),
+            fix_suggestion: meta.fix_suggestion.map(|s| s.to_string()),
+            sink_start_byte: Some(t.sink_start_byte),
+            sink_end_byte: Some(t.sink_end_byte),
+            confidence: crate::rules::common::confidence_for_hops(t.hops),
+            taint_hops: Some(t.hops),
+            tags: vec![],
+            crypto_algorithm: None,
+            cnsa2_deadline: None,
+            dep_name: None,
+            dep_version: None,
+            dep_ecosystem: None,
+            dep_purl: None,
+            dep_vulnerability_id: None,
+            dep_fixed_version: None,
+            dep_source: None,
+            dep_vulnerability_severity: None,
+            dep_path: vec![],
+            crypto_material: None,
+        })
+        .collect()
+}
+
+pub struct TaintXssInnerHtml;
+
+impl TaintXssInnerHtml {
+    fn spec() -> JsTaintSpec {
+        JsTaintSpec {
+            sources: javascript_taint_sources(),
+            sinks: vec![
+                JsNodeMatcher::MemberAssign {
+                    field: "innerHTML".into(),
+                    description: "innerHTML assignment".into(),
+                },
+                JsNodeMatcher::MemberAssign {
+                    field: "outerHTML".into(),
+                    description: "outerHTML assignment".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "document.write".into(),
+                    description: "document.write".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "document.writeln".into(),
+                    description: "document.writeln".into(),
+                },
+            ],
+            sanitizers: vec![
+                JsNodeMatcher::Call {
+                    canonical: "DOMPurify.sanitize".into(),
+                    description: "DOMPurify.sanitize".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "sanitizeHtml".into(),
+                    description: "sanitizeHtml".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "xss".into(),
+                    description: "xss".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "escape".into(),
+                    description: "escape".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "encodeURIComponent".into(),
+                    description: "encodeURIComponent".into(),
+                },
+            ],
+        }
+    }
+}
+
+impl_rule! {
+    TaintXssInnerHtml,
+    id = "js/taint-xss-innerhtml",
+    severity = Severity::High,
+    cwe = Some("CWE-79"),
+    description = "Untrusted input reaches innerHTML or document.write sink",
+    language = Language::JavaScript,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let meta = JsTaintRuleMeta {
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
+            fix_suggestion: Some("Use `DOMPurify.sanitize()` or `textContent` instead of `innerHTML`/`document.write`"),
+        };
+        map_js_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!("{} reaches {} — untrusted input can lead to XSS", src, sink)
+        })
+
+    }
+}
+
+// ─── js/taint-sql-injection ───────────────────────────────────────────────
+//
+// Intraprocedural taint rule: fires when untrusted Express/Next/etc input
+// (`req.body`, `req.query`, `searchParams.get(...)`, ...) reaches a SQL
+// execute sink. Sinks are identified by method name on any receiver,
+// matching the common JS SQL client conventions (`db.query`, `pool.query`,
+// `connection.execute`, `sequelize.query`, `knex.raw`). This is noisier
+// than the canonical-callee approach but catches the realistic shape of
+// server-side JS apps where database handles are ad-hoc variables.
+
+pub struct TaintSqlInjection;
+
+impl TaintSqlInjection {
+    fn spec() -> JsTaintSpec {
+        JsTaintSpec {
+            sources: javascript_taint_sources(),
+            sinks: SQL_METHODS
+                .iter()
+                .map(|(method, description)| JsNodeMatcher::MethodName {
+                    method: (*method).into(),
+                    description: (*description).into(),
+                })
+                .collect(),
+            sanitizers: vec![
+                JsNodeMatcher::MethodName {
+                    method: "escape".into(),
+                    description: "mysql .escape()".into(),
+                },
+                JsNodeMatcher::MethodName {
+                    method: "escapeLiteral".into(),
+                    description: "pg .escapeLiteral()".into(),
+                },
+            ],
+        }
+    }
+}
+
+impl_rule! {
+    TaintSqlInjection,
+    id = "js/taint-sql-injection",
+    severity = Severity::Critical,
+    cwe = Some("CWE-89"),
+    description = "Untrusted input reaches a SQL execute sink — possible SQL injection",
+    language = Language::JavaScript,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let meta = JsTaintRuleMeta {
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
+            fix_suggestion: Some("Use parameterized queries: `db.query(\"SELECT * FROM users WHERE name = $1\", [name])`"),
+        };
+        map_js_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!("{} reaches {} — untrusted input can inject SQL", src, sink)
+        })
+
+    }
+}
+
+// ─── js/taint-eval ──────────────────────────────────────────────────────
+//
+// Intraprocedural taint rule: fires when untrusted input reaches `eval()`
+// or `new Function(...)`. CWE-95 (Improper Neutralization of Directives
+// in Dynamically Evaluated Code).
+
+pub struct TaintEval;
+
+impl TaintEval {
+    fn spec() -> JsTaintSpec {
+        JsTaintSpec {
+            sources: javascript_taint_sources(),
+            sinks: vec![
+                JsNodeMatcher::Call {
+                    canonical: "eval".into(),
+                    description: "eval() call".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "Function".into(),
+                    description: "new Function() call".into(),
+                },
+            ],
+            sanitizers: vec![],
+        }
+    }
+}
+
+impl_rule! {
+    TaintEval,
+    id = "js/taint-eval",
+    severity = Severity::Critical,
+    cwe = Some("CWE-95"),
+    description = "Untrusted input reaches eval or Function — arbitrary code execution",
+    language = Language::JavaScript,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let meta = JsTaintRuleMeta {
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
+            fix_suggestion: Some(
+                "Remove `eval()`/`new Function()` and use safe alternatives like `JSON.parse()`",
+            ),
+        };
+        map_js_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!(
+                "{} reaches {} — untrusted input can execute arbitrary code",
+                src, sink
+            )
+        })
+
+    }
+}
+
+// ─── js/taint-command-injection ─────────────────────────────────────────
+//
+// Intraprocedural taint rule: fires when untrusted input reaches a
+// child-process execution sink. CWE-78 (OS Command Injection).
+
+pub struct TaintCommandInjection;
+
+impl TaintCommandInjection {
+    fn spec() -> JsTaintSpec {
+        JsTaintSpec {
+            sources: javascript_taint_sources(),
+            sinks: vec![
+                JsNodeMatcher::Call {
+                    canonical: "child_process.exec".into(),
+                    description: "child_process.exec()".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "child_process.execSync".into(),
+                    description: "child_process.execSync()".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "child_process.spawn".into(),
+                    description: "child_process.spawn()".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "child_process.spawnSync".into(),
+                    description: "child_process.spawnSync()".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "child_process.execFile".into(),
+                    description: "child_process.execFile()".into(),
+                },
+            ],
+            sanitizers: vec![
+                JsNodeMatcher::Call {
+                    canonical: "shellescape".into(),
+                    description: "shellescape".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "shell-escape".into(),
+                    description: "shell-escape".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "escapeShellArg".into(),
+                    description: "escapeShellArg".into(),
+                },
+            ],
+        }
+    }
+}
+
+impl_rule! {
+    TaintCommandInjection,
+    id = "js/taint-command-injection",
+    severity = Severity::Critical,
+    cwe = Some("CWE-78"),
+    description = "Untrusted input reaches a command execution sink — OS command injection",
+    language = Language::JavaScript,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let meta = JsTaintRuleMeta {
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
+            fix_suggestion: Some("Pass arguments as an array to `child_process.execFile()` instead of building a shell string"),
+        };
+        map_js_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!(
+                "{} reaches {} — untrusted input can inject OS commands",
+                src, sink
+            )
+        })
+
+    }
+}
+
+// ─── js/taint-ssrf ──────────────────────────────────────────────────────
+//
+// Intraprocedural taint rule: fires when untrusted input reaches an
+// outbound HTTP request sink. CWE-918 (Server-Side Request Forgery).
+
+pub struct TaintSsrf;
+
+impl TaintSsrf {
+    fn spec() -> JsTaintSpec {
+        JsTaintSpec {
+            sources: javascript_taint_sources(),
+            sinks: vec![
+                JsNodeMatcher::Call {
+                    canonical: "fetch".into(),
+                    description: "fetch() call".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "http.get".into(),
+                    description: "http.get() call".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "http.request".into(),
+                    description: "http.request() call".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "https.get".into(),
+                    description: "https.get() call".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "https.request".into(),
+                    description: "https.request() call".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "axios.get".into(),
+                    description: "axios.get() call".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "axios.post".into(),
+                    description: "axios.post() call".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "axios.request".into(),
+                    description: "axios.request() call".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "got".into(),
+                    description: "got() call".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "got.get".into(),
+                    description: "got.get() call".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "got.post".into(),
+                    description: "got.post() call".into(),
+                },
+            ],
+            sanitizers: vec![],
+        }
+    }
+}
+
+impl_rule! {
+    TaintSsrf,
+    id = "js/taint-ssrf",
+    severity = Severity::High,
+    cwe = Some("CWE-918"),
+    description = "Untrusted input reaches an HTTP request sink — possible SSRF",
+    language = Language::JavaScript,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let meta = JsTaintRuleMeta {
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
+            fix_suggestion: Some(
+                "Validate URLs against an allowlist of permitted hosts before making requests",
+            ),
+        };
+        map_js_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!(
+                "{} reaches {} — untrusted input can cause server-side request forgery",
+                src, sink
+            )
+        })
+
+    }
+}
+
+// ─── js/taint-ssti ─────────────────────────────────────────────────────
+//
+// Intraprocedural taint rule: fires when untrusted input reaches a
+// template rendering sink. CWE-1336 (Server-Side Template Injection).
+
+pub struct TaintSsti;
+
+impl TaintSsti {
+    pub(crate) fn spec() -> JsTaintSpec {
+        JsTaintSpec {
+            sources: javascript_taint_sources(),
+            sinks: vec![
+                JsNodeMatcher::Call {
+                    canonical: "ejs.render".into(),
+                    description: "ejs.render() call".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "ejs.renderFile".into(),
+                    description: "ejs.renderFile() call".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "pug.render".into(),
+                    description: "pug.render() call".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "pug.renderFile".into(),
+                    description: "pug.renderFile() call".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "Handlebars.compile".into(),
+                    description: "Handlebars.compile() call".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "handlebars.compile".into(),
+                    description: "handlebars.compile() call".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "nunjucks.renderString".into(),
+                    description: "nunjucks.renderString() call".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "mustache.render".into(),
+                    description: "mustache.render() call".into(),
+                },
+            ],
+            sanitizers: vec![],
+        }
+    }
+}
+
+impl_rule! {
+    TaintSsti,
+    id = "js/taint-ssti",
+    severity = Severity::Critical,
+    cwe = Some("CWE-1336"),
+    description = "Untrusted input reaches a template rendering sink — possible server-side template injection",
+    language = Language::JavaScript,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let meta = JsTaintRuleMeta {
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
+            fix_suggestion: Some("Use pre-compiled templates with auto-escaping instead of rendering user input as template strings"),
+        };
+        map_js_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!(
+                "{} reaches {} — untrusted input can inject server-side templates",
+                src, sink
+            )
+        })
+
+    }
+}
+
+// ─── js/taint-xpath-injection ──────────────────────────────────────────
+//
+// Intraprocedural taint rule: fires when untrusted input reaches an
+// XPath evaluation sink. CWE-643 (XPath Injection).
+
+pub struct TaintXpathInjection;
+
+impl TaintXpathInjection {
+    pub(crate) fn spec() -> JsTaintSpec {
+        JsTaintSpec {
+            sources: javascript_taint_sources(),
+            sinks: vec![
+                JsNodeMatcher::Call {
+                    canonical: "xpath.select".into(),
+                    description: "xpath.select() call".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "xpath.evaluate".into(),
+                    description: "xpath.evaluate() call".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "document.evaluate".into(),
+                    description: "document.evaluate() call".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "dom.evaluate".into(),
+                    description: "dom.evaluate() call".into(),
+                },
+            ],
+            sanitizers: vec![],
+        }
+    }
+}
+
+impl_rule! {
+    TaintXpathInjection,
+    id = "js/taint-xpath-injection",
+    severity = Severity::High,
+    cwe = Some("CWE-643"),
+    description = "Untrusted input reaches an XPath evaluation sink — possible XPath injection",
+    language = Language::JavaScript,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let meta = JsTaintRuleMeta {
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
+            fix_suggestion: Some(
+                "Validate and sanitize user input before building XPath expressions",
+            ),
+        };
+        map_js_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!(
+                "{} reaches {} — untrusted input can inject XPath expressions",
+                src, sink
+            )
+        })
+
+    }
+}
+
+// ─── js/taint-ldap-injection ───────────────────────────────────────────
+//
+// Intraprocedural taint rule: fires when untrusted input reaches an
+// LDAP operation sink. CWE-90 (LDAP Injection).
+
+pub struct TaintLdapInjection;
+
+impl TaintLdapInjection {
+    pub(crate) fn spec() -> JsTaintSpec {
+        JsTaintSpec {
+            sources: javascript_taint_sources(),
+            sinks: vec![
+                JsNodeMatcher::Call {
+                    canonical: "client.search".into(),
+                    description: "LDAP client.search() call".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "ldap.search".into(),
+                    description: "LDAP ldap.search() call".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "conn.search".into(),
+                    description: "LDAP conn.search() call".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "client.bind".into(),
+                    description: "LDAP client.bind() call".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "ldap.bind".into(),
+                    description: "LDAP ldap.bind() call".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "conn.bind".into(),
+                    description: "LDAP conn.bind() call".into(),
+                },
+            ],
+            sanitizers: vec![],
+        }
+    }
+}
+
+impl_rule! {
+    TaintLdapInjection,
+    id = "js/taint-ldap-injection",
+    severity = Severity::High,
+    cwe = Some("CWE-90"),
+    description = "Untrusted input reaches an LDAP operation sink — possible LDAP injection",
+    language = Language::JavaScript,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let meta = JsTaintRuleMeta {
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
+            fix_suggestion: Some("Use ldap-escape or sanitize special LDAP characters before building filter strings"),
+        };
+        map_js_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!(
+                "{} reaches {} — untrusted input can inject LDAP filters",
+                src, sink
+            )
+        })
+
+    }
+}
+
+// ─── Rule: taint-log-injection ────────────────────────────────────────────
+
+pub struct TaintLogInjection;
+
+impl TaintLogInjection {
+    pub(crate) fn spec() -> JsTaintSpec {
+        JsTaintSpec {
+            sources: javascript_taint_sources(),
+            sinks: vec![
+                JsNodeMatcher::Call {
+                    canonical: "console.log".into(),
+                    description: "console.log".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "console.error".into(),
+                    description: "console.error".into(),
+                },
+                JsNodeMatcher::MethodName {
+                    method: "warn".into(),
+                    description: "warn() (matches console.warn, logger.warn, etc.)".into(),
+                },
+                JsNodeMatcher::MethodName {
+                    method: "info".into(),
+                    description: "info() (matches console.info, logger.info, etc.)".into(),
+                },
+                JsNodeMatcher::MethodName {
+                    method: "debug".into(),
+                    description: "debug() (matches console.debug, logger.debug, etc.)".into(),
+                },
+            ],
+            sanitizers: vec![],
+        }
+    }
+}
+
+impl_rule! {
+    TaintLogInjection,
+    id = "js/taint-log-injection",
+    severity = Severity::Medium,
+    cwe = Some("CWE-117"),
+    description = "Untrusted input reaches a logging sink — possible log injection",
+    language = Language::JavaScript,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let meta = JsTaintRuleMeta {
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
+            fix_suggestion: Some(
+                "Sanitize user input before logging — strip newlines and control characters",
+            ),
+        };
+        map_js_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!(
+                "{} reaches {} — untrusted input can forge log entries",
+                src, sink
+            )
+        })
+
+    }
+}
+
+// ─── js/taint-xxe ─────────────────────────────────────────────────────
+pub struct TaintXxe;
+
+impl TaintXxe {
+    pub(crate) fn spec() -> JsTaintSpec {
+        JsTaintSpec {
+            sources: javascript_taint_sources(),
+            sinks: vec![
+                JsNodeMatcher::MethodName {
+                    method: "parseString".into(),
+                    description: "xml2js.parseString / xml parser".into(),
+                },
+                JsNodeMatcher::MethodName {
+                    method: "parseXml".into(),
+                    description: "libxmljs.parseXml".into(),
+                },
+                JsNodeMatcher::MethodName {
+                    method: "parseFromString".into(),
+                    description: "DOMParser.parseFromString".into(),
+                },
+            ],
+            sanitizers: vec![],
+        }
+    }
+}
+
+impl_rule! {
+    TaintXxe,
+    id = "js/taint-xxe",
+    severity = Severity::High,
+    cwe = Some("CWE-611"),
+    description = "Untrusted input reaches an XML parser — possible XML External Entity (XXE) injection",
+    language = Language::JavaScript,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let meta = JsTaintRuleMeta {
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
+            fix_suggestion: Some("Disable external entity resolution in XML parser configuration"),
+        };
+        map_js_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!(
+                "{} reaches {} — untrusted input can trigger XML External Entity processing",
+                src, sink
+            )
+        })
+
+    }
+}
+
+// ─── js/taint-nosql-injection ──────────────────────────────────────────
+//
+// Intraprocedural taint rule: fires when untrusted Express/Next/etc input
+// reaches a MongoDB query sink (mongoose/mongodb driver patterns).
+
+pub struct TaintNosqlInjection;
+
+impl TaintNosqlInjection {
+    fn spec() -> JsTaintSpec {
+        JsTaintSpec {
+            sources: javascript_taint_sources(),
+            sinks: vec![
+                // Use specific Call matchers for .find() to avoid matching
+                // Array.prototype.find() (issue #141).
+                JsNodeMatcher::Call {
+                    canonical: "collection.find".into(),
+                    description: "MongoDB collection.find()".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "db.find".into(),
+                    description: "MongoDB db.find()".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "model.find".into(),
+                    description: "Mongoose model.find()".into(),
+                },
+                JsNodeMatcher::Call {
+                    canonical: "Model.find".into(),
+                    description: "Mongoose Model.find()".into(),
+                },
+                JsNodeMatcher::MethodName {
+                    method: "findOne".into(),
+                    description: "MongoDB .findOne() call".into(),
+                },
+                JsNodeMatcher::MethodName {
+                    method: "updateOne".into(),
+                    description: "MongoDB .updateOne() call".into(),
+                },
+                JsNodeMatcher::MethodName {
+                    method: "updateMany".into(),
+                    description: "MongoDB .updateMany() call".into(),
+                },
+                JsNodeMatcher::MethodName {
+                    method: "deleteOne".into(),
+                    description: "MongoDB .deleteOne() call".into(),
+                },
+                JsNodeMatcher::MethodName {
+                    method: "deleteMany".into(),
+                    description: "MongoDB .deleteMany() call".into(),
+                },
+                JsNodeMatcher::MethodName {
+                    method: "aggregate".into(),
+                    description: "MongoDB .aggregate() call".into(),
+                },
+                JsNodeMatcher::MethodName {
+                    method: "countDocuments".into(),
+                    description: "MongoDB .countDocuments() call".into(),
+                },
+            ],
+            sanitizers: vec![],
+        }
+    }
+}
+
+impl_rule! {
+    TaintNosqlInjection,
+    id = "js/taint-nosql-injection",
+    severity = Severity::High,
+    cwe = Some("CWE-943"),
+    description = "Untrusted input reaches a MongoDB query sink — possible NoSQL injection",
+    language = Language::JavaScript,
+    fn check_with_context(_self, source, tree, ctx) {
+
+        let meta = JsTaintRuleMeta {
+            rule_id: _self.id(),
+            severity: _self.severity(),
+            cwe: _self.cwe(),
+            fix_suggestion: Some("Validate and sanitize user input before using in MongoDB queries. Use mongo-sanitize to strip $ operators."),
+        };
+        map_js_taint_findings(&meta, source, tree, ctx, &Self::spec(), |src, sink| {
+            format!(
+                "{} reaches {} — untrusted input can inject NoSQL operators",
+                src, sink
+            )
+        })
+
+    }
+}
+
+/// Returns the taint rule ID and spec pairs for all JavaScript taint rules.
+/// Used by the scanner's pass 1 to extract cross-file summaries: each
+/// rule's sinks are tested against function bodies with synthetic
+/// per-parameter sources.
+pub fn js_taint_rule_specs() -> Vec<(&'static str, JsTaintSpec)> {
+    vec![
+        ("js/taint-xss-innerhtml", TaintXssInnerHtml::spec()),
+        ("js/taint-sql-injection", TaintSqlInjection::spec()),
+        ("js/taint-eval", TaintEval::spec()),
+        ("js/taint-command-injection", TaintCommandInjection::spec()),
+        ("js/taint-ssrf", TaintSsrf::spec()),
+        ("js/taint-ssti", TaintSsti::spec()),
+        ("js/taint-xpath-injection", TaintXpathInjection::spec()),
+        ("js/taint-ldap-injection", TaintLdapInjection::spec()),
+        ("js/taint-log-injection", TaintLogInjection::spec()),
+        ("js/taint-xxe", TaintXxe::spec()),
+        ("js/taint-nosql-injection", TaintNosqlInjection::spec()),
+    ]
+}
+
+/// Per-rule metadata used by the batched JS taint runner to shape
+/// findings (severity, CWE, fix hint, description formatter).
+struct JsTaintRuleDispatch {
+    meta: JsTaintRuleMeta<'static>,
+    format_description: fn(&str, &str) -> String,
+}
+
+fn js_taint_xss_innerhtml_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can lead to XSS")
+}
+fn js_taint_sql_injection_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can inject SQL")
+}
+fn js_taint_eval_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can execute arbitrary code")
+}
+fn js_taint_command_injection_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can inject OS commands")
+}
+fn js_taint_ssrf_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can cause server-side request forgery")
+}
+fn js_taint_ssti_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can inject server-side templates")
+}
+fn js_taint_xpath_injection_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can inject XPath expressions")
+}
+fn js_taint_ldap_injection_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can inject LDAP filters")
+}
+fn js_taint_log_injection_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can forge log entries")
+}
+fn js_taint_xxe_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can trigger XML External Entity processing")
+}
+fn js_taint_nosql_injection_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can inject NoSQL operators")
+}
+
+fn js_taint_rule_dispatch_table() -> Vec<JsTaintRuleDispatch> {
+    vec![
+        JsTaintRuleDispatch {
+            meta: JsTaintRuleMeta {
+                rule_id: "js/taint-xss-innerhtml",
+                severity: Severity::High,
+                cwe: Some("CWE-79"),
+                fix_suggestion: Some("Use `DOMPurify.sanitize()` or `textContent` instead of `innerHTML`/`document.write`"),
+            },
+            format_description: js_taint_xss_innerhtml_desc,
+        },
+        JsTaintRuleDispatch {
+            meta: JsTaintRuleMeta {
+                rule_id: "js/taint-sql-injection",
+                severity: Severity::Critical,
+                cwe: Some("CWE-89"),
+                fix_suggestion: Some("Use parameterized queries: `db.query(\"SELECT * FROM users WHERE name = $1\", [name])`"),
+            },
+            format_description: js_taint_sql_injection_desc,
+        },
+        JsTaintRuleDispatch {
+            meta: JsTaintRuleMeta {
+                rule_id: "js/taint-eval",
+                severity: Severity::Critical,
+                cwe: Some("CWE-95"),
+                fix_suggestion: Some("Remove `eval()`/`new Function()` and use safe alternatives like `JSON.parse()`"),
+            },
+            format_description: js_taint_eval_desc,
+        },
+        JsTaintRuleDispatch {
+            meta: JsTaintRuleMeta {
+                rule_id: "js/taint-command-injection",
+                severity: Severity::Critical,
+                cwe: Some("CWE-78"),
+                fix_suggestion: Some("Pass arguments as an array to `child_process.execFile()` instead of building a shell string"),
+            },
+            format_description: js_taint_command_injection_desc,
+        },
+        JsTaintRuleDispatch {
+            meta: JsTaintRuleMeta {
+                rule_id: "js/taint-ssrf",
+                severity: Severity::High,
+                cwe: Some("CWE-918"),
+                fix_suggestion: Some("Validate URLs against an allowlist of permitted hosts before making requests"),
+            },
+            format_description: js_taint_ssrf_desc,
+        },
+        JsTaintRuleDispatch {
+            meta: JsTaintRuleMeta {
+                rule_id: "js/taint-ssti",
+                severity: Severity::Critical,
+                cwe: Some("CWE-1336"),
+                fix_suggestion: Some("Use pre-compiled templates with auto-escaping instead of rendering user input as template strings"),
+            },
+            format_description: js_taint_ssti_desc,
+        },
+        JsTaintRuleDispatch {
+            meta: JsTaintRuleMeta {
+                rule_id: "js/taint-xpath-injection",
+                severity: Severity::High,
+                cwe: Some("CWE-643"),
+                fix_suggestion: Some("Validate and sanitize user input before building XPath expressions"),
+            },
+            format_description: js_taint_xpath_injection_desc,
+        },
+        JsTaintRuleDispatch {
+            meta: JsTaintRuleMeta {
+                rule_id: "js/taint-ldap-injection",
+                severity: Severity::High,
+                cwe: Some("CWE-90"),
+                fix_suggestion: Some("Use ldap-escape or sanitize special LDAP characters before building filter strings"),
+            },
+            format_description: js_taint_ldap_injection_desc,
+        },
+        JsTaintRuleDispatch {
+            meta: JsTaintRuleMeta {
+                rule_id: "js/taint-log-injection",
+                severity: Severity::Medium,
+                cwe: Some("CWE-117"),
+                fix_suggestion: Some("Sanitize user input before logging — strip newlines and control characters"),
+            },
+            format_description: js_taint_log_injection_desc,
+        },
+        JsTaintRuleDispatch {
+            meta: JsTaintRuleMeta {
+                rule_id: "js/taint-xxe",
+                severity: Severity::High,
+                cwe: Some("CWE-611"),
+                fix_suggestion: Some("Disable external entity resolution in XML parser configuration"),
+            },
+            format_description: js_taint_xxe_desc,
+        },
+        JsTaintRuleDispatch {
+            meta: JsTaintRuleMeta {
+                rule_id: "js/taint-nosql-injection",
+                severity: Severity::High,
+                cwe: Some("CWE-943"),
+                fix_suggestion: Some("Validate and sanitize user input before using in MongoDB queries. Use mongo-sanitize to strip $ operators."),
+            },
+            format_description: js_taint_nosql_injection_desc,
+        },
+    ]
+}
+
+/// Run every built-in JS taint rule over `tree` in a single batched
+/// pass, returning per-rule [`Finding`]s.
+///
+/// Rules are grouped by their sanitizer profile so that rules sharing
+/// the same sanitizers collapse into a single AST walk. The default
+/// JS taint ruleset has two groups (no-sanitizer x 8, sanitizer x 3),
+/// which means 2 walks per file instead of 11.
+pub fn run_js_taint_batched(
+    source: &str,
+    tree: &tree_sitter::Tree,
+    ctx: &FileContext<'_>,
+    enabled_rule_ids: &std::collections::HashSet<&str>,
+) -> Vec<Finding> {
+    let dispatch = js_taint_rule_dispatch_table();
+    let rule_specs = js_taint_rule_specs();
+
+    // Only include rules the caller actually registered.
+    let rules: Vec<javascript_taint::BatchedRule<'_>> = rule_specs
+        .iter()
+        .filter(|(id, _)| enabled_rule_ids.contains(id))
+        .map(|(id, spec)| javascript_taint::BatchedRule { rule_id: id, spec })
+        .collect();
+
+    if rules.is_empty() {
+        return Vec::new();
+    }
+
+    let cross_file_info = match (ctx.cross_file_summaries, ctx.javascript_import_paths) {
+        (Some(summaries), Some(import_paths)) => Some(javascript_taint::CrossFileInfoBatched {
+            import_to_path: import_paths,
+            summaries,
+        }),
+        _ => None,
+    };
+
+    let raw = javascript_taint::analyze_tree_batched(
+        tree.root_node(),
+        source,
+        &rules,
+        ctx.javascript_aliases,
+        cross_file_info.as_ref(),
+    );
+
+    raw.into_iter()
+        .filter_map(|(rule_id, t)| {
+            let d = dispatch.iter().find(|d| d.meta.rule_id == rule_id)?;
+            Some(Finding {
+                rule_id: d.meta.rule_id.to_string(),
+                severity: d.meta.severity,
+                cwe: d.meta.cwe.map(|s| s.to_string()),
+                description: (d.format_description)(&t.source_description, &t.sink_description),
+                file: String::new(),
+                line: t.sink_line,
+                column: t.sink_column,
+                end_line: t.sink_end_line,
+                end_column: t.sink_end_column,
+                snippet: get_source_line(source, t.sink_start_byte),
+                source_line: Some(t.source_line),
+                source_description: Some(t.source_description),
+                sink_line: Some(t.sink_line),
+                sink_description: Some(t.sink_description),
+                fix_suggestion: d.meta.fix_suggestion.map(|s| s.to_string()),
+                sink_start_byte: Some(t.sink_start_byte),
+                sink_end_byte: Some(t.sink_end_byte),
+                confidence: crate::rules::common::confidence_for_hops(t.hops),
+                taint_hops: Some(t.hops),
+                tags: vec![],
+                crypto_algorithm: None,
+                cnsa2_deadline: None,
+                dep_name: None,
+                dep_version: None,
+                dep_ecosystem: None,
+                dep_purl: None,
+                dep_vulnerability_id: None,
+                dep_fixed_version: None,
+                dep_source: None,
+                dep_vulnerability_severity: None,
+                dep_path: vec![],
+                crypto_material: None,
+            })
+        })
+        .collect()
+}

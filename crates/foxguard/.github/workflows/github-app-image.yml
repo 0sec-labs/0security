@@ -1,0 +1,52 @@
+name: GitHub App Image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "rules/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "Dockerfile.github-app"
+      - "Dockerfile.github-app.dockerignore"
+      - "scripts/smoke-github-app-image.sh"
+      - ".github/workflows/github-app-image.yml"
+      - ".github/workflows/build-github-app-image.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "rules/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "Dockerfile.github-app"
+      - "Dockerfile.github-app.dockerignore"
+      - "scripts/smoke-github-app-image.sh"
+      - ".github/workflows/github-app-image.yml"
+      - ".github/workflows/build-github-app-image.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Build and smoke test without publishing
+    if: github.event_name == 'pull_request' || github.ref != 'refs/heads/main'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/build-github-app-image.yml
+
+  publish:
+    name: Build, smoke test, and publish
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/build-github-app-image.yml
+    with:
+      push: true
+      tags: |
+        ghcr.io/0sec-labs/foxguard-github-app:${{ github.sha }}
+        ghcr.io/0sec-labs/foxguard-github-app:latest

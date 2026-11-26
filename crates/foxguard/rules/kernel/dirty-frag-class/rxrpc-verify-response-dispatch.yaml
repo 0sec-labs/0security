@@ -1,0 +1,57 @@
+# Dirty Frag class — AF_RXRPC response dispatch into an opaque verify_response
+# backend.
+#
+# net/rxrpc/conn_event.c is a confirmed advisory site, but the in-place
+# skcipher decrypt happens in the selected security backend (rxkad on v6.14),
+# not inline in the dispatcher itself. The broad skb-inplace-skcipher rule
+# therefore cannot see the crypto idiom from this file alone.
+#
+# This narrow companion rule flags the RESPONSE-case dispatch callsite so the
+# advisory-named file is not dropped from Tier 1 scans. Triage must confirm the
+# chosen backend eventually performs in-place decrypt on the skb without a
+# dominating cow/unshare gate.
+#
+# Severity rationale: this rule by itself does NOT detect a write primitive —
+# it only confirms the advisory-named file routes into a backend that may
+# contain one. Reported as WARNING (severity calibration per #215) to keep
+# ERROR-level findings reserved for confirmed write primitives flagged by
+# skb-inplace-skcipher-no-cow on the backend implementation file (rxkad.c).
+#
+# Recall caveats — shapes this rule MISSES:
+#   - renamed or wrapper-mediated verify_response dispatch.
+#   - the decrypt helper itself; that is still covered by the generic
+#     skb-inplace-skcipher-no-cow rule when scanning rxkad.c.
+#
+# Precision caveats — false-positive shapes NOT suppressed:
+#   - alternate security backends wired through verify_response that do not
+#     reach an in-place skcipher decrypt. Triage step: confirm the backend is
+#     rxkad or a structurally equivalent clone.
+rules:
+  - id: kernel/dirty-frag/rxrpc-verify-response-dispatch
+    pattern-regex: '(?ms)RXRPC_PACKET_TYPE_RESPONSE\s*:\s*[^}]*?\bconn->security->verify_response\s*\(\s*conn\s*,\s*skb\s*\)'
+    message: |
+      RXRPC RESPONSE dispatch into an opaque verify_response backend
+      (Dirty Frag class — triage funnel, not a confirmed write primitive).
+      net/rxrpc/conn_event.c reaches the vulnerable RxKAD decrypt path
+      through conn->security->verify_response(conn, skb) rather than an
+      inline crypto_skcipher_decrypt() idiom, so this rule only signals
+      that the advisory-named file routes here.
+
+      Triage: confirm the selected backend (rxkad on v6.14, or a
+      structurally equivalent RxGK clone) performs in-place skb decrypt
+      WITHOUT a dominating skb_cow_data / skb_unshare / skb_make_writable /
+      pskb_expand_head gate. If confirmed, the actual write primitive will
+      also be flagged by kernel/dirty-frag/skb-inplace-skcipher-no-cow
+      when scanning the backend implementation.
+
+      See oss-security 2026-05-07 advisory (Hyunwoo Kim @v4bel).
+    severity: WARNING
+    languages: [c]
+    paths:
+      include:
+        - net/rxrpc/conn_event*.c
+    metadata:
+      cwe: "CWE-787"
+      references:
+        - "https://www.openwall.com/lists/oss-security/2026/05/07/8"
+        - "https://github.com/V4bel/dirtyfrag/blob/master/assets/write-up.md"

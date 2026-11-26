@@ -1,0 +1,4901 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "fingerprint": "ac1546bcaa6ab1b07eeaee346c76f02ed1e548c2777411f3e93ac4eeea498c92",
+      "rule_id": "manifest/cargo-pq-vulnerable-dep",
+      "file": "Cargo.lock",
+      "line": 874
+    },
+    {
+      "fingerprint": "f40860fdcf31aa2cdb78b6636ed373cfc2f694c80ed38096693085eea4d035c0",
+      "rule_id": "manifest/cargo-pq-vulnerable-dep",
+      "file": "Cargo.lock",
+      "line": 1188
+    },
+    {
+      "fingerprint": "f083c60f5c5241c3d487aacf0e173651bd1bb30d9042e7ae63acaf4c6ebd331a",
+      "rule_id": "manifest/cargo-pq-vulnerable-dep",
+      "file": "Cargo.lock",
+      "line": 1518
+    },
+    {
+      "fingerprint": "301113590cff19504cc6f461e35c8d75d222414cc59aab606cabc5147c1f4538",
+      "rule_id": "manifest/cargo-pq-vulnerable-dep",
+      "file": "Cargo.lock",
+      "line": 2109
+    },
+    {
+      "fingerprint": "24cd3d2292052327fef553c24ae01f5696ef421fb17dc7cb6db39d864a7ad5b8",
+      "rule_id": "manifest/cargo-pq-vulnerable-dep",
+      "file": "Cargo.lock",
+      "line": 2129
+    },
+    {
+      "fingerprint": "fcf0fd7a3e80d490a22cb372ff1987838ab3388cef44fe342fc3d2ded2742149",
+      "rule_id": "manifest/cargo-pq-vulnerable-dep",
+      "file": "Cargo.lock",
+      "line": 2388
+    },
+    {
+      "fingerprint": "78be138217ff59e0e53577318e3f3a442502b53af777565b1869adbe45e29a2b",
+      "rule_id": "manifest/cargo-pq-vulnerable-dep",
+      "file": "Cargo.lock",
+      "line": 2499
+    },
+    {
+      "fingerprint": "f05931963cdfbd8e19bbac8793bcc45e21b4666abfb4536450cfd63e07443b46",
+      "rule_id": "manifest/cargo-pq-vulnerable-dep",
+      "file": "Cargo.lock",
+      "line": 2535
+    },
+    {
+      "fingerprint": "5c8cf2dc1dffb9bf05a7bbf7f66308f47ef0e90130d36a0456fd6415f4e544f2",
+      "rule_id": "manifest/cargo-pq-vulnerable-dep",
+      "file": "Cargo.lock",
+      "line": 2562
+    },
+    {
+      "fingerprint": "484d32857bbd4e1b9ada8b5675a4989134f8f8344a7466aa8b69f12498c169dd",
+      "rule_id": "manifest/cargo-pq-vulnerable-dep",
+      "file": "Cargo.lock",
+      "line": 3178
+    },
+    {
+      "fingerprint": "2a2713cee642b38f6ff0cd88156299b89d9208775e60069c7146a46976dd5602",
+      "rule_id": "py/no-command-injection",
+      "file": "benchmarks/compare_versions.py",
+      "line": 36
+    },
+    {
+      "fingerprint": "6963ef2200eb99a3c2d61fb2419a2634a8c963dd1d9550cea04375dadaf1c873",
+      "rule_id": "py/no-command-injection",
+      "file": "benchmarks/parity/parity.py",
+      "line": 386
+    },
+    {
+      "fingerprint": "b8eb10230d96cb7f52990ea1a76ec3869b2052297be24190c0afd507b76bb741",
+      "rule_id": "rs/no-path-traversal",
+      "file": "examples/taint_diag.rs",
+      "line": 74
+    },
+    {
+      "fingerprint": "3601d07229fb6207c7c995cdf6a09b45835040822f50c75516acafc6123deac3",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/app.rs",
+      "line": 75
+    },
+    {
+      "fingerprint": "3772c509ae6e9c457d4ab20766a988982fb5f680775b28c2545b198f33791acd",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/app.rs",
+      "line": 82
+    },
+    {
+      "fingerprint": "f01e2dc4975f5307270eca63a4b576f619051c16d309f5c2b620712978756f82",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/app.rs",
+      "line": 112
+    },
+    {
+      "fingerprint": "f067325005d32d0da42569c37bff41b2bdf03e0d21972c317022bd973e5e2466",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/app.rs",
+      "line": 115
+    },
+    {
+      "fingerprint": "df7961677890275bac8356ab1bb759a5674cfb2e1be94b6d01e2c80f20527a3c",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/app.rs",
+      "line": 120
+    },
+    {
+      "fingerprint": "08af9102ff934fc1df11728d0d322347a8b0748d91d6d813c977812d859492b2",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/app.rs",
+      "line": 124
+    },
+    {
+      "fingerprint": "bc481835b07b0fe60d9cfc8ada4a0301b0ae88f57155acba781e406d922f308a",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/app.rs",
+      "line": 193
+    },
+    {
+      "fingerprint": "1d6a7a1dd2ece4341ff9a6e9eb470e5e507201665c077d96d3c38ff43f5ebbc7",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/app.rs",
+      "line": 229
+    },
+    {
+      "fingerprint": "736016f02b07bf1c2d155ecd6c11110fb61be2bbc740eb893961a29f18c79c62",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/app.rs",
+      "line": 237
+    },
+    {
+      "fingerprint": "aeda2f5ac162dcf4efaba79932c9794d24f9c4368373951b4f0d7c86beb5a2eb",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/app.rs",
+      "line": 259
+    },
+    {
+      "fingerprint": "f6f3949027ba95ddee80c19738cab2f6660de5c83e3bffbbf97afdcc19ce602e",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/app.rs",
+      "line": 281
+    },
+    {
+      "fingerprint": "9178b42c6e0078f47fa7e1deedf254256bb8b5a26045119e9433bd0d36e138cc",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/app.rs",
+      "line": 336
+    },
+    {
+      "fingerprint": "7b22a408488b7ab97510f30682621ae5cb0c5aa6d0d4a3b965f5d26f85c45f7f",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/app.rs",
+      "line": 341
+    },
+    {
+      "fingerprint": "d0ee8e90e1570468fb73a30f94786157665a9875c1efaa2bb68626d7eb6f7517",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/app.rs",
+      "line": 374
+    },
+    {
+      "fingerprint": "67001aa1bb4a0c97db933502e6a4cd451c6d41763edbba67b7fc12e50ade706c",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/app.rs",
+      "line": 375
+    },
+    {
+      "fingerprint": "ca0cecd9eb67d4f15e59e28a4ea31c2ea8cd68285447644f007c2295f17f7601",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/app.rs",
+      "line": 378
+    },
+    {
+      "fingerprint": "b8281d5fd2cd5fcea8b24aa51fa099fa06a26c3a2c355374256915808271f2ce",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/app.rs",
+      "line": 409
+    },
+    {
+      "fingerprint": "05ad3f489e023c2120e7b5a17bd731fc7b0746fe5c9fee43ae91ae23716484f1",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/app.rs",
+      "line": 414
+    },
+    {
+      "fingerprint": "3d3cb568f89370c4f6af0029904ff62f4176216095a60f3c6334a65b08630923",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/app.rs",
+      "line": 430
+    },
+    {
+      "fingerprint": "910c7c2d1df6cc69629312d9d25c3071ff526600980f86dbcc008b67e819cdce",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/app.rs",
+      "line": 431
+    },
+    {
+      "fingerprint": "dc175008b483674477c332a8fbe03c1bc8944d388f9c08ccab3df01f0fa71a26",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/app.rs",
+      "line": 448
+    },
+    {
+      "fingerprint": "30b7e2bd25be506418c65375cdd7d4e8df8d5a604d769149be531b85c8a57af1",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/app.rs",
+      "line": 737
+    },
+    {
+      "fingerprint": "fbeb63f6fb19acd2c6d7f061df3a51ff188222164ed67bcbbf6b7c5c7e60a711",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/app.rs",
+      "line": 747
+    },
+    {
+      "fingerprint": "48498d9529c86b281f7417d698a1eb92144015d6ca664fa0179bb7a725385691",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/app.rs",
+      "line": 755
+    },
+    {
+      "fingerprint": "442c1bcfb713cb727c3524925c5b33deab526980f51006ef5163d54c89e44d4c",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/app.rs",
+      "line": 779
+    },
+    {
+      "fingerprint": "af3deb9ae4d25bb97cdf9c3bfdd7aeb0d12ebe11462bc1c6b7323a61b7d8c9cf",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/config.rs",
+      "line": 566
+    },
+    {
+      "fingerprint": "8743008557f19d2733cb4ffcbe4230d659d74b3610778ec6c10d8cbeec65cd7c",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/diff.rs",
+      "line": 43
+    },
+    {
+      "fingerprint": "6644a7a5747a420daeab785204a1bf24a5caccbb60ddfc2369abf6484f7ea256",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/diff.rs",
+      "line": 226
+    },
+    {
+      "fingerprint": "8f48d7928e9370cac55087685206a4b5383582fbdf3251ff5dd2bbb9e182a2e6",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/engine/coccinelle.rs",
+      "line": 475
+    },
+    {
+      "fingerprint": "fbcb5151825b73b7ab2ff17c6059c4830e9fbd861de83c5fd3ebe03d09bdaf6f",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/engine/coccinelle.rs",
+      "line": 480
+    },
+    {
+      "fingerprint": "78f2334fb6d68b25e5e2fa34c52110d4543dde6065aff0693bec18c5f6485b5d",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/engine/coccinelle.rs",
+      "line": 499
+    },
+    {
+      "fingerprint": "5873fcd4698c95393658936f39a4703ec7dc99182c051e78efd81b689036664f",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/engine/coccinelle.rs",
+      "line": 678
+    },
+    {
+      "fingerprint": "22517b4c6e15f5d0a858f0fe62fe39fb08d9ec9d6e461f554d84a4247c1e4b5d",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/engine/codeql.rs",
+      "line": 270
+    },
+    {
+      "fingerprint": "ee002f5049db8506ea38f5e279726b10467a71b27c762ab11f9527a16ccd1a4d",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/engine/codeql.rs",
+      "line": 302
+    },
+    {
+      "fingerprint": "f15ad9f6be804d9190bae11ed68a46591ad30c71521f4485e6aafd415ea6688f",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/engine/codeql.rs",
+      "line": 655
+    },
+    {
+      "fingerprint": "5caef98440464c28d83cea82f2c6f975c19aa88fb37cba382ae708da01fde5f8",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/engine/scanner.rs",
+      "line": 227
+    },
+    {
+      "fingerprint": "cb03ed6aa3bcd79b275ad48b9a94eb1665af8bd74388df8efb2de2f7ad1d70e4",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/engine/scanner.rs",
+      "line": 388
+    },
+    {
+      "fingerprint": "0c2dfca92c33d777c41045af73e996f314f476f9c4c5c821988a32848f673213",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/engine/scanner.rs",
+      "line": 570
+    },
+    {
+      "fingerprint": "191caede53a8c8bb39a4210c307652cacc8be5a2679aeaa1e346e63e30852f49",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/engine/scanner.rs",
+      "line": 578
+    },
+    {
+      "fingerprint": "5ad1b7869e09e7f9dfd8ef7024c74ca9210e807bac61e14c5ef43f77b5c48e23",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/engine/scanner.rs",
+      "line": 585
+    },
+    {
+      "fingerprint": "6fcbc92265737615a8063e63e98422d29ad8c6e9f903c41c397586929bacd13b",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/engine/scanner.rs",
+      "line": 1118
+    },
+    {
+      "fingerprint": "ecb0cc2844d2cac1a38106848081b915a96ecfaadafa39c69853616103d6ef5b",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/engine/scanner.rs",
+      "line": 1126
+    },
+    {
+      "fingerprint": "f93088ee610da538d29068c655309a4741bcce65effe8615a0447c2885a4791d",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/engine/scanner.rs",
+      "line": 1143
+    },
+    {
+      "fingerprint": "8e27f9575068300570bd47a97c3cf0c1dc2480bf046aa114929d7c88ec85d73b",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/engine/scanner.rs",
+      "line": 1150
+    },
+    {
+      "fingerprint": "bacee3784f1f7e14bfba200b7ddf5a11100469acba56eb4100c77a875b8264a6",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/engine/scanner.rs",
+      "line": 1172
+    },
+    {
+      "fingerprint": "7f8c0bb6b9d793595892d6187adf017a8daf8cdd3f368d2e772f99f0d62dce61",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/engine/scanner.rs",
+      "line": 1181
+    },
+    {
+      "fingerprint": "5425a666ffd22ea11e5f9ab4e3e2c725cd5df5b1a3dce731cbf126d94a047808",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/engine/scanner.rs",
+      "line": 1190
+    },
+    {
+      "fingerprint": "464c8ccaaf6ec054b86a455e65b4052da35e8731775a26b908395e6708384671",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/fix/mod.rs",
+      "line": 71
+    },
+    {
+      "fingerprint": "0fb7af0d28786b9b48fea422733d7388ff8a7f7abe362fc06091f3e76266b3a9",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/git.rs",
+      "line": 35
+    },
+    {
+      "fingerprint": "ace6de8972214081f7b5ce8946bf23be069da0f4cc815d471c95d9a6d6d50581",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/output/mod.rs",
+      "line": 156
+    },
+    {
+      "fingerprint": "3da21f30a603277eee1d946841d39dc2e5c95527ca7509b5d2c5cda2f7a4647c",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/output/mod.rs",
+      "line": 197
+    },
+    {
+      "fingerprint": "993b64595dbf2095f5a59fd1b449ab70edb24d8b796fb9cd6b3bb6b460be4156",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/output/mod.rs",
+      "line": 201
+    },
+    {
+      "fingerprint": "ccb538846f69cc32a2788f00d2af0ef4619608c7e5b5f75cdb3f6ead54136ed1",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/output/mod.rs",
+      "line": 246
+    },
+    {
+      "fingerprint": "dc364934659dee287c6ca3b292b5fee761104705b9b78aa2e6a6bfa1318288c4",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/path_identity.rs",
+      "line": 61
+    },
+    {
+      "fingerprint": "b5fbafa79237f0222f7a47b2594168c1bb48f8dcb58a4b25e5cad28f11b0dbc6",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/path_identity.rs",
+      "line": 75
+    },
+    {
+      "fingerprint": "cb9ae0b7bc17e496be2db505e41894211fdf604fc3395527cbc1583b0341a531",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/path_identity.rs",
+      "line": 112
+    },
+    {
+      "fingerprint": "e27e1dc22cb91fd742d651fe4107b9be4bfb4b49f7f619e79f759cf19b310cd8",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/report/cbom.rs",
+      "line": 271
+    },
+    {
+      "fingerprint": "8e881c253420d34d7b84174d7ee8280ce1cdb4891fee27f08ff88a7834021821",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/report/json.rs",
+      "line": 114
+    },
+    {
+      "fingerprint": "f97cfa6114e9eee582f4e982720fc3bc770cf210b7c909bca859f7a4d25a61c4",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/report/terminal.rs",
+      "line": 27
+    },
+    {
+      "fingerprint": "f7e3cca3c557aa9e1ae1880b610d4a6453845fbd6fb0c55b58e7f090b5f93632",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/report/terminal.rs",
+      "line": 126
+    },
+    {
+      "fingerprint": "5e12bbe1e2581bfb956514ad52b81ca2e694b8a795dd15a87bcb4de8628463d6",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/rules/common.rs",
+      "line": 56
+    },
+    {
+      "fingerprint": "41dda9520c49596364c290924f450a2f00d64b01080298c17e7c69eb56fab47c",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/rules/common.rs",
+      "line": 64
+    },
+    {
+      "fingerprint": "c29709aafc4d8a41cf6941ab08b64974bbbef928a329348ea960d9907e94628d",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/rules/config.rs",
+      "line": 24
+    },
+    {
+      "fingerprint": "7e03f786e15ab3e4ee75e3d11d1c68299fcdb22108aebac11e8baaba08ec33de",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/rules/config.rs",
+      "line": 32
+    },
+    {
+      "fingerprint": "6b89bb439134293a7d43d9bfffc1d9f903d5d0005952b9661cb7ec231c3afa11",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/rules/config.rs",
+      "line": 40
+    },
+    {
+      "fingerprint": "4b7348d9c44449878fa261747258fa8b7409473d53b1af1b704cbe70ee8a0397",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/rules/config.rs",
+      "line": 47
+    },
+    {
+      "fingerprint": "39f2a9fd9ffbce6cfecacd3058e173402aae35189a28e4f8f7a42d3fc4267a18",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/rules/config.rs",
+      "line": 54
+    },
+    {
+      "fingerprint": "dcb50cbd62abb5f6f1c7f30ee4accf4fd1510c25f69b56faf0167ba346ac0a0f",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/rules/config.rs",
+      "line": 61
+    },
+    {
+      "fingerprint": "415b9d839b1fda603819cc35ec82f2ce475a15902292ce3dfb31ae978b82fd69",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/rules/config.rs",
+      "line": 69
+    },
+    {
+      "fingerprint": "a8b166dca8ceb89221d77c042fd1a0074a14766cfff8cffae7a30bcff1902a98",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/rules/config.rs",
+      "line": 77
+    },
+    {
+      "fingerprint": "018b9844033be4aca9ef1812c36933954bbda67756a379dd55b0d206c4c6321f",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/rules/config.rs",
+      "line": 85
+    },
+    {
+      "fingerprint": "6f26b599fc6b344d589ab6409d7e0ef39c9794bbff45f05f53269e4d6faa2be3",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/rules/config.rs",
+      "line": 94
+    },
+    {
+      "fingerprint": "99ce44526537ab44e783d372b0859c58b4b005d169177fbbefb14094bfa9943f",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/rules/csharp.rs",
+      "line": 18
+    },
+    {
+      "fingerprint": "137daf0d9e9e2599dad6fed59a3b51675d4016062f4e5850599837fae2bd7289",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/rules/generic_mode.rs",
+      "line": 983
+    },
+    {
+      "fingerprint": "6d65f8ec0f8e7bb02be7bbd24567a2e191f78c8d31711173bccbe2065fb40679",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/rules/generic_mode.rs",
+      "line": 1108
+    },
+    {
+      "fingerprint": "654df9243d7f4bd3c7093af0b36b0089864f4fb315dc36b20434b6b8424408aa",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/rules/generic_mode.rs",
+      "line": 1112
+    },
+    {
+      "fingerprint": "b59bf1bfb2de19e64894d7b555feafa059073e3bee1b9568416941b6a7070fdd",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/rules/go.rs",
+      "line": 23
+    },
+    {
+      "fingerprint": "f83c221eecde60ef82ee193155d4b0d5529c7f742ea4b017f79058c55a6bc865",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/rules/go.rs",
+      "line": 31
+    },
+    {
+      "fingerprint": "8ca694d8d32485480ddaeed527e3bb9f8cde5525b8b0198eb87790fa41f8b81c",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/rules/go.rs",
+      "line": 38
+    },
+    {
+      "fingerprint": "727cbde16d8ab12ce4b399b3dda66054d5f797349613f4145dfda5e7cdc88b8f",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/rules/go.rs",
+      "line": 45
+    },
+    {
+      "fingerprint": "11387bf12f2d701272695deb1250134801a31b7cc3c5e117e070a256b029c1e1",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/rules/go.rs",
+      "line": 52
+    },
+    {
+      "fingerprint": "bb943085dc13fa5d66b4448b5b52617720d0923e76f9fa343dfb03dacd8c0dee",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/rules/go.rs",
+      "line": 60
+    },
+    {
+      "fingerprint": "1c6e4fc7b26001aa0f45e8cf84ba5c16a37a0a4fd1b0b98ce647b7c1522f2da5",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/rules/go.rs",
+      "line": 67
+    },
+    {
+      "fingerprint": "83e0b04b218ea951e289985e4e2ccbc37dd31d19527fc1f5273444468625d553",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/rules/go.rs",
+      "line": 75
+    },
+    {
+      "fingerprint": "03c4440f9f00976fbfa0e143490e8ae54f36bae3326beb39a5457bb5b16b81d7",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/rules/java.rs",
+      "line": 18
+    },
+    {
+      "fingerprint": "eb2314c6c8e74179963bbdb032e35a570acfec4590299f9d39a558eb408c1d01",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/rules/java.rs",
+      "line": 26
+    },
+    {
+      "fingerprint": "00f630848dac59758bed08965a7a8fb754ada26f038fc55fe6f87ab6102aabea",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/rules/java.rs",
+      "line": 34
+    },
+    {
+      "fingerprint": "230f37d95e212791b52eb5be23ffb525500372034119c42daa8c91e4fcaab325",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/rules/java.rs",
+      "line": 42
+    },
+    {
+      "fingerprint": "34e5fc4abaddcac7b3acdeacdfcf34ebdae046f38a8730d6f5e86c5723c13bf5",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/rules/java.rs",
+      "line": 50
+    },
+    {
+      "fingerprint": "75a4a43fc12052511cc00cc77b38682c7f90395752169b0da890cb46662fc9e0",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/rules/javascript.rs",
+      "line": 19
+    },
+    {
+      "fingerprint": "bf2cfbe4ef9045e27814fb524f75b8aed7ffeb5024f6b07aa67022664076d2b1",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/rules/javascript.rs",
+      "line": 33
+    },
+    {
+      "fingerprint": "d4112fd51e683aa3af34776085660e5599511e6492dd132c6bcd527ed4aefec6",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/rules/javascript.rs",
+      "line": 40
+    },
+    {
+      "fingerprint": "a8b633f214f07a4e066d313a0c64cf8327ab2876b4f8b4a0c09a770b1a880308",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/rules/javascript.rs",
+      "line": 48
+    },
+    {
+      "fingerprint": "a4bca856cc76a588767ea90129b34cfcdbb4023486b26ddd23901ecd10721273",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/rules/kotlin.rs",
+      "line": 17
+    },
+    {
+      "fingerprint": "654b1e18e48caf6f01ec082945325a659adfd22d92bedc4a5f5d824c8f9d906c",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/rules/kotlin.rs",
+      "line": 25
+    },
+    {
+      "fingerprint": "477f37f2d17cded8a2230756c4b386ee6174f295f540cef713ce46da0718293c",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/rules/kotlin.rs",
+      "line": 33
+    },
+    {
+      "fingerprint": "670e44e2ec6c2f9d31f4aa269904600c78add7abbaa627bae9727872258de4bf",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/rules/kotlin.rs",
+      "line": 41
+    },
+    {
+      "fingerprint": "a7e7a0637836c83c3cc54588a038a9caa8042eb2c5b93b62b2168255542418b8",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/rules/kotlin.rs",
+      "line": 49
+    },
+    {
+      "fingerprint": "f2283e2dfa6d29ad0bd0f800bb56a36cce694edba58826e68e49f3eaef4fbf08",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/rules/php.rs",
+      "line": 23
+    },
+    {
+      "fingerprint": "d713b0625cc1279c1d0e6f8193d63837efd877a6d739cdeceae2ba78c1caf936",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/rules/python.rs",
+      "line": 19
+    },
+    {
+      "fingerprint": "e74d4e751c6bbc572c88959a8c3e4bfc4899018d0b084cd36d0851a96ce8637f",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/rules/semgrep_compat.rs",
+      "line": 1037
+    },
+    {
+      "fingerprint": "ac77718a4d471c22690579f21a400d38d1397ed5cb802d02da273bdc80a01c38",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/rules/semgrep_compat.rs",
+      "line": 1045
+    },
+    {
+      "fingerprint": "efde28442b4cafc14ae13a3b82d1eb8a8dd51a4848ece19e08f84fd5251f73a1",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/rules/semgrep_compat.rs",
+      "line": 1631
+    },
+    {
+      "fingerprint": "3660bda7c0d441dc4f20ed2125d5f8e057762dd247ecd66c43d2b93f4b967a6e",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/rules/semgrep_compat.rs",
+      "line": 2428
+    },
+    {
+      "fingerprint": "eb75458a67eb2208df1fc6cbf82f82f2e6f419fa0947fefa4df49247c9336faa",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/rules/semgrep_taint.rs",
+      "line": 2462
+    },
+    {
+      "fingerprint": "ab8b77f9928a3d155600ff07db8cf419e5abff0809ec775d3a442e9690edb5f5",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/rules/semgrep_taint.rs",
+      "line": 3774
+    },
+    {
+      "fingerprint": "424f64ea7f4a86b3ab44825776456181b4afef3cf46e9275e382d746bc58799f",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/rules/swift.rs",
+      "line": 17
+    },
+    {
+      "fingerprint": "5ba4b40171cb10331564abcd8a610248cda21a71649cc4db475fe51855f128f2",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/rules/swift.rs",
+      "line": 25
+    },
+    {
+      "fingerprint": "c75bea11a81a0b03894809543d8f67efa50f3603139b898bdec154d0828b12ff",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/rules/swift.rs",
+      "line": 33
+    },
+    {
+      "fingerprint": "8ee3bc50cab3129ab5ed047e104be06cae0d7b258a99e2ae521260e3aedd2ec7",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/rules/swift.rs",
+      "line": 41
+    },
+    {
+      "fingerprint": "d7b5b89b7e498c607fcdd56c1988bb2663073552855d59cc3206501d1d861205",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/rules/swift.rs",
+      "line": 51
+    },
+    {
+      "fingerprint": "88ad5081528df8fca27fa3d3ccb2d0e740a5dec8ce57066d8c9290a1acec6b4e",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/rules/swift.rs",
+      "line": 59
+    },
+    {
+      "fingerprint": "da5dbb8bd9745d058224dddbd01556680f2104c794d49ebd2c1af7fa3484503e",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/rules/swift.rs",
+      "line": 67
+    },
+    {
+      "fingerprint": "12b2eb4dec9f40ef883dc4a6d2ceb2220b12067eef3c54fe9e57256bf1df9819",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/rules/swift.rs",
+      "line": 74
+    },
+    {
+      "fingerprint": "d877459ce33421f0c27438926335e710c408a69709da9735111822137e6b6d64",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/rules/swift.rs",
+      "line": 98
+    },
+    {
+      "fingerprint": "11755c78a9019b2384073451fe4103835374a4302e90f906965f3de07dc7f27d",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/secrets.rs",
+      "line": 189
+    },
+    {
+      "fingerprint": "87aaa88b46756d7df2449ff7f633af96ef2cce9da1b2d927f92215f512d626fa",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/tui/input.rs",
+      "line": 354
+    },
+    {
+      "fingerprint": "7f4f0cca69c67a6182fb4d7322f2eab49e3eb526a4c062b66ad470074b38f760",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/tui/input.rs",
+      "line": 357
+    },
+    {
+      "fingerprint": "a7c91b3ba7f4e7fcd7f5735e66a3a11466826eb8760425dea73a45711f520135",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "src/tui/input.rs",
+      "line": 361
+    },
+    {
+      "fingerprint": "6ced696090546e95e7e56ef20b39039cd57c4806f87520fd65521f2333b94180",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/tui/input.rs",
+      "line": 461
+    },
+    {
+      "fingerprint": "a8b9acc7cd05cb074936a3884a342c523621606480638d7af6790262d033dbfa",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/tui/input.rs",
+      "line": 642
+    },
+    {
+      "fingerprint": "d36755630817b1528de70677379fe5f090960e82a0db9b9c3cbe2fbae979a47d",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/tui/input.rs",
+      "line": 646
+    },
+    {
+      "fingerprint": "80d040df5940f60161b2c3f5327b912715e6ace72dc5eb2c9e79953bfd67d183",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/tui/input.rs",
+      "line": 666
+    },
+    {
+      "fingerprint": "78e2957014dda9f7db46134cfd3977cd5e53bdb6045f3a9883964c528e7a7f75",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/tui/input.rs",
+      "line": 687
+    },
+    {
+      "fingerprint": "57c84ee65eea06122d4895900832429676bf293cce4b77fc1efbe29a4877df13",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/tui/input.rs",
+      "line": 716
+    },
+    {
+      "fingerprint": "f7623592b5cd58fdd43ac073f7d91edcc9ee02ad95de0cdd8a3e977ef6cffe12",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/tui/input.rs",
+      "line": 752
+    },
+    {
+      "fingerprint": "d7e9c01a592bb73fe9adec73e71b8a22a3180acc56bfb17143e8779c0733016f",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/tui/input.rs",
+      "line": 828
+    },
+    {
+      "fingerprint": "7d1066ca48fdf7709e137eee55a00750ef8f5a202f3e86feaceaa99546d1f428",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/tui/mod.rs",
+      "line": 319
+    },
+    {
+      "fingerprint": "103713866df419db8c00e3ec1ed827f895f3a70e2573636f8e026b4551b141bf",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/tui/mod.rs",
+      "line": 338
+    },
+    {
+      "fingerprint": "c2f9b6f9c32b10c5cbf57916f8dc756c1a5595fb14e633d034e52e2374cf09ff",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/tui/mod.rs",
+      "line": 350
+    },
+    {
+      "fingerprint": "02c6f06955b5dd3c96eb101bfb4ce6879ffdb7a64f28a2460cec653bf7b0b62d",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/tui/state.rs",
+      "line": 391
+    },
+    {
+      "fingerprint": "25a2b7d60006e4073828e2651ccb66b68d18de6827750caf830378e77606d7ad",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/tui/state.rs",
+      "line": 395
+    },
+    {
+      "fingerprint": "acb20240443c2f78c82d49c4c73ad22cea0c032710368f43a5c683634da516b2",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/tui/state.rs",
+      "line": 401
+    },
+    {
+      "fingerprint": "91918c3d775a40343e94f032a46d2dcf6d789d5f1e1d3fb39adf4909cca44fc1",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/tui/state.rs",
+      "line": 406
+    },
+    {
+      "fingerprint": "57bb8e16ae775836eeead3eb2e020fec237769671b7c92ee3837724055dad67f",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/tui/state.rs",
+      "line": 414
+    },
+    {
+      "fingerprint": "d09d4cfdd3a79df3c9a15e450180cc7820edd6e88770ce1394a8cac359640eb9",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/tui/state.rs",
+      "line": 416
+    },
+    {
+      "fingerprint": "de2a05fd4cdfd2fc8e6ea8b8f33de4da1ff297bd1c73c94ca35dda0bdaa2f39a",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/tui/state.rs",
+      "line": 428
+    },
+    {
+      "fingerprint": "45ddacc677c33795697c69a5d26eb32f32d9280c2636cecbaea7c72e2df221ce",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/tui/widgets.rs",
+      "line": 1108
+    },
+    {
+      "fingerprint": "6f6b9ed08a2c411e9493bb2297a2f8241947b1bdc658d8d4077e4cb257421b15",
+      "rule_id": "rs/no-path-traversal",
+      "file": "src/tui/widgets.rs",
+      "line": 1123
+    },
+    {
+      "fingerprint": "db89b570de5497194c4326c469aa008704bdae33bf70b5cc6a1271b7570e5603",
+      "rule_id": "rs/no-command-injection",
+      "file": "tests/common/semgrep_parity_harness.rs",
+      "line": 36
+    },
+    {
+      "fingerprint": "404d3e598db1fd7d0fd44f31f9ad3470f628261a7695a23a3a75b73ab3d2da2f",
+      "rule_id": "rs/no-path-traversal",
+      "file": "tests/common/semgrep_parity_harness.rs",
+      "line": 53
+    },
+    {
+      "fingerprint": "02da6c97d77dcbb628dd4bb227df2211d421be7e9cf29b88480a4412b072fff1",
+      "rule_id": "rs/no-command-injection",
+      "file": "tests/common/semgrep_parity_harness.rs",
+      "line": 170
+    },
+    {
+      "fingerprint": "cca76b4eaa1a94e2e7ed7fadc692558c7e9494e7d50a385aa97c215178657aa4",
+      "rule_id": "config/apache-pq-vulnerable-tls",
+      "file": "tests/fixtures/config/apache_vulnerable/httpd.conf",
+      "line": 12
+    },
+    {
+      "fingerprint": "7388772c5a17d001e2e5cdaa6ec016b488f9e348380f2e820a068b3fcaf09c60",
+      "rule_id": "config/apache-pq-vulnerable-tls",
+      "file": "tests/fixtures/config/apache_vulnerable/httpd.conf",
+      "line": 13
+    },
+    {
+      "fingerprint": "182aa2a3c84d26312d10f87aa53c887c49c95e22ce5c1a908bb16009b9c36246",
+      "rule_id": "config/dockerfile-insecure-tls-env",
+      "file": "tests/fixtures/config/dockerfile_insecure/Dockerfile",
+      "line": 6
+    },
+    {
+      "fingerprint": "74cc1c5dce221c350bee70cba446220ec98e9f5a0a1a0c684d3acb10b5f395f6",
+      "rule_id": "config/dockerfile-insecure-tls-env",
+      "file": "tests/fixtures/config/dockerfile_insecure/Dockerfile",
+      "line": 7
+    },
+    {
+      "fingerprint": "9fbec51bb5e3947eb2a350dc9070cff9e39706d6b82dfd884a61594f755fa558",
+      "rule_id": "config/dockerfile-insecure-tls-env",
+      "file": "tests/fixtures/config/dockerfile_insecure/Dockerfile",
+      "line": 8
+    },
+    {
+      "fingerprint": "122be477525966bc2b84e0eb949607bc20b285206a897dc7e5b166ee1d3a5611",
+      "rule_id": "config/dockerfile-insecure-tls-env",
+      "file": "tests/fixtures/config/dockerfile_insecure/Dockerfile",
+      "line": 9
+    },
+    {
+      "fingerprint": "d61169e19132005dfc65c02d1e9630e0a8fddee2f40e53949a381e013f022ab3",
+      "rule_id": "config/dockerfile-insecure-tls-env",
+      "file": "tests/fixtures/config/dockerfile_insecure/Dockerfile",
+      "line": 13
+    },
+    {
+      "fingerprint": "01eff1369b351751de61a81b44daf97a1bae693487dee7bff915c79207b61a74",
+      "rule_id": "config/haproxy-pq-vulnerable-tls",
+      "file": "tests/fixtures/config/haproxy_vulnerable/haproxy.cfg",
+      "line": 4
+    },
+    {
+      "fingerprint": "07f744316b556274ca8f1bd652650c0ba7b137747b07fce3d224dc66f75594f5",
+      "rule_id": "config/haproxy-pq-vulnerable-tls",
+      "file": "tests/fixtures/config/haproxy_vulnerable/haproxy.cfg",
+      "line": 5
+    },
+    {
+      "fingerprint": "ffa43ddfd340072bc1a9be2e5932ad560fd698121407afa9b64edef377ecf14d",
+      "rule_id": "config/nginx-pq-vulnerable-tls",
+      "file": "tests/fixtures/config/nginx_vulnerable/nginx.conf",
+      "line": 9
+    },
+    {
+      "fingerprint": "7bc9a246aae4e807f7d99c596cc91592399dfc87b6003c74aa57b6c157898885",
+      "rule_id": "config/nginx-pq-vulnerable-tls",
+      "file": "tests/fixtures/config/nginx_vulnerable/nginx.conf",
+      "line": 10
+    },
+    {
+      "fingerprint": "0fca57684a0f495e2ef699557e3e45855b09c1db512e7c281adb12af9eb36dd4",
+      "rule_id": "manifest/cargo-pq-vulnerable-dep",
+      "file": "tests/fixtures/deps/Cargo.lock",
+      "line": 6
+    },
+    {
+      "fingerprint": "b8078cfde095c35f86be7219f7787f65710427d92804bc0eeeb0cb4a12cc3d82",
+      "rule_id": "manifest/cargo-pq-vulnerable-dep",
+      "file": "tests/fixtures/deps/Cargo.lock",
+      "line": 15
+    },
+    {
+      "fingerprint": "7d6e77a0cea6bbad3a9b4a915488bcf8ab699aa1d3e9b1e307be01a8ae83ec1a",
+      "rule_id": "manifest/cargo-pq-vulnerable-dep",
+      "file": "tests/fixtures/deps/Cargo.lock",
+      "line": 32
+    },
+    {
+      "fingerprint": "ba6a61e0cd13f3b3ecd861b3a1b42af71c25ec695c033c858098d4cedcdeb1a9",
+      "rule_id": "manifest/pipfile-pq-vulnerable-dep",
+      "file": "tests/fixtures/deps/Pipfile.lock",
+      "line": 16
+    },
+    {
+      "fingerprint": "064f209b0f7036c072371d227cc63e2f90fe8449f0342f7d0ce0516232d4e2d9",
+      "rule_id": "manifest/pipfile-pq-vulnerable-dep",
+      "file": "tests/fixtures/deps/Pipfile.lock",
+      "line": 20
+    },
+    {
+      "fingerprint": "5e375ee9762857e5e36d9ef8cc0e8b13a31d0411be568a8dea7724739b2c6304",
+      "rule_id": "manifest/pipfile-pq-vulnerable-dep",
+      "file": "tests/fixtures/deps/Pipfile.lock",
+      "line": 30
+    },
+    {
+      "fingerprint": "9e3c4b550b4fb79de39900ade03598345d581163b5745b07d7b6dc49cb67cf95",
+      "rule_id": "manifest/npm-pq-vulnerable-dep",
+      "file": "tests/fixtures/deps/package-lock.json",
+      "line": 20
+    },
+    {
+      "fingerprint": "c3a5d4a83773a9ab0692b34cd0027bf9f3afcc1b884d6aed981533d4e4320376",
+      "rule_id": "manifest/npm-pq-vulnerable-dep",
+      "file": "tests/fixtures/deps/package-lock.json",
+      "line": 24
+    },
+    {
+      "fingerprint": "20cbde43173a83965c1735f14d20a628ecfbd0f4f73994c7acbffebc08fb61b4",
+      "rule_id": "manifest/pnpm-pq-vulnerable-dep",
+      "file": "tests/fixtures/deps/pnpm-lock.yaml",
+      "line": 20
+    },
+    {
+      "fingerprint": "af58b4800ebe00c793a09e551c96d698b821a4f2b212db04198c97b300033aa5",
+      "rule_id": "manifest/pnpm-pq-vulnerable-dep",
+      "file": "tests/fixtures/deps/pnpm-lock.yaml",
+      "line": 28
+    },
+    {
+      "fingerprint": "7c898c6abff01ba3135a2d3d74416b1343f0e37e09a0c7273016da83137a86c3",
+      "rule_id": "manifest/poetry-pq-vulnerable-dep",
+      "file": "tests/fixtures/deps/poetry.lock",
+      "line": 9
+    },
+    {
+      "fingerprint": "1db7a7b3bb948346f8a15dc8c6ccdab644bd43e37ed5a7efda9366c2daa06f7e",
+      "rule_id": "manifest/poetry-pq-vulnerable-dep",
+      "file": "tests/fixtures/deps/poetry.lock",
+      "line": 14
+    },
+    {
+      "fingerprint": "baa4bd053bf42645eb2f1d76d6627570b7a1832ee0ac35aea17ba87d706e7a08",
+      "rule_id": "manifest/poetry-pq-vulnerable-dep",
+      "file": "tests/fixtures/deps/poetry.lock",
+      "line": 19
+    },
+    {
+      "fingerprint": "d5caef4ee4e083d7f52fecbfc420a0c8a6630aa8fcb6689ff8c453207cf1ad36",
+      "rule_id": "manifest/pip-pq-vulnerable-dep",
+      "file": "tests/fixtures/deps/requirements.txt",
+      "line": 3
+    },
+    {
+      "fingerprint": "5207d81992b3638f99be9c0111f24b965b6d8096ed63319149fe840dfe3ebf64",
+      "rule_id": "manifest/pip-pq-vulnerable-dep",
+      "file": "tests/fixtures/deps/requirements.txt",
+      "line": 5
+    },
+    {
+      "fingerprint": "0dfceded66d414886fb17cde6f6e170d298be39fb51719cc51d38d57af199455",
+      "rule_id": "manifest/pip-pq-vulnerable-dep",
+      "file": "tests/fixtures/deps/requirements.txt",
+      "line": 8
+    },
+    {
+      "fingerprint": "c11f6a7579133d4a296baba27aed3c177ea51e0c29e38d756a1290c14c1faba2",
+      "rule_id": "manifest/pip-pq-vulnerable-dep",
+      "file": "tests/fixtures/deps/requirements.txt",
+      "line": 10
+    },
+    {
+      "fingerprint": "4a94fc6a9e57fb09307c4d14fff5bb6dc9aacc2aadc38688f676f1db429daad3",
+      "rule_id": "semgrep/kernel/dirty-frag/skb-inplace-aead-no-cow",
+      "file": "tests/fixtures/kernel/dirty-frag/aead_no_cow_vulnerable.c",
+      "line": 27
+    },
+    {
+      "fingerprint": "f9229504d918670df10502640a4446c885aefc31b84b29afb5512d2b1898c404",
+      "rule_id": "semgrep/kernel/dirty-frag/skb-inplace-aead-no-cow",
+      "file": "tests/fixtures/kernel/dirty-frag/ah_aead_no_cow_vulnerable.c",
+      "line": 35
+    },
+    {
+      "fingerprint": "1e07a14c607dcf82896df70f30ed4c1a6da718fdb081f4ca5df72a891d01025a",
+      "rule_id": "semgrep/kernel/dirty-frag/scatterwalk-store-on-shared-sgl",
+      "file": "tests/fixtures/kernel/dirty-frag/crypto_template_wrapper_no_skb.c",
+      "line": 29
+    },
+    {
+      "fingerprint": "d11adac94dd4c821ac3b8d26d6209c792034803028a012f07f956adb832acda4",
+      "rule_id": "semgrep/kernel/dirty-frag/skb-inplace-aead-no-cow",
+      "file": "tests/fixtures/kernel/dirty-frag/crypto_template_wrapper_no_skb.c",
+      "line": 29
+    },
+    {
+      "fingerprint": "5de03b145704e04c913ba58c16a346c922797896867f00f25e48f35acf9b3680",
+      "rule_id": "semgrep/kernel/dirty-frag/skb-inplace-skcipher-no-cow",
+      "file": "tests/fixtures/kernel/dirty-frag/crypto_template_wrapper_no_skb.c",
+      "line": 31
+    },
+    {
+      "fingerprint": "005c4a490dff4a2de9a7b3980d06e5e35ab95ff8196c746866db53c1ac2753e8",
+      "rule_id": "semgrep/kernel/dirty-frag/skb-inplace-skcipher-no-cow",
+      "file": "tests/fixtures/kernel/dirty-frag/ipcomp_skcipher_no_cow_vulnerable.c",
+      "line": 33
+    },
+    {
+      "fingerprint": "92b84f761b6beedfe7cf41c65445b8329d4d9e96ca23dd42244e49db38f30b2e",
+      "rule_id": "semgrep/kernel/dirty-frag/scatterwalk-store-on-shared-sgl",
+      "file": "tests/fixtures/kernel/dirty-frag/scatterwalk_authenc_store_vulnerable.c",
+      "line": 30
+    },
+    {
+      "fingerprint": "5504f44a6f42a465e37ed938338c20dc5ac6bf2921f7225a4245aa0dd2e4262b",
+      "rule_id": "semgrep/kernel/dirty-frag/scatterwalk-store-on-shared-sgl",
+      "file": "tests/fixtures/kernel/dirty-frag/scatterwalk_memcpy_to_sglist_vulnerable.c",
+      "line": 33
+    },
+    {
+      "fingerprint": "5667c4ce21196b6eba667dd15d14f1425932f9c94addfd6094183f74ec136999",
+      "rule_id": "semgrep/kernel/dirty-frag/scatterwalk-store-on-shared-sgl",
+      "file": "tests/fixtures/kernel/dirty-frag/scatterwalk_store_vulnerable.c",
+      "line": 28
+    },
+    {
+      "fingerprint": "ca31a84cf48a6ea9678fba3158f01a75883f6d0144ec7dc80663c5e8b0381ab5",
+      "rule_id": "semgrep/kernel/dirty-frag/skb-inplace-skcipher-no-cow",
+      "file": "tests/fixtures/kernel/dirty-frag/skcipher_no_cow_vulnerable.c",
+      "line": 28
+    },
+    {
+      "fingerprint": "7ddceaf20d067b4b92c792c10c0c7b9860bf71be137e5fd08cb2f67e3fb7f128",
+      "rule_id": "py/taint-command-injection",
+      "file": "tests/fixtures/realistic/cli_tool.py",
+      "line": 34
+    },
+    {
+      "fingerprint": "0c30808c31dbf7439b3193f01f778316f9a33c7aaae33f34f87923770b2a46d5",
+      "rule_id": "py/no-command-injection",
+      "file": "tests/fixtures/realistic/cli_tool.py",
+      "line": 34
+    },
+    {
+      "fingerprint": "7262f444a10b51e63275caf72825889a3eda621fb38233ae4503b740aa06f951",
+      "rule_id": "py/taint-command-injection",
+      "file": "tests/fixtures/realistic/cli_tool.py",
+      "line": 40
+    },
+    {
+      "fingerprint": "1aba013367850a1dd1fc57d7a9e72bb07059a6c49b2922e509e2eb4dcc3ad5ee",
+      "rule_id": "py/no-command-injection",
+      "file": "tests/fixtures/realistic/cli_tool.py",
+      "line": 40
+    },
+    {
+      "fingerprint": "5c8771dec816762d2c98fca808ac51a870d0b42dd57a31def265e883791dc8e9",
+      "rule_id": "py/taint-eval",
+      "file": "tests/fixtures/realistic/cli_tool.py",
+      "line": 46
+    },
+    {
+      "fingerprint": "35e61ed1c0752084ca7f5a53292aaf138a48461006a2e8ddf6b7d13385e17d01",
+      "rule_id": "py/no-eval",
+      "file": "tests/fixtures/realistic/cli_tool.py",
+      "line": 46
+    },
+    {
+      "fingerprint": "eac944d5e1a2c6feae3119467353d701e2bf32b153dc6dd6a0ff6174a70a37d6",
+      "rule_id": "py/taint-eval",
+      "file": "tests/fixtures/realistic/cli_tool.py",
+      "line": 52
+    },
+    {
+      "fingerprint": "ac00919b5c73df1c91d28ebfa747b87d38fb29fb7e5de5cd4ede671ce100024a",
+      "rule_id": "py/no-eval",
+      "file": "tests/fixtures/realistic/cli_tool.py",
+      "line": 52
+    },
+    {
+      "fingerprint": "7d4d717e0f02ec0e1607d49b166152684a2e5be01b24e13ce22e6283b52ab091",
+      "rule_id": "py/no-eval",
+      "file": "tests/fixtures/realistic/cli_tool.py",
+      "line": 77
+    },
+    {
+      "fingerprint": "e66e224ac2516a402b6f23e88ca2d5f53a92ebec5b92528a3b6fcc6253d52aa7",
+      "rule_id": "py/no-sql-injection",
+      "file": "tests/fixtures/realistic/django_chain/queries.py",
+      "line": 13
+    },
+    {
+      "fingerprint": "cec595bfe3398f97c7bc1bd4fb562483e5c8aff4943821027a25c7b6012be8b8",
+      "rule_id": "py/taint-sql-injection",
+      "file": "tests/fixtures/realistic/django_chain/views.py",
+      "line": 22
+    },
+    {
+      "fingerprint": "ed0c9f03cc78fed5e5c5679086bf44301f1d2564c417c057385356ad67ba5a9c",
+      "rule_id": "py/no-sql-injection",
+      "file": "tests/fixtures/realistic/django_shop/queries.py",
+      "line": 20
+    },
+    {
+      "fingerprint": "1d6e6b2b963ff237e60470c0ba14ba57c74cdd13cb9db91737bf74b460e2b577",
+      "rule_id": "py/no-pickle",
+      "file": "tests/fixtures/realistic/django_shop/queries.py",
+      "line": 27
+    },
+    {
+      "fingerprint": "7e111a1e431d0f78049212f7d44e2143ac3b56baaf90fa4c4fc55abd033ae95c",
+      "rule_id": "py/taint-command-injection",
+      "file": "tests/fixtures/realistic/django_shop/views.py",
+      "line": 36
+    },
+    {
+      "fingerprint": "786a8f2c41098168a9ce47eae91647822269dcaaea40bf4bb829ba4b0560ffd0",
+      "rule_id": "py/no-command-injection",
+      "file": "tests/fixtures/realistic/django_shop/views.py",
+      "line": 36
+    },
+    {
+      "fingerprint": "ee43af471b9dac64e98487377251f6c26c8e785274bf751591a749e26b57a428",
+      "rule_id": "py/taint-ssrf",
+      "file": "tests/fixtures/realistic/django_shop/views.py",
+      "line": 43
+    },
+    {
+      "fingerprint": "085fad2fa794ccb554208a69f357e009b07ffff1115df2e3e6a8722d41113b92",
+      "rule_id": "py/no-ssrf",
+      "file": "tests/fixtures/realistic/django_shop/views.py",
+      "line": 43
+    },
+    {
+      "fingerprint": "ca50be76e3952345123bdf855835e3cfb3ee9218a3e5579d6fe219aaad289c81",
+      "rule_id": "py/taint-sql-injection",
+      "file": "tests/fixtures/realistic/django_shop/views.py",
+      "line": 52
+    },
+    {
+      "fingerprint": "4284c578d24b83efc9de9b3b9432e2936c0355ea63415abe73d3efec0eee8c26",
+      "rule_id": "py/taint-pickle-deserialization",
+      "file": "tests/fixtures/realistic/django_shop/views.py",
+      "line": 61
+    },
+    {
+      "fingerprint": "1e911c8f8f8aa7b758b9e7c721c7854b49fd9bc9380282ac6780f8488204f092",
+      "rule_id": "py/taint-command-injection",
+      "file": "tests/fixtures/realistic/django_views.py",
+      "line": 33
+    },
+    {
+      "fingerprint": "a78d242fc9ce19866f176e90d6c1cbc242d87b069aa9e5d226c576d196f66b4a",
+      "rule_id": "py/no-command-injection",
+      "file": "tests/fixtures/realistic/django_views.py",
+      "line": 33
+    },
+    {
+      "fingerprint": "9683b28aac71c1d0c22175220ca0de607b700056ad3eb76fa11a92a17d6c8249",
+      "rule_id": "py/taint-command-injection",
+      "file": "tests/fixtures/realistic/django_views.py",
+      "line": 40
+    },
+    {
+      "fingerprint": "9863dc791617c123b5c8339a31b965b4472d33f9aed2cb3ad22c780b222efb0a",
+      "rule_id": "py/no-command-injection",
+      "file": "tests/fixtures/realistic/django_views.py",
+      "line": 40
+    },
+    {
+      "fingerprint": "d35dae3ba60694871013203dae991411763c6af432a96bc91a417ef8f331583a",
+      "rule_id": "py/taint-sql-injection",
+      "file": "tests/fixtures/realistic/django_views.py",
+      "line": 48
+    },
+    {
+      "fingerprint": "2f62653634deb1b6a591c29e30ccee6e55063b0cc9884419a230546ea1c9f912",
+      "rule_id": "py/taint-ssrf",
+      "file": "tests/fixtures/realistic/django_views.py",
+      "line": 55
+    },
+    {
+      "fingerprint": "847b2ed23d547f3d8caf7a9311fb9917708eba5d0b81fad84d05455e681bfecb",
+      "rule_id": "py/no-ssrf",
+      "file": "tests/fixtures/realistic/django_views.py",
+      "line": 55
+    },
+    {
+      "fingerprint": "154c018904a61ea19a699f97893357c3673f17a82d8e01268f06d3d44dbad67c",
+      "rule_id": "py/taint-pickle-deserialization",
+      "file": "tests/fixtures/realistic/django_views.py",
+      "line": 61
+    },
+    {
+      "fingerprint": "8ebe39199b3caffd158a1b1bced520d19377fe701548e972359cfbdebfd40825",
+      "rule_id": "py/no-pickle",
+      "file": "tests/fixtures/realistic/django_views.py",
+      "line": 61
+    },
+    {
+      "fingerprint": "4d2e022792b56040561d4c5f12225077f02917e9c146adbdd7aab11c809bed03",
+      "rule_id": "js/taint-sql-injection",
+      "file": "tests/fixtures/realistic/express_api/routes.js",
+      "line": 24
+    },
+    {
+      "fingerprint": "edab1ccecd7ac0a8721597985df4512d98f9ba91edbab2820dc37a038836e2d5",
+      "rule_id": "js/no-sql-injection",
+      "file": "tests/fixtures/realistic/express_api/routes.js",
+      "line": 24
+    },
+    {
+      "fingerprint": "4526476a652a71ab3648c159161b9c01c455b99ed888419bb45b10efd13b09e1",
+      "rule_id": "js/taint-command-injection",
+      "file": "tests/fixtures/realistic/express_api/routes.js",
+      "line": 32
+    },
+    {
+      "fingerprint": "fdc3a5bb5275865fd2306cfb7091838a454ed58609379bbf75f2d93e856339aa",
+      "rule_id": "js/no-command-injection",
+      "file": "tests/fixtures/realistic/express_api/routes.js",
+      "line": 32
+    },
+    {
+      "fingerprint": "29901713f644260a131b135e0399533555e38bec1f37f366d7dedea7eaa7fb4a",
+      "rule_id": "js/taint-eval",
+      "file": "tests/fixtures/realistic/express_api/routes.js",
+      "line": 40
+    },
+    {
+      "fingerprint": "8aa89227b7f1ce67998361ae8c055b123d6e51a08db3bd1afffb10e2817210f7",
+      "rule_id": "js/no-eval",
+      "file": "tests/fixtures/realistic/express_api/routes.js",
+      "line": 40
+    },
+    {
+      "fingerprint": "6eb3b1cbb46ec742cae9dfb4c8862e61616b6f98e86038ed195ccf2c8c110565",
+      "rule_id": "js/taint-sql-injection",
+      "file": "tests/fixtures/realistic/express_api/routes.js",
+      "line": 48
+    },
+    {
+      "fingerprint": "afa2ac4ee64d6282733737ed4edf20ebd3843b95799fbfcf23200134cd7372a4",
+      "rule_id": "js/taint-eval",
+      "file": "tests/fixtures/realistic/express_api/routes.js",
+      "line": 55
+    },
+    {
+      "fingerprint": "22773c1b28d4cee3876d220a52b7a123e8271b24c1cd9aabb51ffa6300d854ff",
+      "rule_id": "js/no-sql-injection",
+      "file": "tests/fixtures/realistic/express_api/services.js",
+      "line": 17
+    },
+    {
+      "fingerprint": "e2ffe6d984d17dc362166572b5a659942506bddb1ebdbb5973fcba8dc5b98114",
+      "rule_id": "js/no-eval",
+      "file": "tests/fixtures/realistic/express_api/services.js",
+      "line": 24
+    },
+    {
+      "fingerprint": "d47115213478d3de4af6e6ad429ab48d6ee4866de4ae0aa37185252901d5906a",
+      "rule_id": "js/taint-xss-innerhtml",
+      "file": "tests/fixtures/realistic/express_app.js",
+      "line": 25
+    },
+    {
+      "fingerprint": "bae2a47fd5c5d9a0c35014b49d2233939dd210950312cd55dffc4737c56324ba",
+      "rule_id": "js/no-xss-innerhtml",
+      "file": "tests/fixtures/realistic/express_app.js",
+      "line": 25
+    },
+    {
+      "fingerprint": "10e344e160a9726f0ab27c74c0d3d8188564f136fc0e12feaeec2779c6391d59",
+      "rule_id": "js/taint-xss-innerhtml",
+      "file": "tests/fixtures/realistic/express_app.js",
+      "line": 32
+    },
+    {
+      "fingerprint": "6b3ed194a03d4a877b6290810ca92280df7826714ec28e3f33a3a6153059fd2c",
+      "rule_id": "js/no-xss-innerhtml",
+      "file": "tests/fixtures/realistic/express_app.js",
+      "line": 32
+    },
+    {
+      "fingerprint": "e069247a9438625130fab05a1f0d22488a4a308147251e4ecc02136cc4d78234",
+      "rule_id": "js/taint-xss-innerhtml",
+      "file": "tests/fixtures/realistic/express_app.js",
+      "line": 39
+    },
+    {
+      "fingerprint": "7db74d28cfc2c8c35f6fdcd530650a5ecc422ec76a6671da4ef2185ad3566724",
+      "rule_id": "js/no-document-write",
+      "file": "tests/fixtures/realistic/express_app.js",
+      "line": 39
+    },
+    {
+      "fingerprint": "6fd8ad8288e5de040cd2fd127b36804889f56321bda76834c1aa68eab8a4ea67",
+      "rule_id": "js/taint-xss-innerhtml",
+      "file": "tests/fixtures/realistic/express_app.js",
+      "line": 46
+    },
+    {
+      "fingerprint": "30321be41f33c22c7c142421c30a0616746a6c3217200f80d24179b415aa795e",
+      "rule_id": "js/no-xss-innerhtml",
+      "file": "tests/fixtures/realistic/express_app.js",
+      "line": 46
+    },
+    {
+      "fingerprint": "f8fd12d7e5ae24d61a9f97e794dfbea8c75c61a0f224b4564ee98ce988389901",
+      "rule_id": "js/taint-xss-innerhtml",
+      "file": "tests/fixtures/realistic/express_app.js",
+      "line": 54
+    },
+    {
+      "fingerprint": "05697b4b88669ca8c95b1b40404a814eb0ef951ceecf31ba316ebd9590d11158",
+      "rule_id": "js/no-document-write",
+      "file": "tests/fixtures/realistic/express_app.js",
+      "line": 54
+    },
+    {
+      "fingerprint": "6d8ff49ce699d9edfd04a6325b14d80fa9783f8a900e94fc930731d3bf164fc2",
+      "rule_id": "js/no-document-write",
+      "file": "tests/fixtures/realistic/express_app.js",
+      "line": 68
+    },
+    {
+      "fingerprint": "48550223f22ea4bd56cead743e8db79ef987fa46dd75c0d13564b2f0d7f5a840",
+      "rule_id": "js/no-xss-innerhtml",
+      "file": "tests/fixtures/realistic/express_app.js",
+      "line": 76
+    },
+    {
+      "fingerprint": "172dcb8ca889f89f9c2a19a5257f15f1c908f8914bf8e9b63b588aa372e873b3",
+      "rule_id": "js/taint-sql-injection",
+      "file": "tests/fixtures/realistic/express_chain/routes.js",
+      "line": 22
+    },
+    {
+      "fingerprint": "3d9c17406e0ae505331ff7cf3b287ed3dcecfefa30c4b99b9d0464d8e4280bb2",
+      "rule_id": "js/no-sql-injection",
+      "file": "tests/fixtures/realistic/express_chain/services.js",
+      "line": 10
+    },
+    {
+      "fingerprint": "03b4bc3d5f64e9e9bec104382472559caaf36add5024d7ea2ff091dcbcb4da08",
+      "rule_id": "py/taint-eval",
+      "file": "tests/fixtures/realistic/fastapi_app.py",
+      "line": 34
+    },
+    {
+      "fingerprint": "4b32e124e2d8bc9b2b30ec0c336c0ae5bc198276a68981e8a050918c60a2b407",
+      "rule_id": "py/no-eval",
+      "file": "tests/fixtures/realistic/fastapi_app.py",
+      "line": 34
+    },
+    {
+      "fingerprint": "479e099b3a2a17cf3c19ed48babaa7074d188b14c4f5e717cb6404a2a7a6eb98",
+      "rule_id": "py/taint-pickle-deserialization",
+      "file": "tests/fixtures/realistic/fastapi_app.py",
+      "line": 41
+    },
+    {
+      "fingerprint": "7fc5717ce549eaf27143130a4c85045c250ea755e81e2dc92f65a2ad605f4e1d",
+      "rule_id": "py/no-pickle",
+      "file": "tests/fixtures/realistic/fastapi_app.py",
+      "line": 41
+    },
+    {
+      "fingerprint": "5cb16dfe6d8caffdc45baa354a863b34f79fe9c886f0636e38d20409273af11f",
+      "rule_id": "py/taint-ssrf",
+      "file": "tests/fixtures/realistic/fastapi_app.py",
+      "line": 48
+    },
+    {
+      "fingerprint": "e6e5fb920c6ab791912e8a078411667f81c75ba3343ce278221ed3c3dcbb3d68",
+      "rule_id": "py/no-ssrf",
+      "file": "tests/fixtures/realistic/fastapi_app.py",
+      "line": 48
+    },
+    {
+      "fingerprint": "2fb4071c25d26b28e9adf929212bd72fa80f2167eb6fe2066a38ada99931e8ec",
+      "rule_id": "py/no-eval",
+      "file": "tests/fixtures/realistic/fastapi_app.py",
+      "line": 56
+    },
+    {
+      "fingerprint": "4f2b0f42728457462cb278e3bfa7ec5eaa0b454eca06205ab704b94d97c6ee2d",
+      "rule_id": "py/no-eval",
+      "file": "tests/fixtures/realistic/fastapi_app.py",
+      "line": 62
+    },
+    {
+      "fingerprint": "8a2be401fcb946c52a0812397e02657a857d516aed042e80728a4b1c9629cd0a",
+      "rule_id": "py/taint-pickle-deserialization",
+      "file": "tests/fixtures/realistic/flask_app.py",
+      "line": 41
+    },
+    {
+      "fingerprint": "d12c68de3731863c068ff7f21d7cf8943a876cd5e0b651166de168ea6b51ca17",
+      "rule_id": "py/no-pickle",
+      "file": "tests/fixtures/realistic/flask_app.py",
+      "line": 41
+    },
+    {
+      "fingerprint": "6d08f3590f6c1b21824ebe4b42566b72107c7153af757528e522ad2fc78ed284",
+      "rule_id": "py/taint-eval",
+      "file": "tests/fixtures/realistic/flask_app.py",
+      "line": 48
+    },
+    {
+      "fingerprint": "7b5bc58109dec5c2991b29dd35afa2ed806ae1954c9d3f7e373fb4cc3b2d7321",
+      "rule_id": "py/no-eval",
+      "file": "tests/fixtures/realistic/flask_app.py",
+      "line": 48
+    },
+    {
+      "fingerprint": "0bdbaae3b2934d15c7888910796481706605bae1f1ec000ca2c40b0cd87bbb49",
+      "rule_id": "py/taint-command-injection",
+      "file": "tests/fixtures/realistic/flask_app.py",
+      "line": 56
+    },
+    {
+      "fingerprint": "613a5593f54778ec47718ef0557842b3716e829409888a2ca57d03ecdfd711ca",
+      "rule_id": "py/no-command-injection",
+      "file": "tests/fixtures/realistic/flask_app.py",
+      "line": 56
+    },
+    {
+      "fingerprint": "afdda845fbb547bf6defe18187fba7d328ecc2d60252963eeb946b08458851fa",
+      "rule_id": "py/taint-command-injection",
+      "file": "tests/fixtures/realistic/flask_app.py",
+      "line": 64
+    },
+    {
+      "fingerprint": "8c2055c6cd0419d139711d0374c58afc5dc8a2ea8f92486325082af57a6c7be0",
+      "rule_id": "py/no-command-injection",
+      "file": "tests/fixtures/realistic/flask_app.py",
+      "line": 64
+    },
+    {
+      "fingerprint": "cc8f7861a76a26d46a6882ee36e0d914fd5b65c40b3b3c10b7e7de7193fb0382",
+      "rule_id": "py/taint-ssrf",
+      "file": "tests/fixtures/realistic/flask_app.py",
+      "line": 72
+    },
+    {
+      "fingerprint": "922d7722ebcbca1c8f737dff7d7bf216304dccafbed8cf8eceeb447835e30af8",
+      "rule_id": "py/no-ssrf",
+      "file": "tests/fixtures/realistic/flask_app.py",
+      "line": 72
+    },
+    {
+      "fingerprint": "296f48bd961c97171c7f30726ad65f81b7341a4dab2666b8e8284f29146647ca",
+      "rule_id": "py/taint-yaml-load",
+      "file": "tests/fixtures/realistic/flask_app.py",
+      "line": 79
+    },
+    {
+      "fingerprint": "7460915b0eaa793fa88eb5d90098a51544d632a45afaf01a7ef2b39b8fb5b840",
+      "rule_id": "py/no-yaml-load",
+      "file": "tests/fixtures/realistic/flask_app.py",
+      "line": 79
+    },
+    {
+      "fingerprint": "cff75567667d883480abf2a2a271120ba315bf8b8e2054cc8d7e780ec3e20f93",
+      "rule_id": "py/taint-sql-injection",
+      "file": "tests/fixtures/realistic/flask_app.py",
+      "line": 88
+    },
+    {
+      "fingerprint": "4acee6452ea9f412951bfe766a8e7c883b88a38dad7dbb7c48f812e7adb05c55",
+      "rule_id": "py/no-eval",
+      "file": "tests/fixtures/realistic/flask_app.py",
+      "line": 104
+    },
+    {
+      "fingerprint": "ede89ba35b864e9a384ab8215dc1b32c347b83d8f395f6fe8913566f245ea5e8",
+      "rule_id": "go/taint-command-injection",
+      "file": "tests/fixtures/realistic/gin_app.go",
+      "line": 36
+    },
+    {
+      "fingerprint": "769b568e3fbb2c4600f1497ea08b611acf7b3f903506ce83461305ed50216bfb",
+      "rule_id": "go/no-command-injection",
+      "file": "tests/fixtures/realistic/gin_app.go",
+      "line": 36
+    },
+    {
+      "fingerprint": "72c3dd6c1946a052670a609dd8325de676c47f2fd9a2d933f85e775a93cd9947",
+      "rule_id": "go/no-sql-injection",
+      "file": "tests/fixtures/realistic/gin_app.go",
+      "line": 47
+    },
+    {
+      "fingerprint": "ef53339944a2b806079808b96ec4eab5395987242a2bcfd56c09af474a6d3ccf",
+      "rule_id": "go/taint-sql-injection",
+      "file": "tests/fixtures/realistic/gin_app.go",
+      "line": 48
+    },
+    {
+      "fingerprint": "0e27313660face6e449cd277b95278c8957b35953797813ad0014f8186d6224c",
+      "rule_id": "go/taint-ssrf",
+      "file": "tests/fixtures/realistic/gin_app.go",
+      "line": 60
+    },
+    {
+      "fingerprint": "971e4d892fe08d61b03c9275f19c3711c3727fb9e5da3e53063d96038dfc7f02",
+      "rule_id": "go/no-ssrf",
+      "file": "tests/fixtures/realistic/gin_app.go",
+      "line": 60
+    },
+    {
+      "fingerprint": "257e96fad56d279e0547820f1f16d410ba28f02364e90af606036702fe980294",
+      "rule_id": "go/gin-no-trusted-proxies",
+      "file": "tests/fixtures/realistic/gin_app.go",
+      "line": 73
+    },
+    {
+      "fingerprint": "228748ab5ca40216ef6b28980dbc83beae98d1f835c1659b9a3e600e46aab1f9",
+      "rule_id": "go/taint-sql-injection",
+      "file": "tests/fixtures/realistic/gin_chain/handlers.go",
+      "line": 24
+    },
+    {
+      "fingerprint": "9ec139f5d82e62336dc572b2868de02d05ac9c843e28f15b1e1818a5f4bf7992",
+      "rule_id": "go/no-sql-injection",
+      "file": "tests/fixtures/realistic/gin_chain/store.go",
+      "line": 14
+    },
+    {
+      "fingerprint": "a87fc6ef824d8fe8dbfdab496275523f491d34585055fa84bb9ee568b278a84e",
+      "rule_id": "go/taint-ssrf",
+      "file": "tests/fixtures/realistic/gin_service/handlers.go",
+      "line": 25
+    },
+    {
+      "fingerprint": "b228cd3d15778f22335b32a113daca00e1411f91263b76c9bcbf1c635a56571e",
+      "rule_id": "go/no-ssrf",
+      "file": "tests/fixtures/realistic/gin_service/handlers.go",
+      "line": 25
+    },
+    {
+      "fingerprint": "9628fe4bf7373704088f162ee469fcafe2e28d5b01cf3c7f442d7a1b88f51414",
+      "rule_id": "go/taint-sql-injection",
+      "file": "tests/fixtures/realistic/gin_service/handlers.go",
+      "line": 32
+    },
+    {
+      "fingerprint": "ff26c9d0b5fe73d1d254e1f7bb3550c1fa3f9af5b9e79f54356521b78e66067c",
+      "rule_id": "go/taint-command-injection",
+      "file": "tests/fixtures/realistic/gin_service/handlers.go",
+      "line": 41
+    },
+    {
+      "fingerprint": "0c5deddfe278a0df50ac5f8f93c89aac1774feedb2163e3f4334a34684d583f3",
+      "rule_id": "go/no-command-injection",
+      "file": "tests/fixtures/realistic/gin_service/handlers.go",
+      "line": 41
+    },
+    {
+      "fingerprint": "8b75c43f4ea8a0306ee82e11378b941bea207c70648b7c50616c79464ba63556",
+      "rule_id": "go/no-sql-injection",
+      "file": "tests/fixtures/realistic/gin_service/store.go",
+      "line": 15
+    },
+    {
+      "fingerprint": "e5d16ca2dd911e64f6452d37ce9ec71f4ffe3fec181fb9697733bdd3f2b84188",
+      "rule_id": "js/taint-xss-innerhtml",
+      "file": "tests/fixtures/realistic/hono_app.ts",
+      "line": 21
+    },
+    {
+      "fingerprint": "2e777b7768266f787d2ba89419af1ed85cf7faa588df3e3895bd18ca8865113f",
+      "rule_id": "js/no-xss-innerhtml",
+      "file": "tests/fixtures/realistic/hono_app.ts",
+      "line": 21
+    },
+    {
+      "fingerprint": "8ea3cbd26a419eb7767fba6f18a05c8467f4509293ef287057a0b84dee1bfbc0",
+      "rule_id": "js/taint-xss-innerhtml",
+      "file": "tests/fixtures/realistic/hono_app.ts",
+      "line": 28
+    },
+    {
+      "fingerprint": "d8b703e1edcda7d7ad207517a53e70ef0c35f6713d2699902239d38343e61853",
+      "rule_id": "js/no-document-write",
+      "file": "tests/fixtures/realistic/hono_app.ts",
+      "line": 28
+    },
+    {
+      "fingerprint": "9d35f702fa063d370291a9849784867f4e089302fab625b290aad9ee1e5d7c9e",
+      "rule_id": "js/taint-xss-innerhtml",
+      "file": "tests/fixtures/realistic/hono_app.ts",
+      "line": 37
+    },
+    {
+      "fingerprint": "6a124eecf6a21ff9d3b3e729aacfaf3cacdfcb3d9e72ad1976328f665d6be7b8",
+      "rule_id": "js/no-xss-innerhtml",
+      "file": "tests/fixtures/realistic/hono_app.ts",
+      "line": 37
+    },
+    {
+      "fingerprint": "de9a1c056d3238fb46ca0bea3e856252c560e39513a36bee78e5a631c008baf4",
+      "rule_id": "js/no-document-write",
+      "file": "tests/fixtures/realistic/hono_app.ts",
+      "line": 52
+    },
+    {
+      "fingerprint": "45dd85d437f4fc1e8e4b05d37aca344b0b03419908f72ea8927a21e52700c4c8",
+      "rule_id": "java/no-sql-injection",
+      "file": "tests/fixtures/realistic/java_chain/QueryHelper.java",
+      "line": 17
+    },
+    {
+      "fingerprint": "18ea51460cbd3d71d66d9492153feccd5109a280505731a940605efcf40f6752",
+      "rule_id": "java/taint-sql-injection",
+      "file": "tests/fixtures/realistic/java_spring_controller.java",
+      "line": 19
+    },
+    {
+      "fingerprint": "4d93a0e6ba18c4223d2779fcf0d2d69b64797da07d9dd4fa2290b1424c78abf7",
+      "rule_id": "java/taint-command-injection",
+      "file": "tests/fixtures/realistic/java_spring_controller.java",
+      "line": 25
+    },
+    {
+      "fingerprint": "57edc642244ff52a2642e894dfdac8443742e36524e6d933ac70ec7311e5dda3",
+      "rule_id": "java/taint-ssrf",
+      "file": "tests/fixtures/realistic/java_spring_controller.java",
+      "line": 30
+    },
+    {
+      "fingerprint": "4d4eb618b14d9f073608b212c7234226750b83bb49a7ce6f0787c2c05831c8b5",
+      "rule_id": "java/taint-unsafe-deserialization",
+      "file": "tests/fixtures/realistic/java_spring_controller.java",
+      "line": 36
+    },
+    {
+      "fingerprint": "5c1650de0e78ed87d863ff06921f9957ac7b116e6b35b39b080fe1613de5c9ea",
+      "rule_id": "js/no-sql-injection",
+      "file": "tests/fixtures/realistic/next_app/actions.ts",
+      "line": 15
+    },
+    {
+      "fingerprint": "637d7e1d8fdbb4995dbc564655f8b68504b4b2fbf5fe4b7d809a57dfe533cf60",
+      "rule_id": "js/no-eval",
+      "file": "tests/fixtures/realistic/next_app/actions.ts",
+      "line": 21
+    },
+    {
+      "fingerprint": "680c0dc5824725600b4d73cd4bcaead1fbe2bfcffb7fa2f2002a3c65ed4d4115",
+      "rule_id": "js/taint-sql-injection",
+      "file": "tests/fixtures/realistic/next_app/route.ts",
+      "line": 21
+    },
+    {
+      "fingerprint": "e0b7f01ee441f17459304f1876e4d53a556efca51cf947b480df8b2da2941969",
+      "rule_id": "js/no-sql-injection",
+      "file": "tests/fixtures/realistic/next_app/route.ts",
+      "line": 21
+    },
+    {
+      "fingerprint": "a98581f4cedf5abb72731ee30f5a8cd4b7b4eb7281490ae68d715fcf2b89160d",
+      "rule_id": "js/taint-xss-innerhtml",
+      "file": "tests/fixtures/realistic/nextjs_handlers.ts",
+      "line": 20
+    },
+    {
+      "fingerprint": "de24c3d13ccdaef2f693c8fb98468a6529013e542b2849d9b8be4ceaed9c1d44",
+      "rule_id": "js/no-xss-innerhtml",
+      "file": "tests/fixtures/realistic/nextjs_handlers.ts",
+      "line": 20
+    },
+    {
+      "fingerprint": "93c2a8e9f308a7abab56dc3e14c836370056592e790c9d73b0f3492505258af4",
+      "rule_id": "js/taint-xss-innerhtml",
+      "file": "tests/fixtures/realistic/nextjs_handlers.ts",
+      "line": 27
+    },
+    {
+      "fingerprint": "e7691394a54042552f03bc99120fe3fbdf9823702a0fe5305a9cc8fb65ef103d",
+      "rule_id": "js/no-document-write",
+      "file": "tests/fixtures/realistic/nextjs_handlers.ts",
+      "line": 27
+    },
+    {
+      "fingerprint": "3f739c89bea90e6e10cf9b6efb8a19bf8398bcda96ef16267342d6c2137f19bc",
+      "rule_id": "js/taint-xss-innerhtml",
+      "file": "tests/fixtures/realistic/nextjs_handlers.ts",
+      "line": 36
+    },
+    {
+      "fingerprint": "fb0eecea560c3cbb1e4b8402b7bd8f2dca388d9e11f9f93ec465c8d84a6cf3a5",
+      "rule_id": "js/no-xss-innerhtml",
+      "file": "tests/fixtures/realistic/nextjs_handlers.ts",
+      "line": 36
+    },
+    {
+      "fingerprint": "39ce4132611577697d5e20d7b5e4cf880c9335a1e42e6a691cbeea51696ce81e",
+      "rule_id": "js/no-document-write",
+      "file": "tests/fixtures/realistic/nextjs_handlers.ts",
+      "line": 51
+    },
+    {
+      "fingerprint": "b866cc29768c3ae885d040c7f729f7034ab26c308fd185f81659e488cb2d10a6",
+      "rule_id": "py/no-command-injection",
+      "file": "tests/fixtures/safe_cli_taint.py",
+      "line": 16
+    },
+    {
+      "fingerprint": "dd317e26c39458c4b0d9aee7365cacce90e67864c250a2de30d22a72ee9ba252",
+      "rule_id": "py/no-eval",
+      "file": "tests/fixtures/safe_cli_taint.py",
+      "line": 20
+    },
+    {
+      "fingerprint": "7663daed7116be574ab87734251b96b3e3310d9fe7fd83a377452f2728d023a0",
+      "rule_id": "java/no-weak-crypto",
+      "file": "tests/fixtures/safe_crypto_agility.java",
+      "line": 13
+    },
+    {
+      "fingerprint": "f7f90c964b1334869dbe7f70cf7dd13216ecbb25b841113e172e0f118f5ee44f",
+      "rule_id": "java/no-weak-crypto",
+      "file": "tests/fixtures/safe_crypto_agility.java",
+      "line": 14
+    },
+    {
+      "fingerprint": "08ac93463e48644502c5e87a5c068eb6318b2ba0c27d6bf9bfd4f7278506b306",
+      "rule_id": "java/no-weak-crypto",
+      "file": "tests/fixtures/safe_crypto_agility.java",
+      "line": 15
+    },
+    {
+      "fingerprint": "ce452f6c3734a72d1860c91abc9504a554689f81591239b7020b5012c4c83077",
+      "rule_id": "js/no-weak-crypto",
+      "file": "tests/fixtures/safe_crypto_agility.js",
+      "line": 12
+    },
+    {
+      "fingerprint": "571180ed7c3607d0f5c530cee1ae4e6dbf1bde9b9d3c6cc1885107ba0fa88b9c",
+      "rule_id": "js/no-weak-crypto",
+      "file": "tests/fixtures/safe_crypto_agility.js",
+      "line": 13
+    },
+    {
+      "fingerprint": "beb2d63311bf9f7674824f020a33fd44fd497ef8bdbc6b9fde2f92c4a178e114",
+      "rule_id": "py/no-weak-crypto",
+      "file": "tests/fixtures/safe_crypto_agility.py",
+      "line": 12
+    },
+    {
+      "fingerprint": "937c24740f78c304a19aa190259546dacb4ad4bf1f3ce1a871cbd22321272f4e",
+      "rule_id": "py/no-weak-crypto",
+      "file": "tests/fixtures/safe_crypto_agility.py",
+      "line": 13
+    },
+    {
+      "fingerprint": "20c2a6f43b7e717fac0cde8f3d713b66779c887ea1b59624653d852c14f3e972",
+      "rule_id": "js/no-xss-innerhtml",
+      "file": "tests/fixtures/safe_deno_taint.ts",
+      "line": 14
+    },
+    {
+      "fingerprint": "2216608a3f185d9726fc118496fb6927e57e885343812ee6d8a64baeef542a04",
+      "rule_id": "js/no-xss-innerhtml",
+      "file": "tests/fixtures/safe_deno_taint.ts",
+      "line": 21
+    },
+    {
+      "fingerprint": "0856f21da66557ace48d61ba81094d57ad1004da8055ebafb9c8dca75684f09d",
+      "rule_id": "py/no-pickle",
+      "file": "tests/fixtures/safe_django_taint.py",
+      "line": 12
+    },
+    {
+      "fingerprint": "930de877e513c600bbfaeef7870c27c22623f17fe10f56283d8b63f0ad6a53f1",
+      "rule_id": "py/no-pickle",
+      "file": "tests/fixtures/safe_django_taint.py",
+      "line": 18
+    },
+    {
+      "fingerprint": "282be6ef062d1de96c66d1229a42a8898c04876a1bb9c8b75af50cbb8d41e4a3",
+      "rule_id": "py/no-eval",
+      "file": "tests/fixtures/safe_django_taint.py",
+      "line": 26
+    },
+    {
+      "fingerprint": "a6d7197db5a7cc17df918274f7be27647e7976ce232e4101de65165673be6222",
+      "rule_id": "py/no-yaml-load",
+      "file": "tests/fixtures/safe_django_taint.py",
+      "line": 30
+    },
+    {
+      "fingerprint": "868e78f26e695287f6d4cbf0271629e7109ca33e6ada0f7b2e08931417ef4283",
+      "rule_id": "py/no-pickle",
+      "file": "tests/fixtures/safe_fastapi_taint.py",
+      "line": 14
+    },
+    {
+      "fingerprint": "9d7413d057ebb43cb55fa1ec335b67e13050008516c99f3c67a42ce3e05acbe7",
+      "rule_id": "py/no-command-injection",
+      "file": "tests/fixtures/safe_fastapi_taint.py",
+      "line": 21
+    },
+    {
+      "fingerprint": "456fccdb3503cf100b292e113169e08852030e6f3a35baa3b2306a1f5a941e59",
+      "rule_id": "go/no-command-injection",
+      "file": "tests/fixtures/safe_go_taint.go",
+      "line": 27
+    },
+    {
+      "fingerprint": "b42fdfaa5c420f4a3fe62b0e09c542766707032ef41252762e8f662090386de9",
+      "rule_id": "go/no-command-injection",
+      "file": "tests/fixtures/safe_go_taint.go",
+      "line": 41
+    },
+    {
+      "fingerprint": "fdb9bc819838ab95bef5143b2f0976314d910f9948541e2fc4ed5f79f73414d8",
+      "rule_id": "go/no-command-injection",
+      "file": "tests/fixtures/safe_go_taint.go",
+      "line": 73
+    },
+    {
+      "fingerprint": "805a4cb3ce1dc7151addec5daa77751e0de567637643d30f030feebcd11ea5b3",
+      "rule_id": "js/no-document-write",
+      "file": "tests/fixtures/safe_hono_taint.ts",
+      "line": 8
+    },
+    {
+      "fingerprint": "5671ade78883ddc129e99fd4646ab30dfda6fbe76bf9610b02f940f0547ea4f3",
+      "rule_id": "js/no-xss-innerhtml",
+      "file": "tests/fixtures/safe_hono_taint.ts",
+      "line": 17
+    },
+    {
+      "fingerprint": "5ecad7ab194c0e192c42ffefae62c691616294f8ba75325d987a8d67f9a16add",
+      "rule_id": "js/no-xss-innerhtml",
+      "file": "tests/fixtures/safe_hono_taint.ts",
+      "line": 25
+    },
+    {
+      "fingerprint": "cffcdf8cfc2c0810abbbd2ac46da2c6e40d70016c5029035cddd4f1851a8a080",
+      "rule_id": "js/no-document-write",
+      "file": "tests/fixtures/safe_js_taint.js",
+      "line": 16
+    },
+    {
+      "fingerprint": "517b0ea422fd88eb2638d94ae89d66422820f181780e2a96d04aa42d579308ba",
+      "rule_id": "js/no-document-write",
+      "file": "tests/fixtures/safe_js_taint.js",
+      "line": 22
+    },
+    {
+      "fingerprint": "3777ff04d307e3e2ed78f6f2dd3d641f476a12a8a32bf690e2deabb0f39c6356",
+      "rule_id": "js/no-document-write",
+      "file": "tests/fixtures/safe_js_taint.js",
+      "line": 32
+    },
+    {
+      "fingerprint": "c6d7d487ef7a11e40799175e23616e637909da70aabd1f5c50b961c7eaa18efa",
+      "rule_id": "js/no-document-write",
+      "file": "tests/fixtures/safe_js_taint.js",
+      "line": 42
+    },
+    {
+      "fingerprint": "dd9f8ceb3dbfc15437e647845582f30fb153c549893981f312a8ed04d43716f4",
+      "rule_id": "js/no-xss-innerhtml",
+      "file": "tests/fixtures/safe_js_taint.js",
+      "line": 47
+    },
+    {
+      "fingerprint": "8072494dafa78f8c229e97587dba4882cb84e6fbbeaff4ca24668bcee88d4ec3",
+      "rule_id": "js/no-xss-innerhtml",
+      "file": "tests/fixtures/safe_js_taint.js",
+      "line": 78
+    },
+    {
+      "fingerprint": "12e9e8c847cef734a9552d1c6b4bcbdcf7d364a461f34664b3fbaccfbdd65ea8",
+      "rule_id": "js/no-xss-innerhtml",
+      "file": "tests/fixtures/safe_js_taint.js",
+      "line": 84
+    },
+    {
+      "fingerprint": "6b8209bbd50e35d10edfb72cc5aa47ade0d6f139ecdd92ccfa8873886bd4bfb5",
+      "rule_id": "js/no-xss-innerhtml",
+      "file": "tests/fixtures/safe_js_taint.js",
+      "line": 90
+    },
+    {
+      "fingerprint": "065d9c3ad1215349b569ea0768a2542e4837173670b9e17406f035f08a1d95bf",
+      "rule_id": "js/no-xss-innerhtml",
+      "file": "tests/fixtures/safe_js_taint.js",
+      "line": 96
+    },
+    {
+      "fingerprint": "3e2ec861014d632d7b7e24beecc7be23580888b0db42b2af16aeacfee2655114",
+      "rule_id": "js/no-sql-injection",
+      "file": "tests/fixtures/safe_js_taint.js",
+      "line": 103
+    },
+    {
+      "fingerprint": "25950985f4f4384558cfb657c78eacc6130718460f8184ac18d763cfa3a55072",
+      "rule_id": "js/no-sql-injection",
+      "file": "tests/fixtures/safe_js_taint.js",
+      "line": 109
+    },
+    {
+      "fingerprint": "6b309caa78175a399349ad65e38fa56039bc7fd3911e8cffe3b5120296a4a1b6",
+      "rule_id": "js/no-command-injection",
+      "file": "tests/fixtures/safe_js_taint.js",
+      "line": 116
+    },
+    {
+      "fingerprint": "f5dc6df08855bb1db85bc7a9553d71b02a2ae2f4c70a4d2c880c71fcff0fdd6d",
+      "rule_id": "js/no-command-injection",
+      "file": "tests/fixtures/safe_js_taint.js",
+      "line": 122
+    },
+    {
+      "fingerprint": "8e6c16f2f64ef1c2b38a11c923f90624edf44d4e33ef05e4fcdd965ffdc2e8dc",
+      "rule_id": "js/no-document-write",
+      "file": "tests/fixtures/safe_nextjs_taint.ts",
+      "line": 15
+    },
+    {
+      "fingerprint": "32e699354a927c472b54c3ee69683a01a62af461bc71a795abf0d9060f3b37a0",
+      "rule_id": "js/no-xss-innerhtml",
+      "file": "tests/fixtures/safe_nextjs_taint.ts",
+      "line": 22
+    },
+    {
+      "fingerprint": "ad718181d7d3cf36f7a1b5b83fd898bbdc2f6f5fa478c518790c85ccbe98509b",
+      "rule_id": "php/no-command-injection",
+      "file": "tests/fixtures/safe_php_taint.php",
+      "line": 16
+    },
+    {
+      "fingerprint": "bc7192710b6f18ae27aea656ced577b2af6a4f1b627a463786d378453f1402c7",
+      "rule_id": "php/no-unserialize",
+      "file": "tests/fixtures/safe_php_taint.php",
+      "line": 53
+    },
+    {
+      "fingerprint": "bbff26802e3d60dc88c31b39af8e3c70549fa07aae05bcd32373b4ae5eb6c1d4",
+      "rule_id": "py/no-pickle",
+      "file": "tests/fixtures/safe_py_taint.py",
+      "line": 16
+    },
+    {
+      "fingerprint": "7e80ac6e2b938e847736711887d802be0198bea0261b84a7f32154dfb5201001",
+      "rule_id": "py/no-pickle",
+      "file": "tests/fixtures/safe_py_taint.py",
+      "line": 23
+    },
+    {
+      "fingerprint": "557946d976613570c40e7d82df6763ebfe8a7755942339b5a9cdbe0e518f41c7",
+      "rule_id": "py/no-pickle",
+      "file": "tests/fixtures/safe_py_taint.py",
+      "line": 31
+    },
+    {
+      "fingerprint": "e33970a5087f3c062678040a4b8eaed41a27ebd260e1e71d52f692d9204f4029",
+      "rule_id": "py/no-pickle",
+      "file": "tests/fixtures/safe_py_taint.py",
+      "line": 42
+    },
+    {
+      "fingerprint": "f2a982ea13122373fe5499a9fa358da6595bb41f87fee569161f0bd157549eae",
+      "rule_id": "py/no-pickle",
+      "file": "tests/fixtures/safe_py_taint.py",
+      "line": 52
+    },
+    {
+      "fingerprint": "9d450122dd404bae78280afa7ee40618b6119b0f846b092b6bfa366d83cd10e6",
+      "rule_id": "py/no-pickle",
+      "file": "tests/fixtures/safe_py_taint.py",
+      "line": 70
+    },
+    {
+      "fingerprint": "1fe0b991b73a63dc0152210313de31ae32a68902267170736e04f3176b7df130",
+      "rule_id": "py/no-pickle",
+      "file": "tests/fixtures/safe_py_taint.py",
+      "line": 77
+    },
+    {
+      "fingerprint": "68d60aefc6ea725020fd6125021c371566de5362946558c05be44946182aa87a",
+      "rule_id": "py/no-eval",
+      "file": "tests/fixtures/safe_py_taint.py",
+      "line": 91
+    },
+    {
+      "fingerprint": "69500074e951bc735b33c625543e8ac80db6e4395833f3493c3bc07c1e1ae85d",
+      "rule_id": "py/no-yaml-load",
+      "file": "tests/fixtures/safe_py_taint.py",
+      "line": 104
+    },
+    {
+      "fingerprint": "0372f821f387253a907c85635bf38d6445a7d008624209af8d85a17db0e7074c",
+      "rule_id": "py/no-pickle",
+      "file": "tests/fixtures/safe_py_taint.py",
+      "line": 116
+    },
+    {
+      "fingerprint": "788343a5558176c8cdb62456a9262ff11958b3313b5b7651612ff28f2f791d22",
+      "rule_id": "py/no-command-injection",
+      "file": "tests/fixtures/safe_py_taint.py",
+      "line": 165
+    },
+    {
+      "fingerprint": "7468a336f0ba59cfd80495243c1c3d118971ebaa86962831fa2e6a40fcabd74c",
+      "rule_id": "py/no-command-injection",
+      "file": "tests/fixtures/safe_py_taint.py",
+      "line": 171
+    },
+    {
+      "fingerprint": "eaada929b895d2f468ab4a7f108f804851872d1ace8286fcebd077aa857e4c01",
+      "rule_id": "py/no-command-injection",
+      "file": "tests/fixtures/safe_py_taint.py",
+      "line": 177
+    },
+    {
+      "fingerprint": "6e951c0841e39c33c046c76fc6a8825eafcc87e709392910f7327c7be844abf7",
+      "rule_id": "py/no-sql-injection",
+      "file": "tests/fixtures/safe_py_taint.py",
+      "line": 184
+    },
+    {
+      "fingerprint": "ea4d1919eb7dee984fbf5561ab61cadc900a7b1eb9a6efcc042db96ad7036437",
+      "rule_id": "rb/no-command-injection",
+      "file": "tests/fixtures/safe_ruby_taint.rb",
+      "line": 26
+    },
+    {
+      "fingerprint": "83e0c5ab2c65a198c8d313135018f4e030f6399abfb8ab61dc73bf397a7384eb",
+      "rule_id": "rb/no-unsafe-deserialization",
+      "file": "tests/fixtures/safe_ruby_taint.rb",
+      "line": 55
+    },
+    {
+      "fingerprint": "991c5d4d95aa796175cf96ac1e3a8b0f899c776f5b0a12b99c268a12d02974d6",
+      "rule_id": "js/no-eval",
+      "file": "tests/fixtures/semgrep_taint/safe_js_eval.js",
+      "line": 5
+    },
+    {
+      "fingerprint": "8d8a32678bfbfa359d7afe15ecbdca042c33abacfdfad967a9c652c62de34d7a",
+      "rule_id": "js/taint-log-injection",
+      "file": "tests/fixtures/semgrep_taint/safe_js_eval.js",
+      "line": 9
+    },
+    {
+      "fingerprint": "77e919d55917f59b9ebfe86e768e600aedc934529a46049a3f931b3919f9edd3",
+      "rule_id": "go/taint-command-injection",
+      "file": "tests/fixtures/semgrep_taint/vulnerable_go_exec.go",
+      "line": 13
+    },
+    {
+      "fingerprint": "3978727f2460250a87f2cdef7bf6b9d00215e726cabd70cf2f74c4ef923dcbd1",
+      "rule_id": "go/no-command-injection",
+      "file": "tests/fixtures/semgrep_taint/vulnerable_go_exec.go",
+      "line": 13
+    },
+    {
+      "fingerprint": "cf7676e33a69ec333dac4c4f435e1102b90611aa64c59be67efb0e611ad6bd58",
+      "rule_id": "go/taint-command-injection",
+      "file": "tests/fixtures/semgrep_taint/vulnerable_go_exec.go",
+      "line": 19
+    },
+    {
+      "fingerprint": "3e2c4d94d77152b4ad20e1373fa9013289cddeef002d7eb4e8e4a70eff88ae56",
+      "rule_id": "go/no-command-injection",
+      "file": "tests/fixtures/semgrep_taint/vulnerable_go_exec.go",
+      "line": 19
+    },
+    {
+      "fingerprint": "87665b4cc9c0dfca5dcecf6dcd44201ae66e99f2b51d96063b435354daa6bafd",
+      "rule_id": "go/taint-command-injection",
+      "file": "tests/fixtures/semgrep_taint/vulnerable_go_exec.go",
+      "line": 26
+    },
+    {
+      "fingerprint": "7be5bfa17fdab2911fb58e822a0f3a52336bab638fdd21f123d5da258ffc1436",
+      "rule_id": "go/no-command-injection",
+      "file": "tests/fixtures/semgrep_taint/vulnerable_go_exec.go",
+      "line": 26
+    },
+    {
+      "fingerprint": "afd859c2f10294e58fefd1c5b8f0eb4e82bd73206b9cfa3028f02db0b1186ee7",
+      "rule_id": "js/taint-eval",
+      "file": "tests/fixtures/semgrep_taint/vulnerable_js_eval.js",
+      "line": 6
+    },
+    {
+      "fingerprint": "eee25efc2b1e2d21e98d0cb59407dcd4f88b58c79c07b0fa7f50b4d9adbc2297",
+      "rule_id": "js/no-eval",
+      "file": "tests/fixtures/semgrep_taint/vulnerable_js_eval.js",
+      "line": 6
+    },
+    {
+      "fingerprint": "ff6ac41d5ff58d19b95f608873bc6021e308fee1799bfae2097bcd9f04750552",
+      "rule_id": "js/taint-eval",
+      "file": "tests/fixtures/semgrep_taint/vulnerable_js_eval.js",
+      "line": 12
+    },
+    {
+      "fingerprint": "91d8069b2c49e6c80996797d3f99807c0f2c78db15e0250f4c926fa70d0c1b80",
+      "rule_id": "js/no-eval",
+      "file": "tests/fixtures/semgrep_taint/vulnerable_js_eval.js",
+      "line": 12
+    },
+    {
+      "fingerprint": "ab9099ed14e07beeee359ff2a396bb55097c30fd6d45682729fb51c7b57d7135",
+      "rule_id": "js/taint-eval",
+      "file": "tests/fixtures/semgrep_taint/vulnerable_js_eval.js",
+      "line": 19
+    },
+    {
+      "fingerprint": "564acab7a2a5b740f6354f017de98b7ae4cf2829b03b2c52938e39d99e30cda2",
+      "rule_id": "js/no-eval",
+      "file": "tests/fixtures/semgrep_taint/vulnerable_js_eval.js",
+      "line": 19
+    },
+    {
+      "fingerprint": "62b41bb7820d394f16507bc9a97611f76c303640c8669f52165232ac5b691123",
+      "rule_id": "cs/no-sql-injection",
+      "file": "tests/fixtures/vulnerable.cs",
+      "line": 21
+    },
+    {
+      "fingerprint": "9dbbb25983acd7706a3a69b520323257d906e7328880932690c96a4f90b7d03c",
+      "rule_id": "cs/no-command-injection",
+      "file": "tests/fixtures/vulnerable.cs",
+      "line": 27
+    },
+    {
+      "fingerprint": "bd8bb15d38e01fc101b9edd23f29f59de035aa427f524567f93579c4e2f24599",
+      "rule_id": "cs/no-unsafe-deserialization",
+      "file": "tests/fixtures/vulnerable.cs",
+      "line": 33
+    },
+    {
+      "fingerprint": "781331b16b4fca0724ac7ee561e408441ff43be5139f86e852d82e01f7407a20",
+      "rule_id": "cs/no-ssrf",
+      "file": "tests/fixtures/vulnerable.cs",
+      "line": 41
+    },
+    {
+      "fingerprint": "fb99c69774e147d5051e844f4495d9efc9eb838904367a1df227b4fa131da17b",
+      "rule_id": "cs/no-path-traversal",
+      "file": "tests/fixtures/vulnerable.cs",
+      "line": 47
+    },
+    {
+      "fingerprint": "7d91ba4b1c08481da5fe4b4f245fb5e70d94221ff237d6b659167dcd2ff3a16e",
+      "rule_id": "cs/no-path-traversal",
+      "file": "tests/fixtures/vulnerable.cs",
+      "line": 48
+    },
+    {
+      "fingerprint": "d1470c9eebf69df59d6c7c861d213e533415d2b80dd680572e5d30c724e91497",
+      "rule_id": "cs/no-path-traversal",
+      "file": "tests/fixtures/vulnerable.cs",
+      "line": 49
+    },
+    {
+      "fingerprint": "bd36af830f81c52ff5ea38c620d60cd03186e10c93ba4aee5693100bc6bc5ad4",
+      "rule_id": "cs/no-path-traversal",
+      "file": "tests/fixtures/vulnerable.cs",
+      "line": 50
+    },
+    {
+      "fingerprint": "916e1a1592e73684d7709e81ab765b8b666348a0179adb79adef61a1c58e8a41",
+      "rule_id": "cs/no-weak-crypto",
+      "file": "tests/fixtures/vulnerable.cs",
+      "line": 56
+    },
+    {
+      "fingerprint": "add3e274d1d5ab6e1308044f1293dabad7ce5b898232bd721499330a39abe981",
+      "rule_id": "cs/no-weak-crypto",
+      "file": "tests/fixtures/vulnerable.cs",
+      "line": 57
+    },
+    {
+      "fingerprint": "513022d0c9c7d948c4ebe924c733ff505a05422270055b9567597a12482bdbed",
+      "rule_id": "cs/no-weak-crypto",
+      "file": "tests/fixtures/vulnerable.cs",
+      "line": 58
+    },
+    {
+      "fingerprint": "ab0c86ca9848bce79bd63a820e5268c754af4b45b79660f9ddeb32da5205ca79",
+      "rule_id": "cs/no-hardcoded-secret",
+      "file": "tests/fixtures/vulnerable.cs",
+      "line": 64
+    },
+    {
+      "fingerprint": "77432bfb5107b96c750d89f9cf945e9eb712227e64239f0c320146bfafe6d0ee",
+      "rule_id": "cs/no-hardcoded-secret",
+      "file": "tests/fixtures/vulnerable.cs",
+      "line": 65
+    },
+    {
+      "fingerprint": "6070362001a4d4dcadc8f561c75285edb893b74d97025ea34f45b326c06f2216",
+      "rule_id": "cs/no-hardcoded-secret",
+      "file": "tests/fixtures/vulnerable.cs",
+      "line": 66
+    },
+    {
+      "fingerprint": "1bd4b77411a12b861cb17200460952a62e126a2d6ce906a21569be901038511a",
+      "rule_id": "cs/no-xxe",
+      "file": "tests/fixtures/vulnerable.cs",
+      "line": 72
+    },
+    {
+      "fingerprint": "0ad5a7fdfdfcf91aec0b60b31257981e0ed8e77f6cc5c79527e8915c62bbbdc4",
+      "rule_id": "cs/no-ldap-injection",
+      "file": "tests/fixtures/vulnerable.cs",
+      "line": 80
+    },
+    {
+      "fingerprint": "da3cbdf4d4172c023f7bc7a70100ab891796d573d632932d0adda2169922c9cd",
+      "rule_id": "cs/no-cors-star",
+      "file": "tests/fixtures/vulnerable.cs",
+      "line": 90
+    },
+    {
+      "fingerprint": "80bb89b4d4b6a49ea2c45c37f11441d748fe0c7c46361be766b1711cc834dc65",
+      "rule_id": "go/no-weak-crypto",
+      "file": "tests/fixtures/vulnerable.go",
+      "line": 8
+    },
+    {
+      "fingerprint": "92ec46a28fb21cd67cd3b0c4b854079bb74b7fca956f566e5c15bd2dceb24602",
+      "rule_id": "go/no-sql-injection",
+      "file": "tests/fixtures/vulnerable.go",
+      "line": 22
+    },
+    {
+      "fingerprint": "2aeafd91c60ad3e8d17dddb864e5b88d34405ab36ec831cad4695905c967de2b",
+      "rule_id": "go/no-sql-injection",
+      "file": "tests/fixtures/vulnerable.go",
+      "line": 25
+    },
+    {
+      "fingerprint": "2544f42c75d8db9e048dac34973134c51cfd0032231d902d47a1717c0e6bc283",
+      "rule_id": "go/no-command-injection",
+      "file": "tests/fixtures/vulnerable.go",
+      "line": 28
+    },
+    {
+      "fingerprint": "4d361f24d83e404eb03e931e739d0810f9e7bb1ff59ef535b324d728ef0b8645",
+      "rule_id": "go/no-hardcoded-secret",
+      "file": "tests/fixtures/vulnerable.go",
+      "line": 31
+    },
+    {
+      "fingerprint": "bb0844b2915872f8d0a29ede56096b47be87444d95b6b7f414f082dd7905851d",
+      "rule_id": "go/no-weak-crypto",
+      "file": "tests/fixtures/vulnerable.go",
+      "line": 34
+    },
+    {
+      "fingerprint": "f3bf785bee57e5965395b66eac112567f1eadb32523bf3ea69b90b4144b30557",
+      "rule_id": "go/no-ssrf",
+      "file": "tests/fixtures/vulnerable.go",
+      "line": 37
+    },
+    {
+      "fingerprint": "e9749d6e242fe71069cbbaea1b929a7d497d14c801a3f89f195b7cfeb9956e0a",
+      "rule_id": "go/no-ssrf",
+      "file": "tests/fixtures/vulnerable.go",
+      "line": 40
+    },
+    {
+      "fingerprint": "265b00410655df91d038647f514d78280c354b2a58bc68d18a7224ffeb46f35d",
+      "rule_id": "go/net-http-no-timeout",
+      "file": "tests/fixtures/vulnerable.go",
+      "line": 43
+    },
+    {
+      "fingerprint": "af2ff5aaef41a629ecd8ed2ac96524ae9b0db2966c5aebb22bf3f285d422c2dd",
+      "rule_id": "go/insecure-tls-skip-verify",
+      "file": "tests/fixtures/vulnerable.go",
+      "line": 47
+    },
+    {
+      "fingerprint": "b2c4b36ba8f915fc13ad1f794648316c358d872dcb2b8d96fc1043be50c44c39",
+      "rule_id": "go/missing-ssl-minversion",
+      "file": "tests/fixtures/vulnerable.go",
+      "line": 52
+    },
+    {
+      "fingerprint": "c16bddcc17879bf8624aa2b4eee80890d49965af5dfe2241d29d06d6252b8901",
+      "rule_id": "go/cookie-missing-secure",
+      "file": "tests/fixtures/vulnerable.go",
+      "line": 55
+    },
+    {
+      "fingerprint": "cc92f47b9ce0c559b060b83320cdb7837d1f726d960c4638f344062d11b71f6b",
+      "rule_id": "go/cookie-missing-httponly",
+      "file": "tests/fixtures/vulnerable.go",
+      "line": 58
+    },
+    {
+      "fingerprint": "71da6dc0749111427c93e2fd7a5cde75202303fcf1173b8a5109c51eabe8b496",
+      "rule_id": "go/math-random-used",
+      "file": "tests/fixtures/vulnerable.go",
+      "line": 61
+    },
+    {
+      "fingerprint": "1fadd770d43d0e0be7823e6505373928040bdbf7622e191178cabf8665404772",
+      "rule_id": "go/no-unsafe-deserialization",
+      "file": "tests/fixtures/vulnerable.go",
+      "line": 64
+    },
+    {
+      "fingerprint": "27763dad9cbc881a6c55f7cb30d19c5d27a32e514fa6720159628a5c094fc625",
+      "rule_id": "go/no-unsafe-deserialization",
+      "file": "tests/fixtures/vulnerable.go",
+      "line": 68
+    },
+    {
+      "fingerprint": "7ea0c04f84ca35fb30391883b2a91c68ec64601784efe8326cbaaf99d99bf68b",
+      "rule_id": "go/jwt-no-verify",
+      "file": "tests/fixtures/vulnerable.go",
+      "line": 71
+    },
+    {
+      "fingerprint": "3f782f1f933f11c20b3aa4928f63a41b10cbf4b95c20336b213eb32bcc28ab76",
+      "rule_id": "go/jwt-no-verify",
+      "file": "tests/fixtures/vulnerable.go",
+      "line": 74
+    },
+    {
+      "fingerprint": "0b395221b320285f7a4a18232d98ae96ace4354c47bfe289097c22b4cec4b558",
+      "rule_id": "go/jwt-hardcoded-secret",
+      "file": "tests/fixtures/vulnerable.go",
+      "line": 77
+    },
+    {
+      "fingerprint": "d334fbafefc12edbe3307a400813bb57244c6ace3f0b99c1edbbe109981083b5",
+      "rule_id": "go/pq-vulnerable-crypto",
+      "file": "tests/fixtures/vulnerable.go",
+      "line": 94
+    },
+    {
+      "fingerprint": "f2dec7aa9cca038f93f8a8c76cef37c65f35aedfab69d0865bb59caea2d16600",
+      "rule_id": "go/pq-vulnerable-crypto",
+      "file": "tests/fixtures/vulnerable.go",
+      "line": 96
+    },
+    {
+      "fingerprint": "2f28543197a46466e2631c91db8137e85e8b494a841a932424e97e77798c3d86",
+      "rule_id": "go/pq-vulnerable-crypto",
+      "file": "tests/fixtures/vulnerable.go",
+      "line": 98
+    },
+    {
+      "fingerprint": "e99eb8e91a48f6749acc788b8b80edc3cd294fcbc8d074b881c879765bfd55e0",
+      "rule_id": "go/pq-vulnerable-crypto",
+      "file": "tests/fixtures/vulnerable.go",
+      "line": 99
+    },
+    {
+      "fingerprint": "eafbe1cdcbc64420ba62f08296b2dcea4410bad587b6c99f9e2b2a6542e18afa",
+      "rule_id": "go/pq-vulnerable-crypto",
+      "file": "tests/fixtures/vulnerable.go",
+      "line": 99
+    },
+    {
+      "fingerprint": "d0878d16945527660517700894ea8356756b810e802380be2cdb8799622f2025",
+      "rule_id": "semgrep/cardano-haskell/ffi-foreign-import",
+      "file": "tests/fixtures/vulnerable.hs",
+      "line": 5
+    },
+    {
+      "fingerprint": "3538da8a311582c938566ddb41ac4240ca55aff13b15add5575b85c6b864ed2a",
+      "rule_id": "semgrep/cardano-haskell/partial-function",
+      "file": "tests/fixtures/vulnerable.hs",
+      "line": 8
+    },
+    {
+      "fingerprint": "7858ecdbd8c0023409b5c802ba0e702f3c1867b5b229f8a6ad018d7185f1732a",
+      "rule_id": "java/no-sql-injection",
+      "file": "tests/fixtures/vulnerable.java",
+      "line": 13
+    },
+    {
+      "fingerprint": "4ecaeca12c1ff5b6cd13e9c9176745f92e882e26e58067d2c6abe8dbb641a26c",
+      "rule_id": "java/no-sql-injection",
+      "file": "tests/fixtures/vulnerable.java",
+      "line": 14
+    },
+    {
+      "fingerprint": "19f3cf7e24fb73f599d6354dbe4676be9855615af82274c3ecd3ecf99e6220d4",
+      "rule_id": "java/no-command-injection",
+      "file": "tests/fixtures/vulnerable.java",
+      "line": 19
+    },
+    {
+      "fingerprint": "b822fa3c271899babf70aabd6b743841808e263c91483dfd5cba65323b552c23",
+      "rule_id": "java/no-command-injection",
+      "file": "tests/fixtures/vulnerable.java",
+      "line": 20
+    },
+    {
+      "fingerprint": "bd7cad7fd2bdb8e096dc51e448f2341a7feadef7c1a3cfc7694dd16f461a487b",
+      "rule_id": "java/no-unsafe-deserialization",
+      "file": "tests/fixtures/vulnerable.java",
+      "line": 26
+    },
+    {
+      "fingerprint": "a673beb8a6ec255456dd484a10258d44abf43c6b27722cc07b55dd1c6ee926b3",
+      "rule_id": "java/no-ssrf",
+      "file": "tests/fixtures/vulnerable.java",
+      "line": 31
+    },
+    {
+      "fingerprint": "6b25be7b253bcbc7d844008a385190df0f470179015c4a78b75c633c2a9aad2b",
+      "rule_id": "java/no-path-traversal",
+      "file": "tests/fixtures/vulnerable.java",
+      "line": 36
+    },
+    {
+      "fingerprint": "9a1b311858af238470418cfa7a6a4a6f8538f5b1093a8e9fbd3b82d6e196b840",
+      "rule_id": "java/no-path-traversal",
+      "file": "tests/fixtures/vulnerable.java",
+      "line": 37
+    },
+    {
+      "fingerprint": "224d0239f52177f6f3b7ccbb12a88c3ca63aac9b48597865e419d456ce38b17f",
+      "rule_id": "java/no-weak-crypto",
+      "file": "tests/fixtures/vulnerable.java",
+      "line": 42
+    },
+    {
+      "fingerprint": "cedbb18d88c77244412e5e7fca4d4344961e2265f880835ffe594d88febed844",
+      "rule_id": "java/no-weak-crypto",
+      "file": "tests/fixtures/vulnerable.java",
+      "line": 43
+    },
+    {
+      "fingerprint": "69b5161cb9706a7b34f6514cd72f1f0b7076995c4c4fc298a49bfdaa34bd108e",
+      "rule_id": "java/no-weak-crypto",
+      "file": "tests/fixtures/vulnerable.java",
+      "line": 44
+    },
+    {
+      "fingerprint": "482ad5e0d1a2479251c0ee2f5b7c98b64e37858a9c4280f69e0f7e8b90ec12ee",
+      "rule_id": "java/no-hardcoded-secret",
+      "file": "tests/fixtures/vulnerable.java",
+      "line": 53
+    },
+    {
+      "fingerprint": "605f15346c6c4a1ed04a3aa81570f026c9760ecd53ba2b6f12276c29d1c194da",
+      "rule_id": "java/no-hardcoded-secret",
+      "file": "tests/fixtures/vulnerable.java",
+      "line": 54
+    },
+    {
+      "fingerprint": "f3545312dc23f8b412bdc3a99c46620ff080c1c1cdccd8e2e328e390a6830c2e",
+      "rule_id": "java/no-xxe",
+      "file": "tests/fixtures/vulnerable.java",
+      "line": 58
+    },
+    {
+      "fingerprint": "0077d412ca0a3b73e2a14e59a63b88c15739c6ce0ad84dc1e9d35c7abb0e0955",
+      "rule_id": "java/spring-csrf-disabled",
+      "file": "tests/fixtures/vulnerable.java",
+      "line": 63
+    },
+    {
+      "fingerprint": "0b1c9c19f72890d7f2d3a3e4af465958e84661f6e7c227e4c034afe40af5e34d",
+      "rule_id": "java/spring-cors-permissive",
+      "file": "tests/fixtures/vulnerable.java",
+      "line": 68
+    },
+    {
+      "fingerprint": "089ee8a769be2b839dc87c2b823d3db47c6737d22e923ba72064d7911671572f",
+      "rule_id": "java/no-xss",
+      "file": "tests/fixtures/vulnerable.java",
+      "line": 73
+    },
+    {
+      "fingerprint": "3a93d0bdd0a6086bfa0e21b0e6fa39e53779b7a063237f504164583563a4b94d",
+      "rule_id": "java/no-xss",
+      "file": "tests/fixtures/vulnerable.java",
+      "line": 74
+    },
+    {
+      "fingerprint": "c21c53af39c9886396de47c6916b798ee0a96b8652f9278b4ae0534808bc831a",
+      "rule_id": "java/no-xss",
+      "file": "tests/fixtures/vulnerable.java",
+      "line": 75
+    },
+    {
+      "fingerprint": "449dd77e296a262c75aa565050d0706eccb1a82c4febbe32a35a18cfb49236b3",
+      "rule_id": "java/no-xss",
+      "file": "tests/fixtures/vulnerable.java",
+      "line": 76
+    },
+    {
+      "fingerprint": "5d591fe7d66e9d785d95eb99a09b38cb7abaaaab0a6a02f8bec90fcc920b84a5",
+      "rule_id": "java/no-xss",
+      "file": "tests/fixtures/vulnerable.java",
+      "line": 78
+    },
+    {
+      "fingerprint": "021b43260b332e8e80bed679c3575980b18c93979f7c60bb8fd77daf2cb422ae",
+      "rule_id": "java/no-xss",
+      "file": "tests/fixtures/vulnerable.java",
+      "line": 79
+    },
+    {
+      "fingerprint": "0a7bfae2cab34c7bb6d7730e6b26201fb16cfe244e692387e95796ae831f8ce7",
+      "rule_id": "java/pq-vulnerable-crypto",
+      "file": "tests/fixtures/vulnerable.java",
+      "line": 82
+    },
+    {
+      "fingerprint": "9a1a84a235b6e3238a24dda43e06c23aff5043b96d6d758734e7fc737f693646",
+      "rule_id": "java/pq-vulnerable-crypto",
+      "file": "tests/fixtures/vulnerable.java",
+      "line": 83
+    },
+    {
+      "fingerprint": "b4fd9b32149f4afa70438de69e204d1294b96fa6b4be29f22fcbc7af76f40c5d",
+      "rule_id": "java/pq-vulnerable-crypto",
+      "file": "tests/fixtures/vulnerable.java",
+      "line": 84
+    },
+    {
+      "fingerprint": "26e797effb120f8ceb546ef9b93a6b5b4ae6dbed7ed5e2aeb7e6e3eaa0f5c574",
+      "rule_id": "java/pq-vulnerable-crypto",
+      "file": "tests/fixtures/vulnerable.java",
+      "line": 85
+    },
+    {
+      "fingerprint": "365dd09432060e168ff33564ec524211436e313fac1fd09c496bb7cb7a732998",
+      "rule_id": "js/no-eval",
+      "file": "tests/fixtures/vulnerable.js",
+      "line": 9
+    },
+    {
+      "fingerprint": "039ebc065984c4790103dc355bb15d608bd5f069d167e889b33d12a5371df164",
+      "rule_id": "js/no-hardcoded-secret",
+      "file": "tests/fixtures/vulnerable.js",
+      "line": 12
+    },
+    {
+      "fingerprint": "dfa00e0e5db86546622bca67cefa3fdd349ca7990006b8c2c12fcb0ec7b30701",
+      "rule_id": "js/no-sql-injection",
+      "file": "tests/fixtures/vulnerable.js",
+      "line": 16
+    },
+    {
+      "fingerprint": "c664d15fd7e181af287cd408c89d3ab368a84c122444a9689ffb8e712d8072a3",
+      "rule_id": "js/no-sql-injection",
+      "file": "tests/fixtures/vulnerable.js",
+      "line": 19
+    },
+    {
+      "fingerprint": "5122a7646b64b46e27a5016b148edc9591e1e0bd38a4b80ae28740125f51652e",
+      "rule_id": "js/no-xss-innerhtml",
+      "file": "tests/fixtures/vulnerable.js",
+      "line": 23
+    },
+    {
+      "fingerprint": "141714e8e71171508e5726303e06ab0e990e5f3c37a6e5cf16f2dfd1f271d017",
+      "rule_id": "js/no-command-injection",
+      "file": "tests/fixtures/vulnerable.js",
+      "line": 26
+    },
+    {
+      "fingerprint": "0ed5064d8fd951750517e5a101474a4c9572b387a0fdaa2954487b0bb9c2ba6a",
+      "rule_id": "js/no-document-write",
+      "file": "tests/fixtures/vulnerable.js",
+      "line": 29
+    },
+    {
+      "fingerprint": "29ea9e286623e7ebd10a4bcda3e0823627f674e0684ff8dfe75f0037fbd7b945",
+      "rule_id": "js/no-open-redirect",
+      "file": "tests/fixtures/vulnerable.js",
+      "line": 32
+    },
+    {
+      "fingerprint": "759ecd5c6d9fa5d1c9757247a416cc5cb945148c1deed04933c8f2106a3b977f",
+      "rule_id": "js/no-weak-crypto",
+      "file": "tests/fixtures/vulnerable.js",
+      "line": 35
+    },
+    {
+      "fingerprint": "178f74840647211575e378453ec91ddca6a9a07f6fa788760add7c89518f570e",
+      "rule_id": "js/no-path-traversal",
+      "file": "tests/fixtures/vulnerable.js",
+      "line": 41
+    },
+    {
+      "fingerprint": "2875ee633dafee9d04f43b4d508fab940405e7ae8ddaafa65a22cb34fb32fbe3",
+      "rule_id": "js/no-ssrf",
+      "file": "tests/fixtures/vulnerable.js",
+      "line": 44
+    },
+    {
+      "fingerprint": "f2a38e8c8b72ac2b605531ba25c1f852e01be08ebf923fbef39d61eb6fcf05fc",
+      "rule_id": "js/no-path-traversal",
+      "file": "tests/fixtures/vulnerable.js",
+      "line": 47
+    },
+    {
+      "fingerprint": "efa07d0cc08479a2ad7a3eba4f518f8e80d92f4af453cb97d0600f223c65ce46",
+      "rule_id": "js/no-prototype-pollution",
+      "file": "tests/fixtures/vulnerable.js",
+      "line": 53
+    },
+    {
+      "fingerprint": "65d3b6219cc82505572167f80f5a29841f9c916a0041d52c83aa375e20ea2837",
+      "rule_id": "js/no-unsafe-regex",
+      "file": "tests/fixtures/vulnerable.js",
+      "line": 56
+    },
+    {
+      "fingerprint": "b1623004d47035a76c03620ec7283c07bcd6339a8c7c2d8fe7bcefd99242d4df",
+      "rule_id": "js/no-cors-star",
+      "file": "tests/fixtures/vulnerable.js",
+      "line": 59
+    },
+    {
+      "fingerprint": "348988d9330f968d651c5308b134637776147c5ca5b18d39a6f90cd8925a555f",
+      "rule_id": "js/express-no-hardcoded-session-secret",
+      "file": "tests/fixtures/vulnerable.js",
+      "line": 62
+    },
+    {
+      "fingerprint": "9813bc4c62b9ce15cf3e65982547d7bf3842d9c02a4e45b967c3bd58f433e29c",
+      "rule_id": "js/express-cookie-no-secure",
+      "file": "tests/fixtures/vulnerable.js",
+      "line": 65
+    },
+    {
+      "fingerprint": "5fca449d494d61415bb0b5050151b70070f7b0a318f794d710b3bb5cdc837e52",
+      "rule_id": "js/express-cookie-no-httponly",
+      "file": "tests/fixtures/vulnerable.js",
+      "line": 65
+    },
+    {
+      "fingerprint": "d7a384260cf9b187d1597459590ff08a828845dd475080625a97346f5ececf68",
+      "rule_id": "js/express-cookie-no-samesite",
+      "file": "tests/fixtures/vulnerable.js",
+      "line": 65
+    },
+    {
+      "fingerprint": "e463cda0530917026b5fdcc98f2c9b5c50ff2b91dd86cc11fc7c0c7bae958841",
+      "rule_id": "js/express-cookie-no-httponly",
+      "file": "tests/fixtures/vulnerable.js",
+      "line": 68
+    },
+    {
+      "fingerprint": "f4059c4542eb2d5f2f4806f2be50845c8cdd823e4b6991358893206cd8a2ff65",
+      "rule_id": "js/express-cookie-no-samesite",
+      "file": "tests/fixtures/vulnerable.js",
+      "line": 68
+    },
+    {
+      "fingerprint": "be59ef289fd4e5ee7993896bf2616541f2fd14e1a27fc436e9294b010b63a7dc",
+      "rule_id": "js/express-cookie-no-samesite",
+      "file": "tests/fixtures/vulnerable.js",
+      "line": 71
+    },
+    {
+      "fingerprint": "45c0af8633a1205cc367c2b41748abc1bc8545ee1b395a0f82d4d33d62ac9977",
+      "rule_id": "js/express-session-saveuninitialized-true",
+      "file": "tests/fixtures/vulnerable.js",
+      "line": 74
+    },
+    {
+      "fingerprint": "cc2fd05e4ba5516d05f92914b0b6910249b88c97f0d72864447ba90e2fd7a60f",
+      "rule_id": "js/jwt-hardcoded-secret",
+      "file": "tests/fixtures/vulnerable.js",
+      "line": 77
+    },
+    {
+      "fingerprint": "1bcdf545654fd29567a94ba6bb29961916e6a55515768827cb859342024ce36c",
+      "rule_id": "js/jwt-none-algorithm",
+      "file": "tests/fixtures/vulnerable.js",
+      "line": 80
+    },
+    {
+      "fingerprint": "9343330782ed8e41bcdc8a8f935b2d16064f4b4fb946a5b2405df4f7c481d3e3",
+      "rule_id": "js/jwt-ignore-expiration",
+      "file": "tests/fixtures/vulnerable.js",
+      "line": 83
+    },
+    {
+      "fingerprint": "40c10ff42a0d9653db1071143a1b20e09101fbcb629d4cdcdbeeb3355d65f258",
+      "rule_id": "js/jwt-verify-missing-algorithms",
+      "file": "tests/fixtures/vulnerable.js",
+      "line": 83
+    },
+    {
+      "fingerprint": "2e25bce24cc5718b2bb336dde3df2e5bb9ebff601a887cd411002529cd06fcb0",
+      "rule_id": "js/jwt-decode-without-verify",
+      "file": "tests/fixtures/vulnerable.js",
+      "line": 86
+    },
+    {
+      "fingerprint": "0ecd669561bc9caa07097d121fec78fdd3a231918f9eb16d31367a4f5597343c",
+      "rule_id": "js/jwt-verify-missing-algorithms",
+      "file": "tests/fixtures/vulnerable.js",
+      "line": 89
+    },
+    {
+      "fingerprint": "7557db38000476bb799521dede921ba323e8c3a0e6844521e12a328a3d5f7c97",
+      "rule_id": "js/express-direct-response-write",
+      "file": "tests/fixtures/vulnerable.js",
+      "line": 93
+    },
+    {
+      "fingerprint": "d2e31d96115174091e9edd8ffaaea323bd231a94b4abdc401afad1133f44031a",
+      "rule_id": "js/no-unsafe-deserialization",
+      "file": "tests/fixtures/vulnerable.js",
+      "line": 97
+    },
+    {
+      "fingerprint": "a116304af66988cb6a5d6e4b8d4c259d11e6031f29c8724c0b2d9d9273581368",
+      "rule_id": "js/no-unsafe-deserialization",
+      "file": "tests/fixtures/vulnerable.js",
+      "line": 100
+    },
+    {
+      "fingerprint": "14158b72b616249cfdd829a17ec245467a74e357d64299d852f587b6364cb573",
+      "rule_id": "js/pq-vulnerable-crypto",
+      "file": "tests/fixtures/vulnerable.js",
+      "line": 103
+    },
+    {
+      "fingerprint": "fd67427867bb9575d40f6bf4fe260113528e8e352b82782379f804f97850252c",
+      "rule_id": "js/pq-vulnerable-crypto",
+      "file": "tests/fixtures/vulnerable.js",
+      "line": 104
+    },
+    {
+      "fingerprint": "cb04b044791be80a3d4f685cb135058f637f66177191fd838c2432707488f5d0",
+      "rule_id": "js/pq-vulnerable-crypto",
+      "file": "tests/fixtures/vulnerable.js",
+      "line": 105
+    },
+    {
+      "fingerprint": "62e9d3df44f81e283d2386807ef123a6b0aea20138ef749c074abfc2b666c446",
+      "rule_id": "kt/no-sql-injection",
+      "file": "tests/fixtures/vulnerable.kt",
+      "line": 7
+    },
+    {
+      "fingerprint": "732924110c49c679ca65c768e57629bb036e335e411793ae56e98a36d47da6e1",
+      "rule_id": "kt/no-command-injection",
+      "file": "tests/fixtures/vulnerable.kt",
+      "line": 11
+    },
+    {
+      "fingerprint": "ad99a59fd7726e3de058ede89cbb4c34cef1c00121a54dbe74ae5b2d57b8e88b",
+      "rule_id": "kt/no-command-injection",
+      "file": "tests/fixtures/vulnerable.kt",
+      "line": 12
+    },
+    {
+      "fingerprint": "ecbb1380821d73efbac0c1e3a2f82f6f2d36befbade3182034bb8527747012c4",
+      "rule_id": "kt/no-unsafe-deserialization",
+      "file": "tests/fixtures/vulnerable.kt",
+      "line": 17
+    },
+    {
+      "fingerprint": "aa47e33844eb61ef39c146b8203abe685bd38aba55e3ea5194a1d911c3860956",
+      "rule_id": "kt/no-ssrf",
+      "file": "tests/fixtures/vulnerable.kt",
+      "line": 21
+    },
+    {
+      "fingerprint": "8752688b85dbb3dca19b4022145eff0ba599a8e75de692038e489541a8c04391",
+      "rule_id": "kt/no-path-traversal",
+      "file": "tests/fixtures/vulnerable.kt",
+      "line": 25
+    },
+    {
+      "fingerprint": "b69dbb7cf5555ebe50e61c3d54cf0b44cf8dc4b92e404abc1e63709626b94c11",
+      "rule_id": "kt/no-hardcoded-secret",
+      "file": "tests/fixtures/vulnerable.kt",
+      "line": 33
+    },
+    {
+      "fingerprint": "eba42d6a43bbe68471bc2511309d8272fde3216243806c227162c780a98b00e1",
+      "rule_id": "kt/no-xxe",
+      "file": "tests/fixtures/vulnerable.kt",
+      "line": 38
+    },
+    {
+      "fingerprint": "9ecde7a3dc2c16478036e972d64f8ebeb98ab0c57cb9e6bb57d9a4732041f059",
+      "rule_id": "kt/no-cors-star",
+      "file": "tests/fixtures/vulnerable.kt",
+      "line": 44
+    },
+    {
+      "fingerprint": "2bf902f4860a94b5411f53551bb4e15c9555e0ab062cfcef0e7eac42dbf520fa",
+      "rule_id": "kt/no-eval",
+      "file": "tests/fixtures/vulnerable.kt",
+      "line": 48
+    },
+    {
+      "fingerprint": "16045c3fe690084df1d0e1ac82ef4492f3437cb174acc93593445b5e503e8ecc",
+      "rule_id": "kt/taint-sql-injection",
+      "file": "tests/fixtures/vulnerable.kt",
+      "line": 53
+    },
+    {
+      "fingerprint": "4b41deefaf554a3b64fcae10e42475952dc5ece6e3ec8d0711c45afcb4443c9d",
+      "rule_id": "kt/no-sql-injection",
+      "file": "tests/fixtures/vulnerable.kt",
+      "line": 53
+    },
+    {
+      "fingerprint": "daaee9e693f26e4fc2048ee775881d7b8fdca9977a0db0611916cecea1782c37",
+      "rule_id": "php/no-eval",
+      "file": "tests/fixtures/vulnerable.php",
+      "line": 5
+    },
+    {
+      "fingerprint": "d2c86d7f1c27f1687318aa23d632721879c07ff8cd0133ef42202a42f586b9c8",
+      "rule_id": "php/no-command-injection",
+      "file": "tests/fixtures/vulnerable.php",
+      "line": 8
+    },
+    {
+      "fingerprint": "971935e5f96c435ada32d891004896edc7f39506011f9762e2404ace5998ca46",
+      "rule_id": "php/no-command-injection",
+      "file": "tests/fixtures/vulnerable.php",
+      "line": 9
+    },
+    {
+      "fingerprint": "341ec40a97f8e635e6884a0ee6ea957045551ff1571e73ad0d3dc9e1cf36a0ae",
+      "rule_id": "php/no-command-injection",
+      "file": "tests/fixtures/vulnerable.php",
+      "line": 10
+    },
+    {
+      "fingerprint": "00dcc59aa7ba69c174841222263cbb7227715ac19e8d90b264bd3c20c65a03e6",
+      "rule_id": "php/no-command-injection",
+      "file": "tests/fixtures/vulnerable.php",
+      "line": 11
+    },
+    {
+      "fingerprint": "ae71584ac4edc20d2c386588f9ffb061baf5d0537a72b140b6e50c7dfce8de9d",
+      "rule_id": "php/no-command-injection",
+      "file": "tests/fixtures/vulnerable.php",
+      "line": 12
+    },
+    {
+      "fingerprint": "315d93e1de2d4757a6f0ca83fcbf468da869ecee7ded1b1da3e2d2f36fb0697a",
+      "rule_id": "php/no-sql-injection",
+      "file": "tests/fixtures/vulnerable.php",
+      "line": 15
+    },
+    {
+      "fingerprint": "d25a1b2f51c4e780391d55f5dc0e2cc4e0b25cc078ad7b49672529742aa9a6f7",
+      "rule_id": "php/no-unserialize",
+      "file": "tests/fixtures/vulnerable.php",
+      "line": 18
+    },
+    {
+      "fingerprint": "7b11ccec78ab78ed0931c69c2baa9ed1f81a32080cc964e3abd7dc4000e689fd",
+      "rule_id": "php/no-file-inclusion",
+      "file": "tests/fixtures/vulnerable.php",
+      "line": 21
+    },
+    {
+      "fingerprint": "ec17b0b74544a0a1c419ea6e829d06c1e9d9b5a4724dd46ee0396cc520186295",
+      "rule_id": "php/no-file-inclusion",
+      "file": "tests/fixtures/vulnerable.php",
+      "line": 22
+    },
+    {
+      "fingerprint": "d629db58c283143926fa182b25dfa701dc01ad813bd7ab251ae6072a2487fdfc",
+      "rule_id": "php/no-file-inclusion",
+      "file": "tests/fixtures/vulnerable.php",
+      "line": 23
+    },
+    {
+      "fingerprint": "a08b2d9fcbb6c1fe04176f468fc480372e7db7c5863bffe9fdf504f7c5839183",
+      "rule_id": "php/no-weak-crypto",
+      "file": "tests/fixtures/vulnerable.php",
+      "line": 26
+    },
+    {
+      "fingerprint": "57b00ae457b7f5596d4890eca153497206f78f3b82ab85dec7c568bc2f4ba936",
+      "rule_id": "php/no-weak-crypto",
+      "file": "tests/fixtures/vulnerable.php",
+      "line": 27
+    },
+    {
+      "fingerprint": "0f4f68576c862d2ff79cc957e8a28c7d9d06c70c4a6211ff1e9f221dcbe4d286",
+      "rule_id": "php/no-hardcoded-secret",
+      "file": "tests/fixtures/vulnerable.php",
+      "line": 30
+    },
+    {
+      "fingerprint": "40207b7d1faca890d3a8a35b0995bb14b7893ec306308374b9c39ade59f784ee",
+      "rule_id": "php/no-hardcoded-secret",
+      "file": "tests/fixtures/vulnerable.php",
+      "line": 31
+    },
+    {
+      "fingerprint": "077582dcb6557aad0376ab94b04b6291f266e41b83942aa18f894f60cfb84318",
+      "rule_id": "php/no-hardcoded-secret",
+      "file": "tests/fixtures/vulnerable.php",
+      "line": 32
+    },
+    {
+      "fingerprint": "bdd01fc355d02e988dae0c7ac7cc1f482464d57d04d09dc7cba6ad96620baf90",
+      "rule_id": "php/no-ssrf",
+      "file": "tests/fixtures/vulnerable.php",
+      "line": 35
+    },
+    {
+      "fingerprint": "3ec872f5e7d1d0f3163094977fdf1b3949ef28107ea5cac954ec2dbef122028b",
+      "rule_id": "php/no-ssrf",
+      "file": "tests/fixtures/vulnerable.php",
+      "line": 36
+    },
+    {
+      "fingerprint": "88e2d6bedd3c59a597691183025a032129c8381a82f0d6a1297b4edcb9dedeb9",
+      "rule_id": "php/no-extract",
+      "file": "tests/fixtures/vulnerable.php",
+      "line": 39
+    },
+    {
+      "fingerprint": "51c2f0174f01516379866275cbdf2129ae5139831004e8443fd1f1d85e7f7db6",
+      "rule_id": "php/no-preg-eval",
+      "file": "tests/fixtures/vulnerable.php",
+      "line": 42
+    },
+    {
+      "fingerprint": "44d64bba6b6c2730991a45ecf862da6ce148ab5f5439f48ba86a7e8a5daf8344",
+      "rule_id": "py/no-hardcoded-secret",
+      "file": "tests/fixtures/vulnerable.py",
+      "line": 11
+    },
+    {
+      "fingerprint": "72d9816b690d316e941d480692772715fa299fd5441245f8f244f295b83efede",
+      "rule_id": "py/no-hardcoded-secret",
+      "file": "tests/fixtures/vulnerable.py",
+      "line": 14
+    },
+    {
+      "fingerprint": "6714ee91aba031e2f38d01317706fdc2412c8158715080d61dceda8477a805db",
+      "rule_id": "py/django-secret-key-hardcoded",
+      "file": "tests/fixtures/vulnerable.py",
+      "line": 14
+    },
+    {
+      "fingerprint": "38b8af3e68bb35a0aa583e664ba987e6c0d21a0a75ccdf779e3e15032ee78217",
+      "rule_id": "py/no-hardcoded-secret",
+      "file": "tests/fixtures/vulnerable.py",
+      "line": 18
+    },
+    {
+      "fingerprint": "d6d7cc2daf6964793a57595782fc87f5652d27b27c9a998e88270c0a255fd203",
+      "rule_id": "py/flask-secret-key-hardcoded",
+      "file": "tests/fixtures/vulnerable.py",
+      "line": 18
+    },
+    {
+      "fingerprint": "f85c07441e91b827d7153a6d935fbaa2c02cd29007ae005b3420f97e44a0701c",
+      "rule_id": "py/session-cookie-secure-disabled",
+      "file": "tests/fixtures/vulnerable.py",
+      "line": 21
+    },
+    {
+      "fingerprint": "fc4b8475aaac5bacf16502946b244c53d721774b47aa32ea7904f4418cf141af",
+      "rule_id": "py/session-cookie-httponly-disabled",
+      "file": "tests/fixtures/vulnerable.py",
+      "line": 24
+    },
+    {
+      "fingerprint": "91c5ffb630abce824fde45e4f2665298977d01f8848ccc7d3d684644a8cc7a8d",
+      "rule_id": "py/session-cookie-samesite-disabled",
+      "file": "tests/fixtures/vulnerable.py",
+      "line": 27
+    },
+    {
+      "fingerprint": "d04f7173ecf7602b5d3f36fa5c86d564ad92f6af42c37b1f6a4a862e726ae915",
+      "rule_id": "py/csrf-cookie-secure-disabled",
+      "file": "tests/fixtures/vulnerable.py",
+      "line": 30
+    },
+    {
+      "fingerprint": "be0554c97f525e3150841415a6823b22a912bcbb47303310e49480efb4c0cc5b",
+      "rule_id": "py/csrf-cookie-httponly-disabled",
+      "file": "tests/fixtures/vulnerable.py",
+      "line": 33
+    },
+    {
+      "fingerprint": "03d62cb73d7c22c2242b76fb27817b3cb5bc22dd83f57a1964c11c95d9aa7afe",
+      "rule_id": "py/csrf-cookie-samesite-disabled",
+      "file": "tests/fixtures/vulnerable.py",
+      "line": 36
+    },
+    {
+      "fingerprint": "ab9bdcd91bfcec0fda0a0de2a8da3f982d76612f553d3c81515300bafec8ad03",
+      "rule_id": "py/csrf-exempt",
+      "file": "tests/fixtures/vulnerable.py",
+      "line": 39
+    },
+    {
+      "fingerprint": "1214843797d0e93da6f69adc03a09eb4dfcf32985582566fb2e42b9367e630c9",
+      "rule_id": "py/wtf-csrf-disabled",
+      "file": "tests/fixtures/vulnerable.py",
+      "line": 44
+    },
+    {
+      "fingerprint": "265d5fe8d5a7a787f58677595f3681e04dadf35f313d383b7e7955f6faaa843e",
+      "rule_id": "py/wtf-csrf-check-default-disabled",
+      "file": "tests/fixtures/vulnerable.py",
+      "line": 47
+    },
+    {
+      "fingerprint": "15c4410221b39dd6e8f4fd7f18113dcf83ea810592d036e56ad708e3a8560461",
+      "rule_id": "py/django-allowed-hosts-wildcard",
+      "file": "tests/fixtures/vulnerable.py",
+      "line": 50
+    },
+    {
+      "fingerprint": "388a8e2a1f63f3b3d3580ab21bd64175d2edabadf1319e25e454a3c4c02d8044",
+      "rule_id": "py/secure-ssl-redirect-disabled",
+      "file": "tests/fixtures/vulnerable.py",
+      "line": 53
+    },
+    {
+      "fingerprint": "8180da97b36f936d4a400ba633a28118cf8f77c9b1ff50a56ba4121bc822a765",
+      "rule_id": "py/no-ssrf",
+      "file": "tests/fixtures/vulnerable.py",
+      "line": 56
+    },
+    {
+      "fingerprint": "7046dd4b0950d9a57d43cbb5cb5293854ed977289869d226eec435de3c6df760",
+      "rule_id": "py/no-path-traversal",
+      "file": "tests/fixtures/vulnerable.py",
+      "line": 59
+    },
+    {
+      "fingerprint": "8a9dd0088207e67639bb8fac42bc631cbc711e68640d7c97992d340761f39d74",
+      "rule_id": "py/no-sql-injection",
+      "file": "tests/fixtures/vulnerable.py",
+      "line": 65
+    },
+    {
+      "fingerprint": "4a0ee15cf6b1b4291e21c5fdcfcec2a0ae8a3103a5382ded00578ec96cbbe23b",
+      "rule_id": "py/taint-eval",
+      "file": "tests/fixtures/vulnerable.py",
+      "line": 70
+    },
+    {
+      "fingerprint": "a26a00bfcbadcc4f320483fda6e9ba4edc6b6c062872dd36798c8b8ffabbb15c",
+      "rule_id": "py/no-eval",
+      "file": "tests/fixtures/vulnerable.py",
+      "line": 70
+    },
+    {
+      "fingerprint": "c4b0e2670a328d0b35826c227573f4900cd84a0a3206cca89fff6edae5867bbe",
+      "rule_id": "py/no-eval",
+      "file": "tests/fixtures/vulnerable.py",
+      "line": 71
+    },
+    {
+      "fingerprint": "e6ac0586526eba8dfb4a4fbc06fbe6dc4660f99289d0b75203f26294c2d91199",
+      "rule_id": "py/no-command-injection",
+      "file": "tests/fixtures/vulnerable.py",
+      "line": 75
+    },
+    {
+      "fingerprint": "2462bc2514d2da52ef4ebcb4d77aa86b50c2ed5211bcc4a680e4590bc7ccc982",
+      "rule_id": "py/no-path-traversal",
+      "file": "tests/fixtures/vulnerable.py",
+      "line": 79
+    },
+    {
+      "fingerprint": "cbda0bb402dfd6bd588d1bd17b1cfdf49bc45f7569b6636bbbb298718b39b9ca",
+      "rule_id": "py/no-weak-crypto",
+      "file": "tests/fixtures/vulnerable.py",
+      "line": 84
+    },
+    {
+      "fingerprint": "910711be56db68bddd4f46c81cfba03af9301ca787937501a990e00e2f3af908",
+      "rule_id": "py/no-pickle",
+      "file": "tests/fixtures/vulnerable.py",
+      "line": 92
+    },
+    {
+      "fingerprint": "5b113e6b6dab55b76656fbb0676f9d89acbe3d8cd1664fbcdc1630f9ef61c21a",
+      "rule_id": "py/no-yaml-load",
+      "file": "tests/fixtures/vulnerable.py",
+      "line": 96
+    },
+    {
+      "fingerprint": "9220a4cf355b235a0dfde74f9c7026efd5abd8a063c02ed791a4f27467346b77",
+      "rule_id": "py/no-debug-true",
+      "file": "tests/fixtures/vulnerable.py",
+      "line": 99
+    },
+    {
+      "fingerprint": "9e62396216f88293cc3198c4fe373d0e8dc675af945db72af28ca40c09f00217",
+      "rule_id": "py/no-open-redirect",
+      "file": "tests/fixtures/vulnerable.py",
+      "line": 103
+    },
+    {
+      "fingerprint": "a910ad4cb4182e108554aa68aa3590ea1a70dba4df26fef8b81aad11c4ad40f6",
+      "rule_id": "py/no-cors-star",
+      "file": "tests/fixtures/vulnerable.py",
+      "line": 106
+    },
+    {
+      "fingerprint": "7ca6533ea21b2d91a444ebef5c651b26293c02373b90b41dea6778d1608455bd",
+      "rule_id": "py/flask-debug-mode",
+      "file": "tests/fixtures/vulnerable.py",
+      "line": 109
+    },
+    {
+      "fingerprint": "82165a8c7f544de546faf8d532d57cec98525e62e3aab5758406ea32734df85c",
+      "rule_id": "py/jwt-no-verify",
+      "file": "tests/fixtures/vulnerable.py",
+      "line": 113
+    },
+    {
+      "fingerprint": "57d313727ab7520ca0c21cc312afb5c04899f02d0609ad8d9b58402166a56316",
+      "rule_id": "py/jwt-hardcoded-secret",
+      "file": "tests/fixtures/vulnerable.py",
+      "line": 113
+    },
+    {
+      "fingerprint": "81a8e3dd73dfb77a245026aa726b87856b7c5d228ebc83c1263296530877f4b2",
+      "rule_id": "py/jwt-hardcoded-secret",
+      "file": "tests/fixtures/vulnerable.py",
+      "line": 116
+    },
+    {
+      "fingerprint": "f05e65ba0085f5ea69de3999277caef6baddf17f9e6c63d1ee3ca10ca475a885",
+      "rule_id": "py/pq-vulnerable-crypto",
+      "file": "tests/fixtures/vulnerable.py",
+      "line": 123
+    },
+    {
+      "fingerprint": "aa691f5f1e55df30f770ed5cfef4ff9279176eba18955acda7d564471af5ce72",
+      "rule_id": "py/pq-vulnerable-crypto",
+      "file": "tests/fixtures/vulnerable.py",
+      "line": 124
+    },
+    {
+      "fingerprint": "31b62633bf46c0eda73396f1d019623052f3e99969a0535575d4269e8949fc77",
+      "rule_id": "py/pq-vulnerable-crypto",
+      "file": "tests/fixtures/vulnerable.py",
+      "line": 125
+    },
+    {
+      "fingerprint": "5131f6f591acaf9b02587227af453125835dbde54436ec90114634f076d92bde",
+      "rule_id": "rb/no-eval",
+      "file": "tests/fixtures/vulnerable.rb",
+      "line": 4
+    },
+    {
+      "fingerprint": "ca9c4dc177f6cf4a0c262224fddfb89b565e80f8a5ecdfc0f1f4f8765e0cc45d",
+      "rule_id": "rb/no-eval",
+      "file": "tests/fixtures/vulnerable.rb",
+      "line": 5
+    },
+    {
+      "fingerprint": "059abb68648a91b8f700c56e28d291c451c2fc7ab22f7c1fb3e0803bb148200f",
+      "rule_id": "rb/no-command-injection",
+      "file": "tests/fixtures/vulnerable.rb",
+      "line": 8
+    },
+    {
+      "fingerprint": "d7443d63b814af067cd26ac23af77a527acbee3123db35e636b17db3b9761b62",
+      "rule_id": "rb/no-command-injection",
+      "file": "tests/fixtures/vulnerable.rb",
+      "line": 9
+    },
+    {
+      "fingerprint": "14295d8ed1412ac2b939313ea2d11614b05ae24574fd6df4f0159bf270d3a87b",
+      "rule_id": "rb/no-command-injection",
+      "file": "tests/fixtures/vulnerable.rb",
+      "line": 10
+    },
+    {
+      "fingerprint": "e1bd02d31ef06c8c61943b389cdbc186c2a3b55333eed50ee45a0d3147632a14",
+      "rule_id": "rb/no-sql-injection",
+      "file": "tests/fixtures/vulnerable.rb",
+      "line": 13
+    },
+    {
+      "fingerprint": "bb860ad690113cf9600da253a282a670ac53bee0b4fd62f6ae483d191aa78ee4",
+      "rule_id": "rb/no-sql-injection",
+      "file": "tests/fixtures/vulnerable.rb",
+      "line": 14
+    },
+    {
+      "fingerprint": "44b0caac1ffba4b62c3386e1684a60129f310ec65fed279be71c2f0d8454e629",
+      "rule_id": "rb/no-mass-assignment",
+      "file": "tests/fixtures/vulnerable.rb",
+      "line": 17
+    },
+    {
+      "fingerprint": "d1f3aa87e44514135153271cfb47c3caf1405ef2e4d2b1442bb8b94dee580729",
+      "rule_id": "rb/no-unsafe-deserialization",
+      "file": "tests/fixtures/vulnerable.rb",
+      "line": 20
+    },
+    {
+      "fingerprint": "c84bd2e22ea67de225d5ec4340ed33d965bf093ecccb4fa8816d1831735a8861",
+      "rule_id": "rb/no-unsafe-deserialization",
+      "file": "tests/fixtures/vulnerable.rb",
+      "line": 21
+    },
+    {
+      "fingerprint": "f44b2cd8e1976f3f50e8573475b1f465242644c03780169b46a5ec52f9e8359f",
+      "rule_id": "rb/no-open-redirect",
+      "file": "tests/fixtures/vulnerable.rb",
+      "line": 24
+    },
+    {
+      "fingerprint": "f71930c219cc4318578bf45d74b6a854f0a14ba7cffb38703b5e58c99bdf42b7",
+      "rule_id": "rb/no-csrf-skip",
+      "file": "tests/fixtures/vulnerable.rb",
+      "line": 27
+    },
+    {
+      "fingerprint": "877e99c2c81961da47b2378ae14e2ed49e2a63b36136fe54954e075b40987876",
+      "rule_id": "rb/no-html-safe",
+      "file": "tests/fixtures/vulnerable.rb",
+      "line": 30
+    },
+    {
+      "fingerprint": "f9901b3aa3fe0179e275c9189680eea2eaf945fee8719d82f8af775af540a256",
+      "rule_id": "rb/no-html-safe",
+      "file": "tests/fixtures/vulnerable.rb",
+      "line": 31
+    },
+    {
+      "fingerprint": "9987f155bb467eb39b0fbe58d150d66b79e5c6ca6e2dd3be74b5c2b49a680c51",
+      "rule_id": "rb/no-hardcoded-secret",
+      "file": "tests/fixtures/vulnerable.rb",
+      "line": 34
+    },
+    {
+      "fingerprint": "f0c71e6212950e63a33bd5f92bd4f09aa32447d3b83e4500f8a6d59380ca13d0",
+      "rule_id": "rb/no-hardcoded-secret",
+      "file": "tests/fixtures/vulnerable.rb",
+      "line": 35
+    },
+    {
+      "fingerprint": "38623fc67fe028198c8af3b53ec0463f9b6c346a209c609cb869e242b3596af5",
+      "rule_id": "rb/no-weak-crypto",
+      "file": "tests/fixtures/vulnerable.rb",
+      "line": 38
+    },
+    {
+      "fingerprint": "2ba3785cd40ff643a5988081bb439ff243657254350fe059d1adfad0862d104d",
+      "rule_id": "rb/no-weak-crypto",
+      "file": "tests/fixtures/vulnerable.rb",
+      "line": 39
+    },
+    {
+      "fingerprint": "45877691efe76fe6c9f6ababd0153570ccdfb7a43345141a456d0444352f6058",
+      "rule_id": "rb/no-ssrf",
+      "file": "tests/fixtures/vulnerable.rb",
+      "line": 42
+    },
+    {
+      "fingerprint": "2cbbc090549686aec4ffbd374888408ec9ae7bf2e9155f89d2a0ac05d93ef543",
+      "rule_id": "rb/no-ssrf",
+      "file": "tests/fixtures/vulnerable.rb",
+      "line": 43
+    },
+    {
+      "fingerprint": "a339ce7fe02e76b90c34e2d7b02b658c7fc9e8f7d307e0902df7694efd225169",
+      "rule_id": "rb/no-ssrf",
+      "file": "tests/fixtures/vulnerable.rb",
+      "line": 44
+    },
+    {
+      "fingerprint": "9262f2435636964628c829d4f71cc37968577e7d0b3a27ea9263fc70d9c806be",
+      "rule_id": "rb/no-ssrf",
+      "file": "tests/fixtures/vulnerable.rb",
+      "line": 45
+    },
+    {
+      "fingerprint": "e2d7260b7ba96dc98071e601cc5efdda755384d403583f5c7117906b37c06cb6",
+      "rule_id": "rb/no-ssrf",
+      "file": "tests/fixtures/vulnerable.rb",
+      "line": 46
+    },
+    {
+      "fingerprint": "f871dd30239aaea0ec748a4e20279c6792c2b5d3e381c2846932c40d1755532d",
+      "rule_id": "rb/no-ssrf",
+      "file": "tests/fixtures/vulnerable.rb",
+      "line": 47
+    },
+    {
+      "fingerprint": "94e081911bb1fe495fa7b916d49a0e10b895670a13b5e23ee0b1d4717913112b",
+      "rule_id": "rb/no-path-traversal",
+      "file": "tests/fixtures/vulnerable.rb",
+      "line": 50
+    },
+    {
+      "fingerprint": "f11901b310a96f6e5ee1d92afe602823660117f1233b7b1a91b36c0e9c137bc1",
+      "rule_id": "rb/no-path-traversal",
+      "file": "tests/fixtures/vulnerable.rb",
+      "line": 51
+    },
+    {
+      "fingerprint": "b33b9786955619c1425c267cb17be6e240a883d56d7d67d7b380bd8d3921ae59",
+      "rule_id": "rb/no-path-traversal",
+      "file": "tests/fixtures/vulnerable.rb",
+      "line": 52
+    },
+    {
+      "fingerprint": "30f6b8d3e126ca801fa50bb9e3a14ffcf9bed4bfbe2d10a19539244e6303ac5c",
+      "rule_id": "rb/no-path-traversal",
+      "file": "tests/fixtures/vulnerable.rb",
+      "line": 53
+    },
+    {
+      "fingerprint": "7382ef4d1616234e6ad5c57a6837c25941256f96946f51dba10d2f971472ad6e",
+      "rule_id": "rb/no-path-traversal",
+      "file": "tests/fixtures/vulnerable.rb",
+      "line": 54
+    },
+    {
+      "fingerprint": "9a19e2d2007774b913882dd0573869e0b2ea9dfc7d9afeb33f64eaa99265f7ab",
+      "rule_id": "rb/no-path-traversal",
+      "file": "tests/fixtures/vulnerable.rb",
+      "line": 55
+    },
+    {
+      "fingerprint": "55f64c9f2d59ab5bb32b0a644a9c6e27ba53aacd10059b038a57793faaa0db08",
+      "rule_id": "rs/unsafe-block",
+      "file": "tests/fixtures/vulnerable.rs",
+      "line": 7
+    },
+    {
+      "fingerprint": "61314f459a03fa9ca9314c98a44aff11234e9c64847b225d583d53e243b0c9cf",
+      "rule_id": "rs/unsafe-block",
+      "file": "tests/fixtures/vulnerable.rs",
+      "line": 15
+    },
+    {
+      "fingerprint": "bb99ac80edb346700139ef477de5e2f25ac81d55b7c9f824339fb7bbb8acbe76",
+      "rule_id": "rs/transmute-usage",
+      "file": "tests/fixtures/vulnerable.rs",
+      "line": 15
+    },
+    {
+      "fingerprint": "66b7289e96d4f02134c4cf765a349baa1f871f7bf9176d757fd67ebfad13f26b",
+      "rule_id": "rs/no-command-injection",
+      "file": "tests/fixtures/vulnerable.rs",
+      "line": 20
+    },
+    {
+      "fingerprint": "4033f12ffa98e34650d8e96cab02340eae45781725ccf787fc24e783e94cfe49",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "tests/fixtures/vulnerable.rs",
+      "line": 20
+    },
+    {
+      "fingerprint": "a625dc6243ef2242505a497096d73acbefd94085d318c46a69bcfd2e66115f81",
+      "rule_id": "rs/no-sql-injection",
+      "file": "tests/fixtures/vulnerable.rs",
+      "line": 25
+    },
+    {
+      "fingerprint": "416f2acbf877f2be72385a2021f7058f67128e187b95721cd4643311c03f133d",
+      "rule_id": "rs/no-weak-hash",
+      "file": "tests/fixtures/vulnerable.rs",
+      "line": 30
+    },
+    {
+      "fingerprint": "4b6d54da527f058afbd8532f0ffe1718bdccdce6fdddf038fa550b0dda8de48c",
+      "rule_id": "rs/no-weak-hash",
+      "file": "tests/fixtures/vulnerable.rs",
+      "line": 31
+    },
+    {
+      "fingerprint": "2e26e3e1401de2918d35b223bfd0e78b40e4ef805a556da289c7bcf600701901",
+      "rule_id": "rs/no-weak-hash",
+      "file": "tests/fixtures/vulnerable.rs",
+      "line": 31
+    },
+    {
+      "fingerprint": "43a67108988bbaac6fdf99377a9dafbd4bdc21ba1385a6855cd7fc44bb8abd32",
+      "rule_id": "rs/no-hardcoded-secret",
+      "file": "tests/fixtures/vulnerable.rs",
+      "line": 36
+    },
+    {
+      "fingerprint": "55678e142d9d7419a0ce7ef17df469aa902190f0b308841d700cbe7dd7e8edc1",
+      "rule_id": "rs/no-hardcoded-secret",
+      "file": "tests/fixtures/vulnerable.rs",
+      "line": 37
+    },
+    {
+      "fingerprint": "9f83904557b47c87405e73580fc6ce5ae53884ab573667e4c8215f3d779f8277",
+      "rule_id": "rs/no-hardcoded-secret",
+      "file": "tests/fixtures/vulnerable.rs",
+      "line": 38
+    },
+    {
+      "fingerprint": "fdfde1104a06945292342499f74d2b9ce29470206e8b1138365e0f89bb8e858a",
+      "rule_id": "rs/tls-verify-disabled",
+      "file": "tests/fixtures/vulnerable.rs",
+      "line": 43
+    },
+    {
+      "fingerprint": "d4e95b977255f9c265ff711af2d974b17a411d60839b31dcd46e5ff3a9fbdc5f",
+      "rule_id": "rs/no-ssrf",
+      "file": "tests/fixtures/vulnerable.rs",
+      "line": 50
+    },
+    {
+      "fingerprint": "3f378aa3a0a2d2c9705a63124b7ce1d06805951caee7fcac89d4c8600d8e2c84",
+      "rule_id": "rs/no-path-traversal",
+      "file": "tests/fixtures/vulnerable.rs",
+      "line": 55
+    },
+    {
+      "fingerprint": "7c73ae5da15b3ba71e11679bfca5d9dc664d4cd39788955718983970f9482d21",
+      "rule_id": "rs/no-path-traversal",
+      "file": "tests/fixtures/vulnerable.rs",
+      "line": 56
+    },
+    {
+      "fingerprint": "f1f21afa584b02a1006125a71c8936135c3d533ddf8cfd5ef752101de922b05b",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "tests/fixtures/vulnerable.rs",
+      "line": 62
+    },
+    {
+      "fingerprint": "00a2fb3374291a99f397e11ec8892698007bc3949e1656a79dd38f4f12017a5e",
+      "rule_id": "rs/no-unwrap-in-lib",
+      "file": "tests/fixtures/vulnerable.rs",
+      "line": 63
+    },
+    {
+      "fingerprint": "924e84b505bdaa2a119eb309c30f70c78203ad4aaa82083da2f99922a79eee9d",
+      "rule_id": "rs/pq-vulnerable-crypto",
+      "file": "tests/fixtures/vulnerable.rs",
+      "line": 72
+    },
+    {
+      "fingerprint": "c7ed7f80d499e2170a501d45b23d945ee31a157cecf7872b4b66af4350956dfc",
+      "rule_id": "rs/pq-vulnerable-crypto",
+      "file": "tests/fixtures/vulnerable.rs",
+      "line": 73
+    },
+    {
+      "fingerprint": "e51f1497de93b15e1162c5a658f9d53341d8d391a3d1dffddb743387fc16e5f9",
+      "rule_id": "rs/pq-vulnerable-crypto",
+      "file": "tests/fixtures/vulnerable.rs",
+      "line": 74
+    },
+    {
+      "fingerprint": "cffff214acd2940ef44ee7e60cd0eb52f1d7393030de3d062907b0f0ac4c51d1",
+      "rule_id": "swift/no-hardcoded-secret",
+      "file": "tests/fixtures/vulnerable.swift",
+      "line": 7
+    },
+    {
+      "fingerprint": "ddd2585bb291418669eb1798c08d60eb9d970f03eac7abdfb4d381a7dea12d75",
+      "rule_id": "swift/no-hardcoded-secret",
+      "file": "tests/fixtures/vulnerable.swift",
+      "line": 8
+    },
+    {
+      "fingerprint": "80c598c4d25497ade73316ccc730895540ada900c5c85df8af24f38eb57e7ee1",
+      "rule_id": "swift/no-hardcoded-secret",
+      "file": "tests/fixtures/vulnerable.swift",
+      "line": 9
+    },
+    {
+      "fingerprint": "c2264faece6a46889af45a101197a47756158028b89b3fc1f6b951fc421a4894",
+      "rule_id": "swift/no-command-injection",
+      "file": "tests/fixtures/vulnerable.swift",
+      "line": 15
+    },
+    {
+      "fingerprint": "f149185498f5698da1a18893ac367a0f07433d56d1a1a5aa5d2f1268dadf41ec",
+      "rule_id": "swift/no-weak-crypto",
+      "file": "tests/fixtures/vulnerable.swift",
+      "line": 22
+    },
+    {
+      "fingerprint": "6bedfb98b6d930258662c60a2b59b9d05f6ca917a18d00017cca9019f7e2c758",
+      "rule_id": "swift/no-weak-crypto",
+      "file": "tests/fixtures/vulnerable.swift",
+      "line": 23
+    },
+    {
+      "fingerprint": "e09751061c8ba00d9b2c7fe01f696bdc6b58a1ec398fc333596c1ed3d84270b0",
+      "rule_id": "swift/no-weak-crypto",
+      "file": "tests/fixtures/vulnerable.swift",
+      "line": 24
+    },
+    {
+      "fingerprint": "964404d6c41f437e93a0489d0574828368a420bb4ff161ad0523e8aa77546214",
+      "rule_id": "swift/no-insecure-transport",
+      "file": "tests/fixtures/vulnerable.swift",
+      "line": 28
+    },
+    {
+      "fingerprint": "989ccf4c0de3b6028d767e78d4c3abb0f9df1e8de4b140b1b82fc475241a55a5",
+      "rule_id": "swift/no-insecure-transport",
+      "file": "tests/fixtures/vulnerable.swift",
+      "line": 29
+    },
+    {
+      "fingerprint": "a64140375b5fa07ce5d595cc1896e4757466beed7f46b0228e74a987f40c9efa",
+      "rule_id": "swift/no-eval-js",
+      "file": "tests/fixtures/vulnerable.swift",
+      "line": 33
+    },
+    {
+      "fingerprint": "82050c81790486bb9fa06fe06e7ad4ecf5feebe920717f5557e05345d87cc6a3",
+      "rule_id": "swift/no-sql-injection",
+      "file": "tests/fixtures/vulnerable.swift",
+      "line": 40
+    },
+    {
+      "fingerprint": "fb227873f950500821e7fe7409aa1aad992db289a8dd7d4593003bc2ad38db42",
+      "rule_id": "swift/no-insecure-keychain",
+      "file": "tests/fixtures/vulnerable.swift",
+      "line": 48
+    },
+    {
+      "fingerprint": "31adf694d36068dadc10499f9f1768648da69384612dc42199041c9b77d82e0f",
+      "rule_id": "swift/no-tls-disabled",
+      "file": "tests/fixtures/vulnerable.swift",
+      "line": 56
+    },
+    {
+      "fingerprint": "2d938431985642f023f27660f9afed961080aa56b9e09458f1388f6955d790d3",
+      "rule_id": "swift/no-tls-disabled",
+      "file": "tests/fixtures/vulnerable.swift",
+      "line": 59
+    },
+    {
+      "fingerprint": "a07778f9c9c9b0a0e4997a4b82777d56171a79388fa4be094cdb8e0a6c4f7c59",
+      "rule_id": "swift/no-tls-disabled",
+      "file": "tests/fixtures/vulnerable.swift",
+      "line": 60
+    },
+    {
+      "fingerprint": "1177be0108cebbac22dce80b2d7f90d39e3de4bbdd3eb998afd4b155a812de9c",
+      "rule_id": "swift/no-path-traversal",
+      "file": "tests/fixtures/vulnerable.swift",
+      "line": 66
+    },
+    {
+      "fingerprint": "31ec83f12dd92eddb604ab798da30c80602e978ab82f4061f19fe2e9a9a09b38",
+      "rule_id": "swift/no-path-traversal",
+      "file": "tests/fixtures/vulnerable.swift",
+      "line": 67
+    },
+    {
+      "fingerprint": "5734476abf368572189acc03d20309f879da475f6868d18fec7e017384a96ab3",
+      "rule_id": "swift/no-ssrf",
+      "file": "tests/fixtures/vulnerable.swift",
+      "line": 72
+    },
+    {
+      "fingerprint": "6bac66cdbebfa91f875ecc25b05a1228b265f35fee4a91ca135a48cefc1ba4c5",
+      "rule_id": "swift/no-ssrf",
+      "file": "tests/fixtures/vulnerable.swift",
+      "line": 73
+    },
+    {
+      "fingerprint": "12b82920c817b99a794697118081f8b2eaa02924bdc1a33463369313576138f4",
+      "rule_id": "c/taint-format-string",
+      "file": "tests/fixtures/vulnerable_c_taint.c",
+      "line": 17
+    },
+    {
+      "fingerprint": "7ae35265198223c8ae998ed1bc58db089f58a27b4eb8015cfa56b64a22f9ab7a",
+      "rule_id": "c/taint-format-string",
+      "file": "tests/fixtures/vulnerable_c_taint.c",
+      "line": 24
+    },
+    {
+      "fingerprint": "b841e8563b6e389e5bf7af8e9678fa4e5e852f1069ba309593bf48e29ad2de6b",
+      "rule_id": "c/taint-command-injection",
+      "file": "tests/fixtures/vulnerable_c_taint.c",
+      "line": 32
+    },
+    {
+      "fingerprint": "5fd466dbe1c1f211ae271807e1dd24762bb59f8ba819f38fd74a02927d0dacde",
+      "rule_id": "c/taint-command-injection",
+      "file": "tests/fixtures/vulnerable_c_taint.c",
+      "line": 39
+    },
+    {
+      "fingerprint": "5d1475d9ef4edd225d693c0a8d7379526fca724f07d97e66c76b92c8de47a405",
+      "rule_id": "c/taint-command-injection",
+      "file": "tests/fixtures/vulnerable_c_taint.c",
+      "line": 44
+    },
+    {
+      "fingerprint": "4729d07a8e4ce8c5dd2f0016b7513ba8fdbc2ec3ed32fae98ea4512d7a6fe23c",
+      "rule_id": "c/taint-command-injection",
+      "file": "tests/fixtures/vulnerable_c_taint.c",
+      "line": 53
+    },
+    {
+      "fingerprint": "2cd4e111db77b7a8d7cbf10d2038ecd8fb86678b3719bbc4f8492023950daab5",
+      "rule_id": "c/taint-buffer-overflow",
+      "file": "tests/fixtures/vulnerable_c_taint.c",
+      "line": 63
+    },
+    {
+      "fingerprint": "25012d3bc711e499f2203f52e6868c9035792715215fd16e99a59c02f4aa3e38",
+      "rule_id": "c/taint-buffer-overflow",
+      "file": "tests/fixtures/vulnerable_c_taint.c",
+      "line": 71
+    },
+    {
+      "fingerprint": "591e297aeb257690f046ff48eccd4003a60794ac829d1f362c054a5416ef6f93",
+      "rule_id": "c/taint-buffer-overflow",
+      "file": "tests/fixtures/vulnerable_c_taint.c",
+      "line": 78
+    },
+    {
+      "fingerprint": "f8c8f8301a17f24d8e475adcd374a2812c1877717c325d42c4fa8b9167ee132b",
+      "rule_id": "c/taint-sql-injection",
+      "file": "tests/fixtures/vulnerable_c_taint.c",
+      "line": 88
+    },
+    {
+      "fingerprint": "6e8f033b3850b3d2a73d58c2f51d6eb0066f2d0daf056a42537434bfaaa1fa18",
+      "rule_id": "c/taint-sql-injection",
+      "file": "tests/fixtures/vulnerable_c_taint.c",
+      "line": 97
+    },
+    {
+      "fingerprint": "e57f0f135ecac1022a71be38c16fb75658d7e0a4e623afef6768935dca6a5aa2",
+      "rule_id": "py/taint-command-injection",
+      "file": "tests/fixtures/vulnerable_cli_taint.py",
+      "line": 13
+    },
+    {
+      "fingerprint": "bbffad23e6c0952438444256d2c9085d86345d5f472436f6071476d2530bd332",
+      "rule_id": "py/taint-command-injection",
+      "file": "tests/fixtures/vulnerable_cli_taint.py",
+      "line": 19
+    },
+    {
+      "fingerprint": "de1214bd254616b7aa62ec17a8e3c30550f1ee8c845af299398fc438086b3883",
+      "rule_id": "py/no-command-injection",
+      "file": "tests/fixtures/vulnerable_cli_taint.py",
+      "line": 19
+    },
+    {
+      "fingerprint": "92922dbd47dd57cd2ac903c2bd39a655a6bf2c2d58961c0119b07527de8da91a",
+      "rule_id": "py/taint-eval",
+      "file": "tests/fixtures/vulnerable_cli_taint.py",
+      "line": 25
+    },
+    {
+      "fingerprint": "0d26255e81ab19fa0d8f55cddaa3a433af3ccf710b3b16efae9637f7890dd41e",
+      "rule_id": "py/no-eval",
+      "file": "tests/fixtures/vulnerable_cli_taint.py",
+      "line": 25
+    },
+    {
+      "fingerprint": "2d275ce553ca527e5ad80cdca151d52b5323a20a2cc4b1a7b3259e33dd24908c",
+      "rule_id": "py/taint-eval",
+      "file": "tests/fixtures/vulnerable_cli_taint.py",
+      "line": 31
+    },
+    {
+      "fingerprint": "a207b1c48d16f7f1da88a5d9d0b0f31a0172dbf77c9a7d5e6bdf16cf430398f3",
+      "rule_id": "py/no-eval",
+      "file": "tests/fixtures/vulnerable_cli_taint.py",
+      "line": 31
+    },
+    {
+      "fingerprint": "e77f9f856cdbb8c386d0cb7ef575d4b811605b9997d18d8406739530a7614dc0",
+      "rule_id": "py/taint-command-injection",
+      "file": "tests/fixtures/vulnerable_cli_taint.py",
+      "line": 37
+    },
+    {
+      "fingerprint": "2f43b6c5dd056d61352e6324fad701e2a9cb3263c36ed7a50a273a9b75ccd911",
+      "rule_id": "py/no-command-injection",
+      "file": "tests/fixtures/vulnerable_cli_taint.py",
+      "line": 37
+    },
+    {
+      "fingerprint": "43ac65d3f3d964fd45df3937575fd6e2f8afb0b01f5c179876783408517662fd",
+      "rule_id": "cs/no-command-injection",
+      "file": "tests/fixtures/vulnerable_csharp_taint.cs",
+      "line": 30
+    },
+    {
+      "fingerprint": "4b1d4b5c41e684f32ffa231a1362287adf9993e18bfdcd0e7f1c4fb4a47b035b",
+      "rule_id": "cs/no-xxe",
+      "file": "tests/fixtures/vulnerable_csharp_taint.cs",
+      "line": 54
+    },
+    {
+      "fingerprint": "379b4b3006d8c8936a5f6f3aae7bebf316aea9ed2022ad0d3205d1f5c21bb4c6",
+      "rule_id": "js/taint-xss-innerhtml",
+      "file": "tests/fixtures/vulnerable_deno_taint.ts",
+      "line": 10
+    },
+    {
+      "fingerprint": "5e0c5316af04aacd6a0c2c454e8b3f82669ace3429ae4880756fc61280a7f370",
+      "rule_id": "js/no-xss-innerhtml",
+      "file": "tests/fixtures/vulnerable_deno_taint.ts",
+      "line": 10
+    },
+    {
+      "fingerprint": "eae633ddca13c6fff86298b1f03cb6628ee05bf0388535498164fb80e88246e1",
+      "rule_id": "js/taint-xss-innerhtml",
+      "file": "tests/fixtures/vulnerable_deno_taint.ts",
+      "line": 16
+    },
+    {
+      "fingerprint": "819444cc390a3434e0677e742580dd9969611f46178b839974c506ecb0ee30bf",
+      "rule_id": "js/no-xss-innerhtml",
+      "file": "tests/fixtures/vulnerable_deno_taint.ts",
+      "line": 16
+    },
+    {
+      "fingerprint": "197f882857a622033f865864e06227b87d4729f6fdf55f89dc52b6648d628bf4",
+      "rule_id": "py/taint-pickle-deserialization",
+      "file": "tests/fixtures/vulnerable_django_taint.py",
+      "line": 18
+    },
+    {
+      "fingerprint": "f875f5fea68b9f455b34d1f23e5588c302fad8cee4c1b78dee85ac32dc6476d4",
+      "rule_id": "py/no-pickle",
+      "file": "tests/fixtures/vulnerable_django_taint.py",
+      "line": 18
+    },
+    {
+      "fingerprint": "0daa17708903696f48aab41f97b51a132fa33ede48930acfbf977b41e6c80ae1",
+      "rule_id": "py/taint-command-injection",
+      "file": "tests/fixtures/vulnerable_django_taint.py",
+      "line": 24
+    },
+    {
+      "fingerprint": "c0282b5060ccb304125c65982f3780d1b7d49cbcbe3e69cb4693983938e4ff68",
+      "rule_id": "py/no-command-injection",
+      "file": "tests/fixtures/vulnerable_django_taint.py",
+      "line": 24
+    },
+    {
+      "fingerprint": "cdfb55d824bef54533d77eddb87ba3c39cb1b89f5a2a9757812b2e7b5b384528",
+      "rule_id": "py/taint-eval",
+      "file": "tests/fixtures/vulnerable_django_taint.py",
+      "line": 30
+    },
+    {
+      "fingerprint": "6a5dc6f32630e2c96409a92a02af83ef101c9b032f7e678837948e310fc7859e",
+      "rule_id": "py/no-eval",
+      "file": "tests/fixtures/vulnerable_django_taint.py",
+      "line": 30
+    },
+    {
+      "fingerprint": "f912c5dd28576acada845c5be70744785d088e6d2b353d5c7dfe7532b95ffda5",
+      "rule_id": "py/taint-yaml-load",
+      "file": "tests/fixtures/vulnerable_django_taint.py",
+      "line": 35
+    },
+    {
+      "fingerprint": "067b4c7519accd96c232efe23da8bbd93a9bcd1962e1ab3e1cbffa4607b75b90",
+      "rule_id": "py/no-yaml-load",
+      "file": "tests/fixtures/vulnerable_django_taint.py",
+      "line": 35
+    },
+    {
+      "fingerprint": "94a4ceb55a3c245efda83924f0f532e5fb51b0a52846657213e2fd3f7f923720",
+      "rule_id": "py/taint-ssrf",
+      "file": "tests/fixtures/vulnerable_django_taint.py",
+      "line": 43
+    },
+    {
+      "fingerprint": "254d1c60dd352015cbd8af4de112d5e6a55e68d202c06590c3f6f6d82365f5aa",
+      "rule_id": "py/no-ssrf",
+      "file": "tests/fixtures/vulnerable_django_taint.py",
+      "line": 43
+    },
+    {
+      "fingerprint": "673a00889e6b5a3583756f13e033132e41bf364f85eb2d8788015e0f2cc4680e",
+      "rule_id": "py/taint-pickle-deserialization",
+      "file": "tests/fixtures/vulnerable_fastapi_taint.py",
+      "line": 19
+    },
+    {
+      "fingerprint": "f5ab1d5b9678e5cccf0ebbfc37b61c0ccda8d54639502182c47ab32a6a0e556c",
+      "rule_id": "py/no-pickle",
+      "file": "tests/fixtures/vulnerable_fastapi_taint.py",
+      "line": 19
+    },
+    {
+      "fingerprint": "6eb92a46a0ec331f4713f60a1874986bffac4eacb353eb029859f92ffd81c3fa",
+      "rule_id": "py/taint-command-injection",
+      "file": "tests/fixtures/vulnerable_fastapi_taint.py",
+      "line": 28
+    },
+    {
+      "fingerprint": "badd09873698d71a5113ea241d4aa3038ce73244fae6faa4935ac26c739b560d",
+      "rule_id": "py/no-command-injection",
+      "file": "tests/fixtures/vulnerable_fastapi_taint.py",
+      "line": 28
+    },
+    {
+      "fingerprint": "bfb961c2665d50928ca7ff6a2d817d7e1807fd2bc358bb53a6776123d1d46f46",
+      "rule_id": "py/taint-eval",
+      "file": "tests/fixtures/vulnerable_fastapi_taint.py",
+      "line": 35
+    },
+    {
+      "fingerprint": "291af20d310288ce8217d5fcaa66d2dcfd02ef41f62adb2fe87cb3ada1a81b09",
+      "rule_id": "py/no-eval",
+      "file": "tests/fixtures/vulnerable_fastapi_taint.py",
+      "line": 35
+    },
+    {
+      "fingerprint": "1316efff994048b0af4ba8781956dd3d722ea84d92832db90dcd6275f8fe5470",
+      "rule_id": "go/taint-command-injection",
+      "file": "tests/fixtures/vulnerable_go_taint.go",
+      "line": 23
+    },
+    {
+      "fingerprint": "a97a2fab86afb8b5f0e273e3e093cdfdf0f20d8bf6086b5072f4c444564f715f",
+      "rule_id": "go/no-command-injection",
+      "file": "tests/fixtures/vulnerable_go_taint.go",
+      "line": 23
+    },
+    {
+      "fingerprint": "b1462aefcf462154757aaada2a217e5c0a9ae3e909fdd2b98e5bb08be30143c8",
+      "rule_id": "go/taint-command-injection",
+      "file": "tests/fixtures/vulnerable_go_taint.go",
+      "line": 29
+    },
+    {
+      "fingerprint": "74ff9fedf5489216d9c72f6ef3df5c970fe57ed05cf4b39e55dcb11e94f101b2",
+      "rule_id": "go/no-command-injection",
+      "file": "tests/fixtures/vulnerable_go_taint.go",
+      "line": 29
+    },
+    {
+      "fingerprint": "a64272869ca9a63c131d8c7be16c3d19ebb137d4a06d2b6fda19b370412618c4",
+      "rule_id": "go/taint-command-injection",
+      "file": "tests/fixtures/vulnerable_go_taint.go",
+      "line": 35
+    },
+    {
+      "fingerprint": "8a8a4feb3ffab5369fbef3d2e073d5104cbe32213b54fc32ff65e8eb77aa82d7",
+      "rule_id": "go/no-command-injection",
+      "file": "tests/fixtures/vulnerable_go_taint.go",
+      "line": 35
+    },
+    {
+      "fingerprint": "39edb2b9d0f6298c7b18dd674c61bbf0c4fe151bb4224c6934c4cb6b72a49b99",
+      "rule_id": "go/taint-command-injection",
+      "file": "tests/fixtures/vulnerable_go_taint.go",
+      "line": 42
+    },
+    {
+      "fingerprint": "62ab1910bba8734b4beb1a3096ee2dc9d0ae8e3c1feea5a686c4fbab4ad49eb5",
+      "rule_id": "go/no-command-injection",
+      "file": "tests/fixtures/vulnerable_go_taint.go",
+      "line": 42
+    },
+    {
+      "fingerprint": "89c3698b9d6ed8fb7ecb9f574cf2d33c5480dd18613fdb3468c3fba3624e5852",
+      "rule_id": "go/taint-command-injection",
+      "file": "tests/fixtures/vulnerable_go_taint.go",
+      "line": 49
+    },
+    {
+      "fingerprint": "a124e4c5f8fbd88ca4a1f669a2560f67f9fd1904e3bd796b71a080c9a93d5731",
+      "rule_id": "go/no-command-injection",
+      "file": "tests/fixtures/vulnerable_go_taint.go",
+      "line": 49
+    },
+    {
+      "fingerprint": "50e417e67dd896c61a2864f9e6466810c9c3c96a72bb25916d3f68e2e5c88d2b",
+      "rule_id": "go/taint-sql-injection",
+      "file": "tests/fixtures/vulnerable_go_taint.go",
+      "line": 57
+    },
+    {
+      "fingerprint": "e1d6f66d5741c4796911310a3b768d7cc9b78804b1f07d4001687475505aab71",
+      "rule_id": "go/no-sql-injection",
+      "file": "tests/fixtures/vulnerable_go_taint.go",
+      "line": 57
+    },
+    {
+      "fingerprint": "55d5d3712ed153005e5cdf76a55bdd88441738f181d8c606e3745ea29708f22e",
+      "rule_id": "go/taint-sql-injection",
+      "file": "tests/fixtures/vulnerable_go_taint.go",
+      "line": 63
+    },
+    {
+      "fingerprint": "fd5e9093fc5d2fb6df2f57e4e599102b97877f06b33a2d3923e0a709757a5f1a",
+      "rule_id": "go/no-sql-injection",
+      "file": "tests/fixtures/vulnerable_go_taint.go",
+      "line": 63
+    },
+    {
+      "fingerprint": "a8f3f99a7237f5cb9f7217dacd47b96dce2332fde02487788f445e2f7f083365",
+      "rule_id": "go/taint-sql-injection",
+      "file": "tests/fixtures/vulnerable_go_taint.go",
+      "line": 69
+    },
+    {
+      "fingerprint": "b7ce08f5009015815625c1f38310e6325e45bbd05e549bbb11caf16bfdf043ac",
+      "rule_id": "go/no-sql-injection",
+      "file": "tests/fixtures/vulnerable_go_taint.go",
+      "line": 69
+    },
+    {
+      "fingerprint": "271e4781ba671e675d5ddf87ebc0c7b9a1ef6e42edc1e3abce7221f92168f9a9",
+      "rule_id": "go/taint-ssti",
+      "file": "tests/fixtures/vulnerable_go_taint.go",
+      "line": 78
+    },
+    {
+      "fingerprint": "345bcb464c8b60eda1a7fc313bbda7a758671d6e66ac9d84db5c9a3715561192",
+      "rule_id": "go/taint-xpath-injection",
+      "file": "tests/fixtures/vulnerable_go_taint.go",
+      "line": 86
+    },
+    {
+      "fingerprint": "d7db7b756702e8c8037b78c3f38a29bea165ec7abe4d8efbad852c462ce97d34",
+      "rule_id": "go/taint-ldap-injection",
+      "file": "tests/fixtures/vulnerable_go_taint.go",
+      "line": 94
+    },
+    {
+      "fingerprint": "277fe0fa798de8e5143dd1b19674f9b83d6152f9ad70ff810b5834b045c66063",
+      "rule_id": "go/taint-ssrf",
+      "file": "tests/fixtures/vulnerable_go_taint.go",
+      "line": 102
+    },
+    {
+      "fingerprint": "5b325c2e03dffd12cffc5434509aa3b2652eb3a1f47a718c2ed35bd0065a82d6",
+      "rule_id": "go/no-ssrf",
+      "file": "tests/fixtures/vulnerable_go_taint.go",
+      "line": 102
+    },
+    {
+      "fingerprint": "aeed00abda4122f087525ac98f502e6eab75b7c45663b4727d800adba589ce6c",
+      "rule_id": "go/taint-ssrf",
+      "file": "tests/fixtures/vulnerable_go_taint.go",
+      "line": 108
+    },
+    {
+      "fingerprint": "2ff4900fa0d116f743fcedaca5311a0ec162aee7eda532f67cd33d72352fd478",
+      "rule_id": "go/no-ssrf",
+      "file": "tests/fixtures/vulnerable_go_taint.go",
+      "line": 108
+    },
+    {
+      "fingerprint": "1af8bd0b48af939ff81bffc13323420d2963b1458c995f3b209417446f9bef9c",
+      "rule_id": "go/taint-ssrf",
+      "file": "tests/fixtures/vulnerable_go_taint.go",
+      "line": 114
+    },
+    {
+      "fingerprint": "2bb2ea008c40eabf12181d9d9fa42c32212cb0286031dd0ed5c2fbd1691dc168",
+      "rule_id": "go/no-ssrf",
+      "file": "tests/fixtures/vulnerable_go_taint.go",
+      "line": 114
+    },
+    {
+      "fingerprint": "4271c3425ec30cc64c02d0137b594bf7a718db8b29f8b83d50abbf268034b7af",
+      "rule_id": "go/taint-log-injection",
+      "file": "tests/fixtures/vulnerable_go_taint.go",
+      "line": 122
+    },
+    {
+      "fingerprint": "28b3a5bb692d1c6f67c0951f6a17ae4e70a4fa5e79304c99e76e428eddf20e2b",
+      "rule_id": "go/taint-nosql-injection",
+      "file": "tests/fixtures/vulnerable_go_taint.go",
+      "line": 130
+    },
+    {
+      "fingerprint": "a54bd3069ab4c5660cb1d5e6c6e873f5eb6507d9d07837a7a95bbfcc6c0a3e3d",
+      "rule_id": "go/taint-path-traversal",
+      "file": "tests/fixtures/vulnerable_go_taint.go",
+      "line": 138
+    },
+    {
+      "fingerprint": "413330410715a36edf2f1da3af93613816ba70be8938275de01570f2ee5ba024",
+      "rule_id": "go/taint-path-traversal",
+      "file": "tests/fixtures/vulnerable_go_taint.go",
+      "line": 144
+    },
+    {
+      "fingerprint": "1630dba88460698f5384b03efb449eb5e09be5bb76f48dfdf1c2bb4a6e915b95",
+      "rule_id": "go/taint-path-traversal",
+      "file": "tests/fixtures/vulnerable_go_taint.go",
+      "line": 150
+    },
+    {
+      "fingerprint": "912097ddbcad5a903b9078eaadc9c0714ad722e33b184d45e52ae0420700dd5b",
+      "rule_id": "js/taint-xss-innerhtml",
+      "file": "tests/fixtures/vulnerable_hono_taint.ts",
+      "line": 11
+    },
+    {
+      "fingerprint": "2f0649c6bf8e6242ebaac0dc2058cd82ea0d90ef737f40d7c2a8d487fcaa25f6",
+      "rule_id": "js/no-document-write",
+      "file": "tests/fixtures/vulnerable_hono_taint.ts",
+      "line": 11
+    },
+    {
+      "fingerprint": "88cc453d6cbd24dd19b7c8568cbe248baafe65e547ce72bfc235e085f79cfec6",
+      "rule_id": "js/taint-xss-innerhtml",
+      "file": "tests/fixtures/vulnerable_hono_taint.ts",
+      "line": 18
+    },
+    {
+      "fingerprint": "1afb5736ab9f5291e2dcd7308e4befc299b6743bf4c8d9e72d671fcdfea149c8",
+      "rule_id": "js/no-xss-innerhtml",
+      "file": "tests/fixtures/vulnerable_hono_taint.ts",
+      "line": 18
+    },
+    {
+      "fingerprint": "eadd72addbd7154e88b78f9eebfb38283e17c95cac95fe5272b1ba607ff4f9bd",
+      "rule_id": "java/taint-sql-injection",
+      "file": "tests/fixtures/vulnerable_java_taint.java",
+      "line": 9
+    },
+    {
+      "fingerprint": "afe458cd230769e39bfb7c0b765aefe5b7b7f42cb8cdf0921b80e81a42f986bf",
+      "rule_id": "java/taint-command-injection",
+      "file": "tests/fixtures/vulnerable_java_taint.java",
+      "line": 14
+    },
+    {
+      "fingerprint": "3bb120be1c293fd0562102ceed473d502010564592d116f9d5381997917a9052",
+      "rule_id": "java/taint-ssrf",
+      "file": "tests/fixtures/vulnerable_java_taint.java",
+      "line": 19
+    },
+    {
+      "fingerprint": "08e1d9ff4982e2b365b822b84e3422a81b9c65be10af680b394370cb102df6ea",
+      "rule_id": "java/taint-unsafe-deserialization",
+      "file": "tests/fixtures/vulnerable_java_taint.java",
+      "line": 24
+    },
+    {
+      "fingerprint": "b153de9953136cf01c61dfbd862caa0526df1e682a0ab5dedbb8bbdf3ff4a18e",
+      "rule_id": "js/taint-xss-innerhtml",
+      "file": "tests/fixtures/vulnerable_js_taint.js",
+      "line": 10
+    },
+    {
+      "fingerprint": "ce470983319b7c5df1283daa8ec39fbe25a2e466dad9ffbdea7e1d22a1c8c095",
+      "rule_id": "js/no-xss-innerhtml",
+      "file": "tests/fixtures/vulnerable_js_taint.js",
+      "line": 10
+    },
+    {
+      "fingerprint": "ffd3e907359f6fa07dae4e3bdbb8c16868c048f85cf912c6799a5a5c9475408d",
+      "rule_id": "js/taint-xss-innerhtml",
+      "file": "tests/fixtures/vulnerable_js_taint.js",
+      "line": 16
+    },
+    {
+      "fingerprint": "3cd8c9f6a0c0a7af5c9b6ffaeef85929d70a60bcf240bb12060790865353f3f7",
+      "rule_id": "js/no-xss-innerhtml",
+      "file": "tests/fixtures/vulnerable_js_taint.js",
+      "line": 16
+    },
+    {
+      "fingerprint": "ef8104104f3251b5fbc3a126115cf9a36c82420689ef7c5b25463b52f8cdee23",
+      "rule_id": "js/taint-xss-innerhtml",
+      "file": "tests/fixtures/vulnerable_js_taint.js",
+      "line": 21
+    },
+    {
+      "fingerprint": "17e4cb571a036bbc71900f6eec320376008c0f073b4c7f1c232301baa3c0063e",
+      "rule_id": "js/no-document-write",
+      "file": "tests/fixtures/vulnerable_js_taint.js",
+      "line": 21
+    },
+    {
+      "fingerprint": "2d6ccef3db1909e54deb9bc2eae0ba9a3f19481a349b4757ff4e03243ecd44b8",
+      "rule_id": "js/taint-xss-innerhtml",
+      "file": "tests/fixtures/vulnerable_js_taint.js",
+      "line": 27
+    },
+    {
+      "fingerprint": "ce63aeca2e326bee2bd436dce6a97e43ab4aa0aa9cd3c04f0917a383741c10c4",
+      "rule_id": "js/no-xss-innerhtml",
+      "file": "tests/fixtures/vulnerable_js_taint.js",
+      "line": 27
+    },
+    {
+      "fingerprint": "175ad5da4070d002bc5a5083be9fc3ba227ff89c2a2f82b2371a8cc9e35d5cc1",
+      "rule_id": "js/taint-xss-innerhtml",
+      "file": "tests/fixtures/vulnerable_js_taint.js",
+      "line": 34
+    },
+    {
+      "fingerprint": "c85f65bbf3abb09d5397f3c845dfe319c3890a824fed0de88189a9fe0bd89a67",
+      "rule_id": "js/no-document-write",
+      "file": "tests/fixtures/vulnerable_js_taint.js",
+      "line": 34
+    },
+    {
+      "fingerprint": "d6b6e584036058f4ec5a5c42aac5c41f0a568f06d81f2f7e2ccecf407df41627",
+      "rule_id": "js/taint-xss-innerhtml",
+      "file": "tests/fixtures/vulnerable_js_taint.js",
+      "line": 39
+    },
+    {
+      "fingerprint": "2fe3b782cf612739df1c78db2cf13a6502e9206aa4e35171b3e65b768eecfaa0",
+      "rule_id": "js/no-document-write",
+      "file": "tests/fixtures/vulnerable_js_taint.js",
+      "line": 39
+    },
+    {
+      "fingerprint": "d3a0fa666732d6cb1ffa02d5a2322db018ff4028842a8538bd234a5b33ca842c",
+      "rule_id": "js/taint-xss-innerhtml",
+      "file": "tests/fixtures/vulnerable_js_taint.js",
+      "line": 51
+    },
+    {
+      "fingerprint": "67193ef5a07794d55765958bbd7d96a6e14f075c41854fb15e5029fd2d632ace",
+      "rule_id": "js/no-document-write",
+      "file": "tests/fixtures/vulnerable_js_taint.js",
+      "line": 51
+    },
+    {
+      "fingerprint": "344909a6ebf05348c7096f2d7e753dc0ca531949b51df6d6cc8739e41ac532e6",
+      "rule_id": "js/taint-xss-innerhtml",
+      "file": "tests/fixtures/vulnerable_js_taint.js",
+      "line": 58
+    },
+    {
+      "fingerprint": "1f4527f2b3ae49fb9d91f5dc70c76de3275c7c74a15c82531957e2ca0fbda10c",
+      "rule_id": "js/no-document-write",
+      "file": "tests/fixtures/vulnerable_js_taint.js",
+      "line": 58
+    },
+    {
+      "fingerprint": "c4307c2e10149b1a9305a62ed1a2612aeb64ad17d0e42419c5c3434ac73bff74",
+      "rule_id": "js/taint-xss-innerhtml",
+      "file": "tests/fixtures/vulnerable_js_taint.js",
+      "line": 65
+    },
+    {
+      "fingerprint": "769546a438cc5a1661f58385f3c324a20ba0216b727e6210fd19ffdec4495457",
+      "rule_id": "js/taint-xss-innerhtml",
+      "file": "tests/fixtures/vulnerable_js_taint.js",
+      "line": 71
+    },
+    {
+      "fingerprint": "5824256ba9d58bd4d2d53e9a5054ec71ff92604ebcb1259c8f7bdd588bd4579e",
+      "rule_id": "js/no-xss-innerhtml",
+      "file": "tests/fixtures/vulnerable_js_taint.js",
+      "line": 71
+    },
+    {
+      "fingerprint": "ba6c83704b1885beb1d162276da346b8dd2fa2a480d73b52722b28787df538d1",
+      "rule_id": "js/taint-log-injection",
+      "file": "tests/fixtures/vulnerable_js_taint.js",
+      "line": 77
+    },
+    {
+      "fingerprint": "a6fe6bb201dd743901c721535473117d1452289fa9e10b6dadba898f39a63e94",
+      "rule_id": "js/taint-xxe",
+      "file": "tests/fixtures/vulnerable_js_taint.js",
+      "line": 84
+    },
+    {
+      "fingerprint": "70c9af6c0e8a6e5c0e8d1fd1224f5c94f9d14df97949c270f3d33d339452a98b",
+      "rule_id": "js/taint-nosql-injection",
+      "file": "tests/fixtures/vulnerable_js_taint.js",
+      "line": 91
+    },
+    {
+      "fingerprint": "2d5b4c0e0bff8c31d5a170ecc31eabae4c4e3febf301d40c5b371d6b709b307e",
+      "rule_id": "js/taint-ldap-injection",
+      "file": "tests/fixtures/vulnerable_js_taint.js",
+      "line": 97
+    },
+    {
+      "fingerprint": "12cd9d85748bf95097532c3ecfe11fe61fdc580bc6f946ac33adb5f9d063cae2",
+      "rule_id": "js/taint-xss-innerhtml",
+      "file": "tests/fixtures/vulnerable_nextjs_taint.ts",
+      "line": 13
+    },
+    {
+      "fingerprint": "5ff80f5701c59b42fdf1909a06f4bb10c9fe1578f92a0742ca9e6e336a13765f",
+      "rule_id": "js/no-xss-innerhtml",
+      "file": "tests/fixtures/vulnerable_nextjs_taint.ts",
+      "line": 13
+    },
+    {
+      "fingerprint": "9237ee72aeaaced38d884cad1492b27956183daa75ddfe0ada6f0d496a8934a9",
+      "rule_id": "js/taint-xss-innerhtml",
+      "file": "tests/fixtures/vulnerable_nextjs_taint.ts",
+      "line": 19
+    },
+    {
+      "fingerprint": "3672563f5bd8b9d3c919a5c60148983d0ff7327c052a6d022a62de0dbafbe7fa",
+      "rule_id": "js/no-document-write",
+      "file": "tests/fixtures/vulnerable_nextjs_taint.ts",
+      "line": 19
+    },
+    {
+      "fingerprint": "f4c56e53dbf4f97675ecb3e559263a4f9a6f30e35d5f4ed1fdf2b34a96858ed3",
+      "rule_id": "php/no-command-injection",
+      "file": "tests/fixtures/vulnerable_php_taint.php",
+      "line": 11
+    },
+    {
+      "fingerprint": "6f9e53c677ebd83ed837ff76ef243d0dc409fe4d4947b158fee42b73886bfcc7",
+      "rule_id": "php/no-file-inclusion",
+      "file": "tests/fixtures/vulnerable_php_taint.php",
+      "line": 32
+    },
+    {
+      "fingerprint": "2cf0abb8b4772e12d779d93a79407ae43d405043ea85359c89f8da4e9ce5f9fb",
+      "rule_id": "php/no-unserialize",
+      "file": "tests/fixtures/vulnerable_php_taint.php",
+      "line": 39
+    },
+    {
+      "fingerprint": "91ae20fa132bac2d728a99c352ff61ca8854bd4a597b4cc1479191ab09a11c36",
+      "rule_id": "py/no-pickle",
+      "file": "tests/fixtures/vulnerable_py_aliases.py",
+      "line": 30
+    },
+    {
+      "fingerprint": "ce915ca1f7d802ad7843b1647478e71d157048f724da9a898883733a4ec35109",
+      "rule_id": "py/no-pickle",
+      "file": "tests/fixtures/vulnerable_py_aliases.py",
+      "line": 33
+    },
+    {
+      "fingerprint": "4d8ab4b1e1251e752bfbc5e67cd7ead35e1babf144aee81424585c5c27fe6515",
+      "rule_id": "py/no-pickle",
+      "file": "tests/fixtures/vulnerable_py_aliases.py",
+      "line": 36
+    },
+    {
+      "fingerprint": "267cab98c7af3ca4af31143375ac2f81a0eb8d51318b95abbc01574bcb532163",
+      "rule_id": "py/no-pickle",
+      "file": "tests/fixtures/vulnerable_py_aliases.py",
+      "line": 39
+    },
+    {
+      "fingerprint": "d9a98e32f8d5cdb6137d96870b5ae1373d59f89041c32a81a2a3b178efce6139",
+      "rule_id": "py/no-yaml-load",
+      "file": "tests/fixtures/vulnerable_py_aliases.py",
+      "line": 44
+    },
+    {
+      "fingerprint": "5c0368528b9b8571031d6a21a8dc5f172ac9f4edf2e04600ba5da07d965c5f83",
+      "rule_id": "py/no-yaml-load",
+      "file": "tests/fixtures/vulnerable_py_aliases.py",
+      "line": 47
+    },
+    {
+      "fingerprint": "6b9db1ba74e9f5981999d0ce272f4c5e6b449b63aff6d199c9a7e1e4f30aa56c",
+      "rule_id": "py/no-weak-crypto",
+      "file": "tests/fixtures/vulnerable_py_aliases.py",
+      "line": 52
+    },
+    {
+      "fingerprint": "3b0c6cac5b1fdb55368d180d806bf9b542de2e16cc41cba3aabb06dc373d9e2b",
+      "rule_id": "py/no-weak-crypto",
+      "file": "tests/fixtures/vulnerable_py_aliases.py",
+      "line": 55
+    },
+    {
+      "fingerprint": "79c23c5f0b1616a68c166e9db6f83963f21468adf2250f54333f185c412e2768",
+      "rule_id": "py/no-weak-crypto",
+      "file": "tests/fixtures/vulnerable_py_aliases.py",
+      "line": 58
+    },
+    {
+      "fingerprint": "7454ac5da6acd03769bd39a508c5e602660c1bd2465ef27c592acba85c24a981",
+      "rule_id": "py/no-weak-crypto",
+      "file": "tests/fixtures/vulnerable_py_aliases.py",
+      "line": 61
+    },
+    {
+      "fingerprint": "d724042b2b25471d5edf176f3606903c3eaef6dbf7475ac0e0d07c2623d83309",
+      "rule_id": "py/no-ssrf",
+      "file": "tests/fixtures/vulnerable_py_aliases.py",
+      "line": 66
+    },
+    {
+      "fingerprint": "40872065716b4fac47a8d83e494d18ba0c2b60bf70e25f1e80c46c8dcfbf3c33",
+      "rule_id": "py/no-ssrf",
+      "file": "tests/fixtures/vulnerable_py_aliases.py",
+      "line": 69
+    },
+    {
+      "fingerprint": "3c2e03133ba2fbc2968e9a266826c6d724c515466bad39aabc1d14d9691051eb",
+      "rule_id": "py/no-command-injection",
+      "file": "tests/fixtures/vulnerable_py_aliases.py",
+      "line": 74
+    },
+    {
+      "fingerprint": "7b4f3f41f628993745d475d9071ee1286de194bd094884104d375bc3014ff113",
+      "rule_id": "py/no-command-injection",
+      "file": "tests/fixtures/vulnerable_py_aliases.py",
+      "line": 77
+    },
+    {
+      "fingerprint": "2f098702d3d2b6f7b80ff66bf20343f8e6d3401fa9d79cc82c570ee1222b8b8f",
+      "rule_id": "py/no-command-injection",
+      "file": "tests/fixtures/vulnerable_py_aliases.py",
+      "line": 80
+    },
+    {
+      "fingerprint": "89b3c30a22b0ce8ef4441de328a215dae3c13ae67db9806b70c770650033b989",
+      "rule_id": "py/no-command-injection",
+      "file": "tests/fixtures/vulnerable_py_aliases.py",
+      "line": 83
+    },
+    {
+      "fingerprint": "d54ddf48c96631fbbf0371899f84b91b8f6e6b94f3f0c65f68dc2f62bd1efebe",
+      "rule_id": "py/no-path-traversal",
+      "file": "tests/fixtures/vulnerable_py_aliases.py",
+      "line": 88
+    },
+    {
+      "fingerprint": "895724f2e8c6cbc1144cf17dd1e7ecafc8e93c851a230efdbbf57e324dd10802",
+      "rule_id": "py/no-path-traversal",
+      "file": "tests/fixtures/vulnerable_py_aliases.py",
+      "line": 93
+    },
+    {
+      "fingerprint": "a9ba13625f04823b386424134085e8eb5e69dbe625d73d57f58eaafe88b81b84",
+      "rule_id": "py/taint-pickle-deserialization",
+      "file": "tests/fixtures/vulnerable_py_taint.py",
+      "line": 15
+    },
+    {
+      "fingerprint": "decd219767874cd986ee5fa67a74239a55396ce3035030f6aa87138a1da40e2d",
+      "rule_id": "py/no-pickle",
+      "file": "tests/fixtures/vulnerable_py_taint.py",
+      "line": 15
+    },
+    {
+      "fingerprint": "350e04ac5c83f9c459ac5e172a26bba5739340b5faa8ce54bfa1ecbcee3cf275",
+      "rule_id": "py/taint-pickle-deserialization",
+      "file": "tests/fixtures/vulnerable_py_taint.py",
+      "line": 21
+    },
+    {
+      "fingerprint": "d0207727c4fdd13333c240637abc3d565167b6ebc173dc1d664c9bb466b787e9",
+      "rule_id": "py/no-pickle",
+      "file": "tests/fixtures/vulnerable_py_taint.py",
+      "line": 21
+    },
+    {
+      "fingerprint": "e00041e7da36c426920fa7b453344dd4fa883ce3759c210512c64787a391bcca",
+      "rule_id": "py/taint-pickle-deserialization",
+      "file": "tests/fixtures/vulnerable_py_taint.py",
+      "line": 29
+    },
+    {
+      "fingerprint": "c892e614ccde5585ab3c4563e0450dd30e954db4fe8dbc846262e42832cbd310",
+      "rule_id": "py/no-pickle",
+      "file": "tests/fixtures/vulnerable_py_taint.py",
+      "line": 29
+    },
+    {
+      "fingerprint": "ffe01d7b2629bce227adf79ef23708a0d17a3cbae50f2e78437306c8b84cea71",
+      "rule_id": "py/taint-pickle-deserialization",
+      "file": "tests/fixtures/vulnerable_py_taint.py",
+      "line": 35
+    },
+    {
+      "fingerprint": "453233eff5419c41e3b70652b32bf59878561a10d1f19e477e52a5af8090d357",
+      "rule_id": "py/no-pickle",
+      "file": "tests/fixtures/vulnerable_py_taint.py",
+      "line": 35
+    },
+    {
+      "fingerprint": "cc35705cd80666115b0497c4d5ab46af8639dd22c00b90a5a2dc32b731610d6e",
+      "rule_id": "py/taint-pickle-deserialization",
+      "file": "tests/fixtures/vulnerable_py_taint.py",
+      "line": 41
+    },
+    {
+      "fingerprint": "5c43912dba5622d1bda77a35200e7ba3d11badc5f3a4b2592e99d6910a9fa8dc",
+      "rule_id": "py/no-pickle",
+      "file": "tests/fixtures/vulnerable_py_taint.py",
+      "line": 41
+    },
+    {
+      "fingerprint": "4c5222d9662e36b060019169a7572812d58cd354f336d3bc8fb2b75864797b99",
+      "rule_id": "py/taint-pickle-deserialization",
+      "file": "tests/fixtures/vulnerable_py_taint.py",
+      "line": 46
+    },
+    {
+      "fingerprint": "a7fca691dc1d54f00f16a134265de0f5bbf3ba862b131cc5d6bafcc7a690e086",
+      "rule_id": "py/no-pickle",
+      "file": "tests/fixtures/vulnerable_py_taint.py",
+      "line": 46
+    },
+    {
+      "fingerprint": "1c1182cc66f319a522f208620f207206f5671b889692e8d7693139b6a1c0ed53",
+      "rule_id": "py/taint-pickle-deserialization",
+      "file": "tests/fixtures/vulnerable_py_taint.py",
+      "line": 54
+    },
+    {
+      "fingerprint": "0da756b833368861c8ff1fcc5d9fc350c42acb6cc894470f41f468bcd4950806",
+      "rule_id": "py/no-pickle",
+      "file": "tests/fixtures/vulnerable_py_taint.py",
+      "line": 54
+    },
+    {
+      "fingerprint": "fc60725e6f0c44a07447b2828ba8351b7a3e226a70ae402f80b6e7ae7f33d47c",
+      "rule_id": "py/taint-pickle-deserialization",
+      "file": "tests/fixtures/vulnerable_py_taint.py",
+      "line": 60
+    },
+    {
+      "fingerprint": "356a5f485060e934956dee85f4e3f3502f8cf0fdf76a2b07d7760bde082ee53f",
+      "rule_id": "py/no-pickle",
+      "file": "tests/fixtures/vulnerable_py_taint.py",
+      "line": 60
+    },
+    {
+      "fingerprint": "310d2a360cd1a6191fbf820c589cb27fb742513251520cb0791556100dbef947",
+      "rule_id": "py/taint-pickle-deserialization",
+      "file": "tests/fixtures/vulnerable_py_taint.py",
+      "line": 65
+    },
+    {
+      "fingerprint": "461f15b7da5b8c55719f94326971c9406aa676654f037c0868c78e93312c8b53",
+      "rule_id": "py/no-pickle",
+      "file": "tests/fixtures/vulnerable_py_taint.py",
+      "line": 65
+    },
+    {
+      "fingerprint": "7872424fd4a4594563e96ac91364c25f8567d6a00d1b91f7846eae9deed8e8d0",
+      "rule_id": "py/taint-pickle-deserialization",
+      "file": "tests/fixtures/vulnerable_py_taint.py",
+      "line": 71
+    },
+    {
+      "fingerprint": "a1eaa18d64573fb8cd2781c0c1839901764271370625e82eaf4cf33279fa3dc6",
+      "rule_id": "py/no-pickle",
+      "file": "tests/fixtures/vulnerable_py_taint.py",
+      "line": 71
+    },
+    {
+      "fingerprint": "9b36276d999736d8ff9a2ff2d6e5296c60e6d4c65af8fb4c510e05577a0ec145",
+      "rule_id": "py/taint-pickle-deserialization",
+      "file": "tests/fixtures/vulnerable_py_taint.py",
+      "line": 76
+    },
+    {
+      "fingerprint": "a51526481269f763d51b233363c43bf7c7fbd547b9105801d45ebedd473fee6f",
+      "rule_id": "py/no-pickle",
+      "file": "tests/fixtures/vulnerable_py_taint.py",
+      "line": 76
+    },
+    {
+      "fingerprint": "e60afb6ac7854e3f5407f28c3097b51a677be3c7668cf9b81a7322b5389830b4",
+      "rule_id": "py/taint-pickle-deserialization",
+      "file": "tests/fixtures/vulnerable_py_taint.py",
+      "line": 82
+    },
+    {
+      "fingerprint": "316bbc63df2c04dd85604d3e7f25b6f905e4fa8afbd49f87f80fd55a320c1e40",
+      "rule_id": "py/no-pickle",
+      "file": "tests/fixtures/vulnerable_py_taint.py",
+      "line": 82
+    },
+    {
+      "fingerprint": "27f18b073f9042a4b824222493d07940a6f5b6abc1cec3461236f10700359dd7",
+      "rule_id": "py/taint-pickle-deserialization",
+      "file": "tests/fixtures/vulnerable_py_taint.py",
+      "line": 88
+    },
+    {
+      "fingerprint": "c6bdaa437eea617fef9ea75de6894857fc82749f18eaf6f35ed2512f5932aebe",
+      "rule_id": "py/no-pickle",
+      "file": "tests/fixtures/vulnerable_py_taint.py",
+      "line": 88
+    },
+    {
+      "fingerprint": "77645ac0b3eaa3a35053527fad3b46106ccfbf2f12f63551c7e08d70ae6545fc",
+      "rule_id": "py/taint-pickle-deserialization",
+      "file": "tests/fixtures/vulnerable_py_taint.py",
+      "line": 94
+    },
+    {
+      "fingerprint": "4d1ac224eef76a19dec5abe4e4853bd18d2e6ab7a7a0cc00f38fab1362ac65a5",
+      "rule_id": "py/no-pickle",
+      "file": "tests/fixtures/vulnerable_py_taint.py",
+      "line": 94
+    },
+    {
+      "fingerprint": "5422345f34fc1db28db9c998403457a33dc93c179ec4d4906b95b2bd7c2faf39",
+      "rule_id": "py/taint-pickle-deserialization",
+      "file": "tests/fixtures/vulnerable_py_taint.py",
+      "line": 108
+    },
+    {
+      "fingerprint": "4fb1a559e68e8ea9465f4d98be7305552f5bbf846ec43fd2f32ec4447f1dfb89",
+      "rule_id": "py/no-pickle",
+      "file": "tests/fixtures/vulnerable_py_taint.py",
+      "line": 108
+    },
+    {
+      "fingerprint": "93ab4ef2102c8a8e8836f4dd0abcf70ebd572e0a2714004ec1b54613b975dc1c",
+      "rule_id": "py/taint-pickle-deserialization",
+      "file": "tests/fixtures/vulnerable_py_taint.py",
+      "line": 116
+    },
+    {
+      "fingerprint": "336618fdcce534672982ade23fa10e7fcfaa54631d50085dca7826648e140649",
+      "rule_id": "py/no-pickle",
+      "file": "tests/fixtures/vulnerable_py_taint.py",
+      "line": 116
+    },
+    {
+      "fingerprint": "e198f668910f82331193520353db71ff02e70ce0bd82ba0c3e106c686fa8394f",
+      "rule_id": "py/taint-eval",
+      "file": "tests/fixtures/vulnerable_py_taint.py",
+      "line": 131
+    },
+    {
+      "fingerprint": "18e85aefe5f7e47dab1fc2078e4570e472c61633574c3c3a4d385f05c2c7a0e2",
+      "rule_id": "py/no-eval",
+      "file": "tests/fixtures/vulnerable_py_taint.py",
+      "line": 131
+    },
+    {
+      "fingerprint": "6ea634b0a7b42e41c5e757d581a1980fb20a51e4d7c0455cb214cb5fa3df3067",
+      "rule_id": "py/taint-command-injection",
+      "file": "tests/fixtures/vulnerable_py_taint.py",
+      "line": 137
+    },
+    {
+      "fingerprint": "d9dfed23d169ea9ad41f18e40c579818647096277db92141416072a99af1fe8d",
+      "rule_id": "py/no-command-injection",
+      "file": "tests/fixtures/vulnerable_py_taint.py",
+      "line": 137
+    },
+    {
+      "fingerprint": "e31b934ce8ca23e2316dd07322d1209681e0485793068d509f02130908eb7be5",
+      "rule_id": "py/taint-ssrf",
+      "file": "tests/fixtures/vulnerable_py_taint.py",
+      "line": 143
+    },
+    {
+      "fingerprint": "88b1cae800c5b97593fee96294ca54a6d280476f8b0ef27c58d5ef659c8e63d0",
+      "rule_id": "py/no-ssrf",
+      "file": "tests/fixtures/vulnerable_py_taint.py",
+      "line": 143
+    },
+    {
+      "fingerprint": "a6f6549704dbffa9d9e265e7d6b0cbd457f3e87c4f4c3bdcf9a0838683c0ad3f",
+      "rule_id": "py/taint-yaml-load",
+      "file": "tests/fixtures/vulnerable_py_taint.py",
+      "line": 149
+    },
+    {
+      "fingerprint": "92d21c14be3a73232d3eb38fcfccd3125525635fdb24c156900087c768ae0e04",
+      "rule_id": "py/no-yaml-load",
+      "file": "tests/fixtures/vulnerable_py_taint.py",
+      "line": 149
+    },
+    {
+      "fingerprint": "147d06f38179f5e76258704241fc9a1d5cbc632568517fa50e12bb7f060cbbca",
+      "rule_id": "py/no-sql-injection",
+      "file": "tests/fixtures/vulnerable_py_taint.py",
+      "line": 159
+    },
+    {
+      "fingerprint": "103a462e2d273b058b4123f4af8cd2c8a62952e9251038f35870633d91abec08",
+      "rule_id": "py/taint-sql-injection",
+      "file": "tests/fixtures/vulnerable_py_taint.py",
+      "line": 162
+    },
+    {
+      "fingerprint": "b2a5bd47f7d8f3eb6c13a648ecb83c33d9db28adb1a02efb179685b04d88b77e",
+      "rule_id": "py/taint-command-injection",
+      "file": "tests/fixtures/vulnerable_py_taint.py",
+      "line": 171
+    },
+    {
+      "fingerprint": "351688691bd061bfaaa723d3e98e54ac1a59a39426e34ddc54d744afdfedef28",
+      "rule_id": "py/no-command-injection",
+      "file": "tests/fixtures/vulnerable_py_taint.py",
+      "line": 171
+    },
+    {
+      "fingerprint": "f77a0177d99c138b545bf1a2283f303e6827f3c9c3b615e9add784072a385b65",
+      "rule_id": "py/taint-eval",
+      "file": "tests/fixtures/vulnerable_py_taint.py",
+      "line": 176
+    },
+    {
+      "fingerprint": "caccb41be8f20963f785241a9f6f8c76771e1e077e4d9f9915356e96d151d350",
+      "rule_id": "py/no-eval",
+      "file": "tests/fixtures/vulnerable_py_taint.py",
+      "line": 176
+    },
+    {
+      "fingerprint": "8a32055951dc833b68408c23beb5002d3089b07e8fb0a86c9125a437a41c0a39",
+      "rule_id": "py/taint-sql-injection",
+      "file": "tests/fixtures/vulnerable_py_taint.py",
+      "line": 185
+    },
+    {
+      "fingerprint": "ac24a483e81a9e1943179e9914859fb3ca215c84108b966ef8e3a0d9f81f464e",
+      "rule_id": "py/no-sql-injection",
+      "file": "tests/fixtures/vulnerable_py_taint.py",
+      "line": 185
+    },
+    {
+      "fingerprint": "58457cc7fabd0ea901f8ec7bb209583653f953d45b18f2f19122a2a492f058d6",
+      "rule_id": "py/taint-ssti",
+      "file": "tests/fixtures/vulnerable_py_taint.py",
+      "line": 195
+    },
+    {
+      "fingerprint": "aeebf902b3afcc49ad1637f1826a5d3b8bb0ea01fba9b24e75d19abbdc146fec",
+      "rule_id": "py/taint-xpath-injection",
+      "file": "tests/fixtures/vulnerable_py_taint.py",
+      "line": 205
+    },
+    {
+      "fingerprint": "ae4eff687020c523b8223510746dfa7677579a7f15a22fa02e6bbc9de527084c",
+      "rule_id": "py/taint-ldap-injection",
+      "file": "tests/fixtures/vulnerable_py_taint.py",
+      "line": 215
+    },
+    {
+      "fingerprint": "c2d72b3deffc0b821d83a0992109df8b619927697962c83b0a2810ca5464f193",
+      "rule_id": "py/taint-command-injection",
+      "file": "tests/fixtures/vulnerable_py_taint.py",
+      "line": 221
+    },
+    {
+      "fingerprint": "d7a7764c41f5f431fcf8219d4c8c79c9fe9c093276fcbfe5ad63403330fd2cf3",
+      "rule_id": "py/no-command-injection",
+      "file": "tests/fixtures/vulnerable_py_taint.py",
+      "line": 221
+    },
+    {
+      "fingerprint": "dbf4fd2ecc9cf90a801af36f48432a61f2a4cf219af49b8c4eb779859f4f5479",
+      "rule_id": "py/taint-log-injection",
+      "file": "tests/fixtures/vulnerable_py_taint.py",
+      "line": 229
+    },
+    {
+      "fingerprint": "cab337fb08775ad7564ce151177a51888e740602da040b2199c04606e6b8c69a",
+      "rule_id": "py/taint-xxe",
+      "file": "tests/fixtures/vulnerable_py_taint.py",
+      "line": 237
+    },
+    {
+      "fingerprint": "b7b66f1e1167a212c6deb6d2de48e177639974921b8af3d64733c78183c31638",
+      "rule_id": "py/taint-nosql-injection",
+      "file": "tests/fixtures/vulnerable_py_taint.py",
+      "line": 247
+    },
+    {
+      "fingerprint": "43b0cdbd4e21558deb1435f766adbe9467214144bbc1f726e04a6b7c2fac1966",
+      "rule_id": "rb/no-command-injection",
+      "file": "tests/fixtures/vulnerable_ruby_taint.rb",
+      "line": 17
+    },
+    {
+      "fingerprint": "f005818ed33d8a5a4ef0a5241da543e73039bda5b316dc9b03ff0a7686d66cab",
+      "rule_id": "rb/no-sql-injection",
+      "file": "tests/fixtures/vulnerable_ruby_taint.rb",
+      "line": 24
+    },
+    {
+      "fingerprint": "754fad68bac0beb205ab63f5df5b4636526a66c814b62987bd007b5f5304e875",
+      "rule_id": "rb/no-html-safe",
+      "file": "tests/fixtures/vulnerable_ruby_taint.rb",
+      "line": 34
+    },
+    {
+      "fingerprint": "f9cc35394133fda8f099234f87723732bac57640663267c657678dd2020bc18f",
+      "rule_id": "rb/no-unsafe-deserialization",
+      "file": "tests/fixtures/vulnerable_ruby_taint.rb",
+      "line": 41
+    },
+    {
+      "fingerprint": "f68fa65e3a7e224c26cbe724a699489e937a22482c598b092dd5bea0cbab0eb5",
+      "rule_id": "rb/no-open-redirect",
+      "file": "tests/fixtures/vulnerable_ruby_taint.rb",
+      "line": 48
+    },
+    {
+      "fingerprint": "1be19a9e7798e3812db207cd6c36897c6077a70fc85fd19ca28db8b2309f964a",
+      "rule_id": "rb/no-command-injection",
+      "file": "tests/fixtures/vulnerable_ruby_taint.rb",
+      "line": 70
+    },
+    {
+      "fingerprint": "2c62e40f4e1d63c4cf3d57e1fe93c1197840b7fb73bc5d367953e9c0149a3326",
+      "rule_id": "js/no-eval",
+      "file": "tests/fixtures/vulnerable_tsx.tsx",
+      "line": 6
+    },
+    {
+      "fingerprint": "89fa04df927b713fd9b90b9dbba4b5259a2aa5535d0de6438da6c493f6636d75",
+      "rule_id": "js/no-eval",
+      "file": "tests/fixtures/vulnerable_typescript.ts",
+      "line": 6
+    },
+    {
+      "fingerprint": "3a1645dfd6d1091d8f4ad4b3935b1c147e0054fd69a7fd09c5d752c83c1e3148",
+      "rule_id": "rs/no-path-traversal",
+      "file": "tests/integration.rs",
+      "line": 1400
+    },
+    {
+      "fingerprint": "24aebc5d73d224cda874c5a9b37e38b3f41432d5bb42738eb0e1d7ab95d73c86",
+      "rule_id": "rs/no-path-traversal",
+      "file": "tests/integration.rs",
+      "line": 2756
+    },
+    {
+      "fingerprint": "9117a4b6813d43e352bbeba89c57d41ddd65427c55167738d626587d237b296d",
+      "rule_id": "rs/no-path-traversal",
+      "file": "tests/kernel_dirty_frag.rs",
+      "line": 33
+    },
+    {
+      "fingerprint": "813304b455e9dec6e248b3de2c7ea8c9c23efa5fdd7bd42ff14e7a56dcca9624",
+      "rule_id": "rs/no-path-traversal",
+      "file": "tests/kernel_dirty_frag.rs",
+      "line": 302
+    },
+    {
+      "fingerprint": "7cef49e361e76d83ebbcabae09d7d75df13b85823dad9cd6bed24a5357c4c0bf",
+      "rule_id": "rs/no-path-traversal",
+      "file": "tests/rule_inventory.rs",
+      "line": 14
+    },
+    {
+      "fingerprint": "eb64644a1982006d51728bd3e9478fc03d521c8ac7c3312a5b69b73da398415a",
+      "rule_id": "rs/no-command-injection",
+      "file": "tests/semgrep_parity_inverse.rs",
+      "line": 145
+    }
+  ]
+}

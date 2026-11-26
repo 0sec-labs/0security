@@ -1,0 +1,49 @@
+# Rust
+/target
+# Ad-hoc cargo target dirs (e.g. false-positive check runs)
+*-target/
+.fp-check-target/
+
+# Node
+node_modules/
+/package-lock.json
+vscode-extension/out/
+vscode-extension/*.vsix
+
+# Python
+__pycache__/
+
+# Build output
+www/dist/
+www/.astro/
+
+# OS
+.DS_Store
+
+# Local
+.omx/
+.local/
+.playwright-mcp/
+*.local.md
+benchmarks/repos/
+benchmarks/results*.md
+benchmarks/.version-worktrees-*/
+rules/kernel/dirty-frag-class/queries/.scratch.*/
+.claude/
+
+# Registry-coverage harness snapshot (cloned semgrep-rules; never committed).
+# See src/bin/registry_coverage.rs and docs/parity/registry-coverage.md.
+.registry-snapshot/
+
+# Sync conflict artifacts
+*.sync-conflict-*
+
+# Local terminalizer artifacts
+.terminalizer-bin/
+assets/terminalizer/
+assets/foxguard-terminalizer*.gif
+
+# Local togi mutation-test artifacts
+.togi-cache/
+.togi.lock
+togi.toml
