@@ -74,22 +74,6 @@ def main(argv: list[str] | None = None) -> int:
     p_scan.add_argument("--bug-class", default="memory-safety")
     p_scan.add_argument("--llm", default="mock")
     p_scan.add_argument("--model", default=None)
-    # Cloud-sink lane — stream findings to the 0cloud orchestrator instead of
-    # printing a local report. The bearer token is env-ONLY (ZERO_CLOUD_TOKEN).
-    p_scan.add_argument(
-        "--cloud",
-        action="store_true",
-        help="stream findings to the 0cloud orchestrator (ZERO_CLOUD_* env)",
-    )
-    p_scan.add_argument(
-        "--scan-id", default=None, help="cloud scan id (or ZERO_CLOUD_SCAN_ID; env wins)"
-    )
-    p_scan.add_argument(
-        "--sink", default=None, help="orchestrator base URL (or ZERO_CLOUD_SINK; env wins)"
-    )
-    p_scan.add_argument(
-        "--timeout", type=int, default=30000, help="per-request POST timeout in ms (cloud mode)"
-    )
 
     p_feedback = sub.add_parser(
         "research-feedback-import",
@@ -771,20 +755,6 @@ def main(argv: list[str] | None = None) -> int:
         opts = ScanOptions(
             bug_class=args.bug_class, backend=args.backend, llm=args.llm, model=args.model
         )
-        if args.cloud:
-            from . import cloud_sink
-
-            config = cloud_sink.build_config(
-                sink=args.sink, scan_id=args.scan_id, timeout_ms=args.timeout
-            )
-            if config is None:
-                print(
-                    "error: --cloud requires a sink URL and scan id "
-                    "(--sink/--scan-id flags or ZERO_CLOUD_SINK/ZERO_CLOUD_SCAN_ID env)",
-                    file=sys.stderr,
-                )
-                return 2
-            return cloud_sink.run_cloud_scan(args.binary, config, opts=opts)
         scan_result = api_scan(args.binary, opts)
         print(format_result(scan_result, args.format))
         return 0

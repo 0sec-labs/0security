@@ -807,8 +807,8 @@ export class ToolExecutor {
         }
       }
       // Oversized / fenced / unified-diff suggestions are dropped (never
-      // truncated), keeping the location — same gate as the CLI parser and
-      // the cloud sink (findings-parser.ts isSuggestionAcceptable).
+      // truncated), keeping the location — same gate as the CLI parser
+      // (findings-parser.ts isSuggestionAcceptable).
       const suggestion = args.suggested_replacement;
       finding.reviewAnnotation = {
         path: sourcePath,

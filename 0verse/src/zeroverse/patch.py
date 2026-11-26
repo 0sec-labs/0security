@@ -162,7 +162,7 @@ def recommend(
 
 @dataclass
 class PatchContext:
-    """Opt-in source context (the 0cloud / AIxCC source-CP setting). 0verse is
+    """Opt-in source context (the AIxCC source-CP setting). 0verse is
     binary-first, so source mode is never assumed — only attempted when supplied."""
 
     source_root: str                  # repo / source dir (copied to a scratch build)

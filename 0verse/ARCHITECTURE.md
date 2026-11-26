@@ -89,7 +89,7 @@ optional engine degrades gracefully rather than blocking the run.
  (8) poc         crashing input + exploitability class                 pwntools standalone replay
  (9) patch       fix the confirmed PoV, verify it no longer reproduces patch stage (B0 recommendation always; opt-in
                   without regression (opt-in, ZEROVERSE_PATCH=1)        source-diff / binary micro-patch)
- (10) report     evidence-backed finding (+ PoV + patch)               json / sarif / ndjson / markdown; --cloud sink
+ (10) report     evidence-backed finding (+ PoV + patch)               json / sarif / ndjson / markdown
 ```
 
 Stages 1–8 are the always-on find→prove spine; stage 9 (patch+verify), the
@@ -165,6 +165,6 @@ src/zeroverse/
   crs_api.py / dedup.py        # M7 CRS-API/SARIF adapter + tiered crash dedup
   patch.py            # stage 9 — patch + deterministic verify (opt-in)
   report.py           # Finding + PoV + Patch data model; json/sarif/ndjson/md
-  cloud_sink.py / mcp.py            # managed cloud sink + stdio MCP bridge
+  mcp.py                            # stdio MCP bridge
   dataset.py / negative.py / groundtruth.py / benchmark.py   # the rigor layer (moat + honesty + eval)
 ```

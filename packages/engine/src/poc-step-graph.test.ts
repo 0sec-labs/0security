@@ -7,8 +7,6 @@
  *   3. Backward-compat: a Finding with no pocSteps is still a valid Finding.
  *   4. The agent-loop `parsePocStepsArg` helper accepts JSON strings and
  *      already-parsed arrays, and rejects malformed payloads cleanly.
- *   5. The cloud-sink `normalizeFinding` passes pocSteps through and drops
- *      malformed step graphs without dropping the finding itself.
  *
  * The PoC step graph is OPTIONAL and ADDITIVE — the existing prose evidence
  * fields (`request`/`response`/`analysis`) stay intact alongside it.

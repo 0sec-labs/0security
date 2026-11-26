@@ -727,7 +727,7 @@ export interface Finding {
    */
   pocSteps?: PocStep[];
   /**
-   * Machine-executable verification contract (0#193 / 0-cloud#111).
+   * Machine-executable verification contract (0#193).
    * Optional and additive. When populated, cloud's canary watcher (and any
    * OSS caller) can re-evaluate whether the finding is still real against
    * a fresh checkout of the target repo. See {@link VerificationSpec}.
@@ -1117,7 +1117,7 @@ export interface Evidence {
 //
 // The field is OPTIONAL and ADDITIVE. Existing findings produced before this
 // type existed have `pocSteps === undefined` and continue to round-trip
-// unchanged through every renderer, exporter, the DB, and the cloud sink.
+// unchanged through every renderer, exporter, and the DB.
 
 /** Stage of a PoC step in the discover → exploit → verify lifecycle. */
 export type PocStepKind = "setup" | "auth" | "prerequisite" | "exploit" | "verify";
@@ -1183,7 +1183,7 @@ export interface PocStep {
   expect?: PocStepExpect;
 }
 
-// ── Verification Spec (0#193 / 0-cloud#111) ───────────────────────
+// ── Verification Spec (0#193) ───────────────────────
 //
 // A `VerificationSpec` is a *machine-executable* contract attached to a
 // finding. It answers a single question: "is this finding still real?".
@@ -1205,7 +1205,7 @@ export interface PocStep {
 //
 // The field is OPTIONAL and ADDITIVE on `Finding`. Existing findings produced
 // before this type existed leave it undefined and continue to round-trip
-// unchanged through every renderer, exporter, the DB, and the cloud sink.
+// unchanged through every renderer, exporter, and the DB.
 
 /**
  * Code-level predicate. Each variant is a discriminated union keyed on

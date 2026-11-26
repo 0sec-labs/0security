@@ -8,7 +8,7 @@ clean binary that confirms nothing still burned the full no-signal fuzz lane
 (~30 s) and would burn LLM tokens escalating slices the slice layer never flagged.
 
 This module is the **in-process** ATLANTIS §4.3 TASK SCHEDULER + BUDGET ALLOCATOR,
-NOT the k8s/Kafka mesh (that belongs to 0cloud). It gives the spine:
+NOT a k8s/Kafka mesh. It gives the spine:
 
   * a **lane-task priority queue** popped per **epoch** by ATLANTIS's anti-starvation
     **weighted-random sampling** (every positive-priority lane eventually runs; hot
