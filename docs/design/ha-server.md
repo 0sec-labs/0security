@@ -222,3 +222,10 @@ The remaining work shipped as small steps in this order: durable job queue, lead
 - The Sentinel scheduler fires due triggers only on the leader. Every replica still reconciles and observes its own state. Because Sentinel stores are still local SQLite files, a standby replica does not run the triggers in its own file. This is why the docs do not call the server highly available yet.
 - Not gated yet: the audit sink and retention, because the audit log is still a local file per replica.
 - Tests: a fake server for takeover, connection loss and hangs; real PostgreSQL for five competing replicas, a killed leader session and a handover on stop.
+
+### Readiness as built
+
+- `HaRuntime.healthy()` answers from memory. A timer reads `zero_schema_migrations` every 2 seconds with a 2 second limit. A failed check, or a check that stops completing, makes the replica unhealthy. A later success restores it.
+- In server mode `/readyz` returns 503 when this replica's own database or the shared database is unhealthy. `/healthz` stays a liveness check and does not look at the database, so an outage does not make the platform restart every replica.
+- The first failure is reported once on stderr, not on every check.
+- Tests: a fake pool for failure, recovery and hangs; real PostgreSQL for a dropped schema.
