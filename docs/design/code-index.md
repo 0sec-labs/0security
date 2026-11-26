@@ -9,7 +9,7 @@ Per-repo index behind the `code-index` tool pack: `callers_of`, `callees_of`, `r
   network, deserialize, template, redirect) for TypeScript, JavaScript and Python.
 - Built offline from the granted folder. Cached in memory per root, commit and working-tree state (commit plus the
   stat of every indexed file), so an edit or a new commit gives a new index.
-- Loaded by skills (`seedless-depth-review`, `verify-finding`) through `tools: [code-index]`, not part of the core list.
+- Loaded by skills (`seedless-depth-review`, `verify-finding`) through `tools: [code-index]`, not part of the core list. The main session and any subagent get the four tools on the turn after `load_skill` of such a skill, never before; a child does not inherit them from its parent, and a restricted worker tool list or workflow phase keeps them out. `ZERO_TOOLSET=full` (opt-in everything list) advertises them up front.
 - Not data flow. A path is a lead; the model reads each hop with `cat -n` before it claims a finding. Unsupported
   languages, unknown symbols and a missing folder return a soft result that points back to `rg`.
 

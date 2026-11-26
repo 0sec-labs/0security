@@ -1873,8 +1873,10 @@ export class ToolExecutor {
 
   private subagentTools(messaging: MessagingRuntime | undefined, childId?: string): ToolDefinition[] {
     const inherited = this.ctx.delegationTools ?? getToolsForRole({ webSearchEnabled: this.ctx.webSearchEnabled });
+    const packNames = packToolNames();
     return filterWorkflowAgentTools(inherited.filter(tool =>
       Object.hasOwn(TOOL_DEFINITIONS, tool.name) &&
+      !packNames.has(tool.name) && // a child loads the pack itself through a skill; it never inherits it
       (this.ctx.webSearchEnabled !== false || tool.name !== "web_search") &&
       (tool.name !== "spawn_agent" || childId === undefined || this._workerTree.canDelegate(childId)),
     ).concat(REPORT_STATUS_TOOL, buildSendMessageTool(messaging), CHECK_MESSAGES_TOOL));

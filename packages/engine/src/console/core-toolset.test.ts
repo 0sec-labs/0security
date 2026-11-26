@@ -92,6 +92,21 @@ describe("core toolset in the console", () => {
     } finally { await session.cleanup(); }
   });
 
+  it("ZERO_TOOLSET=full is the opt-in everything list and does advertise the pack tools up front", async () => {
+    const prior = process.env["ZERO_TOOLSET"];
+    process.env["ZERO_TOOLSET"] = "full";
+    const runtime = new ScriptedRuntime([end("a")]);
+    const session = createConsoleSession({ runtime, refineObjective: false });
+    try {
+      await session.send("hello");
+      const first = names(runtime.calls[0]!.tools);
+      for (const name of ["callees_of", "callers_of", "routes", "trace_to_sink", ...CORE_TOOL_NAMES]) expect(first).toContain(name);
+    } finally {
+      await session.cleanup();
+      if (prior === undefined) delete process.env["ZERO_TOOLSET"]; else process.env["ZERO_TOOLSET"] = prior;
+    }
+  });
+
   it("lists skills when load_skill gets no id", async () => {
     const runtime = new ScriptedRuntime([call("load_skill", {}), end("done")]);
     const session = createConsoleSession({ runtime, refineObjective: false });
