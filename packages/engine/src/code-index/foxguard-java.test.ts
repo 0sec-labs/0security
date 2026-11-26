@@ -30,12 +30,12 @@ function supportsGraph(bin: string): boolean {
 }
 
 function findBinary(): string | undefined {
-  const candidates = [
-    process.env["ZERO_FOXGUARD_TEST_BIN"],
-    join(REPO, "target/release/foxguard"),
-    join(REPO, "target/debug/foxguard"),
-    ...(process.env["PATH"] ?? "").split(delimiter).filter(Boolean).map((d) => join(d, "foxguard")),
-  ].filter((c): c is string => Boolean(c));
+  const onPath = (process.env["PATH"] ?? "").split(delimiter).filter(Boolean).map((d) => join(d, "foxguard"));
+  const local = [join(REPO, "target/release/foxguard"), join(REPO, "target/debug/foxguard")];
+  // In CI the setup action puts the freshly built binary on PATH; a target/ directory left in a persistent
+  // workspace by an earlier run can be stale, so PATH goes first there.
+  const ordered = process.env["CI"] ? [...onPath, ...local] : [...local, ...onPath];
+  const candidates = [process.env["ZERO_FOXGUARD_TEST_BIN"], ...ordered].filter((c): c is string => Boolean(c));
   return candidates.find(supportsGraph);
 }
 
