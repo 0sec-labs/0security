@@ -1,7 +1,7 @@
 // Licensed under the 0security Enterprise License. See enterprise/LICENSE.
 // All tests are offline. The signing key is generated in memory; no private key is stored anywhere.
 import { execFileSync } from "node:child_process";
-import { generateKeyPairSync, sign, type KeyObject } from "node:crypto";
+import { createPublicKey, generateKeyPairSync, sign, type KeyObject } from "node:crypto";
 import { mkdtempSync, readFileSync, readdirSync, unlinkSync, writeFileSync, rmdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -95,7 +95,7 @@ describe("verifyLicense", () => {
   it("rejects an unknown key id and the production keys when only test keys sign", () => {
     expect(verify(mint(payload({ kid: "nope" }))).reason).toBe("unknown-key");
     expect(verifyLicense(mint(payload()), NOW).reason).toBe("unknown-key");
-    expect(verifyLicense(mint(payload({ kid: "k1" })), NOW).reason).toBe("bad-signature");
+    expect(verifyLicense(mint(payload({ kid: "k2" })), NOW).reason).toBe("bad-signature");
     expect(verifyLicense(mint(payload({ kid: "__proto__" })), NOW, KEYS).reason).toBe("unknown-key");
   });
 
@@ -145,8 +145,19 @@ describe("verifyLicense", () => {
   });
 
   it("uses the production key by default and ships only a public key", () => {
-    expect(Object.keys(PRODUCTION_PUBLIC_KEYS)).toContain("k1");
-    expect(verifyLicense(mint(payload({ kid: "k1" })), NOW).ok).toBe(false);
+    expect(Object.keys(PRODUCTION_PUBLIC_KEYS)).toContain("k2");
+    expect(verifyLicense(mint(payload({ kid: "k2" })), NOW).ok).toBe(false);
+  });
+
+  it("does not trust the retired key k1", () => {
+    expect(Object.keys(PRODUCTION_PUBLIC_KEYS)).not.toContain("k1");
+    expect(Object.keys(PRODUCTION_PUBLIC_KEYS)).toEqual(["k2"]);
+    expect(verifyLicense(mint(payload({ kid: "k1" })), NOW).reason).toBe("unknown-key");
+  });
+
+  it("commits a k2 public key that parses as an Ed25519 SPKI key", () => {
+    const key = createPublicKey({ key: Buffer.from(PRODUCTION_PUBLIC_KEYS.k2, "base64"), format: "der", type: "spki" });
+    expect(key.asymmetricKeyType).toBe("ed25519");
   });
 });
 
