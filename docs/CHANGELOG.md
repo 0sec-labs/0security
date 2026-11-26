@@ -14,12 +14,9 @@ on the GitHub Release tag.
 
 ### Added
 
-<<<<<<< HEAD
 - Foxguard, the static analysis engine `0 scan` runs first, now lives in this repository as `crates/foxguard` (history preserved) and builds from source in the release workflow. Releases publish `foxguard-darwin-arm64`, `foxguard-linux-x64`, `foxguard-linux-arm64` and `foxguard-windows-x64.exe` next to `0`, listed in the same `checksums.txt` with the same attestation and signature. `install.sh` installs it next to `0` and verifies it against that file; `INSTALL_FOXGUARD=0` still skips it and `ZERO_FOXGUARD_PATH` still overrides it.
-=======
 - A docs page, "Use 0 from Claude Code or Codex", shows how another coding agent drives 0 through its shell: scan, read findings, ask a question, exit codes. 0 has no MCP server for this; the CLI does the job.
 - Findings can carry a structured root cause (bug class, unsafe pattern, missing guard, design origin). `0security findings verify` records one on a true-positive verdict, and it seeds a hunt for variants: the same bug at other sites, stored as findings with a `variantOf` link that `findings show` and `findings list` display. `0security findings fix` rescans the recorded variants in the fixed tree and marks each fixed or still open, then hunts. New command `0security findings variants` runs a hunt or `--rescan` by hand; `--no-variants` turns the automatic runs off. Stored findings and exports are unchanged when these fields are absent.
->>>>>>> origin/main
 - Anonymous lifecycle events go to PostHog: `first_run`, `command_invoked` (a command name from a fixed list, otherwise `other`), `update` (the two versions) and `error_exit` (an error category only). They go straight to PostHog from the CLI. `DO_NOT_TRACK=1` turns them off.
 - The `usage` event has `finding_class_counts`, findings counted by a fixed list of vulnerability classes. Titles, descriptions, evidence and targets are still never sent.
 
@@ -30,11 +27,8 @@ on the GitHub Release tag.
 
 ### Removed
 
-<<<<<<< HEAD
 - The pinned download of an external Foxguard release is gone from `install.sh`, the container images and CI. The images build Foxguard from `crates/foxguard`. The Foxguard GitHub App, VS Code extension, Claude Code plugin, website, pre-commit hook, composite action and Python and npm packaging are not part of this repository.
-=======
 - `0verse scan --cloud`, `--scan-id`, `--sink` and `--timeout`, and the `ZERO_CLOUD_*` settings they read. They streamed findings to the 0cloud orchestrator, which is gone.
->>>>>>> origin/main
 - The 0cloud integration is gone. `0` is one product with no hosted account: cloud sign-in and cloud credentials (`ZERO_CLOUD_TOKEN`, `~/.0/cloud.env`), feedback sent to a cloud account, opt-in run contributions and the cloud Windows evidence worker no longer exist. Feedback goes only to your own `ZERO_FEEDBACK_URL`.
 
 ## [0.45.0] - 2026-11-24
