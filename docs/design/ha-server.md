@@ -244,3 +244,12 @@ A process that is killed instead, or exits after the failsafe, leaves its jobs w
 The platform should wait before it sends SIGTERM, so the load balancer sees the 503 first. The Helm chart does this with a preStop delay.
 
 Tests: a fake pool for resignation and repeated calls; real PostgreSQL for a drain that finishes one job, returns another and hands the scheduler role to a second replica. The shutdown order in the server itself has no test of its own.
+
+### Helm and compose as built
+
+- The chart keeps one replica by default and renders the same manifests as before. `highAvailability.enabled` raises the replica count (2 to 20), keeps one volume per replica, adds a PodDisruptionBudget (`maxUnavailable: 1`), a topology spread over nodes, a `preStop` delay, and an egress rule to the database.
+- The database URL and the license come from Secrets you create, mounted as files. The chart renders neither value.
+- The chart refuses an install that cannot work: no database Secret, no license Secret, no shared sign-in (each replica would make its own access token), a grace period shorter than the delay plus the drain, or no database CIDR while the network policy is on.
+- `deploy/compose/docker-compose.ha.yml` runs two replicas behind Caddy with `/readyz` health checks and cookie stickiness. It does not start a database, because a database on the compose network is on another machine and needs TLS.
+- `replicaCount` stays refused. A replica count above 1 without a shared database still corrupts SQLite.
+- Tests: `helm lint` and `helm template` cases in `scripts/helm-chart.test.mjs` and `docker compose config` in CI. Nothing was installed on a cluster, and the compose file was not run, because Docker is not available here.

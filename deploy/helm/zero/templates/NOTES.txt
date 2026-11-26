@@ -1,4 +1,8 @@
+{{- if .Values.highAvailability.enabled }}
+The 0 console runs as {{ .Values.highAvailability.replicas }} replicas on one shared PostgreSQL database. Preview: findings, accounts and audit data are still stored per replica.
+{{- else }}
 The 0 console runs as one replica with one volume.
+{{- end }}
 {{- if not (include "zero.secretName" .) }}
 
 No access token was set. The first start generates one and prints it once:
