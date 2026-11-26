@@ -166,9 +166,8 @@ export { ENTERPRISE_ENV, EnterpriseEgressError, assertEgressAllowed, enterpriseM
 export { ScopedTargetError, assertScopedTarget, classifyAddress as classifyTargetAddress, describeScopedTarget, parseScopeFile, type ResolveHost as ResolveTargetHost, type ScopedTarget, type ScopedTargetOptions } from "./policy/scoped-target.js";
 // Consent-gated analytics pipeline — the single choke point that may transmit
 // analytics. The CLI entry must set `ZERO_ANALYTICS_LEVEL` from the operator's
-// setting and call `maybeSubscribeAnalyticsPipeline()` (mirrors the cloud sink
-// wiring); without that call the pipeline never subscribes and transmits
-// nothing. USAGE tier only for now — command/code/target/finding collectors
+// setting and call `maybeSubscribeAnalyticsPipeline()`; without that call the pipeline never
+// subscribes and transmits nothing. USAGE tier only for now — command/code/target/finding collectors
 // are a separate, reviewed wave.
 export {
   analyticsPipeline,
@@ -233,9 +232,9 @@ export type {
 } from "./events/bus.js";
 export { ScanCostLedger } from "./agent/cost-ledger.js";
 
-// Verification spec evaluator (0#193 / 0-cloud#111). Re-checks a
-// finding's `verificationSpec` predicates against a repo on disk so cloud's
-// canary watcher (and any OSS caller) can deterministically decide whether
+// Verification spec evaluator (0#193). Re-checks a
+// finding's `verificationSpec` predicates against a repo on disk so a
+// canary watcher (or any caller) can deterministically decide whether
 // a finding is still real after upstream changes.
 export {
   runCliPathTraversalReplayFixture,

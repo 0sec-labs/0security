@@ -97,12 +97,6 @@ Grouped by file, `file:line` as of this commit.
 - `scanner.ts:55` — DB unavailable, results will not be persisted — `scan_db_unavailable` (`error`)
 - `scanner.ts:56` — the cause object for the line above — fold into `scan_db_unavailable`'s `error` field, delete the separate write
 
-### `cloud-sink.ts` — 3
-
-- `cloud-sink.ts:129` — sink POST returned a non-2xx, body preview — `cloud_sink_post_rejected`
-- `cloud-sink.ts:135` — sink POST threw (transport) — `cloud_sink_post_failed`
-- `cloud-sink.ts:478` — dropping a finding that failed normalization — `cloud_sink_finding_dropped`
-
 ### `seed-findings.ts` — 2
 
 - `seed-findings.ts:40` — seed line N is invalid JSON, skipped — `seed_finding_invalid_json`

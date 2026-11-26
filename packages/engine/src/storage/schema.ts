@@ -148,8 +148,7 @@ export const findings = sqliteTable(
      * when the agent produced a finding without a deterministic re-check
      * contract — every reader must continue to work in that case. Stored
      * as text because the spec is an opaque blob that the verifier reads
-     * whole; we never query individual predicates. See 0#193 /
-     * 0-cloud#111.
+     * whole; we never query individual predicates. See 0#193.
      */
     verificationSpec: text("verificationSpec"),
     /**

@@ -134,23 +134,18 @@ from **concepts only — never copy tuned prompt text or learned state.** The sp
 - **An open handcrafted feature vector** (VulnBERT-style *idea*) — but our own names,
   not the source-side engine's exact registry.
 
-### Stays the managed platform's MOAT — 0verse must NOT replicate; cloud wraps it
-- The **labeled dataset**: `(finding, attempted-PoC, ground-truth, feature-vector)`
-  rows from paid scans at scale (the closed feedback loop). *0verse should emit its
-  oracle verdicts in a clean capturable shape so the cloud can build a dataset — but
-  ship no curated corpus.*
-- The **trained triage classifier** (fused VulnBERT, ~92% recall / 1.2% FPR) that
-  early-terminates boring scans.
-- The **specific tuned LLM gate prompts** (the 5-check adversarial gate, the skeptic's
-  burned-us checks) that encode hard-won real over-claim failures. 0verse ships
-  *deterministic* equivalents + a generic "adversarially refute this" pass.
-- **Own-sent dedup + disclosure routing** — depend on operator-private state.
+### What 0verse does not ship
+- A curated corpus of labeled `(finding, attempted-PoC, ground-truth, feature-vector)` rows,
+  a trained triage classifier, or tuned LLM gate prompts. 0verse ships *deterministic*
+  equivalents and a generic "adversarially refute this" pass.
+- Disclosure routing or deduplication against an operator's own sent reports. That depends
+  on private state.
 
-**Net:** 0verse's open core is *deterministic, externally-checkable proof* — crash
-it, mark it with a canary, confirm the marker, dedup against public advisories,
-classify reach by rule. The supported cross-project shape is signed evidence
-produced out of band and imported by the platform. Generic platform dispatch is
-not implied by the local API, MCP server, cloud sink, or reference adapter.
+**Net:** 0verse's open core is *deterministic, externally-checkable proof*: crash it,
+mark it with a canary, confirm the marker, dedup against public advisories, classify
+reach by rule. The supported cross-project shape is signed evidence produced out of band
+and imported by another tool. The local API, MCP server and reference adapter do not
+imply a hosted scan service.
 
 
 ## CI: the PoV-reproduction gate (#9)
@@ -305,28 +300,17 @@ shape plus one top-level terminal state, reason, and structured per-stage outcom
 PoV-is-truth is in the contract — `confirmed=true` and terminal state `confirmed`
 only with a reproducing PoV. Empty findings are successful only when the terminal
 state is `no-findings`; infrastructure, unsupported, skipped, and cancelled scans
-remain failures. The current cloud endpoint has no non-completing report envelope:
-`final: true` immediately marks the scan complete, while `final: false` reports are
-rejected. The reference sink therefore uploads no report for a failed terminal
-state, logs the terminal reason, and exits non-zero so worker failure handling owns
-the transition. When live finding events are enabled, only per-finding events sent
-before that failure may remain in the cloud. Only `confirmed` and `no-findings` emit
-the cloud completion marker.
+remain failures.
 
-### Machine contract and reference cloud adapter (#28)
+### Machine contract and reference adapter (#28)
 
-The versioned NDJSON contract can be consumed by a managed scan platform, and a
-reference managed-lane example demonstrates parsing and promotion rules. This is
-**implemented contract scaffolding**, not a registered binary job type or an
-operational platform lane.
-
-Under ADR-066, the only wired 0verse-to-platform seam today is the specific
-signed Hyper-V evidence importer. A provider-neutral PoV importer remains planned.
-A platform-dispatched 0verse container, generic binary job type, and E2B template
-are **parked** until the blind known-CVE stripped-ELF gate passes. Until then,
-generic managed dispatch is operationally **unsupported**. This does not remove
-the opt-in local `analyze_binary` tool described above, and `confirmed=true` in
-local output does not by itself make a platform finding.
+The versioned NDJSON contract can be consumed by any scan platform, and a reference
+example demonstrates parsing and promotion rules. This is **implemented contract
+scaffolding**, not a registered job type or an operational service. The only wired
+0verse-to-platform seam today is the signed Hyper-V evidence importer. A provider-neutral
+PoV importer remains planned. This does not remove the opt-in local `analyze_binary` tool
+described above, and `confirmed=true` in local output does not by itself make a platform
+finding.
 
 The reference adapter is dependency-free (`scan_lane()` + `parse_ndjson()`) and
 remains useful for contract tests. Nothing in this repository registers,

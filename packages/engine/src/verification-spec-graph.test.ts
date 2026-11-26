@@ -1,5 +1,5 @@
 /**
- * 0#193 / 0-cloud#111 — Finding.verificationSpec wire contract.
+ * 0#193 — Finding.verificationSpec wire contract.
  *
  * Coverage:
  *   1. Type narrowing on the VerificationCodePredicate discriminated union.
@@ -9,8 +9,6 @@
  *   4. The agent-tool `parseVerificationSpecArg` helper accepts both already-
  *      parsed objects and JSON strings, and rejects malformed payloads
  *      cleanly.
- *   5. The cloud-sink `normalizeFinding` passes verificationSpec through
- *      without dropping the finding when the spec itself is malformed.
  *
  * The spec is OPTIONAL and ADDITIVE — existing prose evidence + pocSteps
  * remain intact alongside it.

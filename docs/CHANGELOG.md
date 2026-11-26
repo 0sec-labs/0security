@@ -24,6 +24,7 @@ on the GitHub Release tag.
 
 ### Removed
 
+- `0verse scan --cloud`, `--scan-id`, `--sink` and `--timeout`, and the `ZERO_CLOUD_*` settings they read. They streamed findings to the 0cloud orchestrator, which is gone.
 - The 0cloud integration is gone. `0` is one product with no hosted account: cloud sign-in and cloud credentials (`ZERO_CLOUD_TOKEN`, `~/.0/cloud.env`), feedback sent to a cloud account, opt-in run contributions and the cloud Windows evidence worker no longer exist. Feedback goes only to your own `ZERO_FEEDBACK_URL`.
 
 ## [0.45.0] - 2026-11-24

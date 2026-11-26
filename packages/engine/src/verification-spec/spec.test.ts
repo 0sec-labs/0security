@@ -1,5 +1,5 @@
 /**
- * 0#193 / 0-cloud#111 — VerificationSpec evaluator tests.
+ * 0#193 — VerificationSpec evaluator tests.
  *
  * Coverage:
  *   1. file-contains predicate: passes when pattern matches, fails when it
