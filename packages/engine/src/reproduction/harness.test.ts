@@ -163,7 +163,7 @@ describe("container limits", () => {
     const spy: ContainerRunner = { isolation: "container", async probe() { return { ok: true, runtime: "fake" }; }, async run(request) { seen = request; return { exitCode: 0, output: "", timedOut: false, durationMs: 1, limitsNotApplied: ["storage-size"] }; } };
     const result = await reproduceFinding({ proof: traversal, snapshotDir: join(FIXTURES, "fixed"), commit: COMMIT, image: IMAGE, runner: spy });
     expect(seen?.limits).toEqual(REPRODUCTION_LIMITS);
-    expect(REPRODUCTION_LIMITS).toMatchObject({ pidsLimit: 128, memory: "512m", cpus: "1", storageSize: "256m", tmpfs: ["/tmp:rw,size=64m,noexec,nosuid"] });
+    expect(REPRODUCTION_LIMITS).toMatchObject({ pidsLimit: 128, memory: "512m", cpus: "1", storageSize: "256m", readOnlyRoot: true, tmpfs: ["/tmp:rw,size=64m,noexec,nosuid"] });
     expect(seen?.timeoutMs).toBe(REPRODUCTION_TIMEOUT_MS);
     expect(seen?.network).toBe("none");
     expect(result.logTail).toContain("limits not applied: storage-size");

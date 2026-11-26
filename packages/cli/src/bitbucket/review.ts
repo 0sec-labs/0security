@@ -38,7 +38,12 @@ export interface ReviewOptions {
 export type ReviewOutcome =
   | { status: "skipped"; reason: "closed" | "draft" | "fork" | "unchanged" }
   | { status: "too-large"; files: number }
-  | { status: "reviewed"; sha: string; total: number; inlinePosted: number; inlineRemoved: number; partial: boolean; warnings: string[] };
+  | { status: "reviewed"; sha: string; total: number; inlinePosted: number; inlineRemoved: number; partial: boolean; warnings: string[]; costUsd?: number };
+
+/** What the scan says it spent, from its JSON report. Undefined when the report has no cost. */
+function scanCost(json: string): number | undefined {
+  try { const cost = (JSON.parse(json) as { costUsd?: unknown }).costUsd; return typeof cost === "number" && Number.isFinite(cost) && cost >= 0 ? cost : undefined; } catch { return undefined; }
+}
 
 export const prKey = (pr: Pick<PullRequest, "platform" | "owner" | "repo" | "id">): string => `${pr.platform}:${pr.owner}/${pr.repo}#${pr.id}`;
 const sameCommit = (a: string, b: string): boolean => a.slice(0, 12) === b.slice(0, 12);
@@ -143,5 +148,5 @@ export async function reviewPullRequest(pr: PullRequest, deps: { client: Bitbuck
     await upsertSummary(summaryBody(reportId, pr, result.sha, findings, { partial, filesScanned: files.length, outside: all.length - inScope.length, inline: wanted.size }));
   }
   deps.state.set(prKey(pr), result.sha);
-  return { status: "reviewed", sha: result.sha, total: findings.length, inlinePosted, inlineRemoved, partial, warnings };
+  return { status: "reviewed", sha: result.sha, total: findings.length, inlinePosted, inlineRemoved, partial, warnings, ...(scanCost(result.json) !== undefined ? { costUsd: scanCost(result.json)! } : {}) };
 }

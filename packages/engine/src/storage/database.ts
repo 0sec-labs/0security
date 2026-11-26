@@ -40,6 +40,7 @@ import type {
   TrustGraphEdgeRow,
 } from "./types.js";
 import type { FindingReproduction } from "../shared/reproduction.js";
+import type { ExecutedPoc } from "../shared/executed-poc.js";
 import type { FindingModelVerification, PersistedFindingReviewFields, WorkflowStatus } from "./finding-helpers.js";
 import type { TriageDetails } from "./repositories/finding-repository.js";
 import { createRepositories, type Repositories } from "./repositories/index.js";
@@ -238,6 +239,14 @@ export class osecDB {
 
   setFindingReproduction(findingId: string, patch: FindingReproduction): void {
     return this.repos.findings.setFindingReproduction(findingId, patch);
+  }
+
+  getFindingExecutedPoc(findingId: string): ExecutedPoc | undefined {
+    return this.repos.findings.getFindingExecutedPoc(findingId);
+  }
+
+  setFindingExecutedPoc(findingId: string, record: ExecutedPoc): void {
+    return this.repos.findings.setFindingExecutedPoc(findingId, record);
   }
 
   setFindingModelVerification(findingId: string, verification: FindingModelVerification): void {

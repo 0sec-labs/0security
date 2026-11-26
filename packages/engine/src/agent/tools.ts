@@ -26,6 +26,7 @@ import { readFileSync, statSync, existsSync, writeFileSync, realpathSync, mkdirS
 import { spawnSync } from "node:child_process";
 import { resolve, dirname } from "node:path";
 import type { Finding } from "../shared/index.js";
+import { executePocForFinding } from "../executed-poc/run.js";
 import type { ToolDefinition, ToolCall, ToolResult, ToolResultMeta, ToolContext } from "./types.js";
 import type { NativeRuntime } from "../runtime/types.js";
 import { runBeforeCommand } from "./before-command.js";
@@ -1071,6 +1072,8 @@ export class ToolExecutor {
     }
     this.ctx.findings.push(finding);
 
+    await this.attemptExecutedPoc(finding);
+
     // 0#567 — harvest reusable footholds (credentials/tokens/cookies/…)
     // out of this finding's evidence into the loot ledger so the agent can
     // chain them into follow-up requests. No-op when the loot
@@ -1083,6 +1086,23 @@ export class ToolExecutor {
     }
 
     return { success: true, output: { findingId: finding.id, message: "Finding saved" } };
+  }
+
+  /**
+   * After a high or critical finding is saved, try its PoC in the sandbox and store the outcome next to it. Harness
+   * code only: the model cannot call this or set the result. Best-effort: a failure here never blocks the save.
+   */
+  private async attemptExecutedPoc(finding: Finding): Promise<void> {
+    const runtime = this.ctx.executedPoc;
+    if (!runtime || !this.db || this.ctx.persistFindings === false) return;
+    try {
+      const record = await executePocForFinding({ finding, folder: this.ctx.scopePath, runtime });
+      if (!record) return;
+      this.db.setFindingExecutedPoc(finding.id, record);
+      finding.executedPoc = record;
+    } catch {
+      /* the finding stays as saved, with no executed-PoC record */
+    }
   }
 
   private updateFinding(args: Record<string, unknown>): ToolResult {

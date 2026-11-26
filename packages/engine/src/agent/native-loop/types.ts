@@ -44,6 +44,8 @@ export interface NativeAgentConfig {
   persistDelegatedFinding?: ToolContext["persistDelegatedFinding"];
   updateDelegatedFinding?: ToolContext["updateDelegatedFinding"];
   scopePath?: string;
+  /** Test seam: the executed-PoC runtime. Defaults to the one configured through the environment. */
+  executedPoc?: ToolContext["executedPoc"];
   /** Inherited parent identity; validated before the child starts analysis. */
   workspaceIdentity?: WorkspaceIdentity;
   sessionId?: string; // Resume from existing session

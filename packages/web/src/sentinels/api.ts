@@ -5,7 +5,7 @@ import { useBackendApi } from "@/api";
 import { queryKeys } from "@/queries";
 import {
   SENTINEL_RUN_APPROVAL, SENTINEL_TRIGGER_APPROVAL, SentinelApiError,
-  type AgentTurn, type Sentinel, type SentinelActivation, type SentinelAutomation, type SentinelFile, type SentinelFileEntry, type SentinelFileRevision, type SentinelPreset, type SentinelPresetAutomation, type SentinelSchedule, type SentinelTrigger, type SentinelTriggerKind,
+  type AgentTurn, type Sentinel, type SentinelUsage, type SentinelActivation, type SentinelAutomation, type SentinelFile, type SentinelFileEntry, type SentinelFileRevision, type SentinelPreset, type SentinelPresetAutomation, type SentinelSchedule, type SentinelTrigger, type SentinelTriggerKind,
 } from "./model";
 
 type Fetch = (path: string, init?: RequestInit) => Promise<Response>;
@@ -38,6 +38,7 @@ export function createSentinelClient(webFetch: Fetch) {
         throw error;
       }
     },
+    usage: (signal?: AbortSignal) => call<SentinelUsage>("sentinels/usage", { signal }),
     presets: (signal?: AbortSignal) => call<{ presets: SentinelPreset[] }>("sentinel-presets", { signal }).then(data => data.presets),
     get: (sentinelId: string, signal?: AbortSignal) => call<{ sentinel: Sentinel }>(`sentinels/${id(sentinelId)}`, { signal }).then(data => data.sentinel),
     create: (input: Record<string, unknown>) => call<{ sentinel: Sentinel; suggestedAutomations?: SentinelPresetAutomation[] }>("sentinels", body("POST", input)),
@@ -52,10 +53,10 @@ export function createSentinelClient(webFetch: Fetch) {
     acknowledge: (sentinelId: string, version: number) => call<{ sentinel: Sentinel }>(`sentinels/${id(sentinelId)}/acknowledge`, body("POST", { version })).then(data => data.sentinel),
     triggers: (sentinelId: string, signal?: AbortSignal) => call<{ triggers: SentinelTrigger[] }>(`sentinels/${id(sentinelId)}/triggers`, { signal }),
     /** Creating enabled needs the review approval; the default is disabled. */
-    createTrigger: (sentinelId: string, input: { runBudgetUsd?: number; runModel?: { providerId: string; model: string; reasoning?: string }; automationId: string; kind: SentinelTriggerKind; schedule?: SentinelSchedule; github?: { repo: string; baseBranch?: string; pollMs?: number; commentOnPr?: boolean; includeForks?: boolean }; enabled?: boolean }) =>
+    createTrigger: (sentinelId: string, input: { runBudgetUsd?: number; runModel?: { providerId: string; model: string; reasoning?: string }; automationId: string; kind: SentinelTriggerKind; schedule?: SentinelSchedule; github?: { repo: string; baseBranch?: string; pollMs?: number; commentOnPr?: boolean; includeForks?: boolean; results?: "off" | "sarif" | "comment" | "both" }; enabled?: boolean }) =>
       call<{ trigger: SentinelTrigger }>(`sentinels/${id(sentinelId)}/triggers`, body("POST", { ...input, ...(input.enabled ? { approval: SENTINEL_TRIGGER_APPROVAL } : {}) })).then(data => data.trigger),
     /** Enabling sends the approval token; the UI must have shown the review dialog first. */
-    updateTrigger: (sentinelId: string, triggerId: string, version: number, patch: { enabled?: boolean; schedule?: SentinelSchedule; github?: { repo: string; baseBranch?: string; pollMs?: number; commentOnPr?: boolean; includeForks?: boolean } }) =>
+    updateTrigger: (sentinelId: string, triggerId: string, version: number, patch: { enabled?: boolean; schedule?: SentinelSchedule; github?: { repo: string; baseBranch?: string; pollMs?: number; commentOnPr?: boolean; includeForks?: boolean; results?: "off" | "sarif" | "comment" | "both" } }) =>
       call<{ trigger: SentinelTrigger }>(`sentinels/${id(sentinelId)}/triggers/${id(triggerId)}`, body("PATCH", { expectedVersion: version, ...patch, ...(patch.enabled ? { approval: SENTINEL_TRIGGER_APPROVAL } : {}) })).then(data => data.trigger),
     removeTrigger: (sentinelId: string, triggerId: string) => call<{ ok: true }>(`sentinels/${id(sentinelId)}/triggers/${id(triggerId)}`, { method: "DELETE" }),
     automations: (sentinelId: string, signal?: AbortSignal) => call<{ automations: SentinelAutomation[] }>(`sentinels/${id(sentinelId)}/automations`, { signal }).then(data => data.automations),
@@ -83,6 +84,11 @@ export function useSentinels(options: { enabled?: boolean; poll?: boolean } = {}
 export function useSentinel(sentinelId: string) {
   const { client, backendId } = useSentinelClient();
   return useQuery({ queryKey: queryKeys.sentinels(backendId, "one", sentinelId), queryFn: ({ signal }) => client.get(sentinelId, signal), enabled: Boolean(sentinelId), refetchInterval: 10_000, retry: false });
+}
+/** Spend of the Sentinels by Sentinel, model and week. Absent on a server that predates it (the query errors and the section hides). */
+export function useSentinelUsage() {
+  const { client, backendId } = useSentinelClient();
+  return useQuery({ queryKey: queryKeys.sentinels(backendId, "usage"), queryFn: ({ signal }) => client.usage(signal), refetchInterval: 15_000, retry: false });
 }
 export function useSentinelPresets(enabled = true) {
   const { client, backendId } = useSentinelClient();
@@ -128,7 +134,7 @@ export function useSentinelMutations() {
     setPaused: useMutation({ mutationFn: (input: { id: string; paused: boolean; version: number }) => client.setPaused(input.id, input.paused, input.version), onSuccess: refresh }),
     run: useMutation({ mutationFn: (input: { id: string; version: number; task?: string }) => client.run(input.id, input.version, input.task), onSuccess: refresh }),
     acknowledge: useMutation({ mutationFn: (input: { id: string; version: number }) => client.acknowledge(input.id, input.version), onSuccess: refresh }),
-    createTrigger: useMutation({ mutationFn: (input: { runBudgetUsd?: number; runModel?: { providerId: string; model: string; reasoning?: string }; id: string; automationId: string; kind: SentinelTriggerKind; schedule?: SentinelSchedule; github?: { repo: string; baseBranch?: string; commentOnPr?: boolean; includeForks?: boolean } }) => client.createTrigger(input.id, { ...(input.runBudgetUsd !== undefined ? { runBudgetUsd: input.runBudgetUsd } : {}), ...(input.runModel ? { runModel: input.runModel } : {}), automationId: input.automationId, kind: input.kind, ...(input.schedule ? { schedule: input.schedule } : {}), ...(input.github ? { github: input.github } : {}) }), onSuccess: refresh }),
+    createTrigger: useMutation({ mutationFn: (input: { runBudgetUsd?: number; runModel?: { providerId: string; model: string; reasoning?: string }; id: string; automationId: string; kind: SentinelTriggerKind; schedule?: SentinelSchedule; github?: { repo: string; baseBranch?: string; commentOnPr?: boolean; includeForks?: boolean; results?: "off" | "sarif" | "comment" | "both" } }) => client.createTrigger(input.id, { ...(input.runBudgetUsd !== undefined ? { runBudgetUsd: input.runBudgetUsd } : {}), ...(input.runModel ? { runModel: input.runModel } : {}), automationId: input.automationId, kind: input.kind, ...(input.schedule ? { schedule: input.schedule } : {}), ...(input.github ? { github: input.github } : {}) }), onSuccess: refresh }),
     updateTrigger: useMutation({ mutationFn: (input: { id: string; triggerId: string; version: number; enabled?: boolean; schedule?: SentinelSchedule }) => client.updateTrigger(input.id, input.triggerId, input.version, { ...(input.enabled !== undefined ? { enabled: input.enabled } : {}), ...(input.schedule ? { schedule: input.schedule } : {}) }), onSuccess: refresh }),
     removeTrigger: useMutation({ mutationFn: (input: { id: string; triggerId: string }) => client.removeTrigger(input.id, input.triggerId), onSuccess: refresh }),
     deleteFile: useMutation({ mutationFn: (input: { id: string; path: string; revision: number }) => client.deleteFile(input.id, input.path, input.revision), onSuccess: (_result, input) => { void cache.invalidateQueries({ queryKey: queryKeys.sentinels(backendId, "files", input.id) }); } }),

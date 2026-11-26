@@ -160,12 +160,14 @@ export interface TuiSettings {
   titleInstructions: string;
   /** Archive saved sessions idle longer than this many days at startup; 0 is off. Operator-only. */
   archiveIdleDays: number;
+  /** Path of the business context file that orders findings by what matters to you. Operator-only: a project never sets it. */
+  findingsContext: string;
 }
 
 /** Keys of `TuiSettings` holding a bounded integer. */
 type NumberKey = "subagentConcurrency" | "subagentMaxDepth" | "subagentFanOut" | "archiveIdleDays";
 /** Keys of `TuiSettings` holding free text. */
-type TextKey = "titleInstructions";
+type TextKey = "titleInstructions" | "findingsContext";
 export const MAX_TITLE_INSTRUCTIONS = 500;
 /** Higher values are the sensitive direction: a project checkout may only lower these. */
 const LIMIT_KEYS: readonly NumberKey[] = ["subagentConcurrency", "subagentMaxDepth", "subagentFanOut"];
@@ -449,6 +451,15 @@ const DEFS: readonly TuiSettingDef[] = [
     group: "Conversations",
   },
   {
+    key: "findingsContext",
+    label: "Findings context file",
+    description: "Path of the business context file (JSON) that orders findings by what matters to you. Commands use it unless you pass --context. Global only.",
+    kind: "text",
+    default: "",
+    maxLength: 500,
+    group: "Findings",
+  },
+  {
     key: "archiveIdleDays",
     label: "Archive idle conversations",
     description: "At startup, archive saved conversations idle for more than this many days. Set to 0 to keep everything. Applies to this computer.",
@@ -495,6 +506,7 @@ export const DEFAULT_SETTINGS: TuiSettings = {
   subagentFanOut: 1024,
   titleInstructions: "",
   archiveIdleDays: 0,
+  findingsContext: "",
 };
 
 /** Basename of the settings file inside the 0 state directory. */
@@ -635,6 +647,7 @@ export function isOperatorSetting(key: keyof TuiSettings): boolean {
     || key === "executionProfile"
     || key === "approvals"
     || key === "archiveIdleDays"
+    || key === "findingsContext"
     || key === "modelPreference"
     || key === "workflows";
 }
@@ -804,6 +817,7 @@ export function normalizeSettings(raw: unknown): TuiSettings {
     subagentFanOut: numberAt(raw, "subagentFanOut"),
     titleInstructions: strictValueAt(raw, "titleInstructions") ?? DEFAULT_SETTINGS.titleInstructions,
     archiveIdleDays: numberAt(raw, "archiveIdleDays"),
+    findingsContext: strictValueAt(raw, "findingsContext") ?? DEFAULT_SETTINGS.findingsContext,
   };
 }
 

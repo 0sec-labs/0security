@@ -48,7 +48,7 @@ const EXIT_USER_ERROR = 1;
 const CLI_CONFIG_KEYS = [
   "busyInputMode", "autoCompaction", "compactionThreshold", "allowSubagentPeerMessaging",
   "allowSubagentOperatorMessaging", "allowDevSourceUpdates",
-  "executionProfile", "approvals", "analyticsLevel", "diagnosticReporting", "updatePolicy",
+  "executionProfile", "approvals", "analyticsLevel", "diagnosticReporting", "updatePolicy", "findingsContext",
 ] as const satisfies readonly (keyof TuiSettings)[];
 const PUBLIC_CONFIG_KEYS = new Set<keyof TuiSettings>(CLI_CONFIG_KEYS);
 const INTERNAL_CONFIG_KEYS = new Set<keyof TuiSettings>(["onboardingCompleted", "diagnosticReportingPrompted", "modelPreference", "workflows"]);

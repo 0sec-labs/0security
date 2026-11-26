@@ -115,12 +115,14 @@ automations:
           repo: o/r
           tagPrefix: v
           report: commit-status
+          results: sarif
       - kind: check-completed
         check:
           repo: o/r
           branch: main
           conclusion: failure
           report: comment
+          results: both
 `);
     const plan = planSync(loadDefinitions(s.defs), s.stores);
     expect(plan[0]).toMatchObject({ action: "create" });
@@ -128,8 +130,8 @@ automations:
     const triggers = s.stores.sentinels.listTriggers();
     expect(triggers.map(trigger => trigger.kind).sort()).toEqual(["check-completed", "release"]);
     expect(triggers.every(trigger => !trigger.enabled)).toBe(true);
-    expect(triggers.find(trigger => trigger.kind === "release")!.release).toEqual({ repo: "o/r", on: "release", tagPrefix: "v", pollMs: 300_000, report: "commit-status" });
-    expect(triggers.find(trigger => trigger.kind === "check-completed")!.check).toMatchObject({ branch: "main", conclusion: "failure", report: "comment" });
+    expect(triggers.find(trigger => trigger.kind === "release")!.release).toEqual({ repo: "o/r", on: "release", tagPrefix: "v", pollMs: 300_000, report: "commit-status", results: "sarif" });
+    expect(triggers.find(trigger => trigger.kind === "check-completed")!.check).toMatchObject({ branch: "main", conclusion: "failure", report: "comment", results: "both" });
     expect(planSync(loadDefinitions(s.defs), s.stores)[0]).toMatchObject({ action: "unchanged" });
     s.write("rel.yaml", exportDefinition(s.stores.sentinels.list()[0]!, s.stores));
     expect(planSync(loadDefinitions(s.defs), s.stores)[0]).toMatchObject({ action: "unchanged" });
@@ -172,6 +174,42 @@ automations:
       s.write("bb.yaml", file(bad).replace("          tokenEnv: BITBUCKET_DC_TOKEN\n", bad.includes("tokenEnv") ? "" : "          tokenEnv: BITBUCKET_DC_TOKEN\n"));
       expect(() => loadDefinitions(s.defs)).toThrow("bb.yaml");
     }
+    s.close();
+  });
+
+  it("syncs spend limits of a Sentinel and its triggers, edits them in place and round trips through export", () => {
+    const s = setup();
+    const withLimits = `${reviewer.replace("automations:", "dailyBudgetUsd: 5\nmonthlyBudgetUsd: 60\nautomations:")}`.replace("      - kind: github-pr", "      - kind: github-pr\n        dailyBudgetUsd: 2\n        monthlyBudgetUsd: 20");
+    s.write("pr.yaml", withLimits);
+    expect(planSync(loadDefinitions(s.defs), s.stores)[0]!.changes).toEqual(expect.arrayContaining(["new Sentinel (paused)"]));
+    applySync(loadDefinitions(s.defs), s.stores, { enable: true });
+    const created = s.stores.sentinels.list()[0]!;
+    expect(created).toMatchObject({ dailyBudgetUsd: 5, monthlyBudgetUsd: 60 });
+    const trigger = s.stores.sentinels.listTriggers(created.id)[0]!;
+    expect(trigger).toMatchObject({ dailyBudgetUsd: 2, monthlyBudgetUsd: 20, enabled: true });
+    expect(planSync(loadDefinitions(s.defs), s.stores)[0]!.action).toBe("unchanged");
+
+    // A changed limit is an update; the trigger keeps its id and stays enabled.
+    s.write("pr.yaml", withLimits.replace("dailyBudgetUsd: 5", "dailyBudgetUsd: 7").replace("dailyBudgetUsd: 2", "dailyBudgetUsd: 3"));
+    expect(planSync(loadDefinitions(s.defs), s.stores)[0]!.changes).toEqual(expect.arrayContaining(["daily budget", "triggers of Review pull requests"]));
+    applySync(loadDefinitions(s.defs), s.stores);
+    expect(s.stores.sentinels.get(created.id)).toMatchObject({ dailyBudgetUsd: 7, monthlyBudgetUsd: 60 });
+    expect(s.stores.sentinels.listTriggers(created.id)).toEqual([expect.objectContaining({ id: trigger.id, dailyBudgetUsd: 3, monthlyBudgetUsd: 20, enabled: true })]);
+
+    const exported = exportDefinition(s.stores.sentinels.get(created.id)!, s.stores);
+    expect(exported).toContain("dailyBudgetUsd: 7");
+    expect(exported).toContain("monthlyBudgetUsd: 20");
+    s.write("pr.yaml", exported);
+    expect(planSync(loadDefinitions(s.defs), s.stores)[0]!.action).toBe("unchanged");
+    s.close();
+  });
+
+  it("rejects a limit that is not a positive amount", () => {
+    const s = setup();
+    s.write("pr.yaml", reviewer.replace("automations:", "dailyBudgetUsd: 0\nautomations:"));
+    expect(() => loadDefinitions(s.defs)).toThrow(/dailyBudgetUsd/);
+    s.write("pr.yaml", reviewer.replace("          repo: o/r", "          repo: o/r").replace("      - kind: github-pr", "      - kind: github-pr\n        monthlyBudgetUsd: -1"));
+    expect(() => loadDefinitions(s.defs)).toThrow(/monthlyBudgetUsd/);
     s.close();
   });
 

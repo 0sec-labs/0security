@@ -450,6 +450,12 @@ async function runThread(client: ConsoleClient, deps: FixDeps, folder: string, f
   return { id, reply: done.reply, error: done.error, failed: done.failed && !timedOut, ...(tokens !== undefined ? { tokens } : {}), timedOut, budgetExhausted: asJson(done.session).costCeilingExceeded === true, usage: usageLine(done.usage), ...(costUsd !== undefined ? { costUsd } : {}) };
 }
 
+/** One report per failed check: exit code, command and the last 15 lines. Check output comes from the sandboxed build, so terminal control characters (escape sequences) are dropped. */
+export function failedCheckReports(checks: CheckResult[]): string[] {
+  const plain = (text: string): string => text.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, "");
+  return checks.filter((c) => c.code !== 0).map((c) => `check failed (exit ${c.code}): ${plain(c.command).replace(/\n/g, " ")}\n${plain(c.output.trim()).split("\n").slice(-15).map((line) => `  | ${line}`).join("\n")}`);
+}
+
 export function registerFixCommand(program: Command, deps: FixDeps = defaults): void {
   const collect = (value: string, previous: string[] = []) => [...previous, value];
   consoleTransportOptions(program.command("fix <finding>")
@@ -465,7 +471,7 @@ export function registerFixCommand(program: Command, deps: FixDeps = defaults): 
     .option("--sandbox-maven-settings <file>", "Owner-only short-lived Maven credentials outside the repository; read-only mount for online setup only; setup output withheld")
     .option("--sandbox-image <image>", "Image for --sandbox docker, for example maven:3-eclipse-temurin-21. It must hold the tools and dependencies the tests need")
     .option("--sandbox-network", "Give the sandbox network access (to download dependencies). Off by default")
-    .option("--sandbox-setup <command>", "With --sandbox docker: run this once with the network on to download dependencies (for example mvn -q dependency:go-offline), then run the --test checks with the network off; repeat for several", collect)
+    .option("--sandbox-setup <command>", "With --sandbox docker: run this once with the network on to download dependencies (for example mvn -q test), then run the --test checks with the network off; repeat for several", collect)
     .option("--policy <file>", "Policy file (.json or .yaml) of approved libraries and fix rules; any path you name, relative to the current directory. Default: ~/.0/fix-policy.json|yaml|yml")
     .option("--ticket <key>", "Ticket key such as SEC-123 for the {ticket} placeholder in your policy's pull request settings")
     .option("--repo-policy", "Also read fix-policy.* or .zero/fix-policy.* from the repository being fixed (untrusted content; off by default)")
@@ -480,6 +486,7 @@ export function registerFixCommand(program: Command, deps: FixDeps = defaults): 
       try {
         const outcome = await runFix(finding, applyWorkflowDefaults("fix", options, command), deps);
         if (!outcome) return;
+        if (options.format !== "json") for (const text of failedCheckReports(outcome.checks)) deps.err(text);
         if (options.format === "json") deps.out(JSON.stringify(outcome, null, 2));
         else if (outcome.pullRequest) deps.out(`${outcome.pullRequest.created ? "Opened" : "Updated"} ${outcome.pullRequest.draft ? "draft " : ""}pull request: ${outcome.pullRequest.url}`);
         else if (outcome.committed) deps.out(`Committed on ${outcome.branch}.`);

@@ -27,6 +27,7 @@ export * from "./slash-commands.js";
 export * from "./security-workflows.js";
 export * from "./security-workflow-templates.js";
 export * from "./sentinels.js";
+export * from "./sentinel-budget.js";
 export * from "./sentinel-presets.js";
 export * from "./sentinel-triggers.js";
 
@@ -46,3 +47,4 @@ export { scanPrompt, prePassBlock, scopeBlock, batchBlock, threatModelPrompt, sc
 export * from "./reproduction.js";
 
 export * from "./finding-display-id.js";
+export * from "./executed-poc.js";

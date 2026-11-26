@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { budgetCapSchema } from "./sentinel-budget.js";
 
 /**
  * Sentinels: named, always-on security agents that sit alongside Automations (workflows).
@@ -76,6 +77,10 @@ const base = {
   model: modelSchema.nullable().default(null),
   /** USD cap for each automated run, checked as model usage receipts arrive. */
   runBudgetUsd: z.number().finite().min(0.01).max(100).nullable().optional(),
+  /** Most the Sentinel may spend per UTC day, in USD. Once reached, unattended runs are refused until the next day. Null or absent: no limit. */
+  dailyBudgetUsd: budgetCapSchema.nullable().optional(),
+  /** Most the Sentinel may spend per UTC month, in USD. Once reached, unattended runs are refused until the next month. Null or absent: no limit. */
+  monthlyBudgetUsd: budgetCapSchema.nullable().optional(),
   notifications: notificationsSchema.prefault({}),
   status: z.enum(SENTINEL_STATUSES).default("paused"),
   /** Automations (workflow definition ids) this Sentinel owns; they share its notes files. */

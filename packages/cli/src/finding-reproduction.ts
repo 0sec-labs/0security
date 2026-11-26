@@ -1,3 +1,4 @@
+import { executedPocFor, executedPocLabel, parseExecutedPoc, type ExecutedPoc } from "@0/engine/shared";
 import { parseFindingReproduction, proposeProof, reproductionFor, reproductionLabel, reproductionLine, proofLine, type FindingReproduction, type PocStep } from "@0/engine/shared";
 
 /** What a finding row shows for proof: the stored record, or a proposed recipe derived from its steps. Never a guess at a result. */
@@ -22,3 +23,15 @@ export function reproductionDetail(row: { reproduction?: unknown; pocSteps?: unk
 }
 
 export { proposeProof };
+
+type ExecRow = { executedPoc?: unknown; severity?: string };
+
+/** The stored executed-PoC record, or for a high or critical finding without one a derived static-only record. */
+export function rowExecutedPoc(row: ExecRow): ExecutedPoc | undefined {
+  return executedPocFor({ severity: row.severity }, parseExecutedPoc(row.executedPoc));
+}
+
+/** Short phrase for `findings list`. */
+export function executedPocPhrase(row: ExecRow): string | undefined {
+  return executedPocLabel(rowExecutedPoc(row));
+}

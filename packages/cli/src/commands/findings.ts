@@ -1,6 +1,6 @@
 import type { Command } from "commander";
 import chalk from "chalk";
-import { acceptanceExpiresWithin, describeAttackerImpact, compareFindingsBySeverity, effectiveTriageStatus } from "@0/engine/shared";
+import { executedPocLine, acceptanceExpiresWithin, describeAttackerImpact, compareFindingsBySeverity, effectiveTriageStatus } from "@0/engine/shared";
 import type { Finding, FindingTriageStatus, LayerVerdict } from "@0/engine/shared";
 import { writePresentationLine, writePresentationErrorLine } from "../presentation/process-output.js";
 import {
@@ -13,12 +13,13 @@ import {
 import { buildFindingConsoleCommand } from "../finding-handoff.js";
 import { resolveFindingId, shortFindingId, shortFingerprint } from "../finding-id.js";
 import { rowVerification, verificationPhrase } from "../finding-verification.js";
-import { reproductionDetail, reproductionPhrase, rowReproduction } from "../finding-reproduction.js";
+import { executedPocPhrase, rowExecutedPoc, reproductionDetail, reproductionPhrase, rowReproduction } from "../finding-reproduction.js";
 import { auditTriage, buildTriageRequest, triageLabel, type TriageFlags } from "./findings-triage.js";
 import { UsageError } from "./output.js";
 import { foldSimilarGroups } from "./findings-dedupe.js";
 import { parseFindingBusinessContext, compareFindingsByBusinessContext } from "@0/engine/shared";
-import { adjustmentFor, contextScore, describeAdjustment, findingPath, loadBusinessContext, type BusinessContext } from "../business-context.js";
+import { adjustmentFor, contextScore, describeAdjustment, findingPath } from "../business-context.js";
+import { contextOptionsOf, CONTEXT_FLAG_HELP, loadContextFor, REPOSITORY_FLAG_HELP, type LoadedContext } from "../business-context-load.js";
 
 type FindingsListOptions = {
   dbPath?: string;
@@ -30,6 +31,7 @@ type FindingsListOptions = {
   expiring?: string;
   scope?: string;
   context?: string;
+  repository?: string;
   limit?: string;
   all?: boolean;
 };
@@ -54,6 +56,8 @@ type FindingRow = {
   modelVerification?: string | null;
   /** JSON of the proposed proof and harness result; null until either exists. */
   reproduction?: string | null;
+  /** JSON of the executed-PoC outcome and run record; null until a PoC attempt is recorded. */
+  executedPoc?: string | null;
   pocSteps?: string | null;
   timestamp: number;
   score?: number | null;
@@ -135,7 +139,8 @@ function withFindingsListOptions(command: Command, options: { defaultLimit?: str
     .option("--status <status>", "Filter by status: discovered, verified, confirmed, scored, reported, fixed, false-positive")
     .option("--triage <triage>", "Filter by triage: new, accepted, suppressed")
     .option("--expiring <days>", "Only accepted risks that expire within this many days")
-    .option("--context <file>", "Business context file (JSON): order findings by what matters to you, with the reason shown. See the docs")
+    .option("--context <file>", CONTEXT_FLAG_HELP)
+    .option("--repository <name>", REPOSITORY_FLAG_HELP)
     .option("--scope <scope>", "in: findings not labelled out of scope; out: only those the declared scope (0security scan --scope) labelled out of scope; all (default): both, each labelled");
   return options.defaultLimit
     ? withFilters.option("--limit <n>", "Max findings/groups to show", options.defaultLimit)
@@ -195,15 +200,17 @@ function renderVerification(row: FindingRow, withProof = true): void {
   if (phrase) console.log(`  ${chalk.gray(phrase)}`);
   const proof = withProof ? reproductionPhrase(row as { reproduction?: unknown; pocSteps?: unknown }) : undefined;
   if (proof) console.log(`  ${chalk.gray(`proof: ${proof}`)}`);
+  const executed = withProof ? executedPocPhrase(row as { executedPoc?: unknown; severity?: string }) : undefined;
+  if (executed) console.log(`  ${chalk.gray(`poc: ${executed}`)}`);
 }
 /** Orders by severity moved by your business context, then as without it. Severity itself is never changed. */
-function contextComparer(context: BusinessContext): (a: FindingRow, b: FindingRow) => number {
-  const score = (row: FindingRow) => contextScore(row.severity, adjustmentFor(context, findingPath((row as { reviewAnnotation?: unknown }).reviewAnnotation)));
+function contextComparer(context: LoadedContext): (a: FindingRow, b: FindingRow) => number {
+  const score = (row: FindingRow) => contextScore(row.severity, adjustmentFor(context.context, findingPath((row as { reviewAnnotation?: unknown }).reviewAnnotation), context.repository));
   return (a, b) => score(b) - score(a) || compareFindingsBySeverity(priorityFinding(a), priorityFinding(b)) || b.timestamp - a.timestamp || b.id.localeCompare(a.id);
 }
-function renderPriority(row: FindingRow, context?: BusinessContext): void {
+function renderPriority(row: FindingRow, context?: LoadedContext): void {
   console.log(`  ${chalk.white.bold(row.title)}${row.scope === "out-of-scope" ? chalk.yellow("  [out of scope]") : ""}`);
-  const why = context ? describeAdjustment(adjustmentFor(context, findingPath((row as { reviewAnnotation?: unknown }).reviewAnnotation))) : parseFindingBusinessContext((row as { businessContext?: unknown }).businessContext)?.rationale ?? "";
+  const why = context ? describeAdjustment(adjustmentFor(context.context, findingPath((row as { reviewAnnotation?: unknown }).reviewAnnotation), context.repository)) : parseFindingBusinessContext((row as { businessContext?: unknown }).businessContext)?.rationale ?? "";
   if (why) console.log(`  ${chalk.gray("Operator business context (unverified):")} ${why}`);
   if (row.scope === "out-of-scope") console.log(`  ${chalk.gray("Outside declared scope:")} ${row.scopeReason ?? "no reason given"}${row.scopeSource ? chalk.gray(` (${row.scopeSource})`) : ""}`);
   const attacker = describeAttackerImpact(priorityFinding(row));
@@ -224,7 +231,7 @@ async function renderFindingsList(opts: FindingsListOptions): Promise<void> {
   const limit = Number(opts.limit ?? "50");
   if (!Number.isSafeInteger(limit) || limit < 0 || limit > 5000) throw new Error("Finding limit must be an integer between 0 and 5000.");
   // Read the context before any database is opened: a bad file changes nothing.
-  const context = opts.context ? loadBusinessContext(opts.context) : undefined;
+  const context = await loadContextFor(opts);
   const choice = (name: string, value: string | undefined, allowed: readonly string[]): void => { if (value !== undefined && !allowed.includes(value)) throw new Error(`Unknown ${name} "${value}". Use one of: ${allowed.join(", ")}.`); };
   choice("severity", opts.severity, ["critical", "high", "medium", "low", "info"]);
   choice("status", opts.status, ["discovered", "verified", "confirmed", "scored", "reported", "fixed", "false-positive"]);
@@ -271,6 +278,7 @@ async function renderFindingsList(opts: FindingsListOptions): Promise<void> {
   }
   console.log("");
   console.log(chalk.red.bold("  \u25C6 0") + chalk.gray(opts.all ? ` findings (${Math.min(rows.length, limit)})` : ` finding groups (${Math.min(groups.length, limit)})`));
+  if (context) console.log(chalk.gray(`  Ordered by your business context (${context.source}${context.repository ? `, repository ${context.repository}` : ""}). Severity is unchanged.`));
   console.log("");
   if (opts.all) {
     for (const f of rows.slice(0, limit)) {
@@ -350,8 +358,11 @@ export function registerFindingsCommand(program: Command): void {
     .description("Show detailed information about a finding")
     .argument("<id>", "Finding ID (full or prefix)")
     .option("--db-path <path>", "Path to SQLite database")
+    .option("--context <file>", CONTEXT_FLAG_HELP)
+    .option("--repository <name>", REPOSITORY_FLAG_HELP)
     .option("--json", "Print JSON")
-    .action(async (id: string, opts: { dbPath?: string; json?: boolean }, command: Command) => {
+    .action(async (id: string, opts: { dbPath?: string; json?: boolean; context?: string; repository?: string }, command: Command) => {
+      const context = await loadContextFor(contextOptionsOf(opts, command));
       const { db, dbPath: selectedDbPath } = await openDatabaseHolding(id, resolveDbPath(opts, command));
 
       try {
@@ -364,17 +375,19 @@ export function registerFindingsCommand(program: Command): void {
         const related = finding.fingerprint ? db.getRelatedFindings(finding.fingerprint) as FindingRow[] : [finding];
 
         if (opts.json) {
-          const { modelVerification: _raw, reproduction: _rawRepro, ...plain } = finding as FindingRow & { reproduction?: unknown };
+          const { modelVerification: _raw, reproduction: _rawRepro, executedPoc: _rawExec, ...plain } = finding as FindingRow & { reproduction?: unknown; executedPoc?: unknown };
+          const executedRecord = rowExecutedPoc(finding as { executedPoc?: unknown; severity?: string });
           const stored = rowVerification(finding);
           const proofRecord = rowReproduction(finding as { reproduction?: unknown; pocSteps?: unknown });
-          console.log(JSON.stringify({ ...plain, ...(stored ? { verification: stored } : {}), ...(proofRecord ? { reproduction: proofRecord } : {}), related: related.map((row) => ({ id: row.id, scanId: row.scanId, status: row.status, triage: row.triageStatus ?? "new" })) }, null, 2));
+          const why = context ? adjustmentFor(context.context, findingPath((finding as { reviewAnnotation?: unknown }).reviewAnnotation), context.repository) : undefined;
+          console.log(JSON.stringify({ ...plain, ...(why?.tags.length ? { ranking: { shift: why.shift, tags: why.tags, notes: why.notes } } : {}), ...(stored ? { verification: stored } : {}), ...(proofRecord ? { reproduction: proofRecord } : {}), ...(executedRecord ? { executedPoc: executedRecord } : {}), related: related.map((row) => ({ id: row.id, scanId: row.scanId, status: row.status, triage: row.triageStatus ?? "new" })) }, null, 2));
           return;
         }
         console.log("");
         console.log(chalk.red.bold("  \u25C6 0") + chalk.gray(" finding detail"));
         console.log("");
 
-        renderPriority(finding);
+        renderPriority(finding, context);
         renderVerification(finding, false);
         console.log(`  ${chalk.gray("Category:")} ${finding.category}`);
         if (finding.score != null) {
@@ -401,6 +414,11 @@ export function registerFindingsCommand(program: Command): void {
         }
         const proofDetail = reproductionDetail(finding as { reproduction?: unknown; pocSteps?: unknown });
         if (proofDetail) console.log(`  ${chalk.gray(`${proofDetail.label}:`)}        ${proofDetail.line}`);
+        const executedRow = rowExecutedPoc(finding as { executedPoc?: unknown; severity?: string });
+        if (executedRow) {
+          console.log(`  ${chalk.gray("PoC execution:")} ${executedRow.outcome}. ${executedPocLine(executedRow)}`);
+          if (executedRow.run) console.log(`  ${chalk.dim(`run: ${executedRow.run.status} (${executedRow.run.reason}), ${executedRow.run.isolation}, ${(executedRow.run.durationMs / 1000).toFixed(1)}s`)}`);
+        }
         console.log("");
         console.log(`  ${chalk.gray("Description:")}`);
         console.log(`  ${finding.description}`);

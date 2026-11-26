@@ -31,6 +31,7 @@ import { newCorrelationId, buildToolCallLogEntry, buildToolCallsPayload, type To
 import { registerSignalCleanup } from "../signal-cleanup.js";
 import { externalMemoryPath, shouldHarvestLoot, summarizeReasoning, isTransientLlmError, isContextWindowError, NATIVE_REQUEST_PREFLIGHT_BYTES, compactMessagesForRequestPreflight, MAX_OUTPUT_CAP_CONTINUATIONS, OUTPUT_CAP_CONTINUATION_PROMPT, isRecoverableOutputCap, toolFailureText } from "./helpers.js";
 import { type NativeAgentLoopOptions, type NativeAgentState } from "./types.js";
+import { executedPocForScan } from "../../executed-poc/run.js";
 import { resolveCompactionThresholds, ContextSummaryReceiptError, type CompactMessagesResult, compactMessagesWithLLM, dropOldestMessages, generateProgressSummary } from "./compaction.js";
 import { LoopDetector, PLAYBOOK_MARKER, messagesContainText, BUDGET_WARNING_SOFT, BUDGET_WARNING_HARD, computeBudgetWarningTurns } from "./loop-detector.js";
 import { seedFromJournal, buildInitialPrompt, buildContinuePrompt, type PersistedNativeToolContext, persistSession } from "./run-support.js";
@@ -143,6 +144,7 @@ async function runNativeAgentLoopInternal(opts: NativeAgentLoopOptions): Promise
     scopePath: config.scopePath,
     workspaceIdentity: config.workspaceIdentity,
     persistFindings: db !== null || !!config.persistDelegatedFinding,
+    executedPoc: executedPocForScan(config.scanId, config.executedPoc),
     persistDelegatedFinding: config.persistDelegatedFinding,
     updateDelegatedFinding: config.updateDelegatedFinding,
     authConfig: config.authConfig,

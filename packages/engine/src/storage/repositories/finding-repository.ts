@@ -6,8 +6,9 @@ import type { Finding, FindingTriageStatus } from "../../shared/index.js";
 import * as schema from "../schema.js";
 import { findingStatuses, type FindingStatusDB } from "../schema.js";
 import { iterateLatestFindingMetadata, getFindingFamilyMetadata, selectFindingFamiliesBySeverity, selectFindingsBySeverity, type RankedFindingOptions } from "../finding-priority.js";
+import { parseExecutedPoc, type ExecutedPoc } from "../../shared/executed-poc.js";
 import { parseFindingReproduction, parseReproductionResult, type FindingReproduction } from "../../shared/reproduction.js";
-import { buildFindingFingerprint, type PersistedFindingReviewFields, type FindingModelVerification, parseFindingModelVerification, serializeFindingModelVerification, serializeFindingReproduction, serializeFindingSourceVerification, serializeFindingVerificationResult, serializeFindingReviewAnnotation, restoreFindingReviewFields, deriveEvidenceFromPocSteps, normalizeWorkflowStatus, type WorkflowStatus } from "../finding-helpers.js";
+import { buildFindingFingerprint, type PersistedFindingReviewFields, type FindingModelVerification, parseFindingModelVerification, serializeFindingModelVerification, serializeFindingReproduction, serializeExecutedPoc, serializeFindingSourceVerification, serializeFindingVerificationResult, serializeFindingReviewAnnotation, restoreFindingReviewFields, deriveEvidenceFromPocSteps, normalizeWorkflowStatus, type WorkflowStatus } from "../finding-helpers.js";
 import { effectiveTriageStatus } from "../../shared/triage-expiry.js";
 import { Repository } from "./base.js";
 
@@ -228,6 +229,21 @@ export class FindingRepository extends Repository {
     const current = this.getFindingReproduction(findingId);
     const merged = serializeFindingReproduction({ proof: patch.proof ?? current?.proof, result: patch.result ?? current?.result });
     const result = this.db.update(schema.findings).set({ reproduction: merged }).where(eq(schema.findings.id, findingId)).run();
+    if (result.changes === 0) throw new Error(`Finding ${findingId} not found`);
+  }
+
+
+  /** The stored executed-PoC record, or undefined. */
+  getFindingExecutedPoc(findingId: string): ExecutedPoc | undefined {
+    return parseExecutedPoc(this.owner.getFinding(findingId)?.executedPoc);
+  }
+
+
+  /** Store the executed-PoC record next to the finding. Touches no other column. A record that is not complete is refused. */
+  setFindingExecutedPoc(findingId: string, record: ExecutedPoc): void {
+    const serialized = serializeExecutedPoc(record);
+    if (!serialized) throw new Error("Not a complete executed-PoC record; refusing to store it.");
+    const result = this.db.update(schema.findings).set({ executedPoc: serialized }).where(eq(schema.findings.id, findingId)).run();
     if (result.changes === 0) throw new Error(`Finding ${findingId} not found`);
   }
 

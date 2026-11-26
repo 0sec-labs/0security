@@ -27,7 +27,8 @@ import { coverageJson, coverageText, DEFAULT_BATCH_SIZE, moduleShardOf, ownersOf
 import { planScan, planText } from "../scan-plan.js";
 import { interactiveScopeHint } from "../threat-interview-findings.js";
 import { resumeHint, type ResumeHint } from "../scan-resume.js";
-import { businessContextSteering, loadBusinessContext } from "../business-context.js";
+import { businessContextSteering } from "../business-context.js";
+import { loadContextFor } from "../business-context-load.js";
 import { applyBusinessContext } from "../scan-report.js";
 import { loadScope, loadSteering, type Steering } from "../scan-steering.js";
 import { applyTierSettings, loadTierMap, repoIdentifier, resolveTier, settingsSentence, tierSentence, type ResolvedTier } from "../scan-tiers.js";
@@ -210,7 +211,7 @@ interface ScanOptions extends ConsoleTransportOptions {
   budget: string; diff?: string; prepass?: string; scanner?: string[]; rules?: string[]; format: string; output?: string; timeout: string; failOn?: string; model?: string; skill: string; passes: string;
   provider?: string; reasoning?: string;
   codeowners?: string;
-  businessContext?: string;
+  businessContext?: string; repository?: string;
   context?: string[]; policy?: string[]; orgPolicy?: string[]; repoContext?: boolean; repoIgnores?: boolean;
   scope?: string; repoScope?: boolean; scopeSarif?: string;
   targetUrl?: string; scopeFile?: string; acknowledgeHost?: string; rateLimit?: string; templates?: string;
@@ -863,10 +864,13 @@ export async function runScan(target: string | undefined, options: ScanOptions, 
     if (options.coverage !== undefined) { await printCoverage(resolved, options, deps); return; }
     const known: KnownSet | undefined = options.known?.length ? loadKnown(options.known, resolved.roots) : undefined;
     if (known) deps.err(`known: ${known.items.length} item${known.items.length === 1 ? "" : "s"} from ${known.tools.join(", ") || "the given files"}; the scan is told to look for what they missed`);
-    const businessContext = options.businessContext ? loadBusinessContext(options.businessContext) : undefined;
+    // Read before any model starts, so a bad file stops the scan before it costs anything. A file named with --business-context
+    // wins over the findingsContext setting; rules for specific repositories match --repository or the folder's git remote.
+    const loadedContext = await loadContextFor({ ...(options.businessContext !== undefined ? { context: options.businessContext } : {}), ...(options.repository ? { repository: options.repository } : {}) }, { folder: resolved.folder, detect: async folder => repoIdentifier(await (deps.gitRemote ?? defaultScanDeps.gitRemote!)(folder)) });
+    const businessContext = loadedContext?.context;
     const declaredScope = loadScope(resolved.folder, options, deps.err);
     const extras: Partial<ScanOutcome> = {
-      ...(businessContext ? { businessContext } : {}),
+      ...(businessContext ? { businessContext, ...(loadedContext?.repository ? { businessRepository: loadedContext.repository } : {}) } : {}),
       ...(declaredScope ? { scope: declaredScope, ...(options.scopeSarif === "suppress" ? { scopeSarifSuppress: true } : {}) } : {}),
       ...(tier ? { tier: tierInfo(tier), ...(options.failOnSkip ? { failOnSkip: true } : {}) } : {}),
       ...(known ? { known: { items: known.items, tools: known.tools, ...(options.onlyNew ? { onlyNew: true } : {}) } } : {}),
@@ -882,7 +886,7 @@ export async function runScan(target: string | undefined, options: ScanOptions, 
       return;
     }
     const steering = loadSteering(resolved.folder, options, deps.err);
-    if (businessContext) steering.context.push(businessContextSteering(businessContext));
+    if (businessContext) steering.context.push(businessContextSteering(businessContext, loadedContext?.repository));
     if (steering.policies.length && options.skill === "scan") options = { ...options, skill: POLICY_SKILL };
     if (deps.resolveSkill) options = { ...options, skill: deps.resolveSkill(options.skill) };
     const budget = Number(options.budget);
@@ -1006,6 +1010,7 @@ export function registerScanCommand(program: Command, deps: ScanDeps = defaultSc
     .option("--templates <path>", "With --target-url: a Nuclei template file or folder to run instead of the templates Nuclei has installed. 0 never downloads templates")
     .option("--rules <file-or-folder>", "Semgrep or OpenGrep rules for the pre-pass (a file or a folder); repeat for several. Replaces the default rules and needs --scanner semgrep or opengrep. Rules are never read from the scanned folder unless you name them", (value: string, previous: string[] = []) => [...previous, value])
     .option("--business-context <file>", "Operator-owned JSON tags and notes for investigation and work ordering; keeps technical severity unchanged")
+    .option("--repository <name>", "Repository name the business context rules are matched against (default: the git remote of the scanned folder)")
     .option("--context <file>", "Give the scan this file (a threat model, notes on who may do what) as lower-priority background; repeat for several. It can steer what the scan weighs but cannot change how it works", (value: string, previous: string[] = []) => [...previous, value])
     .option("--policy <file-or-folder>", "Check the code against these Markdown policies (a file or a folder of .md files) and report pass or fail for each; repeat for several. Runs the policy-check skill", (value: string, previous: string[] = []) => [...previous, value])
     .option("--org-policy <folder>", "An organisation's policy folder: evaluated first, and wins when a --policy says otherwise or uses the same id; repeat for several", (value: string, previous: string[] = []) => [...previous, value])

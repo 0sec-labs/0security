@@ -142,3 +142,33 @@ describe("stored operator business context", () => {
     expect(overridden.indexOf("admin-high")).toBeLessThan(overridden.indexOf("payments-medium"));
   });
 });
+
+describe("findings list and show with repository rules", () => {
+  it("applies the rules of the repository named with --repository, and none for another", async () => {
+    const { db, path, directory, insert } = fixture();
+    try { insert("admin-high", "high", "services/admin/panel.ts"); insert("checkout-medium", "medium", "src/payments/checkout.ts"); } finally { db.close(); }
+    const ctx = join(directory, "repos.json");
+    writeFileSync(ctx, JSON.stringify({ repositories: { "acme/shop": [{ match: "src/payments/**", tags: ["payments", "personal-data"] }], "acme/*": [{ match: "services/admin/**", tags: ["internal-only"] }] } }));
+    const shop = await list(["--db-path", path, "--context", ctx, "--repository", "acme/shop"]);
+    expect(shop.indexOf("checkout-medium")).toBeLessThan(shop.indexOf("admin-high"));
+    expect(shop).toContain("repository acme/shop");
+    expect(shop).toContain("ranked lower (-1): internal-only");
+    const other = await list(["--db-path", path, "--context", ctx, "--repository", "elsewhere/app"]);
+    expect(other.indexOf("admin-high")).toBeLessThan(other.indexOf("checkout-medium"));
+    expect(other).not.toContain("Operator business context");
+  });
+
+  it("shows why a finding ranks where it does in findings show", async () => {
+    const { db, path, directory, insert } = fixture();
+    try { insert("checkout-medium", "medium", "src/payments/checkout.ts"); } finally { db.close(); }
+    const ctx = join(directory, "c.json");
+    writeFileSync(ctx, JSON.stringify({ entries: [{ match: "src/payments/**", tags: ["payments"], note: "card data" }] }));
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const program = new Command(); registerFindingsCommand(program);
+    await program.parseAsync(["findings", "show", "checkout-medium", "--db-path", path, "--context", ctx], { from: "user" });
+    expect(log.mock.calls.map(call => String(call[0])).join("\n")).toContain("Operator business context (unverified): ranked higher (+1): payments. card data");
+    log.mockClear();
+    await program.parseAsync(["findings", "show", "checkout-medium", "--db-path", path, "--context", ctx, "--json"], { from: "user" });
+    expect(JSON.parse(String(log.mock.calls[0]![0]))).toMatchObject({ severity: "medium", ranking: { shift: 1, tags: ["payments"] } });
+  });
+});

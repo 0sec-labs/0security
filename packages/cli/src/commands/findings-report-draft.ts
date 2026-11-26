@@ -16,6 +16,7 @@ import { findingDatabasePaths, loadFindingFocus } from "../finding-focus.js";
 import { resolveFindingId, shortFingerprint } from "../finding-id.js";
 import { osecDB } from "@0/engine/storage";
 import { finishWithError, UsageError } from "./output.js";
+import { contextOptionsOf, loadContextFor, REPOSITORY_FLAG_HELP, withBusinessContext, type LoadedContext } from "../business-context-load.js";
 
 export const REPORT_STAGES = ["early-warning", "notification", "final"] as const;
 export type ReportStage = (typeof REPORT_STAGES)[number];
@@ -101,6 +102,7 @@ function sourceTable(ctx: DraftContext): string[] {
     ["Finding id", `\`${finding.id}\`${finding.fingerprint ? ` (fingerprint \`${finding.fingerprint}\`)` : ""}`],
     ["Title", cell(finding.title)],
     ["Severity", `${finding.severity} (as recorded by the scanner or reviewer; not a measure of real-world exploitation)`],
+    ...(finding.businessContext ? [["Operator business context (unverified; the severity is unchanged)", cell(finding.businessContext.rationale)] as [string, string]] : []),
     ["Category", cell(finding.category)],
     ["Where", where ? `\`${cell(where)}\`` : blank("location; the finding record has none")],
     ...(target ? [["Scanned target", `\`${cell(target)}\``] as [string, string]] : []),
@@ -280,6 +282,9 @@ export interface ReportDraftOptions {
   stage?: string; product?: string; manufacturer?: string; contact?: string; affectedVersions?: string; exploitedSince?: string;
   exploitationEvidence?: string; maliciousActor?: string; memberStates?: string; mitigation?: string; userMeasures?: string;
   correctiveMeasure?: string; correctiveMeasureDate?: string; evidenceFile?: string[]; facts?: string; output?: string; dbPath?: string;
+  context?: string; repository?: string;
+  /** The loaded business context; set by the command from --context or the findingsContext setting. */
+  ranking?: LoadedContext
 }
 
 export interface ReportDraftDeps {
@@ -300,6 +305,7 @@ export function runReportDraft(id: string, options: ReportDraftOptions, deps: Re
   for (const key of FACT_KEYS) { const value = options[key]; if (clean(value)) facts[key] = value!; }
   if (options.evidenceFile?.length) facts.evidenceFiles = [...(fromFile.evidenceFiles ?? []), ...options.evidenceFile.map(file => describeEvidenceFile(file))];
   const loaded = deps.load(id, options.dbPath);
+  if (options.ranking) loaded.finding = withBusinessContext([loaded.finding], options.ranking)[0]!;
   const ctx: DraftContext = { finding: loaded.finding, ...(loaded.target ? { target: loaded.target } : {}), facts, toolVersion: deps.version, generatedAt: deps.now().toISOString() };
   const text = stage === "all" ? buildAllDrafts(ctx) : buildReportDraft(stage as ReportStage, ctx);
   if (options.output) { deps.write(resolve(options.output), text); deps.err(`Wrote ${options.output}. This is a draft: a person must review it and submit it; nothing was sent.`); }
@@ -354,11 +360,13 @@ export function registerFindingsReportDraftCommand(parent: Command, deps?: Repor
     .option("--facts <file>", "JSON file with the same facts (camelCase keys, for example affectedVersions); flags win")
     .option("-o, --output <file>", "Write to a file instead of stdout")
     .option("--db-path <path>", "Path to SQLite database")
+    .option("--context <file>", "Business context file (JSON): add why the finding ranks where it does. Defaults to the file set with `0security config set findingsContext`")
+    .option("--repository <name>", REPOSITORY_FLAG_HELP)
     .addHelpText("after", "\nEvery field is taken from the finding or from what you supply here; everything else is left as a visible blank. It is a draft: a person reviews it and submits it through the authority's channel. Article 14 of Regulation (EU) 2024/2847 is the starting point; confirm current requirements.")
-    .action((id: string, options: ReportDraftOptions, command: Command) => {
+    .action(async (id: string, options: ReportDraftOptions, command: Command) => {
       const merged = { ...command.parent?.opts(), ...options } as ReportDraftOptions;
       const resolved = deps ?? defaults;
-      try { runReportDraft(id, { ...options, dbPath: options.dbPath ?? merged.dbPath }, resolved); }
+      try { runReportDraft(id, { ...options, dbPath: options.dbPath ?? merged.dbPath, ranking: await loadContextFor(contextOptionsOf(options, command)) }, resolved); }
       catch (error) { finishWithError(error, resolved, false); }
     });
 }

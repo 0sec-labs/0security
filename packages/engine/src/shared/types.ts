@@ -763,6 +763,12 @@ export interface Finding {
    * on findings that never had either.
    */
   reproduction?: import("./reproduction.js").FindingReproduction;
+  /**
+   * Outcome of the PoC the harness ran in the sandbox after a high or critical
+   * finding was saved: executed-proven, executed-failed or static-only, with the
+   * run record. Only the harness writes it. Additive: absent on older findings.
+   */
+  executedPoc?: import("./executed-poc.js").ExecutedPoc;
   /** Target-neutral research receipts attached by the shared adapter plane. */
   researchEvidence?: ResearchEvidenceEnvelope[];
   /**

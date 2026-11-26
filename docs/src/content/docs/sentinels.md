@@ -65,6 +65,27 @@ Scheduled and polled turns are autonomous, so the Sentinel must be active and re
 
 A Sentinel has shell access, like a thread. An optional sandbox (SmolVM or Docker) limits it, as does one global setting: **Ask before running commands** under **Settings → Helpers**, off by default. When it is on, a Sentinel needs your approval for its commands, as in threads. See [Configuration](/configuration/#ask-before-running-commands).
 
+### Spend limits
+
+A Sentinel can have a daily and a monthly spend limit, in USD. Once it has spent that much in the UTC day or month, new unattended runs are refused.
+
+```bash
+0security sentinels set SENTINEL_ID --daily-budget 5 --monthly-budget 60
+0security sentinels set SENTINEL_ID --daily-budget none
+```
+
+A trigger can also have a daily and a monthly limit, which count only the runs that trigger started:
+
+```bash
+0security sentinels triggers add SENTINEL_ID --kind schedule --frequency daily --at 03:00 --daily-budget 2
+```
+
+A refused run is recorded in the Sentinel's activity with the reason, for example `Budget reached: $5 of the $5 daily limit for this Sentinel is spent`, and the trigger shows it. A pull request or event that was refused is offered again when the limit resets. A schedule runs at its next time. A turn that waited in the queue is checked again when it starts.
+
+Limits apply to runs that triggers start. Your own messages and manual runs are never refused, but their cost counts toward the daily and monthly spend. A limit is checked before a run starts, so a run that starts just under the limit can pass it. Use the budget per automated run to cap that. While a Sentinel with a limit has a run in progress, its other triggers wait until it ends.
+
+**Settings → Usage** lists the cost of Sentinel runs by Sentinel, model and week for the last 12 weeks, and each Sentinel's spend today and this month against its limits.
+
 ## Triggers
 
 | Trigger | Behavior |
@@ -84,6 +105,8 @@ There is no trigger for a branch push or a new finding.
 ### GitHub pull request trigger
 
 `github-pr` polls for new and updated pull requests. The first poll only records pull requests that are already open and never reviews them. If `gh` is missing or signed out, the trigger shows a blocked status and retries on the next poll.
+
+The poll reads up to 1,000 open pull requests through `gh`, which pages through the API itself. A trigger remembers up to 3,000 pull requests, oldest first out. If more than 1,000 are open, the poll reads the newest 1,000, the trigger shows that older ones are not reviewed, and a base branch narrows the list.
 
 A new commit on an open pull request wakes the Sentinel in its thread with one turn, recorded in its activity. If an older commit of the same pull request is still waiting, the newer one replaces it. Reviews run one at a time, in the order they arrive. Closed and merged pull requests are ignored.
 
@@ -114,6 +137,8 @@ Draft pull requests are skipped with the reason `draft pull request`, and review
 Changing a trigger's repository, branch or options turns it off and records a new baseline. Turning on comments or forks needs a fresh approval.
 
 The Sentinel's `gh` account needs permission to comment when `--comment` is on, and comments appear as that person. A failed comment shows on the activation and does not fail the review.
+
+A third option, `results`, sends the findings back to GitHub. See [Send findings to GitHub](#send-findings-to-github).
 
 #### Limits for pull request runs
 
@@ -266,6 +291,46 @@ A comment carries a hidden marker, so 0 finds and edits its own comment and neve
 
 0 does not create check runs. GitHub allows only a GitHub App to write them, and a `gh` login is not one.
 
+### Send findings to GitHub
+
+A Sentinel run that scans can upload its findings to GitHub code scanning, post one summary comment, or both. Set `results` on a `github-pr`, `release` or `check-completed` trigger. The default is `off`, so nothing is sent.
+
+| Value | What is sent |
+| --- | --- |
+| `off` | Nothing. The result stays in the Sentinel. |
+| `sarif` | A SARIF upload to code scanning, so findings appear in the Security tab and as pull request annotations. |
+| `comment` | One summary comment on the pull request, edited in place on later runs. |
+| `both` | The upload and the comment. |
+
+Set it when you add the trigger:
+
+```bash
+0security sentinels triggers add <sentinel> --kind github-pr --repo owner/name --results sarif
+0security sentinels triggers add <sentinel> --kind release --repo owner/name --results sarif
+```
+
+In a YAML file, set `results: sarif` next to `repo`. In the app, turn on **Send findings to GitHub code scanning** when you add a pull request trigger.
+
+The upload runs `gh api` against `repos/{owner}/{repo}/code-scanning/sarifs`, with the document compressed and base64 encoded, and the commit and ref of the run:
+
+| Trigger | Ref |
+| --- | --- |
+| `github-pr` | `refs/pull/<number>/head`, with the pull request's head commit |
+| `release` | `refs/tags/<tag>`, with the commit the tag points to |
+| `check-completed` | `refs/heads/<branch>`, with the commit of the check. Only checks the poll finds on the tip of a branch are uploaded. A check that arrives by webhook is not, because it can belong to a fork pull request. |
+
+For a `release` or `check-completed` trigger, `results: comment` and `report: comment` do the same thing. `report: commit-status` still posts a commit status next to an upload.
+
+The document holds severity, title, category and a file path and line for each finding. It has no descriptions, evidence, proof-of-concept steps or local paths. A finding without a repository file path is left out. Links, markup, `@` mentions and issue references are removed from titles. A document has at most 1,000 results, most severe first. The run's own findings go in each upload. One category per Sentinel keeps two Sentinels from closing each other's alerts.
+
+Uploads use your own `gh` login, so the account needs permission to write code scanning results (the `security_events` scope for a classic token). Pull requests from forks are never uploaded, even with `includeForks`. Comments follow the rules above, and the same limits apply: one per pull request per minute and 30 per hour for the whole engine.
+
+A failed upload shows on the run and does not fail it. A skipped finding is noted on the run. Code scanning is available on public repositories and on private ones with GitHub Code Security.
+
+0 does not create check runs. GitHub allows only a GitHub App to write them, and a `gh` login is not one. `ZERO_ENTERPRISE` refuses every `gh` call, so nothing is polled or sent.
+
+This path is tested with a fake `gh` and fixtures. It has not been run against live GitHub.
+
 #### Webhook for release and check events
 
 The webhook described above also starts `release` and `check-completed` triggers. Add these events to the same webhook in GitHub: **Releases**, **Pushes** (for tags), **Check runs** and **Check suites**. Choose only the events you use.
@@ -352,6 +417,8 @@ automations:
           branch: main
           conclusion: failure
 ```
+
+A Sentinel takes `dailyBudgetUsd` and `monthlyBudgetUsd`, and a trigger takes the same two. Changing a limit updates the Sentinel or trigger in place and does not turn the trigger off.
 
 A trigger takes the settings for its kind: `schedule`, `github` (pull requests), `bitbucket` (pull requests), `release`, `check` or `webhook`. The fields are the ones in the JSON examples above. Unknown fields and values outside the limits are refused.
 
