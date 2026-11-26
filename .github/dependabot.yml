@@ -23,6 +23,15 @@ updates:
       # Grammar ABI must match the vendored tree-sitter 0.21.1 runtime.
       - dependency-name: tree-sitter-c
         update-types: [version-update:semver-minor, version-update:semver-major]
+  - package-ecosystem: cargo
+    # The Foxguard engine (crates/foxguard). The compiler is pinned in rust-toolchain.toml.
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    groups:
+      cargo-minor-and-patch:
+        update-types: [minor, patch]
   - package-ecosystem: github-actions
     directories: [/, /.github/actions/setup-ci]
     schedule:
@@ -40,5 +49,5 @@ updates:
       # A new Node major is a project decision (corepack is gone in 25+, CI and engines are on 24).
       - dependency-name: node
         update-types: [version-update:semver-major]
-      # The workbench image pins its toolchain with RUSTUP_TOOLCHAIN, so a base-image bump changes nothing.
+      # The foxguard-builder stage installs the compiler pinned in rust-toolchain.toml, so a base-image bump changes nothing.
       - dependency-name: rust

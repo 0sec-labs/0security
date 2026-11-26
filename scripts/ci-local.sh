@@ -9,8 +9,10 @@
 # to main; the push is safe only when it exits 0.
 #
 # Not replayed: `uses:` steps (checkout/setup-*), "Bootstrap runner" (CI disk
-# and corepack shim preflight) and "Provision FoxGuard binary" (uses a foxguard
-# already on PATH; falls back to the provision script only if none is found).
+# and corepack shim preflight) and "Provide Foxguard" (uses a foxguard already
+# on PATH; falls back to building crates/foxguard only if none is found). The
+# `foxguard` and `rust` jobs are not replayed: run `cargo test -p foxguard`
+# (or the targeted subset) for Rust changes.
 # `playwright install --with-deps` is run without --with-deps (needs root).
 # Network is used only by what the steps themselves need (pnpm install,
 # playwright browser download, `npm install` in dist/).
@@ -75,9 +77,9 @@ const push = (job, s, env) => {
   seen.add(s.run);
   out.push({ job, name: s.name, run: s.run, env: { ...env, ...(s.env || {}) } });
 };
-// `changes` (path selection) and `verify` (aggregate) have nothing to replay.
+// `changes` (path selection) and `verify` (aggregate) have nothing to replay; `foxguard` and `rust` build Rust.
 for (const [jobName, job] of Object.entries(doc.jobs)) {
-  if (jobName === "changes" || jobName === "verify") continue;
+  if (jobName === "changes" || jobName === "verify" || jobName === "foxguard" || jobName === "rust") continue;
   for (const s of job.steps || []) {
     if (s.uses && s.uses.startsWith("./")) {          // local composite action
       const action = parse(fs.readFileSync(s.uses.replace(/\/?$/, "/") + "action.yml", "utf8"));
@@ -93,11 +95,11 @@ trap 'rm -rf "$TMP"' EXIT
 REAL_HOME="$HOME"
 mkdir -p "$TMP/home" "$TMP/runner-temp"
 
-# Prefer the foxguard on PATH; otherwise provision one into a temp dir.
+# Prefer the foxguard on PATH; otherwise build one from crates/foxguard into a temp dir.
 FOXDIR=""
 if ! command -v foxguard >/dev/null 2>&1; then
   FOXDIR="$TMP/runner-temp/0-tools/bin"
-  INSTALL_DIR="$FOXDIR" bash "$ROOT/scripts/provision-foxguard.sh" || echo "warning: foxguard provisioning failed" >&2
+  INSTALL_DIR="$FOXDIR" bash "$ROOT/scripts/build-foxguard.sh" || echo "warning: building foxguard failed" >&2
 fi
 
 # Pin pnpm to the repo's packageManager version for every step (also inside
@@ -176,7 +178,7 @@ started=0 failed=()
 for i in $(seq 0 $((COUNT - 1))); do
   name="$(field "$i" name)"
   [ "$LIST" = 1 ] && { echo "[$(field "$i" job)] $name"; continue; }
-  case "$name" in "Bootstrap runner"|"Provision FoxGuard binary") continue ;; esac
+  case "$name" in "Bootstrap runner"|"Provide Foxguard (built from crates/foxguard)") continue ;; esac
   [ "${#bgidx[@]}" -gt 0 ] && [ "$(field "$i" job)" = engine ] && continue
   if [ "${#bgidx[@]}" -gt 0 ] && [ "$launched" = 0 ]; then
     case "$name" in "Install dependencies"|"Build CLI"|"Check package layering") ;; *) launch_bg ;; esac

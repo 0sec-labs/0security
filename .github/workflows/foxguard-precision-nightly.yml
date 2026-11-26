@@ -1,0 +1,56 @@
+name: "0: Foxguard precision corpus (nightly)"
+
+on:
+  schedule:
+    - cron: "30 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  precision:
+    name: Run labeled precision corpus
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned Rust toolchain
+        run: bash scripts/ensure-rust.sh
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: "3.12"
+
+      - uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-precision-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-precision-
+            ${{ runner.os }}-cargo-build-
+
+      - uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        with:
+          path: crates/foxguard/benchmarks/precision/clones
+          key: precision-clones-${{ hashFiles('crates/foxguard/benchmarks/precision/corpus.toml') }}
+          restore-keys: precision-clones-
+
+      - name: Build foxguard
+        run: cargo build --release --locked -p foxguard --bin foxguard
+
+      - name: Run precision corpus
+        run: FOXGUARD=target/release/foxguard ./crates/foxguard/benchmarks/precision/run.sh --check
+
+      - name: Upload precision dashboard
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: precision-corpus
+          path: crates/foxguard/benchmarks/precision/results/
+          if-no-files-found: error
+          retention-days: 30
