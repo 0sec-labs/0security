@@ -162,14 +162,15 @@ function staticEntry(filePath: string): StaticEntry {
   return entry;
 }
 
-export function sendFile(res: ServerResponse, filePath: string, controlToken?: string): void {
+export function sendFile(res: ServerResponse, filePath: string): void {
   const ext = extname(filePath);
   const contentType = CONTENT_TYPES[ext] ?? "application/octet-stream";
   const req = (res as { req?: IncomingMessage }).req;
   if (ext === ".html") {
-    // Per-session token injection and per-page CSP hashes make HTML dynamic: never cached or validated.
-    let content: string | Buffer = readFileSync(filePath);
-    if (controlToken) content = content.toString().replace("</head>", `<meta name="0-control-token" content="${controlToken}"></head>`);
+    // Per-page CSP hashes make HTML dynamic: never cached or validated. The control
+    // token is not embedded here; the CLI delivers it to the browser through the
+    // launch URL fragment, so another local process cannot read it from the page.
+    const content = readFileSync(filePath);
     res.writeHead(200, { ...htmlSecurityHeaders(content.toString()), "Content-Type": contentType, "Cache-Control": "no-store" });
     res.end(content);
     return;
