@@ -26,7 +26,24 @@ const SOURCE = /\.(?:java|kt|kts|scala|groovy)$/;
 const TOOL_FOLDERS = new Set(["node_modules", ".git", ".gradle", ".idea", ".mvn"]);
 /** Build output and vendored folders: not read, and reported when one holds a `src` tree. Hidden folders are read. */
 const SKIP = new Set(["dist", "build", "target", "vendor", "out"]);
-function hasSourceTree(dir: string): boolean { try { return statSync(join(dir, "src")).isDirectory(); } catch { return false; } }
+/** A bounded look (at most 200 entries, four levels, no links) for any source file in a folder that is not read. */
+function holdsSource(root: string): boolean {
+  let budget = 200;
+  const look = (dir: string, depth: number): boolean => {
+    let handle;
+    try { handle = opendirSync(dir); } catch { return false; }
+    try {
+      for (let entry = handle.readSync(); entry && budget > 0; entry = handle.readSync()) {
+        budget -= 1;
+        if (entry.isSymbolicLink()) continue;
+        if (entry.isFile() && SOURCE.test(entry.name)) return true;
+        if (entry.isDirectory() && depth < 4 && look(join(dir, entry.name), depth + 1)) return true;
+      }
+    } catch { return false; } finally { handle.closeSync(); }
+    return false;
+  };
+  return look(root, 0);
+}
 const MAX_FILES = 20000;
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 const MAX_IMPORTS_PER_COMPONENT = 50;
@@ -103,9 +120,8 @@ function walk(folder: string, limit: { left: number; truncated: boolean; skipped
       if (limit.entries > maxEntries) { limit.truncated = true; return; }
       if (entry.isSymbolicLink()) { limit.skipped += 1; continue; }
       if (entry.isDirectory()) {
-        if (TOOL_FOLDERS.has(entry.name)) continue;
-        // Build output and dependency folders are not application source, but a folder named like one that holds a src tree is reported as not read.
-        if (SKIP.has(entry.name)) { if (hasSourceTree(join(dir, entry.name))) limit.skipped += 1; continue; }
+        // Tool, build-output and dependency folders are not read. One that holds a source file is reported as not scanned.
+        if (TOOL_FOLDERS.has(entry.name) || SKIP.has(entry.name)) { if (holdsSource(join(dir, entry.name))) limit.skipped += 1; continue; }
         visit(join(dir, entry.name), depth + 1);
         continue;
       }

@@ -343,17 +343,23 @@ describe("a scan that hit a limit never says not-imported", () => {
     expect(vulnerableSymbolsWithLimit(many, "pkg:maven/a/b@1").more).toBe(true);
     expect(vulnerableSymbolsWithLimit([{ ecosystem_specific: { imports: [{ path: "p.q", symbols: ["One"] }] } }], "pkg:maven/a/b@1")).toEqual({ symbols: ["p.q.One"], more: false });
   });
-  it("reads hidden source folders and reports a build-named folder that holds a src tree", () => {
+  it("reads hidden source folders and reports skipped tool and build folders that hold source", () => {
     const dir = mkdtempSync(join(tmpdir(), "0-usage-hidden-"));
     mkdirSync(join(dir, ".hidden/src/main/java"), { recursive: true });
     writeFileSync(join(dir, ".hidden/src/main/java/H.java"), "import org.yaml.snakeyaml.Yaml;\n");
     expect(attachJavaUsage([advisory()], dir).advisories[0]!.usage!.status).toBe("imported");
     const other = mkdtempSync(join(tmpdir(), "0-usage-build-"));
     mkdirSync(join(other, "build/src/main/java"), { recursive: true });
+    mkdirSync(join(other, "node_modules/pkg"), { recursive: true });
+    writeFileSync(join(other, "node_modules/pkg/N.java"), "import org.yaml.snakeyaml.Yaml;\n");
     writeFileSync(join(other, "build/src/main/java/B.java"), "import org.yaml.snakeyaml.Yaml;\n");
     const result = attachJavaUsage([advisory()], other);
-    expect(result.scan.skipped).toBe(1);
+    expect(result.scan.skipped).toBe(2);
     expect(result.advisories[0]!.usage!.status).toBe("unknown");
+    const clean = mkdtempSync(join(tmpdir(), "0-usage-clean-"));
+    mkdirSync(join(clean, "node_modules/pkg"), { recursive: true });
+    writeFileSync(join(clean, "node_modules/pkg/index.js"), "x");
+    expect(attachJavaUsage([advisory()], clean).advisories[0]!.usage!.status).toBe("not-imported");
   });
   it("bounds the imports-by-components cross product before it runs", () => {
     const dir = mkdtempSync(join(tmpdir(), "0-usage-cross-"));
