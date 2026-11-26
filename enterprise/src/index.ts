@@ -49,3 +49,4 @@ export { DSSE_PAYLOAD_TYPE, EvidenceKeyError, dssePae, evidenceKeyId, signEviden
 export type { DsseEnvelope } from "./evidence-signing.js";
 export { SamlError, SamlServiceProvider, parseIdpMetadata } from "./saml/index.js";
 export type { IdpMetadata, SamlFailure, SamlIdentity, SamlSettings, SamlStart, SignatureRequirement } from "./saml/index.js";
+export * from "./ha/index.js";

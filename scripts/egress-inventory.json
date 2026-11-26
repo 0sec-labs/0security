@@ -4,7 +4,7 @@
     {
       "id": "usage-analytics-posthog",
       "class": "automatic",
-      "enterprise": "allowed",
+      "enterprise": "blocked",
       "destinations": [
         "eu.i.posthog.com"
       ],
@@ -13,12 +13,12 @@
       ],
       "when": "Batched while a command or the console runs, when analyticsLevel is usage and the build embeds a key. Also one small event at first run, at each command, on a version change and on an error exit; not for --help, --version, shell completion, config, or CI and machine-output runs unless analyticsLevel usage is set in a settings file.",
       "sent": "Anonymous counters and lifecycle events: version, OS, command name from a fixed list, outcome class, finding class counts.",
-      "disable": "DO_NOT_TRACK."
+      "disable": "DO_NOT_TRACK, ZERO_ENTERPRISE."
     },
     {
       "id": "crash-and-feedback",
       "class": "automatic",
-      "enterprise": "allowed",
+      "enterprise": "blocked",
       "destinations": [
         "Sentry ingest (embedded DSN or ZERO_SENTRY_DSN)",
         "ZERO_FEEDBACK_URL"
@@ -28,7 +28,7 @@
       ],
       "when": "A crash with diagnosticReporting automatic, or a feedback message the operator sends.",
       "sent": "Redacted crash envelope, or the reviewed feedback text.",
-      "disable": "diagnosticReporting off, DO_NOT_TRACK."
+      "disable": "diagnosticReporting off, DO_NOT_TRACK, ZERO_ENTERPRISE."
     },
     {
       "id": "update-check",
@@ -538,6 +538,20 @@
       "when": "Server mode, only when ZERO_AUDIT_SINK_URL is set in the process environment. Off by default. Never read from a repository, a project file or the database.",
       "sent": "Batches of audit events (action, actor, subject, outcome, whitelisted and redacted detail), with ZERO_AUDIT_SINK_TOKEN as a bearer token when set. Plain http and plain TCP syslog are refused except to this machine; UDP is refused.",
       "disable": "Leave ZERO_AUDIT_SINK_URL unset."
+    },
+    {
+      "id": "ha-shared-database",
+      "class": "operator",
+      "enterprise": "allowed",
+      "destinations": [
+        "the PostgreSQL server you set in ZERO_HA_DATABASE_URL or ZERO_HA_DATABASE_URL_FILE"
+      ],
+      "files": [
+        "enterprise/src/ha/postgres.ts"
+      ],
+      "when": "Server mode with the ha license feature, only when ZERO_HA_DATABASE_URL or ZERO_HA_DATABASE_URL_FILE is set in the process environment. Off by default. Never read from a repository, a project file or the database.",
+      "sent": "SQL over a connection to your database: server sign-in sessions as hashed keys, account ids, roles and expiry times, and the schema migration table. A server on another machine must use TLS (sslmode require, verify-ca or verify-full). The connection string holds a password and is never logged or sent anywhere else.",
+      "disable": "Leave both variables unset."
     },
     {
       "id": "findings-server-upload",
