@@ -368,4 +368,11 @@ describe("a scan that hit a limit never says not-imported", () => {
     const components = Array.from({ length: 200 }, (_, index) => ({ name: `g${index}/a`, version: "1", purl: `pkg:maven/g${index}/a@1` }));
     expect(scanJavaUsage(dir, components, { limits: { maxMatchWork: 1000 } }).truncated).toBe(true);
   });
+  it("an unfinished look into a skipped folder counts as not scanned", () => {
+    const dir = mkdtempSync(join(tmpdir(), "0-usage-deepskip-"));
+    let deep = join(dir, "node_modules");
+    for (let level = 0; level < 8; level += 1) deep = join(deep, "n");
+    mkdirSync(deep, { recursive: true });
+    expect(attachJavaUsage([advisory()], dir).scan.skipped).toBe(1);
+  });
 });

@@ -101,6 +101,6 @@ export async function runCheckReport(file: string, options: CheckOptions, deps: 
   if (format === "text" && result.withoutDetails) deps.err(`${result.withoutDetails} advisories are listed by id only (details unavailable or over the limit).`);
   if (result.advisories.some(item => item.malicious)) deps.err("A malicious package is in this SBOM. Remove it and treat machines that installed it as compromised.");
   // A malicious package never counts as not imported: it does not need an import to harm a build.
-  const counted = result.advisories.filter(item => !(options.ignoreNotImported && item.usage?.status === "not-imported")).length;
+  const counted = result.advisories.filter(item => !(options.ignoreNotImported && !item.malicious && item.usage?.status === "not-imported")).length;
   return counted || (registry && slopsquatFails(registry.findings, failOn)) ? 1 : 0;
 }

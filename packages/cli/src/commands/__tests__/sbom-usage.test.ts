@@ -98,6 +98,12 @@ describe("0 sbom check --usage", () => {
     await expect(runCheck("sbom.json", { usage: "/no/such/folder" }, io.deps)).rejects.toThrow("is not a folder");
     expect(io.urls).toEqual([]);
   });
+  it("--ignore-not-imported never ignores a malicious package, even one that carries a not-imported label", async () => {
+    const io = run();
+    io.deps.read = () => JSON.stringify({ components: [{ purl: "pkg:maven/evil/pkg@1" }] });
+    io.deps.fetch = (async (url: string | URL | Request) => String(url).endsWith("querybatch") ? new Response(JSON.stringify({ results: [{ vulns: [{ id: "MAL-2026-1" }] }] })) : new Response(JSON.stringify({ id: "MAL-2026-1", summary: "bad" }))) as typeof fetch;
+    expect(await runCheck("sbom.json", { usage: join(fixtures, "app"), ignoreNotImported: true }, io.deps)).toBe(1);
+  });
   it("makes no request beyond the OSV lookup a plain check already makes", async () => {
     const plain = run(); await runCheck("sbom.json", {}, plain.deps);
     const withUsage = run(); await runCheck("sbom.json", { usage: join(fixtures, "app") }, withUsage.deps);

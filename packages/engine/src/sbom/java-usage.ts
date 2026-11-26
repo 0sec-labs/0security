@@ -26,20 +26,21 @@ const SOURCE = /\.(?:java|kt|kts|scala|groovy)$/;
 const TOOL_FOLDERS = new Set(["node_modules", ".git", ".gradle", ".idea", ".mvn"]);
 /** Build output and vendored folders: not read, and reported when one holds a `src` tree. Hidden folders are read. */
 const SKIP = new Set(["dist", "build", "target", "vendor", "out"]);
-/** A bounded look (at most 200 entries, four levels, no links) for any source file in a folder that is not read. */
+/** A bounded look (at most 200 entries, four levels, no links) in a folder that is not read. True when it holds a source file, and also when the look could not finish: an unfinished look proves nothing. */
 function holdsSource(root: string): boolean {
   let budget = 200;
   const look = (dir: string, depth: number): boolean => {
     let handle;
-    try { handle = opendirSync(dir); } catch { return false; }
+    try { handle = opendirSync(dir); } catch { return true; }
     try {
-      for (let entry = handle.readSync(); entry && budget > 0; entry = handle.readSync()) {
+      for (let entry = handle.readSync(); entry; entry = handle.readSync()) {
         budget -= 1;
+        if (budget < 0) return true;
         if (entry.isSymbolicLink()) continue;
         if (entry.isFile() && SOURCE.test(entry.name)) return true;
-        if (entry.isDirectory() && depth < 4 && look(join(dir, entry.name), depth + 1)) return true;
+        if (entry.isDirectory()) { if (depth >= 4 || look(join(dir, entry.name), depth + 1)) return true; }
       }
-    } catch { return false; } finally { handle.closeSync(); }
+    } catch { return true; } finally { handle.closeSync(); }
     return false;
   };
   return look(root, 0);
