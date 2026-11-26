@@ -8,6 +8,7 @@ import { SecurityWorkflowStore, SentinelStore } from "@0/engine/storage";
 import { createSecurityWorkflowTemplate } from "@0/engine/shared";
 import { WebSentinelService } from "./sentinels.js";
 import type { SentinelSessionEvent } from "./sentinel-runner.js";
+import { checkEvent } from "./sentinel-github-events.js";
 import { MAX_SARIF_RESULTS, buildSentinelSarif, neutralise } from "./sentinel-github-results.js";
 
 const T0 = Date.parse("2026-03-02T10:00:00Z");
@@ -49,12 +50,12 @@ function fixture(gh: Gh | undefined, calls: Call[]) {
     const url = new URL(`http://localhost${path}`);
     return (await service.handle(url.pathname, method, body, url.searchParams))!;
   };
-  async function armed(kind: "github-pr" | "release", config: Record<string, unknown>) {
+  async function armed(kind: "github-pr" | "release" | "check-completed", config: Record<string, unknown>) {
     const created = (await call("POST", P, { name: "Scan Watch", skills: ["pr-diff-review"] })).data as { sentinel: { id: string } };
     const id = created.sentinel.id;
     await call("POST", `${P}/${id}/resume`, { acknowledge: true });
     const automation = workflows.save({ ...createSecurityWorkflowTemplate("dependency-review", { target: "." }), ownerSentinelId: id });
-    const key = kind === "github-pr" ? "github" : "release";
+    const key = kind === "github-pr" ? "github" : kind === "release" ? "release" : "check";
     const trigger = await call("POST", `${P}/${id}/triggers`, { automationId: automation.id, kind, [key]: { repo: "acme/app", pollMs: 60_000, ...config }, enabled: true, approval: "enable-reviewed-trigger" });
     expect(trigger.status).toBe(201);
     return { id, triggerId: (trigger.data as { trigger: { id: string } }).trigger.id };
@@ -244,6 +245,35 @@ describe("release trigger results", () => {
     expect(uploads).toHaveLength(1);
     expect(decode(uploads[0]!).body).toMatchObject({ commit_sha: SHA, ref: "refs/tags/v1.1.0" });
     expect(calls.some(c => c.args.some(a => a.includes("/statuses/")))).toBe(false);
+  });
+});
+
+describe("check trigger results", () => {
+  const check = (id: number) => JSON.stringify({ id, name: "build", status: "completed", conclusion: "failure", head_sha: SHA, pr: null });
+  it("uploads a polled check under its branch ref", async () => {
+    let listing = check(1);
+    const calls: Call[] = [];
+    const f = fixture(args => (args[1] === "repos/acme/app" ? "main" : args.includes("--input") ? "{}" : args[1] === "--paginate" ? listing : undefined), calls);
+    const { id } = await f.armed("check-completed", { results: "sarif" });
+    await f.poll(0);
+    listing = [check(1), check(2)].join("\n");
+    await f.poll(2);
+    f.missions.findings.mockReturnValue([finding()]);
+    await f.finish(id);
+    const uploads = sarifUploads(calls);
+    expect(uploads).toHaveLength(1);
+    expect(decode(uploads[0]!).body).toMatchObject({ commit_sha: SHA, ref: "refs/heads/main" });
+  });
+
+  it("never uploads a check that arrived by webhook, because it can belong to a fork pull request", async () => {
+    const calls: Call[] = [];
+    const f = fixture(() => "{}", calls);
+    const { id, triggerId } = await f.armed("check-completed", { results: "sarif", branch: "main" });
+    const event = checkEvent({ repo: "acme/app", id: 5, name: "build", conclusion: "failure", sha: SHA, branch: "main", pr: 7 })!;
+    expect(await f.service.deliverWebhookEvent(triggerId, event)).toBe(true);
+    f.missions.findings.mockReturnValue([finding()]);
+    await f.finish(id);
+    expect(sarifUploads(calls)).toHaveLength(0);
   });
 });
 

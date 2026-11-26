@@ -532,12 +532,12 @@ export class SentinelRunner {
   }
 
   /** Where this trigger's result goes, or nothing when reporting is off (the default). */
-  #reportTarget(trigger: SentinelTrigger, event: GithubEvent): SummaryTarget | undefined {
+  #reportTarget(trigger: SentinelTrigger, event: GithubEvent, polled: boolean): SummaryTarget | undefined {
     const config = trigger.release ?? trigger.check;
     const results = config?.results ?? "off";
     // `results: comment` asks for the same one comment as `report: comment`.
     const mode = config?.report && config.report !== "none" ? config.report : resultsComment(results) ? "comment" : "none";
-    const sarifRef = resultsSarif(results) ? this.#sarifRefFor(event) : undefined;
+    const sarifRef = resultsSarif(results) ? this.#sarifRefFor(event, polled) : undefined;
     let target: SummaryTarget | undefined;
     if (mode === "comment" && event.pr) target = { repo: event.repo, pr: event.pr, headSha: event.sha ?? "", fork: false };
     // A tag has no pull request to comment on, and a tag push can point at a tag object: the status goes on the commit the tag resolves to.
@@ -551,11 +551,14 @@ export class SentinelRunner {
       : { repo: event.repo, mode: "sarif", headSha: event.sha ?? "", fork: false, sarifRef };
   }
 
-  /** The Git ref a code scanning upload is filed under: the tag, the pull request head, or the branch the check ran on. */
-  #sarifRefFor(event: GithubEvent): string | undefined {
+  /**
+   * The Git ref a code scanning upload is filed under: the tag for a release, or the branch for a check. A check is uploaded only when
+   * the poll found it on the tip of a branch of this repository. A webhook delivery can come from a fork pull request, and its
+   * pull request number or branch name is not proof of where the commit lives, so it is never uploaded.
+   */
+  #sarifRefFor(event: GithubEvent, polled: boolean): string | undefined {
     if (event.kind === "release") return event.tag && isSafeRef(event.tag) ? `refs/tags/${event.tag}` : undefined;
-    if (event.pr) return `refs/pull/${event.pr}/head`;
-    return event.branch && isSafeRef(event.branch) ? `refs/heads/${event.branch}` : undefined;
+    return polled && event.branch && isSafeRef(event.branch) ? `refs/heads/${event.branch}` : undefined;
   }
 
   /** One signed delivery. Nothing is polled; a webhook trigger never runs without a delivery. */
@@ -605,7 +608,7 @@ export class SentinelRunner {
       if (seen[event.key] !== undefined) continue;
       if (launched >= MAX_EVENT_LAUNCHES_PER_POLL) break;
       const idempotencyKey = `github:${trigger.id}:${event.kind}:${event.key}`;
-      const target = this.#reportTarget(trigger, event);
+      const target = this.#reportTarget(trigger, event, !pushed);
       const remember = () => { if (trigger.cursor) seen[event.key] = event.sha ?? "seen"; };
       if (this.#persistent()) {
         const outcome = await this.#deliverSafely({

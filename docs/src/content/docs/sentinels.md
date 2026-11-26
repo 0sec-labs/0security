@@ -296,7 +296,7 @@ The upload runs `gh api` against `repos/{owner}/{repo}/code-scanning/sarifs`, wi
 | --- | --- |
 | `github-pr` | `refs/pull/<number>/head`, with the pull request's head commit |
 | `release` | `refs/tags/<tag>`, with the commit the tag points to |
-| `check-completed` | `refs/pull/<number>/head` when the check belongs to a pull request, otherwise `refs/heads/<branch>`. A check with neither is not uploaded. |
+| `check-completed` | `refs/heads/<branch>`, with the commit of the check. Only checks the poll finds on the tip of a branch are uploaded. A check that arrives by webhook is not, because it can belong to a fork pull request. |
 
 For a `release` or `check-completed` trigger, `results: comment` and `report: comment` do the same thing. `report: commit-status` still posts a commit status next to an upload.
 
