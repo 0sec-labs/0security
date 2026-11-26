@@ -63,3 +63,19 @@ localhost,127.0.0.1
 {{- include "zero.fullname" . -}}
 {{- end -}}
 {{- end -}}
+
+{{/* Refuse an HA install that would start replicas which cannot work together. */}}
+{{- define "zero.haChecks" -}}
+{{- if .Values.highAvailability.enabled -}}
+{{- $ha := .Values.highAvailability -}}
+{{- if not $ha.databaseSecret.name -}}{{- fail "highAvailability.databaseSecret.name is required: a Secret with the PostgreSQL URL, as a file" -}}{{- end -}}
+{{- if not $ha.licenseSecret.name -}}{{- fail "highAvailability.licenseSecret.name is required: a Secret with the enterprise license file" -}}{{- end -}}
+{{- if and (not (include "zero.secretName" .)) (not .Values.team.config) -}}{{- fail "Replicas need one shared sign-in. Set secrets.existingSecret with ZERO_ACCESS_TOKEN, or set team.config. Without it each replica would generate its own access token." -}}{{- end -}}
+{{- if lt (int .Values.terminationGracePeriodSeconds) (add (int $ha.preStopSeconds) 30) -}}{{- fail "terminationGracePeriodSeconds must be at least highAvailability.preStopSeconds + 30, so the drain can finish." -}}{{- end -}}
+{{- if and .Values.networkPolicy.enabled (not $ha.databaseCIDRs) -}}{{- fail "highAvailability.databaseCIDRs is required while networkPolicy is enabled: the replicas must reach the database." -}}{{- end -}}
+{{- end -}}
+{{- end -}}
+
+{{- define "zero.replicas" -}}
+{{- if .Values.highAvailability.enabled -}}{{ .Values.highAvailability.replicas }}{{- else -}}1{{- end -}}
+{{- end -}}

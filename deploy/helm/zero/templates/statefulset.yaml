@@ -5,8 +5,10 @@ metadata:
   labels:
     {{- include "zero.labels" . | nindent 4 }}
 spec:
-  # Exactly one replica: a single process owns the SQLite database on the volume.
-  replicas: 1
+  {{- include "zero.haChecks" . }}
+  # One replica, because a single process owns the SQLite database on the volume.
+  # With highAvailability.enabled each replica gets its own volume and shares one PostgreSQL database.
+  replicas: {{ include "zero.replicas" . }}
   serviceName: {{ include "zero.fullname" . }}
   podManagementPolicy: OrderedReady
   updateStrategy:
@@ -105,6 +107,12 @@ spec:
             - name: ZERO_TEAM_CONFIG
               value: /etc/zero/team.json
             {{- end }}
+            {{- if .Values.highAvailability.enabled }}
+            - name: ZERO_HA_DATABASE_URL_FILE
+              value: /etc/zero-ha/database-url
+            - name: ZERO_LICENSE_FILE
+              value: /etc/zero-ha/license
+            {{- end }}
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -137,21 +145,61 @@ spec:
             periodSeconds: 30
             timeoutSeconds: 5
             failureThreshold: 3
+          {{- if .Values.highAvailability.enabled }}
+          # The load balancer sees /readyz fail at SIGTERM. The wait lets it stop sending requests first.
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", {{ .Values.highAvailability.preStopSeconds | quote }}]
+          {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:
             - name: data
               mountPath: /data
+            {{- if .Values.highAvailability.enabled }}
+            - name: ha
+              mountPath: /etc/zero-ha
+              readOnly: true
+            {{- end }}
             {{- if .Values.team.config }}
             - name: team-config
               mountPath: /etc/zero
               readOnly: true
             {{- end }}
-      {{- if .Values.team.config }}
+      {{- if or .Values.team.config .Values.highAvailability.enabled }}
       volumes:
+        {{- if .Values.team.config }}
         - name: team-config
           configMap:
             name: {{ include "zero.fullname" . }}-team
+        {{- end }}
+        {{- if .Values.highAvailability.enabled }}
+        - name: ha
+          projected:
+            defaultMode: 0440
+            sources:
+              - secret:
+                  name: {{ .Values.highAvailability.databaseSecret.name | quote }}
+                  items:
+                    - key: {{ .Values.highAvailability.databaseSecret.key | quote }}
+                      path: database-url
+              - secret:
+                  name: {{ .Values.highAvailability.licenseSecret.name | quote }}
+                  items:
+                    - key: {{ .Values.highAvailability.licenseSecret.key | quote }}
+                      path: license
+        {{- end }}
+      {{- end }}
+      {{- if and .Values.highAvailability.enabled (not .Values.affinity) }}
+      # Spread replicas over nodes when the cluster can, so one node loss leaves the others.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              {{- include "zero.selectorLabels" . | nindent 14 }}
       {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:

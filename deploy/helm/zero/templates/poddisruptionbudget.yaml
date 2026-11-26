@@ -1,0 +1,14 @@
+{{- if and .Values.highAvailability.enabled .Values.highAvailability.podDisruptionBudget }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "zero.fullname" . }}
+  labels:
+    {{- include "zero.labels" . | nindent 4 }}
+spec:
+  # A node drain takes one replica at a time, so the others keep serving.
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      {{- include "zero.selectorLabels" . | nindent 6 }}
+{{- end }}

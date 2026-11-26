@@ -61,3 +61,45 @@ test("Entra ID, a team config and an existing secret reach the pod without a key
   assert.match(out.stdout, /name: zero-secrets/);
   assert.doesNotMatch(out.stdout, /kind: Secret/);
 });
+
+const haValues = [
+  "--set", "highAvailability.enabled=true",
+  "--set", "highAvailability.databaseSecret.name=zero-db",
+  "--set", "highAvailability.licenseSecret.name=zero-license",
+  "--set", "secrets.existingSecret=zero-secrets",
+  "--set", "highAvailability.databaseCIDRs={10.0.0.0/24}",
+];
+
+test("high availability runs replicas on a shared database, with a budget, a drain delay and no secret in the chart", { skip }, () => {
+  const out = template(...haValues);
+  assert.equal(out.status, 0, out.stderr);
+  assert.match(out.stdout, /kind: StatefulSet[\s\S]*replicas: 2\n/);
+  assert.match(out.stdout, /kind: PodDisruptionBudget[\s\S]*maxUnavailable: 1/);
+  assert.match(out.stdout, /ZERO_HA_DATABASE_URL_FILE/);
+  assert.match(out.stdout, /ZERO_LICENSE_FILE/);
+  assert.match(out.stdout, /command: \["sleep", "10"\]/);
+  assert.match(out.stdout, /port: 5432/);
+  assert.match(out.stdout, /name: "zero-db"/);
+  assert.doesNotMatch(out.stdout, /postgres(ql)?:\/\//);
+  assert.doesNotMatch(out.stdout, /kind: Secret/);
+});
+
+test("without high availability the chart still renders one replica and no budget", { skip }, () => {
+  const out = template();
+  assert.match(out.stdout, /replicas: 1\n/);
+  assert.doesNotMatch(out.stdout, /PodDisruptionBudget|ZERO_HA_DATABASE_URL_FILE|preStop/);
+});
+
+test("high availability refuses settings that would start replicas that cannot work together", { skip }, () => {
+  const only = (drop) => haValues.filter((_, i, all) => !(all[i - 1] === "--set" && all[i].startsWith(drop)) && !(all[i] === "--set" && all[i + 1]?.startsWith(drop)));
+  assert.match(template("--set", "highAvailability.enabled=true").stderr, /databaseSecret\.name/);
+  assert.match(template(...only("highAvailability.licenseSecret")).stderr, /licenseSecret\.name/);
+  assert.match(template(...only("secrets.existingSecret")).stderr, /shared sign-in/);
+  assert.match(template(...only("highAvailability.databaseCIDRs")).stderr, /databaseCIDRs/);
+  assert.match(template(...haValues, "--set", "terminationGracePeriodSeconds=35").stderr, /terminationGracePeriodSeconds/);
+  assert.match(template(...haValues, "--set", "highAvailability.replicas=1").stderr, /replicas/);
+});
+
+test("replicaCount stays refused when high availability is on", { skip }, () => {
+  assert.notEqual(template(...haValues, "--set", "replicaCount=3").status, 0);
+});

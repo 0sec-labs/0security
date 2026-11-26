@@ -3,6 +3,18 @@
   "type": "object",
   "properties": {
     "replicaCount": { "not": {}, "description": "The console runs as exactly one replica." },
+    "highAvailability": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "replicas": { "type": "integer", "minimum": 2, "maximum": 20 },
+        "preStopSeconds": { "type": "integer", "minimum": 0, "maximum": 120 },
+        "databasePort": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "databaseCIDRs": { "type": "array", "items": { "type": "string" } },
+        "databaseSecret": { "type": "object", "properties": { "name": { "type": "string" }, "key": { "type": "string", "minLength": 1 } } },
+        "licenseSecret": { "type": "object", "properties": { "name": { "type": "string" }, "key": { "type": "string", "minLength": 1 } } }
+      }
+    },
     "persistence": {
       "type": "object",
       "properties": {
