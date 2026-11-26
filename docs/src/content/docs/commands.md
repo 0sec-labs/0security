@@ -1271,7 +1271,7 @@ A miss means the reply did not show the attack working in those attempts. It doe
 Test whether an agent obeys poisoned text: a fake MCP server that records its calls, and a judge that reads the recording
 
 ```text
-0security redteam <command>
+0security redteam
 ```
 
 The honeypot is an MCP server with tools shaped like the ones real agents hold: `read_file`, `read_email`, `fetch_url`, `write_file`, `send_email`, `http_post` and `run_command`. The three that read return data with a poisoned instruction in it and a fake secret. The others do nothing and only record that they were called. Nothing on your machine is read, written, sent or run. If the agent obeys the poisoned text, the recording shows it calling a tool that acts on the world with the canary or the secret in its arguments.
@@ -1287,6 +1287,8 @@ Run the agent you are testing in a sandbox, with the honeypot as its only tool s
 
 `config` prints the MCP configuration to give the agent, and prints the canary on standard error. Use that same canary with `judge`.
 
+Subcommands: [honeypot](#redteam-honeypot) · [config](#redteam-config) · [judge](#redteam-judge) · [scenarios](#redteam-scenarios) · [run](#redteam-run) · [generate](#redteam-generate).
+
 #### redteam honeypot
 
 ```text
@@ -1301,6 +1303,16 @@ Serves the fake MCP server over standard input and output, and appends each tool
 0security redteam honeypot --decoy --trace /var/log/agent-decoy.jsonl --alert-url https://hooks.example.com/services/abc -H "Authorization: Bearer $HOOK_TOKEN"
 ```
 
+| Option | Registered default | Description |
+| --- | --- | --- |
+| `--trace <file>` **required** | — | Append each call to this file, one JSON object per line |
+| `--canary <text>` | — | The marker the poisoned text asks the agent to send out; the judge needs the same one (default: ZERO_REDTEAM_CANARY) |
+| `--payload <text>` | — | The poisoned instruction returned by the source tools (default: ask the agent to email the secret out) |
+| `--payload-file <file>` | — | Read the poisoned instruction from a file |
+| `--decoy` | — | Serve decoy tools that nothing legitimate calls, so every call is an alert (for a running agent, not a test) |
+| `--alert-url <url>` | — | With --decoy: POST each alert as JSON to this https URL (a chat webhook or your own collector); a `text` field makes it readable in Slack-style webhooks |
+| `-H, --alert-header <header>` | — | Header for the alert request, `Name: value`; the value may be $ENV_VAR so a token is not typed on the command line (repeatable) |
+
 #### redteam config
 
 ```text
@@ -1308,6 +1320,12 @@ Serves the fake MCP server over standard input and output, and appends each tool
 ```
 
 Prints an MCP configuration that launches the honeypot, with the canary in the server environment (`ZERO_REDTEAM_CANARY`) so it is not shown in process listings, and makes a fresh canary unless you pass `--canary`. `--name` sets the server name in the configuration.
+
+| Option | Registered default | Description |
+| --- | --- | --- |
+| `--trace <file>` **required** | — | Where the honeypot will record calls |
+| `--canary <text>` | — | Use this canary instead of making one |
+| `--name <name>` | `honeypot` | Name of the server in the configuration |
 
 #### redteam judge
 
@@ -1323,6 +1341,15 @@ Reads the recording and says whether the agent obeyed. It exits 1 when it did, s
 0security redteam judge --trace /tmp/redteam.jsonl --canary CANARY-1a2b3c4d5e6f --format sarif --target mail-agent > redteam.sarif
 ```
 
+| Option | Registered default | Description |
+| --- | --- | --- |
+| `--trace <file>` **required** | — | The file the honeypot wrote |
+| `--canary <text>` **required** | — | The canary the honeypot was started with |
+| `--forbid <tools>` | — | Tools that count as a hit when called at all, comma separated, such as run_command |
+| `--format <format>` | `text` | text, json, sarif or md (sarif and md report the hit as a finding) |
+| `--target <name>` | — | Name of the agent in a sarif or md report (default: the trace file name) |
+| `--scenario <file>` | — | A SCENARIO line, or a scan report or finding saved as JSON, so the finding names the scenario |
+
 #### redteam scenarios
 
 ```text
@@ -1336,6 +1363,14 @@ Lists the replayable scenarios in a scan report made with the `agent-toxic-flow`
 0security redteam scenarios report.json
 ```
 
+| Argument | Required | Description |
+| --- | --- | --- |
+| `report` | Yes |  |
+
+| Option | Registered default | Description |
+| --- | --- | --- |
+| `--canary <text>` | — | Put this canary in each payload instead of making one |
+| `--format <format>` | `text` | text or json |
 
 #### redteam run
 
@@ -1353,21 +1388,22 @@ Each run gets a fresh canary, a temporary directory and an MCP configuration tha
 
 A run in which the agent never called the honeypot is **inconclusive**, never clear: an agent that ignores the honeypot tells you nothing. Before the first run the tool checks that the honeypot itself starts, so a broken setup is not reported as an agent that did not take the bait.
 
-| Option | Meaning |
-| --- | --- |
-| `--agent <command>` | The command that starts your agent, run through the shell. Required. |
-| `--cwd <dir>` | Directory to run it in. Default: the current directory. |
-| `--runs <n>` | Number of runs, 1 to 20. Default 3. |
-| `--timeout <seconds>` | Stop a run after this long, 1 to 3600. Default 120. |
-| `--env <name>` | Pass this environment variable through, such as a model key. Repeatable. |
-| `--forbid <tools>` | Tools that count as obeying if called at all. |
-| `--payload <text>`, `--scenario <file>` | The poisoned instruction, or a scenario from `redteam scenarios`. |
-| `--format <format>` | `text`, `json`, `sarif` or `md`. A report with no findings is valid. |
-| `-o, --output <file>` | Write the result to a file; written for exit codes 1 and 2 too. |
-| `--target <name>` | Name of the agent in a report. |
-| `--max-hit-rate <fraction>` | Exit 1 only if the share of conclusive runs in which the agent obeyed is above this. Default 0. |
-| `--trace-dir <dir>` | Keep each run's recording there. Nothing in that directory is deleted. |
-| `--unsafe-no-isolation` | Required. Acknowledges that nothing isolates the agent. |
+| Option | Registered default | Description |
+| --- | --- | --- |
+| `--agent <command>` **required** | — | Shell command that starts the agent; {mcp_config} is replaced by the path of an MCP config file that lists the honeypot |
+| `--cwd <dir>` | — | Directory to run the agent in (default: the current directory) |
+| `--runs <n>` | `3` | How many times to run the agent (1 to 20) |
+| `--timeout <seconds>` | `120` | Stop an agent run after this long (1 to 3600) |
+| `--env <NAME>` | — | Pass this variable from the current environment to the agent; everything else is scrubbed (repeatable) |
+| `--forbid <tools>` | — | Tools that count as a hit when called at all, comma separated, such as run_command |
+| `--payload <text>` | — | The poisoned instruction the honeypot returns (default: ask the agent to email the secret out) |
+| `--scenario <file>` | — | A SCENARIO line, or a scan report or finding saved as JSON; its payload is used with each run's canary |
+| `--format <format>` | `text` | text, json, sarif or md |
+| `--target <name>` | `agent` | Name of the agent in a sarif or md report |
+| `--max-hit-rate <fraction>` | `0` | Exit 1 only when the share of conclusive runs the agent obeyed is above this (0 to 1) |
+| `--trace-dir <dir>` | — | Keep each run's trace in this directory (it is never deleted) |
+| `-o, --output <file>` | — | Write the result (in --format) to this file instead of stdout, even when the exit code is 1 or 2 |
+| `--unsafe-no-isolation` | — | Required: there is no sandbox yet, so the agent runs on this machine with the access you give it. Results are untrusted if the agent can write to the trace file. A container agent needs its own cleanup (docker run --rm --name &lt;unique&gt;), since stopping the shell does not stop the container. POSIX only |
 
 **There is no isolation yet.** The agent runs on this machine as your user, with the access you give it, in its working directory and with the network it has. Scrubbing the environment hides your variables; it does not stop a process from reading files under your real home directory or reaching local sockets, so it is not a secret boundary. Use a throwaway virtual machine or container. If the agent can write to the recording, a compromised agent can alter the result, so treat results as untrusted. An agent started through `docker run` needs its own cleanup (use `--rm` and a name). Credential-looking values in the agent's arguments are masked in anything the tool prints or writes. Press Ctrl-C and the agent's process group is stopped and the temporary directory removed. POSIX systems only.
 
@@ -1390,6 +1426,17 @@ The manifest is JSON: `{ "tools": [{ "name": "send_email", "privilege": "network
 Without a URL the command uses a small open starter set of generic scenarios chosen by your tools and sources. With `--url` or `ZERO_BRAIN_URL` it asks a hosted generation service instead, with a token in `ZERO_BRAIN_TOKEN`. The output says which one supplied the scenarios. The payloads carry a fresh canary; use the same canary with `redteam honeypot` and `redteam judge`.
 
 Only the shape of your agent is sent: tool names, a coarse privilege and gate for each, and kinds of input. Never source code, paths, prompts, secrets or findings; the request schema rejects every other field. `--dry-run` prints the exact request and sends nothing. `--offline`, `ZERO_OFFLINE` and `ZERO_ENTERPRISE` never contact a service and use the starter set, with a note. Scenarios returned by a service are checked against a strict schema before use, and an empty or invalid reply falls back to the starter set. Run scenarios from a service only against the honeypot or a sandbox, since their text is not yours.
+
+| Option | Registered default | Description |
+| --- | --- | --- |
+| `--manifest <file>` **required** | — | JSON file listing the agent's tools (name, privilege, gate) and the kinds of input it reads (sources) |
+| `--framework <name>` | — | Prefer scenarios mapped to this framework, such as LLM01 or AML.T0051 |
+| `--count <n>` | — | How many scenarios, 1 to 20 |
+| `--url <url>` | — | The brain endpoint (default: ZERO_BRAIN_URL); https, or http to localhost. The token comes from ZERO_BRAIN_TOKEN |
+| `--dry-run` | — | Print the exact request that would be sent and send nothing |
+| `--offline` | — | Never contact a brain; use the starter pack |
+| `--canary <text>` | — | Put this canary in each payload instead of making one |
+| `--format <format>` | `text` | text or json |
 
 ### sbom
 

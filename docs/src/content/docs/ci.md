@@ -182,9 +182,9 @@ Advisories only warn unless `fail-on` is set, and then any advisory fails the jo
 A pull request can change the files AI coding tools read: rules, MCP configuration and settings. `0security sbom agent-config` checks them with no model key and no network. The Action runs it with `mode: agent-config`.
 
 ```yaml
-      - uses: 0sec-labs/0security@v0.45.0
+      - uses: 0sec-labs/0security@v0.46.0
         with:
-          version: 0.45.0 # Pin the CLI
+          version: 0.46.0 # Pin the CLI
           mode: agent-config
           fail-on: high
 ```
@@ -217,11 +217,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: 0sec-labs/0security@v0.45.0
+      - uses: 0sec-labs/0security@v0.46.0
         env:
           SUPPORT_BOT_KEY: ${{ secrets.SUPPORT_BOT_TEST_KEY }} # A test key with no production access
         with:
-          version: 0.45.0 # Pin the CLI
+          version: 0.46.0 # Pin the CLI
           mode: redteam
           redteam-agent: node bot/agent.js
           redteam-env: SUPPORT_BOT_KEY
