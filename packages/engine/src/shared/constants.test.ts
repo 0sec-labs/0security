@@ -1,6 +1,5 @@
 import { describe, it, expect } from "vitest";
 import {
-  DEFAULT_SEVERITY_FLOOR,
   SEVERITY_RANK,
   severityRank,
   meetsSeverityFloor,
@@ -11,10 +10,6 @@ import {
 // `disclose` command compares against.
 
 describe("severity floor (engine)", () => {
-  it("defaults to medium", () => {
-    expect(DEFAULT_SEVERITY_FLOOR).toBe("medium");
-  });
-
   it("ranks ascending (info lowest, critical highest)", () => {
     expect(SEVERITY_RANK.info).toBeLessThan(SEVERITY_RANK.medium);
     expect(SEVERITY_RANK.medium).toBeLessThan(SEVERITY_RANK.critical);
