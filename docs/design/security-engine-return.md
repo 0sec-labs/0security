@@ -136,7 +136,7 @@ W0, W1, W5 and W6 can start in parallel. Give each one its own worktree and bran
 
 ## W2. Pentest pack (enterprise)
 
-**Why.** SBB, Perk and IBS want managed pentesting. Vattenfall's top pain is knowing which external services are really exploitable. What exists today:
+**Why.** Enterprise customers are asking for managed pentesting. A common pain is knowing which external services are really exploitable. What exists today:
 - declared scope (`SECURITY.md` scope section, the scope interview, per-finding labels)
 - `scan --scanner nuclei --target-url … --acknowledge-host … --scope-file`
 - public and metadata hosts refused unless confirmed (#615)
@@ -274,7 +274,7 @@ Most of the machinery now exists elsewhere:
    - the proposal is a pull request in the customer's own skills repo
    - the customer's held-out set stays theirs
 
-   This is the "feedback loop" Roche asked for.
+   This is the feedback loop a customer asked for.
 
 **Acceptance:**
 - A dry run on one skill (for example `scan` or `verify-finding`) opens a PR with the development scores.
