@@ -188,7 +188,7 @@ async function gradleProjects(folder: string): Promise<string[]> {
 }
 
 /**
- * Run `mvn dependency:tree` and `gradle dependencies --configuration runtimeClasspath` in a folder that has a `pom.xml` or Gradle build files, and parse the trees.
+ * Run `mvn dependency:tree` and `gradle dependencies` (runtimeClasspath, then testRuntimeClasspath for test-only packages) in a folder that has a `pom.xml` or Gradle build files, and parse the trees.
  * Refuses under ZERO_ENTERPRISE. Throws ResolveFailedError when a tool that should run produced no tree.
  */
 export async function resolveJvmDependencies(folder: string, options: ResolveOptions = {}): Promise<ResolveResult> {
@@ -217,9 +217,17 @@ export async function resolveJvmDependencies(folder: string, options: ResolveOpt
   for (const project of projects) {
     const label = relative(folder, project) || ".";
     try {
-      const { stdout } = await runTool("gradle", ["--no-daemon", "--console=plain", "-q", ...(options.offline ? ["--offline"] : []), ...(options.gradleInitScript ? ["-I", options.gradleInitScript] : []), "-p", project, "dependencies", "--configuration", "runtimeClasspath"], folder, options);
-      lists.push(parseGradleTree(stdout));
+      const gradleArgs = ["--no-daemon", "--console=plain", "-q", ...(options.offline ? ["--offline"] : []), ...(options.gradleInitScript ? ["-I", options.gradleInitScript] : []), "-p", project, "dependencies", "--configuration"];
+      const { stdout } = await runTool("gradle", [...gradleArgs, "runtimeClasspath"], folder, options);
+      const runtime = parseGradleTree(stdout);
+      lists.push(runtime);
       tools.push(`gradle (${label})`);
+      // Test-only dependencies come from a second report and are marked dev, like Maven test scope. A project without that configuration is not an error.
+      try {
+        const test = await runTool("gradle", [...gradleArgs, "testRuntimeClasspath"], folder, options);
+        const inRuntime = new Set(runtime.map(component => `${component.name}@${component.version}`));
+        lists.push(parseGradleTree(test.stdout).map(component => inRuntime.has(`${component.name}@${component.version}`) ? component : { ...component, dev: true }));
+      } catch (error) { warnings.push(`gradle (${label}) test dependencies: ${error instanceof Error ? error.message : String(error)}`); }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       // A subproject with no runtimeClasspath (a plain aggregator) is normal; a tool that cannot start or time out is not.
