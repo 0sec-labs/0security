@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { findingSchema, type Finding, type RootCause } from "../shared/index.js";
+import { EXECUTED_POC_HARNESS, type ExecutedPoc } from "../shared/executed-poc.js";
 import { osecDB } from "./database.js";
 import { createShimmedDatabase } from "./wasm-shim.js";
 
@@ -60,25 +61,39 @@ describe("root cause and variantOf storage", () => {
     });
   });
 
-  it("opens a database created before the columns existed and migrates it", () => {
+  const executedPoc: ExecutedPoc = { schemaVersion: 1, harness: EXECUTED_POC_HARNESS, outcome: "static-only", reason: "no-sandbox-image", stepIds: [], startedAt: "2026-11-25T00:00:00.000Z", finishedAt: "2026-11-25T00:00:01.000Z" };
+
+  // A database written by an older version has either neither of the later nullable columns or only executedPoc.
+  it.each([["neither executedPoc nor the root cause columns", ""], ["only the executedPoc column", ", executedPoc TEXT"]])("opens and migrates a database with %s", (_label, extraColumn) => {
     const dir = mkdtempSync(join(tmpdir(), "0-root-cause-legacy-"));
     try {
       const path = join(dir, "legacy.db");
       const legacy = createShimmedDatabase(path);
       legacy.exec(`
         CREATE TABLE scans (id TEXT PRIMARY KEY, target TEXT NOT NULL, depth TEXT NOT NULL, runtime TEXT NOT NULL DEFAULT 'api', mode TEXT NOT NULL DEFAULT 'probe', status TEXT NOT NULL DEFAULT 'running', startedAt TEXT NOT NULL, completedAt TEXT, durationMs INTEGER, summary TEXT);
-        CREATE TABLE findings (id TEXT PRIMARY KEY, scanId TEXT NOT NULL REFERENCES scans(id), templateId TEXT NOT NULL, title TEXT NOT NULL, description TEXT NOT NULL, severity TEXT NOT NULL, category TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'discovered', fingerprint TEXT, evidenceRequest TEXT NOT NULL, evidenceResponse TEXT NOT NULL, evidenceAnalysis TEXT, timestamp INTEGER NOT NULL);
+        CREATE TABLE findings (id TEXT PRIMARY KEY, scanId TEXT NOT NULL REFERENCES scans(id), templateId TEXT NOT NULL, title TEXT NOT NULL, description TEXT NOT NULL, severity TEXT NOT NULL, category TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'discovered', fingerprint TEXT, evidenceRequest TEXT NOT NULL, evidenceResponse TEXT NOT NULL, evidenceAnalysis TEXT, timestamp INTEGER NOT NULL${extraColumn});
         INSERT INTO scans (id, target, depth, startedAt) VALUES ('s', 'https://example.com', 'full', '2026-01-01T00:00:00.000Z');
         INSERT INTO findings (id, scanId, templateId, title, description, severity, category, evidenceRequest, evidenceResponse, timestamp) VALUES ('old', 's', 't', 'Old', 'd', 'high', 'xss', 'req', 'res', 1);
       `);
       legacy.close();
-      const db = new osecDB(path);
-      try {
-        expect(db.getFindingRootCause("old")).toBeUndefined();
-        expect(db.listVariantsOf("old")).toEqual([]);
-        db.setFindingRootCause("old", cause);
-        expect(db.getFindingRootCause("old")).toEqual(cause);
-      } finally { db.close(); }
+      // Opening twice proves the migration is idempotent: the second open finds every column already there.
+      for (let round = 0; round < 2; round++) {
+        const db = new osecDB(path);
+        try {
+          const columns = new Set((db as unknown as { sqlite: { prepare(q: string): { all(): Array<{ name: string }> } } }).sqlite.prepare("PRAGMA table_info(findings)").all().map(c => c.name));
+          for (const column of ["executedPoc", "rootCause", "variantOf"]) expect(columns.has(column)).toBe(true);
+          expect(db.listVariantsOf("old")).toEqual([]);
+          if (round === 0) {
+            expect(db.getFindingRootCause("old")).toBeUndefined();
+            expect(db.getFindingExecutedPoc("old")).toBeUndefined();
+            db.setFindingRootCause("old", cause);
+            db.setFindingExecutedPoc("old", executedPoc);
+          } else {
+            expect(db.getFindingRootCause("old")).toEqual(cause);
+            expect(db.getFindingExecutedPoc("old")?.outcome).toBe("static-only");
+          }
+        } finally { db.close(); }
+      }
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 });
