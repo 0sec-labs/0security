@@ -842,11 +842,12 @@ Options:
 ### 0security findings export (hidden)
 Usage: 0security findings export [options] [ids...]
 
-Export findings, a whole scan or, with no IDs, every finding as json, md, sarif, html or pdf
+Export findings, a whole scan or, with no IDs, every finding as json, md, sarif, html, pdf or
+defectdojo
 
 Options:
   --scan <id>            Export every finding of this scan instead of selected IDs
-  --format <format>      json, md, sarif, html or pdf (default: "json")
+  --format <format>      json, md, sarif, html, pdf or defectdojo (default: "json")
   -o, --output <file>    Write to a file instead of stdout
   --severity <severity>  With no IDs: only this severity
   --category <category>  With no IDs: only this category

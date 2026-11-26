@@ -19,6 +19,20 @@ describe("report export", () => {
     expect(sarif.runs[0].invocations[0].executionSuccessful).toBe(false);
     expect(sarif.runs[0].results[0].properties.evidence.response).toBe("root:x:0:0");
   });
+  it("writes a DefectDojo generic import file without evidence or unsafe paths", async () => {
+    const withLocation: ScanReport = { ...report, findings: [{ ...report.findings[0]!, fingerprint: "loc:a", reviewAnnotation: { path: "src/a.ts", startLine: 4 } }, { ...report.findings[0]!, id: "finding-2", reviewAnnotation: { path: "../../etc/passwd", startLine: 1 }, status: "false-positive" }] };
+    const artifact = await exportReport(withLocation, "defectdojo");
+    expect(artifact.filename).toBe("0-report.defectdojo.json");
+    const [first, second] = JSON.parse(decode(artifact.body)).findings;
+    expect(first).toMatchObject({ title: "Unsafe file access", severity: "High", file_path: "src/a.ts", line: 4, unique_id_from_tool: "loc:a", active: true, verified: true, false_p: false });
+    expect(second.file_path).toBeUndefined();
+    expect(second).toMatchObject({ active: false, false_p: true });
+    expect(decode(artifact.body)).not.toContain("root:x:0:0");
+    const lapsed = await exportReport({ ...report, findings: [{ ...report.findings[0]!, triageStatus: "accepted", triageExpiresAt: "2020-01-01T00:00:00Z" }, { ...report.findings[0]!, id: "finding-3", triageStatus: "accepted" }] }, "defectdojo");
+    const [expired, accepted] = JSON.parse(decode(lapsed.body)).findings;
+    expect(expired).toMatchObject({ active: true, risk_accepted: false });
+    expect(accepted).toMatchObject({ active: false, risk_accepted: true });
+  });
   it("renders readable Markdown and escapes report HTML", async () => {
     expect(decode((await exportReport(report, "markdown")).body)).toContain("Unsafe file access");
     const html = decode((await exportReport(report, "html")).body);

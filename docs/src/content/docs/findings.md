@@ -740,7 +740,7 @@ Export saved findings as JSON, Markdown or SARIF:
 0security findings list --format md -o report.md
 ```
 
-Without `-o` the report goes to stdout. `0security findings export` also writes HTML and PDF. The app exports all five formats.
+Without `-o` the report goes to stdout. `0security findings export` also writes HTML, PDF and a DefectDojo import file (`--format defectdojo`). The app exports the first five formats.
 
 A full report carries evidence, proof-of-concept steps and descriptions that can quote source code or secrets. Check it before you share it.
 

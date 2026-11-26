@@ -5,14 +5,16 @@ import type { ScanReport } from "./shared/index.js";
 import { formatMarkdown } from "./report-formatters/markdown.js";
 import { formatHtml } from "./report-formatters/html.js";
 import { formatSarif } from "./report-formatters/sarif.js";
+import { formatDefectDojo } from "./report-formatters/defectdojo.js";
 import { generatePdfReport } from "./report-formatters/pdf.js";
 
-export const REPORT_EXPORT_FORMATS = ["json", "markdown", "html", "sarif", "pdf"] as const;
+export const REPORT_EXPORT_FORMATS = ["json", "markdown", "html", "sarif", "pdf", "defectdojo"] as const;
 export type ReportExportFormat = typeof REPORT_EXPORT_FORMATS[number];
 export interface ReportExport { body: Uint8Array; contentType: string; filename: string }
 const metadata: Record<ReportExportFormat, [string, string]> = {
   json: ["application/json", "json"], markdown: ["text/markdown; charset=utf-8", "md"],
   html: ["text/html; charset=utf-8", "html"], sarif: ["application/sarif+json", "sarif"], pdf: ["application/pdf", "pdf"],
+  defectdojo: ["application/json", "defectdojo.json"],
 };
 export function isReportExportFormat(value: unknown): value is ReportExportFormat {
   return typeof value === "string" && REPORT_EXPORT_FORMATS.includes(value as ReportExportFormat);
@@ -31,6 +33,6 @@ export async function exportReport(report: ScanReport, format: ReportExportForma
     } finally { await rm(directory, { recursive: true, force: true }); }
   }
   const text = format === "json" ? JSON.stringify(report, null, 2)
-    : format === "markdown" ? formatMarkdown(report) : format === "html" ? formatHtml(report) : formatSarif(report);
+    : format === "markdown" ? formatMarkdown(report) : format === "html" ? formatHtml(report) : format === "defectdojo" ? formatDefectDojo(report) : formatSarif(report);
   return { body: new TextEncoder().encode(text), contentType, filename };
 }

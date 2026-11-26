@@ -27,7 +27,7 @@ interface ExportOptions { severity?: string; category?: string; status?: string;
 export async function runFindingsExport(ids: string[], options: ExportOptions, deps: FindingsExportDeps = defaults): Promise<void> {
   try {
     const format = options.format === "md" ? "markdown" : options.format;
-    if (!isReportExportFormat(format)) throw new UsageError("--format must be one of: json, md, sarif, html, pdf.");
+    if (!isReportExportFormat(format)) throw new UsageError("--format must be one of: json, md, sarif, html, pdf, defectdojo.");
     if (ids.length && options.scan) throw new UsageError("Use finding IDs or --scan, not both.");
     if (format === "pdf" && !options.output) throw new UsageError("PDF is binary; supply -o <file>.");
     // Read the context before any database is opened: a bad file changes nothing.
@@ -75,9 +75,9 @@ export async function runFindingsExport(ids: string[], options: ExportOptions, d
 
 export function registerFindingsExportCommand(parent: Command, deps: FindingsExportDeps = defaults): void {
   parent.command("export [ids...]")
-    .description("Export findings, a whole scan or, with no IDs, every finding as json, md, sarif, html or pdf")
+    .description("Export findings, a whole scan or, with no IDs, every finding as json, md, sarif, html, pdf or defectdojo")
     .option("--scan <id>", "Export every finding of this scan instead of selected IDs")
-    .option("--format <format>", "json, md, sarif, html or pdf", "json")
+    .option("--format <format>", "json, md, sarif, html, pdf or defectdojo", "json")
     .option("-o, --output <file>", "Write to a file instead of stdout")
     .option("--severity <severity>", "With no IDs: only this severity")
     .option("--category <category>", "With no IDs: only this category")

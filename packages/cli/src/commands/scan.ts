@@ -556,7 +556,7 @@ async function writeReport(outcome: ScanOutcome, merged: ReturnType<typeof merge
   if (options.format === "json") body = `${JSON.stringify(scanJson(outcome, merged), null, 2)}\n`;
   else {
     const format = options.format === "md" ? "markdown" : options.format;
-    if (!isReportExportFormat(format)) throw new UsageError(`--format must be one of: ${FORMATS.join(", ")}.`);
+    if (!isReportExportFormat(format) || format === "defectdojo") throw new UsageError(`--format must be one of: ${FORMATS.join(", ")}.`);
     body = (await exportReport(toScanReport(outcome, stored), format, name)).body;
   }
   if (options.output) {
