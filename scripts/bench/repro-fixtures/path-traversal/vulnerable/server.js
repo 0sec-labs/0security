@@ -5,8 +5,8 @@
 // stays inside it, so `../` reads files outside the public folder. That is the point of this fixture.
 //
 // Blast radius, kept small on purpose:
-// - It serves only inside the folder that holds its own copy (the harness-created temp folder, or / inside a
-//   container). Anything above that is refused, so `../` cannot reach the real file system of a host.
+// - It serves only inside the folder that holds its own copy (the harness-created temp folder, or /sandbox inside
+//   a container). Anything above that is refused, so `../` cannot reach the real file system of a host.
 // - It refuses to run with / as that limit unless it is inside a container.
 // - It binds to 127.0.0.1 only and refuses any peer that is not loopback.
 // - It has no package.json and no script that starts it, no CI job runs it, and it exits unless the caller sets
