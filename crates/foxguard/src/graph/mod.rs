@@ -21,6 +21,9 @@ mod security_tests;
 #[cfg(test)]
 mod resolve_tests;
 
+#[cfg(test)]
+mod taint_tests;
+
 use crate::engine::parser::parse_path;
 use crate::engine::scanner::detect_language;
 use crate::Language;
@@ -161,6 +164,13 @@ pub struct CodeGraph {
 pub struct TaintSummaryOut {
     pub file: String,
     pub function: String,
+    /// `Class.method`: the same key as the matching symbol's `qualified`, so same-named methods of
+    /// different classes stay apart.
+    pub qualified: String,
+    /// Id of the matching symbol (`file#qualified@line`), the exact join key for the consumer.
+    pub symbol: String,
+    /// Number of parameters; `paramIndex` values index them, and overloads differ in it.
+    pub arity: usize,
     pub language: &'static str,
     pub params_to_return: Vec<usize>,
     pub params_to_sink: Vec<ParamSinkOut>,
@@ -658,24 +668,35 @@ enum FileOutcome {
 }
 
 fn java_summaries(rel: &str, source: &str, root: Node) -> Vec<TaintSummaryOut> {
-    use crate::rules::java_taint::{extract_cross_file_summaries, java_taint_rule_specs};
+    use crate::rules::java_taint::{extract_method_summaries, java_taint_rule_specs};
     let specs = java_taint_rule_specs();
-    extract_cross_file_summaries(root, source, None, &specs)
+    extract_method_summaries(root, source, &specs)
         .into_iter()
-        .map(|s| TaintSummaryOut {
-            file: rel.to_string(),
-            function: s.name,
-            language: "java",
-            params_to_return: s.params_to_return,
-            params_to_sink: s
-                .params_to_sink
-                .into_iter()
-                .map(|f| ParamSinkOut {
-                    param_index: f.param_index,
-                    rule_id: f.sink_rule_id,
-                    description: f.sink_description,
-                })
-                .collect(),
+        .map(|m| {
+            let qualified = if m.class.is_empty() {
+                m.summary.name.clone()
+            } else {
+                format!("{}.{}", m.class, m.summary.name)
+            };
+            TaintSummaryOut {
+                file: rel.to_string(),
+                symbol: format!("{}#{}@{}", rel, qualified, m.line),
+                qualified,
+                arity: m.arity,
+                function: m.summary.name,
+                language: "java",
+                params_to_return: m.summary.params_to_return,
+                params_to_sink: m
+                    .summary
+                    .params_to_sink
+                    .into_iter()
+                    .map(|f| ParamSinkOut {
+                        param_index: f.param_index,
+                        rule_id: f.sink_rule_id,
+                        description: f.sink_description,
+                    })
+                    .collect(),
+            }
         })
         .collect()
 }

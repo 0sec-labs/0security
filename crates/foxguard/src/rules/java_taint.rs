@@ -310,6 +310,30 @@ pub fn extract_cross_file_summaries(
     _aliases: Option<&AliasTable>,
     rule_specs: &[(&str, TaintSpec)],
 ) -> Vec<FunctionTaintSummary> {
+    extract_method_summaries(root, source, rule_specs)
+        .into_iter()
+        .map(|m| m.summary)
+        .collect()
+}
+
+/// A method summary with the method's identity: the class chain it is declared in, its first line
+/// and its arity, so a consumer can tell same-named methods and overloads apart.
+#[derive(Debug, Clone)]
+pub struct MethodSummary {
+    /// Enclosing classes, outermost first, joined with `.` (`Outer.Inner`); empty outside a class.
+    pub class: String,
+    /// 1-based line of the method declaration.
+    pub line: usize,
+    pub arity: usize,
+    pub summary: FunctionTaintSummary,
+}
+
+/// Per-method summaries with their declaration identity (see [`extract_cross_file_summaries`]).
+pub fn extract_method_summaries(
+    root: Node<'_>,
+    source: &str,
+    rule_specs: &[(&str, TaintSpec)],
+) -> Vec<MethodSummary> {
     let mut summaries = Vec::new();
     walk_tree(root, source, &mut |node, src| {
         if node.kind() != "method_declaration" {
@@ -322,10 +346,33 @@ pub fn extract_cross_file_summaries(
             return;
         };
         let param_names = method_param_names(node, src);
+        let arity = param_names.len();
         if let Some(summary) =
             summarize_java_method(node, &method_name, &param_names, src, rule_specs)
         {
-            summaries.push(summary);
+            let mut chain: Vec<String> = Vec::new();
+            let mut up = node.parent();
+            while let Some(p) = up {
+                if matches!(
+                    p.kind(),
+                    "class_declaration"
+                        | "interface_declaration"
+                        | "enum_declaration"
+                        | "record_declaration"
+                ) {
+                    if let Some(n) = p.child_by_field_name("name") {
+                        chain.push(node_text(n, src).to_string());
+                    }
+                }
+                up = p.parent();
+            }
+            chain.reverse();
+            summaries.push(MethodSummary {
+                class: chain.join("."),
+                line: node.start_position().row + 1,
+                arity,
+                summary,
+            });
         }
     });
     summaries
@@ -1566,6 +1613,70 @@ pub(crate) fn is_plausible_jdbc_execute(node: Node<'_>, source: &str) -> bool {
     }
 }
 
+/// A `.load(...)` call that deserializes YAML: the receiver is named like a YAML object
+/// (`yaml`, `snakeYaml`, `new Yaml()`), or is a variable, field or parameter declared with a type
+/// named `Yaml` anywhere in the file. `Properties.load`, `ServiceLoader.load`, `Config.load` and
+/// the like are not sinks.
+pub(crate) fn is_plausible_yaml_load(node: Node<'_>, source: &str) -> bool {
+    if call_arguments(node).map_or(0, |args| args.named_child_count()) == 0 {
+        return false;
+    }
+    let Some(receiver) = call_receiver_text(node, source) else {
+        return false;
+    };
+    let receiver = receiver.trim();
+    if receiver.to_ascii_lowercase().contains("yaml") {
+        return true;
+    }
+    if !receiver.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '$') {
+        return false;
+    }
+    let mut root = node;
+    while let Some(parent) = root.parent() {
+        root = parent;
+    }
+    let mut stack = vec![root];
+    while let Some(n) = stack.pop() {
+        match n.kind() {
+            "local_variable_declaration" | "field_declaration" => {
+                let yaml_typed = n
+                    .child_by_field_name("type")
+                    .is_some_and(|t| node_text(t, source).trim_end().ends_with("Yaml"));
+                if yaml_typed {
+                    let mut cursor = n.walk();
+                    let named = n.children(&mut cursor).any(|d| {
+                        d.kind() == "variable_declarator"
+                            && d.child_by_field_name("name")
+                                .is_some_and(|name| node_text(name, source) == receiver)
+                    });
+                    if named {
+                        return true;
+                    }
+                }
+            }
+            "formal_parameter" => {
+                if n.child_by_field_name("type")
+                    .is_some_and(|t| node_text(t, source).trim_end().ends_with("Yaml"))
+                    && n.child_by_field_name("name")
+                        .is_some_and(|name| node_text(name, source) == receiver)
+                {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+        let mut cursor = n.walk();
+        stack.extend(n.children(&mut cursor));
+    }
+    false
+}
+
+/// `RestTemplate.exchange(url, method, entity, type, ...)` takes at least three arguments; the
+/// reactive `WebClient.exchange()` and `Exchanger.exchange(x)` do not carry a URL.
+fn is_plausible_rest_exchange(node: Node<'_>) -> bool {
+    call_arguments(node).map_or(0, |args| args.named_child_count()) >= 3
+}
+
 fn match_sink(node: Node<'_>, source: &str, spec: &TaintSpec) -> Option<String> {
     spec.sinks.iter().find_map(|matcher| {
         if matcher_matches_call(matcher, node, source) {
@@ -1582,6 +1693,8 @@ fn matcher_matches_call(matcher: &NodeMatcher, node: Node<'_>, source: &str) -> 
             node.kind() == "method_invocation"
                 && call_method_name(node, source).is_some_and(|actual| actual == method)
                 && (method != "execute" || is_plausible_jdbc_execute(node, source))
+                && (method != "load" || is_plausible_yaml_load(node, source))
+                && (method != "exchange" || is_plausible_rest_exchange(node))
         }
         NodeMatcher::Call { canonical, .. } if node.kind() == "method_invocation" => {
             let Some(method) = call_method_name(node, source) else {
@@ -1980,6 +2093,47 @@ class Controller {
                 .any(|finding| finding.sink_description.contains("ObjectInputStream")),
             "should detect tainted ObjectInputStream constructor: {findings:?}"
         );
+    }
+
+    #[test]
+    fn load_is_a_deserialization_sink_only_on_yaml_receivers() {
+        let yaml = r#"
+class C {
+    void a(HttpServletRequest request) { new Yaml().load(request.getParameter("d")); }
+    void b(HttpServletRequest request) { Yaml y = new Yaml(); y.load(request.getParameter("d")); }
+    void c(HttpServletRequest request, Yaml parser) { parser.load(request.getParameter("d")); }
+}
+"#;
+        let findings = analyze(yaml, &unsafe_deserialization_spec());
+        assert_eq!(findings.len(), 3, "{findings:?}");
+        let other = r#"
+class C {
+    void a(HttpServletRequest request, Properties props) throws Exception { props.load(request.getInputStream()); }
+    void b(HttpServletRequest request) { ServiceLoader.load(request.getParameter("c")); }
+    void c(HttpServletRequest request, Config config) { config.load(request.getParameter("p")); }
+    void d(HttpServletRequest request) { load(request.getParameter("p")); }
+}
+"#;
+        let findings = analyze(other, &unsafe_deserialization_spec());
+        assert!(findings.is_empty(), "{findings:?}");
+    }
+
+    #[test]
+    fn exchange_is_an_ssrf_sink_only_with_a_rest_template_shaped_call() {
+        let rest = r#"
+class C {
+    void a(HttpServletRequest request) {
+        restTemplate.exchange(request.getParameter("u"), HttpMethod.GET, null, String.class);
+    }
+}
+"#;
+        assert_eq!(analyze(rest, &ssrf_spec()).len(), 1);
+        let other = r#"
+class C {
+    void a(HttpServletRequest request) { exchanger.exchange(request.getParameter("u")); }
+}
+"#;
+        assert!(analyze(other, &ssrf_spec()).is_empty());
     }
 
     #[test]
