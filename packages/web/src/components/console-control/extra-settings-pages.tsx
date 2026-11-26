@@ -7,6 +7,8 @@ import { useBackendApi } from "@/api";
 import { formatTokens } from "@/console/format-tokens";
 import { formatCost } from "@/console/panel/views/overview-model";
 import { Button } from "@/components/ui/button";
+import { useSentinelUsage } from "@/sentinels/api";
+import type { SentinelUsage } from "@/sentinels/model";
 import { QueryState } from "./control-ui";
 import { SettingsRow, SettingsSection, SettingsValueRow } from "./settings-section";
 
@@ -58,7 +60,38 @@ export function UsageSettings() {
           <span className="flex items-center gap-3"><span className="text-sm tabular-nums text-muted-foreground-1">{formatCost(row.costUsd) ?? "—"}</span><Button variant="ghost" size="sm" render={<Link to={`/chats/${encodeURIComponent(row.id)}`} />}>Open</Button></span>
         </SettingsRow>)}
       </SettingsSection>
+      <SentinelUsageSections />
       {(usage.data.truncated || usage.data.failed > 0) && <p role="status" className="text-sm text-muted-foreground-2">{usage.data.truncated ? `Showing the first ${MAX_CHATS} chats. ` : ""}{usage.data.failed > 0 ? `${usage.data.failed} chats could not be read.` : ""}</p>}
     </>}
   </div>;
+}
+
+const money = (value: number | null | undefined): string => formatCost(value ?? undefined) ?? "$0.00";
+const runsText = (runs: number, refused: number): string => `${runs} ${runs === 1 ? "run" : "runs"}${refused ? ` · ${refused} refused at the limit` : ""}`;
+/** "$1.20 of $5.00 today" or just the spend when there is no limit. */
+function limitText(label: string, spent: number, cap: number | null): string { return cap === null ? `${money(spent)} ${label}` : `${money(spent)} of ${money(cap)} ${label}`; }
+
+/** Cost of Sentinel runs by Sentinel, model and week, with each Sentinel's spend against its daily and monthly limits. Hidden when the server cannot report it. */
+function SentinelUsageSections() {
+  const usage = useSentinelUsage();
+  const data: SentinelUsage | undefined = usage.data;
+  if (!data || data.sentinels.length === 0) return null;
+  return <>
+    <SettingsSection id="settings-usage-sentinels" title="Sentinels, last 12 weeks">
+      {data.sentinels.map(row => <SettingsRow key={row.id} id={`setting-usage-sentinel-${row.id}`} label={row.name} description={[runsText(row.runs, row.refused), limitText("today", row.dayUsd, row.dailyBudgetUsd), limitText("this month", row.monthUsd, row.monthlyBudgetUsd)].join(" · ")}>
+        <span className="w-16 text-right text-sm tabular-nums text-muted-foreground-1">{money(row.costUsd)}</span>
+      </SettingsRow>)}
+    </SettingsSection>
+    <SettingsSection id="settings-usage-sentinel-models" title="Sentinel runs by model">
+      {data.models.map(row => <SettingsRow key={row.model} id={`setting-usage-sentinel-model-${row.model}`} label={row.model} description={runsText(row.runs, row.refused)}>
+        <span className="w-16 text-right text-sm tabular-nums text-muted-foreground-1">{money(row.costUsd)}</span>
+      </SettingsRow>)}
+    </SettingsSection>
+    <SettingsSection id="settings-usage-sentinel-weeks" title="Sentinel runs by week">
+      {data.weeks.map(row => <SettingsRow key={row.week} id={`setting-usage-sentinel-week-${row.week}`} label={`Week of ${row.week}`} description={runsText(row.runs, row.refused)}>
+        <span className="w-16 text-right text-sm tabular-nums text-muted-foreground-1">{money(row.costUsd)}</span>
+      </SettingsRow>)}
+      <p className="p-4 text-sm text-muted-foreground-2">Weeks start on Monday and days and months are UTC. A Sentinel at its limit refuses new runs until the period ends.</p>
+    </SettingsSection>
+  </>;
 }

@@ -121,7 +121,7 @@ def annotate_run(
     place. Graceful no-op when no KB store is available.
 
     Set on ``TriagedFinding.novelty`` (a dict) so ``serialize.finding_dict``
-    emits it and every downstream consumer (report/0cloud/SARIF) carries it.
+    emits it and every downstream consumer (report/SARIF) carries it.
     """
     kb_store = store if store is not None else load_store(path)
     if kb_store is None or len(kb_store) == 0:

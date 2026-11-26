@@ -13,7 +13,7 @@ const MIN = 60_000;
 const dirs: string[] = [];
 const P = "/api/console/sentinels";
 
-function fixture(options: { gh?: { run: (args: string[]) => Promise<{ stdout: string }> }; profile?: "local" | "smolvm"; checkouts?: Record<string, string>; persistent?: boolean } = {}) {
+function fixture(options: { unavailable?: "cancel" | "subscribe" | "usage"; gh?: { run: (args: string[]) => Promise<{ stdout: string }> }; profile?: "local" | "smolvm"; checkouts?: Record<string, string>; persistent?: boolean } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "zero-sentinel-run-"));
   dirs.push(dir);
   const dbPath = join(dir, "control.db");
@@ -21,6 +21,7 @@ function fixture(options: { gh?: { run: (args: string[]) => Promise<{ stdout: st
   const live = new Set<string>();
   const listeners = new Map<string, Set<(event: SentinelSessionEvent) => void>>();
   const costs = new Map<string, number>();
+  const metrics = vi.fn();
   const emit = (id: string, event: SentinelSessionEvent) => { for (const listener of [...(listeners.get(id) ?? [])]) listener(event); };
   const missions = {
     create: vi.fn((_input: Record<string, unknown>) => { const id = `mission-${++counter}`; live.add(id); return { id }; }),
@@ -34,7 +35,7 @@ function fixture(options: { gh?: { run: (args: string[]) => Promise<{ stdout: st
     removeQueued: vi.fn((_id: string, _messageId: string) => ({})),
     resumeQueue: vi.fn((_id: string, _messageId: string) => ({})),
   };
-  const service = new WebSentinelService({ dbPath, missions, executionProfile: () => options.profile ?? "local", checkout: async repo => options.checkouts?.[repo], persistentThread: () => options.persistent === true, ...(options.gh ? { gh: options.gh } : {}) });
+  const service = new WebSentinelService({ dbPath, missions: options.unavailable ? { ...missions, [options.unavailable]: undefined } : missions, metrics, executionProfile: () => options.profile ?? "local", checkout: async repo => options.checkouts?.[repo], persistentThread: () => options.persistent === true, ...(options.gh ? { gh: options.gh } : {}) });
   const workflows = new SecurityWorkflowStore(dbPath);
   const store = new SentinelStore(dbPath);
   const call = async (method: string, path: string, body?: unknown, actor?: SentinelActor) => {
@@ -53,7 +54,7 @@ function fixture(options: { gh?: { run: (args: string[]) => Promise<{ stdout: st
   }
   const activations = async (id: string) => ((await call("GET", `${P}/${id}/activations`)).data as { activations: Array<Record<string, any>> }).activations;
   const view = async (id: string) => ((await call("GET", `${P}/${id}`)).data as { sentinel: Record<string, any> }).sentinel;
-  return { service, missions, workflows, store, call, armed, activations, view, emit, costs, live };
+  return { metrics, service, missions, workflows, store, call, armed, activations, view, emit, costs, live };
 }
 
 beforeEach(() => { vi.useFakeTimers({ now: T0 }); });
@@ -1319,7 +1320,7 @@ describe("circuit-breaker state preservation across async GitHub PR triggers and
     expect((await f.view(id)).attention).toMatchObject({ needsYou: true, reason: expect.stringMatching(/three failed turns/) });
   });
 
-  it("refuses >190 open pull requests on a poll instead of truncating the 200-entry cursor and re-triggering old PRs", async () => {
+  it("handles more than 190 open pull requests: baselines them all and reviews nothing old", async () => {
     const diffs: string[] = [];
     const open205 = Array.from({ length: 205 }, (_, i) => pr(i + 1, `sha-${i + 1}`));
     const { f, triggerId } = await armedPrPersistent(async args => {
@@ -1328,11 +1329,8 @@ describe("circuit-breaker state preservation across async GitHub PR triggers and
       return { stdout: "" };
     }, false);
 
-    expect(f.store.getTrigger(triggerId)?.lastStatus).toBe("blocked");
-    expect(f.store.getTrigger(triggerId)?.lastError).toMatch(/190/);
-    expect(diffs).toHaveLength(0);
-    expect(f.missions.send).not.toHaveBeenCalled();
-
+    expect(f.store.getTrigger(triggerId)?.lastStatus).toBe("baseline");
+    expect(Object.keys(f.store.getTrigger(triggerId)!.cursor!)).toHaveLength(205);
     await f.service.checkTrigger(triggerId);
     expect(diffs).toHaveLength(0);
     expect(f.missions.send).not.toHaveBeenCalled();
@@ -1363,5 +1361,102 @@ describe("circuit-breaker state preservation across async GitHub PR triggers and
     expect(diffs).toHaveLength(diffsBeforeStable);
     expect(f.store.getTrigger(triggerId)?.cursor?.["1"]).toBe("s-1");
     expect(f.store.getTrigger(triggerId)?.cursor?.["5"]).toBe("s-5");
+  });
+});
+
+describe("Sentinel run budgets and metric receipts", () => {
+  it.each([false, true])("refuses a capped %s persistent launch if runtime observation fails", async persistent => {
+    const f = fixture({ persistent });
+    await f.armed({ runBudgetUsd: .1 });
+    f.missions.subscribe.mockImplementation(() => { throw new Error("runtime disconnected"); });
+    vi.setSystemTime(T0 + 5 * MIN + 1_000); await f.service.tick();
+    expect(f.missions.send).not.toHaveBeenCalled();
+    expect(f.metrics).not.toHaveBeenCalled();
+  });
+  it.each(["cancel", "subscribe", "usage"] as const)("refuses capped launches without runtime %s", async unavailable => {
+    for (const persistent of [false, true]) {
+      const f = fixture({ persistent, unavailable });
+      await f.armed({ runBudgetUsd: .1 });
+      vi.setSystemTime(T0 + 5 * MIN + 1_000); await f.service.tick();
+      expect(f.missions.send).not.toHaveBeenCalled();
+      expect(f.metrics).not.toHaveBeenCalled();
+    }
+  });
+  it.each([false, true])("retains the %s persistent watcher through rejected cancellation and retries until a terminal receipt", async persistent => {
+    const f = fixture({ persistent });
+    const { id } = await f.armed({ runBudgetUsd: .1 });
+    f.missions.cancel.mockRejectedValueOnce(new Error("transient cancellation RPC failure"));
+    vi.setSystemTime(T0 + 5 * MIN + 1_000); await f.service.tick();
+    const missionId = persistent ? "mission-1" : "mission-2";
+    f.costs.set(missionId, .12); f.emit(missionId, { type: "usage" });
+    await vi.advanceTimersByTimeAsync(0);
+    const rows = persistent ? ((await f.call("GET", `${P}/${id}/turns`)).data as { turns: Array<Record<string, any>> }).turns : await f.activations(id);
+    expect(rows[0]).toMatchObject({ status: "running", note: expect.stringContaining("Cancellation failed") });
+    expect(rows[0]!.finishedAt).toBeFalsy();
+    expect(f.metrics).not.toHaveBeenCalled();
+    // Further spend is observed; rapid usage events never cause cancellation storms.
+    f.costs.set(missionId, .16); for (let i = 0; i < 10; i++) f.emit(missionId, { type: "usage" });
+    expect(f.missions.cancel).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(f.missions.cancel).toHaveBeenCalledTimes(2);
+    expect(f.metrics).not.toHaveBeenCalled(); // An accepted cancellation request is still not a terminal receipt.
+    f.costs.set(missionId, .18); f.emit(missionId, { type: "turn-complete", stopReason: "cancelled" });
+    expect(f.metrics).toHaveBeenCalledTimes(1);
+    expect(f.metrics.mock.calls[0]![0]).toMatchObject({ costUsd: .18, status: "budget" });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(f.missions.cancel).toHaveBeenCalledTimes(2);
+  });
+  it("uses actual cumulative token receipt deltas for a persistent turn", async () => {
+    const f = fixture({ persistent: true }); let tokens = 10;
+    f.missions.usage.mockImplementation(() => ({ costUsd: 0, inputTokens: tokens, outputTokens: tokens }));
+    await f.armed(); vi.setSystemTime(T0 + 5 * MIN + 1_000); await f.service.tick();
+    tokens = 25; f.emit("mission-1", { type: "turn-complete", stopReason: "end_turn" });
+    expect(f.metrics.mock.calls[0]![0]).toMatchObject({ tokens: 30, status: "ok" });
+  });
+  it("stops capped automation when the runtime reports unpriced usage", async () => {
+    const f = fixture();
+    f.missions.usage.mockImplementation(() => ({ costUsd: 0, costUnavailable: true }));
+    const { id } = await f.armed({ runBudgetUsd: .1 }); vi.setSystemTime(T0 + 5 * MIN + 1_000); await f.service.tick();
+    f.emit("mission-2", { type: "usage" }); await Promise.resolve(); await Promise.resolve();
+    expect(f.missions.cancel).toHaveBeenCalledWith("mission-2");
+    expect(f.metrics).not.toHaveBeenCalled();
+    const rows = await f.activations(id);
+    expect(rows[0]!.costUsd).toBeUndefined();
+    f.emit("mission-2", { type: "turn-complete", stopReason: "cancelled" });
+    expect(f.metrics.mock.calls[0]![0]).toMatchObject({ costUsd: null });
+  });
+  it("records the actual activation and cancels a child run at its per-run cap", async () => {
+    const f = fixture();
+    const { id, triggerId } = await f.armed({ runBudgetUsd: .1 });
+    vi.setSystemTime(T0 + 5 * MIN + 1_000); await f.service.tick();
+    f.costs.set("mission-2", .12); f.emit("mission-2", { type: "usage" });
+    await Promise.resolve(); await Promise.resolve();
+    expect(f.missions.cancel).toHaveBeenCalledWith("mission-2");
+    expect(f.metrics).not.toHaveBeenCalled();
+    f.emit("mission-2", { type: "turn-complete", stopReason: "cancelled" });
+    expect(f.metrics).toHaveBeenCalledTimes(1);
+    expect(f.metrics.mock.calls[0]![0]).toMatchObject({ sentinelId: id, triggerId, command: "sentinel", status: "budget", costUsd: .12, budgetUsd: .1, tokens: null });
+    f.emit("mission-2", { type: "turn-complete", stopReason: "cancelled" });
+    expect(f.metrics).toHaveBeenCalledTimes(1);
+  });
+  it("records and caps the default persistent trigger turn, separately from earlier thread spend", async () => {
+    const f = fixture({ persistent: true });
+    const { id, triggerId } = await f.armed({ runBudgetUsd: .2 });
+    vi.setSystemTime(T0 + 5 * MIN + 1_000); await f.service.tick();
+    f.costs.set("mission-1", .25); f.emit("mission-1", { type: "usage" });
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    expect(f.missions.cancel).toHaveBeenCalledWith("mission-1");
+    expect(f.metrics).not.toHaveBeenCalled();
+    f.emit("mission-1", { type: "turn-complete", stopReason: "cancelled" });
+    expect(f.metrics).toHaveBeenCalledTimes(1);
+    expect(f.metrics.mock.calls[0]![0]).toMatchObject({ sentinelId: id, triggerId, command: "sentinel", status: "budget", budgetUsd: .2, costUsd: .25 });
+  });
+  it("pins an explicit trigger model in a separate child mission", async () => {
+    const f = fixture({ persistent: true });
+    const { id, triggerId } = await f.armed();
+    f.store.updateTrigger(triggerId, { runModel: { providerId: "openai", model: "chosen-model" }, enabled: true });
+    vi.setSystemTime(T0 + 5 * MIN + 1_000); await f.service.tick();
+    expect(f.missions.create.mock.calls.some(([input]) => input.runtime && (input.runtime as { model: string }).model === "chosen-model")).toBe(true);
+    expect((await f.activations(id))[0]).toMatchObject({ status: "running" });
   });
 });

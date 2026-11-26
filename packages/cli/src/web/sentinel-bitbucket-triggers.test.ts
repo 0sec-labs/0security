@@ -53,7 +53,7 @@ async function harness(options: { reviewerFor?: (settings: ReviewerSettings) => 
   const dbPath = join(dir, "control.db");
   const scans: PullRequest[] = [];
   const settings: ReviewerSettings[] = [];
-  const runner: ReviewRunner = { async scan(pr) { scans.push(pr); return { sha: pr.headSha.padEnd(40, "0"), json: JSON.stringify({ findings: [finding] }), exitCode: 0 }; } };
+  const runner: ReviewRunner = { async scan(pr) { scans.push(pr); return { sha: pr.headSha.padEnd(40, "0"), json: JSON.stringify({ costUsd: 0.75, findings: [finding] }), exitCode: 0 }; } };
   const missions = { create: vi.fn(() => ({ id: "m1" })), send: vi.fn(async () => ({})), pendingDecisions: vi.fn(() => 0), subscribe: vi.fn(() => () => undefined) };
   const reviewer = (s: ReviewerSettings): Reviewer => {
     settings.push(s);
@@ -146,6 +146,34 @@ describe("settings and storage", () => {
   });
 });
 
+describe("spend limits on a Bitbucket trigger", () => {
+  it("records the cost of a review, refuses the next one at the daily limit with a budget reached activation, and reviews again the next day", async () => {
+    const { fake, h } = await withFake("bitbucket-cloud");
+    fake.pullRequests.push(cloudPr(1));
+    const trigger = (await h.create(cloudSettings)).data.trigger.id as string;
+    await h.call("PATCH", `${P}/${h.sentinelId}/triggers/${trigger}`, { dailyBudgetUsd: 0.5, enabled: true, approval: "enable-reviewed-trigger" });
+    await h.tick(0);
+    fake.pullRequests.push(cloudPr(2));
+    await h.tick(1);
+    expect(h.scans.map(pr => pr.id)).toEqual([2]);
+    expect((await h.activations())[0]).toMatchObject({ status: "completed", costUsd: 0.75 });
+
+    fake.pullRequests.push(cloudPr(3));
+    await h.tick(1);
+    expect(h.scans.map(pr => pr.id)).toEqual([2]);
+    expect(h.trigger(trigger)).toMatchObject({ lastStatus: "budget", lastError: expect.stringContaining("Budget reached: $0.75 of the $0.5 daily limit for this trigger") });
+    const refused = (await h.activations()).filter(activation => activation.status === "skipped");
+    expect(refused).toHaveLength(1);
+    expect(refused[0]).toMatchObject({ error: expect.stringContaining("Budget reached"), trigger: { kind: "bitbucket-pr", triggerId: trigger } });
+    // Polling again while over the limit does not pile up records.
+    await h.tick(1);
+    expect((await h.activations()).filter(activation => activation.status === "skipped")).toHaveLength(1);
+
+    await h.tick(24 * 60);
+    expect(h.scans.map(pr => pr.id)).toEqual([2, 3]);
+  });
+});
+
 describe.each(["bitbucket-cloud", "bitbucket-dc"] as const)("polling on %s", platform => {
   it("records what is open, then reviews a new pull request and new commits once each", async () => {
     const { fake, h, cloud } = await withFake(platform);
@@ -153,6 +181,7 @@ describe.each(["bitbucket-cloud", "bitbucket-dc"] as const)("polling on %s", pla
     fake.pullRequests.push(make(1));
     const config = cloud ? cloudSettings : { platform: "dc", repo: "PRJ/app", baseUrl: fake.url, checkout: "/srv/clones/app", pollMs: 60_000 };
     const trigger = (await h.create(config)).data.trigger.id as string;
+    h.store.updateTrigger(trigger, { runModel: { providerId: "azure", model: "deployment", reasoning: "high" }, enabled: true }, undefined, clock);
 
     await h.tick(0);
     expect(h.trigger(trigger)).toMatchObject({ lastStatus: "baseline", cursor: { "1": expect.any(String) } });
@@ -162,6 +191,7 @@ describe.each(["bitbucket-cloud", "bitbucket-dc"] as const)("polling on %s", pla
     fake.pullRequests.push(make(2));
     await h.tick(1);
     expect(h.scans.map(pr => pr.id)).toEqual([2]);
+    expect(h.settings.at(-1)).toMatchObject({ providerId: "azure", model: "deployment", reasoning: "high" });
     expect(fake.comments.length).toBeGreaterThanOrEqual(2);
     expect(fake.report).toBeDefined();
     expect(h.trigger(trigger)).toMatchObject({ lastStatus: "reviewed" });

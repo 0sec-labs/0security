@@ -45,6 +45,7 @@ export function SentinelsPage() {
   const owners = new Map(automations.definitions.map(item => [item.id, item.ownerSentinelId]));
   if (workflowId) return <><AutomationEditor workflowId={workflowId} onClose={() => setSearch(previous => { const next = new URLSearchParams(previous); next.delete("workflow"); return next; })} /></>;
   return <>
+    <div className="flex justify-end"><Button variant="ghost" render={<Link to="/metrics" />}>Run metrics</Button></div>
     <PageHeader title={v("{Sentinels}")} actions={!readOnly && rows.length > 0 ? <><Button type="button" variant="ghost" onClick={() => setNewAutomation(true)}>New automation</Button><Button type="button" variant="secondary" onClick={() => openNewAgent()}><CapyAgentIcon aria-hidden="true" />{v("New {sentinel}")}</Button></> : undefined} />
     {rows.length === 0 ? <EmptyState icon={<CapyAgentIcon />} title={v("No {sentinels} yet")} body={v("A {sentinel} is a standing job. It wakes on a schedule or when a pull request opens, then works in its own thread.")} action={readOnly ? undefined : <Button type="button" variant="secondary" onClick={() => openNewAgent()}>{v("Create {a sentinel}")}</Button>} />
       : <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2">

@@ -1,0 +1,327 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-11-25",
+  "sourceBase": "b4dfb3e29",
+  "state": "Local qualification evidence reconciled with current main; publication and deployment are separate and are not established by this file.",
+  "actualChecks": [
+    {
+      "name": "Native team server",
+      "result": "75 checks initially; final metrics ACL extension 78 checks including owner/editor/viewer"
+    },
+    {
+      "name": "Online SQLite backup/restore",
+      "result": "Actual running-server backup, integrity_check ok, finding retained and authenticated export"
+    },
+    {
+      "name": "Signed installer",
+      "release": "0.45.0",
+      "platform": "darwin-arm64",
+      "signature": "required and verified",
+      "attestation": "required and verified",
+      "scannerCompanion": "0.14.2 verified and executable"
+    },
+    {
+      "name": "Offline binary bundle",
+      "result": "Actual signed binary/chart install, executable and SBOM generation under macOS kernel network denial; positive socket control rejected",
+      "limits": "Does not qualify Linux/container/Helm deployment or an internal model endpoint"
+    },
+    {
+      "name": "Java verifier",
+      "result": "Pinned Maven/JDK21 Docker image on arm64; online warm-up then offline verification; three tests passed; removing guard produced two failures; network and setup-only dummy settings checks passed",
+      "limits": "Verifier isolation covers check commands, not the whole fixing model runtime; live private registry unqualified"
+    },
+    {
+      "name": "OSV",
+      "result": "Live public advisory lookup: 11 advisories for 4 of 6 resolved components; main/test usage evidence retained; vulnerable-code reachability unknown"
+    },
+    {
+      "name": "Bitbucket Pipe",
+      "result": "Native arm64 image built with checksum-verified release CLI; actual scanner-only git PR fixture emitted one lead and exit 1; separate no-token publisher sent nothing",
+      "limits": "No live Bitbucket workspace, Jenkins or Azure pipeline; no paid model call"
+    },
+    {
+      "name": "Findings browser",
+      "result": "Actual 1,528 scanner findings imported and browsed, root-bound citation matches source; imported evidence remains unverified; all 1,528 distinct display IDs resolve"
+    },
+    {
+      "name": "Business context browser",
+      "result": "Actual operator setter, persisted rationale, unchanged technical severity, independent review handoff and separate local/host CI states"
+    },
+    {
+      "name": "Bedrock browser",
+      "result": "Host credential-chain form and model selector; no secret fields or AWS/inference calls; access and price explicitly unknown"
+    }
+  ],
+  "deterministicScale": {
+    "scannerCommit": "60243ac5024efbb5542e1b5781aa004ab34d3044",
+    "scannerVersion": "foxguard 0.14.2",
+    "targetCommit": "1333cf9f6de71171c737abdaca53550932a37891",
+    "trackedJavaFiles": 8759,
+    "javaPhysicalNewlines": 1316081,
+    "elapsedSeconds": 23.771,
+    "exitCode": 1,
+    "sarifFindings": 1528,
+    "scope": "deterministic scanner only; no model validation or accuracy claim"
+  },
+  "deterministicOwasp": {
+    "aggregate": {
+      "tp": 312,
+      "fn": 1103,
+      "fp": 52,
+      "tn": 1273,
+      "tpr": 0.2205,
+      "fpr": 0.0392,
+      "precision": 0.8571,
+      "benchmark_score": 0.1812,
+      "total_findings": 1447
+    },
+    "categories": {
+      "cmdi": {
+        "tp": 20,
+        "fn": 106,
+        "fp": 6,
+        "tn": 119
+      },
+      "crypto": {
+        "tp": 0,
+        "fn": 130,
+        "fp": 0,
+        "tn": 116
+      },
+      "hash": {
+        "tp": 0,
+        "fn": 129,
+        "fp": 0,
+        "tn": 107
+      },
+      "ldapi": {
+        "tp": 0,
+        "fn": 27,
+        "fp": 0,
+        "tn": 32
+      },
+      "pathtraver": {
+        "tp": 0,
+        "fn": 133,
+        "fp": 0,
+        "tn": 135
+      },
+      "securecookie": {
+        "tp": 0,
+        "fn": 36,
+        "fp": 0,
+        "tn": 31
+      },
+      "sqli": {
+        "tp": 46,
+        "fn": 226,
+        "fp": 5,
+        "tn": 227
+      },
+      "trustbound": {
+        "tp": 0,
+        "fn": 83,
+        "fp": 0,
+        "tn": 43
+      },
+      "weakrand": {
+        "tp": 0,
+        "fn": 218,
+        "fp": 0,
+        "tn": 275
+      },
+      "xpathi": {
+        "tp": 0,
+        "fn": 15,
+        "fp": 0,
+        "tn": 20
+      },
+      "xss": {
+        "tp": 246,
+        "fn": 0,
+        "fp": 41,
+        "tn": 168
+      }
+    },
+    "findings_by_rule": {
+      "java/no-command-injection": 26,
+      "java/no-hardcoded-secret": 1,
+      "java/no-path-traversal": 13,
+      "java/no-ssrf": 1,
+      "java/no-xss": 1348,
+      "java/no-xxe": 1,
+      "java/taint-command-injection": 6,
+      "java/taint-sql-injection": 51
+    },
+    "benchmark_ref": "10dfcc54ad02dcfcb358b0ba4a0fef8c919a6d17",
+    "elapsedSeconds": 28.854,
+    "scannerCommit": "60243ac5024efbb5542e1b5781aa004ab34d3044",
+    "scope": "deterministic pattern/taint regression signal only; not agent-layer Java accuracy"
+  },
+  "planning": {
+    "sourceFiles": 9870,
+    "entryPoints": 2131,
+    "batches": 575,
+    "mode": "Actual module/explicit ownership plan; no model analysis"
+  },
+  "remaining": [
+    "Approved model spend cap, then full real Java scan -> triage -> fix -> compile/test -> rescan and ground-truth scoring.",
+    "Configured Bitbucket test repository/token and CI environment for live reviews, annotations, fixes and lifecycle verification.",
+    "Renewed AWS authentication and actual model/service permissions for Bedrock/Entra and cloud deployment qualification.",
+    "Enterprise test license and actual identity provider for licensed shared findings and provisioning.",
+    "Live pipeline runs, release publication, deployment and issue acceptance reconciliation; none performed here."
+  ],
+  "architectureLimits": [
+    "HA remains explicitly deferred; supported runtime is single-node.",
+    "Published main application image 0.45.0 is linux/amd64 only by prior build policy; the locally built Pipe image is a separate native arm64 artifact."
+  ],
+  "regression": {
+    "engine": {
+      "passed": 47
+    },
+    "integratedCli": {
+      "passed": 397,
+      "skipped": 4
+    },
+    "ui": {
+      "passed": 30
+    },
+    "enterprise": {
+      "passed": 106
+    },
+    "ciPackagingAndRecipes": {
+      "passed": 25
+    },
+    "additionalHostReceiptFocused": {
+      "passed": 58,
+      "note": "Overlaps integrated CLI cases; do not sum these groups as unique tests."
+    },
+    "additionalProviderRouting": {
+      "passed": 77,
+      "scope": "59 scan/real-git runner tests plus 18 Cloud/DC trigger tests"
+    }
+  },
+  "hostReceiptAssociation": {
+    "implementation": "Actual fix PR capture, canonical repository hash, separate append-only observation ledger, explicit owner refresh, max20 PRs/60seconds, unique PRs per group, truthful unknown state",
+    "qualification": "Focused local tests include real loopback HTTP and actual git; no real vendor receipts populated without credentials."
+  },
+  "implementationDigest": {
+    "algorithm": "sha256",
+    "value": "e31dc5e982033a49cb162ba67c714acab2bf42845791eb3046a5e8edf499f1d2",
+    "files": 171,
+    "definition": "Sorted changed/untracked source paths plus file-content hashes; qualification documents excluded."
+  },
+  "providerSelection": "Bitbucket review jobs preserve the explicit provider, model and reasoning through the CLI into the console runtime, including inherited Sentinel defaults.",
+  "originalImplementationState": "Local implementation; uncommitted working tree, not published or deployed",
+  "postMergeValidation": {
+    "sourceRevision": "de690cd87",
+    "integratedMain": "df885101736ad5055b48049eaceca394413715ea",
+    "scope": "Reconciled local working tree; does not qualify paid model execution, live vendor integrations, cloud deployment, a release or remote CI.",
+    "globalBuild": {
+      "result": "passed after frozen-lockfile dependency installation and final reconciliation",
+      "command": "pnpm build",
+      "artifactVersion": "0.45.0"
+    },
+    "docsSite": {
+      "result": "passed",
+      "commands": [
+        "pnpm --filter @0/docs build",
+        "node scripts/check-docs-site.mjs --write-marker"
+      ],
+      "builtPages": 101,
+      "readmeDocumentationLinks": 8,
+      "limits": "Local build and local marker only; no deploy or public-domain verification."
+    },
+    "documentationCommands": {
+      "result": "passed",
+      "command": "pnpm check:docs-commands",
+      "filesChecked": 27,
+      "correction": "Bitbucket examples use the canonical findings fix command."
+    },
+    "nativeServer": {
+      "schemaVersion": 1,
+      "startedAt": "2026-11-26T02:41:16.138Z",
+      "runtime": "v24.14.0",
+      "checks": [
+        "native-server-http-auth-csrf-host-health",
+        "online-backup-while-server-running-integrity-and-finding-retained",
+        "restored-database-native-server-restart-auth-and-finding-retained",
+        "authenticated-http-report-export-retains-restored-finding"
+      ],
+      "scope": "Native local process, synthetic retained finding, real SQLite backup. No model, container, cloud, Bitbucket or real IdP qualification.",
+      "completedAt": "2026-11-26T02:41:22.246Z",
+      "outcome": "passed"
+    },
+    "regressionScopeNote": "The earlier regression groups remain historical, overlapping scopes. Final reconciled suite counts are recorded separately when complete.",
+    "regressions": {
+      "web": {
+        "result": "passed",
+        "files": 142,
+        "tests": 977
+      },
+      "enterprisePreHa": {
+        "result": "passed",
+        "files": 6,
+        "tests": 106
+      },
+      "publicScripts": {
+        "result": "passed",
+        "checks": 23
+      },
+      "engineFullRun": {
+        "passedTests": 4934,
+        "failedTests": 5,
+        "skippedTests": 10,
+        "result": "Initial full run exposed three stale Java-skill registry expectations, an inherited telemetry opt-out in a pricing fixture, and a mailbox-poll boundary race. All failures corrected and corresponding focused suites passed; full suite not repeated."
+      },
+      "engineFixReruns": {
+        "skillsTestsPassed": 180,
+        "runtimeAndCleanupTestsPassed": 174,
+        "backgroundLifecycleTestsPassed": 48
+      },
+      "upstreamTelemetryAndSessionStore": {
+        "result": "passed",
+        "testsPassed": 289,
+        "postgresTestsSkipped": 15,
+        "scope": "Source tests with minimal environment and isolated homes; local SQLite exercised, no live PostgreSQL configured."
+      },
+      "metricsPermissions": {
+        "result": "passed",
+        "tests": 8,
+        "scope": "Metrics reads and explicit host refresh require settings.write; generic collection writes remain denied."
+      },
+      "static": {
+        "result": "passed",
+        "checks": 19,
+        "scope": "18 checks passed in the final group; lint passed after dependencies and declaration outputs were rebuilt."
+      },
+      "cli": {
+        "result": "passed across disjoint completed-file groups",
+        "files": 254,
+        "testsPassed": 3289,
+        "testsSkipped": 28,
+        "testsTotal": 3317,
+        "scope": "158 completed files from initial run plus 96 disjoint files after fixing the canonical provider import and metrics permissions test and stabilizing dependencies/build outputs. Initial run was interrupted by dependency relinking; it is not reported as a clean full-suite invocation. Eleven rerun skips require live PostgreSQL."
+      },
+      "browser": {
+        "result": "passed",
+        "checks": 11,
+        "scope": "Local real-browser/native-process workflows with loopback model and host fixtures, including artifact import, rendering, roles, sidebar, twelve-route CLI parity, PR agent, webhooks, telemetry and dashboard. Does not qualify live customer hosts or paid model behavior."
+      }
+    },
+    "credentialValueAudit": {
+      "changedFiles": 202,
+      "matches": 0,
+      "scope": "Compared current environment secret values against changed source contents; no values recorded."
+    },
+    "builtCli": {
+      "result": "passed",
+      "checks": [
+        "Bundled CLI help",
+        "Three command smoke checks",
+        "Bun worker orchestration with 28 loopback requests, real owned-child edits, force-stop and cleanup"
+      ],
+      "scope": "Local built artifacts with mocked model/loopback endpoints; no paid model or live host writes."
+    }
+  }
+}

@@ -32,13 +32,15 @@ export interface SarifUpload { commit: string; ref: string; /** gzip + base64 */
 /** Run the host's CLI with these arguments and an optional request body on standard input. */
 export type HostRun = (args: string[], input?: string) => Promise<string>;
 
+export interface PullRequestChecks { status: "passing" | "failing" | "pending" | "none"; url?: string }
+
 export interface Host {
   readonly name: string;
   /** Whether `name` is a well-formed repository name for this host. */
   isValidRepo(name: string): boolean;
   /** The repository of the current clone, or "" when it cannot be told. */
   currentRepo(): Promise<string>;
-  findOpenPullRequest(branch: string): Promise<PullRequest | undefined>;
+  findOpenPullRequest(branch: string, base?: string): Promise<PullRequest | undefined>;
   /** Returns the new pull request's URL. */
   createPullRequest(input: { base: string; head: string; title: string; bodyFile: string; draft: boolean }): Promise<string>;
   updatePullRequestBody(number: number, bodyFile: string): Promise<void>;
@@ -48,6 +50,7 @@ export interface Host {
   editPullRequest(number: number, change: { addLabels?: string[]; addReviewers?: string[] }): Promise<void>;
   /** Read one pull request by its URL. */
   pullRequestState(url: string): Promise<PullRequestState>;
+  pullRequestChecks?(url: string): Promise<PullRequestChecks>;
   pushBranch(branch: string): Promise<void>;
   issues(repo: string): IssueTracker;
   uploadSarif(repo: string, upload: SarifUpload): Promise<{ id?: string }>;

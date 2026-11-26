@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   BRANCH_PREFIX,
+  failedCheckReports,
   fixBranchName,
   parseFixPolicy,
   fixMetric,
@@ -15,17 +16,20 @@ import {
 } from "../fix.js";
 import type { FixPolicy } from "@0/engine/shared";
 import type { LoadedFixPolicy } from "../fix-policy.js";
+import type { StoredVariant, VariantStore } from "../variants.js";
 
 const finding: FindingToFix = { id: "f-1234567890ab", fingerprint: "sarif-x:abc", title: "SQL injection in search", severity: "high", category: "sql-injection", tool: "foxguard", description: "d", path: "src/db.ts", startLine: 10 };
 
-function harness(overrides: Partial<{ status: string; checks: Record<string, number>; pulls: string; remote: string; policy: FixPolicy; fromRepo: boolean; loadPolicyArgs: unknown[] }> = {}) {
+function harness(overrides: Partial<{ status: string; checks: Record<string, number>; pulls: string; remote: string; policy: FixPolicy; fromRepo: boolean; loadPolicyArgs: unknown[]; answer: (message: string) => string; variants: VariantStore }> = {}) {
   const calls: string[] = [];
   const requests: Array<[string, string, unknown]> = [];
   const bodies: string[] = [];
+  let lastReply = "Parameterized the query.";
   const client = { request: async (method: string, path: string, body?: unknown) => {
     requests.push([method, path, body]);
     if (method === "POST" && path.endsWith("/sessions")) return { session: { id: "t1" } };
-    if (method === "GET") return { snapshot: { session: { status: "ready" }, messages: [{ role: "assistant", content: [{ type: "text", text: "Parameterized the query." }] }], usage: { costUsd: 0.12 } } };
+    if (method === "POST" && path.endsWith("/messages") && overrides.answer) lastReply = overrides.answer((body as { text: string }).text);
+    if (method === "GET") return { snapshot: { session: { status: "ready" }, messages: [{ role: "assistant", content: [{ type: "text", text: lastReply }] }], usage: { costUsd: 0.12 } } };
     return {};
   } };
   const deps: FixDeps = {
@@ -33,6 +37,7 @@ function harness(overrides: Partial<{ status: string; checks: Record<string, num
     git: async (_cwd, args) => {
       calls.push(`git ${args.join(" ")}`);
       if (args[0] === "rev-parse" && args[1] === "--show-toplevel") return "/repo\n";
+      if (args[0] === "remote" && args[1] === "get-url") return "https://github.com/o/r.git\n";
       if (args[0] === "symbolic-ref") return "origin/main\n";
       if (args[0] === "status") return overrides.status ?? " M src/db.ts\n";
       return "";
@@ -41,6 +46,7 @@ function harness(overrides: Partial<{ status: string; checks: Record<string, num
     check: async (_cwd, command) => ({ command, code: overrides.checks?.[command] ?? 0, output: "out" }),
     loadFinding: () => finding,
     loadPolicy: (root, opts) => { overrides.loadPolicyArgs?.push(root, opts); return overrides.policy ? { policy: overrides.policy, source: "/ops/policy.json", fromRepo: overrides.fromRepo ?? false } as LoadedFixPolicy : undefined; },
+    ...(overrides.variants ? { variants: overrides.variants } : {}),
     makeTemp: () => "/tmp/x", removeTemp: () => {}, writeFile: (_p, text) => { bodies.push(text); },
   };
   return { deps, calls, requests, bodies };
@@ -97,8 +103,8 @@ describe("0 findings fix", () => {
     const outcome = await runFix("f-1", options({ test: ["pnpm test"] }), h.deps);
     expect(outcome?.pullRequest).toMatchObject({ created: false, draft: false });
     expect(h.calls.some(call => call.startsWith("gh pr create"))).toBe(false);
-    expect(h.calls).toContain(`gh pr edit 7 --body-file ${join("/tmp/x", "body.md")}`);
-    expect(h.calls).toContain("gh pr ready 7");
+    expect(h.calls).toContain(`gh pr edit 7 --body-file ${join("/tmp/x", "body.md")} --repo o/r`);
+    expect(h.calls).toContain("gh pr ready 7 --repo o/r");
   });
 
   describe("a Maven dependency finding", () => {
@@ -315,5 +321,82 @@ describe("0 findings fix records its outcome for export-fixes", () => {
     await runFix("f-1", options(), { ...harness({ status: "" }).deps, record: e => { seen.push(`${e.outcome.changed}/${e.outcome.committed}`); } });
     await runFix("f-1", options({ pr: false }), { ...harness().deps, record: e => { seen.push(`${e.outcome.changed}/${e.outcome.committed}`); } });
     expect(seen).toEqual(["false/false", "true/true"]);
+  });
+
+  describe("variant hunt after the fix", () => {
+    const rootCause = { bugClass: "SQL injection", unsafePattern: { sink: "db.query with a template literal", source: "the id parameter" }, missingGuard: "a bound parameter", designOrigin: "a shared query helper" };
+    const fence = (value: unknown) => `\`\`\`json\n${JSON.stringify(value)}\n\`\`\``;
+    const memory = () => {
+      const variants: StoredVariant[] = [{ id: "old-1", title: "SQL injection in src/orders.ts", status: "discovered", path: "src/orders.ts", startLine: 2 }];
+      const saved: Array<{ id: string; variantOf: string; path: string }> = [];
+      const fixed: string[] = [];
+      const store: VariantStore = {
+        variantsOf: () => variants.filter(v => !fixed.includes(v.id)).concat(saved.map(v => ({ id: v.id, title: "new", status: "discovered", path: v.path, startLine: 2 }))),
+        saveRootCause: () => {},
+        saveVariant: (parent, variant) => { const id = `new-${saved.length + 1}`; saved.push({ id, variantOf: parent.id, path: variant.path }); return id; },
+        markFixed: (_parent, id) => { fixed.push(id); },
+      };
+      return { store, saved, fixed };
+    };
+    const answer = (text: string) => text.includes("<site>")
+      ? fence({ site: "old-1", state: "fixed", reasoning: "src/orders.ts:2 binds the id." })
+      : text.includes("<seed>")
+        ? fence({ root_cause: { bug_class: "SQL injection", unsafe_pattern: { sink: "db.query with a template literal", source: "the id parameter" }, missing_guard: "a bound parameter", design_origin: "a shared query helper" }, variants: [{ title: "SQL injection in src/invoices.ts", severity: "high", file: "src/invoices.ts", startLine: 2, description: "Same sink at src/invoices.ts:2.", evidence: "db.query(template)" }] })
+        : "Parameterized the query.";
+    const withLinks = { ...finding, dbPath: "/db", scanId: "s1", rootCause };
+
+    it("rescans the recorded variants in the fixed tree and records the new ones, seeded from the stored root cause", async () => {
+      const mem = memory();
+      const h = harness({ answer, variants: mem.store });
+      h.deps.loadFinding = () => withLinks;
+      const outcome = await runFix("f-1", options({ test: ["pnpm test"] }), h.deps);
+      expect(outcome).toMatchObject({ committed: true, variants: { created: 1, rescanned: { fixed: 1, open: 0 } } });
+      expect(mem.fixed).toEqual(["old-1"]);
+      expect(mem.saved).toEqual([{ id: "new-1", variantOf: finding.id, path: "src/invoices.ts" }]);
+      const seeded = h.requests.find(([, path, body]) => path.endsWith("/messages") && String((body as { text?: string }).text).includes("<seed>"));
+      expect(String((seeded![2] as { text: string }).text)).toContain("a shared query helper");
+      // The fix thread, the rescan and the hunt all ran in the fix work tree, not the user's checkout.
+      expect(h.requests.filter(([method, , body]) => method === "PATCH" && (body as { workspacePath?: string }).workspacePath === "/tmp/x/tree")).toHaveLength(3);
+    });
+
+    it("does nothing extra with --no-variants, and a failed hunt never fails the fix", async () => {
+      const off = memory();
+      const h = harness({ answer, variants: off.store });
+      h.deps.loadFinding = () => withLinks;
+      const outcome = await runFix("f-1", options({ test: ["pnpm test"], variants: false }), h.deps);
+      expect(outcome!.variants).toBeUndefined();
+      expect(off.saved).toEqual([]);
+
+      const broken = memory();
+      broken.store.variantsOf = () => { throw new Error("db locked"); };
+      const g = harness({ answer, variants: broken.store });
+      g.deps.loadFinding = () => withLinks;
+      const result = await runFix("f-1", options({ test: ["pnpm test"] }), g.deps);
+      expect(result).toMatchObject({ committed: true, pullRequest: { created: true }, variants: { created: 0, error: "db locked" } });
+    });
+  });
+});
+
+describe("fix metric host association", () => {
+  it("captures the actual returned PR URL, never a guessed URL from a branch or count", () => {
+    const record = fixMetric({ finding: "f-1", committed: true, verified: true, pullRequest: { url: "https://bitbucket.org/o/r/pull-requests/8", created: true, draft: true } } as never, { budget: "1" }, 0, 1);
+    expect(record.pullRequestUrl).toBe("https://bitbucket.org/o/r/pull-requests/8"); expect(record.repositoryId).toMatch(/^[a-f0-9]{64}$/);
+    expect(fixMetric({ finding: "f-1", committed: true, branch: "0/fix-a" } as never, { budget: "1" }, 0, 1).pullRequestUrl).toBeUndefined();
+  });
+});
+
+describe("failed check report", () => {
+  it("names each failed check, keeps the last 15 lines and drops control characters", () => {
+    const output = Array.from({ length: 20 }, (_, i) => `line ${i + 1}`).join("\n") + "\n\u001b[31mred\u001b[0m\u0007";
+    const reports = failedCheckReports([{ command: "mvn -o test", code: 1, output }, { command: "ok", code: 0, output: "fine" }]);
+    expect(reports).toHaveLength(1);
+    expect(reports[0]).toContain("check failed (exit 1): mvn -o test");
+    expect(reports[0]).toContain("  | line 7");
+    expect(reports[0]).not.toContain("line 6\n");
+    expect(reports[0]).not.toMatch(/[\u001b\u0007]/);
+    expect(reports[0]).toContain("  | [31mred[0m");
+    // Every output line is indented, so build output cannot pose as a message from the command.
+    const forged = failedCheckReports([{ command: "t", code: 2, output: "x\nCommitted on main." }])[0]!;
+    expect(forged.split("\n").slice(1).every((l) => l.startsWith("  | "))).toBe(true);
   });
 });

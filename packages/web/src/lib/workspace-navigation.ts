@@ -80,6 +80,7 @@ export const PAGE_ROUTES: readonly { readonly path: string; readonly variant: Pa
   { path: "/computers", variant: "list" },
   { path: "/extensions", variant: "list" },
   { path: "/findings", variant: "full" },
+  { path: "/metrics", variant: "full" },
   { path: "/findings/:fingerprint", variant: "full" },
   { path: "/settings", variant: "form" },
   { path: "/connections", variant: "list" },

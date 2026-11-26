@@ -1,0 +1,27 @@
+# After publishing the image, pin it by immutable registry digest in both steps.
+# Keep this pipeline on a trusted branch. The deployment token must not be a repository variable.
+image: atlassian/default-image:4
+pipelines:
+  pull-requests:
+    '**':
+      - step:
+          name: Scan without publisher token
+          script:
+            - pipe: docker://ghcr.io/0sec-labs/0security-pipe:0.45.0
+              variables:
+                MODE: scan
+                OPENAI_API_KEY: $OPENAI_API_KEY
+          artifacts:
+            - .zero-ci/scan.json
+            - .zero-ci/scan.exit
+            - .zero-ci/scan.commit
+      - step:
+          name: Publish recorded results
+          deployment: security-report
+          clone:
+            enabled: false
+          script:
+            - pipe: docker://ghcr.io/0sec-labs/0security-pipe:0.45.0
+              variables:
+                MODE: publish
+                BITBUCKET_TOKEN: $BITBUCKET_TOKEN

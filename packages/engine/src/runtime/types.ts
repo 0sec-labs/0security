@@ -274,8 +274,7 @@ export interface NativeStreamCallbacks {
    *   - `"reasoning"` — the hidden reasoning summary channel
    *     (Responses API: `response.reasoning_summary_text.delta`).
    *
-   * Wired in the agent loop only when a cloud sink is active so non-cloud
-   * runs pay zero per-token overhead.
+   * Optional: runs without a callback pay no per-token overhead.
    */
   onDelta?: (scope: "assistant_response" | "reasoning", text: string) => void;
 }

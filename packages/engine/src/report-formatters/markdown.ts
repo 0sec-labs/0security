@@ -1,4 +1,5 @@
-import { reproductionFor, reproductionLine, proofLine, describeAttackerImpact, compareFindingsBySeverity, orderByScope, splitByScope } from "../shared/index.js";
+import { businessContextLabel } from "../shared/business-context.js";
+import { executedPocFor, executedPocLine, reproductionFor, reproductionLine, proofLine, describeAttackerImpact, compareFindingsByBusinessContext, orderByScope, splitByScope } from "../shared/index.js";
 import type { ScanReport, Finding, FindingRemediation, PocStep } from "../shared/index.js";
 
 /**
@@ -109,7 +110,7 @@ export function formatMarkdown(report: ScanReport): string {
   if (inScope.length > 0) {
     lines.push("## Findings");
     lines.push("");
-    for (const finding of orderByScope(inScope, compareFindingsBySeverity)) {
+    for (const finding of orderByScope(inScope, compareFindingsByBusinessContext)) {
       lines.push(formatFinding(finding));
     }
   } else {
@@ -131,7 +132,7 @@ export function formatMarkdown(report: ScanReport): string {
 
   if (outOfScope.length > 0) {
     lines.push("", `## Outside declared scope (${outOfScope.length})`, "", "These findings match a vector the repository's scope file declares out of scope. They are listed here, not hidden, and are not counted in the summary or in the exit code.", "");
-    for (const finding of [...outOfScope].sort(compareFindingsBySeverity)) lines.push(formatFinding(finding));
+    for (const finding of [...outOfScope].sort(compareFindingsByBusinessContext)) lines.push(formatFinding(finding));
   }
 
   return lines.join("\n");
@@ -275,6 +276,8 @@ function formatFinding(finding: Finding): string {
   if (finding.triageStatus === "accepted") {
     lines.push(`- **Accepted risk:** ${finding.triageNote ?? "no reason recorded"}${finding.triageExpiresAt ? `; accepted until ${finding.triageExpiresAt.slice(0, 10)}` : ""}${finding.triageApprover ? `; approver (label): ${finding.triageApprover}` : ""}`);
   }
+  const business = businessContextLabel(finding.businessContext);
+  if (business) lines.push(`- **Business priority:** ${inline(business)}`);
   lines.push(`- **Description:** ${finding.description}`);
   lines.push("");
 
@@ -290,6 +293,12 @@ function formatFinding(finding: Finding): string {
   const repro = reproductionFor(finding, finding.reproduction);
   if (repro) {
     lines.push(`**Proof:** ${repro.result ? reproductionLine(repro.result) : proofLine(repro.proof)}.`);
+    lines.push("");
+  }
+
+  const executed = executedPocFor(finding, finding.executedPoc);
+  if (executed) {
+    lines.push(`**PoC execution:** \`${executed.outcome}\`. ${executedPocLine(executed)}.`);
     lines.push("");
   }
 

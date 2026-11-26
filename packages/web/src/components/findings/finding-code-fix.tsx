@@ -1,10 +1,11 @@
 import { useState, type ReactNode } from "react";
+import { Link } from "react-router-dom";
 import { CapyCopyIcon as Copy } from "@/ui/icons/capy";
 import { Button } from "@/components/ui/button";
 import { formatTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { FindingFixInfo, FindingFixRecord, FindingLocation } from "@/types";
-import { checksLabel, locationText, parseDiff, pullRequestLabel, safePullRequestHref, type DiffLineKind } from "./finding-fix-model";
+import { checksLabel, ciLabel, locationText, parseDiff, pullRequestLabel, safePullRequestHref, type DiffLineKind } from "./finding-fix-model";
 
 function SectionLabel({ children }: { children: ReactNode }) {
   return <h3 className="text-xs font-medium text-muted-foreground-1">{children}</h3>;
@@ -71,6 +72,8 @@ function DiffView({ diff, truncated }: { diff: string; truncated: boolean }) {
 function FixRecord({ record }: { record: FindingFixRecord }) {
   const href = safePullRequestHref(record.pullRequestUrl);
   const when = Date.parse(record.recordedAt);
+  const ciHref = safePullRequestHref(record.ci?.url ?? null);
+  const checkedAt = Date.parse(record.ci?.checkedAt ?? "");
   return (
     <div className="flex flex-col gap-2 rounded-md border-[0.5px] border-border-1 bg-card px-3 py-2">
       <dl className="grid grid-cols-[104px_minmax(0,1fr)] gap-x-2 gap-y-1 text-[13px]">
@@ -80,21 +83,36 @@ function FixRecord({ record }: { record: FindingFixRecord }) {
           {pullRequestLabel(record)}
           {href ? <>{" "}<a href={href} target="_blank" rel="noopener noreferrer" className="break-all text-primary underline underline-offset-2">{href}</a></> : null}
         </dd>
-        <dt className="text-xs text-muted-foreground-1">Checks</dt>
+        <dt className="text-xs text-muted-foreground-1">Local checks</dt>
         <dd className="text-foreground">{checksLabel(record)}</dd>
+        {record.pullRequestUrl ? <>
+          <dt className="text-xs text-muted-foreground-1">Code-host CI</dt>
+          <dd className="text-foreground">
+            {ciLabel(record)}{ciHref ? <> · <a href={ciHref} target="_blank" rel="noopener noreferrer" className="text-primary underline underline-offset-2">View checks</a></> : null}
+            {Number.isFinite(checkedAt) ? <span className="block text-xs text-muted-foreground-1">Checked {formatTime(checkedAt)}</span> : null}
+          </dd>
+        </> : null}
         {Number.isFinite(when) ? <><dt className="text-xs text-muted-foreground-1">Recorded</dt><dd className="text-muted-foreground-1">{formatTime(when)}</dd></> : null}
       </dl>
-      {record.diff ? <DiffView diff={record.diff} truncated={record.diffTruncated === true} /> : record.branch ? <p className="text-xs text-muted-foreground-2">The diff is not available on this machine. The branch is gone or holds more than one commit.</p> : null}
+      {record.diff ? <DiffView diff={record.diff} truncated={record.diffTruncated === true} /> : record.branch ? <p className="text-xs text-muted-foreground-2">The diff is not available on this machine. Open the pull request to review the patch.</p> : null}
     </div>
   );
 }
 
-/** The fix recorded by `findings fix`, or the command that makes one. Nothing here asks the code host. */
-export function FixSection({ fix }: { fix: FindingFixInfo | undefined }) {
+/** Recorded fixes, the host CI snapshot, and a handoff to independent verification. */
+export function FixSection({ fix, findingId, onRefresh, refreshing }: { fix: FindingFixInfo | undefined; findingId?: string; onRefresh?: () => void; refreshing?: boolean }) {
   if (!fix) return null;
   return (
     <section aria-label="Fix" className="flex max-w-4xl flex-col gap-2">
-      <SectionLabel>Fix</SectionLabel>
+      <div className="flex items-center justify-between gap-3">
+        <SectionLabel>Fix</SectionLabel>
+        {findingId ? <Button variant="outline" size="sm" render={<Link to={`/chats?finding=${encodeURIComponent(findingId)}&intent=verify`} />}>Re-verify</Button> : null}
+      </div>
+      {findingId ? <p className="text-xs text-muted-foreground-1">Re-verify starts an independent verification thread. Review its result before updating this finding’s status.</p> : null}
+      {onRefresh && fix.records.some(record => record.pullRequestUrl) ? <div className="flex items-center gap-2">
+        <Button variant="ghost" size="sm" onClick={onRefresh} disabled={refreshing}>{refreshing ? "Refreshing…" : "Refresh CI"}</Button>
+        <span className="text-xs text-muted-foreground-1">Host checks are cached for up to 30 seconds.</span>
+      </div> : null}
       {fix.records.length ? fix.records.map((record, index) => <FixRecord key={`${record.branch}-${index}`} record={record} />) : (
         <div className="flex flex-col gap-2">
           <p className="text-[13px] text-muted-foreground-1">No fix recorded. Run this in the repository to propose one:</p>

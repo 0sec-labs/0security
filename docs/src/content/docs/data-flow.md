@@ -7,7 +7,7 @@ This page lists every place 0 can send data off the computer it runs on. It exis
 
 ## What leaves your machine
 
-Your code stays on your machine. 0 sends what you choose to your model provider. By default it also sends anonymous usage counts and lifecycle events (first run, which command ran, an update, an error exit) and crash reports, and it checks GitHub for updates. One switch stops the telemetry: `DO_NOT_TRACK=1`. `ZERO_NO_UPDATE_CHECK=1` stops the update check. `ZERO_ENTERPRISE=1` is the no-egress mode below, and it does not touch telemetry, so set `DO_NOT_TRACK=1` with it.
+Your code stays on your machine. 0 sends what you choose to your model provider. By default it also sends anonymous usage counts and lifecycle events (first run, which command ran, an update, an error exit) and crash reports, and it checks GitHub for updates. `DO_NOT_TRACK=1` stops the telemetry and crash reports. `ZERO_NO_UPDATE_CHECK=1` stops the update check. `ZERO_ENTERPRISE=1` is the no-egress mode below. It blocks every automatic outbound call, including telemetry, lifecycle events and crash reports.
 
 ## No-egress mode
 
@@ -19,6 +19,7 @@ export ZERO_ENTERPRISE=1
 
 Any value except empty, `0`, `false` or `no` turns it on. With it on, 0:
 
+- sends no telemetry, lifecycle events or crash reports;
 - makes no update check and refuses `0security doctor upgrade`;
 - skips the public model catalog and price lookups, so models without a built-in price show no cost;
 - removes the `web_search` tool and refuses the advisory lookup, remote extension sources, the sandbox runtime download, GitHub repository and skills directory reads, SARIF upload through `gh`, and remote worker provisioning;
@@ -26,9 +27,23 @@ Any value except empty, `0`, `false` or `no` turns it on. With it on, 0:
 
 It is read from the process environment only. A project file such as `<project>/.0/tui-settings.json` cannot set or clear it, so a repository you open cannot switch egress back on. It also counts as an opt-out for the public model and price lookups, which already honor `ZERO_OFFLINE` and `DO_NOT_TRACK`, so those gates cannot drift apart from it.
 
+### Internal Bitbucket Data Center
+
+A self-hosted review or fix workflow can reach one explicitly approved Bitbucket installation while `ZERO_ENTERPRISE=1` stays on:
+
+```bash
+export ZERO_ENTERPRISE=1
+export ZERO_BITBUCKET_URL=https://bitbucket.internal.example/bitbucket
+export BITBUCKET_URL="$ZERO_BITBUCKET_URL"
+```
+
+`ZERO_BITBUCKET_URL` comes only from the process environment. It authorizes that exact origin (scheme, host and port) and its context path, including REST and HTTPS git endpoints. It does not enable any other outbound destination. HTTPS is required except on loopback for local testing. Pagination and redirects cannot move credentials outside that origin or context path. Git reviews reject URL rewrites and mismatched repository origins and disable HTTP redirects; use a direct HTTPS origin such as `https://bitbucket.internal.example/bitbucket/scm/PROJECT/repo.git`. Supply git credentials through the runner's trusted credential setup; the review scan does not receive the Bitbucket API token.
+
+This is an application allowlist, not a network firewall. Configure DNS, TLS trust and network policy for the installation you approved. Public advisory lookup and other automatic third-party calls stay disabled. Bitbucket Cloud's separate API and git origins are not implicitly enabled by this setting.
+
 The switch is off by default. An ordinary install keeps its current behavior. For a container, set it in the container environment; for a managed laptop, set it in the shell profile or the device policy.
 
-Telemetry is separate: `DO_NOT_TRACK=1` keeps `~/.0/analytics-sent.log`, which records every analytics payload that does leave, empty. For a no-egress install, set both.
+`DO_NOT_TRACK=1` stops telemetry on its own, without the rest of the mode. For belt and braces, set both on a no-egress install. `~/.0/analytics-sent.log` records every analytics payload that leaves, so it stays empty.
 
 ## Verify it yourself
 
@@ -36,16 +51,16 @@ The repository tests this in the engine and CLI test suites. Each test starts a 
 
 To check a real install, run `node scripts/airgap/verify-no-egress.mjs`. See [Air-gapped installation](/self-hosting/#air-gapped-installation).
 
-For a stronger guarantee than a test, also block egress at the network: run 0 in a container or network namespace whose only route is your model gateway, then run a scan with `ZERO_ENTERPRISE=1` and `DO_NOT_TRACK=1`. The switch gives you the same result without relying on the block, and the block catches a mistake the switch could not.
+For a stronger guarantee than a test, also block egress at the network: run 0 in a container or network namespace whose only route is your model gateway, then run a scan with `ZERO_ENTERPRISE=1`. The switch gives you the same result without relying on the block, and the block catches a mistake the switch could not.
 
 ## Telemetry
 
-One switch, `DO_NOT_TRACK=1`, stops every row here. `ZERO_ENTERPRISE` and `ZERO_OFFLINE` do not.
+`DO_NOT_TRACK=1` or `ZERO_ENTERPRISE=1` stops every row here. `ZERO_OFFLINE` does not.
 
 | Entry | Destination | When | What is sent | How to disable |
 | --- | --- | --- | --- | --- |
-| `usage-analytics-posthog` | `eu.i.posthog.com` | Batched while a command or the console runs, in a release build. Lifecycle events are skipped for `--help`, `--version`, shell completion, `config`, and CI or machine-output runs unless you set `analyticsLevel usage` yourself. | Anonymous counters, plus lifecycle events (`first_run`, `command_invoked`, `update`, `error_exit`) that name a known command or an error category and nothing else. The field list is under [Usage metrics](/configuration/#usage-metrics). | `DO_NOT_TRACK`. |
-| `crash-and-feedback` | Sentry (embedded project or `ZERO_SENTRY_DSN`), the feedback endpoint | A crash with `diagnosticReporting automatic`, or feedback you send. | A redacted crash envelope or the feedback text you reviewed. | `diagnosticReporting off`, `DO_NOT_TRACK`. |
+| `usage-analytics-posthog` | `eu.i.posthog.com` | Batched while a command or the console runs, in a release build. Lifecycle events are skipped for `--help`, `--version`, shell completion, `config`, and CI or machine-output runs unless you set `analyticsLevel usage` yourself. | Anonymous counters, plus lifecycle events (`first_run`, `command_invoked`, `update`, `error_exit`) that name a known command or an error category and nothing else. The field list is under [Usage metrics](/configuration/#usage-metrics). | `DO_NOT_TRACK`, `ZERO_ENTERPRISE`. |
+| `crash-and-feedback` | Sentry (embedded project or `ZERO_SENTRY_DSN`), the feedback endpoint | A crash with `diagnosticReporting automatic`, or feedback you send. | A redacted crash envelope or the feedback text you reviewed. | `diagnosticReporting off`, `DO_NOT_TRACK`, `ZERO_ENTERPRISE`. |
 
 ## Blocked by `ZERO_ENTERPRISE`
 
@@ -104,12 +119,14 @@ These are not blocked, because you name the destination, except where a row says
 | `mcp-remote-server` | Remote MCP servers you added | An installed extension with an http or sse transport runs. | MCP requests and tool arguments. |
 | `scan-and-probe-targets` | The git remote or URL on the command line | `0security scan` with a git URL, `0security probe`, authorized proof-of-concept steps. | A git clone, or HTTP requests to that target. `0security probe` sends to a public host only with `--i-own-this <host>`, never to link-local or cloud metadata addresses, and follows no redirect to another origin. `ZERO_ENTERPRISE` leaves it on, because you name the target. See [Probe a live endpoint](/commands/#probe). |
 | `nuclei-target-scan` | The URL you pass with `--target-url` | `0security scan --scanner nuclei --target-url`, with a scope file or the typed host. 0 starts Nuclei, which you installed; Nuclei sends the requests. | HTTP requests from Nuclei to that one target, at 10 requests per second by default, from http templates only, with no redirect followed, without intrusive, dos or fuzz templates and without out-of-band callbacks. A public host needs `--acknowledge-host` with the exact host. Link-local and cloud metadata addresses are always refused. `ZERO_ENTERPRISE` refuses every target that is not loopback. |
-| `source-control-writes` | The git remote and GitHub host of your repository | `0security findings fix`, threat-model publishing, findings import, sentinel reviews. | The branch push or comment you asked for. |
 | `audit-siem-sink` | The https collector or syslog-over-TLS host you set in `ZERO_AUDIT_SINK_URL` | Server mode, only when you set that variable. Off by default. | Audit events: action, actor, subject, outcome and redacted detail. Plain http and plain TCP syslog are refused except to this machine, and UDP is refused. `ZERO_ENTERPRISE` leaves it on, because the collector is yours. See [Send the audit log to a SIEM](/server-mode/#send-the-audit-log-to-a-siem). |
-| `source-control-writes` | The git remote and GitHub host of your repository | `0security findings fix`, threat-model publishing, findings import, sentinel reviews, and Sentinel release and check triggers with `report` turned on. | The branch push, comment or commit status you asked for. Sentinel triggers also read releases, tags and check runs through `gh`. |
+| `source-control-writes` | The git remote and GitHub host of your repository | `0security findings fix`, threat-model publishing, findings import, sentinel reviews, and Sentinel release, check and pull request triggers with `report` or `results` turned on. | The branch push, comment, commit status or code scanning upload (SARIF) you asked for. The upload holds severity, title, category and file location only. Sentinel triggers also read releases, tags, check runs and open pull requests through `gh`. `ZERO_ENTERPRISE` refuses every `gh` call. |
 | `fix-sandbox-docker` | The registry of the image you name, pulled by the Docker daemon. With `--sandbox-network` or `--sandbox-setup`, whatever the build downloads. | `0security findings fix --sandbox docker`. The container has no network unless you pass `--sandbox-network` or `--sandbox-setup`, which `ZERO_ENTERPRISE` refuses. | Nothing from 0. |
 | `bitbucket-code-insights` | `api.bitbucket.org`, or the Bitbucket Data Center URL you pass | `0security findings upload --to bitbucket-cloud` or `--to bitbucket-dc` with `BITBUCKET_TOKEN` set. | A Code Insights report and annotations from the scan's findings. A plain `http://` URL is refused unless the host is this machine or you pass `--allow-insecure-http`. |
-| `bitbucket-pr-review` | `api.bitbucket.org`, or the Bitbucket Data Center URL you pass, and the git remote of the clone you name | `0security sentinels bitbucket review` or `watch` with `BITBUCKET_TOKEN` set, or an enabled `bitbucket-pr` Sentinel trigger whose token variable is set. | Reads of pull requests, diffs and comments. Comments and a Code Insights report. The scan fetches the pull request's commit from the clone's remote. `ZERO_ENTERPRISE` refuses all of it. |
+| `bitbucket-pr-review` | `api.bitbucket.org`, or the Bitbucket Data Center URL you pass, and the git remote of the clone you name | `0security sentinels bitbucket review` or `watch` with `BITBUCKET_TOKEN` set, or an enabled `bitbucket-pr` Sentinel trigger whose token variable is set. | Reads of pull requests, diffs and comments. Comments and a Code Insights report. The scan fetches the pull request's commit from the clone's remote. `ZERO_ENTERPRISE` blocks it unless `ZERO_BITBUCKET_URL` explicitly approves the exact origin and context path; restricted git must use direct HTTPS. |
+| `bitbucket-fix-pr` | `api.bitbucket.org` for Cloud REST, `bitbucket.org` for Cloud git, or the configured Data Center origin and context path | Explicit fix PR creation and updates. | The fix branch, PR text, draft state and reviewers; reads of PRs, commits and build status. REST uses the Bitbucket token; git uses its own credentials. `--no-pr` avoids publishing. `ZERO_ENTERPRISE` blocks both transports unless `ZERO_BITBUCKET_URL` approves the actual destination; restricted git requires HTTPS and rejects URL rewrites or changed/differing push origins. |
+| `code-host-fix-status` | GitHub through `gh`, `api.bitbucket.org`, or the configured Data Center origin and context path | Opening a finding's fix review (30-second cache), or explicitly refreshing run-metrics host observations (at most 20 PRs per invocation). | Repository, PR and commit identifiers with authentication, for status/lifecycle reads only. No source code, findings bodies or checkout paths are uploaded. `ZERO_ENTERPRISE` blocks GitHub; Bitbucket reads require the explicit `ZERO_BITBUCKET_URL` exception. |
+| `ha-shared-database` | The PostgreSQL server you set in `ZERO_HA_DATABASE_URL` or `ZERO_HA_DATABASE_URL_FILE` | Server mode with the high availability license feature, only when you set one of those variables. Off by default. | Server sign-in sessions (hashed keys, account IDs, roles, expiry times) and the schema version, over a connection to your database. A database on another machine needs TLS. `ZERO_ENTERPRISE` leaves it on, because the database is yours. |
 | `findings-server-upload` | The https URL of your own shared findings server, named with `--to` | `0security findings upload <file> --to https://...` with `ZERO_FINDINGS_API_KEY` set. | The SARIF or findings JSON file you name, with repository, source, commit and ref labels, and the key as a bearer token. A plain `http://` URL is refused unless the host is this machine or you pass `--allow-insecure-http`. `ZERO_ENTERPRISE` leaves it on, because the server is yours. |
 
 ## Local only
@@ -118,7 +135,7 @@ These are not blocked, because you name the destination, except where a row says
 | --- | --- | --- |
 | `dashboard-dev-proxy` | Loopback, or the browser page's own server | Nothing leaves the computer. |
 | `local-socket` | A local unix socket | Nothing leaves the computer. |
-| `no-network-matches` | None | Source text that looks like a network call but is not one. |
+| `no-network-matches` | None | Source text that classifies git commands or parses PR URLs and repository origins into local identities. These modules make no network request. |
 
 The enterprise license check makes no network call. It verifies a signed key on your computer with the local clock. Nothing is registered, reported or looked up, so it needs no entry in the inventory.
 
@@ -128,4 +145,4 @@ The inventory lives in `scripts/egress-inventory.json`. `pnpm check:egress-inven
 
 ## Defaults
 
-The defaults of an ordinary install did not change: usage metrics stay on at the `usage` level in release builds, and the update check stays on for interactive terminals. Whether the container image and install script should ship with `ZERO_ENTERPRISE` on, or with `DO_NOT_TRACK` set, is a product decision that this page does not make.
+The defaults of an ordinary install did not change: usage metrics stay on at the `usage` level in release builds, and the update check stays on for interactive terminals. The Helm chart and the AWS reference set `ZERO_ENTERPRISE` and `DO_NOT_TRACK` for you. The Docker Compose files set neither, because pull request reviews need GitHub. Set them in `.env` for a no-egress install.

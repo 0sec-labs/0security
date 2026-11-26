@@ -207,6 +207,7 @@ export default defineConfig({
             { label: "Sentinels", slug: "sentinels" },
             { label: "Skills", slug: "skills" },
             { label: "Extensions", slug: "extensions" },
+            { label: "Use 0 from Claude Code or Codex", slug: "agents" },
             { label: "Browsers and 0security", slug: "browsers" },
             { label: "Findings", slug: "findings" },
             { label: "Dependency audit", slug: "dependency-audit" },

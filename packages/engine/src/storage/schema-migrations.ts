@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS findings (
   scope TEXT,
   scopeReason TEXT,
   scopeSource TEXT,
+  businessContext TEXT,
   workflowStatus TEXT NOT NULL DEFAULT 'backlog',
   workflowAssignee TEXT,
   workflowUpdatedAt TEXT,
@@ -80,6 +81,9 @@ CREATE TABLE IF NOT EXISTS findings (
   sourceVerification TEXT,
   modelVerification TEXT,
   reproduction TEXT,
+  executedPoc TEXT,
+  rootCause TEXT,
+  variantOf TEXT,
   tool TEXT,
   repo TEXT,
   source TEXT,
@@ -451,6 +455,10 @@ export function migrateLegacySchema(sqlite: ShimmedDatabase): void {
   if (!colNames.has("reproduction")) {
     sqlite.exec("ALTER TABLE findings ADD COLUMN reproduction TEXT");
   }
+  // Structured root cause and the variant link. Additive and nullable.
+  for (const column of ["rootCause", "variantOf"]) {
+    if (!colNames.has(column)) sqlite.exec(`ALTER TABLE findings ADD COLUMN ${column} TEXT`);
+  }
   // Accepted-risk expiry and approver. Additive and nullable.
   if (!colNames.has("triageExpiresAt")) {
     sqlite.exec("ALTER TABLE findings ADD COLUMN triageExpiresAt TEXT");
@@ -458,9 +466,14 @@ export function migrateLegacySchema(sqlite: ShimmedDatabase): void {
   if (!colNames.has("triageApprover")) {
     sqlite.exec("ALTER TABLE findings ADD COLUMN triageApprover TEXT");
   }
+  if (!colNames.has("businessContext")) sqlite.exec("ALTER TABLE findings ADD COLUMN businessContext TEXT");
   // Declared scope label from `0 scan --scope`. Additive and nullable.
   for (const column of ["scope", "scopeReason", "scopeSource"]) {
     if (!colNames.has(column)) sqlite.exec(`ALTER TABLE findings ADD COLUMN ${column} TEXT`);
+  }
+  // Executed proof of concept outcome and run record. Additive and nullable.
+  if (!colNames.has("executedPoc")) {
+    sqlite.exec("ALTER TABLE findings ADD COLUMN executedPoc TEXT");
   }
   // Backfill NULL fingerprint / triageStatus / workflowStatus for rows
   // created before those columns existed.

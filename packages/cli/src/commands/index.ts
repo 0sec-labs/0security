@@ -34,6 +34,7 @@ export { registerFindingsUploadCommand } from "./findings-upload.js";
 export { registerFindingsIssuesCommand } from "./findings-issues.js";
 export { registerFindingsExportFixesCommand } from "./findings-export-fixes.js";
 export { registerFindingsReproduceCommand } from "./findings-reproduce.js";
+export { registerFindingsContextCommand } from "./findings-context.js";
 export { registerSkillsCommand } from "./skills.js";
 export { registerFindingsMetricsCommand } from "./findings-metrics.js";
 export { registerFindingsRollupCommand } from "./findings-rollup.js";

@@ -1,3 +1,4 @@
+import { metricIdentityEnv, type MetricIdentity } from "../run-metrics.js";
 /**
  * Scans a pull request from a local clone the operator names. The pull request's commit is fetched into a temporary git
  * worktree, so the operator's own checkout is never changed, and `0security scan --diff` runs there. Nothing from the pull
@@ -11,9 +12,9 @@ import { mkdtempSync, readFileSync, rmdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { assertEgressAllowed } from "@0/engine";
+import { assertEgressAllowed, enterpriseMode } from "@0/engine";
 import { isSafeGitRef } from "@0/engine/shared";
-import type { PullRequest } from "./client.js";
+import { assertBitbucketDestination, type PullRequest } from "./client.js";
 import type { ReviewRunner, ScanResult } from "./review.js";
 
 const run = promisify(execFile);
@@ -34,6 +35,7 @@ export const defaultExec: Exec = async (file, args, options) => {
 };
 
 export interface RunnerOptions {
+  metricIdentity?: MetricIdentity;
   /** A local clone of the repository; `origin` must be the Bitbucket repository. */
   checkout: string;
   /** Command that starts 0, for example `["0security"]`. Default: this program. */
@@ -41,6 +43,7 @@ export interface RunnerOptions {
   /** Spend limit for one scan, in USD. */
   budget?: string;
   model?: string;
+  providerId?: string; reasoning?: string;
   exec?: Exec;
   /** Environment variables to hide from the scan in addition to the default Bitbucket ones, for example the variable a trigger names for its token. */
   secretVariables?: string[];
@@ -69,17 +72,33 @@ export function gitScanRunner(options: RunnerOptions): ReviewRunner {
   return {
     async scan(pr: PullRequest): Promise<ScanResult> {
       if (!isSafeGitRef(pr.baseBranch, { maxLength: 200 }) || !isSafeGitRef(pr.headBranch, { maxLength: 200 })) throw new Error("The pull request's branch name is not one 0 will pass to git.");
-      assertEgressAllowed("Bitbucket (git remote)");
-      await git(["fetch", "--no-tags", "origin", `+refs/heads/${pr.baseBranch}:refs/remotes/origin/${pr.baseBranch}`, headRefspec(pr)], 300_000);
+      if (enterpriseMode()) {
+        // get-url expands insteadOf, but fetch would expand it again. Reject rewrites rather than trusting a
+        // second expansion, helper transport, remote helper or a checkout-controlled alternate destination.
+        const rewrites = await exec("git", ["-C", options.checkout, "config", "--get-regexp", "^url\\..*\\.(insteadof|pushinsteadof)$"], { env: cleanEnv(), timeoutMs: 10_000 });
+        if (rewrites.code !== 1 || rewrites.stdout.trim()) throw new Error("Restricted-egress Bitbucket refuses git URL rewrites; use the approved HTTPS origin directly.");
+        const remote = (await git(["remote", "get-url", "origin"])).trim();
+        assertBitbucketDestination(remote);
+        const url = new URL(remote);
+        const base = new URL(process.env["ZERO_BITBUCKET_URL"]!);
+        const prefix = base.pathname.replace(/\/+$/, "");
+        const expected = pr.platform === "bitbucket-dc" ? `${prefix}/scm/${pr.owner}/${pr.repo}` : `${prefix}/${pr.owner}/${pr.repo}`;
+        if (url.pathname.replace(/\.git$/, "").toLowerCase() !== expected.toLowerCase()) throw new Error("The git origin does not match the Bitbucket pull request repository.");
+      } else assertEgressAllowed("Bitbucket (git remote)");
+      await git([...(enterpriseMode() ? ["-c", "http.followRedirects=false", "-c", "protocol.allow=never", "-c", "protocol.https.allow=always", "-c", "protocol.http.allow=always"] : []), "fetch", "--no-tags", "origin", `+refs/heads/${pr.baseBranch}:refs/remotes/origin/${pr.baseBranch}`, headRefspec(pr)], 300_000);
       const sha = (await git(["rev-parse", "--verify", `refs/0/pr/${pr.id}^{commit}`])).trim();
       if (!SHA.test(sha)) throw new Error("git did not return a commit.");
+      if (!sha.startsWith(pr.headSha)) {
+        await git(["update-ref", "-d", `refs/0/pr/${pr.id}`]);
+        throw new Error("The fetched commit no longer matches the reviewed Bitbucket head; retry the review.");
+      }
       const parent = mkdtempSync(join(tmpdir(), "0-bitbucket-"));
       const tree = join(parent, "tree");
       const out = join(parent, "scan.json");
       try {
         await git(["worktree", "add", "--detach", tree, sha]);
-        const args = [...command.slice(1), "scan", tree, "--diff", `origin/${pr.baseBranch}`, "--format", "json", "-o", out, "--budget", options.budget ?? "2", ...(options.model ? ["--model", options.model] : [])];
-        const scan = await exec(command[0]!, args, { env: cleanEnv(), timeoutMs: options.scanTimeoutMs ?? 30 * 60_000 });
+        const args = [...command.slice(1), "scan", tree, "--diff", `origin/${pr.baseBranch}`, "--format", "json", "-o", out, "--budget", options.budget ?? "2", ...(options.model ? ["--model", options.model] : []), ...(options.providerId ? ["--provider", options.providerId] : []), ...(options.reasoning ? ["--reasoning", options.reasoning] : [])];
+        const scan = await exec(command[0]!, args, { env: { ...cleanEnv(), ...metricIdentityEnv(options.metricIdentity ?? {}) }, timeoutMs: options.scanTimeoutMs ?? 30 * 60_000 });
         if (scan.code !== 0 && scan.code !== 1 && scan.code !== 3) throw new Error(`The scan failed (exit ${scan.code}).`);
         let json: string;
         try { json = readFileSync(out, "utf8"); } catch { throw new Error("The scan wrote no report."); }

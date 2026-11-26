@@ -9,7 +9,7 @@ import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { createInterface } from "node:readline/promises";
 import type { Command } from "commander";
-import { agentConfigToSarif, agentConfigToText, AGENT_CONFIG_SEVERITIES, assertEgressAllowed, EXTERNAL_GENERATORS, scanAgentConfig, generateSbom, ResolveFailedError, resolveJvmDependencies, parseDependencyReport, mergeComponents, scanJavaUsage, javaUsageToText, GeneratorNotInstalledError, IMAGE_GENERATORS, parseImageSource, LOCKFILES, modelScanToSarif, runExternalGenerator, scanModelPath, toSpdx, type Component, type ExternalGenerator, type ImageSource, type ModelFileResult } from "@0/engine";
+import { assessJavaDependencyReachability, dependencyReachabilityToText, mavenComponents, agentConfigToSarif, agentConfigToText, AGENT_CONFIG_SEVERITIES, assertEgressAllowed, EXTERNAL_GENERATORS, scanAgentConfig, generateSbom, ResolveFailedError, resolveJvmDependencies, parseDependencyReport, mergeComponents, scanJavaUsage, javaUsageToText, GeneratorNotInstalledError, IMAGE_GENERATORS, parseImageSource, LOCKFILES, modelScanToSarif, runExternalGenerator, scanModelPath, toSpdx, type Component, type ExternalGenerator, type ImageSource, type ModelFileResult } from "@0/engine";
 import { VERSION } from "@0/engine/shared";
 import { finishWithError, UsageError } from "./output.js";
 import { registerSbomLicenses } from "./sbom-licenses.js";
@@ -228,6 +228,17 @@ export function runJavaUsage(file: string, folder: string, options: { format?: s
   if (format === "json") deps.out(`${JSON.stringify(report, null, 2)}\n`); else deps.out(javaUsageToText(report));
 }
 
+/** Offline inspection uses the same assessment attached by sbom check --source. */
+export function runJavaReachability(file: string, folder: string, options: { format?: string }, deps: SbomDeps): void {
+  const format = options.format ?? "text";
+  if (format !== "text" && format !== "json") throw new UsageError("--format must be text or json.");
+  let bom: unknown;
+  try { bom = JSON.parse(deps.read(resolve(file))); } catch { throw new UsageError(`'${file}' is not a JSON SBOM.`); }
+  if (!mavenComponents(bom).length) throw new UsageError(`'${file}' lists no Maven components (pkg:maven/...).`);
+  const report = assessJavaDependencyReachability(requireFolder(folder), bom);
+  deps.out(format === "json" ? `${JSON.stringify(report, null, 2)}\n` : dependencyReachabilityToText(report.components, report.graphTruncated || report.usage.truncated));
+}
+
 export function registerSbomCommand(program: Command, deps: SbomDeps = defaults): void {
   const sbom = program.command("sbom").description("Generate an SBOM from lockfiles, check one against known advisories, and scan model files and agent configuration");
   sbom.command("generate")
@@ -275,6 +286,7 @@ export function registerSbomCommand(program: Command, deps: SbomDeps = defaults)
     .argument("<file>", "CycloneDX SBOM (JSON), for example from `0security sbom generate`")
     .option("--format <format>", "Output: text, json or sarif (SARIF imports with `0security findings import`)", "text")
     .option("-o, --output <file>", "Write the result to a file instead of stdout")
+    .option("--source <folder>", "Attach JVM source-import and dependency-path evidence; does not suppress advisories or establish vulnerable-code reachability")
     .option("--outdated", "Also list components with a newer version (looks packages up at https://api.deps.dev; information only, not a vulnerability)")
     .option("--registry", "Also look each npm and PyPI package up on its public registry for invented or planted names (sends package names to registry.npmjs.org, api.npmjs.org and pypi.org)")
     .option("--new-days <days>", "With --registry: a package first published fewer days ago than this is new (default 30)")
@@ -284,6 +296,15 @@ export function registerSbomCommand(program: Command, deps: SbomDeps = defaults)
     .action(async (file: string, options: CheckOptions) => {
       try { const code = await runCheck(file, options, deps); if (code) process.exitCode = code; }
       catch (error) { finishWithError(error, { err: deps.err }, options.format === "json"); }
+    });
+  sbom.command("reachability")
+    .description("Inspect JVM source-import and dependency-path evidence offline; vulnerable-code reachability stays unknown")
+    .argument("<file>", "CycloneDX SBOM (JSON), including the resolved dependency graph when available")
+    .argument("[folder]", "Source folder to read (default: .)")
+    .option("--format <format>", "Output: text or json", "text")
+    .addHelpText("after", "\nReads source and the SBOM only; no build tool, model or network call. Import and graph evidence does not prove that vulnerable methods execute. Use sbom check --source <folder> to attach this evidence to advisory results.")
+    .action((file: string, folder: string | undefined, options: { format?: string }) => {
+      try { runJavaReachability(file, folder ?? ".", options, deps); } catch (error) { finishWithError(error, { err: deps.err }, options.format === "json"); }
     });
   sbom.command("java-usage")
     .description("List which Maven components of an SBOM your Java, Kotlin, Scala or Groovy source imports")

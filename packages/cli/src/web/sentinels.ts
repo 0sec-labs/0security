@@ -1,9 +1,10 @@
+import type { MetricSink } from "../run-metrics.js";
 import { z } from "zod";
 import { recordAccessUpgrade } from "../state/access-upgrade.js";
 import { listSessions } from "../state/session-store.js";
 import { audit } from "./audit.js";
 import { SecurityWorkflowStore, SentinelStore, SentinelStoreError } from "@0/engine/storage";
-import { SENTINEL_FILE_FOLDERS, SENTINEL_PRESETS, SENTINEL_STATUSES, describeSentinelSchedule, getSentinelPreset, sentinelNeedsReview, type Sentinel, type SentinelActivation, type SentinelAttention, type SentinelTrigger } from "@0/engine/shared";
+import { budgetCapSchema, utcDayStart, utcMonthStart, SENTINEL_FILE_FOLDERS, SENTINEL_PRESETS, SENTINEL_STATUSES, describeSentinelSchedule, getSentinelPreset, sentinelNeedsReview, type Sentinel, type SentinelActivation, type SentinelAttention, type SentinelTrigger } from "@0/engine/shared";
 import type { GithubEvent } from "./sentinel-github-events.js";
 import { SentinelRunError, SentinelRunner, type SentinelActor, type SentinelGhClient, type SentinelMissionRuntime } from "./sentinel-runner.js";
 
@@ -20,6 +21,8 @@ function parse<T>(schema: z.ZodType<T>, input: unknown): T {
   return result.data;
 }
 const bodyOf = (input: unknown): Record<string, unknown> => input && typeof input === "object" && !Array.isArray(input) ? input as Record<string, unknown> : {};
+/** The Monday (UTC) of the week an ISO time falls in, as a date. */
+const weekStartOf = (at: string): string => { const d = new Date(at); d.setUTCHours(0, 0, 0, 0); d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7)); return d.toISOString().slice(0, 10); };
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error)).slice(0, 4_000);
 
 export class WebSentinelService {
@@ -32,12 +35,12 @@ export class WebSentinelService {
    * `scheduler` starts the background tick (schedules, GitHub PR polling, run tracking). Off by default so tests and
    * tools that only need the HTTP surface do not run autonomous work; the dashboard turns it on.
    */
-  constructor(options: { dbPath?: string; missions: SentinelMissionRuntime; now?: () => number; scheduler?: boolean | { pollIntervalMs?: number }; gh?: SentinelGhClient; executionProfile?: () => "local" | "smolvm"; checkout?: (repo: string) => Promise<string | undefined>; persistentThread?: () => boolean; bitbucket?: ConstructorParameters<typeof SentinelRunner>[0]["bitbucket"] }) {
+  constructor(options: { metrics?: MetricSink; dbPath?: string; missions: SentinelMissionRuntime; now?: () => number; scheduler?: boolean | { pollIntervalMs?: number }; gh?: SentinelGhClient; executionProfile?: () => "local" | "smolvm"; checkout?: (repo: string) => Promise<string | undefined>; persistentThread?: () => boolean; bitbucket?: ConstructorParameters<typeof SentinelRunner>[0]["bitbucket"] }) {
     this.#store = new SentinelStore(options.dbPath);
     this.#workflows = new SecurityWorkflowStore(options.dbPath);
     this.#missions = options.missions;
     this.#now = options.now ?? Date.now;
-    this.#runner = new SentinelRunner({ store: this.#store, workflows: this.#workflows, missions: options.missions, now: this.#now, ...(options.gh ? { gh: options.gh } : {}), ...(options.executionProfile ? { executionProfile: options.executionProfile } : {}), ...(options.checkout ? { checkout: options.checkout } : {}), ...(options.persistentThread ? { persistentThread: options.persistentThread } : {}), ...(options.bitbucket ? { bitbucket: options.bitbucket } : {}) });
+    this.#runner = new SentinelRunner({ metrics: options.metrics, store: this.#store, workflows: this.#workflows, missions: options.missions, now: this.#now, ...(options.gh ? { gh: options.gh } : {}), ...(options.executionProfile ? { executionProfile: options.executionProfile } : {}), ...(options.checkout ? { checkout: options.checkout } : {}), ...(options.persistentThread ? { persistentThread: options.persistentThread } : {}), ...(options.bitbucket ? { bitbucket: options.bitbucket } : {}) });
     if (options.scheduler) this.#noteAccessUpgrade();
     if (options.scheduler) this.#runner.start(typeof options.scheduler === "object" ? options.scheduler.pollIntervalMs : undefined);
   }
@@ -105,6 +108,38 @@ export class WebSentinelService {
     const thread = this.#runner.threadInfo(sentinel);
     return { ...sentinel, attention: this.#attention(sentinel), ...(thread ? { thread } : {}) };
   }
+  /** Spend by Sentinel, model and week over the last 12 weeks, with each Sentinel's spend today and this month against its limits. UTC. */
+  #usage() {
+    const nowMs = this.#now();
+    const since = new Date(Date.parse(utcDayStart(nowMs)) - 11 * 7 * 86_400_000 - ((new Date(nowMs).getUTCDay() + 6) % 7) * 86_400_000).toISOString();
+    const rows = this.#store.usageSince(since);
+    const sentinels = new Map(this.#store.list().map(sentinel => [sentinel.id, sentinel]));
+    const total = () => ({ runs: 0, costUsd: 0, refused: 0 });
+    const add = (target: ReturnType<typeof total>, row: (typeof rows)[number]) => { if (row.refused) target.refused += 1; else { target.runs += 1; target.costUsd += row.costUsd; } };
+    const bySentinel = new Map<string, ReturnType<typeof total> & { dayUsd: number; monthUsd: number }>();
+    const byModel = new Map<string, ReturnType<typeof total>>();
+    const byWeek = new Map<string, ReturnType<typeof total>>();
+    const day = utcDayStart(nowMs); const month = utcMonthStart(nowMs);
+    for (const row of rows) {
+      const owner = sentinels.get(row.sentinelId);
+      const entry = bySentinel.get(row.sentinelId) ?? { ...total(), dayUsd: 0, monthUsd: 0 };
+      add(entry, row);
+      if (!row.refused && row.at >= month) entry.monthUsd += row.costUsd;
+      if (!row.refused && row.at >= day) entry.dayUsd += row.costUsd;
+      bySentinel.set(row.sentinelId, entry);
+      const model = owner?.model?.model ?? "Default model";
+      add(byModel.get(model) ?? byModel.set(model, total()).get(model)!, row);
+      const week = weekStartOf(row.at);
+      add(byWeek.get(week) ?? byWeek.set(week, total()).get(week)!, row);
+    }
+    const round = (n: number) => Number(n.toFixed(6));
+    return {
+      since, generatedAt: new Date(nowMs).toISOString(),
+      sentinels: [...bySentinel.entries()].map(([id, entry]) => { const s = sentinels.get(id); return { id, name: s?.name ?? "Deleted Sentinel", model: s?.model?.model ?? null, runs: entry.runs, refused: entry.refused, costUsd: round(entry.costUsd), dayUsd: round(entry.dayUsd), monthUsd: round(entry.monthUsd), dailyBudgetUsd: s?.dailyBudgetUsd ?? null, monthlyBudgetUsd: s?.monthlyBudgetUsd ?? null }; }).sort((a, b) => b.costUsd - a.costUsd || a.name.localeCompare(b.name)),
+      models: [...byModel.entries()].map(([model, entry]) => ({ model, runs: entry.runs, refused: entry.refused, costUsd: round(entry.costUsd) })).sort((a, b) => b.costUsd - a.costUsd || a.model.localeCompare(b.model)),
+      weeks: [...byWeek.entries()].map(([week, entry]) => ({ week, runs: entry.runs, refused: entry.refused, costUsd: round(entry.costUsd) })).sort((a, b) => b.week.localeCompare(a.week)),
+    };
+  }
   #automations(id: string) { return this.#workflows.list().filter(workflow => workflow.ownerSentinelId === id); }
 
   async #route(path: string, method: string, input: unknown, query: URLSearchParams, actor?: SentinelActor): Promise<{ status: number; data: unknown }> {
@@ -133,6 +168,10 @@ export class WebSentinelService {
         return { status: 201, data: { sentinel: this.#view(sentinel), ...(suggestedAutomations ? { suggestedAutomations } : {}) } };
       }
       throw new SentinelRequestError("Use GET or POST for Sentinels.", 405);
+    }
+    if (path === "sentinels/usage") {
+      if (method !== "GET") throw new SentinelRequestError("Use GET to read usage.", 405);
+      return { status: 200, data: this.#usage() };
     }
     const match = path.match(/^sentinels\/([^/]+)(?:\/(.*))?$/);
     if (!match) throw new SentinelRequestError("Unknown Sentinel route.", 404);
@@ -190,10 +229,12 @@ export class WebSentinelService {
   }
 
   #triggerView(trigger: SentinelTrigger) {
+    const resultsLabel = (mode: string | undefined) => (mode && mode !== "off" ? `, results to GitHub: ${mode === "sarif" ? "code scanning" : mode === "comment" ? "comment" : "code scanning and comment"}` : "");
     const { activeClaim: _claim, ...visible } = trigger;
     const summary = trigger.schedule ? describeSentinelSchedule(trigger.schedule)
-      : trigger.release ? `${trigger.release.on === "tag" ? "Tags" : "Releases"} on ${trigger.release.repo}${trigger.release.tagPrefix ? `, starting with ${trigger.release.tagPrefix}` : ""}${trigger.release.report !== "none" ? `, reports as ${trigger.release.report}` : ""}`
-      : trigger.check ? `${trigger.check.conclusion === "failure" ? "Failed checks" : "Finished checks"} on ${trigger.check.repo}${trigger.check.branch ? ` (${trigger.check.branch})` : ""}${trigger.check.report !== "none" ? `, reports as ${trigger.check.report}` : ""}`
+      : trigger.release ? `${trigger.release.on === "tag" ? "Tags" : "Releases"} on ${trigger.release.repo}${trigger.release.tagPrefix ? `, starting with ${trigger.release.tagPrefix}` : ""}${trigger.release.report !== "none" ? `, reports as ${trigger.release.report}` : ""}${resultsLabel(trigger.release.results)}`
+      : trigger.check ? `${trigger.check.conclusion === "failure" ? "Failed checks" : "Finished checks"} on ${trigger.check.repo}${trigger.check.branch ? ` (${trigger.check.branch})` : ""}${trigger.check.report !== "none" ? `, reports as ${trigger.check.report}` : ""}${resultsLabel(trigger.check.results)}`
+      : trigger.github ? `Pull requests on ${trigger.github.repo}${trigger.github.commentOnPr ? ", comments on" : ""}${trigger.github.includeForks ? ", forks included" : ""}${resultsLabel(trigger.github.results)}`
       : trigger.bitbucket ? `Bitbucket ${trigger.bitbucket.platform === "cloud" ? "Cloud" : "Data Center"} pull requests in ${trigger.bitbucket.repo} (${trigger.bitbucket.events.join(" and ")}), reports as ${[trigger.bitbucket.comments ? "comments" : "", trigger.bitbucket.insights ? "Code Insights" : ""].filter(Boolean).join(" and ") || "nothing"}`
       : trigger.webhook ? `Signed calls to /api/webhooks/trigger/${trigger.id} (${trigger.webhook.label})`
       : undefined;
@@ -223,7 +264,7 @@ export class WebSentinelService {
     this.#requireWriter(actor);
     if (method === "PATCH") {
       const { approval, expectedVersion, ...patch } = bodyOf(input);
-      const body = parse(z.object({ enabled: z.boolean().optional(), schedule: z.unknown().optional(), github: z.unknown().optional(), release: z.unknown().optional(), check: z.unknown().optional(), webhook: z.unknown().optional(), bitbucket: z.unknown().optional() }).strict(), patch);
+      const body = parse(z.object({ dailyBudgetUsd: budgetCapSchema.nullable().optional(), monthlyBudgetUsd: budgetCapSchema.nullable().optional(), runBudgetUsd: z.number().optional(), runModel: z.unknown().optional(), enabled: z.boolean().optional(), schedule: z.unknown().optional(), github: z.unknown().optional(), release: z.unknown().optional(), check: z.unknown().optional(), webhook: z.unknown().optional(), bitbucket: z.unknown().optional() }).strict(), patch);
       if (body.enabled === true && approval !== "enable-reviewed-trigger") throw new SentinelRequestError("Review this trigger before enabling it.", 400);
       const version = expectedVersion === undefined ? undefined : parse(z.number().int().positive(), expectedVersion);
       return { status: 200, data: { trigger: this.#triggerView(this.#store.updateTrigger(triggerId, body, version, this.#now())) } };

@@ -670,6 +670,8 @@ export interface Finding {
   scopeReason?: string;
   /** Where the scope came from: a file name, never a path outside the scan. */
   scopeSource?: string;
+  /** Operator-supplied work priority, independent of technical severity and observed impact. */
+  businessContext?: import("./business-context.js").FindingBusinessContext;
   /**
    * Append-only list of triage layer verdicts, ordered by execution.
    * Empty until the triage stage runs. See {@link LayerVerdict} for details.
@@ -725,7 +727,7 @@ export interface Finding {
    */
   pocSteps?: PocStep[];
   /**
-   * Machine-executable verification contract (0#193 / 0-cloud#111).
+   * Machine-executable verification contract (0#193).
    * Optional and additive. When populated, cloud's canary watcher (and any
    * OSS caller) can re-evaluate whether the finding is still real against
    * a fresh checkout of the target repo. See {@link VerificationSpec}.
@@ -761,8 +763,21 @@ export interface Finding {
    * on findings that never had either.
    */
   reproduction?: import("./reproduction.js").FindingReproduction;
+  /**
+   * Outcome of the PoC the harness ran in the sandbox after a high or critical
+   * finding was saved: executed-proven, executed-failed or static-only, with the
+   * run record. Only the harness writes it. Additive: absent on older findings.
+   */
+  executedPoc?: import("./executed-poc.js").ExecutedPoc;
   /** Target-neutral research receipts attached by the shared adapter plane. */
   researchEvidence?: ResearchEvidenceEnvelope[];
+  /**
+   * Structured root cause: the bug class, the unsafe pattern, the guard that is missing and where the control should
+   * live. It seeds variant hunting. Optional and additive: absent on findings that never had one.
+   */
+  rootCause?: RootCause;
+  /** Id of the finding whose root cause this finding shares (found by variant hunting). Optional and additive. */
+  variantOf?: string;
   /**
    * Optional parent finding link for derived findings. Kernel crash ingest
    * uses this when a crash-triggered subsystem review finds sibling bugs.
@@ -1115,7 +1130,7 @@ export interface Evidence {
 //
 // The field is OPTIONAL and ADDITIVE. Existing findings produced before this
 // type existed have `pocSteps === undefined` and continue to round-trip
-// unchanged through every renderer, exporter, the DB, and the cloud sink.
+// unchanged through every renderer, exporter, and the DB.
 
 /** Stage of a PoC step in the discover → exploit → verify lifecycle. */
 export type PocStepKind = "setup" | "auth" | "prerequisite" | "exploit" | "verify";
@@ -1181,7 +1196,7 @@ export interface PocStep {
   expect?: PocStepExpect;
 }
 
-// ── Verification Spec (0#193 / 0-cloud#111) ───────────────────────
+// ── Verification Spec (0#193) ───────────────────────
 //
 // A `VerificationSpec` is a *machine-executable* contract attached to a
 // finding. It answers a single question: "is this finding still real?".
@@ -1203,7 +1218,7 @@ export interface PocStep {
 //
 // The field is OPTIONAL and ADDITIVE on `Finding`. Existing findings produced
 // before this type existed leave it undefined and continue to round-trip
-// unchanged through every renderer, exporter, the DB, and the cloud sink.
+// unchanged through every renderer, exporter, and the DB.
 
 /**
  * Code-level predicate. Each variant is a discriminated union keyed on
@@ -1421,6 +1436,9 @@ export interface ScanCoverage extends Partial<ScanFileCoverage> {
   /** Entry points not reached, by reason. */
   notReached: Record<string, number>;
   batches: { total: number; reviewed: number; pending: number };
+  /** Current invocation only, including retries. Costs stay null when any attempted thread did not report cost. */
+  batchRuns?: Array<{ batch: number; module?: string; owners?: string[]; attempts: number; durationMs: number; costUsd: number | null; threadIds: string[]; reviewedUnits: number; totalUnits: number }>;
+
   /** The first units not reached (at most 100). */
   pendingUnits: Array<{ kind: string; path: string; startLine?: number; name?: string; reason?: string }>;
   /** What stopped the scan, when it ended with units pending: the budget, the time limit or failed batches. */
@@ -1892,4 +1910,16 @@ export interface ReviewReport {
   usage?: TokenUsage;
   /** Estimated USD cost from token usage at the configured model rates. */
   estimatedCostUsd?: number;
+}
+
+/** Why a finding exists, in a form that can be searched for elsewhere. */
+export interface RootCause {
+  /** The class of bug, for example "SQL injection" or "missing authorization". */
+  bugClass: string;
+  /** The shape of the unsafe code: the sink and where its input comes from. */
+  unsafePattern: { sink: string; source: string };
+  /** What check or guard is missing at the site. */
+  missingGuard: string;
+  /** Where the control should live so every site is covered (a shared helper, a middleware, a type). */
+  designOrigin: string;
 }

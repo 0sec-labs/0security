@@ -1,3 +1,4 @@
+import { findingFingerprintCode, shortFindingFingerprint } from "@0/engine/shared";
 /**
  * Finding ids for people. An imported finding's id is `<scan id, 70 characters>-<its own 24>`, so the first eight
  * characters are the same for every finding in the file and a prefix never picks one. The part that differs is at the
@@ -18,20 +19,20 @@ export function importedFindingPart(id: string): string | undefined {
 
 /** Like an id, a fingerprint of an imported finding begins with the file's identity; show what is distinctive. */
 export function shortFingerprint(fingerprint: string): string {
-  const imported = /^(?:ci|sarif)-[a-f0-9]{64}:(.+)$/.exec(fingerprint);
-  return (imported ? imported[1]!.replace(/^sarif:/, "") : fingerprint).slice(0, 10);
+  return shortFindingFingerprint(fingerprint);
 }
 
 /**
  * One finding for what the person typed: the whole id, the start of an id, the start of an imported finding's own part
  * (what `findings list` shows), or the end of an id. Throws when the text matches more than one finding.
  */
-export function resolveFindingId<T extends { id: string }>(rows: readonly T[], input: string): T | undefined {
+export function resolveFindingId<T extends { id: string; fingerprint?: string | null }>(rows: readonly T[], input: string): T | undefined {
   const text = input.trim();
   if (!text) return undefined;
   const exact = rows.find(row => row.id === text);
   if (exact) return exact;
   const strategies: Array<(row: T) => boolean> = [
+    row => /^f-/i.test(text) && typeof row.fingerprint === "string" && findingFingerprintCode(row.fingerprint).toLowerCase() === text.toLowerCase(),
     row => row.id.startsWith(text),
     row => (importedFindingPart(row.id) ?? "").startsWith(text),
     row => text.length >= 6 && row.id.endsWith(text),

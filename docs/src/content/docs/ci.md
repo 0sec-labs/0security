@@ -381,7 +381,7 @@ jobs:
 Keep these boundaries:
 
 - Give the runner's machine identity access to the model, as in [Azure OpenAI](/models/#azure-openai) or an AWS role for [Amazon Bedrock](/models/#amazon-bedrock). No model key is stored in GitHub.
-- `ZERO_ENTERPRISE` keeps every outbound call off except the model endpoint you configured, and `DO_NOT_TRACK` stops telemetry. The action's SARIF upload goes to GitHub with the job's token. See [Data flow](/data-flow/).
+- `ZERO_ENTERPRISE` keeps every automatic outbound call off, including telemetry and crash reports, except the model endpoint you configured and the destinations you name. `DO_NOT_TRACK` adds a second switch for telemetry. The action's SARIF upload goes to GitHub with the job's token. See [Data flow](/data-flow/). A Sentinel can upload its findings the same way from your machine: see [Send findings to GitHub](/sentinels/#send-findings-to-github).
 - Install `cosign` on the runner image, so the installer verifies the release [signature](/self-hosting/#verify-the-signature). Or put a pinned, verified binary in the runner image and skip the install.
 - Only run the job on trusted events. Do not run a self-hosted runner for pull requests from forks.
 
@@ -805,3 +805,9 @@ The stage is `early-warning`, `notification` or `final`. The draft takes the tit
 Anything you do not supply stays a visible `[to be completed by the manufacturer: ...]` blank. The draft never claims exploitation, user impact or a patch that you did not state. A person reviews the draft and submits it through the channel the authority designates. 0 sends nothing.
 
 Article 14 of the Regulation is the starting point. Confirm current requirements and deadlines with the authority and your advisers.
+
+## Packaged Bitbucket Pipe and Jenkins library
+
+The repository includes a buildable Bitbucket Pipe in `ci/bitbucket-pipe/` and an exportable Jenkins Shared Library in `ci/jenkins-library/`. The Pipe installs a pinned release with its published SHA-256 verification. Both integrations use separate scan and publish execution: the untrusted scan gets the model key, and the trusted publisher gets the Bitbucket token. The Jenkins library requires separate physical nodes.
+
+Build, configure and qualify them with [the packaging guide](https://github.com/0sec-labs/0security/tree/main/ci/packaging). The guide includes a manual Bitbucket qualification pipeline, a Jenkins example and an actual scanner/image rehearsal with an optional paid model stage. The image and library artifacts require release publication; source files and local tests do not establish live Bitbucket, Jenkins or Azure qualification. The existing Azure Pipelines template above remains available without an extension.

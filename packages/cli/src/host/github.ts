@@ -81,7 +81,7 @@ export class GitHubIssueTracker implements IssueTracker {
 
 export class GitHubHost implements Host {
   readonly name = "github";
-  constructor(private readonly gh: HostRun, private readonly git?: (args: string[]) => Promise<string>) {}
+  constructor(private readonly gh: HostRun, private readonly git?: (args: string[]) => Promise<string>, private readonly repository?: string) {}
 
   isValidRepo(name: string): boolean { return REPO.test(name); }
 
@@ -89,8 +89,8 @@ export class GitHubHost implements Host {
     return (await this.gh(["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"]).catch(() => "")).trim();
   }
 
-  async findOpenPullRequest(branch: string): Promise<PullRequest | undefined> {
-    const found = JSON.parse((await this.gh(["pr", "list", "--head", branch, "--state", "open", "--json", "number,url,isDraft"])) || "[]") as PullRequest[];
+  async findOpenPullRequest(branch: string, base?: string): Promise<PullRequest | undefined> {
+    const found = JSON.parse((await this.gh(["pr", "list", "--head", branch, "--state", "open", "--json", "number,url,isDraft", ...(base ? ["--base", base] : [])])) || "[]") as PullRequest[];
     return found[0];
   }
 
@@ -107,10 +107,19 @@ export class GitHubHost implements Host {
   }
 
   async pullRequestState(url: string): Promise<PullRequestState> {
-    if (!PULL_URL.test(url)) throw new Error("Not a GitHub pull request URL.");
+    if (!PULL_URL.test(url) || (this.repository && !url.startsWith(`https://github.com/${this.repository}/pull/`))) throw new Error("Not a pull request URL for this GitHub repository.");
     const raw = JSON.parse(await this.gh(["pr", "view", url, "--json", "state,isDraft,commits", "--jq", "{state, isDraft, commits: (.commits | length)}"])) as { state?: string; isDraft?: boolean; commits?: number };
     const state = raw.state === "MERGED" ? "merged" : raw.state === "CLOSED" ? "closed" : "open";
     return { state, draft: raw.isDraft === true, commits: typeof raw.commits === "number" ? raw.commits : 0 };
+  }
+
+  async pullRequestChecks(url: string): Promise<import("./index.js").PullRequestChecks> {
+    if (!PULL_URL.test(url) || (this.repository && !url.startsWith(`https://github.com/${this.repository}/pull/`))) throw new Error("Not a pull request URL for this GitHub repository.");
+    const raw = JSON.parse(await this.gh(["pr", "view", url, "--json", "statusCheckRollup"])) as { statusCheckRollup?: Array<{ state?: string; status?: string; conclusion?: string }> };
+    const checks = raw.statusCheckRollup ?? [];
+    const status = !checks.length ? "none" : checks.some(check => ["FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE"].includes(check.conclusion ?? check.state ?? "")) ? "failing"
+      : checks.some(check => check.status ? check.status !== "COMPLETED" || !["SUCCESS", "NEUTRAL", "SKIPPED"].includes(check.conclusion ?? "") : !["SUCCESS", "NEUTRAL", "SKIPPED"].includes(check.state ?? "")) ? "pending" : "passing";
+    return { status, url: `${url}/checks` };
   }
 
   async editPullRequest(number: number, change: { addLabels?: string[]; addReviewers?: string[] }): Promise<void> {

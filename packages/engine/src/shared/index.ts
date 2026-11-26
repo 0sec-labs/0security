@@ -10,9 +10,12 @@ export * from "./finding-similarity.js";
 export * from "./sarif-import.js";
 export * from "./known-findings.js";
 export * from "./attacker-impact.js";
+export * from "./business-context.js";
 export * from "./fix-prompt.js";
 export * from "./triage-expiry.js";
 export * from "./verify-prompt.js";
+export * from "./root-cause.js";
+export * from "./variant-prompt.js";
 export * from "./scanners.js";
 export * from "./workflow.js";
 export * from "./research-evidence.js";
@@ -26,6 +29,7 @@ export * from "./slash-commands.js";
 export * from "./security-workflows.js";
 export * from "./security-workflow-templates.js";
 export * from "./sentinels.js";
+export * from "./sentinel-budget.js";
 export * from "./sentinel-presets.js";
 export * from "./sentinel-triggers.js";
 
@@ -43,3 +47,6 @@ export * from "./agent-session.js";
 export { redactSensitiveHeaders, redactAuthHeaders } from "./redact-headers.js";
 export { scanPrompt, prePassBlock, scopeBlock, batchBlock, threatModelPrompt, scopeQuestionsPrompt, scopeWordingPrompt, MAX_INTERVIEW_QUESTIONS, type InterviewAnswerForPrompt, type InterviewExisting, THREAT_MODEL_PATH, contextBlock, policyBlock, parsePolicyFile, mergePolicies, neutraliseDelimiters, MAX_CONTEXT_FILE_CHARS, MAX_CONTEXT_TOTAL_CHARS, type PrePassLeads, type BatchPromptInfo, type BatchPromptUnit, type SteeringFile, type PolicyEntry, type PolicySource } from "./scan-prompt.js";
 export * from "./reproduction.js";
+
+export * from "./finding-display-id.js";
+export * from "./executed-poc.js";

@@ -40,6 +40,8 @@ import type {
   TrustGraphEdgeRow,
 } from "./types.js";
 import type { FindingReproduction } from "../shared/reproduction.js";
+import type { ExecutedPoc } from "../shared/executed-poc.js";
+import type { RootCause } from "../shared/types.js";
 import type { FindingModelVerification, PersistedFindingReviewFields, WorkflowStatus } from "./finding-helpers.js";
 import type { TriageDetails } from "./repositories/finding-repository.js";
 import { createRepositories, type Repositories } from "./repositories/index.js";
@@ -224,6 +226,10 @@ export class osecDB {
     return this.repos.findings.getFindingModelVerification(findingId);
   }
 
+  setFindingBusinessContext(findingId: string, context: import("../shared/business-context.js").FindingBusinessContext | undefined): void {
+    return this.repos.findings.setFindingBusinessContext(findingId, context);
+  }
+
   setFindingScope(findingId: string, label: { scope: "in-scope" | "out-of-scope"; reason: string; source: string }): void {
     return this.repos.findings.setFindingScope(findingId, label);
   }
@@ -234,6 +240,30 @@ export class osecDB {
 
   setFindingReproduction(findingId: string, patch: FindingReproduction): void {
     return this.repos.findings.setFindingReproduction(findingId, patch);
+  }
+
+  getFindingExecutedPoc(findingId: string): ExecutedPoc | undefined {
+    return this.repos.findings.getFindingExecutedPoc(findingId);
+  }
+
+  setFindingExecutedPoc(findingId: string, record: ExecutedPoc): void {
+    return this.repos.findings.setFindingExecutedPoc(findingId, record);
+  }
+
+  getFindingRootCause(findingId: string): RootCause | undefined {
+    return this.repos.findings.getFindingRootCause(findingId);
+  }
+
+  setFindingRootCause(findingId: string, rootCause: RootCause): void {
+    return this.repos.findings.setFindingRootCause(findingId, rootCause);
+  }
+
+  listVariantLinks() {
+    return this.repos.findings.listVariantLinks();
+  }
+
+  listVariantsOf(findingId: string) {
+    return this.repos.findings.listVariantsOf(findingId);
   }
 
   setFindingModelVerification(findingId: string, verification: FindingModelVerification): void {

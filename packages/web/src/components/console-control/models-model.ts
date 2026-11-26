@@ -43,7 +43,7 @@ export function modelRows(models: readonly CatalogModel[], providers: readonly P
     return {
       key: `${model.provider}:${model.id}`, id: model.id, providerId: model.provider, providerLabel: connected.get(model.provider)!, disabled: !enabled,
       hint: enabled ? undefined : MODEL_OFF_HINT,
-      detail: [model.contextWindowTokens && model.contextWindowTokens > 0 ? `${compact.format(model.contextWindowTokens)} context` : undefined, /\d/.test(model.price ?? "") ? model.price : undefined].filter(Boolean).join(" · "),
+      detail: [model.contextWindowTokens && model.contextWindowTokens > 0 ? `${compact.format(model.contextWindowTokens)} context` : undefined, (/\d/.test(model.price ?? "") || model.provider === "bedrock") ? model.price : undefined].filter(Boolean).join(" · "),
     };
   });
 }

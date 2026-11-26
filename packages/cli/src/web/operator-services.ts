@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { realpathSync, statSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
-import { createNativeApiRuntime, isApiRuntime, runtimeFromPrivateWorkerBinding, type ConsoleRuntime, 
+import { bedrockRegion, hasBedrockCredentialSignals, createNativeApiRuntime, isApiRuntime, runtimeFromPrivateWorkerBinding, type ConsoleRuntime,
   createConsoleRuntime, CodexCatalogRefreshError,
   TOOL_DEFINITIONS, getToolsForRole,
   listProjectReviewChecks, updateProjectReviewChecks,
@@ -445,6 +445,7 @@ export class WebOperatorServices {
   }
 
   #healthView(info: (typeof PROVIDERS)[number], env: ReturnType<typeof webRuntimeEnv>, configured: boolean, source: string | null): (ConnectionHealth & { hint: string | null }) {
+    if (info.id === "bedrock") return { state: "unknown", checking: false, checkedAt: null, hint: "AWS credentials are resolved on this host when a request runs; access has not been checked." };
     if (!configured) return { state: "unknown", checking: false, checkedAt: null, hint: null };
     const variable = info.envVars.find(key => Boolean(env[key]?.trim()));
     const baseVar = connectionBaseUrlVar(info.id);
@@ -478,7 +479,7 @@ export class WebOperatorServices {
         accountId, kind: record.kind, active, label: connectionLabel(meta, info.id, accountId) ?? (record.kind === "oauth" ? record.identity?.email ?? record.identity?.label ?? accountId : accountId),
         order: order.indexOf(accountId),
       })).sort((a, b) => a.order - b.order);
-      const configured = Boolean(via);
+      const configured = info.id === "bedrock" ? hasBedrockCredentialSignals(env) : Boolean(via);
       let connectionIdentity: string | null = null;
       if (configured) {
         try {
@@ -489,14 +490,14 @@ export class WebOperatorServices {
           diagnostics = { valid: false, reason: "invalid_config", message: publicMessage(error) };
         }
       }
-      const source = configured ? environment ? "environment" : store.providers[info.id] ? "account-store" : "codex-file" : null;
+      const source = info.id === "bedrock" ? "aws-credential-chain" : configured ? environment ? "environment" : store.providers[info.id] ? "account-store" : "codex-file" : null;
       return {
         // Which variable is in use: it wins over a saved connection for the same provider, and the page says so.
         health: this.#healthView(info, env, configured, source), environmentVariable: source === "environment" ? via ?? null : null,
         id: info.id, label: info.id === "openai" ? "OpenAI / Custom AI Provider" : info.label, methods: info.methods.includes("api-key") && !PROVIDER_DEVICE_AUTH[info.id] ? info.methods.filter(method => method !== "oauth") : info.methods, configured,
         connectionIdentity,
         source,
-        diagnostics, accounts, configuration: configs[info.id] ?? {}, auth: this.#authStatus(info.id, configured),
+        diagnostics, accounts, configuration: info.id === "bedrock" ? { ...configs[info.id], region: bedrockRegion(env), model: env.ZERO_BEDROCK_MODEL ?? configs[info.id]?.model } : configs[info.id] ?? {}, auth: this.#authStatus(info.id, configured),
       };
     });
   }
@@ -573,9 +574,9 @@ export class WebOperatorServices {
     const rows = discovered.models.map(model => ({
       id: model.id, provider: model.provider,
       enabled: !isModelDisabled(disabledByProvider.get(model.provider) ?? disabledByProvider.set(model.provider, disabledModelsFor(model.provider, accountStore)).get(model.provider)!, model.id),
-      price: model.provider === "chatgpt-plan" ? "Shared ChatGPT allowance" : model.provider === "chatgpt-codex" ? "Included in subscription" : metadata.get(`${model.provider}/${model.id}`)?.price ?? "Unknown rate",
+      price: model.provider === "bedrock" ? "Unknown rate" : model.provider === "chatgpt-plan" ? "Shared ChatGPT allowance" : model.provider === "chatgpt-codex" ? "Included in subscription" : metadata.get(`${model.provider}/${model.id}`)?.price ?? "Unknown rate",
       contextWindowTokens: model.contextTokens ?? resolveContextLimit({ modelId: model.id, providerId: model.provider })?.tokens ?? null,
-      source: model.provider !== "chatgpt-plan" && model.source === "catalog" ? "public-catalog" as const : "account" as const,
+      source: model.provider === "bedrock" ? "configured" as const : model.provider !== "chatgpt-plan" && model.source === "catalog" ? "public-catalog" as const : "account" as const,
     }));
     // Custom OpenAI-compatible gateways may omit /models or publish an incomplete
     // catalog. The operator's configured ID remains selectable in either case.
@@ -635,10 +636,13 @@ export class WebOperatorServices {
       } else throw new OperatorError(400, "unsupported_auth", "Use native ChatGPT browser sign-in.");
       return { providers: this.#providers() };
     }
+    if (info.id === "bedrock" && action !== "configure") throw new OperatorError(400, "host_credentials_only", "Bedrock uses the host AWS credential chain. Configure its region and model; no AWS secrets are accepted here.");
+    if (info.id === "bedrock" && Object.keys(body).some(key => !["providerId", "action", "region", "model", "baseUrl"].includes(key))) throw new OperatorError(400, "host_credentials_only", "Only Bedrock region, model and endpoint settings are accepted; credentials stay on the host.");
     if (action === "configure") {
       const config = validateConnectionConfig(info.id, {
         ...(body.baseUrl !== undefined ? { baseUrl: text(body.baseUrl, "API endpoint") } : {}),
         ...(body.model !== undefined ? { model: text(body.model, "deployment model", 256) } : {}),
+        ...(body.region !== undefined ? { region: text(body.region, "AWS region", 64) } : {}),
       });
       if (!Object.keys(config).length) throw new OperatorError(400, "empty_configuration", "Choose a supported connection configuration field to update.");
       saveConnectionConfig(info.id, { ...loadConnectionConfigs()[info.id], ...config });
@@ -653,6 +657,7 @@ export class WebOperatorServices {
       const config = validateConnectionConfig(info.id, {
         ...(body.baseUrl !== undefined ? { baseUrl: text(body.baseUrl, "API endpoint") } : {}),
         ...(body.model !== undefined ? { model: text(body.model, "deployment model", 256) } : {}),
+        ...(body.region !== undefined ? { region: text(body.region, "AWS region", 64) } : {}),
       });
       await this.#verifyApiKey(info.id, secret, config.baseUrl);
       if (Object.keys(config).length) saveConnectionConfig(info.id, config);

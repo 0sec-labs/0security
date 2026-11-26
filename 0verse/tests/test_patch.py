@@ -25,7 +25,6 @@ from zeroverse import api, oracle, patch
 from zeroverse.agent import MockLLM, Verdict
 from zeroverse.analyze import Finding
 from zeroverse.api import ScanOptions  # noqa: F401  (kept for parity / future use)
-from zeroverse.cloud_sink import OversePoV, map_pov_to_finding, pov_from_scan_finding
 from zeroverse.ingest import Triage
 from zeroverse.patch import (
     PatchContext,
@@ -265,66 +264,6 @@ def test_contract_v1_2_unverified_recommendation() -> None:
     assert d["patch_verified"] is False
     assert d["patch_mode"] == "recommendation"
     assert d["patch_path"] is None
-
-
-# ----------------------------------------------------------------------------
-# cloud remediation mapping — verified-only discipline (hermetic)
-# ----------------------------------------------------------------------------
-
-def _cloud_pov(**kw: object) -> OversePoV:
-    base: dict[str, object] = {
-        "id": "x", "bug_class": "CWE-120", "severity": "high", "title": "t",
-        "description": "d", "target": "/bin/vuln", "confirmed": True,
-        "repro_cmd": "python3 /out/p.py", "pov_path": "/out/p.py",
-        "crash_output": "SIGSEGV", "capability": "oob-write",
-    }
-    base.update(kw)
-    return OversePoV(**base)  # type: ignore[arg-type]
-
-
-def test_cloud_shows_verified_fix_only_when_verified() -> None:
-    cf = map_pov_to_finding(_cloud_pov(
-        patch_mode="binary-micropatch", patch_verified=True,
-        patch_path="/out/vuln.patched",
-        patch_recommendation="main @ 0x4011bc: bound the copy",
-        patch_regression="control-inputs identical",
-    ))
-    rem = cf["evidence"]["remediation"]
-    assert rem["status"] == "verified" and rem["verified"] is True
-    steps = [s for s in cf["pocSteps"] if s["kind"] == "binary-patch"]
-    assert steps and steps[0]["verified"] is True
-
-
-def test_cloud_unverified_patch_is_suggested_not_fixed() -> None:
-    cf = map_pov_to_finding(_cloud_pov(
-        patch_mode="recommendation", patch_verified=False,
-        patch_recommendation="main @ 0x4011bc: bound the copy",
-    ))
-    rem = cf["evidence"]["remediation"]
-    assert rem["status"] == "suggested" and rem["verified"] is False
-    steps = [s for s in cf["pocSteps"] if s["kind"] == "fix-recommendation"]
-    assert steps and steps[0]["verified"] is False
-
-
-def test_cloud_no_patch_has_no_remediation() -> None:
-    cf = map_pov_to_finding(_cloud_pov())
-    assert "remediation" not in cf["evidence"]
-    assert all(s["kind"] == "binary-pov" for s in cf["pocSteps"])
-
-
-def test_cloud_projection_carries_patch_fields() -> None:
-    from zeroverse.api import ScanFinding
-    f = ScanFinding(
-        id="x", bug_class="CWE-120", severity="high", file="/bin/v", function="main",
-        offset="0x4011bc", source="read", sink="strcpy", confirmed=True,
-        hypothesis=True, pruned=False, capability="oob-write", pov_path="/out/p.py",
-        repro_cmd="python3 /out/p.py", dedup_bucket="b1", explanation="",
-        patch_available=True, patch_verified=True, patch_mode="source-diff",
-        patch_path="/out/x.patched", patch_recommendation="bound it",
-        patch_regression="tests 1/1",
-    )
-    pov = pov_from_scan_finding(f, "/bin/v")
-    assert pov.patch_verified is True and pov.patch_mode == "source-diff"
 
 
 # ----------------------------------------------------------------------------

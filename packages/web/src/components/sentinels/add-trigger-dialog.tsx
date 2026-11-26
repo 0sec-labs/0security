@@ -3,6 +3,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Select } from "@/components/ui/select";
+import { ModelRow } from "./profile-rows";
+import type { AgentModelPick } from "@/lib/agent-create-model";
 import { FieldRow as Row, ScheduleFields } from "./schedule-fields";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useCreateAutomation } from "@/components/automations/use-automations";
@@ -15,6 +17,8 @@ export function AddTriggerDialog({ sentinel, automations, open, onOpenChange }: 
   const createAutomation = useCreateAutomation();
   const presets = useSentinelPresets(open);
   const [draft, setDraft] = useState<TriggerDraft>(() => blankTriggerDraft(automations[0]?.id));
+  const [runBudget, setRunBudget] = useState("");
+  const [runModel, setRunModel] = useState<AgentModelPick | null>(null);
   const [error, setError] = useState("");
   const set = <K extends keyof TriggerDraft>(key: K, value: TriggerDraft[K]) => setDraft(current => ({ ...current, [key]: value }));
   const current = automations.some(item => item.id === draft.automationId) ? draft.automationId : automations[0]?.id ?? "";
@@ -22,6 +26,8 @@ export function AddTriggerDialog({ sentinel, automations, open, onOpenChange }: 
   const submit = async () => {
     const parsed = triggerRequestFromDraft({ ...draft, automationId: current || "pending" });
     if (!parsed.ok) { setError(parsed.error); return; }
+    const budget = runBudget.trim() ? Number(runBudget) : undefined;
+    if (budget !== undefined && (!Number.isFinite(budget) || budget < .01 || budget > 100)) { setError("Run budget must be between $0.01 and $100."); return; }
     setError(""); setCreating(true);
     try {
       let automationId = current;
@@ -33,7 +39,7 @@ export function AddTriggerDialog({ sentinel, automations, open, onOpenChange }: 
           : await createAutomation.blank(owner, { name: draft.kind === "schedule" ? "Scheduled turn" : "Pull request turn", instructions: "Wake up and do your job from your instructions. Say what you found." });
         automationId = made.id;
       }
-      await createTrigger.mutateAsync({ id: sentinel.id, ...parsed.request, automationId });
+      await createTrigger.mutateAsync({ id: sentinel.id, ...parsed.request, automationId, ...(budget !== undefined ? { runBudgetUsd: budget } : {}), ...(runModel ? { runModel } : {}) });
       onOpenChange(false); setDraft(blankTriggerDraft(automationId));
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Unable to add the trigger."); }
     finally { setCreating(false); }
@@ -58,7 +64,14 @@ export function AddTriggerDialog({ sentinel, automations, open, onOpenChange }: 
             <div className="min-w-0"><span id="trigger-forks-label" className="block text-sm">Include pull requests from forks</span><span className="block text-xs text-muted-foreground-1">Off: forks are skipped. On: read-only analysis of the diff, marked untrusted. Their code is never run.</span></div>
             <Switch aria-labelledby="trigger-forks-label" checked={draft.includeForks} onCheckedChange={value => set("includeForks", value)} />
           </div>
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0"><span id="trigger-sarif-label" className="block text-sm">Send findings to GitHub code scanning</span><span className="block text-xs text-muted-foreground-1">Uploads each run's findings with your gh login. Off: nothing is uploaded. Pull requests from forks are never uploaded.</span></div>
+            <Switch aria-labelledby="trigger-sarif-label" checked={draft.uploadSarif} onCheckedChange={value => set("uploadSarif", value)} />
+          </div>
         </>}
+        <Row label="Budget per run (USD)"><Input aria-label="Trigger run budget in USD" type="number" min="0.01" max="100" step="0.01" placeholder="Use Sentinel cap" value={runBudget} onChange={event => setRunBudget(event.target.value)} /></Row>
+        <ModelRow enabled={open} value={runModel} onChange={setRunModel} />
+        <p className="text-xs text-muted-foreground-1">The lower of the Sentinel and trigger caps applies. A model override runs in a separate mission. New triggers stay off until reviewed.</p>
         {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
       </div>
       <DialogFooter><Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button><Button type="button" variant="secondary" disabled={creating} onClick={() => void submit()}>{creating ? "Adding" : "Add trigger"}</Button></DialogFooter>

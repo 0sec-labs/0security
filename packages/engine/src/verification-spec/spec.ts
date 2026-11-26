@@ -1,4 +1,4 @@
-// 0#193 / 0-cloud#111 — deterministic finding re-verification.
+// 0#193 — deterministic finding re-verification.
 //
 // `evaluateVerificationSpec` runs a finding's `VerificationSpec.code[]`
 // predicates against a target repo on disk and reports whether the finding

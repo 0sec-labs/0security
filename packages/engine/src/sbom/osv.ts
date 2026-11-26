@@ -1,3 +1,4 @@
+import type { DependencyReachability } from "./java-reachability.js";
 import { assertEgressAllowed } from "../policy/enterprise.js";
 
 /**
@@ -8,6 +9,8 @@ import { fixesFor, severityOf, type AdvisorySeverity } from "./advisory-facts.js
 export type { AdvisorySeverity } from "./advisory-facts.js";
 
 export interface Advisory {
+  /** Optional package-level source evidence. Vulnerable-code reachability remains unknown. */
+  reachability?: DependencyReachability;
   /** The component's package URL. */
   purl: string;
   id: string;

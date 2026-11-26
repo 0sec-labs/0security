@@ -4,7 +4,7 @@
     {
       "id": "usage-analytics-posthog",
       "class": "automatic",
-      "enterprise": "allowed",
+      "enterprise": "blocked",
       "destinations": [
         "eu.i.posthog.com"
       ],
@@ -13,12 +13,12 @@
       ],
       "when": "Batched while a command or the console runs, when analyticsLevel is usage and the build embeds a key. Also one small event at first run, at each command, on a version change and on an error exit; not for --help, --version, shell completion, config, or CI and machine-output runs unless analyticsLevel usage is set in a settings file.",
       "sent": "Anonymous counters and lifecycle events: version, OS, command name from a fixed list, outcome class, finding class counts.",
-      "disable": "DO_NOT_TRACK."
+      "disable": "DO_NOT_TRACK, ZERO_ENTERPRISE."
     },
     {
       "id": "crash-and-feedback",
       "class": "automatic",
-      "enterprise": "allowed",
+      "enterprise": "blocked",
       "destinations": [
         "Sentry ingest (embedded DSN or ZERO_SENTRY_DSN)",
         "ZERO_FEEDBACK_URL"
@@ -28,7 +28,7 @@
       ],
       "when": "A crash with diagnosticReporting automatic, or a feedback message the operator sends.",
       "sent": "Redacted crash envelope, or the reviewed feedback text.",
-      "disable": "diagnosticReporting off, DO_NOT_TRACK."
+      "disable": "diagnosticReporting off, DO_NOT_TRACK, ZERO_ENTERPRISE."
     },
     {
       "id": "update-check",
@@ -187,7 +187,7 @@
       "files": [
         "packages/cli/src/host/gh.ts"
       ],
-      "when": "findings upload (SARIF), sentinel and host integrations that run through the shared gh runner.",
+      "when": "findings upload (SARIF), Sentinel code scanning uploads, and host integrations that run through the shared gh runner.",
       "sent": "The SARIF or API request the operator asked for.",
       "disable": "ZERO_ENTERPRISE refuses to start gh from this runner."
     },
@@ -376,8 +376,8 @@
         "packages/cli/src/host/github.ts",
         "packages/cli/src/web/sentinel-runner.ts"
       ],
-      "when": "Explicit findings fix, threat-model publish, findings import and sentinel review commands, and a Sentinel with release, check or pull request reporting turned on (off by default).",
-      "sent": "A branch push, PR comment or commit status the operator asked for. Sentinel polling reads releases, tags and check runs through gh.",
+      "when": "Explicit findings fix, threat-model publish, findings import and sentinel review commands, and a Sentinel with release, check or pull request reporting or results turned on (off by default).",
+      "sent": "A branch push, PR comment, commit status or code scanning SARIF upload (share-safe finding fields only) the operator asked for. Sentinel polling reads releases, tags, check runs and open pull requests through gh. ZERO_ENTERPRISE refuses every gh call.",
       "disable": "Do not run those commands; use --no-pr."
     },
     {
@@ -416,9 +416,10 @@
       "enterprise": "n/a",
       "destinations": [],
       "files": [
-        "packages/engine/src/agent/destructive-classifier.ts"
+        "packages/engine/src/agent/destructive-classifier.ts",
+        "packages/cli/src/metric-pr.ts"
       ],
-      "when": "Matches the scan pattern only (text that classifies git commands); it makes no call.",
+      "when": "Matches the scan pattern only: text that classifies git commands or parses a PR URL/origin into a local identity. These modules make no network request.",
       "sent": "Nothing.",
       "disable": "Not applicable."
     },
@@ -521,8 +522,8 @@
         "packages/cli/src/bitbucket/runner.ts"
       ],
       "when": "Explicit `0 sentinels bitbucket review` or `watch`, with BITBUCKET_TOKEN set, or an enabled `bitbucket-pr` Sentinel trigger whose token variable is set. The webhook server and the signed webhook route only listen; they send nothing.",
-      "sent": "Reads of pull requests, diffs and comments; comments, a Code Insights report and its annotations, with the token as a bearer header. The scan fetches the pull request's commit from the clone's git remote. A plain http:// URL is refused unless the host is this machine or --allow-insecure-http is passed. ZERO_ENTERPRISE refuses all of it.",
-      "disable": "Do not run the commands, or set ZERO_ENTERPRISE."
+      "sent": "Reads of pull requests, diffs and comments; comments, a Code Insights report and its annotations, with the token as a bearer header. The scan fetches the pull request's commit from the clone's git remote. A plain http:// URL is refused unless the host is this machine or --allow-insecure-http is passed. ZERO_ENTERPRISE blocks requests unless ZERO_BITBUCKET_URL explicitly permits their exact origin and context path. Restricted git transport must use direct HTTPS; SSH and URL rewriting are refused.",
+      "disable": "Do not run the commands, or set ZERO_ENTERPRISE without a ZERO_BITBUCKET_URL exception."
     },
     {
       "id": "audit-siem-sink",
@@ -539,6 +540,20 @@
       "disable": "Leave ZERO_AUDIT_SINK_URL unset."
     },
     {
+      "id": "ha-shared-database",
+      "class": "operator",
+      "enterprise": "allowed",
+      "destinations": [
+        "the PostgreSQL server you set in ZERO_HA_DATABASE_URL or ZERO_HA_DATABASE_URL_FILE"
+      ],
+      "files": [
+        "enterprise/src/ha/postgres.ts"
+      ],
+      "when": "Server mode with the ha license feature, only when ZERO_HA_DATABASE_URL or ZERO_HA_DATABASE_URL_FILE is set in the process environment. Off by default. Never read from a repository, a project file or the database.",
+      "sent": "SQL over a connection to your database: server sign-in sessions as hashed keys, account ids, roles and expiry times, and the schema migration table. A server on another machine must use TLS (sslmode require, verify-ca or verify-full). The connection string holds a password and is never logged or sent anywhere else.",
+      "disable": "Leave both variables unset."
+    },
+    {
       "id": "findings-server-upload",
       "class": "operator",
       "enterprise": "allowed",
@@ -551,6 +566,36 @@
       "when": "Explicit `0 findings upload <file> --to https://...` with ZERO_FINDINGS_API_KEY set. Nothing is sent without both.",
       "sent": "The SARIF or findings JSON file you name, with repository, source, commit and ref labels, and the key in the Authorization header. A plain http:// URL is refused unless the host is this machine or --allow-insecure-http is passed. Redirects are not followed.",
       "disable": "Do not run the command, or leave ZERO_FINDINGS_API_KEY unset."
+    },
+    {
+      "id": "bitbucket-fix-pr",
+      "class": "operator",
+      "enterprise": "blocked",
+      "destinations": [
+        "api.bitbucket.org for Cloud REST, bitbucket.org for Cloud git, or the configured Bitbucket Data Center origin and context path"
+      ],
+      "files": [
+        "packages/cli/src/host/bitbucket.ts",
+        "packages/cli/src/host/fix-host.ts"
+      ],
+      "when": "Explicit findings fix with PR creation enabled. Local origin selection/config inspection itself sends nothing; publishing uses the selected git runner and REST client.",
+      "sent": "The fix branch, PR title and description, draft state and reviewer identities; reads of matching PRs, lifecycle, commits and build statuses. REST carries BITBUCKET_TOKEN in a bearer header; git uses separately configured credentials. ZERO_ENTERPRISE blocks both transports unless ZERO_BITBUCKET_URL approves the actual destination origin/context. Restricted git requires HTTPS and rejects URL rewrites, differing push destinations and changed origins; redirects are refused.",
+      "disable": "Use --no-pr. Under ZERO_ENTERPRISE, leave ZERO_BITBUCKET_URL unset to keep Bitbucket blocked."
+    },
+    {
+      "id": "code-host-fix-status",
+      "class": "operator",
+      "enterprise": "blocked",
+      "destinations": [
+        "GitHub through gh, api.bitbucket.org, or the configured Bitbucket Data Center origin and context path"
+      ],
+      "files": [
+        "packages/cli/src/metric-host-receipts.ts",
+        "packages/cli/src/web/finding-fix.ts"
+      ],
+      "when": "Opening a finding fix review reads current CI status, with a shared 30-second cache. Explicit run-metrics host refresh reads lifecycle and CI status for at most 20 recorded PRs per bounded invocation.",
+      "sent": "Repository, PR and commit identifiers with code-host authentication. Only status/lifecycle reads; no source code, findings bodies or local checkout paths are uploaded. Each request is bound to the selected origin repository and has a deadline. Git commands here inspect local configuration only. ZERO_ENTERPRISE blocks gh; Bitbucket reads require the explicit ZERO_BITBUCKET_URL origin/context exception.",
+      "disable": "Do not open hosted fix review or request metrics refresh. Under ZERO_ENTERPRISE, leave ZERO_BITBUCKET_URL unset to keep Bitbucket reads blocked."
     }
   ],
   "knownHosts": [
@@ -571,6 +616,7 @@
     "auth.kimi.com",
     "auth.openai.com",
     "auth.x.ai",
+    "bitbucket.org",
     "chatgpt.com",
     "code.claude.com",
     "code.visualstudio.com",

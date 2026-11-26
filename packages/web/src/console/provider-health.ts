@@ -53,6 +53,7 @@ export function nextHealthyChoice({ providers, models, recommended = [], failedP
 export interface HealthBadge { label: string; tone: "success" | "warning" | "danger" | "neutral" }
 /** Green "Connected" only when the probe said ok. */
 export function healthBadge(provider: HealthProvider, rowHealthy: boolean, inactive = false): HealthBadge {
+  if (provider.id === "bedrock" && rowHealthy && (!provider.health || provider.health.state === "unknown")) return { label: "AWS chain · unverified", tone: "neutral" };
   if (!rowHealthy) return { label: "Needs connection", tone: "warning" };
   const state = provider.health?.state ?? "unknown";
   if (state === "rejected") return { label: "Key rejected", tone: "danger" };
@@ -72,6 +73,7 @@ export function healthHint(provider: HealthProvider): string | null {
 
 /** Where a provider's credential comes from, in words. */
 export function credentialOrigin(provider: HealthProvider, hasSavedAccount: boolean): string | null {
+  if (provider.id === "bedrock") return "AWS identity on this host; service access unverified";
   if (provider.source !== "environment") return null;
   return hasSavedAccount
     ? `From ${provider.environmentVariable ?? "environment"}, which wins over the saved key`

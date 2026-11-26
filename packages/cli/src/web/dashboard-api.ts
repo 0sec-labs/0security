@@ -1,3 +1,4 @@
+import { handleMetricsRequest, handleMetricHostRefreshRequest } from "./metrics-routes.js";
 // Dashboard HTTP API route handlers (console, scans, findings, control, events).
 import { type IncomingMessage, type ServerResponse } from "node:http";
 import { URL } from "node:url";
@@ -25,6 +26,7 @@ import { assertTeamConsoleMutation } from "./team-web.js";
 import { MAX_SNAPSHOT_WINDOW, MAX_EVENTS_WAIT_SECONDS, parseSnapshotWindow, parseMessagePage, summarizeConsoleWorker } from "./console-snapshot-window.js";
 import { openSharedDb, evictSharedDb } from "./shared-db.js";
 import { findingsServiceFor } from "./findings-service.js";
+import { labelFamilies } from "./findings-ranking.js";
 import { handleFindingFamilyRequest } from "./finding-family-routes.js";
 import { handleFindingsOrgRequest, parseFindingsOrgPath } from "./findings-org-routes.js";
 import { invalidateReadCache, readThrough } from "./read-cache.js";
@@ -135,6 +137,10 @@ export async function handleWebConsoleApiRequest(
     if (id && !readResume) assertTeamConsoleMutation(req, id, team.auth, team.collaboration, gateway);
   }
   try {
+    const refreshMetrics = await handleMetricHostRefreshRequest(path, method, input, Boolean(team) && (!team!.auth.enabled || member?.role === "owner"));
+    if (refreshMetrics) { json(res, refreshMetrics.status, refreshMetrics.data); return true; }
+    const metrics = handleMetricsRequest(path, method, requestUrl.searchParams, !team?.auth.enabled || member?.role === "owner");
+    if (metrics) { json(res, metrics.status, metrics.data); return true; }
     const auditLog = handleAuditLogRequest(path, method, requestUrl.searchParams, { teamEnabled: team?.auth.enabled === true, ...(member?.role ? { role: member.role, permissions: member.permissions } : {}) });
     if (auditLog) { json(res, auditLog.status, auditLog.data); return true; }
     if (skills) {
@@ -467,8 +473,12 @@ export async function handleApiRequest(
         // Findings live in the shared database and in one database per `0 scan` run: show them as one list.
         const merged = await findingsServiceFor(dbPath).list();
         const scans = merged.scans.slice(0, 100) as DBScanRow[];
+        // A file named by the findingsContext setting labels each finding the way a scan does, over a label a scan stored. Severity is unchanged.
+        const labels = await labelFamilies(merged.families as unknown as Array<{ key: string; latest: { scanId: string; severity: string; reviewAnnotation?: unknown } }>, new Map((merged.scans as DBScanRow[]).map(scan => [scan.id, scan.target] as const)));
         const groups = merged.families.map(family => {
-          const latest = normalizeFinding(family.latest as DBFindingRow);
+          const normalized = normalizeFinding(family.latest as DBFindingRow);
+          const label = labels.get(family.key);
+          const latest = label ? { ...normalized, businessContext: label } : normalized;
           return { fingerprint: family.key, latest, count: family.count, scanCount: family.scanCount, sourceScanIds: family.sourceScanIds,
             provenance: family.provenance, workflow: buildWorkflowSummary([latest], [], family.activeSessions, family.verdictCounts) };
         });

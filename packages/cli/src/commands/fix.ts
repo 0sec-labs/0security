@@ -1,3 +1,4 @@
+import { metricPullRequest } from "../metric-pr.js";
 /**
  * `0 fix <finding>`: a thread that follows the `fix-finding` skill in an isolated git work tree, then a pull request.
  *
@@ -13,17 +14,19 @@ import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { Option, type Command } from "commander";
 import { assertEgressAllowed, bumpJavaDependency, parseDependencyFinding } from "@0/engine";
-import { fixPrompt, type FixPolicy, type FixPromptFinding } from "@0/engine/shared";
+import { fixPrompt, type FixPolicy, type FixPromptFinding, type RootCause } from "@0/engine/shared";
 import { loadFixPolicyFile, type FixPolicyOptions, type LoadedFixPolicy } from "./fix-policy.js";
 import { osecDB, resolveOsecDbPath } from "@0/engine/storage";
 import { consoleTransportOptions, type ConsoleClient, type ConsoleTransportOptions } from "../console-client.js";
+import { defaultVariantStore, DEFAULT_VARIANT_BUDGET_USD, huntVariants, rescanSummary, rescanVariants, type VariantParent, type VariantStore } from "./variants.js";
 import { connect, DEFAULT_SCAN_MODEL, defaultScanDeps, waitForThread, type ScanDeps } from "./scan.js";
 import { resolveFindingId, shortFindingId } from "../finding-id.js";
-import { selectHost, type Host } from "../host/index.js";
+import type { Host } from "../host/index.js";
+import { selectFixHost } from "../host/fix-host.js";
 import { MAX_REVIEWERS, commitSubject, footerText, isDraft, needsTicket, parseTicket, pullRequestTitle, renderBodyTemplate, resolveBranchPrefix, type PullRequestConventions } from "./fix-conventions.js";
 import { CODEOWNERS_PATHS, reviewersFromCodeowners } from "./fix-codeowners.js";
 import { finishWithError, UsageError } from "./output.js";
-import { isPinnedImage, makeSandboxCache, NETWORK_CANARY, runInSandbox, sandboxLabel, validateSandboxImage, type SandboxSpec } from "./fix-sandbox.js";
+import { applySandboxProfile, validateMavenSettingsFile, isPinnedImage, makeSandboxCache, NETWORK_CANARY, runInSandbox, sandboxLabel, validateSandboxImage, type SandboxSpec } from "./fix-sandbox.js";
 import { appendRunMetric, type RunMetric } from "../run-metrics.js";
 import { applyWorkflowDefaults } from "../workflow-defaults.js";
 
@@ -37,7 +40,11 @@ const CHECK_TIMEOUT_MS = 10 * 60 * 1000;
 export const BRANCH_PREFIX = "0/fix-";
 
 export interface CheckResult { command: string; code: number; output: string; /** Set when the command ran in a container: "<image>, network off". */ sandbox?: string }
-export interface FindingToFix extends FixPromptFinding { fingerprint: string }
+export interface FindingToFix extends FixPromptFinding {
+  fingerprint: string;
+  /** Where the finding is stored and which scan it belongs to; variants found after the fix are stored there. Absent: no variant hunt. */
+  dbPath?: string; scanId?: string; rootCause?: RootCause; variantOf?: string;
+}
 
 export interface FixDeps extends Pick<ScanDeps, "open" | "err" | "sleep" | "startConsole"> {
   out(text: string): void;
@@ -54,6 +61,8 @@ export interface FixDeps extends Pick<ScanDeps, "open" | "err" | "sleep" | "star
   metrics?(record: Omit<RunMetric, "version" | "ci">): void;
   /** Remember what a standalone fix did, so `findings export-fixes` can report it. Not set for burndown, which keeps its own record. */
   record?(entry: { repo: string; fingerprint: string; outcome: FixOutcome }): void | Promise<void>;
+  /** Where root causes and variants are stored. Absent in tests that do not hunt, so they write nothing. */
+  variants?: VariantStore;
 }
 
 function resolveRow(rows: Array<Record<string, unknown>>, id: string): Record<string, unknown> {
@@ -93,6 +102,9 @@ const defaults: FixDeps = {
         id: String(row.id), title: String(row.title), severity: String(row.severity), category: String(row.category),
         tool: typeof row.tool === "string" ? row.tool : null, description: String(row.description ?? ""),
         fingerprint: String(row.fingerprint ?? row.id),
+        dbPath: resolveOsecDbPath(dbPath), scanId: String(row.scanId),
+        ...(db.getFindingRootCause(String(row.id)) ? { rootCause: db.getFindingRootCause(String(row.id)) } : {}),
+        ...(typeof row.variantOf === "string" && row.variantOf ? { variantOf: row.variantOf } : {}),
         ...(annotation ? { path: annotation.path, startLine: annotation.startLine, ...(annotation.endLine ? { endLine: annotation.endLine } : {}) } : {}),
         ...(typeof row.evidenceResponse === "string" && row.evidenceResponse ? { snippet: row.evidenceResponse } : {}),
       };
@@ -103,6 +115,7 @@ const defaults: FixDeps = {
   removeTemp: path => rmSync(path, { recursive: true, force: true }),
   writeFile: (path, text) => writeFileSync(path, text, { mode: 0o600 }),
   metrics: record => appendRunMetric(record),
+  variants: defaultVariantStore(),
   async record(entry) { const { recordStandaloneFix } = await import("./burndown.js"); recordStandaloneFix(entry.repo, entry.fingerprint, entry.outcome); },
 };
 
@@ -173,11 +186,14 @@ export function pullRequestBody(finding: FindingToFix, summary: string | undefin
 }
 
 export interface FixOptions extends ConsoleTransportOptions {
-  repo?: string; base?: string; test?: string[]; ready?: boolean; budget: string; model?: string; timeout: string; pr: boolean; format?: string; policy?: string; repoPolicy?: boolean; sandbox?: string; sandboxImage?: string; sandboxNetwork?: boolean; sandboxSetup?: string[]; ticket?: string;
+  host?: string; bitbucketUrl?: string;
+  repo?: string; base?: string; test?: string[]; ready?: boolean; budget: string; model?: string; timeout: string; pr: boolean; format?: string; policy?: string; repoPolicy?: boolean; sandbox?: string; sandboxImage?: string; sandboxNetwork?: boolean; variants?: boolean; variantBudget?: string; sandboxSetup?: string[]; sandboxProfile?: string; sandboxMavenSettings?: string; ticket?: string;
 }
 
 export interface FixOutcome {
   finding: string; branch: string; changed: boolean; committed: boolean; checks: CheckResult[]; verified: boolean;
+  /** The variant hunt that followed the fix: sites recorded, and the earlier variants checked again in the fixed tree. */
+  variants?: { created: number; rescanned: { fixed: number; open: number; unchecked: number }; error?: string };
   pullRequest?: { url: string; created: boolean; draft: boolean }; threadId?: string; costUsd?: number; tokens?: number; budgetExhausted?: boolean; timedOut?: boolean; summary?: string;
 }
 
@@ -185,6 +201,7 @@ export interface FixOutcome {
 export function fixMetric(outcome: FixOutcome | undefined, options: Pick<FixOptions, "model" | "budget">, startedAt: number, endedAt: number): Omit<RunMetric, "version" | "ci"> {
   const status = !outcome ? "failed" : outcome.timedOut ? "timeout" : outcome.budgetExhausted ? "budget" : outcome.committed ? "ok" : "failed";
   return {
+    ...(metricPullRequest(outcome?.pullRequest?.url) ?? {}),
     at: new Date(startedAt).toISOString(), command: "fix", model: options.model ?? DEFAULT_SCAN_MODEL, budgetUsd: Number(options.budget), costUsd: outcome?.costUsd ?? null,
     durationSeconds: Math.max(0, Math.round((endedAt - startedAt) / 1000)), findingsAttempted: 1, findingsProposed: outcome?.committed ? 1 : 0, checksPassed: outcome?.committed && outcome.verified ? 1 : 0,
     tokens: outcome?.tokens ?? null, status, findingIds: outcome ? [outcome.finding] : [],
@@ -203,6 +220,8 @@ async function defaultBase(deps: FixDeps, repo: string, requested?: string): Pro
 
 /** Check the sandbox flags together. Without --sandbox the checks run on this machine with your privileges. */
 export function sandboxSpec(options: FixOptions, env: NodeJS.ProcessEnv = process.env): SandboxSpec | undefined {
+  try { options = applySandboxProfile(options); } catch (error) { throw new UsageError((error as Error).message); }
+  if (options.sandboxMavenSettings && !options.sandboxSetup?.length) throw new UsageError("--sandbox-maven-settings requires an online --sandbox-setup or --sandbox-profile java.");
   if (!options.sandbox) {
     if (options.sandboxImage || options.sandboxNetwork || options.sandboxSetup?.length) throw new UsageError("--sandbox-image, --sandbox-network and --sandbox-setup need --sandbox docker.");
     return undefined;
@@ -239,11 +258,13 @@ async function runFixFlow(id: string, options: FixOptions, deps: FixDeps): Promi
   let madeBranch: { repo: string; branch: string; existed: boolean } | undefined;
   let committedBranch = false;
   let cache: string | undefined;
+  let fixClient: ConsoleClient | undefined;
   try {
+    try { options = applySandboxProfile(options); } catch (error) { throw new UsageError((error as Error).message); }
     const budget = Number(options.budget);
     if (!Number.isFinite(budget) || budget <= 0) throw new UsageError("--budget must be a positive number of USD.");
     if (!Number.isFinite(Number(options.timeout)) || Number(options.timeout) <= 0) throw new UsageError("--timeout must be a positive number of seconds.");
-    const sandbox = sandboxSpec(options);
+    const sandbox = sandboxSpec({ ...options, sandboxProfile: undefined });
     if (options.computer || options.engineUrl) throw new UsageError("0security fix edits files on this machine; run it against the local console.");
     const finding = deps.loadFinding(id, options.dbPath);
     const remember = async (outcome: FixOutcome): Promise<void> => {
@@ -251,6 +272,9 @@ async function runFixFlow(id: string, options: FixOptions, deps: FixDeps): Promi
     };
     try { repo = (await deps.git(resolve(options.repo ?? process.cwd()), ["rev-parse", "--show-toplevel"])).trim(); }
     catch { throw new UsageError("Run this inside the git repository the finding is in, or pass --repo."); }
+    if (options.sandboxMavenSettings) validateMavenSettingsFile(options.sandboxMavenSettings, repo);
+    // Resolve the target and require credentials before starting work or pushing a fix.
+    const host = options.pr ? await selectFixHost({ host: options.host, bitbucketUrl: options.bitbucketUrl, run: (args, input) => deps.gh(tree || repo, args, input), git: args => deps.git(tree || repo, args) }) : undefined;
     const base = await defaultBase(deps, repo, options.base);
     // The policy is read before anything is created: a bad pull request setting stops the run first.
     const loaded = deps.loadPolicy(repo, options);
@@ -289,6 +313,7 @@ async function runFixFlow(id: string, options: FixOptions, deps: FixDeps): Promi
       if (direct.reason) deps.err(`not changed directly (${direct.reason}); asking the model`);
       const { client, stop } = await connect(options, deps);
       stopConsole = stop;
+      fixClient = client;
       thread = await runThread(client, deps, tree, finding, options, budget, policy, Boolean(sandbox));
     }
     const status = (await deps.git(tree, ["status", "--porcelain", "--untracked-files=all"])).trim();
@@ -305,7 +330,7 @@ async function runFixFlow(id: string, options: FixOptions, deps: FixDeps): Promi
     if (sandbox && options.sandboxSetup?.length) {
       // Setup downloads dependencies into a cache folder with the network on. The checks then reuse that cache with the network off.
       cache = makeSandboxCache();
-      const online = { ...sandbox, network: true, cache };
+      const online = { ...sandbox, network: true, cache, ...(options.sandboxMavenSettings ? { mavenSettingsFile: options.sandboxMavenSettings } : {}) };
       const offline = { ...sandbox, network: false, cache };
       sandboxNotes = { setup: true, pinned: isPinnedImage(sandbox.image) };
       let ready = true;
@@ -334,15 +359,40 @@ async function runFixFlow(id: string, options: FixOptions, deps: FixDeps): Promi
     await deps.git(tree, [...identity, "commit", "--quiet", "-m", `${commitSubject(named, conventions)}\n\nFinding ${finding.id}`]);
     committedBranch = true;
     const outcome: FixOutcome = { ...common, changed: true, committed: true, checks, verified };
-    if (!options.pr) { deps.err(`committed on ${branch}; not pushed (--no-pr).`); await remember(outcome); return outcome; }
+    // The fix is the other trigger for a variant hunt: the tree now holds the fix, so a site that still has the bug stands out.
+    const followUp = async (done: FixOutcome): Promise<FixOutcome> => {
+      if (!deps.variants || options.variants === false || !finding.dbPath || !finding.scanId || finding.variantOf) return done;
+      const parent: VariantParent = {
+        id: finding.id, dbPath: finding.dbPath, scanId: finding.scanId, title: finding.title, category: finding.category, severity: finding.severity, description: finding.description,
+        ...(finding.path ? { path: finding.path } : {}), ...(finding.startLine ? { startLine: finding.startLine } : {}), ...(finding.endLine ? { endLine: finding.endLine } : {}), ...(finding.rootCause ? { rootCause: finding.rootCause } : {}),
+      };
+      const run = { timeout: options.timeout, budget: options.variantBudget ?? String(DEFAULT_VARIANT_BUDGET_USD), ...(options.model ? { model: options.model } : {}) };
+      try {
+        if (!fixClient) { const connection = await connect(options, deps); fixClient = connection.client; stopConsole ??= connection.stop; }
+        const store = { store: deps.variants, err: deps.err, sleep: deps.sleep };
+        const folder = tree;
+        const rescanned = await rescanVariants(fixClient, store, folder, parent, run);
+        const commit = (await deps.git(tree, ["rev-parse", "HEAD"]).catch(() => "")).trim();
+        const hunt = await huntVariants(fixClient, store, folder, parent, run, commit ? { fixCommit: commit } : {});
+        const error = hunt.error ?? rescanned.error;
+        deps.err(`variants: ${hunt.created.length} recorded, ${rescanned.items.length} checked again${error ? ` (${error})` : ""}`);
+        return { ...done, variants: { created: hunt.created.length, rescanned: rescanSummary(rescanned), ...(error ? { error } : {}) } };
+      } catch (error) {
+        const message = error instanceof Error ? error.message.split("\n")[0]! : String(error);
+        deps.err(`warning: the variant hunt did not run (${message})`);
+        return { ...done, variants: { created: 0, rescanned: { fixed: 0, open: 0, unchecked: 0 }, error: message } };
+      }
+    };
+    if (!options.pr) { deps.err(`committed on ${branch}; not pushed (--no-pr).`); const done = await followUp(outcome); await remember(done); return done; }
 
     // The branch is ours and only ours: never the base, always with a lease so a person's later push is not overwritten.
-    const host = selectHost({ run: (args, input) => deps.gh(tree, args, input), git: args => deps.git(tree, args) });
+    if (!host) throw new Error("No pull request host was selected.");
+    // Check API access and locate the existing PR before writing to the git remote.
+    const existing = await host.findOpenPullRequest(branch, base.name);
     await host.pushBranch(branch);
     const bodyFile = join(temp, "body.md");
     const draft = isDraft(verified, conventions, !checks.length && !options.ready);
     deps.writeFile(bodyFile, pullRequestBody(finding, thread.reply, checks, footerText(conventions), draft && verified && !checks.length, conventions?.bodyTemplate ? { template: conventions.bodyTemplate, ...(ticket ? { ticket } : {}) } : undefined, direct.applied, sandboxNotes));
-    const existing = await host.findOpenPullRequest(branch);
     let url: string; let created = false;
     if (existing) {
       url = existing.url;
@@ -357,7 +407,7 @@ async function runFixFlow(id: string, options: FixOptions, deps: FixDeps): Promi
       const reviewers = await chooseReviewers(deps, repo, base.ref, conventions, finding.path);
       if (conventions.labels?.length || reviewers.length) await decoratePullRequest(host, url, { ...conventions, reviewers }, deps.err);
     }
-    const opened: FixOutcome = { ...outcome, pullRequest: { url, created, draft } };
+    const opened: FixOutcome = await followUp({ ...outcome, pullRequest: { url, created, draft } });
     await remember(opened);
     return opened;
   } finally {
@@ -387,7 +437,7 @@ async function chooseReviewers(deps: FixDeps, repo: string, baseRef: string, con
 
 /** Labels that exist (or can be made) and reviewers go on the pull request. A refusal is a warning: the pull request is already open. */
 async function decoratePullRequest(host: Host, url: string, conventions: PullRequestConventions, warn: (text: string) => void): Promise<void> {
-  const number = Number(/\/pull\/(\d+)/.exec(url)?.[1]);
+  const number = Number(/\/(?:pull|pull-requests)\/(\d+)$/.exec(url)?.[1]);
   if (!Number.isInteger(number) || number < 1) { warn(`could not tell the pull request number from ${url}; labels and reviewers were not added`); return; }
   try {
     let labels: string[] = [];
@@ -430,7 +480,7 @@ async function runThread(client: ConsoleClient, deps: FixDeps, folder: string, f
   const id = String(created.id);
   const path = `/api/console/sessions/${encodeURIComponent(id)}`;
   await client.request("PATCH", `${path}/configuration`, { workspacePath: folder });
-  await client.request("POST", `${path}/messages`, { text: fixPrompt(finding, { tests: options.test ?? [], policy, sandboxed, ...(isJavaDependencyFinding(finding) ? { skill: "java-dependency-fix" } : {}) }) });
+  await client.request("POST", `${path}/messages`, { text: fixPrompt(finding, { tests: options.test ?? [], policy, sandboxed, ...(isJavaDependencyFinding(finding) ? { skill: "java-dependency-fix" } : options.sandboxProfile === "java" ? { skill: "java-security-fix" } : {}) }) });
   deps.err(`working in thread ${id} (budget $${Number(budget.toFixed(4))})`);
   const { snapshot, timedOut } = await waitForThread(client, deps, id, Date.now() + Number(options.timeout) * 1000);
   const done = finishedThread(snapshot);
@@ -439,21 +489,33 @@ async function runThread(client: ConsoleClient, deps: FixDeps, folder: string, f
   return { id, reply: done.reply, error: done.error, failed: done.failed && !timedOut, ...(tokens !== undefined ? { tokens } : {}), timedOut, budgetExhausted: asJson(done.session).costCeilingExceeded === true, usage: usageLine(done.usage), ...(costUsd !== undefined ? { costUsd } : {}) };
 }
 
+/** One report per failed check: exit code, command and the last 15 lines. Check output comes from the sandboxed build, so terminal control characters (escape sequences) are dropped. */
+export function failedCheckReports(checks: CheckResult[]): string[] {
+  const plain = (text: string): string => text.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, "");
+  return checks.filter((c) => c.code !== 0).map((c) => `check failed (exit ${c.code}): ${plain(c.command).replace(/\n/g, " ")}\n${plain(c.output.trim()).split("\n").slice(-15).map((line) => `  | ${line}`).join("\n")}`);
+}
+
 export function registerFixCommand(program: Command, deps: FixDeps = defaults): void {
   const collect = (value: string, previous: string[] = []) => [...previous, value];
   consoleTransportOptions(program.command("fix <finding>")
     .description("Fix one finding in an isolated git work tree and open a pull request for review")
+    .option("--host <host>", "Code host: github, bitbucket-cloud or bitbucket-dc (inferred from origin)")
+    .option("--bitbucket-url <url>", "Bitbucket Data Center HTTPS base URL, including any context path (or BITBUCKET_URL)")
     .option("--repo <dir>", "Git repository the finding is in (default: the current directory)")
     .option("--base <branch>", "Branch to start from and open the pull request against (default: the remote's default branch)")
     .option("--test <command>", "Check to run after the change; repeat for several. A failing check makes the pull request a draft", collect)
     .option("--ready", "Open the pull request ready for review even when no --test ran. Without it, a pull request with no checks is a draft")
     .addOption(new Option("--sandbox <mode>", "Run the --test commands in a container instead of on this machine (docker)").choices(["docker"]))
+    .option("--sandbox-profile <profile>", "Use the pinned Maven/JDK 21 verifier: online dependency setup then offline verify (java)")
+    .option("--sandbox-maven-settings <file>", "Owner-only short-lived Maven credentials outside the repository; read-only mount for online setup only; setup output withheld")
     .option("--sandbox-image <image>", "Image for --sandbox docker, for example maven:3-eclipse-temurin-21. It must hold the tools and dependencies the tests need")
     .option("--sandbox-network", "Give the sandbox network access (to download dependencies). Off by default")
-    .option("--sandbox-setup <command>", "With --sandbox docker: run this once with the network on to download dependencies (for example mvn -q dependency:go-offline), then run the --test checks with the network off; repeat for several", collect)
+    .option("--sandbox-setup <command>", "With --sandbox docker: run this once with the network on to download dependencies (for example mvn -q test), then run the --test checks with the network off; repeat for several", collect)
     .option("--policy <file>", "Policy file (.json or .yaml) of approved libraries and fix rules; any path you name, relative to the current directory. Default: ~/.0/fix-policy.json|yaml|yml")
     .option("--ticket <key>", "Ticket key such as SEC-123 for the {ticket} placeholder in your policy's pull request settings")
     .option("--repo-policy", "Also read fix-policy.* or .zero/fix-policy.* from the repository being fixed (untrusted content; off by default)")
+    .option("--no-variants", "Do not rescan the recorded variants or hunt for the same bug at other sites after the fix")
+    .option("--variant-budget <usd>", "Spend cap for each variant thread, in USD", String(DEFAULT_VARIANT_BUDGET_USD))
     .option("--no-pr", "Commit on the fix branch but do not push or open a pull request")
     .option("--budget <usd>", "Stop when the estimated spend reaches this many USD", String(DEFAULT_BUDGET_USD))
     .option("--model <model>", `Model for the fix thread (default: ${DEFAULT_SCAN_MODEL})`)
@@ -465,6 +527,7 @@ export function registerFixCommand(program: Command, deps: FixDeps = defaults): 
       try {
         const outcome = await runFix(finding, applyWorkflowDefaults("fix", options, command), deps);
         if (!outcome) return;
+        if (options.format !== "json") for (const text of failedCheckReports(outcome.checks)) deps.err(text);
         if (options.format === "json") deps.out(JSON.stringify(outcome, null, 2));
         else if (outcome.pullRequest) deps.out(`${outcome.pullRequest.created ? "Opened" : "Updated"} ${outcome.pullRequest.draft ? "draft " : ""}pull request: ${outcome.pullRequest.url}`);
         else if (outcome.committed) deps.out(`Committed on ${outcome.branch}.`);

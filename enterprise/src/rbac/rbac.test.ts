@@ -98,3 +98,13 @@ describe("routes", () => {
     expect(decideRoute(auditor, "POST", "/api/finding-family/x/triage").allowed).toBe(false);
   });
 });
+
+
+it("allows licensed owners to reach metrics handlers while refusing non-owner roles and unknown subroutes", () => {
+  for (const [method, path] of [["GET", "/api/console/run-metrics"], ["HEAD", "/api/console/run-metrics"], ["POST", "/api/console/run-metrics/refresh-host"]]) {
+    expect(decideRoute(BUILT_IN_ROLES.owner!.permissions, method!, path!)).toEqual({ allowed: true });
+    for (const role of ["editor", "viewer", "triager", "auditor"]) expect(decideRoute(BUILT_IN_ROLES[role]!.permissions, method!, path!).allowed).toBe(false);
+  }
+  expect(routePermission("POST", "/api/console/run-metrics")).toBeNull();
+  expect(routePermission("GET", "/api/console/run-metrics/secrets")).toBeNull();
+});

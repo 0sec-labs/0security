@@ -890,6 +890,10 @@ describe("thread and subagent settings", () => {
 
   it("keeps idle archiving operator-only", () => {
     expect(isOperatorSetting("archiveIdleDays")).toBe(true);
+    expect(isOperatorSetting("findingsContext")).toBe(true);
+    expect(DEFAULT_SETTINGS.findingsContext).toBe("");
+    expect(sanitizeOverrides({ findingsContext: "/tmp/context.json" })).toEqual({});
+    expect(normalizeSettings({ findingsContext: "  /home/me/context.json " }).findingsContext).toBe("/home/me/context.json");
     expect(layered({ archiveIdleDays: 30 }, { archiveIdleDays: 1 }).settings.archiveIdleDays).toBe(30);
     expect(sanitizeOverrides({ archiveIdleDays: 1, titleInstructions: "Short" })).toEqual({ titleInstructions: "Short" });
   });

@@ -117,6 +117,7 @@ export const findings = sqliteTable(
     scope: text("scope"),
     scopeReason: text("scopeReason"),
     scopeSource: text("scopeSource"),
+    businessContext: text("businessContext"), // JSON: operator declaration; not observed impact
     workflowStatus: text("workflowStatus").notNull().default("backlog"),
     workflowAssignee: text("workflowAssignee"),
     workflowUpdatedAt: text("workflowUpdatedAt"),
@@ -148,8 +149,7 @@ export const findings = sqliteTable(
      * when the agent produced a finding without a deterministic re-check
      * contract — every reader must continue to work in that case. Stored
      * as text because the spec is an opaque blob that the verifier reads
-     * whole; we never query individual predicates. See 0#193 /
-     * 0-cloud#111.
+     * whole; we never query individual predicates. See 0#193.
      */
     verificationSpec: text("verificationSpec"),
     /**
@@ -203,6 +203,15 @@ export const findings = sqliteTable(
      * `0 findings reproduce`. NULL until either exists. Additive: old rows are unaffected.
      */
     reproduction: text("reproduction"),
+    /** JSON ExecutedPoc: outcome (executed-proven, executed-failed, static-only) and the sandbox run record. NULL until a PoC attempt is recorded. */
+    executedPoc: text("executedPoc"),
+    /**
+     * JSON of the structured root cause (bugClass, unsafePattern {sink, source}, missingGuard, designOrigin). NULL until
+     * a thread records one. Additive: old rows are unaffected and every reader must work without it.
+     */
+    rootCause: text("rootCause"),
+    /** Id of the finding whose root cause this one shares, set by variant hunting. NULL for every other finding. */
+    variantOf: text("variantOf"),
     /** Scanner that produced the finding when it was imported (for example `CodeQL`); NULL for findings 0 found itself. */
     tool: text("tool"),
     /** Repository a finding was sent from (`owner/name`), set only by the shared findings server's ingest. NULL otherwise. */

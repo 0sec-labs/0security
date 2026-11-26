@@ -1,0 +1,16 @@
+// Configure 0security as a trusted, pinned external library using the exported library package.
+// Prevent job authors from overriding its configured version. Keep this pipeline outside untrusted PR branches.
+@Library('0security') _
+pipeline {
+  agent none
+  stages {
+    stage('Security review') {
+      when { changeRequest() }
+      steps {
+        zeroSecurity scanLabel: 'ephemeral-security-scan', publishLabel: 'trusted-security-publisher',
+          modelCredential: 'openai-api-key', bitbucketCredential: 'bitbucket-token',
+          repo: 'PROJECT/repo', bitbucketUrl: 'https://bitbucket.example.com', version: '0.45.0'
+      }
+    }
+  }
+}

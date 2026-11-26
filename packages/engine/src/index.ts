@@ -44,6 +44,7 @@ export {
   CodexCatalogRefreshError,
 } from "./runtime/codex-models.js";
 export type { CodexCatalogModel } from "./runtime/codex-models.js";
+export { BEDROCK_DEFAULT_MODEL, bedrockRegion, hasBedrockCredentialSignals } from "./runtime/llm-api/provider-config.js";
 export { DEFAULT_OPENAI_MODEL } from "./runtime/llm-api/provider-config.js";
 export { modelTransportStats } from "./runtime/llm-api/transport.js";
 export type { ModelTransportStats } from "./runtime/llm-api/transport.js";
@@ -166,9 +167,8 @@ export { ENTERPRISE_ENV, EnterpriseEgressError, assertEgressAllowed, enterpriseM
 export { ScopedTargetError, assertScopedTarget, classifyAddress as classifyTargetAddress, describeScopedTarget, parseScopeFile, type ResolveHost as ResolveTargetHost, type ScopedTarget, type ScopedTargetOptions } from "./policy/scoped-target.js";
 // Consent-gated analytics pipeline — the single choke point that may transmit
 // analytics. The CLI entry must set `ZERO_ANALYTICS_LEVEL` from the operator's
-// setting and call `maybeSubscribeAnalyticsPipeline()` (mirrors the cloud sink
-// wiring); without that call the pipeline never subscribes and transmits
-// nothing. USAGE tier only for now — command/code/target/finding collectors
+// setting and call `maybeSubscribeAnalyticsPipeline()`; without that call the pipeline never
+// subscribes and transmits nothing. USAGE tier only for now — command/code/target/finding collectors
 // are a separate, reviewed wave.
 export {
   analyticsPipeline,
@@ -233,9 +233,9 @@ export type {
 } from "./events/bus.js";
 export { ScanCostLedger } from "./agent/cost-ledger.js";
 
-// Verification spec evaluator (0#193 / 0-cloud#111). Re-checks a
-// finding's `verificationSpec` predicates against a repo on disk so cloud's
-// canary watcher (and any OSS caller) can deterministically decide whether
+// Verification spec evaluator (0#193). Re-checks a
+// finding's `verificationSpec` predicates against a repo on disk so a
+// canary watcher (or any caller) can deterministically decide whether
 // a finding is still real after upstream changes.
 export {
   runCliPathTraversalReplayFixture,
@@ -250,6 +250,8 @@ export type {
 // both pass.
 export { parseVerifySpec, inlineVerifySpec, verificationLine, isVerified, gateDone, claimsFixed, runVerifier, OciRunner, HostRunner, snapshotWorktree, snapshotHead, isGitRepo, isPinnedImage } from "./verifier/index.js";
 export type { VerifySpec, VerifierResult, ContainerRunner } from "./verifier/index.js";
+export { planPocSpec, executePocForFinding, createExecutedPoc, executedPocConfigFromEnv, executedPocForScan, ExecutedPocBudget } from "./executed-poc/index.js";
+export type { ExecutedPocConfig, ExecutedPocRuntime } from "./executed-poc/index.js";
 export { reproduceFinding } from "./reproduction/index.js";
 export type { ReproduceInput } from "./reproduction/index.js";
 

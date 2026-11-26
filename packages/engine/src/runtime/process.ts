@@ -304,7 +304,7 @@ export class ProcessRuntime implements Runtime {
     // OS page-cache on /usr/local/bin/<runtime>, so the first exec pays
     // for the binary load + dynamic linker + the runtime's own startup,
     // which can exceed 5s for an ~80 MB Rust binary. Empirically observed
-    // (2026-05-13 0-cloud rollout): same lodash audit dispatched
+    // (2026-05-13 rollout): same lodash audit dispatched
     // back-to-back where one sandbox succeeded and the next failed with
     // "Runtime 'codex' not available. Is codex installed?", correlating
     // with sandbox cold/warm state, not codex install state. After this

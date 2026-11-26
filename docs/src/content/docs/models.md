@@ -123,7 +123,7 @@ export DO_NOT_TRACK=1
 - Leave `ZERO_LLM_FALLBACK` unset and do not export other provider keys, so no request can route elsewhere. See [Keep model traffic in one region](#keep-model-traffic-in-one-region).
 - To check the route without a scan, run `ZERO_RUNTIME_TRACE=1 0 -p "reply with ok"`. It prints the chosen provider and model on stderr.
 
-With `DO_NOT_TRACK=1`, 0 sends no usage counts, command names or crash reports. It also skips the public price and model-catalog lookups, so prices for gateway models show as unknown. To stop the update check as well, set `ZERO_NO_UPDATE_CHECK=1`, or use `ZERO_OFFLINE=1`. With all of these off, model requests go only to `OPENAI_BASE_URL`.
+With `DO_NOT_TRACK=1`, 0 sends no usage counts, command names or crash reports. `ZERO_ENTERPRISE=1` does the same and blocks every other automatic call. It also skips the public price and model-catalog lookups, so prices for gateway models show as unknown. To stop the update check as well, set `ZERO_NO_UPDATE_CHECK=1`, or use `ZERO_OFFLINE=1`. With all of these off, model requests go only to `OPENAI_BASE_URL`.
 
 Some traffic stays under your control. The `web_search` tool is off unless you set `ZERO_FEATURE_WEB_SEARCH=1`. Scan targets are contacted because you point 0 at them. GitHub is contacted only when you scan a GitHub repository.
 
@@ -209,7 +209,7 @@ env ZERO_SELECTED_PROVIDER=bedrock \
 | Endpoint | `BEDROCK_BASE_URL` for a VPC endpoint or an internal proxy. Otherwise the regional `bedrock-runtime` endpoint. |
 | Model | A Bedrock model ID or cross-region inference profile ID your account can invoke. The default is `global.anthropic.claude-sonnet-4-5-20250929-v1:0`. |
 
-The model must support tool use through the Converse API. Prices for Bedrock models show as unknown. The model picker does not list Bedrock models, so pass the ID with `--model` or `ZERO_MODEL`. You can use `bedrock:<model>` in [`ZERO_LLM_FALLBACK`](#failover) when AWS credentials are set. To reach Bedrock through a LiteLLM proxy instead, use an [OpenAI-compatible gateway](#custom-and-local-providers).
+The model must support tool use through the Converse API. Prices for Bedrock models show as unknown. In **Connections → AWS identity → Amazon Bedrock**, save a region and a model or inference-profile ID. The model then appears in the picker with an unknown rate. This is an operator-configured choice, not a list of models your account is entitled to invoke. AWS credentials stay on the host; the browser accepts only non-secret region, model and endpoint settings. Saving does not make an AWS request, verify access or establish that credentials have not expired. The connection badge stays **AWS chain · unverified**. Existing host region settings take precedence. CLI users can still pass `--model` or `ZERO_MODEL`. You can use `bedrock:<model>` in [`ZERO_LLM_FALLBACK`](#failover) when AWS credentials are set. To reach Bedrock through a LiteLLM proxy instead, use an [OpenAI-compatible gateway](#custom-and-local-providers).
 
 ### Together AI
 

@@ -48,7 +48,7 @@ team:
   #     redirectUri: https://0.example.com/api/team/auth/callback
 
 # ZERO_ENTERPRISE=1 turns off update checks, registry lookups and other outbound calls except the model endpoint you configured.
-# The chart also sets DO_NOT_TRACK=1 with it, because telemetry has its own single switch.
+# The chart also sets DO_NOT_TRACK=1, a second switch for telemetry.
 enterprise: true
 
 extraEnv: []        # list of name/value or valueFrom entries

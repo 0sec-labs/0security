@@ -92,3 +92,16 @@ describe("GitHub host: pull request labels, reviewers and state", () => {
     expect(calls).toEqual([]);
   });
 });
+
+describe("GitHub live CI summary", () => {
+  it.each([
+    [[], "none"],
+    [[{ state: "SUCCESS" }], "passing"],
+    [[{ status: "COMPLETED", conclusion: "SUCCESS" }, { status: "QUEUED" }], "pending"],
+    [[{ status: "COMPLETED", conclusion: "FAILURE" }], "failing"],
+    [[{ status: "COMPLETED", conclusion: "UNKNOWN" }], "pending"],
+  ] as const)("maps check states", async (checks, status) => {
+    const { host } = fake({ "pr view": JSON.stringify({ statusCheckRollup: checks }) });
+    expect(await host.pullRequestChecks!("https://github.com/o/r/pull/7")).toMatchObject({ status });
+  });
+});

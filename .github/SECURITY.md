@@ -1,89 +1,60 @@
-# Security Policy
+# Security policy
 
 ## Reporting a vulnerability
 
-Report vulnerabilities in 0 privately using GitHub's
-[Report a vulnerability form](https://github.com/0sec-labs/0security/security/advisories/new).
-Private vulnerability reporting is enabled for this repository.
+Please report suspected vulnerabilities privately through GitHub private vulnerability reporting:
 
-For email reporting, contact **admin@0.security**.
-Do not open a public issue for a suspected security flaw.
+<https://github.com/0sec-labs/0security/security/advisories/new>
 
-Include:
+For email reporting, contact **admin@0.security**. Do not open a public issue, pull request or discussion for a suspected vulnerability. Include the affected version (`0security --version`), what you observed, and the steps or proof of concept needed to reproduce it. If the report concerns the `0` engine, the CLI, the container image or the install script, it belongs here. Vulnerabilities in the companion scanner are best reported in its own repository (<https://github.com/0sec-labs/foxguard>); we will forward anything that lands here by mistake.
 
-- a clear description of the issue;
-- reproducible steps or a minimal test case;
-- affected version or commit;
-- potential impact and any mitigations already attempted.
+## What to expect
 
-Do not include customer data, production credentials, or exploit material for
-third-party systems without authorization.
+These are targets, not guarantees. We are a small team.
 
-For execution-boundary or tool-approval reports, include the entrypoint
-(console, command, dashboard, desktop, MCP, or 0verse), autonomy mode,
-executor/runtime, and relevant feature flags. Redact tokens,
-provider credentials, private target paths, and sensitive artifacts before
-sharing logs. A minimal synthetic reproducer is preferable to a production
-target or a live exploit.
+| Step | Target |
+| --- | --- |
+| Acknowledge your report | within 3 business days |
+| Initial assessment and severity | within 10 business days |
+| Fix or mitigation for confirmed high and critical issues | within 90 days, sooner where we can |
 
-This policy is for flaws in this repository's software. Findings produced while
-assessing another system should go to that system's authorized disclosure
-channel; using 0 does not grant permission to test it or publish its data.
+We will keep you informed as the report progresses, and we are glad to credit you in the advisory unless you prefer to stay anonymous. We ask that you give us a reasonable chance to ship a fix before you disclose publicly, and we will coordinate the disclosure date with you.
 
-## Extension and MCP execution trust
+## What to include for execution-boundary reports
 
-Extensions and custom MCP servers run code as the user on the engine host. They
-are not sandboxed. The guardrails are review and pinning, not isolation:
+For reports about tool approval or the execution boundary, name the entrypoint (web console, CLI command, or 0verse), the autonomy mode, the executor or runtime, and any feature flags. Redact tokens, provider credentials, private target paths and sensitive artifacts from logs. A minimal synthetic reproducer is better than a production target or a live exploit. Do not include customer data or exploit material for systems you are not authorized to test.
 
-- nothing runs on install; you read one prompt (repository at the full commit,
-  files, what it can run, connect to or call) and approve the exact revision, from
-  your own terminal or the browser, never from a command a thread ran;
-- git extensions are fetched without executing anything, pinned to a full commit
-  SHA, installed disabled, and never auto-update; any change re-prompts;
-- an MCP server's tools are hashed per tool and a changed, new or removed tool
-  blocks the whole server until you approve again;
-- these routes are browser-only (agent/engine-bearer callers are refused) and
-  owner-only in team mode; a process gets a scrubbed environment plus only the
-  variable names you approved;
-- the one exception is the engine operation endpoint, which lets an attached
-  engine or MCP client call `save_workflow` (validated, revision-guarded) so
-  workflows can be authored remotely; it cannot install extensions or MCP servers;
-- an approved extension or server can still read files, use the network and
-  prompt-inject the agent through tool names, descriptions and output.
+## Extension and MCP server trust
 
-Reports that bypass the review, pinning, caller or secret-handling rules are in
-scope. Behaviour of an approved third-party extension is not a flaw in 0. See
-the [security model](https://docs.0.security/configuration/#security-model).
+Extensions and the MCP servers inside them run code as you on the engine host. The main guardrails are review and pinning. An extension can also declare an OS sandbox for its scripts and servers (see [Sandboxing](https://docs.0.security/extensions/#sandboxing)); without one, or with `ZERO_SANDBOX=off`, they are not isolated.
+
+- Nothing runs on install. You read one prompt (the repository at the full commit, its files, and what it can run, connect to or call) and approve the exact revision from your own terminal or the browser, never from a command a thread ran.
+- Git extensions are fetched without executing anything, pinned to a full commit SHA, installed disabled, and never update on their own. Any change asks again.
+- An MCP server's tools are hashed per tool. A changed, new or removed tool blocks the whole server until you approve it again, and this is never auto-approved.
+- These routes are browser-only (agent and engine-bearer callers are refused) and owner-only in team mode. A process gets a scrubbed environment plus only the variable names you approved.
+- An approved extension or server can still read files it can reach, use the network and prompt-inject the agent through tool names, descriptions and output. MCP tool results are labelled as untrusted, fenced and capped.
+
+Reports that bypass the review, pinning, caller, sandbox or secret-handling rules are in scope. Behaviour of an approved third-party extension is not a flaw in 0. See the [security model](https://docs.0.security/configuration/#security-model).
 
 ## Self-edit preview
 
-`ZERO_SELF_EDIT=1` (off by default) lets the dashboard create a `self/*` git
-worktree and run a preview of an agent-edited copy of 0 on loopback ports with
-an empty scratch home and an allow-listed environment. Guardrails:
+`ZERO_SELF_EDIT=1` (off by default) lets the web console create a `self/*` git worktree and run a preview of an agent-edited copy of 0 on loopback ports, with an empty scratch home and an allow-listed environment.
 
-- owner-only in team mode and unavailable to engine-bearer callers;
-- a protected-path gate, evaluated by the live dashboard (not the agent) and
-  failing closed, rejects diffs touching authentication, approvals,
-  session and credential storage, the self-edit code itself, dependencies and
-  lockfiles, build config, CI and agent instructions;
-- apply is not implemented: nothing is promoted to the running dashboard;
-- framing is limited to an exact loopback origin
-  (`ZERO_PREVIEW_FRAME_ANCESTORS`, set by the launcher); everything else stays
-  `frame-ancestors 'none'`.
+- It is owner-only in team mode and unavailable to engine-bearer callers.
+- A protected-path gate, evaluated by the live console and not the agent, fails closed. It rejects diffs touching authentication, approvals, session and credential storage, the self-edit code itself, dependencies and lockfiles, build config, CI and agent instructions.
+- Apply is not implemented: nothing is promoted to the running console.
+- Framing is limited to an exact loopback origin (`ZERO_PREVIEW_FRAME_ANCESTORS`, set by the launcher). Everything else stays `frame-ancestors 'none'`.
 
-The preview backend is agent-edited code running as the same OS user. It is not
-a filesystem or network sandbox, so enable it only on a machine and account
-where that is acceptable. Escapes from the protected-path gate or the scratch
-home are in scope.
+The preview backend is agent-edited code running as the same OS user. It is not a filesystem or network sandbox, so enable it only on a machine and account where that is acceptable. Escapes from the protected-path gate or the scratch home are in scope.
 
 ## Supported versions
 
-Security fixes are made against the latest tagged 0 release. If you build
-from source, include the commit hash and affected component in your report.
-The independent 0verse Python package and unreleased desktop source do not
-share the CLI's release version; identify their checkout revision explicitly.
+Security fixes are made against the latest release. Older releases are not patched; upgrade to the latest release to receive fixes. The independent 0verse Python package does not share the CLI's release version; identify its checkout revision in a report. Self-hosted deployments should follow the upgrade steps in the [self-hosting guide](https://docs.0.security/self-hosting/#upgrades-and-rollbacks).
 
-## Disclosure
+## Verifying what you run
 
-We coordinate fixes and disclosure with reporters where practical. Public
-advisories are published only after a fix or mitigation is available.
+Every release publishes SHA-256 checksums, a CycloneDX SBOM and GitHub build-provenance attestations for each asset. See [Verify a release](https://docs.0.security/self-hosting/#verify-a-release).
+
+## Safe harbor
+
+We will not pursue legal action against people who make a good-faith effort to follow this policy: test only against your own installations and accounts, avoid privacy violations and service disruption, do not access or modify other people's data, and report what you find promptly. This is a statement of intent and not a legal waiver. It does not authorize testing of systems we do not own or operate.

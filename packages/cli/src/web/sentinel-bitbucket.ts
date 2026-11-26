@@ -102,10 +102,10 @@ export async function runBitbucketTrigger(deps: BitbucketRunDeps, delivered?: De
     const skip = !pr.open ? "closed" : pr.draft ? "draft" : pr.fork ? "fork" : undefined;
     const record = (status: SentinelActivation["status"], extra: { error?: string; note?: string }, idempotencyKey: string) => {
       const info: Record<string, string | number> = { repo: config.repo, pr: pr.id, headSha: pr.headSha, base: pr.baseBranch.slice(0, 200), head: pr.headBranch.slice(0, 200), title: oneLine(pr.title, 300), event };
-      store.createActivation({
+      return store.createActivation({
         sentinelId: sentinel.id, sentinelVersion: sentinel.version, status, skills: [...sentinel.skills], automationId: deps.automationId,
         trigger: { kind: "bitbucket-pr", automationId: deps.automationId, triggerId: trigger.id, event: info },
-        ...(extra.error ? { error: extra.error } : {}), ...(extra.note ? { note: extra.note } : {}), finishedAt: isoAt(deps.now()),
+        ...(extra.error ? { error: extra.error } : {}), ...(extra.note ? { note: extra.note } : {}), startedAt: isoAt(deps.now()), ...(status !== "running" ? { finishedAt: isoAt(deps.now()) } : {}),
       }, { via: deps.via, idempotencyKey });
     };
     if (skip) {
@@ -114,21 +114,38 @@ export async function runBitbucketTrigger(deps: BitbucketRunDeps, delivered?: De
       continue;
     }
     if (store.getTurnByKey(sentinel.id, key)) { handled(); continue; }
+    // A spend limit that is reached refuses the review. It is recorded once per pull request commit and tried again after the limit resets.
+    const refusal = store.budgetRefusal(sentinel.id, trigger.id, deps.now());
+    if (refusal) {
+      if (!store.getTurnByKey(sentinel.id, `${key}:budget`)) record("skipped", { error: refusal }, `${key}:budget`);
+      lastStatus = "budget"; lastError = refusal;
+      break;
+    }
     if (reviews >= MAX_BITBUCKET_REVIEWS_PER_POLL) break;
     reviews += 1;
+    const started = record("running", {}, key);
+    const runSettings = reviewerSettings(config, token);
+    runSettings.metricIdentity = { sentinelId: sentinel.id, triggerId: trigger.id, activationId: started.id };
+    runSettings.budget = String(Math.min(config.budgetUsd, sentinel.runBudgetUsd ?? Infinity, trigger.runBudgetUsd ?? Infinity));
+    const runModel = trigger.runModel ?? (config.model ? undefined : sentinel.model);
+    if (runModel) {
+      runSettings.model = runModel.model; runSettings.providerId = runModel.providerId;
+      if (runModel.reasoning) runSettings.reasoning = runModel.reasoning;
+    }
+    const runReviewer = (deps.reviewer ?? createReviewer)(runSettings);
     let outcome: ReviewOutcome;
     try {
-      outcome = await reviewPullRequest(pr, { client: reviewer.client, runner: reviewer.runner, state }, reviewer.review);
+      outcome = await reviewPullRequest(pr, { client: reviewer.client, runner: runReviewer.runner, state }, reviewer.review);
     } catch (error) {
       // A failed review is not retried until the pull request changes: a retry on every poll would spend the budget again each time.
       lastStatus = "error"; lastError = `Pull request ${pr.id}: ${message(error)}`;
-      record("failed", { error: lastError }, key);
+      store.updateActivation(started.id, { status: "failed", error: lastError, finishedAt: isoAt(deps.now()) });
       handled();
       continue;
     }
     handled();
-    if (outcome.status === "skipped") continue;
-    record("completed", { note: oneLine(describeOutcome(outcome), 400) }, key);
+    if (outcome.status === "skipped") { store.updateActivation(started.id, { status: "skipped", finishedAt: isoAt(deps.now()) }); continue; }
+    store.updateActivation(started.id, { status: "completed", note: oneLine(describeOutcome(outcome), 400), ...(outcome.status === "reviewed" && outcome.costUsd !== undefined ? { costUsd: outcome.costUsd } : {}), finishedAt: isoAt(deps.now()) });
     if (lastStatus !== "error") lastStatus = "reviewed";
   }
   return { ...(remember ? { cursor: seen } : {}), lastStatus, ...(lastError ? { lastError } : {}) };

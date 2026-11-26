@@ -119,8 +119,8 @@ export const SUGGESTION_MAX_LENGTH = 20_000;
  * — a half-function inside a ```suggestion block applies as broken code.
  * Fenced / unified-diff content is dropped for the same reason: a line
  * starting with ``` or `@@ ` renders broken inside a GitHub suggestion
- * block. All three annotation paths (CLI parser, finding, cloud sink)
- * gate on this one predicate.
+ * block. Every annotation path (CLI parser, finding)
+ * gates on this one predicate.
  */
 export function isSuggestionAcceptable(suggestion: string): boolean {
   if (suggestion.length > SUGGESTION_MAX_LENGTH) return false;
@@ -259,7 +259,7 @@ function parseJsonOutput(output: string, prefix: string, scopePath?: string): Fi
             evidence,
             ...(explicitSteps ? { pocSteps: explicitSteps } : derivedSteps.length > 0 ? { pocSteps: derivedSteps } : {}),
             // Pass-through with clamping when the upstream JSON schema includes
-            // `confidence`. Downstream cloud-sink also clamps; this is defence
+            // `confidence`. This is defence
             // in depth so an agent runtime that reports a wild value (1.5,
             // -0.2, NaN) never escapes the OSS engine. Absent → undefined,
             // which the cloud column accepts as NULL.
@@ -291,9 +291,8 @@ function parseJsonOutput(output: string, prefix: string, scopePath?: string): Fi
 
 /**
  * Clamp an arbitrary confidence value to [0,1], or return `undefined` if
- * the input isn't a usable finite number. Mirrors the `cloud-sink.ts`
- * normalizer so OSS-side and wire-side agree on what "no confidence
- * signal" looks like.
+ * the input isn't a usable finite number. "No confidence
+ * signal" is always `undefined`.
  */
 function clampConfidence(v: unknown): number | undefined {
   if (typeof v !== "number" || !Number.isFinite(v)) return undefined;

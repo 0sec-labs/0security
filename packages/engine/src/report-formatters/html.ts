@@ -1,5 +1,6 @@
+import { businessContextLabel } from "../shared/business-context.js";
 import type { ScanReport, Finding, Severity } from "../shared/index.js";
-import { describeAttackerImpact, compareFindingsBySeverity, orderByScope, isOutOfScope, reproductionFor } from "../shared/index.js";
+import { executedPocFor, executedPocLine, describeAttackerImpact, compareFindingsByBusinessContext, orderByScope, isOutOfScope, reproductionFor } from "../shared/index.js";
 import { findingPresentation, targetLabel, reportDate, safeHttpUrl } from "./presentation.js";
 import { renderOverview, type ReportWithOverview } from "./overview.js";
 
@@ -18,6 +19,7 @@ function renderFinding(f: Finding, i: number, deploymentNote?: string): string {
     ${copy.deployment ? `<aside class="finding-deployment"><span>${e(copy.deployment.label)}</span><p>${e(copy.deployment.note)}</p>${(() => { const sources = (copy.deployment.sources ?? []).flatMap(source => { const href = safeHttpUrl(source.url); return href ? [`<a href="${e(href)}" target="_blank" rel="noreferrer">${e(source.label)} ↗</a>`] : []; }); return sources.length ? `<div class="deployment-sources">${sources.join("")}</div>` : ""; })()}</aside>` : deploymentNote ? `<aside class="finding-deployment"><span>Deployment not confirmed for this finding</span><p>Confirm that this specific code path is active before treating its potential impact as production exposure.</p></aside>` : ""}
     <header class="finding-heading"><span class="badge" style="--severity:${colors[f.severity]}"><i></i>${f.severity}</span><h2>${e(copy.title)}</h2><p class="lead">${e(copy.summary)}</p></header>
     ${copy.action ? `<section class="fix"><span class="eyebrow">Recommended fix</span><p>${e(copy.action)}</p></section>` : ""}
+    ${f.businessContext ? block("Operator business context", businessContextLabel(f.businessContext)) : ""}
     ${scopeBanner}
     <nav class="tabs" aria-label="Finding ${i + 1} sections"><button type="button" class="tab active" data-section="context" aria-pressed="true">Technical detail</button><button type="button" class="tab" data-section="evidence" aria-pressed="false">Evidence</button><button type="button" class="tab" data-section="assessment" aria-pressed="false">Assessment</button></nav>
     <div class="tab-panel" data-panel="context">
@@ -27,7 +29,7 @@ function renderFinding(f: Finding, i: number, deploymentNote?: string): string {
       ${block("Analysis & remediation", f.evidence.analysis)}
       ${!f.description && !f.evidence.analysis ? '<p class="empty-note">No additional narrative was recorded. See the evidence for source references.</p>' : ""}
     </div>
-    <div class="tab-panel" data-panel="evidence">${block("Request / reproduction", f.evidence.request, true)}${block("Response / source evidence", f.evidence.response, true)}${structured("Reproduction steps",f.pocSteps)}${structured("Verification contract",f.verificationSpec)}${structured("Source verification",f.sourceVerification)}${structured("Reproduction result",f.pocExecution)}${structured("Replay verification",f.verification_result)}${structured("Proof by reproduction",reproductionFor(f,f.reproduction))}${structured("Source annotation",f.reviewAnnotation)}${structured("Remediation details",f.remediation)}${!f.evidence.request && !f.evidence.response ? '<p class="empty-note">No request or response evidence was recorded.</p>' : ""}</div>
+    <div class="tab-panel" data-panel="evidence">${block("Request / reproduction", f.evidence.request, true)}${block("Response / source evidence", f.evidence.response, true)}${structured("Reproduction steps",f.pocSteps)}${structured("Verification contract",f.verificationSpec)}${structured("Source verification",f.sourceVerification)}${structured("Reproduction result",f.pocExecution)}${structured("Replay verification",f.verification_result)}${(() => { const ex = executedPocFor(f, f.executedPoc); return ex ? `<p class="empty-note"><strong>PoC execution: ${e(ex.outcome)}.</strong> ${e(executedPocLine(ex))}.</p>` : ""; })()}${structured("PoC run record",f.executedPoc?.run)}${structured("Proof by reproduction",reproductionFor(f,f.reproduction))}${structured("Source annotation",f.reviewAnnotation)}${structured("Remediation details",f.remediation)}${!f.evidence.request && !f.evidence.response ? '<p class="empty-note">No request or response evidence was recorded.</p>' : ""}</div>
     <div class="tab-panel" data-panel="assessment"><section class="content-section"><h3>Assessment</h3><dl class="facts"><div><dt>Technical severity</dt><dd>${f.severity}</dd></div><div><dt>Status</dt><dd>${e(f.status)}</dd></div>${f.confidence != null ? `<div><dt>Confidence</dt><dd>${Math.round(f.confidence * 100)}%</dd></div>` : ""}${f.cvssScore != null ? `<div><dt>CVSS</dt><dd>${f.cvssScore.toFixed(1)}</dd></div>` : ""}</dl></section>
       ${attacker ? `<section class="content-section"><h3>${e(attacker.label ?? "What an attacker can do")}</h3><div class="narrative"><p>${e(attacker.can)}</p></div>${attacker.who || attacker.gets ? `<dl class="facts">${attacker.who ? `<div><dt>Who can do it</dt><dd>${e(attacker.who)}</dd></div>` : ""}${attacker.gets ? `<div><dt>What they get</dt><dd>${e(attacker.gets)}</dd></div>` : ""}</dl>` : ""}</section>` : ""}
       ${f.impactAssessment ? `<section class="content-section"><h3>Impact assessment</h3><dl class="impact">${Object.entries(f.impactAssessment).map(([key,value])=>`<div><dt>${e(key.replace(/_/g," "))}</dt><dd>${e(String(value))}</dd></div>`).join("")}</dl></section>` : ""}
@@ -37,7 +39,7 @@ function renderFinding(f: Finding, i: number, deploymentNote?: string): string {
   </article>`;
 }
 export function formatHtml(report: ReportWithOverview): string {
-  const e = escapeHtml, sorted = orderByScope(report.findings, compareFindingsBySeverity), target = targetLabel(report.target);
+  const e = escapeHtml, sorted = orderByScope(report.findings, compareFindingsByBusinessContext), target = targetLabel(report.target);
   // Keep human-provided target text available without exposing local checkout paths.
   const targetReference = report.target.startsWith("/") || report.target.startsWith("\\") || /^(?:[a-z]:|https?:\/\/)/i.test(report.target) ? target : report.target;
   // Escape '<' so source evidence cannot terminate the inert JSON script element.

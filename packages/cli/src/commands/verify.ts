@@ -9,12 +9,13 @@
 import { existsSync, statSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { Option, type Command } from "commander";
-import { attackerImpactSentence, firstCitation, MAX_VERIFY_FINDINGS_PER_PROMPT, parseVerdicts, verifyPrompt, type VerifyPromptFinding } from "@0/engine/shared";
+import { attackerImpactSentence, firstCitation, MAX_VERIFY_FINDINGS_PER_PROMPT, parseVerdicts, verifyPrompt, type RootCause, type VerifyPromptFinding } from "@0/engine/shared";
 import { listOsecRunDatabasePaths, osecDB, resolveOsecDbPath, type FindingModelVerification, type ModelVerdict } from "@0/engine/storage";
 import { consoleTransportOptions, type ConsoleClient, type ConsoleTransportOptions } from "../console-client.js";
 import { resolveFindingId, shortFindingId } from "../finding-id.js";
 import { connect, DEFAULT_SCAN_MODEL, defaultScanDeps, waitForThread, type ScanDeps } from "./scan.js";
 import { finishWithError, UsageError } from "./output.js";
+import { defaultVariantStore, DEFAULT_VARIANT_BUDGET_USD, huntVariants, type HuntResult, type VariantParent, type VariantStore } from "./variants.js";
 import { appendRunMetric, type RunMetric } from "../run-metrics.js";
 import { applyWorkflowDefaults } from "../workflow-defaults.js";
 import { asJson, finishedThread } from "./thread-output.js";
@@ -33,6 +34,10 @@ export interface VerifyCandidate {
   scanId: string; status: string; triage: string; timestamp: number;
   path?: string; startLine?: number; endLine?: number; impact?: string;
   verification?: FindingModelVerification;
+  /** The stored root cause, when the finding has one. */
+  rootCause?: RootCause;
+  /** Set when this finding is itself a variant of another: it is never the start of a hunt. */
+  variantOf?: string;
 }
 
 export interface VerifyDeps extends Pick<ScanDeps, "open" | "err" | "sleep" | "startConsole"> {
@@ -46,22 +51,24 @@ export interface VerifyDeps extends Pick<ScanDeps, "open" | "err" | "sleep" | "s
   now(): Date;
   /** Record one run in the metrics file (counts and ids only). Absent in tests, so they write nothing. */
   metrics?(record: Omit<RunMetric, "version" | "ci">): void;
+  /** Where root causes and variants are stored. Absent in tests that do not hunt, so they write nothing. */
+  variants?: VariantStore;
 }
 
 export interface VerifyOptions extends ConsoleTransportOptions {
   folder?: string; severity?: string; category?: string; tool?: string; scan?: string; limit?: string; force?: boolean; apply?: boolean; dryRun?: boolean;
-  budget: string; perFinding: string; concurrency: string; batch: string; maxConsecutiveFailures: string; timeout: string; model?: string; format?: string;
+  variants?: boolean; variantBudget?: string; budget: string; perFinding: string; concurrency: string; batch: string; maxConsecutiveFailures: string; timeout: string; model?: string; format?: string;
 }
 
 export interface VerifyItem {
   finding: string; title: string; severity: string; result: "verified" | "failed" | "skipped" | "planned";
   verdict?: ModelVerdict; advisorySeverity?: string; reasoning?: string; duplicateOf?: string; control?: string; threadId?: string; costUsd?: number;
-  applied?: boolean; applyRefused?: string; reason?: string;
+  applied?: boolean; applyRefused?: string; reason?: string; rootCause?: RootCause; variants?: HuntResult;
 }
 
 export interface VerifyReport {
   folder: string; dryRun: boolean; selected: number; verified: number; failed: number; skipped: number;
-  counts: Record<ModelVerdict, number>; applied: number; costUsd: number; tokens?: number; stoppedReason?: string; items: VerifyItem[];
+  counts: Record<ModelVerdict, number>; applied: number; costUsd: number; tokens?: number; stoppedReason?: string; items: VerifyItem[]; variantsCreated?: number;
 }
 
 /** The metrics record of one verify run, or undefined when no thread ran (a dry run, or nothing selected). */
@@ -100,6 +107,7 @@ function readCandidates(dbPath: string | undefined): VerifyCandidate[] {
         let impact: string | undefined;
         try { impact = row.impactAssessment ? attackerImpactSentence({ impactAssessment: JSON.parse(String(row.impactAssessment)), category: String(row.category) }) : undefined; } catch { /* unreadable assessment: no impact text */ }
         const verification = db.getFindingModelVerification(id);
+        const rootCause = db.getFindingRootCause(id);
         out.push({
           id, dbPath: path, fingerprint: String(row.fingerprint ?? id), title: String(row.title), severity: String(row.severity), category: String(row.category),
           tool: typeof row.tool === "string" ? row.tool : null, description: String(row.description ?? ""), scanId: String(row.scanId), status: String(row.status),
@@ -107,6 +115,8 @@ function readCandidates(dbPath: string | undefined): VerifyCandidate[] {
           ...(annotation && typeof annotation.path === "string" && annotation.path ? { path: annotation.path, ...(typeof annotation.startLine === "number" ? { startLine: annotation.startLine } : {}), ...(typeof annotation.endLine === "number" ? { endLine: annotation.endLine } : {}) } : {}),
           ...(impact ? { impact } : {}),
           ...(verification ? { verification } : {}),
+          ...(rootCause ? { rootCause } : {}),
+          ...(typeof row.variantOf === "string" && row.variantOf ? { variantOf: row.variantOf } : {}),
         });
       }
     } finally { db.close(); }
@@ -134,7 +144,14 @@ export const defaultVerifyDeps: VerifyDeps = {
   },
   now: () => new Date(),
   metrics: record => appendRunMetric(record),
+  variants: defaultVariantStore(),
 };
+
+const toParent = (c: VerifyCandidate, rootCause?: RootCause): VariantParent => ({
+  id: c.id, dbPath: c.dbPath, scanId: c.scanId, title: c.title, category: c.category, severity: c.severity, description: c.description,
+  ...(c.path ? { path: c.path } : {}), ...(c.startLine ? { startLine: c.startLine } : {}), ...(c.endLine ? { endLine: c.endLine } : {}),
+  ...((rootCause ?? c.rootCause) ? { rootCause: (rootCause ?? c.rootCause)! } : {}),
+});
 
 const emptyCounts = (): Record<ModelVerdict, number> => ({ "true-positive": 0, "false-positive": 0, fixed: 0, uncertain: 0, duplicate: 0 });
 const oneLine = (text: string): string => text.replace(/\s+/g, " ").trim();
@@ -291,7 +308,13 @@ async function runVerifyFlow(ids: string[], options: VerifyOptions, deps: Verify
       }
     }
     deps.save(c, stored);
-    return { failed, item: { ...base(c), result: "verified", verdict, reasoning, ...(advisory ? { advisorySeverity: advisory } : {}), ...(duplicateOf ? { duplicateOf } : {}), ...(control ? { control } : {}), ...(thread.id ? { threadId: thread.id } : {}), ...(share !== undefined ? { costUsd: share } : {}), ...(applied ? { applied } : {}), ...(applyRefused ? { applyRefused } : {}) } };
+    // The root cause of a real finding seeds the variant hunt; it is stored whether or not a hunt follows.
+    const rootCause = verdict === "true-positive" ? got?.rootCause : undefined;
+    if (rootCause && deps.variants) {
+      try { deps.variants.saveRootCause(toParent(c, rootCause), rootCause); c.rootCause = rootCause; }
+      catch (error) { deps.err(`warning: could not store the root cause (${error instanceof Error ? error.message.split("\n")[0] : "unknown error"})`); }
+    }
+    return { failed, item: { ...base(c), result: "verified", verdict, reasoning, ...(rootCause ? { rootCause } : {}), ...(advisory ? { advisorySeverity: advisory } : {}), ...(duplicateOf ? { duplicateOf } : {}), ...(control ? { control } : {}), ...(thread.id ? { threadId: thread.id } : {}), ...(share !== undefined ? { costUsd: share } : {}), ...(applied ? { applied } : {}), ...(applyRefused ? { applyRefused } : {}) } };
   };
 
   const work = async () => {
@@ -330,7 +353,20 @@ async function runVerifyFlow(ids: string[], options: VerifyOptions, deps: Verify
       deps.err(`${finished}/${groups.length} ${group.map(c => items.get(c.id)!.verdict ?? items.get(c.id)!.result).join(", ")}: ${group[0]!.title}${group.length > 1 ? ` (+${group.length - 1})` : ""}`);
     }
   };
-  try { await Promise.all(Array.from({ length: concurrency }, work)); } finally { stop?.(); }
+  try {
+    await Promise.all(Array.from({ length: concurrency }, work));
+    // A real finding is the seed of a hunt for the same bug at other sites. The hunts run one after another after the checks.
+    if (client && deps.variants && !options.dryRun && options.variants !== false) {
+      for (const group of groups) for (const c of group) {
+        const item = items.get(c.id);
+        if (item?.verdict !== "true-positive" || c.variantOf) continue;
+        const hunt = await huntVariants(client, { store: deps.variants, err: deps.err, sleep: deps.sleep }, folder, toParent(c, c.rootCause), { timeout: options.timeout, budget: options.variantBudget ?? String(DEFAULT_VARIANT_BUDGET_USD), ...(options.model ? { model: options.model } : {}) });
+        item.variants = hunt;
+        spent += hunt.costUsd ?? 0;
+        deps.err(`variants of ${shortFindingId(c.id)}: ${hunt.error && !hunt.created.length ? `hunt failed (${hunt.error})` : `${hunt.created.length} recorded`}`);
+      }
+    }
+  } finally { stop?.(); }
 
   for (const group of groups) for (const c of group) {
     if (items.has(c.id)) continue;
@@ -344,6 +380,7 @@ async function runVerifyFlow(ids: string[], options: VerifyOptions, deps: Verify
     verified: ordered.filter(i => i.result === "verified").length, failed: ordered.filter(i => i.result === "failed").length,
     skipped: ordered.filter(i => i.result === "skipped").length, counts, applied: ordered.filter(i => i.applied).length,
     costUsd: Number(spent.toFixed(6)), ...(tokens ? { tokens } : {}), ...(stoppedReason ? { stoppedReason } : {}), items: ordered,
+    ...(ordered.some(i => i.variants) ? { variantsCreated: ordered.reduce((n, i) => n + (i.variants?.created.length ?? 0), 0) } : {}),
   };
 }
 
@@ -353,6 +390,7 @@ export function renderVerifyReport(report: VerifyReport): string {
     `${report.dryRun ? "Verification plan" : "Verification report"} for ${report.folder} (experimental, advisory)`,
     `Selected ${report.selected}, verified ${report.verified}, failed ${report.failed}, skipped ${report.skipped}`,
     `true-positive ${c["true-positive"]}, false-positive ${c["false-positive"]}, fixed ${c.fixed}, uncertain ${c.uncertain}, duplicate ${c.duplicate}${report.applied ? `, suppressed by --apply ${report.applied}` : ""}`,
+    ...(report.variantsCreated !== undefined ? [`Variants recorded: ${report.variantsCreated} (see \`0security findings show\`)`] : []),
     `Cost $${report.costUsd.toFixed(4)}${report.stoppedReason ? `, stopped: ${report.stoppedReason}` : ""}`,
   ];
   if (report.items.length) lines.push("");
@@ -382,9 +420,11 @@ export function registerVerifyCommand(program: Command, deps: VerifyDeps = defau
     .option("--max-consecutive-failures <n>", "Stop after this many checks in a row that return no verdict", "3")
     .option("--model <model>", `Model for the threads (default: ${DEFAULT_SCAN_MODEL})`)
     .option("--timeout <seconds>", "Maximum seconds to wait for one thread", "600")
+    .option("--no-variants", "Do not hunt for the same bug at other sites after a true-positive verdict")
+    .option("--variant-budget <usd>", "Spend cap for each variant hunt, in USD", String(DEFAULT_VARIANT_BUDGET_USD))
     .option("--dry-run", "List what would be checked and skipped; change nothing")
     .addOption(new Option("--format <format>", "Output: text or json").choices(["text", "json"])))
-    .addHelpText("after", "\nA verdict is advice stored next to the finding: severity and status stay as they were. With --apply only a false-positive verdict that cites a control at path:line suppresses a finding, with a note you can read in `0security findings show`. Running it again skips findings that already have a verdict.\nExit codes: 0 done, 1 a check returned no verdict or the run stopped on failures, 2 usage error, 3 the total budget ran out.")
+    .addHelpText("after", "\nA verdict is advice stored next to the finding: severity and status stay as they were. With --apply only a false-positive verdict that cites a control at path:line suppresses a finding, with a note you can read in `0security findings show`. Running it again skips findings that already have a verdict. A true-positive verdict also records the finding's root cause and starts a hunt for variants (the same bug at other sites), stored as findings that link back with variantOf; --no-variants turns that off.\nExit codes: 0 done, 1 a check returned no verdict or the run stopped on failures, 2 usage error, 3 the total budget ran out.")
     .action(async (findings: string[], options: VerifyOptions, command: Command) => {
       const json = options.format === "json";
       const err = (text: string) => process.stderr.write(`${text}\n`);

@@ -1,3 +1,4 @@
+import { createServer } from "node:http";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -53,12 +54,12 @@ const pr = (over: Partial<PullRequest> = {}): PullRequest => ({ platform: "bitbu
 
 describe("git scan runner", () => {
   it("scans the pull request's commit in a temporary worktree and cleans up", async () => {
-    const runner = gitScanRunner({ checkout: clone, scanCommand: [process.execPath, fakeScan], budget: "1.5" });
+    const runner = gitScanRunner({ checkout: clone, scanCommand: [process.execPath, fakeScan], budget: "1.5", providerId: "azure", model: "deployment", reasoning: "high" });
     const result = await runner.scan(pr());
     expect(result).toMatchObject({ sha: featureSha, exitCode: 0 });
     const report = JSON.parse(result.json) as { seen: { args: string[]; hasNew: boolean; token: string | null; secret: string | null } };
     expect(report.seen.hasNew).toBe(true);
-    expect(report.seen.args).toEqual(expect.arrayContaining(["--diff", "origin/main", "--format", "json", "--budget", "1.5"]));
+    expect(report.seen.args).toEqual(expect.arrayContaining(["--diff", "origin/main", "--format", "json", "--budget", "1.5", "--provider", "azure", "--model", "deployment", "--reasoning", "high"]));
     // The scan never sees the Bitbucket token or the webhook secret.
     expect(report.seen.token).toBeNull();
     expect(report.seen.secret).toBeNull();
@@ -67,6 +68,42 @@ describe("git scan runner", () => {
     expect(run(clone, "for-each-ref", "refs/0")).toBe("");
     expect(existsSync(join(clone, "new.txt"))).toBe(false);
     expect(run(clone, "rev-parse", "--abbrev-ref", "HEAD")).toBe("main");
+  });
+
+  it("fetches real approved HTTP git under restricted egress, rejecting repository mismatches and rewrites", async () => {
+    run(origin, "update-ref", "refs/pull-requests/6/from", featureSha);
+    run(origin, "update-server-info");
+    const requests: string[] = [];
+    const server = createServer((req, res) => {
+      requests.push(req.url!);
+      expect(req.headers.authorization).toBeUndefined();
+      const path = new URL(req.url!, "http://localhost").pathname;
+      const prefix = "/bitbucket/scm/ws/app.git/";
+      if (!path.startsWith(prefix) || path.includes("..")) { res.writeHead(404); res.end(); return; }
+      try { res.end(readFileSync(join(origin, ".git", path.slice(prefix.length)))); }
+      catch { res.writeHead(404); res.end(); }
+    });
+    await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+    const { port } = server.address() as { port: number };
+    const base = `http://127.0.0.1:${port}/bitbucket`;
+    const httpClone = join(root, "http-clone");
+    run(root, "init", "-q", "-b", "main", httpClone);
+    run(httpClone, "remote", "add", "origin", `${base}/scm/ws/app.git`);
+    vi.stubEnv("ZERO_ENTERPRISE", "1"); vi.stubEnv("ZERO_BITBUCKET_URL", base);
+    try {
+      const runner = gitScanRunner({ checkout: httpClone, scanCommand: [process.execPath, fakeScan] });
+      expect((await runner.scan(pr({ platform: "bitbucket-dc", id: 6, headSha: featureSha }))).sha).toBe(featureSha);
+      expect(requests.some(path => path.includes("info/refs"))).toBe(true);
+      expect(requests.some(path => path.includes("/objects/"))).toBe(true);
+      const before = requests.length;
+      await expect(runner.scan(pr({ platform: "bitbucket-dc", repo: "other", headSha: featureSha }))).rejects.toThrow("does not match");
+      run(httpClone, "config", "url.https://evil.invalid/.insteadOf", base);
+      await expect(runner.scan(pr({ platform: "bitbucket-dc", headSha: featureSha }))).rejects.toThrow("URL rewrites");
+      expect(requests.length).toBe(before);
+    } finally {
+      vi.unstubAllEnvs();
+      await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+    }
   });
 
   it("also hides the variable a trigger names for its token", async () => {

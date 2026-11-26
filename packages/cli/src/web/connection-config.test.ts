@@ -27,3 +27,11 @@ it("preserves provider-specific transport restrictions", () => {
   expect(() => validateConnectionConfig("anthropic", { baseUrl: "http://remote.example/v1" })).toThrow();
   expect(() => validateConnectionConfig("anthropic", { model: "arbitrary" })).toThrow();
 });
+
+it("Bedrock stores region/model only and respects host environment precedence", () => {
+  const home = mkdtempSync(join(tmpdir(), "0-bedrock-config-")); homes.push(home);
+  saveConnectionConfig("bedrock", { region: "eu-central-1", model: "eu.vendor.model:0" }, home);
+  expect(connectionConfigEnvPatch({}, home)).toEqual({ AWS_REGION: "eu-central-1", ZERO_BEDROCK_MODEL: "eu.vendor.model:0" });
+  expect(connectionConfigEnvPatch({ AWS_DEFAULT_REGION: "us-west-2", ZERO_BEDROCK_MODEL: "host-model" }, home)).toEqual({});
+  expect(() => validateConnectionConfig("bedrock", { region: "https://evil.example" })).toThrow();
+});

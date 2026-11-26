@@ -1,0 +1,12 @@
+# Manual qualification pipeline in a trusted test repository. Does not push an image or reports.
+# No model key or model charge. Enable Docker service access on the runner.
+image: atlassian/default-image:4
+pipelines:
+  custom:
+    qualify-pipe:
+      - step:
+          name: Build image and run scanners on synthetic PR
+          services: [docker]
+          script:
+            - docker build -f ci/bitbucket-pipe/Dockerfile -t 0security-pipe:qualification .
+            - sh ci/packaging/qualify-pipe.sh 0security-pipe:qualification

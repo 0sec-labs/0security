@@ -35,6 +35,10 @@ export const ROUTE_RULES: readonly Rule[] = [
   rule("read", /^\/api\/console\/audit-log$/, "audit.read"),
   rule("write", /^\/api\/console\/audit-log$/, "settings.write"),
 
+  // Cost and host-receipt administration remain owner-only; handlers also enforce the signed-in role.
+  rule("read", /^\/api\/console\/run-metrics$/, "settings.write"),
+  rule("write", /^\/api\/console\/run-metrics\/refresh-host$/, "settings.write"),
+
   // Findings.
   rule("read", /^\/api\/(?:dashboard|scans|findings|finding-family|findings-server|events)(?:\/|$)/, "findings.read"),
   rule("write", /^\/api\/(?:findings|finding-family)(?:\/|$)/, "findings.triage"),

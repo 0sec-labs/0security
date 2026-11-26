@@ -46,6 +46,8 @@ const sharedSettings = {
 const terminalSettings = new Set([
   // Loads and runs source from the host disk with full credentials. Operator-only; a web or team session must never flip it.
   "allowDevSourceUpdates",
+  // A file path on the machine that runs the engine; set it with `0security config set findingsContext <path>`.
+  "findingsContext",
 ]);
 const browserSettings = new Set(["web-theme", "web-color-theme", "web-accent", "web-font-size", "web-motion"]);
 export function settingSurface(key: string): "shared" | "browser" | "terminal" | "unsupported" {

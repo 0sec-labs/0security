@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { budgetCapSchema } from "./sentinel-budget.js";
 
 /**
  * Sentinels: named, always-on security agents that sit alongside Automations (workflows).
@@ -74,6 +75,12 @@ const base = {
   folder: z.string().trim().min(1).max(4096).nullable().default(null),
   hostId: z.string().trim().min(1).max(256).nullable().default(null),
   model: modelSchema.nullable().default(null),
+  /** USD cap for each automated run, checked as model usage receipts arrive. */
+  runBudgetUsd: z.number().finite().min(0.01).max(100).nullable().optional(),
+  /** Most the Sentinel may spend per UTC day, in USD. Once reached, unattended runs are refused until the next day. Null or absent: no limit. */
+  dailyBudgetUsd: budgetCapSchema.nullable().optional(),
+  /** Most the Sentinel may spend per UTC month, in USD. Once reached, unattended runs are refused until the next month. Null or absent: no limit. */
+  monthlyBudgetUsd: budgetCapSchema.nullable().optional(),
   notifications: notificationsSchema.prefault({}),
   status: z.enum(SENTINEL_STATUSES).default("paused"),
   /** Automations (workflow definition ids) this Sentinel owns; they share its notes files. */
@@ -116,10 +123,11 @@ export type SentinelCreateInput = z.output<typeof SentinelCreateSchema>;
  * they now mean, so Sentinels already reviewed with shell access keep their acknowledgement, while a Sentinel that was
  * read-only needs one review because its authority widened.
  */
-export function sentinelReviewFingerprint(sentinel: Pick<Sentinel, "model" | "skills" | "hostId" | "folder">): string {
+export function sentinelReviewFingerprint(sentinel: Pick<Sentinel, "model" | "skills" | "hostId" | "folder" | "runBudgetUsd">): string {
   const sorted = (items: string[]) => [...items].sort();
   return JSON.stringify({
     model: sentinel.model ? { p: sentinel.model.providerId, m: sentinel.model.model, r: sentinel.model.reasoning ?? null } : null,
+    ...(sentinel.runBudgetUsd !== undefined ? { runBudgetUsd: sentinel.runBudgetUsd } : {}),
     toolAccess: "exec", autonomy: "act", skills: sorted(sentinel.skills), hostId: sentinel.hostId,
     ...(sentinel.folder ? { folder: sentinel.folder } : {}),
   });

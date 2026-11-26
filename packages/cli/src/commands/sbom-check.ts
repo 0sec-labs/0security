@@ -1,13 +1,13 @@
 /** `0 sbom check`: look the components of an SBOM up in OSV, and optionally in deps.dev for newer versions. */
 import { statSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
-import { advisoriesToSarif, advisoriesToText, checkBomAgainstOsv, checkOutdated, checkSlopsquat, outdatedToText, slopsquatFails, slopsquatSarifParts, slopsquatToText } from "@0/engine";
+import { assessJavaDependencyReachability, advisoriesToSarif, advisoriesToText, checkBomAgainstOsv, checkOutdated, checkSlopsquat, outdatedToText, slopsquatFails, slopsquatSarifParts, slopsquatToText } from "@0/engine";
 import { VERSION } from "@0/engine/shared";
 import { UsageError } from "./output.js";
 import { resolutionLine } from "./sbom-resolution.js";
 import type { SbomDeps } from "./sbom.js";
 
-export interface CheckOptions { format?: string; output?: string; outdated?: boolean; registry?: boolean; newDays?: string; private?: string[]; failOn?: string }
+export interface CheckOptions { format?: string; output?: string; outdated?: boolean; registry?: boolean; newDays?: string; private?: string[]; failOn?: string; source?: string }
 
 /** The file each component came from: its lockfile when the SBOM records one (`0:source`, cdxgen's `SrcFile`, or evidence), otherwise the SBOM itself. */
 function componentLocator(bom: unknown, sbomPath: string): (purl: string) => string {
@@ -43,8 +43,23 @@ export async function runCheckReport(file: string, options: CheckOptions, deps: 
   if (!["text", "json", "sarif"].includes(format)) throw new UsageError("--format must be text, json or sarif.");
   let bom: unknown;
   try { bom = JSON.parse(deps.read(resolve(file))); } catch (error) { if (error instanceof UsageError) throw error; throw new UsageError(`'${file}' is not a JSON SBOM.`); }
+  let reachability;
+  if (options.source !== undefined) {
+    const folder = resolve(options.source);
+    let valid = false;
+    try { valid = statSync(folder).isDirectory(); } catch { /* report usage error below */ }
+    if (!valid) throw new UsageError(`--source: '${options.source}' is not a folder.`);
+    reachability = assessJavaDependencyReachability(folder, bom);
+  }
   const fetchOption = deps.fetch ? { fetch: deps.fetch } : {};
   const result = await checkBomAgainstOsv(bom, fetchOption).catch(error => { throw new Error(`Could not check against OSV: ${error instanceof Error ? error.message : String(error)}`); });
+  if (reachability) {
+    const byPurl = new Map(reachability.components.map(item => [item.purl, item]));
+    for (const advisory of result.advisories) {
+      const evidence = byPurl.get(advisory.purl);
+      if (evidence) advisory.reachability = evidence;
+    }
+  }
   const failOn = options.failOn?.toLowerCase();
   if (failOn !== undefined && !["critical", "high", "medium", "low", "info"].includes(failOn)) throw new UsageError("--fail-on must be one of critical, high, medium, low or info.");
   const newDays = options.newDays === undefined ? undefined : Number(options.newDays);
@@ -53,7 +68,7 @@ export async function runCheckReport(file: string, options: CheckOptions, deps: 
   const registry = options.registry ? await checkSlopsquat(bom, { ...fetchOption, ...(newDays !== undefined ? { newDays } : {}), privatePatterns: options.private ?? [] }) : undefined;
   const outdated = options.outdated ? await checkOutdated(bom, fetchOption) : undefined;
   let text: string;
-  if (format === "json") text = `${JSON.stringify({ ...result, ...(outdated ? { outdated } : {}), ...(registry ? { registry } : {}) }, null, 2)}\n`;
+  if (format === "json") text = `${JSON.stringify({ ...result, ...(reachability ? { reachability } : {}), ...(outdated ? { outdated } : {}), ...(registry ? { registry } : {}) }, null, 2)}\n`;
   else if (format === "sarif") {
     const locate = componentLocator(bom, resolve(file));
     const sarif = advisoriesToSarif(result.advisories, { toolVersion: VERSION, locate }) as { runs: Array<{ tool: { driver: { rules: object[] } }; results: object[] }> };
@@ -68,6 +83,7 @@ export async function runCheckReport(file: string, options: CheckOptions, deps: 
     if (format !== "text" && outdated) deps.err(outdatedToText(outdated).trimEnd());
     if (format !== "text" && registry) deps.err(slopsquatToText(registry).trimEnd());
   } else deps.out(text);
+  if (reachability && (reachability.graphTruncated || reachability.usage.truncated)) deps.err("Source or dependency evidence is incomplete; vulnerable-code reachability remains unknown.");
   if (registry?.notChecked) deps.err(`Registry check not checked: ${registry.notChecked}.`);
   if (format !== "text") deps.err(resolutionLine(result.checked, result.unresolved));
   if (format === "text" && result.withoutDetails) deps.err(`${result.withoutDetails} advisories are listed by id only (details unavailable or over the limit).`);

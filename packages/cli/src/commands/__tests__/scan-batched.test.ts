@@ -418,3 +418,48 @@ describe("single thread failures", () => {
     expect(report(h).status).toBe("complete");
   });
 });
+
+describe("operator CODEOWNERS batching", () => {
+  it("groups by owners without dropping unowned units and tells each real scan thread its labels", async () => {
+    const dir = app(4);
+    const owners = join(temp(), "CODEOWNERS");
+    writeFileSync(owners, "/routes/r00.js @payments\n/routes/r01.js @payments\n/routes/r02.js @platform\n");
+    const db = join(temp(), "db.sqlite");
+    const h = harness(db);
+    await runScan(dir, opts(db, { codeowners: owners, batches: "on" }), h.deps);
+    expect(h.messages.some(message => message.includes("Ownership labels for this batch: @payments"))).toBe(true);
+    expect(h.messages.some(message => message.includes("Ownership labels for this batch: @platform"))).toBe(true);
+    const ownerMessages = h.messages.filter(message => message.includes("Ownership labels for this batch:"));
+    expect(ownerMessages.every(message => !message.includes("routes/r03.js"))).toBe(true);
+    expect(h.messages.some(message => message.includes("routes/r03.js"))).toBe(true);
+    expect(report(h).coverage).toMatchObject({ complete: true, entryPoints: { total: 4, reviewed: 4 } });
+    const runs = report(h).coverage.batchRuns;
+    expect(runs).toHaveLength(h.created.length);
+    expect(runs.every((run: { attempts: number; durationMs: number; reviewedUnits: number; totalUnits: number; threadIds: string[] }) => run.attempts === 1 && run.durationMs >= 0 && run.reviewedUnits === run.totalUnits && run.threadIds.length === 1)).toBe(true);
+    expect(runs.some((run: { owners?: string[] }) => run.owners?.includes("@payments"))).toBe(true);
+  });
+
+  it("rejects a missing ownership file before opening the model transport", async () => {
+    const dir = app(4);
+    const h = harness("x");
+    await runScan(dir, opts(join(temp(), "db.sqlite"), { codeowners: join(dir, "missing"), batches: "on" }), h.deps);
+    expect(h.err.join("\n")).toContain("--codeowners");
+    expect(process.exitCode).toBe(2);
+    expect(h.created).toHaveLength(0);
+  });
+});
+
+
+it("does not report a known cost when a started batch loses its report", async () => {
+  const dir = app(10);
+  const db = join(temp(), "db.sqlite");
+  const h = harness(db);
+  const load = h.deps.loadReport;
+  h.deps.loadReport = async (client, id) => { if (id === "t1") throw new Error("report transport lost"); return load(client, id); };
+  const rows: unknown[] = [];
+  h.deps.metrics = row => rows.push(row);
+  await runScan(dir, opts(db, { batches: "on", retries: "0" }), h.deps);
+  expect(report(h).costUsd).toBeUndefined();
+  expect(report(h).coverage.batchRuns[0].costUsd).toBeNull();
+  expect(rows).toEqual([expect.objectContaining({ costUsd: null, tokens: null })]);
+});

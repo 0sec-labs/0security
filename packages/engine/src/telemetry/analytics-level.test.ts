@@ -39,9 +39,9 @@ describe("resolveAnalyticsLevel — parsing", () => {
   });
 });
 
-describe("the single opt-out", () => {
-  it("is DO_NOT_TRACK and nothing else", () => {
-    expect([...ANALYTICS_OPT_OUT_ENV]).toEqual(["DO_NOT_TRACK"]);
+describe("the opt-outs", () => {
+  it("are DO_NOT_TRACK and ZERO_ENTERPRISE and nothing else", () => {
+    expect([...ANALYTICS_OPT_OUT_ENV]).toEqual(["DO_NOT_TRACK", "ZERO_ENTERPRISE"]);
   });
 
   it("DO_NOT_TRACK forces off", () => {
@@ -55,8 +55,14 @@ describe("the single opt-out", () => {
     expect(resolveAnalyticsLevel({ "ZERO_ANALYTICS_LEVEL": "usage", DO_NOT_TRACK: "false" })).toBe("usage");
   });
 
-  it("ZERO_NO_TELEMETRY, ZERO_OFFLINE and ZERO_ENTERPRISE no longer affect analytics", () => {
-    for (const name of ["ZERO_NO_TELEMETRY", "ZERO_OFFLINE", "ZERO_ENTERPRISE"]) {
+  it("ZERO_ENTERPRISE forces analytics off, like DO_NOT_TRACK", () => {
+    expect(analyticsOptedOut({ ZERO_ENTERPRISE: "1" })).toBe(true);
+    expect(resolveAnalyticsLevel({ ZERO_ENTERPRISE: "1", ZERO_ANALYTICS_LEVEL: "usage" })).toBe("off");
+    expect(analyticsOptedOut({ ZERO_ENTERPRISE: "0" })).toBe(false);
+  });
+
+  it("ZERO_NO_TELEMETRY and ZERO_OFFLINE do not affect analytics", () => {
+    for (const name of ["ZERO_NO_TELEMETRY", "ZERO_OFFLINE"]) {
       expect(analyticsOptedOut({ [name]: "1" })).toBe(false);
       expect(resolveAnalyticsLevel({ [name]: "1" })).toBe("usage");
     }

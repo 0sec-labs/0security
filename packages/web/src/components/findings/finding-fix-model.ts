@@ -38,3 +38,14 @@ export function parseDiff(diff: string): DiffLine[] {
     return { kind: "context", text };
   });
 }
+
+/** Host checks never inherit the result of local regression commands. */
+export function ciLabel(record: FindingFixRecord): string {
+  switch (record.ci?.status) {
+    case "passing": return "CI passed";
+    case "failing": return "CI failed";
+    case "pending": return "CI pending";
+    case "none": return "No CI checks reported";
+    default: return "CI status unavailable";
+  }
+}

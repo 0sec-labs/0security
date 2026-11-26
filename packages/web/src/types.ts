@@ -83,6 +83,7 @@ export type FindingRecord = {
   evidenceResponse: string;
   evidenceAnalysis?: string | null;
   impactAssessment?: ImpactAssessment | null;
+  businessContext?: import("@0/engine/shared").FindingBusinessContext | null;
   /** Proposed recipe (never run) and the harness result, when there is one. */
   reproduction?: FindingReproduction | null;
 };
@@ -204,6 +205,8 @@ export type FindingFixRecord = {
   recordedAt: string;
   diff?: string;
   diffTruncated?: boolean;
+  /** Code-host CI snapshot; local --test results remain separate. */
+  ci?: { status: "passing" | "failing" | "pending" | "none" | "unavailable"; checkedAt: string; url?: string };
 };
 
 export type FindingFixInfo = { records: FindingFixRecord[]; command: string };

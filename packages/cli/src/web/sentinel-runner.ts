@@ -1,3 +1,5 @@
+import { cancellationRetry } from "./cancellation-retry.js";
+import { usageTokens, type MetricSink } from "../run-metrics.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { SentinelStore, type SecurityWorkflowStore } from "@0/engine/storage";
@@ -7,10 +9,13 @@ import {
   CHECKS_JQ, RELEASES_JQ, TAGS_JQ, checksFromPoll, isCommitSha, isSafeRef, matchesCheck, matchesRelease, releasesFromPoll, statusContext, statusFor, tagsFromPoll,
   type GithubEvent,
 } from "./sentinel-github-events.js";
+import { runGh } from "../host/gh.js";
+import { packSarif } from "../commands/findings-upload.js";
+import { buildSentinelSarif, neutralise } from "./sentinel-github-results.js";
 import { diffRightLines, inlineMarker, planInlineSuggestions, type SuggestionFinding } from "./pr-review.js";
 import {
-  isSafeGitRef, nextSentinelFire, sentinelNeedsReview, sentinelPollMs, sentinelReviewFingerprint,
-  type ShareSafeReport, type Sentinel, type SentinelActivation, type SentinelTrigger, type SecurityWorkflow,
+  isSafeGitRef, nextSentinelFire, resultsComment, resultsSarif, sentinelNeedsReview, sentinelPollMs, sentinelReviewFingerprint,
+  type ShareSafeReport, type Sentinel, type SentinelGithubPrConfig, type SentinelActivation, type SentinelTrigger, type SecurityWorkflow,
 } from "@0/engine/shared";
 import { consoleExecutionProfile } from "../console-execution.js";
 import { AgentTurnDelivery, type TurnResult } from "./agent-turns.js";
@@ -24,7 +29,7 @@ const MISSED_GRACE_MS = 60_000;
 const MAX_PR_LAUNCHES_PER_POLL = 3;
 const MAX_PR_DIFF_CHARS = 14_000;
 const MAX_EVENT_LAUNCHES_PER_POLL = 3;
-/** The trigger cursor keeps 200 entries. A poll that returns more could not be remembered, so it is refused instead of replayed. */
+/** Release, tag and check polls: the cursor could not remember more than this many, so a poll that returns more is refused instead of replayed. */
 const MAX_POLLED_EVENTS = 190;
 /** Pull request comments: at most one per pull request per minute and 30 per hour for the whole engine. */
 const prCommentMinGapMs = () => { const value = Number(process.env.ZERO_PR_COMMENT_MIN_GAP_MS); return Number.isFinite(value) && value >= 0 ? value : 60_000; };
@@ -56,7 +61,7 @@ export interface SentinelMissionRuntime {
   subscribe?(id: string, listener: (event: SentinelSessionEvent) => void): () => void;
   cancel?(id: string): Promise<unknown>;
   /** Cumulative cost of the mission so far; costUsd is undefined when pricing is unknown. */
-  usage?(id: string): { costUsd?: number } | undefined;
+  usage?(id: string): { costUsd?: number; costUnavailable?: boolean; inputTokens?: number; outputTokens?: number } | undefined;
   /** Is the mission still live in this engine? Defaults to "yes" when absent. */
   exists?(id: string): boolean;
   /** Restore a saved mission after an engine restart; returns the live id. */
@@ -78,18 +83,26 @@ export interface SentinelMissionRuntime {
  */
 export const agentsPersistentThreadFromEnv = (): boolean => !/^(0|false|off|no)$/i.test((process.env.ZERO_AGENTS_PERSISTENT_THREAD ?? "").trim());
 /** Minimal `gh` seam (same shape as the engine's GhClient). Credentials stay in gh's own store. */
-export interface SentinelGhClient { run(args: string[]): Promise<{ stdout: string }> }
-const defaultSentinelGh = (): SentinelGhClient => ({ run: async args => { assertEgressAllowed("GitHub (gh)"); const { stdout } = await execute("gh", args, { timeout: 30_000, maxBuffer: 4_000_000 }); return { stdout }; } });
+export interface SentinelGhClient { run(args: string[], input?: string): Promise<{ stdout: string }> }
+/** `input` is a request body for standard input (a SARIF upload). */
+const defaultSentinelGh = (): SentinelGhClient => ({ run: async (args, input) => {
+  assertEgressAllowed("GitHub (gh)");
+  if (input !== undefined) return { stdout: await runGh(args, input) };
+  const { stdout } = await execute("gh", args, { timeout: 30_000, maxBuffer: 4_000_000 });
+  return { stdout };
+} });
 
 /**
  * Where a finished run posts its summary. A pull request number means one comment (found by a hidden marker, edited in place).
  * `mode: "status"` means a commit status on the commit, or on the commit `ref` points to (a tag, resolved when posting).
+ * `mode: "sarif"` means only a code scanning upload. Any mode with `sarifRef` (a full Git ref) also uploads the findings as SARIF;
+ * the commit is `headSha`, or the commit the tag in `ref` points to when `headSha` is not a commit.
  */
-export type SummaryTarget = { repo: string; headSha: string; fork: boolean } & ({ pr: number; mode?: "comment" } | { pr?: number; mode: "status"; ref?: string });
+export type SummaryTarget = { repo: string; headSha: string; fork: boolean; sarifRef?: string } & ({ pr: number; mode?: "comment" } | { pr?: number; mode: "status"; ref?: string } | { pr?: number; mode: "sarif"; ref?: string });
 
 export interface SentinelActor { userId: string; displayName: string; role?: "owner" | "editor" | "viewer"; onMissionCreated?: (missionId: string) => void }
 export class SentinelRunError extends Error {
-  constructor(message: string, readonly statusCode: number, readonly kind: "inactive" | "review" | "busy" | "invalid" = "invalid") { super(message); this.name = "SentinelRunError"; }
+  constructor(message: string, readonly statusCode: number, readonly kind: "inactive" | "review" | "busy" | "invalid" | "budget" = "invalid") { super(message); this.name = "SentinelRunError"; }
 }
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error)).slice(0, 4_000);
@@ -138,16 +151,18 @@ export class SentinelRunner {
   readonly #executionProfile: () => "local" | "smolvm";
   readonly #checkout: (repo: string) => Promise<string | undefined>;
   readonly #persistent: () => boolean;
+  readonly #metrics: MetricSink | undefined;
   readonly #turns: AgentTurnDelivery;
 
-  constructor(options: { store: SentinelStore; workflows: SecurityWorkflowStore; missions: SentinelMissionRuntime; gh?: SentinelGhClient; now?: () => number; executionProfile?: () => "local" | "smolvm"; checkout?: (repo: string) => Promise<string | undefined>; persistentThread?: () => boolean; bitbucket?: { env?: NodeJS.ProcessEnv; reviewer?: BitbucketRunDeps["reviewer"] } }) {
+  constructor(options: { metrics?: MetricSink; store: SentinelStore; workflows: SecurityWorkflowStore; missions: SentinelMissionRuntime; gh?: SentinelGhClient; now?: () => number; executionProfile?: () => "local" | "smolvm"; checkout?: (repo: string) => Promise<string | undefined>; persistentThread?: () => boolean; bitbucket?: { env?: NodeJS.ProcessEnv; reviewer?: BitbucketRunDeps["reviewer"] } }) {
+    this.#metrics = options.metrics;
     this.#bitbucketEnv = options.bitbucket?.env; this.#bitbucketReviewer = options.bitbucket?.reviewer;
     this.#store = options.store; this.#workflows = options.workflows; this.#missions = options.missions;
     this.#executionProfile = options.executionProfile ?? (() => { try { return consoleExecutionProfile(); } catch { return "local"; } });
     this.#checkout = options.checkout ?? findCheckout;
     this.#gh = options.gh ?? defaultSentinelGh(); this.#now = options.now ?? Date.now;
     this.#persistent = options.persistentThread ?? agentsPersistentThreadFromEnv;
-    this.#turns = new AgentTurnDelivery({ store: this.#store, missions: this.#missions, now: this.#now, ensureHome: sentinel => this.#homeMissionInfo(sentinel, undefined, sentinelReviewFingerprint(sentinel)), postSummary: (sentinel, comment, missionId, turnId, exclude) => this.#postSummary(sentinel, comment, missionId, turnId, exclude, true) });
+    this.#turns = new AgentTurnDelivery({ metrics: options.metrics, store: this.#store, missions: this.#missions, now: this.#now, ensureHome: sentinel => this.#homeMissionInfo(sentinel, undefined, sentinelReviewFingerprint(sentinel)), postSummary: (sentinel, comment, missionId, turnId, exclude) => this.#postSummary(sentinel, comment, missionId, turnId, exclude, true) });
   }
 
   /** Starts the unref'd poll loop (default 15 s). Without it the runner only reacts to manual launches and explicit tick() calls. */
@@ -372,7 +387,17 @@ export class SentinelRunner {
   }
 
   async #deliverSafely(request: Parameters<AgentTurnDelivery["deliver"]>[0]): Promise<TurnResult> {
-    try { return await this.#turns.deliver(request); } catch (error) { return { status: "refused", kind: "failed", reason: message(error) }; }
+    try {
+      const trigger = this.#store.getTrigger(request.trigger.id);
+      if (trigger?.runModel) {
+        if (!trigger.enabled) return { status: "refused", kind: "inactive", reason: "Trigger is off." };
+        await this.launch(request.sentinel.id, { autonomous: true, automation: request.automation, trigger: { kind: request.trigger.kind, triggerId: request.trigger.id, event: request.event }, via: request.via, idempotencyKey: request.idempotencyKey, untrusted: request.untrusted, context: request.context, comment: request.comment });
+        const turn = this.#store.getTurnByKey(request.sentinel.id, request.idempotencyKey);
+        if (!turn) throw new Error("Activation has no turn receipt.");
+        return { status: "queued", turn };
+      }
+      return await this.#turns.deliver(request);
+    } catch (error) { return { status: "refused", kind: "failed", reason: message(error) }; }
   }
   /** What the trigger shows once its turn is queued or refused. The turn's own outcome is written at completion (never overwritten here once it has finished). */
   #turnRelease(outcome: TurnResult, triggerId: string): { lastStatus?: string; lastError?: string } {
@@ -391,31 +416,36 @@ export class SentinelRunner {
   async #pollPullRequests(trigger: SentinelTrigger, sentinel: Sentinel, automation: SecurityWorkflow, release: (update: { lastStatus?: string; lastError?: string; lastActivationId?: string; cursor?: Record<string, string> }) => unknown, via: string): Promise<void> {
     const github = trigger.github!;
     const isEnabled = () => this.#store.getTrigger(trigger.id)?.enabled === true;
+    let truncated = false;
     let prs: Array<{ number: number; headRefOid: string; title: string; url: string; baseRefName: string; headRefName: string; isCrossRepository: boolean; isDraft?: boolean; state?: string }>;
     try {
       const { stdout } = await this.#gh.run(["pr", "list", "--repo", github.repo, "--state", "open", "--limit", String(MAX_POLLED_PULL_REQUESTS), "--json", "number,headRefOid,title,url,baseRefName,headRefName,isCrossRepository,isDraft,state", ...(github.baseBranch ? ["--base", github.baseBranch] : [])]);
       const parsed: unknown = JSON.parse(stdout);
       if (!Array.isArray(parsed)) throw new Error("Unexpected gh output.");
+      // `gh pr list --limit` cuts the list without saying so. A full page means there may be more, so say that instead of baselining a partial list.
+      truncated = parsed.length >= MAX_POLLED_PULL_REQUESTS;
       prs = parsed.filter((pr): pr is (typeof prs)[number] => !!pr && typeof pr.number === "number" && typeof pr.headRefOid === "string")
         .filter(pr => pr.state === undefined || String(pr.state).toUpperCase() === "OPEN");
-      if (prs.length > MAX_POLLED_EVENTS) throw new Error(`More than ${MAX_POLLED_EVENTS} matching open pull requests. Use a base-branch filter.`);
     } catch (error) {
       // Typically gh missing or unauthenticated: surfaced on the trigger, retried at the next poll.
       release({ lastStatus: "blocked", lastError: `GitHub could not be read with the connected gh account: ${message(error)}`.slice(0, 1000) });
       return;
     }
     if (!isEnabled()) { release({}); return; }
-    // Prune closed pull requests so historical PR numbers cannot push open PRs past the 200-entry cursor limit.
+    // `gh` stops at the newest 1,000 open pull requests and does not say so. The ones past that are not reviewed; the trigger says so.
+    const truncation = truncated ? `Read only the newest ${MAX_POLLED_PULL_REQUESTS.toLocaleString("en-US")} open pull requests; older ones are not reviewed. Set a base branch to narrow the list.` : undefined;
+    // Prune closed pull requests so historical PR numbers do not fill the cursor. When the list was cut, keep every entry: an older
+    // pull request outside the window must not look new when it comes back into view. The cursor drops its oldest entries first.
     const openKeys = new Set(prs.map(pr => String(pr.number)));
     const seen: Record<string, string> = {};
     for (const [k, v] of Object.entries(trigger.cursor ?? {})) {
-      if (openKeys.has(k)) seen[k] = v;
+      if (truncated || openKeys.has(k)) seen[k] = v;
     }
     if (!trigger.cursor) {
       // First poll only records what is already open; it never launches a review for old PRs. A draft is recorded as a
       // draft so that marking it ready for review later still starts one review.
       for (const pr of prs) seen[String(pr.number)] = pr.isDraft === true ? `${pr.headRefOid}:draft` : pr.headRefOid;
-      release({ lastStatus: "baseline", cursor: seen });
+      release({ lastStatus: "baseline", ...(truncation ? { lastError: truncation } : {}), cursor: seen });
       return;
     }
     let launched = 0; let lastActivationId: string | undefined; let lastError: string | undefined; let lastStatus = "idle";
@@ -451,7 +481,7 @@ export class SentinelRunner {
         const outcome = await this.#deliverSafely({
           sentinel, origin: "github", via, trigger: { id: trigger.id, kind: "github-pr" }, automation, event, idempotencyKey: prIdempotencyKey,
           ...(fork ? { untrusted: true } : {}), ...(diff ? { context: { label: "pull-request-diff", text: diff } } : {}),
-          ...(github.commentOnPr === true ? { comment: { repo: github.repo, pr: pr.number, headSha: pr.headRefOid, fork } } : {}),
+          ...prTarget(github, pr, fork),
         });
         const update = this.#turnRelease(outcome, trigger.id);
         if (!isEnabled()) {
@@ -468,7 +498,7 @@ export class SentinelRunner {
         trigger: { kind: "github-pr", automationId: automation.id, triggerId: trigger.id, event },
         automation, autonomous: true, via, idempotencyKey: prIdempotencyKey, ...(fork ? { untrusted: true } : {}),
         ...(diff ? { context: { label: "pull-request-diff", text: diff } } : {}),
-        ...(github.commentOnPr === true ? { comment: { repo: github.repo, pr: pr.number, headSha: pr.headRefOid, fork } } : {}),
+        ...prTarget(github, pr, fork),
       });
       if (!result.ok) { lastStatus = result.kind; lastError = result.reason; break; }
       seen[key] = pr.headRefOid; launched += 1; lastActivationId = result.activation.id; lastStatus = "running";
@@ -480,8 +510,8 @@ export class SentinelRunner {
     ));
     release(
       preserveTurnOutcome
-        ? { cursor: seen }
-        : { lastStatus, ...(lastError ? { lastError } : { lastError: undefined }), ...(lastActivationId ? { lastActivationId } : {}), cursor: seen },
+        ? { cursor: seen, ...(truncation ? { lastError: truncation } : {}) }
+        : { lastStatus, ...(lastError ?? truncation ? { lastError: lastError ?? truncation } : { lastError: undefined }), ...(lastActivationId ? { lastActivationId } : {}), cursor: seen },
     );
   }
 
@@ -505,13 +535,33 @@ export class SentinelRunner {
   }
 
   /** Where this trigger's result goes, or nothing when reporting is off (the default). */
-  #reportTarget(trigger: SentinelTrigger, event: GithubEvent): SummaryTarget | undefined {
-    const mode = (trigger.release ?? trigger.check)?.report ?? "none";
-    if (mode === "none") return undefined;
-    if (mode === "comment" && event.pr) return { repo: event.repo, pr: event.pr, headSha: event.sha ?? "", fork: false };
+  #reportTarget(trigger: SentinelTrigger, event: GithubEvent, polled: boolean): SummaryTarget | undefined {
+    const config = trigger.release ?? trigger.check;
+    const results = config?.results ?? "off";
+    // `results: comment` asks for the same one comment as `report: comment`.
+    const mode = config?.report && config.report !== "none" ? config.report : resultsComment(results) ? "comment" : "none";
+    const sarifRef = resultsSarif(results) ? this.#sarifRefFor(event, polled) : undefined;
+    let target: SummaryTarget | undefined;
+    if (mode === "comment" && event.pr) target = { repo: event.repo, pr: event.pr, headSha: event.sha ?? "", fork: false };
     // A tag has no pull request to comment on, and a tag push can point at a tag object: the status goes on the commit the tag resolves to.
-    if (event.kind === "release") return event.tag ? { repo: event.repo, mode: "status", headSha: "", ref: event.tag, fork: false } : undefined;
-    return event.sha ? { repo: event.repo, mode: "status", headSha: event.sha, fork: false, ...(event.pr ? { pr: event.pr } : {}) } : undefined;
+    else if (mode === "none") target = undefined;
+    else if (event.kind === "release") target = event.tag ? { repo: event.repo, mode: "status", headSha: "", ref: event.tag, fork: false } : undefined;
+    else target = event.sha ? { repo: event.repo, mode: "status", headSha: event.sha, fork: false, ...(event.pr ? { pr: event.pr } : {}) } : undefined;
+    if (!sarifRef) return target;
+    if (target) return { ...target, sarifRef };
+    return event.kind === "release"
+      ? { repo: event.repo, mode: "sarif", headSha: "", ref: event.tag, fork: false, sarifRef }
+      : { repo: event.repo, mode: "sarif", headSha: event.sha ?? "", fork: false, sarifRef };
+  }
+
+  /**
+   * The Git ref a code scanning upload is filed under: the tag for a release, or the branch for a check. A check is uploaded only when
+   * the poll found it on the tip of a branch of this repository. A webhook delivery can come from a fork pull request, and its
+   * pull request number or branch name is not proof of where the commit lives, so it is never uploaded.
+   */
+  #sarifRefFor(event: GithubEvent, polled: boolean): string | undefined {
+    if (event.kind === "release") return event.tag && isSafeRef(event.tag) ? `refs/tags/${event.tag}` : undefined;
+    return polled && event.branch && isSafeRef(event.branch) ? `refs/heads/${event.branch}` : undefined;
   }
 
   /** One signed delivery. Nothing is polled; a webhook trigger never runs without a delivery. */
@@ -561,7 +611,7 @@ export class SentinelRunner {
       if (seen[event.key] !== undefined) continue;
       if (launched >= MAX_EVENT_LAUNCHES_PER_POLL) break;
       const idempotencyKey = `github:${trigger.id}:${event.kind}:${event.key}`;
-      const target = this.#reportTarget(trigger, event);
+      const target = this.#reportTarget(trigger, event, !pushed);
       const remember = () => { if (trigger.cursor) seen[event.key] = event.sha ?? "seen"; };
       if (this.#persistent()) {
         const outcome = await this.#deliverSafely({
@@ -598,7 +648,7 @@ export class SentinelRunner {
 
   /** One summary comment per pull request and Sentinel, found by a hidden marker and edited in place on later pushes. */
   async #postSummary(sentinel: Sentinel, comment: SummaryTarget, missionId: string, recordId: string, exclude?: ReadonlySet<string>, isTurn = false): Promise<void> {
-    const subject = comment.mode === "status" ? `${comment.repo}@${(comment.ref ?? comment.headSha).slice(0, 40)}` : `${comment.repo}#${comment.pr}`;
+    const subject = comment.mode === "status" ? `${comment.repo}@${(comment.ref ?? comment.headSha).slice(0, 40)}` : comment.mode === "sarif" ? `${comment.repo}@${(comment.sarifRef ?? comment.headSha).slice(0, 60)}` : `${comment.repo}#${comment.pr}`;
     const nowMs = this.#now();
     while (this.#commentLog.length && nowMs - this.#commentLog[0]! > 3_600_000) this.#commentLog.shift();
     const gapKey = `${sentinel.id}:${subject}`;
@@ -607,7 +657,8 @@ export class SentinelRunner {
     if (limited) { audit({ actor: `sentinel:${sentinel.id}`, action: "sentinel.pr.comment", subject, outcome: "denied", detail: { sentinelId: sentinel.id, reason: limited } }); return; }
     this.#commentLog.push(nowMs); this.#commentLast.set(gapKey, nowMs);
     if (this.#commentLast.size > 500) this.#commentLast.delete(this.#commentLast.keys().next().value!);
-    if (comment.mode === "status") { await this.#postStatus(sentinel, comment, missionId, recordId, subject, exclude, isTurn); return; }
+    if (comment.mode === "sarif") { await this.#postSarif(sentinel, comment, missionId, recordId, subject, exclude, isTurn); return; }
+    if (comment.mode === "status") { await this.#postStatus(sentinel, comment, missionId, recordId, subject, exclude, isTurn); if (comment.sarifRef) await this.#postSarif(sentinel, comment, missionId, recordId, subject, exclude, isTurn); return; }
     const marker = prCommentMarker(sentinel.id);
     const body = renderPrComment(sentinel.name, marker, comment, (this.#missions.findings?.(missionId) ?? []).filter(finding => !exclude || !finding.id || !exclude.has(finding.id)));
     try {
@@ -618,6 +669,7 @@ export class SentinelRunner {
       if (!edited) await this.#gh.run(["pr", "comment", String(comment.pr), "--repo", comment.repo, "--body", body]);
       audit({ actor: `sentinel:${sentinel.id}`, action: "sentinel.pr.comment", subject, detail: { sentinelId: sentinel.id, mode: edited ? "edited" : "created" } });
       await this.#postInline(sentinel, comment, missionId, exclude);
+      if (comment.sarifRef) await this.#postSarif(sentinel, comment, missionId, recordId, subject, exclude, isTurn);
     } catch (error) {
       audit({ actor: `sentinel:${sentinel.id}`, action: "sentinel.pr.comment", subject, outcome: "denied", detail: { sentinelId: sentinel.id, reason: message(error).slice(0, 200) } });
       const failure = `The pull request comment could not be posted: ${message(error)}`.slice(0, 500);
@@ -644,6 +696,34 @@ export class SentinelRunner {
     } catch (error) {
       audit({ actor: `sentinel:${sentinel.id}`, action: "sentinel.github.status", subject, outcome: "denied", detail: { sentinelId: sentinel.id, reason: message(error).slice(0, 200) } });
       const failure = `The commit status could not be posted: ${message(error)}`.slice(0, 500);
+      try { if (isTurn) this.#store.updateTurn(recordId, { note: failure }); else this.#store.updateActivation(recordId, { error: failure }); } catch { /* deleted */ }
+    }
+  }
+
+  /**
+   * Uploads the run's findings to GitHub code scanning (`POST repos/{repo}/code-scanning/sarifs`, gzip then base64, with the commit
+   * and ref). The document is built from share-safe fields only, and the upload goes through the operator's own `gh` login. GitHub
+   * keys alerts by fingerprint, so a later run for the same ref updates them. A failure shows on the run and does not fail it.
+   */
+  async #postSarif(sentinel: Sentinel, target: SummaryTarget, missionId: string, recordId: string, subject: string, exclude: ReadonlySet<string> | undefined, isTurn: boolean): Promise<void> {
+    const ref = target.sarifRef;
+    try {
+      if (!ref || !/^refs\/(heads|tags|pull)\/[A-Za-z0-9._\/-]{1,200}$/.test(ref) || target.fork) throw new Error("No Git ref to upload for.");
+      let sha = target.headSha;
+      if (!isCommitSha(sha)) {
+        const tag = ref.startsWith("refs/tags/") ? ref.slice("refs/tags/".length) : undefined;
+        if (!tag || !isSafeRef(tag)) throw new Error("No commit to upload for.");
+        sha = (await this.#gh.run(["api", `repos/${target.repo}/commits/${tag}`, "--jq", ".sha"])).stdout.trim();
+        if (!isCommitSha(sha)) throw new Error("The tag does not point to a commit.");
+      }
+      const built = buildSentinelSarif(sentinel.name, (this.#missions.findings?.(missionId) ?? []).filter(finding => !exclude || !finding.id || !exclude.has(finding.id)));
+      const body = JSON.stringify({ commit_sha: sha, ref, sarif: packSarif(built.text), tool_name: "0security Sentinel" });
+      const response = JSON.parse((await this.#gh.run(["api", "--method", "POST", `repos/${target.repo}/code-scanning/sarifs`, "--input", "-"], body)).stdout || "{}") as { id?: unknown };
+      audit({ actor: `sentinel:${sentinel.id}`, action: "sentinel.github.sarif", subject, detail: { sentinelId: sentinel.id, results: built.included, skipped: built.skipped, id: typeof response.id === "string" || typeof response.id === "number" ? String(response.id).slice(0, 40) : undefined } });
+      if (built.skipped) { try { const note = `Code scanning upload left out ${built.skipped} finding${built.skipped === 1 ? "" : "s"} without a repository file location or over the ${built.included} result cap.`; if (isTurn) this.#store.updateTurn(recordId, { note }); else this.#store.updateActivation(recordId, { note }); } catch { /* deleted */ } }
+    } catch (error) {
+      audit({ actor: `sentinel:${sentinel.id}`, action: "sentinel.github.sarif", subject, outcome: "denied", detail: { sentinelId: sentinel.id, reason: message(error).slice(0, 200) } });
+      const failure = `The code scanning upload failed: ${message(error)}`.slice(0, 500);
       try { if (isTurn) this.#store.updateTurn(recordId, { note: failure }); else this.#store.updateActivation(recordId, { error: failure }); } catch { /* deleted */ }
     }
   }
@@ -696,6 +776,27 @@ export class SentinelRunner {
       if (sentinel.status !== "active") throw new SentinelRunError("Sentinel is paused.", 409, "inactive");
       if (sentinelNeedsReview(sentinel)) throw new SentinelRunError("Sentinel needs review before it can run on its own.", 409, "review");
     }
+    const triggerConfig = options.trigger.triggerId ? this.#store.getTrigger(options.trigger.triggerId) : undefined;
+    if (options.autonomous) {
+      // With a limit set, runs of one Sentinel do not overlap: the spend of a run in flight is not final, so a second one could not be checked against it.
+      const limited = [sentinel.dailyBudgetUsd, sentinel.monthlyBudgetUsd, triggerConfig?.dailyBudgetUsd, triggerConfig?.monthlyBudgetUsd].some(value => typeof value === "number");
+      if (limited && this.#store.listRunningActivations().some(running => running.sentinelId === sentinelId)) throw new SentinelRunError("A run of this Sentinel is still in progress. Its spend limits are checked when it ends.", 409, "busy");
+      // A spend limit that is reached refuses the run. The refusal is one activation, recorded once per cause; a person's own runs are never refused.
+      const refusal = this.#store.budgetRefusal(sentinelId, options.trigger.triggerId, this.#now());
+      if (refusal) {
+        const key = options.idempotencyKey ? `${options.idempotencyKey}:budget` : undefined;
+        if (!key || !this.#store.getTurnByKey(sentinelId, key)) {
+          this.#store.createActivation({
+            sentinelId, sentinelVersion: sentinel.version, trigger: options.trigger, status: "skipped", skills: [...sentinel.skills], error: refusal, finishedAt: isoAt(this.#now()),
+            ...(options.automation ? { automationId: options.automation.id } : {}),
+          }, { ...(options.via ? { via: options.via } : {}), ...(key ? { idempotencyKey: key } : {}) });
+        }
+        throw new SentinelRunError(refusal, 409, "budget");
+      }
+    }
+    const effective = triggerConfig?.runModel ? { ...sentinel, model: triggerConfig.runModel } : sentinel;
+    const cap = Math.min(sentinel.runBudgetUsd ?? Infinity, triggerConfig?.runBudgetUsd ?? Infinity);
+    if (Number.isFinite(cap) && (!this.#missions.cancel || !this.#missions.subscribe || !this.#missions.usage)) throw new SentinelRunError("This runtime cannot enforce a run budget.", 409);
     const reservation = this.#store.createActivation({
       sentinelId, sentinelVersion: sentinel.version, trigger: options.trigger, status: "running",
       ...(options.automation ? { automationId: options.automation.id } : {}), skills: [...sentinel.skills], ownerPid: process.pid,
@@ -703,13 +804,13 @@ export class SentinelRunner {
     let missionId: string; let home: string; let checkout: string | undefined; let sharedHome: boolean;
     try {
       home = await this.#homeMission(sentinel, options.actor);
-      sharedHome = options.automation?.runIn === "sentinel-home";
+      sharedHome = options.automation?.runIn === "sentinel-home" && !triggerConfig?.runModel;
       const title = `${sentinel.name}: ${options.automation ? options.automation.name : "run"}`;
       missionId = home;
       const prRepo = isGithubKind(options.trigger.kind) ? options.trigger.event?.["repo"] : undefined;
       checkout = !sharedHome && typeof prRepo === "string" ? await this.#checkout(prRepo) : undefined;
       if (!sharedHome) {
-        missionId = this.#missions.create({ ...this.#missionConfig(sentinel, title, checkout), parentSessionId: home }).id;
+        missionId = this.#missions.create({ ...this.#missionConfig(effective, title, checkout), parentSessionId: home }).id;
         options.actor?.onMissionCreated?.(missionId);
       }
     } catch (error) {
@@ -723,7 +824,9 @@ export class SentinelRunner {
     if (options.autonomous) audit({ actor: `sentinel:${sentinelId}`, action: "sentinel.run", subject: sentinel.name, detail: { sentinelId, trigger: typeof options.trigger === "string" ? options.trigger : undefined } });
     const seed = this.#seed(sentinel, options);
     const comment = options.comment;
-    const watch = this.#watch(activation, sentinel, missionId, seed, baseline, comment ? () => this.#postSummary(sentinel, comment, missionId, activation.id) : undefined);
+    let watch: Watch;
+    try { watch = this.#watch(activation, effective, missionId, seed, baseline, cap, comment ? () => this.#postSummary(sentinel, comment, missionId, activation.id) : undefined); }
+    catch (error) { this.#store.updateActivation(activation.id, { status: "failed", error: message(error), finishedAt: isoAt(this.#now()) }); throw error; }
     try {
       await this.#missions.send(missionId, seed, options.actor ? { userId: options.actor.userId, displayName: options.actor.displayName } : undefined, sharedHome ? "queue" : undefined, options.autonomous);
     } catch (error) {
@@ -799,32 +902,43 @@ export class SentinelRunner {
   }
 
   /** Subscribes before the seed is sent so a fast turn cannot be missed. */
-  #watch(activation: SentinelActivation, sentinel: Sentinel, missionId: string, seed: string, baseline: number, afterCompleted?: () => Promise<void>): Watch {
+  #watch(activation: SentinelActivation, sentinel: Sentinel, missionId: string, seed: string, baseline: number, cap: number, afterCompleted?: () => Promise<void>): Watch {
+    let tokenBase = usageTokens(this.#missions.usage?.(missionId));
+    let findingBase = new Set((this.#missions.findings?.(missionId) ?? []).map(finding => finding.id));
     let started = false; let ended = false; let stopping: string | undefined;
     // A turn queued behind another starts from the cost at its own start, so the previous turn's spend is never charged to it.
     let base = baseline;
     const costOf = () => Math.max(0, (this.#missions.usage?.(missionId)?.costUsd ?? base) - base);
+    const costKnown = () => this.#missions.usage?.(missionId)?.costUsd !== undefined && !this.#missions.usage?.(missionId)?.costUnavailable;
     let unsubscribe: (() => void) | undefined;
-    const dispose = () => { unsubscribe?.(); unsubscribe = undefined; };
+    const cancellation = cancellationRetry({
+      cancel: async () => { if (!this.#missions.cancel) throw new Error("Cancellation unavailable"); return this.#missions.cancel(missionId); },
+      active: () => !ended,
+      pending: note => { try { this.#store.updateActivation(activation.id, { note }); } catch { /* deleted */ } },
+    });
+    const dispose = () => { cancellation.dispose(); unsubscribe?.(); unsubscribe = undefined; };
     const finish = (status: SentinelActivation["status"], error?: string) => {
       if (ended) return;
       ended = true; dispose(); this.#watches.delete(activation.id);
-      try { this.#store.updateActivation(activation.id, { status, costUsd: costOf(), finishedAt: isoAt(this.#now()), ...(error ? { error } : {}) }); } catch { /* The Sentinel may have been deleted mid-run. */ }
+      try { this.#store.updateActivation(activation.id, { status, costUsd: costKnown() ? costOf() : undefined, finishedAt: isoAt(this.#now()), ...(error ? { error } : {}) }); } catch { /* The Sentinel may have been deleted mid-run. */ }
+      const tokens = usageTokens(this.#missions.usage?.(missionId));
+      const produced = (this.#missions.findings?.(missionId) ?? []).filter(finding => !findingBase.has(finding.id));
+      this.#metrics?.({ sentinelId: sentinel.id, triggerId: activation.trigger.triggerId, activationId: activation.id, at: activation.startedAt, command: "sentinel", model: sentinel.model?.model ?? "unknown", budgetUsd: Number.isFinite(cap) ? cap : null, costUsd: (this.#missions.usage?.(missionId)?.costUsd === undefined || this.#missions.usage?.(missionId)?.costUnavailable) ? null : costOf(), tokens: tokens === null || tokenBase === null ? null : Math.max(0, tokens - tokenBase), durationSeconds: Math.max(0, (this.#now() - Date.parse(activation.startedAt)) / 1000), findingsAttempted: null, findingsProposed: produced.length, checksPassed: null, findingIds: produced.flatMap(finding => finding.id ? [finding.id] : []), status: stopping === "Run budget reached." ? "budget" : status === "completed" ? "ok" : "failed" });
       if (status === "completed" && afterCompleted) void afterCompleted().catch(() => { /* Reported on the activation by the poster. */ });
     };
     const stop = async (reason: string) => {
-      if (ended || stopping) return;
-      stopping = reason;
-      try { await this.#missions.cancel?.(missionId); } catch { /* The run is closed out below regardless. */ }
-      finish("cancelled", reason);
+      if (ended) return;
+      stopping ??= reason;
+      await cancellation.request();
     };
     const enforce = () => {
       const cost = costOf();
-      try { this.#store.updateActivation(activation.id, { costUsd: cost }); } catch { /* deleted */ }
+      if (Number.isFinite(cap) && (this.#missions.usage?.(missionId)?.costUsd === undefined || this.#missions.usage?.(missionId)?.costUnavailable || cost >= cap)) void stop((this.#missions.usage?.(missionId)?.costUsd === undefined || this.#missions.usage?.(missionId)?.costUnavailable) ? "Cannot price usage under a run budget." : "Run budget reached.");
+      try { this.#store.updateActivation(activation.id, { costUsd: costKnown() ? cost : undefined }); } catch { /* deleted */ }
     };
     const listener = (event: SentinelSessionEvent) => {
       if (ended) return;
-      if (!started) { if (event.type === "user" && event.text === seed) { started = true; base = this.#missions.usage?.(missionId)?.costUsd ?? base; } return; }
+      if (!started) { if (event.type === "user" && event.text === seed) { started = true; base = this.#missions.usage?.(missionId)?.costUsd ?? base; tokenBase = usageTokens(this.#missions.usage?.(missionId)); findingBase = new Set((this.#missions.findings?.(missionId) ?? []).map(finding => finding.id)); } return; }
       if (event.type === "usage") enforce();
       else if (event.type === "turn-complete") {
         const reason = typeof event.stopReason === "string" ? event.stopReason : "end_turn";
@@ -834,7 +948,11 @@ export class SentinelRunner {
       } else if (event.type === "error") finish("failed", typeof event.message === "string" ? event.message.slice(0, 2_000) : "The run failed.");
     };
     if (this.#missions.subscribe) {
-      try { unsubscribe = this.#missions.subscribe(missionId, listener); } catch { /* Mission already gone; reconcile closes it. */ }
+      try { unsubscribe = this.#missions.subscribe(missionId, listener); } catch { /* Checked below for capped runs. */ }
+    }
+    if (Number.isFinite(cap) && typeof unsubscribe !== "function") {
+      cancellation.dispose();
+      throw new SentinelRunError("Cannot observe runtime termination or usage to enforce this run budget.", 409);
     }
     const watch: Watch = { activationId: activation.id, stop, dispose };
     this.#watches.set(activation.id, watch);
@@ -842,9 +960,17 @@ export class SentinelRunner {
   }
 }
 
+/** What a pull request run sends back: a comment (`commentOnPr` or `results`) and/or a code scanning upload. A fork is never uploaded. */
+function prTarget(github: SentinelGithubPrConfig, pr: { number: number; headRefOid: string }, fork: boolean): { comment?: SummaryTarget } {
+  const comment = github.commentOnPr === true || resultsComment(github.results);
+  const sarifRef = resultsSarif(github.results) && !fork ? { sarifRef: `refs/pull/${pr.number}/head` } : {};
+  if (!comment && !sarifRef.sarifRef) return {};
+  const base = { repo: github.repo, pr: pr.number, headSha: pr.headRefOid, fork, ...sarifRef };
+  return { comment: comment ? base : { ...base, mode: "sarif" } };
+}
 const isGithubKind = (kind: string) => kind === "github-pr" || kind === "release" || kind === "check-completed";
 /** One line for GitHub: no links, markup, @mentions or #123 references. */
-const oneLine = (text: string, max: number) => text.replace(/[a-z][a-z0-9+.-]*:\/\/\S+/gi, "(link removed)").replace(/[\r\n\t]+/g, " ").replace(/[<>`\[\]]/g, "").replace(/@/g, "@\u200b").replace(/#(?=\w)/g, "#\u200b").slice(0, max).trim();
+const oneLine = neutralise;
 const SEVERITY_ORDER = ["critical", "high", "medium", "low", "info"];
 
 /** The comment carries share-safe fields only: severity, title, category and a repository-relative location. No evidence, PoC steps or local paths. */

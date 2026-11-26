@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { DAY_MS } from "./units.js";
+import { budgetCapSchema } from "./sentinel-budget.js";
 
 /**
  * Triggers for Sentinel-owned automations. A trigger starts a run of one automation (workflow definition)
@@ -39,6 +40,16 @@ export const SentinelScheduleSchema = z.strictObject({
 });
 export type SentinelSchedule = z.output<typeof SentinelScheduleSchema>;
 
+/**
+ * What a GitHub-scanning trigger sends back. `off` (the default) sends nothing. `sarif` uploads the run's findings to GitHub code
+ * scanning, `comment` posts one summary comment on the pull request, `both` does both.
+ */
+export const SENTINEL_RESULTS_MODES = ["off", "sarif", "comment", "both"] as const;
+export type SentinelResultsMode = (typeof SENTINEL_RESULTS_MODES)[number];
+const results = z.enum(SENTINEL_RESULTS_MODES).default("off");
+export const resultsSarif = (mode: SentinelResultsMode | undefined): boolean => mode === "sarif" || mode === "both";
+export const resultsComment = (mode: SentinelResultsMode | undefined): boolean => mode === "comment" || mode === "both";
+
 export const SentinelGithubPrConfigSchema = z.strictObject({
   repo: z.string().trim().regex(/^(?!\.{1,2}\/)[A-Za-z0-9_.-]{1,100}\/(?!\.{1,2}$)[A-Za-z0-9_.-]{1,100}$/, "Use owner/name."),
   baseBranch: z.string().trim().min(1).max(200).optional(),
@@ -47,6 +58,8 @@ export const SentinelGithubPrConfigSchema = z.strictObject({
   commentOnPr: z.boolean().default(false),
   /** Also analyse pull requests from forks, read-only and marked untrusted. Off by default: forks are skipped. */
   includeForks: z.boolean().default(false),
+  /** Send findings back to GitHub (code scanning, comment or both). Off by default. A fork pull request is never uploaded. */
+  results,
 });
 export type SentinelGithubPrConfig = z.output<typeof SentinelGithubPrConfigSchema>;
 
@@ -87,6 +100,7 @@ export const SentinelReleaseConfigSchema = z.strictObject({
     .default("v"),
   pollMs,
   report,
+  results,
 });
 export type SentinelReleaseConfig = z.output<typeof SentinelReleaseConfigSchema>;
 
@@ -100,6 +114,7 @@ export const SentinelCheckConfigSchema = z.strictObject({
   checkName: z.string().trim().min(1).max(100).optional(),
   pollMs,
   report,
+  results,
 });
 export type SentinelCheckConfig = z.output<typeof SentinelCheckConfigSchema>;
 
@@ -155,11 +170,20 @@ export const SentinelTriggerCreateSchema = z.strictObject({
   check: SentinelCheckConfigSchema.optional(),
   webhook: SentinelWebhookConfigSchema.optional(),
   bitbucket: SentinelBitbucketPrConfigSchema.optional(),
+  /** Most this trigger may spend per UTC day or month, in USD. Absent or null: no limit. */
+  dailyBudgetUsd: budgetCapSchema.nullable().optional(),
+  monthlyBudgetUsd: budgetCapSchema.nullable().optional(),
+  runBudgetUsd: z.number().finite().min(0.01).max(100).optional(),
+  runModel: z.object({ providerId: z.string().trim().min(1).max(128), model: z.string().trim().min(1).max(256), reasoning: z.string().trim().min(1).max(32).optional() }).strict().optional(),
   enabled: z.boolean().default(false),
 });
 export type SentinelTriggerCreate = z.output<typeof SentinelTriggerCreateSchema>;
 
 export interface SentinelTrigger {
+  dailyBudgetUsd?: number;
+  monthlyBudgetUsd?: number;
+  runBudgetUsd?: number;
+  runModel?: { providerId: string; model: string; reasoning?: string };
   id: string;
   sentinelId: string;
   automationId: string;

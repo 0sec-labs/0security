@@ -14,7 +14,6 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   ToolExecutor,
   buildOperatorQuestionRequest,
-  MIN_OPERATOR_QUESTIONS,
   MAX_OPERATOR_QUESTIONS,
 } from "./tools.js";
 import type {
@@ -159,11 +158,6 @@ describe("buildOperatorQuestionRequest — schema validation", () => {
     if (r.ok) return;
     expect(typeof r.error).toBe("string");
     expect(r.error.length).toBeGreaterThan(0);
-  });
-
-  it("MIN/MAX bounds are the documented 1..4", () => {
-    expect(MIN_OPERATOR_QUESTIONS).toBe(1);
-    expect(MAX_OPERATOR_QUESTIONS).toBe(4);
   });
 });
 

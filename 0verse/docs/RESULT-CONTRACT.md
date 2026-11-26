@@ -47,8 +47,8 @@ validates compatibility first.
   `crash_output` (the oracle's captured sanitizer/crash text for a confirmed PoV)
   and `confidence` (an optional per-finding signal — CASR exploitability when the
   oracle ran it, `null` otherwise). No field removed, renamed, or reordered; a
-  consumer pinned to MAJOR `1` keeps working. The cloud sink compat-gates on MAJOR
-  only, so this is fully backward-compatible.
+  consumer pinned to MAJOR `1` keeps working. Consumers
+  that gate on MAJOR only are unaffected, so this is fully backward-compatible.
 - **1.0** — initial locked contract.
 
 ## Top-level (`ScanResult`)
@@ -93,7 +93,6 @@ handler prints the result and returns `0` even when that result is
 `infra-failed` or `unsupported`. An unavailable explicitly selected backend
 fails earlier with exit `2`, but exit zero alone is insufficient for automation.
 Read the result's terminal fields after parsing the supported major version.
-The cloud sink has a separate failure/completion policy.
 
 ```python
 from zeroverse import api
@@ -173,9 +172,8 @@ them (no per-sink addresses).
 ## Requesting a complete lane
 
 The Python `ScanOptions` API also exposes `profile`, `budget`, and `output_dir`.
-The local CLI `scan` currently uses the default `analysis` profile; its
-`--timeout` option is a **cloud HTTP request timeout in milliseconds**, not a
-whole-analysis deadline.
+The local CLI `scan` currently uses the default `analysis` profile and has no
+whole-analysis deadline option.
 
 | Profile | Required capability intent |
 |---|---|

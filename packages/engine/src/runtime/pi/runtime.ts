@@ -273,7 +273,7 @@ export class PiAiRuntime implements Runtime, NativeRuntime {
     const identity = this.connectionIdentity();
     if (!route || !identity) throw new Error("The selected runtime has no captured connection identity.");
     const env = Object.fromEntries(Object.entries(this.env).filter((entry): entry is [string, string] =>
-      entry[1] !== undefined && /^(?:(?:OPENAI|OPENROUTER|ANTHROPIC|AZURE_OPENAI|DEEPSEEK|Z_AI|KIMI|QWEN|XAI|OPENCODE|CLINE|TOGETHER|COPILOT|GOOGLE|GEMINI|AWS|BEDROCK)_|ZERO_(?:CHATGPT_|GEMINI_|COPILOT_|LLM_|REASONING_|REGION_OVERRIDE$|ZAI_THINKING_BUDGET$|MODEL$|SELECTED_PROVIDER$|FORCE_PROVIDER$|PROVIDER$|REQUIRE_|SUPPRESS_PROVIDER_STARTUP_LOG$|RUNTIME$))/.test(entry[0])));
+      entry[1] !== undefined && /^(?:(?:OPENAI|OPENROUTER|ANTHROPIC|AZURE_OPENAI|DEEPSEEK|Z_AI|KIMI|QWEN|XAI|OPENCODE|CLINE|TOGETHER|COPILOT|GOOGLE|GEMINI|AWS|BEDROCK)_|ZERO_(?:CHATGPT_|GEMINI_|COPILOT_|LLM_|REASONING_|REGION_OVERRIDE$|ZAI_THINKING_BUDGET$|MODEL$|BEDROCK_MODEL$|SELECTED_PROVIDER$|FORCE_PROVIDER$|PROVIDER$|REQUIRE_|SUPPRESS_PROVIDER_STARTUP_LOG$|RUNTIME$))/.test(entry[0])));
     const config: RuntimeConfig = { type: "api", timeout: this.config.timeout, provider: route.zeroProvider as RuntimeConfig["provider"], model: route.model, ...this.modelSelection() };
     return structuredClone({
       config, env, provider: route.zeroProvider as ApiProvider, apiKey: route.apiKey, baseUrl: route.rawBaseUrl, model: route.model,

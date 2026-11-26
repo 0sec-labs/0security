@@ -1,0 +1,13 @@
+{
+  "date": "2026-11-25",
+  "environment": "Colima default, Docker Linux arm64 on macOS; 2 CPUs, 4 GiB VM",
+  "image": "docker.io/library/maven@sha256:6fdc855a6ed81d288ca7ca37ac6ff5e9308b612485c0801d70b25a858c83d237",
+  "command": "ZERO_TEST_JAVA_DOCKER=1 vitest run src/commands/__tests__/java-verifier.test.ts",
+  "onlineWarmup": "mvn -B -ntp -Dmaven.repo.local=/cache/m2 dependency:go-offline verify; passed",
+  "offlineCanary": "only loopback; passed; same canary rejected network-enabled container",
+  "offlineVerification": "mvn -o -B -ntp -Dmaven.repo.local=/cache/m2 verify; 3 JUnit tests, 0 failures",
+  "negativeControl": "removed lexical containment guard in disposable fixture; same offline verify exited 1 with 2 failed tests",
+  "initialFailureResolved": "dependency:go-offline alone omitted dynamically loaded Surefire JUnit provider; online verify warm-up now fills the cache",
+  "localMaven": "Maven 3.9.16, host JDK 22 targeting release 21; same 3 positive tests passed and 2 negative-control failures",
+  "limits": ["No Linux amd64 execution", "No live private artifact registry", "Fixture checks lexical traversal, not symlink containment or application-level exploitability"]
+}

@@ -67,6 +67,7 @@ const EXPECTED_SKILL_IDS = [
   "dependency-reachability",
   "scope-interview",
   "java-dependency-fix",
+  "java-security-fix",
 ];
 
 const VALID_ROLES = new Set(["attack", "audit", "review"]);
@@ -211,10 +212,12 @@ describe("Skill Registry", () => {
       const registry = loadSkillRegistry(__dirname);
 
       const attackSkills = listSkillSummaries({ role: "attack" }, registry);
-      expect(attackSkills.length).toBe(EXPECTED_SKILL_IDS.length);
+      expect(attackSkills.map(skill => skill.id).sort()).toEqual(
+        EXPECTED_SKILL_IDS.filter(id => id !== "java-security-fix").sort(),
+      );
 
       const reviewSkills = listSkillSummaries({ role: "review" }, registry);
-      expect(reviewSkills.length).toBe(31);
+      expect(reviewSkills.length).toBe(32);
       const reviewIds = reviewSkills.map((s) => s.id).sort();
       expect(reviewIds).toEqual([
         "advisory-disclosure",
@@ -232,6 +235,7 @@ describe("Skill Registry", () => {
         "iac-review",
         "incident-triage",
         "java-dependency-fix",
+        "java-security-fix",
         "jwt-attacks",
         "llm-app-review",
         "mcp-server-review",

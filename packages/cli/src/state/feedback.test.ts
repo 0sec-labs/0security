@@ -186,7 +186,7 @@ describe("submissionBlockedReason", () => {
     expect(submissionBlockedReason({ "ZERO_FEEDBACK_URL": "not a url" })).toBe("insecure-endpoint");
   });
 
-  it.each(["DO_NOT_TRACK"])(
+  it.each(["DO_NOT_TRACK", "ZERO_ENTERPRISE"])(
     "%s wins over a configured endpoint",
     (name) => {
       expect(submissionBlockedReason({ ...HTTPS_ENV, [name]: "1" })).toBe("opt-out");
@@ -338,7 +338,7 @@ describe("submitFeedback", () => {
 
   it("refuses when opted out, even though sending was explicitly requested", async () => {
     const { fn, calls } = stubFetch(() => okResponse());
-    for (const name of ["DO_NOT_TRACK"]) {
+    for (const name of ["DO_NOT_TRACK", "ZERO_ENTERPRISE"]) {
       const result = await submitFeedback(payload(), { ...HTTPS_ENV, [name]: "1" }, { fetchImpl: fn });
       expect(result.ok).toBe(false);
       expect(result.skipped).toBe("opt-out");
@@ -794,7 +794,7 @@ describe("diagnostic destination and consent", () => {
   it("lets hard opt-outs beat configured Sentry and explicit confirmation", async () => {
     const report = buildDiagnosticFeedback(diagInfo());
     const { fn, calls } = stubFetch(() => okResponse());
-    for (const name of ["DO_NOT_TRACK"]) {
+    for (const name of ["DO_NOT_TRACK", "ZERO_ENTERPRISE"]) {
       const env = { ...sentryEnv, [name]: "true" };
       expect(buildSubmitPreview(report, env)).toBeNull();
       expect((await submitFeedback(report, env, {
@@ -852,7 +852,7 @@ describe("diagnostic destination and consent", () => {
       vi.stubGlobal("__ZERO_BUILT_IN_SENTRY_DSN__", BUILT_IN);
       const report = buildDiagnosticFeedback(diagInfo());
       const { fn, calls } = stubFetch(() => okResponse());
-      for (const name of ["DO_NOT_TRACK"]) {
+      for (const name of ["DO_NOT_TRACK", "ZERO_ENTERPRISE"]) {
         const env = { [name]: "1" };
         expect(submissionBlockedReason(env, report)).toBe("opt-out");
         expect(buildSubmitPreview(report, env)).toBeNull();

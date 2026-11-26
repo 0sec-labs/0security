@@ -186,6 +186,8 @@ Add `--allow-partial` when a partial scan should not fail the job. The exit code
 | `--rate-limit <n>` | `10` | With --target-url: Nuclei requests per second (1 to 150) |
 | `--templates <path>` | — | With --target-url: a Nuclei template file or folder to run instead of the templates Nuclei has installed. 0 never downloads templates |
 | `--rules <file-or-folder>` | — | Semgrep or OpenGrep rules for the pre-pass (a file or a folder); repeat for several. Replaces the default rules and needs --scanner semgrep or opengrep. Rules are never read from the scanned folder unless you name them |
+| `--business-context <file>` | — | Operator-owned JSON tags and notes for investigation and work ordering; keeps technical severity unchanged |
+| `--repository <name>` | — | Repository name the business context rules are matched against (default: the git remote of the scanned folder) |
 | `--context <file>` | — | Give the scan this file (a threat model, notes on who may do what) as lower-priority background; repeat for several. It can steer what the scan weighs but cannot change how it works |
 | `--policy <file-or-folder>` | — | Check the code against these Markdown policies (a file or a folder of .md files) and report pass or fail for each; repeat for several. Runs the policy-check skill |
 | `--org-policy <folder>` | — | An organisation's policy folder: evaluated first, and wins when a --policy says otherwise or uses the same id; repeat for several |
@@ -196,7 +198,10 @@ Add `--allow-partial` when a partial scan should not fail the job. The exit code
 | `--repo-ignores` | — | Also let the pre-pass scanners read their configuration and ignore files from the scanned folder (.foxguard.yml, .semgrepignore, .gitleaks.toml, .gitleaksignore, .trivyignore, osv-scanner.toml, .checkov.yaml). Off by default: a change under review can use them to hide findings. Inline suppressions such as nosemgrep always apply |
 | `--skill <id>` | `scan` | Skill that holds the scan method |
 | `--model <model>` | — | Model for the scan thread (default: gpt-6-luna) |
+| `--provider <id>` | — | Explicit model provider for this scan (use with --model) |
+| `--reasoning <effort>` | — | Reasoning effort for a model that supports it |
 | `--batches <mode>` | `auto` | auto reviews a large folder in batches, one thread per group of entry points, and records what each batch covered; on always does; off keeps one thread |
+| `--codeowners <file>` | — | Group batches by an operator-provided CODEOWNERS file as well as build module; reads no ownership file automatically and never skips unowned code |
 | `--batch-size <n>` | `8` | Entry points one batch reviews (1 to 50); a folder with more than this many is split under --batches auto |
 | `--retries <n>` | `2` | Run a batch again when it fails for a reason that may pass: a dropped connection, a provider timeout, rate limit or server error (0 to 5; 0 turns it off). A thread that is not a batch is asked once to continue. The cost of every attempt counts against --budget |
 | `--coverage-rounds <n>` | `1` | After a thread ends, send it a follow-up that names the source files it never opened, up to this many times (0 to 5; 0 turns it off). Each round counts against --budget |
@@ -664,6 +669,8 @@ Free-text descriptions are left out unless you pass `--include-description`. The
 | --- | --- | --- |
 | `--include-description` | — | Include each finding's free-text description (can quote code or secrets) |
 | `--output <path>` | — | Write the share-safe report to a file instead of stdout |
+| `--context <file>` | — | Business context file (JSON): order the findings by what matters to you. The reasons are not written to the share-safe copy. Defaults to the file set with `0security config set findingsContext` |
+| `--repository <name>` | — | Repository name the context rules are matched against (default: the git remote of the current folder) |
 
 ### doctor
 
@@ -1305,7 +1312,7 @@ Generate an SBOM from lockfiles, check one against known advisories, and scan mo
 0security sbom
 ```
 
-Subcommands: [generate](#sbom-generate) · [check](#sbom-check) · [licenses](#sbom-licenses) · [scan-models](#sbom-scan-models) · [agent-config](#sbom-agent-config) · [java-usage](#sbom-java-usage).
+Subcommands: [generate](#sbom-generate) · [check](#sbom-check) · [licenses](#sbom-licenses) · [scan-models](#sbom-scan-models) · [agent-config](#sbom-agent-config) · [java-usage](#sbom-java-usage) · [reachability](#sbom-reachability).
 
 #### sbom generate
 
@@ -1528,6 +1535,7 @@ The network use is the lookup at `https://api.osv.dev`: package URLs go out and 
 | --- | --- | --- |
 | `--format <format>` | `text` | Output: text, json or sarif (SARIF imports with `0security findings import`) |
 | `-o, --output <file>` | — | Write the result to a file instead of stdout |
+| `--source <folder>` | — | Attach JVM source-import and dependency-path evidence; does not suppress advisories or establish vulnerable-code reachability |
 | `--outdated` | — | Also list components with a newer version (looks packages up at https://api.deps.dev; information only, not a vulnerability) |
 | `--registry` | — | Also look each npm and PyPI package up on its public registry for invented or planted names (sends package names to registry.npmjs.org, api.npmjs.org and pypi.org) |
 | `--new-days <days>` | — | With --registry: a package first published fewer days ago than this is new (default 30) |
@@ -1680,6 +1688,30 @@ Each finding has a rule id, a severity, the file and line, a short snippet and a
 | `--fail-on <severity>` | — | Exit 1 when a finding is at or above this severity: critical, high, medium, low or info |
 | `--allow-host <host>` | — | Host a remote MCP server may use; repeat the option or separate hosts with commas. `*.example.com` allows subdomains |
 
+#### sbom reachability
+
+```text
+0security sbom reachability [options] <file> [folder]
+```
+
+Read JVM source-import candidates and follow the SBOM's dependency graph offline. Nothing runs or is sent over the network. Main-source and test-source evidence are kept separate. Every vulnerable-code verdict stays `unknown`: imports and package dependency edges do not prove that vulnerable methods execute, and missing imports do not prove absence of use.
+
+```bash
+0security sbom reachability sbom.cdx.json . --format json
+0security sbom check sbom.cdx.json --source . --format sarif -o deps.sarif
+```
+
+`sbom check --source` attaches the same evidence to advisory results in text, JSON and SARIF. It does not suppress advisories, lower severity or change the advisory exit code. Source stays local; the advisory check still sends package URLs to OSV. Source and graph limits are reported as incomplete evidence.
+
+| Option | Registered default | Description |
+| --- | --- | --- |
+| `--format <format>` | `text` | Output: text or json |
+
+| Argument | Required | Description |
+| --- | --- | --- |
+| `file` | Yes | CycloneDX SBOM (JSON), including the resolved dependency graph when available |
+| `folder` | No | Source folder to read (default: .) |
+
 #### sbom java-usage
 
 List which Maven components of an SBOM your Java, Kotlin, Scala or Groovy source imports
@@ -1749,7 +1781,7 @@ Browse and manage persisted findings
 
 Triage (`new`, `accepted`, `suppressed`) and verification are separate states. Accepting a finding records your decision; reproduction and fix verification are separate steps.
 
-Subcommands: [list](#findings-list) · [show](#findings-show) · [update](#findings-update) · [import](#findings-import) · [fix](#findings-fix) · [burndown](#findings-burndown) · [verify](#findings-verify) · [metrics](#findings-metrics) · [rollup](#findings-rollup) · [evidence](#findings-evidence) · [export-fixes](#findings-export-fixes) · [report-draft](#findings-report-draft) · [reproduce](#findings-reproduce) · [accept](#findings-accept) · [suppress](#findings-suppress) · [reopen](#findings-reopen) · [export](#findings-export) · [keys](#findings-keys) · [upload](#findings-upload) · [issues](#findings-issues) · [reports](#findings-reports).
+Subcommands: [list](#findings-list) · [show](#findings-show) · [update](#findings-update) · [import](#findings-import) · [fix](#findings-fix) · [burndown](#findings-burndown) · [verify](#findings-verify) · [metrics](#findings-metrics) · [rollup](#findings-rollup) · [evidence](#findings-evidence) · [export-fixes](#findings-export-fixes) · [report-draft](#findings-report-draft) · [reproduce](#findings-reproduce) · [context](#findings-context) · [accept](#findings-accept) · [suppress](#findings-suppress) · [reopen](#findings-reopen) · [export](#findings-export) · [keys](#findings-keys) · [variants](#findings-variants) · [upload](#findings-upload) · [issues](#findings-issues) · [reports](#findings-reports).
 
 | Option | Registered default | Description |
 | --- | --- | --- |
@@ -1760,7 +1792,8 @@ Subcommands: [list](#findings-list) · [show](#findings-show) · [update](#findi
 | `--status <status>` | — | Filter by status: discovered, verified, confirmed, scored, reported, fixed, false-positive |
 | `--triage <triage>` | — | Filter by triage: new, accepted, suppressed |
 | `--expiring <days>` | — | Only accepted risks that expire within this many days |
-| `--context <file>` | — | Business context file (JSON): order findings by what matters to you, with the reason shown. See the docs |
+| `--context <file>` | — | Business context file (JSON): order findings by what matters to you, with the reason shown. Defaults to the file set with `0security config set findingsContext` |
+| `--repository <name>` | — | Repository name the context rules are matched against (default: the git remote of the current folder) |
 | `--scope <scope>` | — | in: findings not labelled out of scope; out: only those the declared scope (0security scan --scope) labelled out of scope; all (default): both, each labelled |
 | `--limit <n>` | `50` | Max findings/groups to show |
 | `--all` | `false` | Show raw finding rows instead of grouped fingerprints |
@@ -1789,13 +1822,14 @@ An accepted risk shows `accepted until <date>`. Once that date passes, the findi
 | `--status <status>` | — | Filter by status: discovered, verified, confirmed, scored, reported, fixed, false-positive |
 | `--triage <triage>` | — | Filter by triage: new, accepted, suppressed |
 | `--expiring <days>` | — | Only accepted risks that expire within this many days |
-| `--context <file>` | — | Business context file (JSON): order findings by what matters to you, with the reason shown. See the docs |
+| `--context <file>` | — | Business context file (JSON): order findings by what matters to you, with the reason shown. Defaults to the file set with `0security config set findingsContext` |
+| `--repository <name>` | — | Repository name the context rules are matched against (default: the git remote of the current folder) |
 | `--scope <scope>` | — | in: findings not labelled out of scope; out: only those the declared scope (0security scan --scope) labelled out of scope; all (default): both, each labelled |
 | `--limit <n>` | — | Max findings/groups to show |
 
 ##### Business context
 
-A scan cannot know what your business depends on. Tell 0 in a small JSON file, and `--context` uses it to order the list:
+Supply business context in a small operator-owned JSON file. Use `scan --business-context context.json` to steer investigation and persist a separate work-priority label. Use `findings list --context context.json` to override the labels for one list:
 
 ```bash
 0security findings list --context context.json
@@ -1826,9 +1860,11 @@ A tag moves a finding up or down in the order, in steps of severity. The tags an
 
 Steps add up, and the total is held to between -2 and +2. A medium finding in `src/payments/**` with `payments` and `personal-data` ranks with the critical ones. Set `weights` in the file to change a tag, for example `"weights": { "payments": 2 }`. A weight is a whole number from -2 to 2.
 
-Each finding that matched shows a line such as `Business context: ranked higher (+2): payments, personal-data. card checkout`. The order changes and nothing else does: a finding keeps its severity, none is hidden, and verification and fixes are unaffected. 0 reads the file only from the path you pass, never from a repository you scan. The file is limited to 64 KB. Without `--context` the order is by severity as before.
+A matching finding shows `Operator business context (unverified): ranked higher (+2): payments, personal-data. card checkout`. Technical severity, CVSS, verification, counts, scope and `--fail-on` remain unchanged; no finding is hidden. The tags and notes are operator declarations, not observed deployment exposure or exploitability.
 
-The context applies to `findings list`. Scans, `findings burndown` and exports do not use it yet.
+`scan --business-context context.json` passes the declarations as labelled background, orders JSON/Markdown/HTML/PDF/SARIF reports within scope groups, and stores the separate declaration with each local finding. The JSON finding and SARIF result property are named `businessContext` and include `provenance: "operator"`, repository, tags, notes, shift, work score and rationale. Later list, burndown and retained exports use the stored labels without reopening the file. The console shows the declaration separately and offers a **Business priority** sort; **Severity** still sorts technical severity. A scan's ordinary model finding saves cannot set the operator declaration field.
+
+0 reads context only from the path explicitly passed. The file is limited to 64 KB; it is never discovered automatically in a scanned repository. One file can hold rules for several repositories under `repositories`. Stored labels carry that scan's repository label. A file you pass to `findings list` or another command, or set with `findingsContext`, is applied when you run the command and overrides a stored label. See [Rank findings by what matters to you](/findings/#rank-findings-by-what-matters-to-you). Without a stored declaration or an explicit list context, ordering remains technical severity. `scan --context` continues to mean prose background and is a separate option.
 
 | Option | Registered default | Description |
 | --- | --- | --- |
@@ -1859,6 +1895,8 @@ Show detailed information about a finding
 | Option | Registered default | Description |
 | --- | --- | --- |
 | `--db-path <path>` | — | Path to SQLite database |
+| `--context <file>` | — | Business context file (JSON): order findings by what matters to you, with the reason shown. Defaults to the file set with `0security config set findingsContext` |
+| `--repository <name>` | — | Repository name the context rules are matched against (default: the git remote of the current folder) |
 | `--json` | — | Print JSON |
 | `--format <format>` | — | Output: text or json Choices: text, json. |
 
@@ -2002,17 +2040,23 @@ A policy file inside the repository being fixed is not read unless you pass `--r
 
 | Option | Registered default | Description |
 | --- | --- | --- |
+| `--host <host>` | — | Code host: github, bitbucket-cloud or bitbucket-dc (inferred from origin) |
+| `--bitbucket-url <url>` | — | Bitbucket Data Center HTTPS base URL, including any context path (or BITBUCKET_URL) |
 | `--repo <dir>` | — | Git repository the finding is in (default: the current directory) |
 | `--base <branch>` | — | Branch to start from and open the pull request against (default: the remote's default branch) |
 | `--test <command>` | — | Check to run after the change; repeat for several. A failing check makes the pull request a draft |
 | `--ready` | — | Open the pull request ready for review even when no --test ran. Without it, a pull request with no checks is a draft |
 | `--sandbox <mode>` | — | Run the --test commands in a container instead of on this machine (docker) Choices: docker. |
+| `--sandbox-profile <profile>` | — | Use the pinned Maven/JDK 21 verifier: online dependency setup then offline verify (java) |
+| `--sandbox-maven-settings <file>` | — | Owner-only short-lived Maven credentials outside the repository; read-only mount for online setup only; setup output withheld |
 | `--sandbox-image <image>` | — | Image for --sandbox docker, for example maven:3-eclipse-temurin-21. It must hold the tools and dependencies the tests need |
 | `--sandbox-network` | — | Give the sandbox network access (to download dependencies). Off by default |
-| `--sandbox-setup <command>` | — | With --sandbox docker: run this once with the network on to download dependencies (for example mvn -q dependency:go-offline), then run the --test checks with the network off; repeat for several |
+| `--sandbox-setup <command>` | — | With --sandbox docker: run this once with the network on to download dependencies (for example mvn -q test), then run the --test checks with the network off; repeat for several |
 | `--policy <file>` | — | Policy file (.json or .yaml) of approved libraries and fix rules; any path you name, relative to the current directory. Default: ~/.0/fix-policy.json\|yaml\|yml |
 | `--ticket <key>` | — | Ticket key such as SEC-123 for the {ticket} placeholder in your policy's pull request settings |
 | `--repo-policy` | — | Also read fix-policy.* or .zero/fix-policy.* from the repository being fixed (untrusted content; off by default) |
+| `--no-variants` | — | Do not rescan the recorded variants or hunt for the same bug at other sites after the fix |
+| `--variant-budget <usd>` | `1` | Spend cap for each variant thread, in USD |
 | `--no-pr` | — | Commit on the fix branch but do not push or open a pull request |
 | `--budget <usd>` | `3` | Stop when the estimated spend reaches this many USD |
 | `--model <model>` | — | Model for the fix thread (default: gpt-6-luna) |
@@ -2135,6 +2179,8 @@ The JSON has the schema `0.fix-outcomes.v1`. A field the run could not know is `
 | `--repo <dir>` | — | Only fixes recorded for this git repository (default: all) |
 | `--since <date>` | — | Only fixes recorded on or after this date, like 2026-01-31 |
 | `--check-merged` | — | Ask the code host whether each pull request was merged, closed or edited (one request each) |
+| `--context <file>` | — | Business context file (JSON): order findings by what matters to you, with the reason shown. Defaults to the file set with `0security config set findingsContext` |
+| `--repository <name>` | — | Repository name the context rules are matched against (default: the git remote of the current folder) |
 | `-o, --output <dir>` | — | Write fix-outcomes.md and fix-outcomes.json into this folder instead of printing |
 | `--format <format>` | `markdown` | Printed output: markdown or json Choices: markdown, json. |
 
@@ -2177,6 +2223,8 @@ The draft says that a person must review it and submit it through the authority'
 | `--facts <file>` | — | JSON file with the same facts (camelCase keys, for example affectedVersions); flags win |
 | `-o, --output <file>` | — | Write to a file instead of stdout |
 | `--db-path <path>` | — | Path to SQLite database |
+| `--context <file>` | — | Business context file (JSON): add why the finding ranks where it does. Defaults to the file set with `0security config set findingsContext` |
+| `--repository <name>` | — | Repository name the context rules are matched against (default: the git remote of the current folder) |
 
 #### findings evidence
 
@@ -2259,6 +2307,8 @@ Exit codes:
 | `--fingerprint <prefix>` | — | Only findings whose fingerprint or id starts with this |
 | `--limit <n>` | — | Attempt at most this many findings in this run; the next run continues with the rest |
 | `--repo <dir>` | — | Git repository the findings are in (default: the current directory) |
+| `--context <file>` | — | Business context file (JSON): fix what matters most to you first, with the reason shown. Defaults to the file set with `0security config set findingsContext` |
+| `--repository <name>` | — | Repository name the context rules are matched against (default: the git remote of the current folder) |
 | `--base <branch>` | — | Branch to start from and open pull requests against (default: the remote's default branch) |
 | `--test <command>` | — | Check to run after each change; repeat for several. A failing check makes the pull request a draft |
 | `--ready` | — | Open pull requests ready for review even when no --test ran. Without it, a pull request with no checks is a draft |
@@ -2303,9 +2353,12 @@ The summary lists runs, cost, average time and counts per command. A proposed fi
 
 | Option | Registered default | Description |
 | --- | --- | --- |
+| `--refresh-host` | — | Read current PR lifecycle and CI for up to 20 recorded PRs (requires --repo; no host writes) |
+| `--repo <checkout>` | — | Explicit local checkout for --refresh-host |
+| `--bitbucket-url <url>` | — | Bitbucket Data Center server base for the explicit checkout |
 | `--since <when>` | — | Only runs since then: 36h, 7d, 2w or a date such as 2026-11-01 |
-| `--command <name>` | — | Only this command: scan, fix, verify |
-| `--by <group>` | — | One row per command, week (Monday start) or model Choices: command, week, model. |
+| `--command <name>` | — | Only this command: scan, fix, verify, sentinel |
+| `--by <group>` | — | One row per command, week (Monday start), model, Sentinel or trigger Choices: command, week, model, sentinel, trigger. |
 | `--format <format>` | — | Output: text, json, or csv (with --by) Choices: text, json, csv. |
 
 #### findings rollup
@@ -2321,11 +2374,11 @@ Count open findings across repositories by severity, category, age and owner, fr
 0security findings rollup api.json web.json --format html -o rollup.html
 ```
 
-Run it once per repository with `--export` to write a rollup export. Put the files in one place, then run it again with the files as inputs. An input is an export file or a findings database. With no input, it reads the databases on this machine. It reads local files only and sends nothing.
+Run it once per repository with `--export` to write a rollup export. Put the files in one place, then run it again with the files as inputs. An input is an export file, a SARIF file or a findings database. With no input, it reads the databases on this machine. It reads local files only and sends nothing.
 
 How it counts:
 
-- A flaw counts once per repository. Rows with the same repository and fingerprint merge, even across files. The newest row sets its state and the oldest sets its age. The same fingerprint in two repositories counts twice.
+- Each input export is a complete snapshot of the repositories it names. The latest `exportedAt` wins per repository in the current view, even if a finding’s `lastSeen` did not change. Within one timestamp a flaw counts once per repository by fingerprint; its newest row sets state and its oldest first-seen sets age. The same flaw remains present in each historical snapshot. The same fingerprint in two repositories counts twice.
 - The open count leaves out findings that are fixed, marked false positive, accepted or suppressed. An acceptance past its expiry counts as open. The output shows how many were left out and why.
 - Age is the time since the finding was first seen: under 7 days, 7 to 30, 30 to 90, over 90.
 - The owner is the finding's assignee. If it has none, the owner comes from the `--owners` file. Otherwise it counts as unassigned. 0 does not read CODEOWNERS, because that file comes from the repository you scan.
@@ -2337,9 +2390,44 @@ The `--owners` file is a JSON object that maps a repository name to an owner or 
 { "api": "payments", "web": "growth" }
 ```
 
-An export has the schema `0.findings-rollup.v1`: `schema`, `exportedAt` and `findings`. Each finding has `repository`, `fingerprint`, `title`, `severity`, `category`, `status`, `triage` (new, accepted or suppressed), `owner` (a string or null), `firstSeen` and `lastSeen` (ISO times). To bring in another scanner's results first, use [findings import](#findings-import).
+An export has the schema `0.findings-rollup.v1`: `schema`, `exportedAt` and `findings`. Each finding has `repository`, `fingerprint`, `title`, `severity`, `category`, `status`, `triage` (new, accepted or suppressed), `owner` (a string or null), `firstSeen` and `lastSeen` (ISO times). It can also have `team` and `tier`; files without them still read. To bring in another scanner's results first, use [findings import](#findings-import).
 
-The rollup does not keep history, so it shows no trend. Keep the JSON output of each run to compare them.
+To see what changed, keep the export of each run and compare a later rollup with an earlier export:
+
+```bash
+0security findings rollup api.json web.json --since last-month.json
+```
+
+The trend shows opened, fixed and net findings per severity and per repository. A finding is opened if it is open now and was not open then. It is fixed if it was open then and is not open now. That includes findings now marked false positive, accepted or suppressed, and findings gone from the file. Net is opened minus fixed. A repository that is in only one of the two files is listed, not counted as fixed. `--since` takes a rollup export, not a database.
+
+To group by team and tier, pass a labels file. It is JSON or YAML and maps a repository name or glob to a team, a tier or both:
+
+```yaml
+api: { team: payments, tier: 1 }
+"pay-*": { team: payments, tier: 2 }
+"path:src/vault/**": { team: security }
+```
+
+For each of team and tier, the most specific match wins: a `path:` rule, then an exact repository name, then the repository glob with the most literal characters. A `path:` rule applies only to findings read from a SARIF file, because only those have a file path. A label from the file replaces a label stored in an export. A finding with no match counts as unlabelled. 0 reads only the file you name, never labels from a scanned repository. Exports keep team and tier but not file paths.
+
+A SARIF file is read with the same limits as [findings import](#findings-import), including the credential scrubbing, and nothing goes into the findings database. The repository is the `--repository` name, else the repository in the SARIF file, else the file name. SARIF has no first-seen time, so the file's modified time sets the age. Results with an active suppression are skipped.
+
+For dated source snapshots, use `--history` in addition to the comparison and label options above:
+
+```bash
+0security findings rollup api-2026-11-01.json web-2026-11-01.json --history history.json
+0security findings rollup history.json api-2026-11-25.json --history history-next.json --format json -o report.json
+0security findings rollup history-next.json --format csv -o dashboard-counts.csv
+```
+
+The archive schema is `0.findings-rollup.history.v1`: `snapshots` contains v1 exports with each input's basename as `source`. Captured timestamps, states and repository identity are retained; absolute input paths and evidence are not. An optional `repositories` array in a v1 export records repositories with zero findings, so a newer clean snapshot can replace older findings. Supply `--repository` when exporting an empty database to preserve its identity.
+
+The JSON report keeps the `--since` comparison in `trend` and adds a chronological `snapshotTrend` array, snapshot provenance and current per-repository `observations`. Each repository's latest `exportedAt` supplies its current rows; different repositories can have different observation dates. Each `snapshotTrend` point lists only the repositories actually observed at that timestamp. A change in observed coverage does not establish that findings were fixed. `--export` writes a current consolidated snapshot; `--history` retains the original observation times.
+
+CSV is a stable long-form table: `schema,snapshot_at,scope,dimension,label,count,repositories,sources`. `scope=current` means the view assembled from the latest snapshot per repository; `scope=snapshot` means an actual captured timestamp. The final two columns contain JSON arrays. These JSON/CSV exports do not establish a remote dashboard connection. Verify DefectDojo or Dependency-Track importers separately using their supported scanner formats.
+
+
+With a business context (`--context` or the `findingsContext` setting) the rollup adds a list of the open findings to look at first. It matches rules for a repository against the repository name of each row, so pass `--repository acme/api` to name a database's repository in full. The counts by severity stay real. Rollup export files carry no file paths, so only findings read from a database or a SARIF file match rules that have a `match`.
 
 | Argument | Required | Description |
 | --- | --- | --- |
@@ -2348,10 +2436,57 @@ The rollup does not keep history, so it shows no trend. Keep the JSON output of 
 | Option | Registered default | Description |
 | --- | --- | --- |
 | `--export <file>` | — | Also write these findings as a rollup export file that another rollup can read |
+| `--history <file>` | — | Write a reusable dated snapshot archive, preserving the input timestamps and provenance |
 | `--owners <file>` | — | JSON file mapping repository names to owners, used when a finding has no assignee |
-| `--repository <name>` | — | Repository name for findings read from a database (default: the scan target's folder name) |
-| `--format <format>` | — | Output: text, json or html Choices: text, json, html. |
+| `--labels <file>` | — | JSON or YAML file mapping repository names or globs (or path: globs) to a team and tier, shown as extra breakdowns |
+| `--since <file>` | — | An earlier rollup export to compare with: shows findings opened and fixed since then |
+| `--repository <name>` | — | Repository name for findings read from a database or a SARIF file (default: the scan target's folder name, or the SARIF's repository). Rules for a repository in the context file match this name |
+| `--context <file>` | — | Business context file (JSON): also list the open findings to look at first, ordered with it. Defaults to the file set with `0security config set findingsContext` |
+| `--format <format>` | — | Output: text, json, html or csv Choices: text, json, html, csv. |
 | `-o, --output <file>` | — | Write the rollup to a file instead of stdout |
+
+#### findings context
+
+Work with the business context file that orders findings
+
+```text
+0security findings context
+```
+
+```bash
+0security findings context check context.json
+```
+
+Subcommands: [check](#findings-context-check).
+
+#### findings context check
+
+List which rules of a context file match which current findings, and which match nothing
+
+```text
+0security findings context check [options] <file>
+```
+
+```bash
+0security findings context check context.json
+0security findings context check context.json --repository acme/api --json
+```
+
+Run it after you write or change a business context file. It reads the file you name and the findings in your databases, and changes nothing. For each rule it shows how many current findings match and gives up to three examples. Findings that are fixed, marked false positive, accepted or suppressed are left out.
+
+It exits 0 when every rule that applies matches a finding, 1 when a rule matches nothing, and 2 when the file is not valid. A rule under a repository that is not the current one is listed as not applied, and is not counted as matching nothing. The file format is in [Rank findings by what matters to you](/findings/#rank-findings-by-what-matters-to-you).
+
+| Argument | Required | Description |
+| --- | --- | --- |
+| `file` | Yes |  |
+
+| Option | Registered default | Description |
+| --- | --- | --- |
+| `--db-path <path>` | — | Path to SQLite database |
+| `--scan <scanId>` | — | Only the findings of this scan |
+| `--repository <name>` | — | Repository name the context rules are matched against (default: the git remote of the current folder) |
+| `--json` | — | Print JSON |
+| `--format <format>` | — | Output: text or json Choices: text, json. |
 
 #### findings reproduce
 
@@ -2363,7 +2498,7 @@ Experimental: run a finding's proposed steps against a local copy of the app in 
 
 Reproduce replays a finding's proposed request against your app and checks whether a canary file came back. It runs the committed tree of `--folder` (default: the current directory) in a container started from `--image`, which must be pinned by digest and contain node. Uncommitted changes are not included.
 
-The container has no network except its own loopback. It is capped at 128 processes, 512 MB of memory, one CPU, 256 MB of writable storage and 64 MB of `/tmp`, and a run stops after two minutes. Some storage drivers cannot cap writable storage. The run is then refused with "storage limit unavailable: reproduction refused". Pass `--allow-unbounded-storage` to run anyway. The result records that storage was unbounded. The harness starts the app and waits until it answers. Then it plants a fresh canary file with a random name and content next to the app folder and in its parent, and replays the finding's request with the file name swapped for the canary. The canary does not exist before that, and its token is not in the command or the app's environment. The harness never contacts a live URL. A second request without the traversal checks that the app does not serve the canary anyway.
+The container has no network except its own loopback. Its root file system is read-only. It is capped at 128 processes, 512 MB of memory and one CPU, and a run stops after two minutes. The app runs in `/sandbox/app`. That folder and its parent `/sandbox` are one 256 MB in-memory file system, and `/tmp` is a separate 64 MB one. Programs cannot be run directly from either one, so use a start command like `node server.js`. An app that needs to run a binary from its folder does not start, and the run reports that. Native add-ons are not tested. Every container runtime enforces these size caps. The harness starts the app and waits until it answers. Then it plants a fresh canary file with a random name and content in the app folder and in `/sandbox`, and replays the finding's request with the file name swapped for the canary. The canary does not exist before that, and its token is not in the command or the app's environment. The harness never contacts a live URL. A second request without the traversal checks that the app does not serve the canary anyway.
 
 The start command is `node server.js` unless you pass `--start`. It comes from you. The repository is untrusted, so its scripts and configuration are never read as instructions. Only path traversal on an HTTP GET route is supported. Other findings, encoded payloads and POST requests give an inconclusive result.
 
@@ -2395,6 +2530,48 @@ Exit codes:
 | `--json` | — | Print JSON |
 | `--format <format>` | — | Output: text or json Choices: text, json. |
 
+#### findings variants
+
+Experimental: hunt for the same bug at other sites from a finding's root cause, or rescan the recorded variants
+
+```text
+0security findings variants [options] <finding>
+```
+
+A fix closes one site; the same mistake is often at others. A finding can carry a root cause: the bug class, the unsafe pattern (the shape of the sink and where its input comes from), the guard that is missing, and the design origin (where the control should live so every site is covered). `0security findings verify` records one when it returns a true-positive verdict, and a hunt records one when the finding has none.
+
+The command starts a thread that follows the `variant-hunting` skill, seeded from that record. It searches the folder for the same sink shape, checks every hit and answers with the sites that still have the bug. Each site becomes a finding with a `variantOf` link to this one, so [findings show](#findings-show) lists the variants and [findings list](#findings-list) marks them. A site already recorded, or on the finding's own lines, is not recorded again. A finding that is itself a variant cannot start a hunt. The thread edits nothing.
+
+`--rescan` hunts for no new variants. It checks the variants already recorded again and marks each one fixed, or leaves it open when the bug is still there or the thread cannot tell. A fixed variant is not checked again. `0security findings fix` does this on the fixed work tree after it commits, then hunts, so the result shows next to the pull request; `0security findings verify` hunts after each true-positive verdict. Both take `--no-variants` to skip it and `--variant-budget` to cap each thread. Cross-repository search is not part of this.
+
+Pass the folder that was scanned with `--folder` (default: the current directory). This command reads files on this machine, so it needs the local console and rejects `--computer` and `--engine-url`.
+
+Exit codes:
+
+- 0: done
+- 1: the thread returned no answer
+- 2: usage error
+
+| Argument | Required | Description |
+| --- | --- | --- |
+| `finding` | Yes |  |
+
+| Option | Registered default | Description |
+| --- | --- | --- |
+| `--folder <dir>` | — | The folder that was scanned; the thread reads the code there (default: the current directory) |
+| `--rescan` | — | Check the variants already recorded for this finding and mark each fixed or still open; hunt for no new ones |
+| `--budget <usd>` | `1` | Spend cap for the thread, in USD |
+| `--model <model>` | — | Model for the thread (default: gpt-6-luna) |
+| `--timeout <seconds>` | `600` | Maximum seconds to wait for the thread |
+| `--format <format>` | — | Output: text or json Choices: text, json. |
+| `--engine-url <url>` | — | Attach directly to a running trusted engine |
+| `--engine-token-env <name>` | — | Environment variable holding the attached engine token |
+| `--computer <id>` | — | Use a registered remote computer |
+| `--engine <id>` | — |  |
+| `--computers-config <path>` | — | Operator computer connection registry JSON file |
+| `--engines-config <path>` | — |  |
+| `--db-path <path>` | — | Control database of the local engine to attach to |
+
 #### findings verify
 
 Experimental: re-check findings with a fresh thread each and record a verdict next to them
@@ -2412,6 +2589,8 @@ The verdict is stored next to the finding by its id. [findings list](#findings-l
 `--apply` never suppresses a critical or high finding. It suppresses a lower-severity finding only when the verdict is false-positive and it names a control at `path:line` that exists in the folder and the reasoning cites a `path:line` too. The suppression note starts with `False positive (model-verified):` and `0security findings reopen` undoes it. Without `--apply` no status changes.
 
 `--budget` is the total for the run and `--per-finding` caps one finding. `--concurrency` (1 to 3) runs threads side by side. The run stops when `--max-consecutive-failures` threads in a row return no verdict, or when the budget is spent. `--dry-run` lists what would be checked. `--format json` prints the report with counts per verdict, the reasoning, the cost and what `--apply` did.
+
+A true-positive verdict also stores the finding's root cause and starts a hunt for variants, the same bug at other sites ([findings variants](#findings-variants)). `--no-variants` turns that off and `--variant-budget` caps each hunt.
 
 Verify reads files on this machine, so it needs the local console and rejects `--computer` and `--engine-url`.
 
@@ -2439,6 +2618,8 @@ Exit codes:
 | `--max-consecutive-failures <n>` | `3` | Stop after this many checks in a row that return no verdict |
 | `--model <model>` | — | Model for the threads (default: gpt-6-luna) |
 | `--timeout <seconds>` | `600` | Maximum seconds to wait for one thread |
+| `--no-variants` | — | Do not hunt for the same bug at other sites after a true-positive verdict |
+| `--variant-budget <usd>` | `1` | Spend cap for each variant hunt, in USD |
 | `--dry-run` | — | List what would be checked and skipped; change nothing |
 | `--format <format>` | — | Output: text or json Choices: text, json. |
 | `--engine-url <url>` | — | Attach directly to a running trusted engine |
@@ -2557,6 +2738,8 @@ Export selected findings, or a whole scan, as `json`, `md`, `sarif`, `html` or `
 | `--status <status>` | — | With no IDs: only this status |
 | `--triage <triage>` | — | With no IDs: only this triage state |
 | `--db-path <path>` | — | Path to SQLite database |
+| `--context <file>` | — | Business context file (JSON): order findings by what matters to you, with the reason shown. Defaults to the file set with `0security config set findingsContext` |
+| `--repository <name>` | — | Repository name the context rules are matched against (default: the git remote of the current folder) |
 | `--json` | — | Print the result of writing a file as JSON |
 
 #### findings keys
@@ -4212,6 +4395,8 @@ Change a Sentinel's settings.
 | `--mission <text>` | — |  |
 | `--file <path>` | — | Patch JSON object |
 | `--version <n>` | — | Reviewed version (default: the current one) |
+| `--daily-budget <usd>` | — | Most the Sentinel may spend per UTC day; runs are refused after that (none removes the limit) |
+| `--monthly-budget <usd>` | — | Most the Sentinel may spend per UTC month; runs are refused after that (none removes the limit) |
 | `--state <state>` | — | active, paused, acknowledged, archived or deleted |
 | `--json` | — | Print machine-readable JSON |
 | `--db-path <path>` | — | Control database (default: the user database) |
@@ -4494,6 +4679,7 @@ Add a trigger for an automation the Sentinel owns; disabled unless --enable --ye
 | `--base-branch <branch>` | — | github-pr: only pull requests into this branch |
 | `--comment` | — | github-pr: comment on each pull request with one short summary, edited in place on later pushes (default: off) |
 | `--include-forks` | — | github-pr: also review pull requests from forks, marked untrusted (default: skipped) |
+| `--results <mode>` | — | github-pr, release, check-completed: send findings back to GitHub: off, sarif, comment, both (default: off). sarif uploads to code scanning; comment posts one pull request comment |
 | `--label <text>` | — | webhook: a name for this webhook (default: webhook) |
 | `--platform <platform>` | — | bitbucket-pr: cloud or dc (Data Center) |
 | `--url <url>` | — | bitbucket-pr, Data Center: server URL, for example https://bitbucket.example.com |
@@ -4502,6 +4688,8 @@ Add a trigger for an automation the Sentinel owns; disabled unless --enable --ye
 | `--events <list>` | — | bitbucket-pr: opened, updated or opened,updated (default: both) |
 | `--max-files <n>` | — | bitbucket-pr: skip a pull request that changes more files than this (default: 50) |
 | `--budget <usd>` | — | bitbucket-pr: spend limit for one pull request scan (default: 2) |
+| `--daily-budget <usd>` | — | Most this trigger may spend per UTC day; its runs are refused after that |
+| `--monthly-budget <usd>` | — | Most this trigger may spend per UTC month; its runs are refused after that |
 | `--json` | — | Print machine-readable JSON |
 | `--db-path <path>` | — | Control database (default: the user database) |
 | `--format <format>` | — | Output: text or json Choices: text, json. |

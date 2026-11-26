@@ -177,7 +177,7 @@ export function detectProvider(configApiKey: string | undefined, preferredModel:
     }
     const provider = pinnedProviderRaw as ApiProvider;
     const model = preferredModel ?? env["ZERO_MODEL"] ??
-      (provider === "azure" ? env.AZURE_OPENAI_MODEL ?? parseCodexAzureConfig(env).model : provider === "openai" ? env.OPENAI_MODEL : undefined) ??
+      (provider === "azure" ? env.AZURE_OPENAI_MODEL ?? parseCodexAzureConfig(env).model : provider === "openai" ? env.OPENAI_MODEL : provider === "bedrock" ? env.ZERO_BEDROCK_MODEL : undefined) ??
       (configProvider !== undefined ? DEFAULT_PROVIDER_MODELS[provider] : undefined);
     if (model === undefined || model === "") {
       if (provider === "azure") throw new Error("Choose an Azure deployment model in Connections to finish setup.");

@@ -1,5 +1,6 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 import { CodeLocationSection, FixSection } from "./finding-code-fix";
 
@@ -21,6 +22,12 @@ describe("CodeLocationSection", () => {
 });
 
 describe("FixSection", () => {
+  it("opens a real verification session for the selected finding without claiming the fix passed", () => {
+    const out = html(createElement(MemoryRouter, {}, createElement(FixSection, { findingId: "f/a?b", fix: { records: [record], command: "c" } })));
+    expect(out).toContain('href="/chats?finding=f%2Fa%3Fb&amp;intent=verify"');
+    expect(out).toContain("Re-verify");
+    expect(out).toContain("Review its result before updating this finding’s status");
+  });
   it("shows the exact command when no fix is recorded", () => {
     const out = html(createElement(FixSection, { fix: { records: [], command: "0security findings fix abc12345" } }));
     expect(out).toContain("No fix recorded");
@@ -38,10 +45,18 @@ describe("FixSection", () => {
     expect(out).toContain("+new");
     expect(out).toContain("The diff is cut here");
   });
+  it("shows a timestamped CI snapshot and a safe checks link separately from local checks", () => {
+    const out = html(createElement(FixSection, { fix: { command: "c", records: [{ ...record, ci: { status: "failing", checkedAt: "2026-11-25T00:00:00Z", url: "https://bitbucket.org/o/r/addon/pipelines/home" } }] } }));
+    expect(out).toContain("Local checks passed");
+    expect(out).toContain("CI failed");
+    expect(out).toContain("Checked");
+    expect(out).toContain('href="https://bitbucket.org/o/r/addon/pipelines/home"');
+  });
   it("does not render an unsafe link and does not invent a diff", () => {
     const out = html(createElement(FixSection, { fix: { command: "c", records: [{ ...record, pullRequestUrl: "javascript:alert(1)", checksPassing: null }] } }));
     expect(out).not.toContain("href=");
     expect(out).toContain("No checks recorded");
+    expect(out).toContain("CI status unavailable");
     expect(out).toContain("The diff is not available");
     expect(out).not.toContain("Fix diff");
   });

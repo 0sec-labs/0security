@@ -1,0 +1,45 @@
+name: 0security scan and publish
+image: ghcr.io/0sec-labs/0security-pipe:0.45.0
+category: Security
+description: Scan a pull request, then publish its recorded findings in a separate trusted step.
+repository: https://github.com/0sec-labs/0security
+maintainer:
+  name: 0security
+  website: https://0.security
+variables:
+  - name: MODE
+    default: scan
+  - name: ZEROCI_BASE_BRANCH
+    default: '${BITBUCKET_PR_DESTINATION_BRANCH}'
+  - name: ZEROCI_COMMIT
+    default: '${BITBUCKET_COMMIT}'
+  - name: ZEROCI_OUT_DIR
+    default: .zero-ci
+  - name: ZEROCI_PREPASS_ONLY
+    default: '0'
+  - name: ZEROCI_TARGET
+    default: .
+  - name: ZEROCI_FAIL_ON
+    default: high
+  - name: ZEROCI_BUDGET
+    default: '3'
+  - name: ZEROCI_UPLOAD_TO
+    default: bitbucket-cloud
+  - name: ZEROCI_REPO
+    default: '${BITBUCKET_WORKSPACE}/${BITBUCKET_REPO_SLUG}'
+  - name: BITBUCKET_URL
+    default: ''
+  - name: BITBUCKET_TOKEN
+    default: ''
+  - name: ZERO_BITBUCKET_URL
+    default: ''
+  - name: ZERO_ENTERPRISE
+    default: ''
+  - name: OPENAI_API_KEY
+    default: ''
+  - name: OPENAI_BASE_URL
+    default: ''
+  - name: ANTHROPIC_API_KEY
+    default: ''
+  - name: GOOGLE_API_KEY
+    default: ''

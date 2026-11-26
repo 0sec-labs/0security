@@ -20,7 +20,7 @@ export function AgentWakeLine({ header, text }: { header: WakeHeader; text: stri
     contentClassName="pt-1"
     summary={<>
       <span data-slot="cause-chip" className="flex-none rounded-md bg-secondary px-1.5 py-px text-[11px] leading-4 font-medium text-muted-foreground-1">{cause}</span>
-      <span className={cn("truncate", summary.working && "animate-pulse")}>{summary.text}</span>
+      <span className={cn("truncate", summary.working && "animate-pulse")}>{turn?.status === "running" && turn.note?.startsWith("Cancellation") ? turn.note : summary.text}</span>
       {summary.failed && <X aria-label="Failed" className="size-3 flex-none text-destructive" />}
     </>}>
     <ul className="mx-auto flex w-full max-w-md flex-col gap-1.5 border-y-[0.5px] border-border-1 py-2 text-xs text-muted-foreground wrap-anywhere">
@@ -31,6 +31,7 @@ export function AgentWakeLine({ header, text }: { header: WakeHeader; text: stri
         {turn.status === "failed" && <X aria-hidden="true" className="size-3 text-destructive" />}
         <span>{{ queued: "Waiting its turn", running: "Working", completed: "Ended the turn", failed: "Failed", cancelled: "Stopped", skipped: "Skipped" }[turn.status]}{turn.startedAt ? ` · started ${clock(turn.startedAt)}` : ""}{turn.startedAt && turn.finishedAt ? ` · ${workedFor(Date.parse(turn.finishedAt) - Date.parse(turn.startedAt))}` : ""}{turn.costUsd !== undefined ? ` · $${turn.costUsd.toFixed(2)}` : ""}</span>
       </li>}
+      {turn?.note && <li role={turn.status === "running" ? "status" : undefined} className="text-muted-foreground-1">{turn.note}</li>}
       {turn?.error && <li className="text-destructive">{turn.error}</li>}
     </ul>
   </Disclosure>;

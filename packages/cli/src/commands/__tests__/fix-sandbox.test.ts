@@ -250,7 +250,7 @@ describe("sandbox setup, cache, canary and pinning", () => {
       const deps = {
         open: async () => ({ request: async (method: string, path: string) => (method === "POST" && path.endsWith("/sessions") ? { session: { id: "t" } } : method === "GET" ? { snapshot: { session: { status: "ready" }, messages: [{ role: "assistant", content: [{ type: "text", text: "ok" }] }], usage: {} } } : {}) }) as never,
         err: () => {}, sleep: async () => {}, startConsole: async () => () => {}, out: () => {},
-        git: async (_c: string, args: string[]) => (args[0] === "rev-parse" && args[1] === "--show-toplevel" ? "/repo\n" : args[0] === "symbolic-ref" ? "origin/main\n" : args[0] === "status" ? " M pom.xml\n" : ""),
+        git: async (_c: string, args: string[]) => (args[0] === "rev-parse" && args[1] === "--show-toplevel" ? "/repo\n" : args[0] === "remote" ? "https://github.com/o/r.git\n" : args[0] === "symbolic-ref" ? "origin/main\n" : args[0] === "status" ? " M pom.xml\n" : ""),
         gh: async (_c: string, args: string[]) => (args[1] === "list" ? "[]" : args[1] === "create" ? "https://github.com/o/r/pull/7\n" : ""),
         check: async (_c: string, command: string, sandbox?: { network: boolean; cache?: string }) => {
           calls.push({ command, network: sandbox?.network, cache: Boolean(sandbox?.cache) });

@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AuditWorkerTree } from "./worker-tree.js";
+import { PERSIST_POLL_MS } from "./tools/subagents.js";
 import { ToolExecutor, TOOL_DEFINITIONS } from "./tools.js";
 import type { ToolContext } from "./types.js";
 import type { NativeRuntime } from "../runtime/types.js";
@@ -177,47 +178,56 @@ describe("canonical background delegation", () => {
       return done();
     });
 
-    const w1 = await tools.execute({ name: "spawn_agent", arguments: { task: "Worker 1 initial", name: "Worker1" } });
-    const w1Id = (w1.output as any).agent_id;
-    await vi.waitFor(() => {
-      const last = lifecycle.filter(e => e.agent_id === w1Id).at(-1);
-      expect(last?.status).toBe("parked");
-    });
+    vi.useFakeTimers();
+    try {
+      const w1 = await tools.execute({ name: "spawn_agent", arguments: { task: "Worker 1 initial", name: "Worker1" } });
+      const w1Id = (w1.output as any).agent_id;
+      await vi.waitFor(() => {
+        const last = lifecycle.filter(e => e.agent_id === w1Id).at(-1);
+        expect(last?.status).toBe("parked");
+      });
 
-    const blocker = await tools.execute({ name: "spawn_agent", arguments: { task: "Blocker task", name: "Blocker" } });
-    const blockerId = (blocker.output as any).agent_id;
-    await blockerStartedPromise;
-    await vi.waitFor(() => {
-      const last = lifecycle.filter(e => e.agent_id === blockerId).at(-1);
-      expect(last?.status).toBe("running");
-    });
+      const blocker = await tools.execute({ name: "spawn_agent", arguments: { task: "Blocker task", name: "Blocker" } });
+      const blockerId = (blocker.output as any).agent_id;
+      await blockerStartedPromise;
+      await vi.waitFor(() => {
+        const last = lifecycle.filter(e => e.agent_id === blockerId).at(-1);
+        expect(last?.status).toBe("running");
+      });
 
-    drainInbox(process.cwd(), "Main", home);
+      drainInbox(process.cwd(), "Main", home);
 
-    const followup = await tools.execute({ name: "spawn_agent", arguments: { agent_id: w1Id, task: "Worker 1 follow-up" } });
-    expect(followup.success).toBe(true);
+      const followup = await tools.execute({ name: "spawn_agent", arguments: { agent_id: w1Id, task: "Worker 1 follow-up" } });
+      expect(followup.success).toBe(true);
 
-    await vi.waitFor(() => {
-      const last = lifecycle.filter(e => e.agent_id === w1Id).at(-1);
-      expect(last?.status).toBe("queued");
-    });
+      // Revival observes the next mailbox poll, not the instant the message is sent.
+      // Advance that cadence explicitly rather than racing waitFor's default 1s deadline.
+      await vi.advanceTimersByTimeAsync(PERSIST_POLL_MS);
+      expect(lifecycle.filter(e => e.agent_id === w1Id).at(-1)?.status).toBe("queued");
+      expect(lifecycle.filter(e => e.agent_id === w1Id).map(e => e.status)).toEqual(["queued", "running", "parked", "queued"]);
 
-    blockerRelease();
-    await reviveStartedPromise;
-    await vi.waitFor(() => {
-      const last = lifecycle.filter(e => e.agent_id === w1Id).at(-1);
-      expect(last?.status).toBe("running");
-    });
+      blockerRelease();
+      await reviveStartedPromise;
+      await vi.waitFor(() => {
+        const last = lifecycle.filter(e => e.agent_id === w1Id).at(-1);
+        expect(last?.status).toBe("running");
+      });
 
-    reviveRelease();
-    await vi.waitFor(() => {
-      const last = lifecycle.filter(e => e.agent_id === w1Id).at(-1);
-      expect(last?.status).toBe("parked");
-    });
+      reviveRelease();
+      await vi.waitFor(() => {
+        const last = lifecycle.filter(e => e.agent_id === w1Id).at(-1);
+        expect(last?.status).toBe("parked");
+      });
 
-    const w1Events = lifecycle.filter(e => e.agent_id === w1Id).map(e => e.status);
-    expect(w1Events).toEqual(["queued", "running", "parked", "queued", "running", "parked"]);
-    await tools.stopPersistentAgents();
+      const w1Events = lifecycle.filter(e => e.agent_id === w1Id).map(e => e.status);
+      expect(w1Events).toEqual(["queued", "running", "parked", "queued", "running", "parked"]);
+    } finally {
+      // A failed assertion must not strand either fake model loop during cleanup.
+      blockerRelease();
+      reviveRelease();
+      try { await tools.stopPersistentAgents(); }
+      finally { vi.useRealTimers(); }
+    }
   });
 });
 

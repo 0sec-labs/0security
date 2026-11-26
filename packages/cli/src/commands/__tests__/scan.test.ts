@@ -41,9 +41,15 @@ describe("scan run metrics", () => {
     deps.metrics = row => { rows.push(row); };
     await runScan(folder(), options({ model: "m1" }), deps);
     expect(rows).toHaveLength(1);
-    expect(rows[0]).toMatchObject({ command: "scan", model: "m1", budgetUsd: 5, findingsAttempted: null, findingsProposed: 1, status: "ok" });
+    expect(rows[0]).toMatchObject({ command: "scan", model: "m1", budgetUsd: 5, findingsAttempted: null, findingsProposed: 1, tokens: 15, status: "ok" });
     expect(JSON.stringify(rows[0])).not.toContain(storedFinding.title);
   });
+});
+
+it("passes the explicit provider and reasoning to the real console creation contract", async () => {
+  const f = fakes(finishedSnapshot());
+  await runScan(folder(), options({ provider: "azure", model: "gpt-6-luna", reasoning: "high" }), f.deps);
+  expect(f.requests.find(([method, path]) => method === "POST" && path === "/api/console/sessions")?.[2]).toMatchObject({ runtime: { providerId: "azure", model: "gpt-6-luna", reasoning: "high" } });
 });
 
 describe("scan status polling", () => {
@@ -461,7 +467,7 @@ describe("the pattern-scanner pre-pass", () => {
   it("gives the hits to the scan as leads to check, marked as data", async () => {
     const { deps, requests } = fakes(finished, []);
     (deps.prePass as ReturnType<typeof vi.fn>).mockResolvedValue(leads);
-    await runScan("/tmp", options(), deps);
+    await runScan(folder(), options(), deps);
     const text = (requests.find(([, path]) => path.endsWith("/messages"))![2] as { text: string }).text;
     expect(text).toContain("foxguard");
     expect(text).toContain("2 hits");
@@ -472,16 +478,16 @@ describe("the pattern-scanner pre-pass", () => {
 
   it("does not run with --prepass off, and a scan without the tool is the same as before", async () => {
     const off = fakes(finished, []);
-    await runScan("/tmp", options({ prepass: "off" }), off.deps);
+    await runScan(folder(), options({ prepass: "off" }), off.deps);
     expect(off.deps.prePass).not.toHaveBeenCalled();
     const none = fakes(finished, []);
-    await runScan("/tmp", options(), none.deps);
+    await runScan(folder(), options(), none.deps);
     const text = (none.requests.find(([, path]) => path.endsWith("/messages"))![2] as { text: string }).text;
     expect(text).not.toContain("<leads>");
   });
 
   it("runs the scanners that were asked for, foxguard by default, and refuses an unknown one", async () => {
-    const tmp = resolve("/tmp");
+    const tmp = folder();
     const byDefault = fakes(finished, []);
     await runScan(tmp, options(), byDefault.deps);
     expect(byDefault.deps.prePass).toHaveBeenCalledWith(tmp, ["foxguard"]);
@@ -496,7 +502,7 @@ describe("the pattern-scanner pre-pass", () => {
   });
 
   it("refuses an unknown mode", async () => {
-    const tmp = resolve("/tmp");
+    const tmp = folder();
     const { deps } = fakes(finished, []);
     await runScan(tmp, options({ prepass: "maybe" }), deps);
     expect(process.exitCode).toBe(2);
@@ -522,7 +528,7 @@ describe("--diff", () => {
   const lead = (path: string) => ({ tool: "foxguard", ruleId: "r", title: "t", description: "d", severity: "high" as const, category: "other" as const, path, startLine: 1, fingerprint: `sarif:${path}`, cwe: [] });
 
   it("scopes the scan to the changed files, and keeps only the leads inside them", async () => {
-    const tmp = resolve("/tmp");
+    const tmp = folder();
     const { deps, requests } = fakes(finished, []);
     (deps.diffFiles as ReturnType<typeof vi.fn>).mockResolvedValue(["src/a.ts", "src/b.ts"]);
     (deps.prePass as ReturnType<typeof vi.fn>).mockResolvedValue({ tools: ["foxguard"], total: 2, leads: [lead("src/a.ts"), lead("src/unchanged.ts")] });
@@ -537,7 +543,7 @@ describe("--diff", () => {
 
   it("writes a valid empty report and starts no thread when nothing changed", async () => {
     const { deps, out, err, client } = fakes(finished, []);
-    await runScan("/tmp", options({ diff: "origin/main" }), deps);
+    await runScan(folder(), options({ diff: "origin/main" }), deps);
     expect(client.request).not.toHaveBeenCalled();
     const report = JSON.parse(String(out.join("")));
     expect(report.findings).toEqual([]);
@@ -549,11 +555,11 @@ describe("--diff", () => {
   it("explains a ref that does not exist, and refuses one that looks like a flag", async () => {
     const bad = fakes(finished, []);
     (bad.deps.diffFiles as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("fatal"));
-    await runScan("/tmp", options({ diff: "nope" }), bad.deps);
+    await runScan(folder(), options({ diff: "nope" }), bad.deps);
     expect(bad.err.join("\n")).toContain("not a git ref");
     process.exitCode = 0;
     const flag = fakes(finished, []);
-    await runScan("/tmp", options({ diff: "--output=/etc/x" }), flag.deps);
+    await runScan(folder(), options({ diff: "--output=/etc/x" }), flag.deps);
     expect(flag.err.join("\n")).toContain("--diff must be a git ref");
     process.exitCode = 0;
   });
@@ -567,7 +573,7 @@ describe("a console that cannot start", () => {
     deps.startConsole = vi.fn(async () => stop);
     const sleep = vi.fn(async () => {});
     deps.sleep = sleep;
-    await runScan("/tmp", options(), deps);
+    await runScan(folder(), options(), deps);
     expect(err.join("\n")).toContain("stopped: it exited with code 1: EPIPE writing to stdout");
     expect(sleep).not.toHaveBeenCalled();
     expect(stop).toHaveBeenCalled();

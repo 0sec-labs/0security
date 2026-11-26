@@ -1,3 +1,4 @@
+import { appendRunMetric } from "../run-metrics.js";
 import { osecDB, SentinelStore } from "@0/engine/storage";
 import { randomUUID } from "node:crypto";
 import { homeStateDir, toShareSafeFindings } from "@0/engine/shared";
@@ -68,7 +69,7 @@ export async function createWorkspaceServices(options: Options) {
     engine = new WorkflowEngineService({ token: options.engineBearer ?? options.controlToken, workspace: options.workspace, allowApply: options.allowApply, dbPath: options.dbPath, timeCapMs: options.timeCapMs, costCapUsd: options.costCapUsd }, { gateway, workflows: workflow });
     await engine.ready;
     github = new GitHubPublicationAuth();
-    sentinels = new WebSentinelService({ dbPath: options.dbPath, missions: {
+    sentinels = new WebSentinelService({ metrics: appendRunMetric, dbPath: options.dbPath, missions: {
       // `workspacePath` is not a create-time field of the gateway; it is applied right after, and the first send waits for it.
       create: input => createMission(gateway, input),
       send: (id, text, author, mode, automated) => sendToMission(gateway, id, text, author, mode, automated),

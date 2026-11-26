@@ -18,6 +18,15 @@ export interface SentinelAttention {
   reason?: string;
   pendingDecisions: number;
 }
+/** Spend by Sentinel, model and week over the last 12 weeks (UTC), as the engine reports it. A limit is null when none is set. */
+export interface SentinelUsage {
+  since: string;
+  generatedAt: string;
+  sentinels: Array<{ id: string; name: string; model: string | null; runs: number; refused: number; costUsd: number; dayUsd: number; monthUsd: number; dailyBudgetUsd: number | null; monthlyBudgetUsd: number | null }>;
+  models: Array<{ model: string; runs: number; refused: number; costUsd: number }>;
+  weeks: Array<{ week: string; runs: number; refused: number; costUsd: number }>;
+}
+
 export interface Sentinel {
   id: string;
   name: string;
@@ -29,6 +38,10 @@ export interface Sentinel {
   folder?: string | null;
   hostId?: string | null;
   model?: SentinelModelChoice | null;
+  runBudgetUsd?: number | null;
+  /** Spend limits in USD per UTC day and per UTC month. Null or absent: no limit. */
+  dailyBudgetUsd?: number | null;
+  monthlyBudgetUsd?: number | null;
   notifications: SentinelNotifications;
   status: SentinelStatus;
   automationIds: string[];
@@ -130,7 +143,7 @@ export interface SentinelTrigger {
   automationId: string;
   kind: SentinelTriggerKind;
   schedule?: SentinelSchedule;
-  github?: { repo: string; baseBranch?: string; pollMs: number; commentOnPr?: boolean; includeForks?: boolean };
+  github?: { repo: string; baseBranch?: string; pollMs: number; commentOnPr?: boolean; includeForks?: boolean; results?: "off" | "sarif" | "comment" | "both" };
   bitbucket?: { platform: "cloud" | "dc"; repo: string; baseUrl?: string; events: Array<"opened" | "updated">; pollMs: number };
   enabled: boolean;
   version: number;
@@ -199,7 +212,7 @@ export const NEEDS_REVIEW_COPY = "Its model, tools or access changed. It will no
 export const triggerKindLabel = (kind: SentinelTriggerKind): string => ({ schedule: "Schedule", manual: "Manual", "github-pr": "Pull requests", release: "Releases", "check-completed": "Checks", webhook: "Webhook", "bitbucket-pr": "Bitbucket pull request" })[kind];
 export function describeTrigger(trigger: Pick<SentinelTrigger, "kind" | "summary" | "github">): string {
   if (trigger.summary) return trigger.summary;
-  if (trigger.kind === "github-pr" && trigger.github) return `Pull requests on ${trigger.github.repo}${trigger.github.commentOnPr ? ", comments on" : ""}${trigger.github.includeForks ? ", forks included" : ""}`;
+  if (trigger.kind === "github-pr" && trigger.github) return `Pull requests on ${trigger.github.repo}${trigger.github.commentOnPr ? ", comments on" : ""}${trigger.github.includeForks ? ", forks included" : ""}${trigger.github.results === "sarif" || trigger.github.results === "both" ? ", uploads to code scanning" : ""}`;
   return triggerKindLabel(trigger.kind);
 }
 
@@ -248,15 +261,15 @@ export function activationLabel(activation: Pick<SentinelActivation, "status" | 
 export const fileBytes = (text: string) => new TextEncoder().encode(text).byteLength;
 
 export const TRIGGER_FREQUENCIES = [["minutes", "Every few minutes"], ["hourly", "Hourly"], ["daily", "Daily"], ["weekdays", "Weekdays"], ["weekly", "Weekly"], ["cron", "Cron"]] as const;
-export interface TriggerDraft { automationId: string; kind: "schedule" | "github-pr"; frequency: SentinelSchedule["frequency"]; every: string; time: string; weekday: string; cron: string; timezone: string; repo: string; baseBranch: string; commentOnPr: boolean; includeForks: boolean }
-export const blankTriggerDraft = (automationId = ""): TriggerDraft => ({ automationId, kind: "schedule", frequency: "daily", every: "15", time: "09:00", weekday: "1", cron: "", timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC", repo: "", baseBranch: "", commentOnPr: false, includeForks: false });
+export interface TriggerDraft { automationId: string; kind: "schedule" | "github-pr"; frequency: SentinelSchedule["frequency"]; every: string; time: string; weekday: string; cron: string; timezone: string; repo: string; baseBranch: string; commentOnPr: boolean; includeForks: boolean; uploadSarif: boolean }
+export const blankTriggerDraft = (automationId = ""): TriggerDraft => ({ automationId, kind: "schedule", frequency: "daily", every: "15", time: "09:00", weekday: "1", cron: "", timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC", repo: "", baseBranch: "", commentOnPr: false, includeForks: false, uploadSarif: false });
 
 /** Validate the add-trigger form. New triggers always start off; enabling stays behind the approval dialog. */
-export function triggerRequestFromDraft(draft: TriggerDraft): { ok: true; request: { automationId: string; kind: "schedule" | "github-pr"; schedule?: SentinelSchedule; github?: { repo: string; baseBranch?: string; commentOnPr: boolean; includeForks: boolean } } } | { ok: false; error: string } {
+export function triggerRequestFromDraft(draft: TriggerDraft): { ok: true; request: { automationId: string; kind: "schedule" | "github-pr"; schedule?: SentinelSchedule; github?: { repo: string; baseBranch?: string; commentOnPr: boolean; includeForks: boolean; results: "off" | "sarif" } } } | { ok: false; error: string } {
   if (!draft.automationId) return { ok: false, error: "Choose which automation this trigger starts." };
   if (draft.kind === "github-pr") {
     if (!/^[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/.test(draft.repo.trim())) return { ok: false, error: "Enter the repository as owner/name." };
-    return { ok: true, request: { automationId: draft.automationId, kind: "github-pr", github: { repo: draft.repo.trim(), ...(draft.baseBranch.trim() ? { baseBranch: draft.baseBranch.trim() } : {}), commentOnPr: draft.commentOnPr, includeForks: draft.includeForks } } };
+    return { ok: true, request: { automationId: draft.automationId, kind: "github-pr", github: { repo: draft.repo.trim(), ...(draft.baseBranch.trim() ? { baseBranch: draft.baseBranch.trim() } : {}), commentOnPr: draft.commentOnPr, includeForks: draft.includeForks, results: draft.uploadSarif ? "sarif" : "off" } } };
   }
   const schedule: SentinelSchedule = { frequency: draft.frequency, timezone: draft.timezone.trim() || "UTC" };
   if (draft.frequency === "minutes") {

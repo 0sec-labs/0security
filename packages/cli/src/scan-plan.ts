@@ -61,11 +61,12 @@ export interface ScanPlan {
   notes: string[];
   /** The module map: one row per build module (Maven or Gradle) when the folder has more than one, in the order its batches run. */
   modules?: ModuleRow[];
+  ownership?: Array<{ owners: string[]; batches: number }>;
   /** The tier map's decision, when a tier map applies; a skipped or pre-pass-only tier means no model would run. */
   tier?: ScanTierInfo;
 }
 
-export interface PlanOptions { shardOf?: (unit: InventoryUnit) => string | undefined; folder: string; batchSize: number; batchesMode: string; budgetUsd: number; tier?: ScanTierInfo }
+export interface PlanOptions { shardOf?: (unit: InventoryUnit) => string | undefined; ownersOf?: (unit: InventoryUnit) => readonly string[]; folder: string; batchSize: number; batchesMode: string; budgetUsd: number; tier?: ScanTierInfo }
 
 /** The module map of a plan: files, entry points and batches per module. Empty when the plan was not split by module. */
 export function moduleRows(batches: ReadonlyArray<{ module?: string; units: readonly InventoryUnit[] }>): ModuleRow[] {
@@ -87,7 +88,14 @@ export function moduleRows(batches: ReadonlyArray<{ module?: string; units: read
 /** The plan of a folder from its inventory. Pure. */
 export function planScan(inventory: Inventory, options: PlanOptions): ScanPlan {
   const { summary } = inventory;
-  const batchList = planBatches(inventory.units, options.batchSize, options.shardOf ? { shardOf: options.shardOf } : {});
+  const batchList = planBatches(inventory.units, options.batchSize, { ...(options.shardOf ? { shardOf: options.shardOf } : {}), ...(options.ownersOf ? { ownersOf: options.ownersOf } : {}) });
+  const ownership = new Map<string, { owners: string[]; batches: number }>();
+  if (options.ownersOf) for (const batch of batchList) {
+    const owners = batch.owners ?? [];
+    const key = JSON.stringify(owners);
+    const row = ownership.get(key) ?? { owners, batches: 0 };
+    row.batches++; ownership.set(key, row);
+  }
   const batchCount = batchList.length;
   const modules = moduleRows(batchList);
   const autoWouldBatch = inventory.units.length > 0 && shouldBatch(inventory, options.batchSize);
@@ -107,6 +115,7 @@ export function planScan(inventory: Inventory, options: PlanOptions): ScanPlan {
     estimate: { lowUsd: Number(estimate.lowUsd.toFixed(4)), highUsd: Number(estimate.highUsd.toFixed(4)), threads, verdict: estimate.verdict, basis: estimate.basis },
     notes,
     ...(modules.length > 1 ? { modules } : {}),
+    ...(options.ownersOf ? { ownership: [...ownership.values()] } : {}),
     ...(options.tier ? { tier: options.tier } : {}),
   };
 }
@@ -118,6 +127,7 @@ export function planText(plan: ScanPlan): string {
   const lines = [
     `Plan for ${plan.folder}`,
     ...(plan.tier ? [`Tier: ${plan.tier.name}${plan.tier.reason ? ` (${plan.tier.reason})` : ""}${plan.tier.skipped ? ". A scan would be skipped: no model, scanner or report of findings." : plan.tier.prepassOnly ? ". A scan would run the pattern scanners only: no model." : ""}`] : []),
+    ...(plan.ownership ? [`Ownership groups: ${plan.ownership.map(group => `${group.owners.join(", ") || "unowned"} (${group.batches} batches)`).join("; ")}`] : []),
     "This lists the folder only. No model, scanner or database was used.",
     "",
     `Source files: ${plan.sourceFiles}`,

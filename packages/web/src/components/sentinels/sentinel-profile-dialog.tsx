@@ -13,8 +13,9 @@ import { AvatarPicker } from "./avatar-picker";
 import { FolderPicker } from "./folder-row";
 import { ComputerRow, ModelRow, Row } from "./profile-rows";
 
-interface Form { name: string; mission: string; avatar: AgentAvatar; folder: string; computerId: string; model: AgentModelPick | null }
+interface Form { runBudgetUsd: string; name: string; mission: string; avatar: AgentAvatar; folder: string; computerId: string; model: AgentModelPick | null }
 const formOf = (sentinel: Sentinel): Form => ({
+  runBudgetUsd: sentinel.runBudgetUsd == null ? "" : String(sentinel.runBudgetUsd),
   name: sentinel.name, mission: sentinel.mission, avatar: { color: sentinel.avatar.color, icon: sentinel.avatar.icon ?? "agent" }, folder: sentinel.folder ?? "", computerId: sentinel.hostId ?? THIS_COMPUTER,
   model: sentinel.model ? { providerId: sentinel.model.providerId, model: sentinel.model.model } : null,
 });
@@ -34,10 +35,12 @@ export function SentinelProfileDialog({ sentinel, readOnly, open, onOpenChange }
   const save = async () => {
     const name = form.name.trim();
     if (!name) { setError("Give it a name."); return; }
+    const budget = form.runBudgetUsd.trim() ? Number(form.runBudgetUsd) : null;
+    if (budget !== null && (!Number.isFinite(budget) || budget < .01 || budget > 100)) { setError("Run budget must be between $0.01 and $100."); return; }
     setError("");
     try {
       await update.mutateAsync({ id: sentinel.id, version: sentinel.version, fields: {
-        name, mission: form.mission.trim(), avatar: { color: form.avatar.color, icon: form.avatar.icon }, folder: form.folder || null,
+        runBudgetUsd: budget, name, mission: form.mission.trim(), avatar: { color: form.avatar.color, icon: form.avatar.icon }, folder: form.folder || null,
         hostId: form.computerId === THIS_COMPUTER ? null : form.computerId, model: form.model,
       } });
       onOpenChange(false);
@@ -67,6 +70,8 @@ export function SentinelProfileDialog({ sentinel, readOnly, open, onOpenChange }
             <Row label="Job"><Input aria-label="Job" value={form.mission} maxLength={SENTINEL_LIMITS.mission} disabled={locked} placeholder="What it watches for" onChange={event => set({ mission: event.target.value })} className="h-8 w-64 max-w-full border-transparent bg-transparent text-right shadow-none" /></Row>
             <Row label="Folder"><FolderPicker value={form.folder} onChange={folder => set({ folder })} /></Row>
             <ComputerRow value={form.computerId} onChange={computerId => set({ computerId })} disabled={locked} />
+            <Row label="Budget per automated run"><Input aria-label="Budget per automated run in USD" type="number" min="0.01" max="100" step="0.01" placeholder="No cap" value={form.runBudgetUsd} disabled={locked} onChange={event => set({ runBudgetUsd: event.target.value })} className="w-32" /></Row>
+            <p className="text-xs text-muted-foreground-1">Stops at the next usage receipt after the cap. An in-flight request can exceed it; unpriced usage stops the run.</p>
             <ModelRow enabled={open} value={form.model} onChange={model => set({ model })} disabled={locked} />
           </div>
           {error && <p role="alert" className="text-sm text-destructive">{error}</p>}

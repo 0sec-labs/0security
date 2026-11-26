@@ -1,3 +1,4 @@
+import { hasBedrockCredentialSignals } from "@0/engine";
 /**
  * Which LLM providers have local credential configuration.
  *
@@ -37,7 +38,7 @@ export function isRemovedProviderModel(model: string | undefined | null): boolea
 }
 
 /** The credential protocols a provider can be authenticated with. */
-type AuthMethod = "api-key" | "oauth";
+type AuthMethod = "api-key" | "oauth" | "aws-chain";
 
 interface ProviderInfo {
   /** Provider id as the runtime names it, e.g. "anthropic". */
@@ -94,6 +95,12 @@ interface ProviderState extends ProviderInfo {
  */
 
 const PROVIDER_DEFS: readonly Omit<ProviderInfo, "auth">[] = [
+  {
+    id: "bedrock", label: "Amazon Bedrock", methods: ["aws-chain"],
+    envVars: ["AWS_BEARER_TOKEN_BEDROCK", "AWS_PROFILE", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_REGION", "AWS_DEFAULT_REGION", "AWS_WEB_IDENTITY_TOKEN_FILE", "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI", "AWS_CONTAINER_CREDENTIALS_FULL_URI"],
+    fileSource: "AWS SDK credential chain on this host",
+    hint: "Configure AWS_PROFILE or an AWS workload role on this host, set AWS_REGION, and select a Bedrock model. Credentials stay on the host; access is verified only by a model request.",
+  },
   {
     id: "chatgpt-codex",
     label: "ChatGPT Codex",
@@ -249,6 +256,7 @@ function hasCredential(value: string | undefined): boolean {
 
 /** The first env var of `info` that actually holds a credential, if any. */
 function satisfyingVar(info: ProviderInfo, env: Record<string, string | undefined>): string | undefined {
+  if (info.id === "bedrock") return hasBedrockCredentialSignals(env) ? "AWS credential chain" : undefined;
   // envVars is ordered most-preferred first, so the first hit is the one the
   // runtime would use — that is what `via` has to report.
   return info.envVars.find((name) => hasCredential(env[name]) && (name !== "AZURE_OPENAI_AUTH" || env[name]?.trim().toLowerCase() === "entra"));

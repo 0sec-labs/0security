@@ -43,6 +43,82 @@ Each finding has a stable link at `/findings/<fingerprint>`.
 
 A group is one flaw. Groups that cite the same file, the same category and overlapping lines are shown as one, with a count of how many were merged. Groups with a different triage state stay apart.
 
+## Rank findings by what matters to you
+
+A business context file tells 0 which code matters most to you. Commands use it to order findings and to say why. A scan cannot know your business, so you write the file.
+
+Create a JSON file anywhere outside the repository you scan:
+
+```json
+{
+  "entries": [
+    { "match": "src/payments/**", "tags": ["payments", "personal-data"], "note": "card checkout" },
+    { "match": "services/admin/**", "tags": ["internal-only"] },
+    { "match": "examples/**", "tags": ["non-production"] }
+  ],
+  "repositories": {
+    "acme/api": [{ "match": "src/auth/**", "tags": ["internet-facing"] }],
+    "acme/docs-*": [{ "tags": ["non-production"] }]
+  }
+}
+```
+
+Pass it with `--context`, or set it once for every command:
+
+```bash
+0security findings list --context context.json
+0security config set findingsContext ~/security/context.json
+```
+
+`--context` wins over the setting. A project cannot set `findingsContext`, only you can, and the web console shows no field for it.
+
+### What the file says
+
+An entry has a `match`, a list of `tags` and an optional `note`. The `match` is a path or glob such as `src/payments/**` or `services/billing`, tested against the file the finding cites. An entry with no `match` covers every finding. A finding with no file gets only entries with no `match`.
+
+The `repositories` object holds rules for named repositories. A key is a name or glob such as `acme/api` or `acme/docs-*`. Its rules apply when the repository matches. The repository is the `--repository` value, or else the name in the git remote of the current folder. For `0security scan` it is the git remote of the scanned folder. For `findings rollup` it is the repository of each row. Without a known repository only the top-level `entries` apply.
+
+Each tag moves a finding by steps of severity:
+
+| Tag | Steps |
+| --- | --- |
+| `internet-facing` | +1 |
+| `payments` | +1 |
+| `personal-data` | +1 |
+| `operationally-critical` | +1 |
+| `internal-only` | -1 |
+| `non-production` | -2 |
+
+Steps add up and the total stays between -2 and +2. A medium finding with `payments` and `personal-data` ranks with the critical ones. Set `weights`, for example `"weights": { "payments": 2 }`, to change a tag. A weight is a whole number from -2 to 2.
+
+### Where it applies
+
+These use the file and print or store why each finding moved:
+
+- `findings list` and `findings show`. A file you name overrides a label a scan stored.
+- `findings export` in every format, and `reports export`
+- `findings burndown`, which fixes in the new order
+- `findings export-fixes` and `findings report-draft`
+- `findings rollup`, which adds a list of the open findings to look at first
+- `scan`, with `--business-context <file>`, because `scan --context` is already the threat model. The scan stores a `businessContext` label with each finding. The file is also given to the scan as background, so a file set with `findingsContext` reaches the scan too.
+- The Findings page, which shows the declaration on a finding and offers the **Business priority** sort
+
+### What it does not do
+
+The context changes the order and adds an explanation. It never changes a finding's severity, hides a finding, changes what a fix may do, or changes `--fail-on` and the exit code of a scan. Those use the real severity. Counts by severity are real counts. A share-safe copy from `reports export` is ordered, but it leaves out the reasons, because they describe your business.
+
+0 reads the file only from the path you name, never from a repository you scan. The file is at most 64 KB, with at most 500 entries. Matching uses globs only, never regular expressions.
+
+0 does not match on service names, assets or finding categories, only on paths and repository names. The Findings page ordering is checked by model tests, not by a browser run.
+
+### Check the file
+
+```bash
+0security findings context check context.json
+```
+
+This lists which rule matches which current findings and which rules match nothing. It exits 0 when every rule that applies matches a finding, 1 when a rule matches nothing and 2 when the file is not valid. A rule for another repository is shown but not counted. Pass `--repository` to check one repository's rules.
+
 ## Finding categories
 
 Each finding has one category. It names the kind of flaw, not where it showed up. The category is the SARIF rule id, the value `--category` filters on, and part of the issue label.
@@ -229,6 +305,17 @@ One thread cannot review every entry point of a big repository, and it cannot te
 In a Maven or Gradle project, each batch stays inside one build module. A module is a directory with a `pom.xml`, `build.gradle`, `build.gradle.kts` or `settings.gradle` file. A file belongs to its nearest such directory. 0 checks only that these files exist. It does not read them.
 
 Batches run module by module, in alphabetical order of the module path. Inside a module, entry points are batched in path order, so files of one package sit together. Each batch prompt names its module.
+
+To keep ownership groups apart as well, pass an operator-maintained CODEOWNERS file:
+
+```bash
+0security scan ./repo --plan --codeowners ./approved-CODEOWNERS --format json
+0security scan ./repo --codeowners ./approved-CODEOWNERS --batches on
+```
+
+The planner respects build-module boundaries and the last matching ownership rule. Unowned units still run. A group of helper files carries the union of its owners. Ownership labels group work; they never grant permissions, suppress a finding or restrict following relevant calls. No CODEOWNERS file is loaded automatically. In CI pass the trusted base branch's copy, and pass the same file again when resuming.
+
+JSON plans include `ownership` groups. Scan JSON includes `coverage.batchRuns` for this invocation: module, owners, attempt count, summed attempt duration, thread IDs, reviewed/total units and actual reported cost. A cost of `null` means at least one attempted thread did not report its cost; retry waits are excluded from duration. Earlier invocations remain in the coverage ledger, while these measurements describe only the current invocation.
 
 Run `--plan` to see the module map, with the files, entry points and batches of each module:
 
@@ -530,6 +617,18 @@ Write one export per repository, then roll them up:
 
 The result counts open findings by severity, category, age and owner. See [findings rollup](/commands/#findings-rollup) for the export format and the counting rules.
 
+To see the change since an earlier run, pass that run's export:
+
+```bash
+0security findings rollup api.json web.json --since last-month.json
+```
+
+It shows findings opened, fixed and net per severity and per repository. To group by team and tier, add a labels file with `--labels labels.yaml`. To count another scanner's SARIF file, name it as an input:
+
+```bash
+0security findings rollup scanner.sarif --repository api --labels labels.yaml
+```
+
 ## Verified fixes
 
 A verified fix is a fix whose checks ran in a container with no network. The pull request says so only when every check passed there.
@@ -559,13 +658,15 @@ To keep the checks offline without building your own image, add a setup step. It
 ```bash
 0security findings fix 3f2a \
   --sandbox docker --sandbox-image maven@sha256:<digest> \
-  --sandbox-setup "mvn -q dependency:go-offline" \
-  --test "mvn -o -q test"
+  --sandbox-setup "mvn -q test" \
+  --test "mvn -o test"
 ```
+
+The setup step runs the tests once, with the network on. That downloads the test runner Maven loads when the tests start, which `mvn dependency:go-offline` does not fetch. With `go-offline`, the offline check fails with "surefire-junit-platform ... has not been downloaded". Setup runs your build with the network on, so use it only on code you trust.
 
 Before the checks, 0 runs a canary in the same container settings. It passes only when the container has no network interface other than loopback. If setup or the canary fails, the checks do not run and the pull request is a draft. The cache folder is deleted when the run ends. `ZERO_ENTERPRISE` refuses `--sandbox-setup`, and you cannot combine it with `--sandbox-network`.
 
-Name the image by digest to pin it. A tag such as `maven:3-eclipse-temurin-21` can change. The pull request says whether the image is pinned. Get a digest with `docker buildx imagetools inspect <image>`.
+Name the image by digest to pin it. A tag such as `maven:3-eclipse-temurin-21` can change. The pull request says whether the image is pinned. Get a digest with `docker buildx imagetools inspect <image>`. The Maven recipe was run with `maven@sha256:6fdc855a6ed81d288ca7ca37ac6ff5e9308b612485c0801d70b25a858c83d237` (Maven 3.9.11, Java 21.0.9, arm64, 833 MB).
 
 The first run pulls the image if it is not on your machine. A Maven JDK image is several hundred megabytes, so the Docker VM needs that much free disk. A full disk makes the pull fail, which counts as a failed check.
 
@@ -574,12 +675,11 @@ Docker pulls the image when it is not on your machine. Use a local image if noth
 Limits:
 
 - The sandbox is Docker's isolation. A flaw in Docker is outside what this gives you.
-- The setup step and canary were run for real with an Alpine Node image. A Maven image was not run for real, because the Docker VM had no disk for the pull.
+- The setup step, canary and offline test were run for real on a one-module Maven project with a JUnit 5 test and a direct `commons-text` dependency, on Docker through Colima. Gradle, multi-module builds and private registries were not run.
 - Disk use inside the container is not limited.
 - The checks run in a copy, so files they write (such as build output) are not in the commit.
 - Only the `docker` mode exists. Private-repository credentials are not passed into the container.
 - `0security findings burndown` does not take `--sandbox`.
-- The mechanism was tested with a real container (an Alpine Node image, no network). The Maven image was not run for real in this build, only through a fake `docker`.
 
 ## See what runs cost
 
