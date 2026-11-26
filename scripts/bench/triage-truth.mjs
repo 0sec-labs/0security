@@ -3,6 +3,8 @@
 //   node scripts/bench/triage-truth.mjs --dry-run --owasp <BenchmarkJava checkout>        sample, classify, render: no model
 //   node scripts/bench/triage-truth.mjs --run --owasp <BenchmarkJava checkout> [--per-class 3] [--seed 1] [--categories sqli,xss,...]
 //   node scripts/bench/triage-truth.mjs --run --labels <labels.json> --app <folder>      score against hand labels
+//   node scripts/bench/triage-truth.mjs --validate-labels <labels.json> [--app <folder>]  check a label file: no model, no cost
+//   node scripts/bench/triage-truth.mjs --labels-from-fixture <name>                      print a label file made from a fixture's answer key
 //
 // The pipeline is the one `0 findings verify` is built for: deterministic leads (a scan of the folder), then agent
 // triage (`findings verify`), then a comparison with the ground truth. The report gives the share of noise the triage
@@ -13,8 +15,9 @@
 // files to a scratch folder and scans that. A finding counts against a case when it is in that case's file and its
 // text names the case's category; any other finding is "other" and left out of the rates.
 //
-// Labels file: { "findings": [{ "path": "src/Foo.java", "line": 42, "label": "real" | "noise", "note": "why" }] }.
+// Labels file: { "app": "name and commit", "findings": [{ "path": "src/Foo.java", "line": 42, "label": "real" | "noise", "note": "why" }] }.
 // A finding matches a label in the same file within 5 lines. Findings with no label are "other".
+// --validate-labels checks the file's shape (and, with --app, that every path exists and every line is inside its file).
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
@@ -82,13 +85,70 @@ export function labelClassifier(labels, window = 5) {
   };
 }
 
+/**
+ * Check a label file's shape. Returns { labels, problems }. Each label needs a relative path without "..", a positive
+ * integer line, label "real" or "noise", and a note saying why (a label nobody can audit is not ground truth). The same
+ * path and line may not carry two labels.
+ */
+export function parseLabels(data) {
+  const problems = [];
+  const labels = Array.isArray(data?.findings) ? data.findings : null;
+  if (!labels) return { labels: [], problems: ["the file needs a findings array"] };
+  const seen = new Set();
+  labels.forEach((l, i) => {
+    const at = `findings[${i}]`;
+    if (typeof l?.path !== "string" || !l.path || l.path.startsWith("/") || l.path.split(/[\\/]/).includes("..")) problems.push(`${at}: path must be a relative path inside the app`);
+    if (!Number.isInteger(l?.line) || l.line < 1) problems.push(`${at}: line must be a positive integer`);
+    if (l?.label !== "real" && l?.label !== "noise") problems.push(`${at}: label must be "real" or "noise"`);
+    if (typeof l?.note !== "string" || !l.note.trim()) problems.push(`${at}: note must say why`);
+    const key = `${l?.path}:${l?.line}`;
+    if (seen.has(key)) problems.push(`${at}: ${key} is labelled twice`);
+    seen.add(key);
+  });
+  return { labels, problems };
+}
+
+/** Problems found by reading the app folder: a label whose file is missing or whose line is past the end. */
+export function checkLabelsAgainstApp(labels, appDir) {
+  const problems = [];
+  for (const l of labels) {
+    const file = join(appDir, l.path);
+    if (!existsSync(file)) { problems.push(`${l.path}: file not found in the app`); continue; }
+    const lines = readFileSync(file, "utf8").split("\n").length;
+    if (l.line > lines) problems.push(`${l.path}:${l.line}: the file has ${lines} lines`);
+  }
+  return problems;
+}
+
+/** Counts for the report: labels by kind, and how many of each kind a scan reached (some finding classified against it). */
+export function labelCoverage(labels, findings, window = 5) {
+  const pos = (f) => ({ file: f.location?.path ?? f.reviewAnnotation?.path, line: f.location?.startLine ?? f.reviewAnnotation?.startLine });
+  const reached = (l) => findings.some((f) => {
+    const { file, line } = pos(f);
+    return file && (file === l.path || file.endsWith(`/${l.path}`)) && (line === undefined || Math.abs(l.line - line) <= window);
+  });
+  const of = (kind) => labels.filter((l) => l.label === kind);
+  return { real: of("real").length, noise: of("noise").length, realReached: of("real").filter(reached).length, noiseReached: of("noise").filter(reached).length };
+}
+
+/** A label file made from a fixture's answer key: planted bugs are real, decoys are noise. Both lists name their lines. */
+export function labelsFromAnswer(answer, name) {
+  const findings = [
+    ...answer.items.map((i) => ({ path: i.path, line: i.startLine, label: "real", note: `planted bug ${i.id}: ${i.description}` })),
+    ...answer.decoys.map((d) => ({ path: d.path, line: d.startLine, label: "noise", note: `decoy: ${d.description ?? d.reason ?? "safe code that looks risky"}` })),
+  ];
+  return { app: `bench fixture ${name}`, findings };
+}
+
 export function parseArgs(argv) {
-  const o = { run: false, dryRun: false, owasp: undefined, labels: undefined, app: undefined, perClass: 3, seed: 1, categories: undefined, scanBudget: 1, verifyBudget: 2, maxCost: 3, model: undefined, out: join(repoRoot, "scripts/bench/results"), cli: defaultCli, timeout: 900 };
+  const o = { run: false, dryRun: false, validateLabels: undefined, labelsFromFixture: undefined, owasp: undefined, labels: undefined, app: undefined, perClass: 3, seed: 1, categories: undefined, scanBudget: 1, verifyBudget: 2, maxCost: 3, model: undefined, out: join(repoRoot, "scripts/bench/results"), cli: defaultCli, timeout: 900 };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const next = () => { if (i + 1 >= argv.length) throw new Error(`${a} needs a value`); return argv[++i]; };
     if (a === "--run") o.run = true;
     else if (a === "--dry-run") o.dryRun = true;
+    else if (a === "--validate-labels") o.validateLabels = resolve(next());
+    else if (a === "--labels-from-fixture") o.labelsFromFixture = next();
     else if (a === "--owasp") o.owasp = resolve(next());
     else if (a === "--labels") o.labels = resolve(next());
     else if (a === "--app") o.app = resolve(next());
@@ -103,6 +163,10 @@ export function parseArgs(argv) {
     else if (a === "--cli") o.cli = resolve(next());
     else if (a === "--timeout") o.timeout = Number(next());
     else throw new Error(`unknown option ${a}`);
+  }
+  if (o.validateLabels || o.labelsFromFixture) {
+    if (o.run || o.dryRun) throw new Error("--validate-labels and --labels-from-fixture take no model and no --run or --dry-run");
+    return o;
   }
   if (o.run === o.dryRun) throw new Error("pass exactly one of --run (spends model money) or --dry-run (free)");
   if (Boolean(o.owasp) === Boolean(o.labels)) throw new Error("pass exactly one of --owasp <checkout> or --labels <file>");
@@ -125,9 +189,11 @@ export function prepare(o) {
     for (const r of sample) cpSync(join(dir, `${r.name}.java`), join(folder, `${r.name}.java`));
     return { root, folder, classify: owaspClassifier(sample), describe: `OWASP Benchmark 1.2 sample: ${sample.length} cases (${sample.filter((r) => r.real).length} real, ${sample.filter((r) => !r.real).length} not real), seed ${o.seed}, per-class ${o.perClass}`, name: "owasp-sample" };
   }
-  const labels = JSON.parse(readFileSync(o.labels, "utf8")).findings ?? [];
+  const { labels, problems } = parseLabels(JSON.parse(readFileSync(o.labels, "utf8")));
+  problems.push(...checkLabelsAgainstApp(labels, o.app));
+  if (problems.length) throw new Error(`the label file does not fit the app:\n${problems.join("\n")}`);
   cpSync(o.app, folder, { recursive: true, filter: (src) => !src.includes("/.git/") });
-  return { root, folder, classify: labelClassifier(labels), describe: `hand-labelled set: ${labels.length} labels (${labels.filter((l) => l.label === "real").length} real, ${labels.filter((l) => l.label !== "real").length} noise)`, name: "hand-labelled" };
+  return { root, folder, labels, classify: labelClassifier(labels), describe: `hand-labelled set: ${labels.length} labels (${labels.filter((l) => l.label === "real").length} real, ${labels.filter((l) => l.label !== "real").length} noise)`, name: "hand-labelled" };
 }
 
 /** Scan the folder, run verify --apply, classify each verified finding. */
@@ -140,6 +206,7 @@ function pipeline(o, prep) {
   let report; try { report = JSON.parse(readFileSync(scanFile, "utf8")); } catch { /* no report */ }
   const findings = report?.findings ?? [];
   const result = { fixture: prep.name, repeat: 1, scanStatus: scan.status, findings: findings.length, rows: [], scanCostUsd: report?.usage?.costUsd ?? report?.costUsd ?? 0, root: prep.root };
+  if (prep.labels) result.coverage = labelCoverage(prep.labels, findings);
   if (!findings.length) return result;
   const verify = cli(["findings", "verify", "--folder", prep.folder, "--apply", "--budget", String(o.verifyBudget), "--format", "json", "--timeout", "600", ...model], 1800);
   let verified; try { verified = JSON.parse(verify.stdout); } catch { result.verifyError = (verify.stderr || verify.stdout).slice(-400); return result; }
@@ -154,6 +221,7 @@ function pipeline(o, prep) {
 
 /** Dry run: classify made-up findings so the sampling, matching and report are checked without a model. */
 function dryRun(o) {
+  if (o.labels) console.log(`ok   label file valid for the app: ${o.labels}`); // prepare() throws on a bad file
   const prep = prepare(o);
   const sampleNames = prep.describe;
   console.log(`ok   ${sampleNames}`);
@@ -165,9 +233,20 @@ function dryRun(o) {
 
 if (isMain(import.meta.url)) {
   let o;
-  try { o = parseArgs(process.argv.slice(2)); } catch (e) { console.error(`${e.message}\nusage: node scripts/bench/triage-truth.mjs (--run | --dry-run) (--owasp <checkout> [--per-class N] [--seed N] [--categories a,b] | --labels <file> --app <folder>) [--scan-budget USD] [--verify-budget USD] [--max-cost USD] [--model id] [--out dir]`); process.exit(2); }
+  try { o = parseArgs(process.argv.slice(2)); } catch (e) { console.error(`${e.message}\nusage: node scripts/bench/triage-truth.mjs --validate-labels <file> [--app <folder>] | --labels-from-fixture <name> | (--run | --dry-run) (--owasp <checkout> [--per-class N] [--seed N] [--categories a,b] | --labels <file> --app <folder>) [--scan-budget USD] [--verify-budget USD] [--max-cost USD] [--model id] [--out dir]`); process.exit(2); }
   try {
-    if (o.dryRun) dryRun(o);
+    if (o.labelsFromFixture) {
+      const file = join(repoRoot, "scripts/bench/fixtures", basename(o.labelsFromFixture), "answer.json");
+      if (!existsSync(file)) throw new Error(`unknown fixture ${o.labelsFromFixture}`);
+      console.log(JSON.stringify(labelsFromAnswer(JSON.parse(readFileSync(file, "utf8")), o.labelsFromFixture), null, 2));
+    } else if (o.validateLabels) {
+      const { labels, problems } = parseLabels(JSON.parse(readFileSync(o.validateLabels, "utf8")));
+      if (o.app) problems.push(...checkLabelsAgainstApp(labels, o.app));
+      const c = labelCoverage(labels, []);
+      console.log(`${labels.length} labels: ${c.real} real, ${c.noise} noise`);
+      if (problems.length) { console.error(problems.join("\n")); process.exit(1); }
+      console.log(`label file valid${o.app ? " for the app" : " (paths and lines not checked: pass --app <folder>)"}`);
+    } else if (o.dryRun) dryRun(o);
     else {
       if (!existsSync(o.cli)) throw new Error(`${o.cli} not found: build the engine and then the CLI first`);
       const prep = prepare(o);
@@ -177,7 +256,8 @@ if (isMain(import.meta.url)) {
       console.log(`${r.findings} findings, ${r.rows.length} verified, spend $${spent.toFixed(4)}${r.verifyError ? `, verify failed: ${r.verifyError}` : ""}`);
       if (spent > o.maxCost) console.log(`warning: spend passed --max-cost ${o.maxCost}`);
       const meta = { date: new Date().toISOString().slice(0, 10), model: o.model ?? "default (gpt-6-luna)", fixtures: [prep.name], repeat: 1, truth: prep.describe };
-      const md = renderTriage([r], meta);
+      const cov = r.coverage ? `\nLabelled set reached by the scan: ${r.coverage.realReached} of ${r.coverage.real} real labels and ${r.coverage.noiseReached} of ${r.coverage.noise} noise labels have a finding within 5 lines. Verify only judges findings, so a real label the scan never reached says nothing about triage.\n` : "";
+      const md = renderTriage([r], meta) + cov;
       const stamp = `triage-truth-${new Date().toISOString().replace(/[:.]/g, "-")}`;
       mkdirSync(o.out, { recursive: true });
       const { root, ...saved } = r;

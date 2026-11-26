@@ -24,7 +24,7 @@ export const GROUPS = {
     "pnpm test:docs-pointers",
     "node --test scripts/install-script.test.mjs scripts/stage-release-assets.test.mjs scripts/action-contract.test.mjs scripts/ci-recipes.test.mjs scripts/ci-packaging.test.mjs scripts/helm-chart.test.mjs scripts/airgap-bundle.test.mjs",
     "pnpm check:update-contract",
-    "node --test scripts/bench/match.test.mjs scripts/bench/verify-score.test.mjs scripts/bench/fix-score.test.mjs scripts/bench/triage-score.test.mjs scripts/bench/real-apps.test.mjs scripts/bench/java.test.mjs scripts/bench/ai-security.test.mjs scripts/bench/code-index/run.test.mjs",
+    "node --test scripts/bench/match.test.mjs scripts/bench/verify-score.test.mjs scripts/bench/fix-score.test.mjs scripts/bench/triage-score.test.mjs scripts/bench/triage-truth.test.mjs scripts/bench/real-apps.test.mjs scripts/bench/java.test.mjs scripts/bench/ai-security.test.mjs scripts/bench/code-index/run.test.mjs",
     "node scripts/bench/run.mjs --dry-run",
     "node scripts/bench/code-index/run.mjs --dry-run",
     "node scripts/bench/code-index/run.mjs --mode variants --dry-run",
