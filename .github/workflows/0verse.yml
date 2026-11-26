@@ -60,7 +60,7 @@ jobs:
         with:
           tool: cargo-deny@0.20.2
       # Scanner test fixtures hold deliberately vulnerable lockfiles and are not audited.
-      # Lockfiles retain disabled optional backends. Check every resolved
+      # deny.toml ignores one unmaintained-crate notice (see there). Lockfiles retain disabled optional backends. Check every resolved
       # workspace feature and platform, without advisory exceptions.
       - name: Audit resolved Rust dependencies
         if: ${{ hashFiles('**/Cargo.lock') != '' }}
