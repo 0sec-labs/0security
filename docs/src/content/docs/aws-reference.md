@@ -36,7 +36,7 @@ variable "region"        { default = "eu-central-1" }
 variable "domain"        { description = "DNS name of the console, for example zero.example.com" }
 variable "admin_cidr"    { description = "Your network, for SSH. Use 127.0.0.1/32 to close SSH and use SSM Session Manager." }
 variable "ingress_cidr"  { description = "Networks allowed to reach HTTPS" }
-variable "release_tag"   { description = "Release tag to build, for example v0.44.0" }
+variable "release_tag"   { description = "Release tag to build, for example v0.45.0" }
 
 provider "aws" { region = var.region }
 

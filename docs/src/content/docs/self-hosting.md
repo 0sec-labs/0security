@@ -468,8 +468,8 @@ You cannot claim more than that:
 The script downloads the release binary, verifies its checksum and signature, and packs it with a manifest. Add `--image` for the container image and `--chart` for the Helm chart. It needs `cosign`, and `docker` for the image:
 
 ```bash
-scripts/airgap/build-bundle.sh --version 0.44.0 --out ./bundle --platform linux-x64 --image --chart
-tar cf 0-airgap-0.44.0.tar -C bundle . && shasum -a 256 0-airgap-0.44.0.tar
+scripts/airgap/build-bundle.sh --version 0.45.0 --out ./bundle --platform linux-x64 --image --chart
+tar cf 0-airgap-0.45.0.tar -C bundle . && shasum -a 256 0-airgap-0.45.0.tar
 ```
 
 Record the hash. The image is the `linux/amd64` image.
@@ -479,7 +479,7 @@ Record the hash. The image is the `linux/amd64` image.
 Copy the archive across and compare its hash with the one you recorded. Then run the installer from the extracted folder:
 
 ```bash
-mkdir 0-bundle && tar xf 0-airgap-0.44.0.tar -C 0-bundle
+mkdir 0-bundle && tar xf 0-airgap-0.45.0.tar -C 0-bundle
 sh 0-bundle/install-bundle.sh
 ```
 

@@ -366,9 +366,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: 0sec-labs/0security@v0.45.0
+        id: scan
         with:
-          version: 0.44.0
+          version: 0.45.0
           fail-on: high
+          upload: "false"
         env:
           ZERO_ENTERPRISE: "1"
           DO_NOT_TRACK: "1"
@@ -376,12 +378,19 @@ jobs:
           AZURE_OPENAI_AUTH: entra
           AZURE_OPENAI_BASE_URL: https://your-resource.openai.azure.com/openai/v1
           ZERO_MODEL: your-deployment-id
+      - name: Upload to code scanning
+        if: ${{ always() && steps.scan.outputs.sarif != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: 0 findings upload "${{ steps.scan.outputs.sarif }}"
 ```
+
+`ZERO_ENTERPRISE` refuses every `gh` call, and the action uploads with `gh`. The example sets `upload: "false"` and uploads in a later step that does not set `ZERO_ENTERPRISE`. Add `security-events: write` to the job permissions.
 
 Keep these boundaries:
 
 - Give the runner's machine identity access to the model, as in [Azure OpenAI](/models/#azure-openai) or an AWS role for [Amazon Bedrock](/models/#amazon-bedrock). No model key is stored in GitHub.
-- `ZERO_ENTERPRISE` keeps every automatic outbound call off, including telemetry and crash reports, except the model endpoint you configured and the destinations you name. `DO_NOT_TRACK` adds a second switch for telemetry. The action's SARIF upload goes to GitHub with the job's token. See [Data flow](/data-flow/). A Sentinel can upload its findings the same way from your machine: see [Send findings to GitHub](/sentinels/#send-findings-to-github).
+- `ZERO_ENTERPRISE` keeps every automatic outbound call off, including telemetry and crash reports, except the model endpoint you configured and the destinations you name. `DO_NOT_TRACK` adds a second switch for telemetry. The upload step sends SARIF to GitHub with the job's token. See [Data flow](/data-flow/). A Sentinel can upload its findings the same way from your machine: see [Send findings to GitHub](/sentinels/#send-findings-to-github).
 - Install `cosign` on the runner image, so the installer verifies the release [signature](/self-hosting/#verify-the-signature). Or put a pinned, verified binary in the runner image and skip the install.
 - Only run the job on trusted events. Do not run a self-hosted runner for pull requests from forks.
 

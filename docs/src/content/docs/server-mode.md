@@ -29,7 +29,7 @@ ghcr.io/0sec-labs/0security:0.45      # releases only, follows the latest 0.41.x
 
 ## Image contents
 
-The image is based on `ubuntu:24.04` and includes:
+The image is based on `ubuntu:26.04` and includes:
 
 | Category | Tools |
 |----------|-------|
@@ -38,10 +38,13 @@ The image is based on `ubuntu:24.04` and includes:
 | Web pentesting | sqlmap, nmap, nikto, gobuster, hydra, ffuf, wfuzz, whatweb, wafw00f, dirb |
 | Active Directory | impacket (0.13.1), certipy-ad (5.1.0), bloodhound-ce (1.9.1), ldap-utils, krb5-user |
 | Cloud identity | AzureHound (v3.0.0, checksum-pinned) |
-| Source analysis | ripgrep, jq, git |
+| Source analysis | ripgrep, jq, git, gh |
 | Container analysis | skopeo |
 | Scripting | python3, python3-requests, python3-bs4 |
+| Not included | Docker, a JDK and Maven |
 | Optional | SecLists wordlists (`INSTALL_SECLISTS=1` build arg, about 1 GB extra) |
+
+The container cannot run the Docker fix sandbox (`--sandbox docker`, including the Java profile) or `sbom generate --resolve` for Maven, because it has no Docker, JDK or Maven. Run those commands on the host, or build your own image on top of this one.
 
 ## Mounts and state
 
@@ -119,7 +122,7 @@ Stop the container and copy the volume:
 
 ```bash
 docker compose stop zero
-docker run --rm -v zero_zero-data:/data -v "$PWD:/backup" ubuntu:24.04 tar czf /backup/zero-data-$(date +%F).tgz -C /data .
+docker run --rm -v zero_zero-data:/data -v "$PWD:/backup" ubuntu:26.04 tar czf /backup/zero-data-$(date +%F).tgz -C /data .
 docker compose start zero
 ```
 

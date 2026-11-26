@@ -746,6 +746,7 @@ Options:
   --category <category>           Only this category
   --tool <name>                   Only findings reported by this tool
   --source <name>                 Alias of --tool
+  --scan <id>                     Only findings of this scan (id prefix)
   --fingerprint <prefix>          Only findings whose fingerprint or id starts with this
   --limit <n>                     Attempt at most this many findings in this run; the next run
                                   continues with the rest
@@ -810,6 +811,7 @@ List which rules of a context file match which current findings, and which match
 
 Options:
   --db-path <path>     Path to SQLite database
+  --scan <scanId>      Only the findings of this scan
   --repository <name>  Repository name the context rules are matched against (default: the git
                        remote of the current folder)
   --format <format>    Output: text or json (choices: "text", "json")
@@ -829,6 +831,7 @@ Options:
                       details)
   --sign <key>        Sign the folder with your Ed25519 private key (PEM file). Needs an enterprise
                       license
+  --scan <id>         Only the findings of this scan
   --name <name>       Name of the application the SBOM describes (default: the repository folder's
                       name)
   --db-path <path>    Path to SQLite database
@@ -841,6 +844,7 @@ Usage: 0security findings export [options] [ids...]
 Export findings, a whole scan or, with no IDs, every finding as json, md, sarif, html or pdf
 
 Options:
+  --scan <id>            Export every finding of this scan instead of selected IDs
   --format <format>      json, md, sarif, html or pdf (default: "json")
   -o, --output <file>    Write to a file instead of stdout
   --severity <severity>  With no IDs: only this severity
@@ -1030,6 +1034,7 @@ List findings from the database
 Options:
   --all                  Show raw finding rows instead of grouped fingerprints
   --db-path <path>       Path to SQLite database
+  --scan <scanId>        Filter by scan ID
   --severity <severity>  Filter by severity: critical, high, medium, low, info
   --category <category>  Filter by attack category
   --status <status>      Filter by status: discovered, verified, confirmed, scored, reported, fixed,
@@ -1323,6 +1328,7 @@ Options:
                                   comma-separated)
   --category <category>           Only this category
   --tool <name>                   Only findings reported by this tool
+  --scan <id>                     Only findings of this scan (id prefix)
   --limit <n>                     Check at most this many findings in this run; the next run
                                   continues with the rest
   --force                         Check findings again that already have a verdict

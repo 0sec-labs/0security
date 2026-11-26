@@ -298,8 +298,6 @@ Nuclei runs at 10 requests per second and 5 templates at once. Change them with 
 
 The report says what authorised the run. The findings are saved for triage as unverified, and no model reviews them. See [Use Nuclei, ZAP or Strix](/use-dynamic-scanners/).
 
-FoxGuard ships next to `0security`. The install script installs it (set `INSTALL_FOXGUARD=0` to skip it). It keeps a `foxguard` you put in the install folder yourself; set `INSTALL_FOXGUARD=force` to replace it. A source checkout builds it with `cargo build --release -p foxguard`. Set `ZERO_FOXGUARD_PATH` to use another copy. Pass `--prepass off` to skip it. `--scanner` adds or replaces scanners (`foxguard`, `semgrep`, `opengrep`, `checkov`); repeat the flag for several. A scanner that is not installed is skipped. A Semgrep rule pack such as `p/default` is downloaded when it runs.
-
 `--rules <file-or-folder>` gives Semgrep or OpenGrep your own rules for the pre-pass. Repeat it for several. The scanner runs only those rules, not its default pack, so add `--scanner semgrep` or `--scanner opengrep`. FoxGuard has its own rule format and does not read them, so `--rules` alone is a usage error.
 
 A rule file is standard Semgrep YAML:
@@ -320,52 +318,6 @@ rules:
 A hit from your rules is a lead like any other. The scan checks it against the code and records it only when it is real. A finding at the rule's lines gets `ruleSource: "custom"` in JSON and in the SARIF properties, and its description names the rule id. Semgrep prefixes the id with the rule file's folder.
 
 0 never looks for rules in the scanned folder. A `.semgrep` folder there is ignored unless you name it with `--rules`. See [Add your own rules](/ci/#add-your-own-rules) for CI.
-
-| Argument | Required | Description |
-| --- | --- | --- |
-| `target` | No |  |
-
-| Option | Registered default | Description |
-| --- | --- | --- |
-| `--budget <usd>` | `5` | Stop when the estimated spend reaches this many USD; partial findings are kept |
-| `--format <format>` | `md` | Report format: json, md, sarif, html, pdf |
-| `-o, --output <file>` | — | Write the report to a file instead of stdout |
-| `--fail-on <severity>` | — | Exit 1 when a finding is at or above this severity (critical, high, medium, low, info) |
-| `--passes <n>` | `1` | Scan this many times and merge the findings (a scan misses some issues that another run finds); the budget is split between them, up to 5 |
-| `--diff <ref>` | — | Review only the files that differ from this git ref (for example origin/main), and what they connect to; an empty diff scans nothing |
-| `--prepass <mode>` | `auto` | auto runs the pattern scanners first when they are installed and gives their hits to the scan as leads; off skips them |
-| `--scanner <id>` | — | Scanner for the pre-pass (foxguard, semgrep, opengrep, gitleaks, trivy, osv-scanner, checkov); repeat or separate with commas to use several (default: foxguard). gitleaks, trivy and osv-scanner must be installed; secret values are redacted |
-| `--rules <file-or-folder>` | — | Semgrep or OpenGrep rules for the pre-pass (a file or a folder); repeat for several. Replaces the default rules and needs --scanner semgrep or opengrep. Rules are never read from the scanned folder unless you name them |
-| `--context <file>` | — | Give the scan this file (a threat model, notes on who may do what) as lower-priority background; repeat for several. It can steer what the scan weighs but cannot change how it works |
-| `--policy <file-or-folder>` | — | Check the code against these Markdown policies (a file or a folder of .md files) and report pass or fail for each; repeat for several. Runs the policy-check skill |
-| `--org-policy <folder>` | — | An organisation's policy folder: evaluated first, and wins when a --policy says otherwise or uses the same id; repeat for several |
-| `--repo-context` | — | Also read .0/threat-model.md from the scanned folder as context. Off by default: a change under review can edit that file; in CI pass the base branch's copy with --context instead |
-| `--repo-ignores` | — | Also let the pre-pass scanners read their configuration and ignore files from the scanned folder (.foxguard.yml, .semgrepignore, .gitleaks.toml, .gitleaksignore, .trivyignore, osv-scanner.toml, .checkov.yaml). Off by default: a change under review can use them to hide findings. Inline suppressions such as nosemgrep always apply |
-| `--poc-image <image>` | — | Run the proof of concept of each high or critical finding in this container image, network off, and label the finding script-matched, script-unmatched or static-only. Must be pinned by digest (name@sha256:...). Default: the ZERO_POC_IMAGE variable or `0security config set executedPocImage`; otherwise off. Needs Docker or podman |
-| `--skill <id>` | `scan` | Skill that holds the scan method |
-| `--model <model>` | — | Model for the scan thread (default: gpt-6-luna) |
-| `--batches <mode>` | `auto` | auto reviews a large folder in batches, one thread per group of entry points, and records what each batch covered; on always does; off keeps one thread |
-| `--batch-size <n>` | `8` | Entry points one batch reviews (1 to 50); a folder with more than this many is split under --batches auto |
-| `--retries <n>` | `2` | Run a batch again when it fails for a reason that may pass: a dropped connection, a provider timeout, rate limit or server error (0 to 5; 0 turns it off). A thread that is not a batch is asked once to continue. The cost of every attempt counts against --budget |
-| `--batch-timeout <seconds>` | `900` | Longest one batch may run before it is cancelled and left pending (the scan goes on with the next batch); --timeout still limits the whole scan |
-| `--concurrency <n>` | `1` | Batches that run at the same time (1 to 3) |
-| `--resume <scan>` | — | Continue the units an earlier batched scan of this folder did not reach (a scan id from its report, or latest); refuses when the git HEAD changed unless --force |
-| `--force` | — | With --resume: continue even though the folder's git HEAD changed |
-| `--coverage [scan]` | — | Print the coverage ledger of a batched scan of this folder (the latest, or the id given) and exit; --format json for JSON |
-| `--allow-partial` | — | Exit by the findings alone (0, or 1 with --fail-on) when the scan stops before it reviews everything; the report still says it is partial |
-| `--plan` | — | List the entry points, the batches and a rough cost range for the folder, then exit; calls no model and writes nothing |
-| `--tiers <file>` | — | An operator's tier map (YAML or JSON) that sets the budget, batches and skill for this repository, or skips it. Default: scan-tiers.yaml\|yml\|json in the 0 state folder. Never read from the scanned folder on its own; in CI read it from the base branch |
-| `--fail-on-skip` | — | Exit 1 when the tier map skips this scan (default: exit 0, with the skip stated in the report) |
-| `--known <sarif>` | — | SARIF from other tools: the scan is told what is already known and looks for what they missed; findings are labelled new or already-known (confirmedIndependently when the scan analysed it itself). Repeat for several |
-| `--only-new` | — | With --known: leave findings that match a known item out of the report |
-| `--timeout <seconds>` | `3600` | Maximum seconds for the whole scan; what it reviewed so far is reported as partial |
-| `--engine-url <url>` | — | Attach directly to a running trusted engine |
-| `--engine-token-env <name>` | — | Environment variable holding the attached engine token |
-| `--computer <id>` | — | Use a registered remote computer |
-| `--engine <id>` | — |  |
-| `--computers-config <path>` | — | Operator computer connection registry JSON file |
-| `--engines-config <path>` | — |  |
-| `--db-path <path>` | — | Control database of the local engine to attach to |
 
 #### Infrastructure as code
 
@@ -1467,19 +1419,6 @@ trivy image --format cyclonedx --quiet -- <image>
 
 The two cdxgen flags keep it from running the project's package manager. These tools write CycloneDX 1.7, not 1.5, and their component counts differ from the builtin reader, because each also walks the other trees in the folder. Whether trivy fetches its vulnerability database on a first run, and how older cdxgen versions treat those flags, is not verified.
 
-| Argument | Required | Description |
-| --- | --- | --- |
-| `folder` | No | Folder to read lockfiles from (default: .) |
-
-| Option | Registered default | Description |
-| --- | --- | --- |
-| `-o, --output <file>` | — | Write the SBOM to a file instead of stdout |
-| `--name <name>` | — | Name of the application the SBOM describes (default: the folder's name) |
-| `--generator <tool>` | `builtin` | Who writes the SBOM: builtin (reads lockfiles; default), syft, cdxgen, trivy (run the installed tool; exit 2 if it is missing) |
-| `--format <format>` | `cyclonedx` | Output format: cyclonedx (1.5, default) or spdx (2.3 JSON; builtin generator only) |
-| `--image <reference-or-archive>` | — | Describe a container image instead of a folder: a reference such as nginx:1.25, or the path of a docker save archive or OCI layout. Needs --generator syft or trivy, which pulls the image |
-| `--ai` | — | Also list the AI in the folder: models, datasets, hosted model ids and MCP servers, found by reading files as text |
-
 #### sbom check
 
 Look every component of an SBOM up in the public OSV database and list the advisories
@@ -1878,20 +1817,6 @@ A matching finding shows `Operator business context (unverified): ranked higher 
 `scan --business-context context.json` passes the declarations as labelled background, orders JSON/Markdown/HTML/PDF/SARIF reports within scope groups, and stores the separate declaration with each local finding. The JSON finding and SARIF result property are named `businessContext` and include `provenance: "operator"`, repository, tags, notes, shift, work score and rationale. Later list, burndown and retained exports use the stored labels without reopening the file. The console shows the declaration separately and offers a **Business priority** sort; **Severity** still sorts technical severity. A scan's ordinary model finding saves cannot set the operator declaration field.
 
 0 reads context only from the path explicitly passed. The file is limited to 64 KB; it is never discovered automatically in a scanned repository. One file can hold rules for several repositories under `repositories`. Stored labels carry that scan's repository label. A file you pass to `findings list` or another command, or set with `findingsContext`, is applied when you run the command and overrides a stored label. See [Rank findings by what matters to you](/findings/#rank-findings-by-what-matters-to-you). Without a stored declaration or an explicit list context, ordering remains technical severity. `scan --context` continues to mean prose background and is a separate option.
-
-| Option | Registered default | Description |
-| --- | --- | --- |
-| `--all` | — | Show raw finding rows instead of grouped fingerprints |
-| `--db-path <path>` | — | Path to SQLite database |
-| `--scan <scanId>` | — | Filter by scan ID |
-| `--severity <severity>` | — | Filter by severity: critical, high, medium, low, info |
-| `--category <category>` | — | Filter by attack category |
-| `--status <status>` | — | Filter by status: discovered, verified, confirmed, scored, reported, fixed, false-positive |
-| `--triage <triage>` | — | Filter by triage: new, accepted, suppressed |
-| `--expiring <days>` | — | Only accepted risks that expire within this many days |
-| `--context <file>` | — | Business context file (JSON): order findings by what matters to you, with the reason shown. See the docs |
-| `--scope <scope>` | — | in: findings not labelled out of scope; out: only those the declared scope (0security scan --scope) labelled out of scope; all (default): both, each labelled |
-| `--limit <n>` | — | Max findings/groups to show |
 
 #### findings show
 
