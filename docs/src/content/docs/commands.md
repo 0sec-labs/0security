@@ -4120,7 +4120,7 @@ Create, inspect and control Sentinels.
 0security sentinels
 ```
 
-Subcommands: [list](#sentinels-list) · [run](#sentinels-run) · [set](#sentinels-set) · [sync](#sentinels-sync) · [export](#sentinels-export) · [bitbucket](#sentinels-bitbucket) · [show](#sentinels-show) · [presets](#sentinels-presets) · [create](#sentinels-create) · [pause](#sentinels-pause) · [resume](#sentinels-resume) · [acknowledge](#sentinels-acknowledge) · [archive](#sentinels-archive) · [delete](#sentinels-delete) · [activations](#sentinels-activations) · [files](#sentinels-files) · [triggers](#sentinels-triggers) · [webhook](#sentinels-webhook).
+Subcommands: [list](#sentinels-list) · [run](#sentinels-run) · [set](#sentinels-set) · [bitbucket](#sentinels-bitbucket) · [sync](#sentinels-sync) · [export](#sentinels-export) · [show](#sentinels-show) · [presets](#sentinels-presets) · [create](#sentinels-create) · [pause](#sentinels-pause) · [resume](#sentinels-resume) · [acknowledge](#sentinels-acknowledge) · [archive](#sentinels-archive) · [delete](#sentinels-delete) · [activations](#sentinels-activations) · [files](#sentinels-files) · [triggers](#sentinels-triggers) · [webhook](#sentinels-webhook).
 
 #### sentinels sync
 
