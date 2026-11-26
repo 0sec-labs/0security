@@ -158,6 +158,29 @@ node scripts/bench/triage-truth.mjs --dry-run --labels labels.json --app <folder
 
 No set from a real application is committed. The 45 hand-labelled findings from a real open-source Java application that issue 448 asks for have not been made: they need a person to read a real codebase and label its scan findings, then a real model run.
 
+### OWASP Benchmark, scan level
+
+`scripts/bench/owasp-score.mjs` scores what the scan itself reports, with no triage step. A case counts as detected when a finding sits in its file and names its category (the rule `triage-truth.mjs` uses). Per category it gives the true-positive rate over the real cases, the false-positive rate over the not-real cases, and their difference (the Benchmark's own score, 0 for chance).
+
+```bash
+node scripts/bench/owasp-score.mjs --dry-run --owasp <BenchmarkJava checkout> --per-class 3     # sample and stage, no model
+node scripts/bench/owasp-score.mjs --scan-file scan.json --owasp <checkout> --per-class 3        # score a saved scan, no model
+node scripts/bench/owasp-score.mjs --run --owasp <checkout> --per-class 3 --budget 1             # scans the sample; spends model money
+```
+
+`--scan-file` takes a report from `0security scan --format json -o` of a folder holding exactly the sampled files (`--dry-run` stages that folder). Use the same `--per-class`, `--seed` and `--categories`, or `--all` for every case. The tests score a made-up checkout and a saved scan end to end. No scan-level OWASP result is recorded yet: it needs a BenchmarkJava checkout and a real model run.
+
+## Vul4J cases
+
+`scripts/bench/vul4j.mjs` turns a Vul4J checkout into a fix case and checks one:
+
+```bash
+node scripts/bench/vul4j.mjs --convert <vul4j checkout> --out <case folder>
+node scripts/bench/vul4j.mjs --validate <case folder>
+```
+
+It reads `VUL4J/vulnerability_info.json` and the human patch, and writes `repo/` (without `VUL4J/`), `answer.json`, `finding.sarif` (at the human patch's first changed line) and `human.patch`. The proof is different from the small Java cases: the project's own failing tests must fail on the vulnerable code and pass with the human patch, through Maven or Gradle. This script does not run them, and `fix-score.mjs` does not load these cases yet. The field names follow the dataset's published columns and were not checked against a real checkout; the tests use a made-up one. No Vul4J result exists. It needs the Vul4J dataset, a JDK of each project's version and the build tool with its dependencies, then a real fix run.
+
 ## What it does not prove
 
 - Seven tiny, synthetic apps with obvious bugs. A high recall here says the scan is not blind, not that it finds bugs in a real codebase; the planted bugs are textbook shapes models have seen.
