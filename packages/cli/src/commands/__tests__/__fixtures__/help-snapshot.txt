@@ -866,7 +866,8 @@ Options:
   --repo <dir>         Only fixes recorded for this git repository (default: all)
   --since <date>       Only fixes recorded on or after this date, like 2026-01-31
   --check-merged       Ask the code host whether each pull request was merged, closed or edited (one
-                       request each)
+                       request each); a merged fix also turns its variants from fixed-pending-merge
+                       to fixed
   --context <file>     Business context file (JSON): order findings by what matters to you, with the
                        reason shown. Defaults to the file set with `0security config set
                        findingsContext`
@@ -1755,6 +1756,11 @@ Options:
                              .gitleaks.toml, .gitleaksignore, .trivyignore, osv-scanner.toml,
                              .checkov.yaml). Off by default: a change under review can use them to
                              hide findings. Inline suppressions such as nosemgrep always apply
+  --poc-image <image>        Run the proof of concept of each high or critical finding in this
+                             container image, network off, and label the finding executed-proven,
+                             executed-failed or static-only. Must be pinned by digest
+                             (name@sha256:...). Default: the ZERO_POC_IMAGE variable or `0security
+                             config set executedPocImage`; otherwise off. Needs Docker or podman
   --skill <id>               Skill that holds the scan method (default: "scan")
   --model <model>            Model for the scan thread (default: gpt-6-luna)
   --provider <id>            Explicit model provider for this scan (use with --model)
