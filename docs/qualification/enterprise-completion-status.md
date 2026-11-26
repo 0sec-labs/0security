@@ -15,6 +15,14 @@ Actual local qualification includes a real native server and online SQLite backu
 
 The deterministic scanner completed a pinned Keycloak checkout with 1,316,081 Java physical newlines in 23.771 seconds. The full pinned OWASP Java benchmark yielded 312 TP / 1,103 FN / 52 FP / 1,273 TN. Those are scanner-layer regression measurements only; they do not establish agent accuracy. Full model-driven qualification and live customer services remain outstanding.
 
+## Post-merge validation snapshot
+
+The local source was reconciled with main at `d6cff04c1`; the validation tree is based on local commit `dd022e8ad` plus subsequent verification fixes. The original issue audit and regression groups above remain historical snapshots and must not be added together as unique tests. This section records the reconciled local checks separately; it does not establish publication, remote CI, release or deployment status.
+
+The global `pnpm build` passed. The documentation site build and local link check passed for 101 pages and eight README documentation links. The independent documentation-command checker passed for 27 files after correcting the Bitbucket examples to the canonical `findings fix` command. The local deployment marker is a build artifact only; no documentation deployment or public-domain check ran.
+
+The native-server qualification was repeated on 2026-11-26 at 02:41 UTC and passed HTTP authentication, CSRF, host and health checks; a real online SQLite backup with integrity and retained-finding checks; restart from the restored database; and authenticated report export retaining the synthetic finding. Its scope remains a native local process and real SQLite operations. It does not qualify model execution, containers, cloud, Bitbucket or a real identity provider. Final reconciled regression counts are recorded separately in the machine-readable results when complete.
+
 ## Build order
 
 1. The code seams listed here are implemented in this branch. Reconcile their remaining external acceptance against actual runs: Bitbucket fix pull requests, Java verification profile, business-context propagation, Java usage/dependency paths, workflow metrics/host observations, rollup history and finding re-verification/CI status.

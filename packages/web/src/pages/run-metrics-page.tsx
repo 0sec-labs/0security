@@ -2,6 +2,7 @@ import { metricTotal } from "./run-metrics-model";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useBackendApi } from "@/api";
+import { queryKeys } from "@/queries";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { ErrorState } from "@/components/state-panel";
@@ -16,7 +17,7 @@ export function RunMetricsPage() {
   const [hostNotice, setHostNotice] = useState("");
   const [by, setBy] = useState("sentinel");
   const [since, setSince] = useState("7d");
-  const query = useQuery({ queryKey: ["run-metrics", client.backendId, by, since], queryFn: async (): Promise<Metrics> => {
+  const query = useQuery({ queryKey: queryKeys.runMetrics(client.backendId, by, since), queryFn: async (): Promise<Metrics> => {
     const response = await client.request(`/api/console/run-metrics?by=${by}&since=${since}`);
     if (!response.ok) throw new Error(response.status === 403 ? "Only workspace owners can read run metrics." : "Could not load run metrics.");
     return response.json();

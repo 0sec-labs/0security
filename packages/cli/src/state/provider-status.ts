@@ -1,4 +1,4 @@
-import { hasBedrockCredentialSignals } from "@0/engine/dist/runtime/llm-api/provider-config.js";
+import { hasBedrockCredentialSignals } from "@0/engine";
 /**
  * Which LLM providers have local credential configuration.
  *

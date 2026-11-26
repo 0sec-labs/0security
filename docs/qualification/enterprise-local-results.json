@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "date": "2026-11-25",
   "sourceBase": "b4dfb3e29",
-  "state": "Local implementation; uncommitted working tree, not published or deployed",
+  "state": "Local qualification evidence reconciled with current main; publication and deployment are separate and are not established by this file.",
   "actualChecks": [
     {
       "name": "Native team server",
@@ -211,5 +211,47 @@
     "files": 171,
     "definition": "Sorted changed/untracked source paths plus file-content hashes; qualification documents excluded."
   },
-  "providerSelection": "Bitbucket review jobs preserve the explicit provider, model and reasoning through the CLI into the console runtime, including inherited Sentinel defaults."
+  "providerSelection": "Bitbucket review jobs preserve the explicit provider, model and reasoning through the CLI into the console runtime, including inherited Sentinel defaults.",
+  "originalImplementationState": "Local implementation; uncommitted working tree, not published or deployed",
+  "postMergeValidation": {
+    "sourceRevision": "dd022e8ad plus post-merge working-tree verification fixes",
+    "integratedMain": "d6cff04c1",
+    "scope": "Reconciled local working tree; does not qualify paid model execution, live vendor integrations, cloud deployment, a release or remote CI.",
+    "globalBuild": {
+      "result": "passed",
+      "command": "pnpm build",
+      "artifactVersion": "0.45.0"
+    },
+    "docsSite": {
+      "result": "passed",
+      "commands": [
+        "pnpm --filter @0/docs build",
+        "node scripts/check-docs-site.mjs --write-marker"
+      ],
+      "builtPages": 101,
+      "readmeDocumentationLinks": 8,
+      "limits": "Local build and local marker only; no deploy or public-domain verification."
+    },
+    "documentationCommands": {
+      "result": "passed",
+      "command": "pnpm check:docs-commands",
+      "filesChecked": 27,
+      "correction": "Bitbucket examples use the canonical findings fix command."
+    },
+    "nativeServer": {
+      "schemaVersion": 1,
+      "startedAt": "2026-11-26T02:41:16.138Z",
+      "runtime": "v24.14.0",
+      "checks": [
+        "native-server-http-auth-csrf-host-health",
+        "online-backup-while-server-running-integrity-and-finding-retained",
+        "restored-database-native-server-restart-auth-and-finding-retained",
+        "authenticated-http-report-export-retains-restored-finding"
+      ],
+      "scope": "Native local process, synthetic retained finding, real SQLite backup. No model, container, cloud, Bitbucket or real IdP qualification.",
+      "completedAt": "2026-11-26T02:41:22.246Z",
+      "outcome": "passed"
+    },
+    "regressionScopeNote": "The earlier regression groups remain historical, overlapping scopes. Final reconciled suite counts are recorded separately when complete."
+  }
 }

@@ -3,13 +3,13 @@ title: Fix findings on Bitbucket
 description: Create and update fix pull requests on Bitbucket Cloud or Data Center with your own git credentials and access token.
 ---
 
-`0security fix` uses the repository's `origin` to select GitHub, Bitbucket Cloud or Bitbucket Data Center. Bitbucket fixes use the REST API directly; they do not need `gh`.
+`0security findings fix` uses the repository's `origin` to select GitHub, Bitbucket Cloud or Bitbucket Data Center. Bitbucket fixes use the REST API directly; they do not need `gh`.
 
 For Bitbucket Cloud, configure your own git credentials with write access and set a repository/workspace access token or OAuth access token that can read and write pull requests:
 
 ```bash
 export BITBUCKET_TOKEN=...
-0security fix <finding> --repo ./your-clone --test "npm test"
+0security findings fix <finding> --repo ./your-clone --test "npm test"
 ```
 
 For Data Center, also name the HTTPS server URL, including any context path. The hostname must match the clone's origin:
@@ -17,7 +17,7 @@ For Data Center, also name the HTTPS server URL, including any context path. The
 ```bash
 export BITBUCKET_URL=https://bitbucket.example.com/bitbucket
 export BITBUCKET_TOKEN=...
-0security fix <finding> --repo ./your-clone --test "mvn test"
+0security findings fix <finding> --repo ./your-clone --test "mvn test"
 ```
 
 You can pass `--host bitbucket-cloud` or `--host bitbucket-dc` explicitly, and `--bitbucket-url` instead of `BITBUCKET_URL`. Cloud origins use `bitbucket.org/workspace/repo`; Data Center HTTPS clone URLs use `/scm/PROJECT/repo.git`, and SSH clone URLs use `PROJECT/repo.git`.

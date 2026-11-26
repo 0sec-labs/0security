@@ -10,6 +10,7 @@ const key = <const N extends string>(name: N) => <const P extends readonly Part[
 export const queryKeys = {
   // Dashboard, runs and scans
   dashboard: key("dashboard"),
+  runMetrics: key("run-metrics"),
   chatFindings: key("chat-findings"),
   runs: key("runs"),
   scans: key("scans"),

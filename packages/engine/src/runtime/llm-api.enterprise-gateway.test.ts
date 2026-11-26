@@ -104,6 +104,7 @@ describe("enterprise OpenAI-compatible gateway (LiteLLM in front of Bedrock)", (
   });
 
   it("still looks pricing up when no opt-out is set", async () => {
+    vi.stubEnv("DO_NOT_TRACK", undefined);
     const fetchSpy = vi.fn<typeof fetch>().mockResolvedValue(Response.json({ data: [] }));
     vi.stubGlobal("fetch", fetchSpy);
     await discoverAndRegisterPricing("bedrock/unpriced-control-model");
