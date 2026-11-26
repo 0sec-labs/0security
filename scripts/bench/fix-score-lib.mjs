@@ -28,6 +28,17 @@ export function rescanVerdict(before, after, files) {
 }
 
 /**
+ * A rescan with fixed patterns, for cases the scanner did not flag. answer.rescanForbid lists { file, pattern } entries:
+ * the exact vulnerable construct must be gone from that file. read(file) returns the file's text or null.
+ * "not-applicable" when the case lists none. It only checks that one construct is absent, so it cannot see a fix that
+ * keeps the flaw in another form; the hidden exploit check does that.
+ */
+export function patternRescan(forbid, read) {
+  if (!Array.isArray(forbid) || !forbid.length) return "not-applicable";
+  return forbid.some(({ file, pattern }) => new RegExp(pattern).test(read(file) ?? "")) ? "still-flagged" : "clean";
+}
+
+/**
  * Score one fix attempt.
  * input: { answer, committed, compiles, testsPass, exploitCode, rescan, rescanNew, numstat, costUsd, seconds, status }
  * compiles is true or false for a language with a build step and null when there is none (Node cases).
@@ -115,6 +126,31 @@ export function aggregate(runs, repeats) {
     costPerFix: costComplete && fixed ? costs.reduce((a, b) => a + b, 0) / fixed : null,
     secondsMean: mean(runs.map((r) => r.seconds)),
   };
+}
+
+/**
+ * The per-case table of the reference-fix check. No model ran: each row says what the case's own checks do on the
+ * vulnerable code and with the hand-written reference fix. facts: { case, language, category, testsBefore, exploitBefore,
+ * testsAfter, exploitAfter, compilesBefore, compilesAfter, rescan, problems }.
+ */
+export function renderReferenceMarkdown(facts, meta) {
+  const yes = (v) => (v === null ? "n/a" : v ? "yes" : "no");
+  const exploit = (code) => (code === 0 ? "blocked" : code === 1 ? "works" : `exit ${code}`);
+  const lines = [
+    "# Fix cases: reference-fix check",
+    "",
+    `- Date: ${meta.date}`,
+    "- Model: none. This is not a model result and says nothing about how often `0security findings fix` succeeds.",
+    `- Cases: ${facts.length}, of which ${facts.filter((f) => f.language === "java").length} Java`,
+    "",
+    "Each row runs the case's own checks twice: on the vulnerable project and with the hand-written reference fix. A valid case has green tests both times, an exploit check that works before and is blocked after, and a rescan that no longer flags the finding. The rescan column names the source of that check: FoxGuard where it flagged the original, a fixed pattern for the vulnerable construct where the case lists one, and n/a where neither applies.",
+    "",
+    "| case | language | category | tests before | tests after | compiles before | compiles after | exploit before | exploit after | rescan | valid |",
+    "|---|---|---|---|---|---|---|---|---|---|---|",
+  ];
+  for (const f of facts) lines.push(`| ${f.case} | ${f.language} | ${f.category} | ${yes(f.testsBefore)} | ${yes(f.testsAfter)} | ${yes(f.compilesBefore)} | ${yes(f.compilesAfter)} | ${exploit(f.exploitBefore)} | ${exploit(f.exploitAfter)} | ${f.rescan} | ${f.problems.length ? "no" : "yes"} |`);
+  lines.push("", "Run `node scripts/bench/fix-score.mjs --dry-run --reference-table <file>` to write this table again. Model results per case come from `--run` and are not committed.", "");
+  return lines.join("\n");
 }
 
 export function renderFixMarkdown(rows, total, meta) {

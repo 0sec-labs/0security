@@ -99,7 +99,9 @@ A run copies the project to a fresh git repository and a fresh home, imports the
 - The project compiles (Java cases; Node has no build).
 - The original tests pass.
 - The hidden proof exits 0.
-- A rescan with FoxGuard no longer reports the finding's rule in that file. This applies only where FoxGuard flagged the original: it did for 6 of the 14 cases (command injection and XML external entities in Java; command injection, SQL injection, `eval` and weak hashing in Node). Elsewhere the rescan column reads n/a, because a clean rescan would prove nothing.
+- A rescan no longer reports the finding. With FoxGuard this means the finding's rule no longer fires in that file. It applies only where FoxGuard flagged the original: 7 of the 14 cases with the scanner version used for the table below (the 6 measured in the real run, plus the hardcoded key). Where it did not, a case may list the vulnerable construct in `rescanForbid` (file and pattern) and the rescan checks that the construct is gone; one case does (the URL allowlist). That is a check for one construct, not a scan. For the other 6 cases (path traversal in both languages, unsafe deserialization, missing authorization, open redirect, prototype pollution) the rescan column reads n/a, because a clean rescan would prove nothing. Those flaws are absences of a check, which only a model scan could judge.
+
+The per-case check of the reference fixes (no model) is committed in [fix-cases-reference.md](fix-cases-reference.md). `node scripts/bench/fix-score.mjs --dry-run --reference-table <file>` writes it again.
 
 2026-11-24, default model (gpt-6-luna), 2 repeats, `--budget 0.5` per fix, total cost $0.08. The per-case table is not kept in the repository. `fix-score.mjs --run` writes it to `scripts/bench/results/` (git-ignored), so run the command above to reproduce it.
 

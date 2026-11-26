@@ -7,5 +7,11 @@
   "expectedFiles": [
     "src/proxy.js"
   ],
-  "note": "Parse the URL and compare the exact hostname and the https scheme. Reject user-info, look-alike hosts that merely start with the allowed name, and URLs that only contain the allowed host in a query or fragment."
+  "note": "Parse the URL and compare the exact hostname and the https scheme. Reject user-info, look-alike hosts that merely start with the allowed name, and URLs that only contain the allowed host in a query or fragment.",
+  "rescanForbid": [
+    {
+      "file": "src/proxy.js",
+      "pattern": "startsWith\\(\"https://\" \\+ ALLOWED_HOST\\)"
+    }
+  ]
 }

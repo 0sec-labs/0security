@@ -5,7 +5,7 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "n
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { aggregate, parseNumstat, renderFixMarkdown, rescanVerdict, scoreCase, summarizeCases } from "./fix-score-lib.mjs";
+import { aggregate, parseNumstat, patternRescan, renderFixMarkdown, renderReferenceMarkdown, rescanVerdict, scoreCase, summarizeCases } from "./fix-score-lib.mjs";
 import { parseArgs, runCasesWithBudget } from "./fix-score.mjs";
 
 const answer = { id: "sqli", expectedFiles: ["src/users.js"] };
@@ -213,4 +213,28 @@ else console.log("{}");
   assert.equal(report.total.costTotal, 0.8);
   assert.match(result.stdout, /not a hard provider billing limit/);
   assert.doesNotMatch(result.stdout, /worst.case/i);
+});
+
+test("patternRescan flags a file that still holds the vulnerable construct", () => {
+  const forbid = [{ file: "src/proxy.js", pattern: "startsWith\\(\"https://\" \\+ ALLOWED_HOST\\)" }];
+  const vulnerable = 'return raw.startsWith("https://" + ALLOWED_HOST);';
+  assert.equal(patternRescan(forbid, () => vulnerable), "still-flagged");
+  assert.equal(patternRescan(forbid, () => "return url.hostname === ALLOWED_HOST;"), "clean");
+  assert.equal(patternRescan(forbid, () => null), "clean");
+  assert.equal(patternRescan(undefined, () => vulnerable), "not-applicable");
+  assert.equal(patternRescan([], () => vulnerable), "not-applicable");
+});
+
+test("renderReferenceMarkdown says no model ran and lists every case", () => {
+  const ok = { case: "a", language: "java", category: "xxe", testsBefore: true, testsAfter: true, compilesBefore: true, compilesAfter: true, exploitBefore: 1, exploitAfter: 0, rescan: "foxguard clean", problems: [] };
+  const bad = { ...ok, case: "b", language: "javascript", compilesBefore: null, compilesAfter: null, exploitAfter: 1, rescan: "n/a", problems: ["x"] };
+  const md = renderReferenceMarkdown([ok, bad], { date: "2026-01-01" });
+  assert.match(md, /Model: none/);
+  assert.match(md, /\| a \| java \| xxe \| yes \| yes \| yes \| yes \| works \| blocked \| foxguard clean \| yes \|/);
+  assert.match(md, /\| b \| javascript \| .* \| n\/a \| n\/a \| works \| works \| n\/a \| no \|/);
+});
+
+test("--reference-table belongs to the dry run", () => {
+  assert.throws(() => parseArgs(["--run", "--reference-table", "/tmp/x.md"]), /dry-run/);
+  assert.ok(parseArgs(["--dry-run", "--reference-table", "/tmp/x.md"]).referenceTable);
 });
