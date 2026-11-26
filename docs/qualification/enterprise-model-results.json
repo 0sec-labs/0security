@@ -1,0 +1,277 @@
+{
+  "schemaVersion": 1,
+  "dateUtc": "2026-11-26",
+  "sourceCheckpoint": "bb7bfacd70861b55773e04bcd8e60a8de81f420f",
+  "scope": "Bounded paid model execution against a copied public Java package and planted single-bug Java fixtures. Not production acceptance, a full-project audit, a model-accuracy benchmark, an invoice or live customer-integration qualification.",
+  "model": {
+    "provider": "openai",
+    "id": "gpt-6-luna",
+    "reasoningEffort": "medium",
+    "observedProviderModels": [
+      "gpt-6-luna"
+    ]
+  },
+  "budget": {
+    "approvedTotalUsd": 5,
+    "reservationAdmissionLimitUsd": "4.80",
+    "scope": "One shared approval across all qualification requests, not a new allowance per case.",
+    "controls": [
+      "Only the approved model is admitted by a local budget proxy.",
+      "Provider credentials remain in the proxy process, outside the qualification CLI and its tool subprocesses; those clients receive a dummy local proxy key.",
+      "No provider or model fallback is admitted.",
+      "Requests reserve a conservative amount before provider forwarding, including in-flight reservations."
+    ],
+    "snapshotBeforeContainerExperiment": {
+      "firstCompletedAt": "2026-11-26T03:07:33.924Z",
+      "throughCompletedAt": "2026-11-26T03:21:01.126Z",
+      "successfulCompletedRequests": 78,
+      "localRejections": 8,
+      "rejectionReason": "paid_call_limit: the initial local 40-call ceiling; rejected requests were not forwarded.",
+      "cumulativeReservedUsd": "3.586672",
+      "standardTokenCostEstimateUsd": "0.038595885",
+      "scope": "This is the completed snapshot before the separate model-plus-container experiment. It is not the final qualification-session total."
+    },
+    "finalLedger": {
+      "proxyStoppedAt": "2026-11-26T03:26:14.376451+00:00",
+      "successfulCompletedRequests": 84,
+      "completedUsageReceipts": 84,
+      "httpStatus": 200,
+      "unknownUsageReceipts": 0,
+      "localRejections": 8,
+      "standardTokenCostEstimateUsd": "0.040367805",
+      "retainedReservationUpperBoundUsd": "3.800292",
+      "ledgerSha256": "5bfe5e38d82766b290ae2fcf490a6ef740edab9514a9573b870416a41ab5b6f3",
+      "scope": "Final stopped proxy ledger including the later model-plus-container fixture. No further paid requests are included after the stop."
+    }
+  },
+  "accounting": {
+    "kind": "provider-token-based estimate; not an invoice",
+    "ratesUsdPerMillion": {
+      "uncachedInput": "0.10",
+      "cachedInput": "0.01",
+      "cacheWrite": "0.125",
+      "output": "0.50"
+    },
+    "formula": "(input-cached-cache_write)*0.10/M + cached*0.01/M + cache_write*0.125/M + output*0.50/M",
+    "note": "Conservative request reservations and the proxy upper estimate are budget-control bounds, separate from the standard token-cost estimate. Reported token usage is not confirmation of a billed-dollar amount.",
+    "pricingSourceRecordedInReceipt": "https://developers.openai.com/api/docs/models/gpt-6-luna",
+    "finalUsageTokens": {
+      "input": 993550,
+      "output": 27544,
+      "cachedRead": 848623,
+      "cacheWrite": 144675
+    }
+  },
+  "keycloakAudit": {
+    "source": {
+      "upstream": "https://github.com/keycloak/keycloak",
+      "commitRecordedInManifest": "1333cf9f6de71171c737abdaca53550932a37891",
+      "package": "core/src/main/java/org/keycloak/jose",
+      "copiedJavaFiles": 42,
+      "physicalNewlines": 3964,
+      "manifestHashesIndependentlyMatching": 42,
+      "hashMismatches": 0,
+      "gitObjectsIndependentlyMatchingManifest": 42,
+      "gitObjectHashMismatches": 0,
+      "commitVerification": "All 42 manifest hashes independently matched git-show blobs at the stated public upstream commit."
+    },
+    "startedAt": "2026-11-26T03:17:28.849Z",
+    "completedAt": "2026-11-26T03:19:52.813Z",
+    "status": "complete",
+    "coverage": {
+      "filesInScope": 42,
+      "filesOpened": 42,
+      "unopenedFiles": 0,
+      "groupsReviewed": 7,
+      "groupsTotal": 7,
+      "batchesReviewed": 2,
+      "batchesTotal": 2,
+      "pendingGroups": 0,
+      "skippedGroups": 0,
+      "entryPointsInScope": 0
+    },
+    "findings": 0,
+    "runtimeEvidence": {
+      "persistedSessions": 2,
+      "provider": "openai",
+      "model": "gpt-6-luna",
+      "reasoningEffort": "medium",
+      "autoRoute": false,
+      "singleModel": false,
+      "completedProxyRequests": 27,
+      "onlyObservedModel": "gpt-6-luna",
+      "businessContext": "The operationally-critical tag and exact operator note were present in both persisted initial prompts; zero findings left no finding-level context/ranking result to verify."
+    },
+    "scanBudgetUsd": "0.60",
+    "standardTokenCostEstimateUsd": "0.022991590",
+    "usage": {
+      "inputTokens": 524086,
+      "cachedTokens": 438549,
+      "cacheWriteTokens": 85456,
+      "outputTokens": 15832
+    },
+    "independentReview": "Coverage report, SQLite coverage ledger, both persisted sessions, all 42 copied source hashes and all 42 upstream git objects at the stated commit were inspected. The per-request standard formula matched the runtime/report/database estimate.",
+    "limits": [
+      "The source is a standalone copied package with no git metadata, build files, dependency manifests or surrounding application callers.",
+      "No build or runtime exploit replay was performed for this source-copy audit.",
+      "Zero findings does not establish vulnerability absence, production exploitability, model precision/recall or full Keycloak coverage."
+    ]
+  },
+  "initialJavaFixFixtureRuns": {
+    "attempts": 4,
+    "repeatsPerCase": 1,
+    "standardTokenCostEstimateUsd": "0.012191440",
+    "reportedResult": "All four initial runs committed a change, compiled, passed the original fixture tests and blocked the separate exploit check under the harness scoring rules. This was limited fixture evidence, not approval of every generated patch.",
+    "cases": [
+      {
+        "case": "java-path-traversal",
+        "standardTokenCostEstimateUsd": "0.002887200",
+        "compilePassed": true,
+        "originalTestsPassed": true,
+        "exploitBlocked": true,
+        "rescan": "not-applicable"
+      },
+      {
+        "case": "java-command-injection",
+        "standardTokenCostEstimateUsd": "0.004309640",
+        "compilePassed": true,
+        "originalTestsPassed": true,
+        "exploitBlocked": true,
+        "rescan": "original finding no longer matched",
+        "additionalRescanFindings": 1
+      },
+      {
+        "case": "java-xxe",
+        "standardTokenCostEstimateUsd": "0.002880825",
+        "compilePassed": true,
+        "originalTestsPassed": true,
+        "exploitBlocked": true,
+        "rescan": "original finding no longer matched",
+        "additionalRescanFindings": 0
+      },
+      {
+        "case": "java-unsafe-deserialization",
+        "standardTokenCostEstimateUsd": "0.002113775",
+        "compilePassed": true,
+        "originalTestsPassed": true,
+        "exploitBlocked": true,
+        "rescan": "not-applicable",
+        "laterCompatibilityReview": "The generated patch failed three additional compatibility checks; the initial limited-test success is not production acceptance."
+      }
+    ],
+    "testEditDisclosure": "The model edited test files in every initial case. Scoring restored and ran the original fixture tests; test edits were disclosed rather than counted as unexpected files.",
+    "rescanLimit": "Only command-injection and XXE were eligible for original-finding rescan scoring. The command-injection run retained one additional scanner finding. No claim that every patched fixture was free of scanner findings is made.",
+    "limits": "Planted, small single-bug repositories with one attempt each; no production repository, private registry, merge acceptance or general fix-success rate established.",
+    "fixtureRevision": "8ca2addcd68695543e6c0a8324e094c76c8a7e79"
+  },
+  "strengthenedDeserializationRerun": {
+    "case": "java-unsafe-deserialization",
+    "attempts": 1,
+    "modelRequests": 11,
+    "standardTokenCostEstimateUsd": "0.003412855",
+    "trigger": "Review of the initial generated fix found three compatibility regressions: a null username, a long Unicode username and a previously serialized legitimate cookie.",
+    "fixtureChange": "The committed fixture tests now retain the three compatibility controls. The reference implementation was unchanged and validated against the strengthened tests. The long username has 40000 characters and 80000 UTF-8 bytes; the retained-cookie control uses the original serialization format.",
+    "result": {
+      "committed": true,
+      "compilePassed": true,
+      "originalStrengthenedTestsPassed": true,
+      "exploitBlocked": true,
+      "onlyExpectedFiles": true,
+      "rescan": "not-applicable"
+    },
+    "testEditDisclosure": "The rerun also edited a test file; scoring restored the strengthened original tests before evaluating the patch.",
+    "limits": "This corrects the fixture evidence for one rerun. It does not make the original defective fix acceptable or establish production compatibility beyond the tested controls.",
+    "fixtureRevision": "bb7bfacd70861b55773e04bcd8e60a8de81f420f"
+  },
+  "supportingCodeChecks": {
+    "reasoningFieldAndGatewayTestsPassed": 78,
+    "budgetHarnessTestsPassed": 17,
+    "staticChecksPassed": 19,
+    "scope": "Focused and static scopes overlap earlier regression groups; do not add them together as unique tests. The initial scan reasoning-field failure was corrected and is separate from the completed Keycloak rerun."
+  },
+  "outstanding": [
+    "Full-project agent coverage and labelled model accuracy/false-positive measurements.",
+    "End-to-end remediation on representative production Java projects with build, exploit, regression and rescan evidence.",
+    "Live Bitbucket, Jenkins, identity-provider, private-registry and cloud/model-service qualification."
+  ],
+  "javaContainerFixture": {
+    "case": "lexical path containment in a small Maven/JDK21 fixture",
+    "modelRequests": 6,
+    "standardTokenCostEstimateUsd": "0.001771920",
+    "image": "docker.io/library/maven@sha256:6fdc855a6ed81d288ca7ca37ac6ff5e9308b612485c0801d70b25a858c83d237",
+    "cliResult": {
+      "exitCode": 0,
+      "changed": true,
+      "committed": true,
+      "verified": true,
+      "pushed": false
+    },
+    "observedChecks": [
+      "Online Maven dependency:go-offline verify setup completed before the verification checks.",
+      "The network-off canary reported only the loopback interface.",
+      "Offline mvn verify compiled the Java21 fixture and reported 3 tests, 0 failures, 0 errors, 0 skipped."
+    ],
+    "scope": "Model-generated fix plus actual Docker/Maven execution. The CLI verifier sandbox covers its check commands, not the whole fixing model runtime. This fixture checks lexical containment; symlink containment is outside scope.",
+    "independentPostFixControls": {
+      "completedAt": "2026-11-26T03:29:13.454Z",
+      "originalPomAndTests": "Restored exact baseline POM and test source into a separate candidate copy; SHA256 hashes verified.",
+      "networkOffCanaryPassed": true,
+      "candidate": {
+        "exitCode": 0,
+        "tests": 3,
+        "failures": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "vulnerableNegativeControl": {
+        "exitCode": 1,
+        "tests": 3,
+        "expectedFailures": 2,
+        "errors": 0,
+        "skipped": 0
+      },
+      "modelBranchAndReportUnchanged": true,
+      "cleanup": "Only the owned Maven cache and sandbox scratch/containers were removed. No owned native console process remained. Default VM, images, global context, retained source, model branch and reports were unchanged."
+    }
+  },
+  "laterIntegrationValidation": {
+    "sourceRevision": "ed6d70c00",
+    "mergedMain": "c867964cd",
+    "globalBuild": "passed",
+    "focusedCli": {
+      "files": 13,
+      "passed": 312,
+      "skipped": 2,
+      "skipScope": "opt-in sandbox cases"
+    },
+    "focusedEngine": {
+      "files": 4,
+      "passed": 57
+    },
+    "static": {
+      "passedChecks": 19
+    },
+    "web": {
+      "files": 142,
+      "passed": 977
+    },
+    "realDocker": {
+      "files": 2,
+      "passed": 6,
+      "scope": "Four reproduction read-only tests and two Maven OCI runner tests with actual positive/negative, network, tmpfs and noexec controls."
+    },
+    "builtCli": [
+      "help passed",
+      "three command smoke checks passed",
+      "Bun worker orchestration passed"
+    ],
+    "documentation": {
+      "build": "passed",
+      "builtPages": 101,
+      "readmeLinks": 8,
+      "agentsRoute": "Old redirect removed; the actual Claude Code/Codex page title and non-redirect content were asserted."
+    },
+    "scope": "These non-model regression scopes overlap previous runs; no unique aggregate is asserted. Later upstream features and subsequent financial follow-up fixes are not paid-qualified by the bb7bf model evidence."
+  },
+  "sourceCheckpointDefinition": "Checkpoint for the corrected scan transport and strengthened fixture; the initial fixture revision is recorded separately."
+}

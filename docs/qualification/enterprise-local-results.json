@@ -165,7 +165,7 @@
     "mode": "Actual module/explicit ownership plan; no model analysis"
   },
   "remaining": [
-    "Approved model spend cap, then full real Java scan -> triage -> fix -> compile/test -> rescan and ground-truth scoring.",
+    "Broader approved scope for a full real Java project scan -> triage -> fix -> compile/test -> rescan and labelled scoring. The $5 bounded copied-package/fixture evidence is recorded separately and does not close this acceptance.",
     "Configured Bitbucket test repository/token and CI environment for live reviews, annotations, fixes and lifecycle verification.",
     "Renewed AWS authentication and actual model/service permissions for Bedrock/Entra and cloud deployment qualification.",
     "Enterprise test license and actual identity provider for licensed shared findings and provisioning.",
@@ -323,5 +323,112 @@
       ],
       "scope": "Local built artifacts with mocked model/loopback endpoints; no paid model or live host writes."
     }
-  }
+  },
+  "modelQualification": {
+    "dateUtc": "2026-11-26",
+    "sourceCheckpoint": "bb7bfacd70861b55773e04bcd8e60a8de81f420f",
+    "evidence": "enterprise-model-results.json",
+    "approvedTotalUsd": 5,
+    "completedSnapshotBeforeContainer": {
+      "successfulRequests": 78,
+      "standardTokenCostEstimateUsd": "0.038595885",
+      "reservedUsd": "3.586672"
+    },
+    "keycloak": {
+      "filesOpened": 42,
+      "filesInScope": 42,
+      "reviewedBatches": 2,
+      "reviewedGroups": 7,
+      "findings": 0,
+      "standardTokenCostEstimateUsd": "0.022991590"
+    },
+    "fixtureReview": "Four initial limited-test successes are not production acceptance; the deserialization patch failed three later compatibility checks, which were added to the fixture before a separately successful rerun.",
+    "scope": "Historical no-paid statements in actualChecks and postMergeValidation describe the earlier local-only snapshot. Later capped paid evidence is separate; final stopped-ledger estimates are not invoices.",
+    "finalStoppedLedger": {
+      "successfulRequests": 84,
+      "completedReceipts": 84,
+      "unknownUsageReceipts": 0,
+      "localRejections": 8,
+      "standardTokenCostEstimateUsd": "0.040367805",
+      "retainedReservationUpperBoundUsd": "3.800292",
+      "proxyStoppedAt": "2026-11-26T03:26:14.376451+00:00"
+    },
+    "containerFixture": {
+      "cliPassed": true,
+      "changed": true,
+      "committed": true,
+      "verified": true,
+      "offlineTestsPassed": 3,
+      "standardTokenCostEstimateUsd": "0.001771920",
+      "scope": "Actual model/Docker/Maven lexical-containment fixture; separate candidate with hash-verified baseline POM/tests passed all three original tests, the vulnerable control failed two, and the network-off canary passed.",
+      "independentPostFixControls": {
+        "completedAt": "2026-11-26T03:29:13.454Z",
+        "originalPomAndTests": "Restored exact baseline POM and test source into a separate candidate copy; SHA256 hashes verified.",
+        "networkOffCanaryPassed": true,
+        "candidate": {
+          "exitCode": 0,
+          "tests": 3,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        "vulnerableNegativeControl": {
+          "exitCode": 1,
+          "tests": 3,
+          "expectedFailures": 2,
+          "errors": 0,
+          "skipped": 0
+        },
+        "modelBranchAndReportUnchanged": true,
+        "cleanup": "Only the owned Maven cache and sandbox scratch/containers were removed. No owned native console process remained. Default VM, images, global context, retained source, model branch and reports were unchanged."
+      }
+    },
+    "upstreamGitObjectHashesVerified": 42,
+    "laterIntegrationValidation": {
+      "sourceRevision": "ed6d70c00",
+      "mergedMain": "c867964cd",
+      "globalBuild": "passed",
+      "focusedCli": {
+        "files": 13,
+        "passed": 312,
+        "skipped": 2,
+        "skipScope": "opt-in sandbox cases"
+      },
+      "focusedEngine": {
+        "files": 4,
+        "passed": 57
+      },
+      "static": {
+        "passedChecks": 19
+      },
+      "web": {
+        "files": 142,
+        "passed": 977
+      },
+      "realDocker": {
+        "files": 2,
+        "passed": 6,
+        "scope": "Four reproduction read-only tests and two Maven OCI runner tests with actual positive/negative, network, tmpfs and noexec controls."
+      },
+      "builtCli": [
+        "help passed",
+        "three command smoke checks passed",
+        "Bun worker orchestration passed"
+      ],
+      "documentation": {
+        "build": "passed",
+        "builtPages": 101,
+        "readmeLinks": 8,
+        "agentsRoute": "Old redirect removed; the actual Claude Code/Codex page title and non-redirect content were asserted."
+      },
+      "scope": "These non-model regression scopes overlap previous runs; no unique aggregate is asserted. Later upstream features and subsequent financial follow-up fixes are not paid-qualified by the bb7bf model evidence."
+    }
+  },
+  "remainingOriginalSnapshot": [
+    "Approved model spend cap, then full real Java scan -> triage -> fix -> compile/test -> rescan and ground-truth scoring.",
+    "Configured Bitbucket test repository/token and CI environment for live reviews, annotations, fixes and lifecycle verification.",
+    "Renewed AWS authentication and actual model/service permissions for Bedrock/Entra and cloud deployment qualification.",
+    "Enterprise test license and actual identity provider for licensed shared findings and provisioning.",
+    "Live pipeline runs, release publication, deployment and issue acceptance reconciliation; none performed here."
+  ]
 }
