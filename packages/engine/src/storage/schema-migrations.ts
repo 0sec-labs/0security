@@ -82,6 +82,8 @@ CREATE TABLE IF NOT EXISTS findings (
   modelVerification TEXT,
   reproduction TEXT,
   executedPoc TEXT,
+  rootCause TEXT,
+  variantOf TEXT,
   tool TEXT,
   repo TEXT,
   source TEXT,
@@ -452,6 +454,10 @@ export function migrateLegacySchema(sqlite: ShimmedDatabase): void {
   // Proof by local reproduction (proposed recipe and harness result). Additive and nullable.
   if (!colNames.has("reproduction")) {
     sqlite.exec("ALTER TABLE findings ADD COLUMN reproduction TEXT");
+  }
+  // Structured root cause and the variant link. Additive and nullable.
+  for (const column of ["rootCause", "variantOf"]) {
+    if (!colNames.has(column)) sqlite.exec(`ALTER TABLE findings ADD COLUMN ${column} TEXT`);
   }
   // Accepted-risk expiry and approver. Additive and nullable.
   if (!colNames.has("triageExpiresAt")) {
