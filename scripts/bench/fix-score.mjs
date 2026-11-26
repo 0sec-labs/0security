@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Fix-quality scorecard: does `0 findings fix` remove a planted vulnerability without breaking the project?
-//   node scripts/bench/fix-score.mjs --dry-run                       validate every case, no model, no cost
+//   node scripts/bench/fix-score.mjs --dry-run [--reference-table f] validate every case, no model, no cost; optionally write the per-case table
 //   node scripts/bench/fix-score.mjs --run [--repeat 2] [--budget 0.5] [--total-budget 4] [--cases a,b] [--model id]
 //
 // Each case under fix-cases/<name>/ has: repo/ (a tiny project with its own tests), finding.sarif (the imported
@@ -11,14 +11,14 @@
 // the answer or the solution: they stay outside the copy.
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { join, resolve } from "node:path";
-import { aggregate, parseNumstat, renderFixMarkdown, rescanVerdict, scoreCase, summarizeCases } from "./fix-score-lib.mjs";
+import { dirname, join, resolve } from "node:path";
+import { aggregate, parseNumstat, patternRescan, renderFixMarkdown, renderReferenceMarkdown, rescanVerdict, scoreCase, summarizeCases } from "./fix-score-lib.mjs";
 import { benchDir, defaultCli, git, isMain, isolatedEnv, run, usd } from "./lib.mjs";
 
 const CASES = join(benchDir, "fix-cases");
 
 export function parseArgs(argv) {
-  const o = { run: false, dryRun: false, repeat: 1, budget: 0.5, totalBudget: undefined, cases: undefined, model: undefined, out: join(benchDir, "results"), cli: defaultCli, timeout: 900 };
+  const o = { run: false, dryRun: false, repeat: 1, budget: 0.5, totalBudget: undefined, cases: undefined, model: undefined, out: join(benchDir, "results"), cli: defaultCli, timeout: 900, referenceTable: undefined };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     const next = () => { if (i + 1 >= argv.length) throw new Error(`${a} needs a value`); return argv[++i]; };
@@ -32,12 +32,14 @@ export function parseArgs(argv) {
     else if (a === "--out") o.out = resolve(next());
     else if (a === "--cli") o.cli = resolve(next());
     else if (a === "--timeout") o.timeout = Number(next());
+    else if (a === "--reference-table") o.referenceTable = resolve(next());
     else throw new Error(`unknown option ${a}`);
   }
   if (o.run === o.dryRun) throw new Error("pass exactly one of --run (spends model money) or --dry-run (free)");
   if (!Number.isSafeInteger(o.repeat) || o.repeat < 1) throw new Error("--repeat must be a positive integer");
   if (!Number.isFinite(o.budget) || !(o.budget > 0)) throw new Error("--budget must be a finite positive number of USD");
   if (o.totalBudget !== undefined && (!Number.isFinite(o.totalBudget) || !(o.totalBudget > 0))) throw new Error("--total-budget must be a finite positive number of USD");
+  if (o.referenceTable && !o.dryRun) throw new Error("--reference-table belongs to --dry-run: it records the reference-fix check, not a model run");
   if (!Number.isFinite(o.timeout) || !(o.timeout > 0)) throw new Error("--timeout must be a finite positive number of seconds");
   return o;
 }
@@ -109,11 +111,18 @@ function scanRules(repo) {
   try { return JSON.parse(p.stdout).findings.map((f) => ({ rule: f.rule_id, file: String(f.file).replace(/^\.\//, "") })); } catch { return null; }
 }
 
+/** The pattern rescan of a repo for the case's rescanForbid entries (see patternRescan). */
+const rescanByPattern = (repo, c) => patternRescan(c.answer.rescanForbid, (f) => (existsSync(join(repo, f)) ? readFileSync(join(repo, f), "utf8") : null));
+
 /** Static check of one case: the finding points at real lines, the tests pass, the exploit works before and is blocked by the reference fix. */
-export function validateCase(c) {
+export function validateCase(c) { return checkCase(c).problems; }
+
+/** Same check, with the facts behind it for the reference table. */
+export function checkCase(c) {
   const problems = [];
+  const facts = { case: c.name, language: c.answer.language, category: c.answer.category, testsBefore: null, testsAfter: null, compilesBefore: null, compilesAfter: null, exploitBefore: null, exploitAfter: null, rescan: "n/a", problems };
   for (const f of ["answer.json", "finding.sarif", ...(isJava(c) ? ["pov/Pov.java", "repo/run-tests.sh"] : ["exploit.mjs", "repo/package.json"])]) if (!existsSync(join(c.dir, f))) problems.push(`missing ${f}`);
-  if (problems.length) return problems;
+  if (problems.length) return { problems, facts };
   if (c.answer.id !== c.name) problems.push(`answer.id ${c.answer.id} does not match the folder`);
   if (!Array.isArray(c.answer.expectedFiles) || !c.answer.expectedFiles.length || !c.answer.note) problems.push("answer needs expectedFiles and note");
   let location;
@@ -126,39 +135,61 @@ export function validateCase(c) {
   const root = mkdtempSync(join(tmpdir(), "0-fixcase-"));
   const repo = makeRepo(c, root);
   if (!testFiles(repo, c).length) problems.push("the project has no test files");
-  if (compile(repo, c) === false) problems.push("the vulnerable project does not compile");
+  facts.compilesBefore = compile(repo, c);
+  if (facts.compilesBefore === false) problems.push("the vulnerable project does not compile");
   const rulesBefore = scanRules(repo);
+  const patternBefore = rescanByPattern(repo, c);
+  if (patternBefore === "clean") problems.push("rescanForbid does not match the vulnerable code");
   const before = runTests(repo, c);
+  facts.testsBefore = before.status === 0;
   if (before.status !== 0) problems.push(`the tests fail on the vulnerable code:\n${(before.stdout + before.stderr).slice(-400)}`);
   const exploit = runExploit(c, repo);
+  facts.exploitBefore = exploit.status;
   if (exploit.status !== 1) problems.push(`the exploit check should exit 1 on the vulnerable code, got ${exploit.status}: ${(exploit.stderr || exploit.stdout).trim().slice(-200)}`);
   // The reference fix must pass both, and change only the expected files.
   const solution = join(c.dir, "solution");
-  if (!existsSync(solution)) { problems.push("missing solution/"); return problems; }
+  if (!existsSync(solution)) { problems.push("missing solution/"); return { problems, facts }; }
   cpSync(solution, repo, { recursive: true });
   const after = runTests(repo, c);
-  if (compile(repo, c) === false) problems.push("the project does not compile with the reference fix");
+  facts.testsAfter = after.status === 0;
+  facts.compilesAfter = compile(repo, c);
+  if (facts.compilesAfter === false) problems.push("the project does not compile with the reference fix");
   const rulesAfter = scanRules(repo);
-  if (rulesBefore && rulesAfter && rescanVerdict(rulesBefore, rulesAfter, c.answer.expectedFiles).rescan === "still-flagged") problems.push("the rescan still flags the finding with the reference fix");
+  const scanner = rulesBefore && rulesAfter ? rescanVerdict(rulesBefore, rulesAfter, c.answer.expectedFiles).rescan : "not-applicable";
+  if (scanner === "still-flagged") problems.push("the rescan still flags the finding with the reference fix");
+  if (scanner !== "not-applicable") facts.rescan = `foxguard ${scanner}`;
+  else if (patternBefore !== "not-applicable") {
+    const patternAfter = rescanByPattern(repo, c);
+    if (patternAfter === "still-flagged") problems.push("rescanForbid still matches with the reference fix");
+    facts.rescan = `pattern ${patternAfter}`;
+  }
   if (after.status !== 0) problems.push(`the tests fail with the reference fix:\n${(after.stdout + after.stderr).slice(-400)}`);
   const blocked = runExploit(c, repo);
+  facts.exploitAfter = blocked.status;
   if (blocked.status !== 0) problems.push(`the exploit check should exit 0 with the reference fix, got ${blocked.status}: ${(blocked.stderr || blocked.stdout).trim().slice(-200)}`);
   const changed = git(repo, ["status", "--porcelain"]).stdout.split("\n").filter(Boolean).map((l) => l.slice(3));
   const stray = changed.filter((f) => !c.answer.expectedFiles.includes(f));
   if (stray.length) problems.push(`the reference fix touches files that are not expected: ${stray.join(", ")}`);
-  return problems;
+  return { problems, facts };
 }
 
 function dryRun(o) {
   const cases = loadCases(o.cases);
   let bad = 0;
+  const allFacts = [];
   for (const c of cases) {
-    const problems = validateCase(c);
+    const { problems, facts } = checkCase(c);
+    allFacts.push(facts);
     console.log(`${problems.length ? "FAIL" : "ok  "} ${c.name} (${c.answer.language}): ${c.answer.category}, expects ${c.answer.expectedFiles.join(", ")}`);
     for (const p of problems) console.log(`     ${p}`);
     bad += problems.length;
   }
   console.log(`\n${cases.length} cases x ${o.repeat} repeat(s) = ${cases.length * o.repeat} fixes; nominal sum of per-fix ceilings $${(cases.length * o.repeat * o.budget).toFixed(2)} at --budget ${o.budget} (receipts can arrive after an in-flight overshoot)`);
+  if (o.referenceTable) {
+    mkdirSync(dirname(o.referenceTable), { recursive: true });
+    writeFileSync(o.referenceTable, renderReferenceMarkdown(allFacts, { date: new Date().toISOString().slice(0, 10) }));
+    console.log(`wrote ${o.referenceTable}`);
+  }
   if (bad) { console.error(`\n${bad} problem(s)`); process.exit(1); }
   console.log("\ndry run passed: every case fails its exploit check before the fix and passes it with the reference fix. No model was called.");
 }
@@ -197,7 +228,10 @@ function fixOne(c, repeatIndex, o) {
   const testsPass = runTests(repo, c).status === 0;
   const exploit = runExploit(c, repo);
   const rulesAfter = scanRules(repo);
-  const { rescan, rescanNew } = rulesBefore && rulesAfter ? rescanVerdict(rulesBefore, rulesAfter, c.answer.expectedFiles) : { rescan: "not-applicable", rescanNew: 0 };
+  const scanner = rulesBefore && rulesAfter ? rescanVerdict(rulesBefore, rulesAfter, c.answer.expectedFiles) : { rescan: "not-applicable", rescanNew: 0 };
+  // Where the scanner did not flag the original, a case may list the vulnerable construct to look for instead.
+  const { rescanNew } = scanner;
+  const rescan = scanner.rescan === "not-applicable" ? rescanByPattern(repo, c) : scanner.rescan;
   return { ...base, ...scoreCase({ answer: c.answer, committed: true, compiles, testsPass, exploitCode: exploit.status, rescan, rescanNew, numstat, costUsd, seconds, status }), branch: outcome.branch, exploitOutput: (exploit.stderr || exploit.stdout).trim().slice(-200) };
 }
 
