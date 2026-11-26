@@ -13,7 +13,7 @@ import { createHash } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readFileSync, unlinkSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 import type { Command } from "commander";
-import { checkBomAgainstOsv, exportReport, generateSbom, type Advisory, type Bom } from "@0/engine";
+import { checkBomAgainstOsv, exportReport, generateSbom, untrustedGitConfig, type Advisory, type Bom } from "@0/engine";
 import { attackerImpactSentence, VERSION, type Finding, type ScanReport } from "@0/engine/shared";
 import { osecDB } from "@0/engine/storage";
 import { findingDatabasePaths, loadFindingFocus } from "../finding-focus.js";
@@ -261,7 +261,10 @@ export async function buildEvidence(folder: string, options: EvidenceOptions, de
     if (result.bom.components.length) bom = result.bom;
     else { sbomNote = "The repository has no supported lockfile with packages. For Maven, Gradle, NuGet or container images, generate an SBOM with syft or cdxgen and add it yourself."; warnings.push(sbomNote); }
     commit = deps.git(repo, ["rev-parse", "HEAD"])?.trim() || null;
-    dirty = commit ? Boolean(deps.git(repo, ["status", "--porcelain"])?.trim()) : false;
+    // The folder's own .git/config must not run fsmonitor or filter commands while the evidence is collected.
+    let statusConfig: string[] | undefined;
+    try { statusConfig = untrustedGitConfig(repo); } catch { warnings.push("The repository's git configuration could not be read safely: the working tree is recorded as changed."); }
+    dirty = commit ? (statusConfig ? Boolean(deps.git(repo, [...statusConfig, "status", "--porcelain", "--ignore-submodules=all"])?.trim()) : true) : false;
     if (!commit) warnings.push("The repository is not a git repository (or git is unavailable): the commit is not recorded.");
   }
 
