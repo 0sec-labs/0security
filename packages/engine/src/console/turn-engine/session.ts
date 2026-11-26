@@ -18,7 +18,6 @@ import { NETWORK_CAPABLE_TOOLS, READ_ONLY_TOOLS } from "../../agent/tool-classif
 import type { AgentRole, ToolCall, ToolContext, ToolDefinition, ToolResult } from "../../agent/types.js";
 import { classifyToolRisk } from "../../agent/destructive-classifier.js";
 import { eventBus } from "../../events/bus.js";
-import { analyticsPipeline } from "../../telemetry/analytics-pipeline.js";
 import { createSessionObjectiveService } from "../session-objective.js";
 import { features } from "../../agent/features.js";
 import { consoleSessionCheckpointSchema } from "../session-checkpoint.js";
@@ -680,29 +679,6 @@ export function createConsoleSession(config: ConsoleSessionConfig): ConsoleSessi
     const bookkeepingTools = new Set(["update_todos", "report_status"]);
     const recordToolResult = (call: ToolCall, result: ToolResult, startedAt: number, findingsBefore: number): void => {
       bookkeepingCalls = bookkeepingTools.has(call.name) ? bookkeepingCalls + 1 : 0;
-      try {
-        analyticsPipeline.recordCommand({
-          tool: call.name,
-          args: call.arguments,
-          output: result.success ? result.output : result.error,
-          status: result.success ? "ok" : "error",
-          durationMs: Date.now() - startedAt,
-          turn: iterations,
-        });
-        for (let index = findingsBefore; index < toolContext.findings.length; index++) {
-          const finding = toolContext.findings[index]!;
-          analyticsPipeline.recordFinding({
-            severity: finding.severity,
-            category: finding.category,
-            title: finding.title,
-            description: finding.description,
-            evidence: finding.evidence,
-            confidence: finding.confidence ?? 0,
-          });
-        }
-      } catch {
-        // Collection must never break the authorized tool path.
-      }
     };
     // Bounded context-window overflow recoveries within this turn. Only used
     // if the planner's provider rejects a request for its window.

@@ -17,7 +17,7 @@ const BRIDGED = new Set<string>(["runtime", "skillAuthoring", "skillEditor", "wo
 
 function executionEnvironment(): Record<string, string> {
   return Object.fromEntries(Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined &&
-    /^(ZERO_(?:DISABLE_[A-Z0-9_]+|ALLOW_[A-Z0-9_]+|ALLOWED_LOCAL_ORIGINS|FEATURE_[A-Z0-9_]+|NO_TELEMETRY|MCP|0VERSE_MCP|0VERSE_ROOT|0VERSE_RUNTIME_CONFIG|BASH_TIMEOUT_MS|AUDIT_SKILLS_MANIFEST|NETWORK_[A-Z0-9_]+|PUBLIC_NETWORK)|DO_NOT_TRACK|HTTPS?_PROXY|ALL_PROXY|NO_PROXY|NODE_EXTRA_CA_CERTS|SSL_CERT_FILE|SSL_CERT_DIR|REQUESTS_CA_BUNDLE|CURL_CA_BUNDLE)$/.test(entry[0])));
+    /^(ZERO_(?:DISABLE_[A-Z0-9_]+|ALLOW_[A-Z0-9_]+|ALLOWED_LOCAL_ORIGINS|FEATURE_[A-Z0-9_]+|MCP|0VERSE_MCP|0VERSE_ROOT|0VERSE_RUNTIME_CONFIG|BASH_TIMEOUT_MS|AUDIT_SKILLS_MANIFEST|NETWORK_[A-Z0-9_]+|PUBLIC_NETWORK)|DO_NOT_TRACK|HTTPS?_PROXY|ALL_PROXY|NO_PROXY|NODE_EXTRA_CA_CERTS|SSL_CERT_FILE|SSL_CERT_DIR|REQUESTS_CA_BUNDLE|CURL_CA_BUNDLE)$/.test(entry[0])));
 }
 
 /** Append truthful termination results; never replay or discard an old tool call. */
@@ -134,7 +134,7 @@ export function createHostConsoleSession(options: HostConsoleSessionOptions): Ho
   // Eligibility must fail before an OS process is created; no silent truncation.
   encodeHostConsoleFrame({ type: "init", value: bootstrap });
   const earlyPolicy = Object.fromEntries(Object.entries(bootstrap.executionEnvironment).filter(([key]) =>
-    /^(ZERO_(?:FEATURE_|DISABLE_|ALLOW_|ALLOWED_|NO_TELEMETRY)|DO_NOT_TRACK)/.test(key) && !/TOKEN|SECRET|PASSWORD|CREDENTIAL|API_KEY/.test(key)));
+    /^(ZERO_(?:FEATURE_|DISABLE_|ALLOW_|ALLOWED_)|DO_NOT_TRACK)/.test(key) && !/TOKEN|SECRET|PASSWORD|CREDENTIAL|API_KEY/.test(key)));
   const controller = new HostConsoleProcess({ ...options.launch, env: { ...options.launch.env, ...earlyPolicy },
     onSnapshot(value) {
       if (fenced || !value || typeof value !== "object") return;

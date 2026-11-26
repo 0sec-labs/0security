@@ -52,8 +52,8 @@ describe("workbench authority boundary", () => {
     expect(optedOut.diagnosticReporting).toBe("off");
     expect(workbenchNetworkEnabled({ DO_NOT_TRACK: "true" })).toBe(true);
     const offline = resolveWorkbenchGuestSettings(optedIn, { ZERO_OFFLINE: "true" });
-    expect(offline.analyticsLevel).toBe("off");
-    expect(offline.diagnosticReporting).toBe("off");
+    expect(offline.analyticsLevel).toBe("usage");
+    expect(offline.diagnosticReporting).toBe("automatic");
     expect(workbenchNetworkEnabled({ ZERO_OFFLINE: "true" })).toBe(false);
     expect(workbenchNetworkEnabled({ ZERO_OFFLINE: "false" })).toBe(true);
     const savedRefusal = resolveWorkbenchGuestSettings({ ...DEFAULT_SETTINGS, analyticsLevel: "off", diagnosticReporting: "off" }, { ZERO_ANALYTICS_LEVEL: "full" });

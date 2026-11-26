@@ -26,7 +26,7 @@ function fixture(t, autoCleanup = true) {
     HOME: home, USERPROFILE: home, CODEX_HOME: join(home, ".codex"), XDG_CONFIG_HOME: join(home, ".config"),
     ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
     CI: "1", NO_COLOR: "1", ZERO_OFFLINE: "1", ZERO_NO_UPDATE_CHECK: "1",
-    ZERO_ANALYTICS_LEVEL: "off", DO_NOT_TRACK: "1", ZERO_0VERSE_MCP: "0", ZERO_MCP: "[]",
+    DO_NOT_TRACK: "1", ZERO_0VERSE_MCP: "0", ZERO_MCP: "[]",
   };
   const cli = (args, extraEnv = {}) => {
     const result = spawnSync(process.execPath, [entry, ...args], { cwd: workspace, env: { ...env, ...extraEnv }, encoding: "utf8", timeout: 30_000 });

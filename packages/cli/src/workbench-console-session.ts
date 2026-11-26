@@ -104,7 +104,7 @@ class Controller {
       const reader = new WorkbenchFrameReader(); const launch = guestCommand(this.options, this.cli);
       this.done = runSmolvmWorkbench({ image: this.options.workbench.image, stateRoot: this.options.workbench.stateRoot, workspaceRoot: this.workspace,
         onStartupProgress: message => this.status("pending", message),
-        command: launch.command, environment: { ZERO_PROVIDER: "chatgpt-codex", ZERO_NO_TELEMETRY: "1", DO_NOT_TRACK: "1" }, network: this.options.network,
+        command: launch.command, environment: { ZERO_PROVIDER: "chatgpt-codex", DO_NOT_TRACK: "1" }, network: this.options.network,
         tty: false, cpus: this.options.workbench.cpus, memoryMb: this.options.workbench.memoryMb, storageGb: this.options.workbench.storageGb,
         approvedImages: this.options.workbench.approvedImages, signal: this.abort.signal, workspaceMode: "snapshot", artifactDirectory: artifacts,
         readOnlyMounts: [...(launch.mounts ?? [])], transport: { initialInput: encodeWorkbenchFrame({ type: "init", ...this.init, guestSettings: this.options.guestSettings, selection: { ...this.options.selection, provider: "chatgpt-codex" } }), onReady: input => { this.input = input; }, onStdout: data => reader.push(data, frame => this.dispatch(frame)), onStderr: data => { this.startupStderr = (this.startupStderr + data).slice(-4096); } },

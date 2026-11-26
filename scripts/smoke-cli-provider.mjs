@@ -146,7 +146,7 @@ console.log(JSON.stringify({ schema_version: "1.0.0", findings: [], target: { fi
       PATH: `${bin}${delimiter}${process.env.PATH ?? "/usr/bin:/bin"}`, HOME: home, USERPROFILE: home,
       XDG_CONFIG_HOME: join(home, "config"), XDG_DATA_HOME: join(home, "data"), XDG_CACHE_HOME: join(home, "cache"),
       TMPDIR: home, CI: "1", NO_COLOR: "1", TERM: "dumb",
-      ZERO_NO_TELEMETRY: "1", DO_NOT_TRACK: "1",
+      DO_NOT_TRACK: "1",
       ANTHROPIC_API_KEY: key, ANTHROPIC_BASE_URL: origin,
       ZERO_FORCE_PROVIDER: "anthropic", ZERO_SELECTED_PROVIDER: "anthropic", ZERO_MODEL: model,
       ZERO_CODEX_AUTH_JSON_PATH: join(home, "no-auth.json"),

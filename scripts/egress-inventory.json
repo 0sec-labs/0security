@@ -4,30 +4,16 @@
     {
       "id": "usage-analytics-posthog",
       "class": "automatic",
-      "enterprise": "blocked",
+      "enterprise": "allowed",
       "destinations": [
         "eu.i.posthog.com"
       ],
       "files": [
         "packages/engine/src/telemetry/analytics-pipeline.ts"
       ],
-      "when": "Batched while a command or the console runs, when analyticsLevel is usage and the build embeds a key.",
-      "sent": "Anonymous counters: version, OS, command name, outcome class.",
-      "disable": "analyticsLevel off, ZERO_NO_TELEMETRY, DO_NOT_TRACK, ZERO_OFFLINE, ZERO_ENTERPRISE."
-    },
-    {
-      "id": "usage-analytics-cloud",
-      "class": "automatic",
-      "enterprise": "blocked",
-      "destinations": [
-        "cloud.0.security"
-      ],
-      "files": [
-        "packages/engine/src/telemetry/analytics-pipeline.ts"
-      ],
-      "when": "Only when cloud credentials are configured.",
-      "sent": "The same usage events, to the signed-in cloud account.",
-      "disable": "Same switches; ZERO_ENTERPRISE also stops cloud credentials from loading."
+      "when": "Batched while a command or the console runs, when analyticsLevel is usage and the build embeds a key. Also one small event at first run, at each command, on a version change and on an error exit.",
+      "sent": "Anonymous counters and lifecycle events: version, OS, command name from a fixed list, outcome class, finding class counts.",
+      "disable": "DO_NOT_TRACK."
     },
     {
       "id": "run-contribution",
@@ -41,12 +27,12 @@
       ],
       "when": "Only with cloud credentials and an explicit contribution permission.",
       "sent": "A sealed run capture the organization opted into.",
-      "disable": "Same switches; ZERO_ENTERPRISE."
+      "disable": "DO_NOT_TRACK; ZERO_ENTERPRISE."
     },
     {
       "id": "crash-and-feedback",
       "class": "automatic",
-      "enterprise": "blocked",
+      "enterprise": "allowed",
       "destinations": [
         "Sentry ingest (embedded DSN or ZERO_SENTRY_DSN)",
         "ZERO_FEEDBACK_URL or cloud.0.security"
@@ -56,7 +42,7 @@
       ],
       "when": "A crash with diagnosticReporting automatic, or a feedback message the operator sends.",
       "sent": "Redacted crash envelope, or the reviewed feedback text.",
-      "disable": "diagnosticReporting off, ZERO_NO_TELEMETRY, DO_NOT_TRACK, ZERO_OFFLINE, ZERO_ENTERPRISE."
+      "disable": "diagnosticReporting off, DO_NOT_TRACK."
     },
     {
       "id": "update-check",
@@ -86,7 +72,7 @@
       ],
       "when": "Console model picker refresh.",
       "sent": "A GET of the public model list; nothing about the operator.",
-      "disable": "ZERO_NO_TELEMETRY, DO_NOT_TRACK, ZERO_OFFLINE, ZERO_ENTERPRISE."
+      "disable": "DO_NOT_TRACK, ZERO_OFFLINE, ZERO_ENTERPRISE."
     },
     {
       "id": "pricing-discovery",
@@ -100,7 +86,7 @@
       ],
       "when": "A model has no built-in price.",
       "sent": "A GET of the public OpenRouter model list.",
-      "disable": "ZERO_NO_TELEMETRY, DO_NOT_TRACK, ZERO_OFFLINE, ZERO_ENTERPRISE."
+      "disable": "DO_NOT_TRACK, ZERO_OFFLINE, ZERO_ENTERPRISE."
     },
     {
       "id": "web-search-tool",

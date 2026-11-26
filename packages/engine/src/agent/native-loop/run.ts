@@ -16,7 +16,6 @@ import { LootLedger } from "../loot.js";
 import { DriftMonitor } from "../drift.js";
 import { maybeCreateTrustGraphSession } from "../trust-graph-runtime.js";
 import { createShadowJournal, type ShadowJournal } from "../journal/shadow.js";
-import { analyticsPipeline } from "../../telemetry/analytics-pipeline.js";
 import { captureNativeRuntime, currentContributionAgent, currentRunContribution, getConfiguredRunContributionClient, withRunContribution } from "../../telemetry/run-contribution.js";
 import { authSecretValues } from "../auth-redaction.js";
 import { detectPlaybooks, buildPlaybookInjection } from "../playbooks.js";
@@ -1602,22 +1601,6 @@ async function runNativeAgentLoopInternal(opts: NativeAgentLoopOptions): Promise
           ...(toolResult.success ? {} : { error: toolResult.error ?? `${block.name} failed without an error message` }),
           ts: toolEndedAt,
         });
-
-        // Analytics (commands tier): consent-gated + redacted inside the
-        // pipeline; fire-and-forget so it can never break or slow an audit. The
-        // raw args/output go straight to the choke point, never onto the bus.
-        try {
-          analyticsPipeline.recordCommand({
-            tool: block.name,
-            args: block.input,
-            output: toolResult.success ? toolResult.output : toolResult.error,
-            status: toolResult.success ? "ok" : "error",
-            durationMs: toolEndedAt - toolStartedAt,
-            turn: state.turnCount,
-          });
-        } catch {
-          /* telemetry never breaks the tool path */
-        }
 
         // Bus event: finding_ingested — fires whenever the agent successfully
         // saves a finding so downstream sinks (cloud relay, dashboard) see the

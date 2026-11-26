@@ -35,7 +35,7 @@ describe("first-run telemetry notice", () => {
     expect(first.text).toContain("usage counts, command names, crash reports and update checks");
     expect(first.text).toContain("never code or findings");
     expect(first.text).toContain(TELEMETRY_DOCS_URL);
-    expect(first.text).toContain("ZERO_OFFLINE=1");
+    expect(first.text).toContain("DO_NOT_TRACK=1");
     expect(existsSync(join(h, ".0", TELEMETRY_NOTICE_FILENAME))).toBe(true);
     expect(run(h).printed).toBe(false);
     expect(run(h, { args: ["web"] }).printed).toBe(false);
@@ -68,7 +68,7 @@ describe("first-run telemetry notice", () => {
   it("is silent when telemetry is not active or an opt-out env is set", () => {
     const h = home();
     expect(run(h, { telemetryActive: false }).printed).toBe(false);
-    for (const name of ["DO_NOT_TRACK", "ZERO_NO_TELEMETRY", "ZERO_OFFLINE"]) {
+    for (const name of ["DO_NOT_TRACK"]) {
       expect(run(h, { env: { [name]: "1" } }).printed).toBe(false);
     }
     expect(existsSync(join(h, ".0", TELEMETRY_NOTICE_FILENAME))).toBe(false);

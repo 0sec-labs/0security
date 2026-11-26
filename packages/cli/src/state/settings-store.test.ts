@@ -390,17 +390,17 @@ describe("analytics environment restrictions", () => {
   beforeEach(() => {
     analyticsPipeline.__resetForTests();
     sent = [];
-    for (const name of ["ZERO_ANALYTICS_LEVEL", "ZERO_OFFLINE", "ZERO_NO_TELEMETRY", "DO_NOT_TRACK"]) {
+    for (const name of ["ZERO_ANALYTICS_LEVEL", "DO_NOT_TRACK"]) {
       vi.stubEnv(name, undefined);
     }
-    vi.stubEnv("ZERO_CLOUD_HOST", "https://analytics.test");
-    vi.stubEnv("ZERO_CLOUD_TOKEN", "test-token");
+    vi.stubEnv("ZERO_ANALYTICS_POSTHOG_KEY", "phc_testtesttesttesttesttest");
+    vi.stubEnv("ZERO_ANALYTICS_POSTHOG_HOST", "http://127.0.0.1:9");
     analyticsPipeline.configure({
       homeDir: makeHome(),
+      knownToolNames: ["bridge-counter"],
       fetchImpl: (async (_url, init) => {
-        const batch = JSON.parse(String(init?.body)).records;
-        sent.push(...batch);
-        return new Response(JSON.stringify({ ok: true, accepted: batch.length }), { status: 202 });
+        sent.push(...JSON.parse(String(init?.body)).batch.filter((event: { event?: string }) => event.event === "usage"));
+        return new Response("{}", { status: 200 });
       }) as typeof fetch,
     });
   });
@@ -412,8 +412,6 @@ describe("analytics environment restrictions", () => {
 
   async function collect(): Promise<void> {
     eventBus.emit("tool_call_started", { tool: "bridge-counter", args_preview: "usage-only fixture", turn: 0, ts: 1 });
-    analyticsPipeline.recordCode({ lang: "ts", source: "export const capture = 1;", origin: "bridge-regression" });
-    analyticsPipeline.recordScope({ target: "scope-marker", kind: "target" });
     await analyticsPipeline.flushNow();
   }
 
@@ -430,22 +428,12 @@ describe("analytics environment restrictions", () => {
     expect(sent).toEqual([]);
   });
 
-  it("limits a shell content-sharing grant to usage without forwarding tool content or code", async () => {
-    vi.stubEnv("ZERO_ANALYTICS_LEVEL", "commands");
-    configureSettingsStore({ homeDir: makeHome() });
-    updateSetting("analyticsLevel", "usage");
-    await collect();
-
-    expect(sent).toEqual([expect.objectContaining({ kind: "usage", featureCounts: { "bridge-counter": 1 } })]);
-    expect(process.env["ZERO_ANALYTICS_LEVEL"]).toBe("commands");
-  });
-
   it("does not broaden a saved opt-out through environment or project settings", async () => {
     const home = makeHome();
     const project = makeProjectDir();
     saveGlobalSettings({ ...DEFAULT_SETTINGS, analyticsLevel: "off" }, home);
-    writeProjectRaw(project, { analyticsLevel: "full" });
-    vi.stubEnv("ZERO_ANALYTICS_LEVEL", "full");
+    writeProjectRaw(project, { analyticsLevel: "usage" });
+    vi.stubEnv("ZERO_ANALYTICS_LEVEL", "usage");
     configureSettingsStore({ homeDir: home, projectDir: project });
     expect(getAnalyticsSetupDraft()).toBe("off");
     expect(updateSetting("analyticsLevel", "usage", { scope: "project" })).toBe(false);
@@ -461,14 +449,14 @@ describe("analytics environment restrictions", () => {
     expect(getAnalyticsSetupDraft()).toBe("usage");
     await collect();
     expect(sent).toEqual([
-      expect.objectContaining({ kind: "usage", featureCounts: { "bridge-counter": 1 } }),
+      expect.objectContaining({ event: "usage", properties: expect.objectContaining({ tool_counts: { "bridge-counter": 1 } }) }),
     ]);
     expect(loadGlobalSettings(home).analyticsLevel).toBe("usage");
     sent.length = 0;
     updateSetting("analyticsLevel", getAnalyticsSetupDraft());
     await collect();
     expect(sent).toEqual([
-      expect.objectContaining({ kind: "usage", featureCounts: { "bridge-counter": 2 } }),
+      expect.objectContaining({ event: "usage", properties: expect.objectContaining({ tool_counts: { "bridge-counter": 1 } }) }),
     ]);
     sent.length = 0;
     updateSetting("analyticsLevel", "off");
@@ -477,7 +465,7 @@ describe("analytics environment restrictions", () => {
     updateSetting("analyticsLevel", "usage");
     await collect();
     expect(sent).toEqual([
-      expect.objectContaining({ kind: "usage", featureCounts: { "bridge-counter": 1 } }),
+      expect.objectContaining({ event: "usage", properties: expect.objectContaining({ tool_counts: { "bridge-counter": 1 } }) }),
     ]);
     sent.length = 0;
     vi.stubEnv("ZERO_ANALYTICS_LEVEL", "off");
@@ -489,7 +477,7 @@ describe("analytics environment restrictions", () => {
   });
 
   it("keeps every hard opt-out effective during setup and after a usage confirmation", async () => {
-    for (const name of ["ZERO_OFFLINE", "ZERO_NO_TELEMETRY", "DO_NOT_TRACK"]) {
+    for (const name of ["DO_NOT_TRACK"]) {
       vi.stubEnv(name, "1");
       configureSettingsStore({ homeDir: makeHome() });
       expect(getAnalyticsSetupDraft()).toBe("off");

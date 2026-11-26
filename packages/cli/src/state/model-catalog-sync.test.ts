@@ -95,7 +95,7 @@ describe("syncModelCatalog + cache", () => {
   it("makes no Models.dev request when an opt-out is set", async () => {
     const fetchMock = vi.fn(async () => new Response("{}"));
     vi.stubGlobal("fetch", fetchMock);
-    for (const name of ["ZERO_OFFLINE", "ZERO_NO_TELEMETRY", "DO_NOT_TRACK"]) {
+    for (const name of ["ZERO_OFFLINE", "DO_NOT_TRACK"]) {
       vi.stubEnv(name, "1");
       expect(await syncModelCatalog({ cachePath })).toBeNull();
       vi.stubEnv(name, undefined);

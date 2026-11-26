@@ -28,7 +28,7 @@ async function start(args: string[], env: Record<string, string>, port: number):
   const assets = join(home, "assets"); mkdirSync(assets);
   writeFileSync(join(assets, "index.html"), "<!doctype html><html><head><title>t</title></head><body>app</body></html>");
   let output = "";
-  const child = spawn(process.execPath, ["--import", "tsx", entry, "web", "--port", String(port), "--asset-dir", assets, "--no-open", ...args], { cwd, env: { ...process.env, HOME: home, ZERO_NO_TELEMETRY: "1", ...env }, stdio: ["ignore", "pipe", "pipe"] });
+  const child = spawn(process.execPath, ["--import", "tsx", entry, "web", "--port", String(port), "--asset-dir", assets, "--no-open", ...args], { cwd, env: { ...process.env, HOME: home, DO_NOT_TRACK: "1", ...env }, stdio: ["ignore", "pipe", "pipe"] });
   child.stdout!.on("data", d => { output += String(d); }); child.stderr!.on("data", d => { output += String(d); });
   const exited = new Promise<number | null>(resolve => child.once("exit", code => resolve(code)));
   const deadline = Date.now() + 60_000;

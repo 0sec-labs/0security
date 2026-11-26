@@ -74,6 +74,8 @@ spec:
             {{- if .Values.enterprise }}
             - name: ZERO_ENTERPRISE
               value: "1"
+            - name: DO_NOT_TRACK
+              value: "1"
             {{- end }}
             {{- with .Values.model.provider }}
             - name: ZERO_SELECTED_PROVIDER
