@@ -225,6 +225,7 @@ export default defineConfig({
             { label: "Server mode and Docker", slug: "server-mode" },
             { label: "Self-hosting on Azure and AWS", slug: "self-hosting" },
             { label: "Reference deployment on AWS", slug: "aws-reference" },
+            { label: "Enterprise evaluation flow", slug: "enterprise-demo-flow" },
             { label: "Data flow and no-egress mode", slug: "data-flow" },
           ],
         },
