@@ -1,10 +1,16 @@
 import { classifySink } from "./sinks.js";
 import { lineOf, lineStarts, maskSource, matchClose } from "./mask.js";
+import { innermostFinder, tick } from "./budget.js";
 import type { FileExtract, IndexCall, IndexRoute, IndexSymbol } from "./types.js";
 
 const KEYWORDS = new Set(["if", "for", "while", "switch", "catch", "return", "typeof", "function", "await", "async", "void", "delete", "throw", "else", "do", "in", "of", "new", "super", "import", "require_", "with", "yield", "case"]);
 const HTTP_METHODS = "get|post|put|patch|delete|all|options|head";
 const IDENT = "[A-Za-z_$][\\w$]*";
+/** Generic arguments after a name, bounded: an unbounded scan backtracks quadratically on `a<a<a<`. */
+const GENERICS = "(?:<[^<>()\\n]{0,200}>)?";
+/** A call target must not start in the middle of an identifier, or every offset of a long name is tried. */
+const NOT_IN_WORD = "(?<![\\w$])";
+const MAX_ARROW_SCAN = 20_000;
 
 interface Def { name: string; qualified: string; kind: IndexSymbol["kind"]; nameOffset: number; start: number; end: number }
 
@@ -14,6 +20,7 @@ export function splitArgs(masked: string, open: number, close: number): Array<{ 
   let depth = 0;
   let start = open + 1;
   for (let k = open + 1; k < close; k++) {
+    tick();
     const ch = masked[k];
     if (ch === "(" || ch === "[" || ch === "{") depth++;
     else if (ch === ")" || ch === "]" || ch === "}") depth--;
@@ -29,13 +36,15 @@ function arrowBodyEnd(masked: string, from: number): number {
   while (k < masked.length && /\s/.test(masked[k]!)) k++;
   if (masked[k] === "{") { const c = matchClose(masked, k); return c === -1 ? masked.length : c + 1; }
   let depth = 0;
-  for (; k < masked.length; k++) {
+  const limit = Math.min(masked.length, k + MAX_ARROW_SCAN);
+  for (; k < limit; k++) {
+    tick();
     const ch = masked[k];
     if (ch === "(" || ch === "[" || ch === "{") depth++;
     else if (ch === ")" || ch === "]" || ch === "}") { if (depth === 0) return k; depth--; }
     else if (depth === 0 && (ch === ";" || ch === "\n")) return k;
   }
-  return masked.length;
+  return limit;
 }
 
 /** After a parameter list closing at `close`, the end of a `function`-style body (skips a TS return type). */
@@ -54,13 +63,14 @@ function findDefs(masked: string): Def[] {
 
   // Class ranges first, for method qualification.
   const classes: Array<{ name: string; start: number; end: number }> = [];
-  for (const m of masked.matchAll(new RegExp(`\\bclass\\s+(${IDENT})[^{;]*\\{`, "g"))) {
+  for (const m of masked.matchAll(new RegExp(`\\bclass\\s+(${IDENT})[^{;]{0,400}\\{`, "g"))) {
     const open = m.index! + m[0].length - 1;
     const close = matchClose(masked, open);
     classes.push({ name: m[1]!, start: open, end: close === -1 ? masked.length : close });
   }
 
-  for (const m of masked.matchAll(new RegExp(`\\bfunction\\s*\\*?\\s*(${IDENT})\\s*(?:<[^>(]*>)?\\(`, "g"))) {
+  for (const m of masked.matchAll(new RegExp(`\\bfunction\\s*(?:\\*\\s*)?(${IDENT})\\s*${GENERICS}\\(`, "g"))) {
+    tick();
     const open = m.index! + m[0].length - 1;
     const close = matchClose(masked, open);
     if (close === -1) continue;
@@ -69,8 +79,9 @@ function findDefs(masked: string): Def[] {
   }
 
   // `const f = (...) =>`, `const f = async x =>`, `const f = function (...) {}`, also `name: (...) =>` in object literals.
-  const assigned = new RegExp(`(?:\\b(?:const|let|var)\\s+|\\b(?:exports|module\\.exports)\\.|[{,]\\s*)(${IDENT})\\s*(?::[^=;{}(]*)?[=:]\\s*(?:async\\s+)?`, "g");
+  const assigned = new RegExp(`(?:\\b(?:const|let|var)\\s+|\\b(?:exports|module\\.exports)\\.|[{,]\\s*)(${IDENT})\\s*(?::[^=;{}(]{0,80})?[=:]\\s*(?:async\\s+)?`, "g");
   for (const m of masked.matchAll(assigned)) {
+    tick();
     const nameOffset = m.index! + m[0].indexOf(m[1]!);
     let k = m.index! + m[0].length;
     let bodyEnd = -1;
@@ -98,13 +109,15 @@ function findDefs(masked: string): Def[] {
     const depthAt: number[] = new Array(body.length);
     let depth = 0;
     for (let i = 0; i < body.length; i++) {
+      tick();
       const ch = body[i]!;
       if (ch === "{" || ch === "(" || ch === "[") { depthAt[i] = depth; depth++; }
       else if (ch === "}" || ch === ")" || ch === "]") { depth--; depthAt[i] = depth; }
       else depthAt[i] = depth;
     }
-    const method = new RegExp(`(?:^|[;}\\n])[ \\t]*(?:(?:public|private|protected|static|async|override|readonly|get|set)\\s+)*\\*?\\s*(${IDENT})\\s*(?:<[^>(]*>)?\\(`, "g");
+    const method = new RegExp(`(?:^|[;}\\n])[ \\t]*(?:(?:public|private|protected|static|async|override|readonly|get|set)[ \\t]+)*(?:\\*[ \\t]*)?(${IDENT})[ \\t]*${GENERICS}\\(`, "g");
     for (const m of body.matchAll(method)) {
+      tick();
       const nameIdx = m.index! + m[0].lastIndexOf(m[1]!);
       if (depthAt[nameIdx] !== 0 || KEYWORDS.has(m[1]!)) continue;
       const open = cls.start + 1 + m.index! + m[0].length - 1;
@@ -141,7 +154,8 @@ export function extractJs(file: string, src: string): FileExtract {
   const routes: IndexRoute[] = [];
   const routerMiddleware = new Map<string, string[]>();
   const calleeName = (text: string): string => /^([\w$.]+)/.exec(text.trim())?.[1]?.split(".").pop() ?? "";
-  for (const m of masked.matchAll(new RegExp(`\\b(${IDENT})\\s*\\.\\s*(${HTTP_METHODS}|use)\\s*\\(`, "g"))) {
+  for (const m of masked.matchAll(new RegExp(`${NOT_IN_WORD}(${IDENT})\\s*\\.\\s*(${HTTP_METHODS}|use)\\s*\\(`, "g"))) {
+    tick();
     const open = m.index! + m[0].length - 1;
     const close = matchClose(masked, open);
     if (close === -1) continue;
@@ -176,19 +190,32 @@ export function extractJs(file: string, src: string): FileExtract {
   }
 
   // NestJS-style decorators: @Controller('p') class ... { @UseGuards(G) @Get('x') method() {} }
-  const methodDefs = defs.filter((d) => d.kind === "method").sort((a, b) => a.start - b.start);
+  const methodDefs = defs.filter((d) => d.kind === "method").sort((a, b) => a.nameOffset - b.nameOffset);
+  const firstMethodAfter = (offset: number): Def | undefined => {
+    let lo = 0, hi = methodDefs.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (methodDefs[mid]!.nameOffset > offset) hi = mid; else lo = mid + 1; }
+    return methodDefs[lo];
+  };
+  // Every class declaration with its decorators, found once; a route takes the last one before it.
+  const classDecls = [...masked.matchAll(new RegExp(`((?:@\\w+\\s*(?:\\([^)]{0,300}\\))?\\s*){0,12})(?:export\\s+(?:default\\s+)?)?(?:abstract\\s+)?\\bclass\\s+${IDENT}`, "g"))];
+  const lastClassBefore = (offset: number): RegExpMatchArray | undefined => {
+    let lo = 0, hi = classDecls.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (classDecls[mid]!.index! < offset) lo = mid + 1; else hi = mid; }
+    return lo > 0 ? classDecls[lo - 1] : undefined;
+  };
   for (const m of masked.matchAll(/@(Get|Post|Put|Patch|Delete|All)\s*\(/g)) {
+    tick();
     const open = m.index! + m[0].length - 1;
     const close = matchClose(masked, open);
     if (close === -1) continue;
     const raw = /^\s*(['"`])([^'"`]*)\1/.exec(src.slice(open + 1, close))?.[2] ?? "";
-    const target = methodDefs.find((d) => d.nameOffset > close);
+    const target = firstMethodAfter(close);
     if (!target) continue;
     const regionStart = Math.max(masked.lastIndexOf("}", m.index!), masked.lastIndexOf(";", m.index!), masked.lastIndexOf("{", m.index!)) + 1;
     const between = masked.slice(regionStart, m.index!) + " " + masked.slice(close, target.nameOffset);
-    const mw = [...between.matchAll(/@(\w+)\s*(?:\(([^)]*)\))?/g)].flatMap((d) => d[1] === "UseGuards" ? (d[2] ?? "").split(",").map((s) => s.trim()).filter(Boolean) : [d[1]!]);
-    const cls = [...masked.slice(0, m.index!).matchAll(new RegExp(`((?:@\\w+\\s*(?:\\([^)]*\\))?\\s*)*)(?:export\\s+(?:default\\s+)?)?(?:abstract\\s+)?\\bclass\\s+${IDENT}`, "g"))].pop();
-    const classDecorators = cls ? [...cls[1]!.matchAll(/@(\w+)\s*(?:\(([^)]*)\))?/g)].flatMap((d) => d[1] === "UseGuards" ? (d[2] ?? "").split(",").map((s) => s.trim()).filter(Boolean) : d[1] === "Controller" ? [] : [d[1]!]) : [];
+    const mw = [...between.matchAll(/@(\w+)\s*(?:\(([^)]{0,300})\))?/g)].flatMap((d) => d[1] === "UseGuards" ? (d[2] ?? "").split(",").map((s) => s.trim()).filter(Boolean) : [d[1]!]);
+    const cls = lastClassBefore(m.index!);
+    const classDecorators = cls ? [...cls[1]!.matchAll(/@(\w+)\s*(?:\(([^)]{0,300})\))?/g)].flatMap((d) => d[1] === "UseGuards" ? (d[2] ?? "").split(",").map((s) => s.trim()).filter(Boolean) : d[1] === "Controller" ? [] : [d[1]!]) : [];
     const prefix = cls ? (/@Controller\s*\(\s*['"`]([^'"`]*)/.exec(src.slice(cls.index!, cls.index! + cls[0].length))?.[1] ?? "") : "";
     const path = `/${[prefix, raw].map((p) => p.replace(/^\/|\/$/g, "")).filter(Boolean).join("/")}`;
     const handler = bySym.get(target.nameOffset);
@@ -197,10 +224,10 @@ export function extractJs(file: string, src: string): FileExtract {
 
   // Calls, attributed to the innermost enclosing symbol.
   const calls: IndexCall[] = [];
-  const sorted = [...ranges].sort((a, b) => (a.end - a.start) - (b.end - b.start));
-  const innermost = (offset: number): string => sorted.find((r) => offset >= r.start && offset < r.end)?.id ?? moduleSym.id;
-  const callRe = new RegExp(`(${IDENT}(?:\\s*(?:\\?\\.|\\.)\\s*#?${IDENT})*)\\s*(?:<[^>()]*>)?\\(`, "g");
+  const innermost = innermostFinder(ranges, moduleSym.id);
+  const callRe = new RegExp(`${NOT_IN_WORD}(${IDENT}(?:\\s*(?:\\?\\.|\\.)\\s*#?${IDENT}){0,10})\\s*${GENERICS}\\(`, "g");
   for (const m of masked.matchAll(callRe)) {
+    tick();
     const text = m[1]!.replace(/\s+/g, "").replace(/\?\./g, ".");
     const first = text.split(".")[0]!;
     if (nameOffsets.has(m.index!) || KEYWORDS.has(first)) continue;

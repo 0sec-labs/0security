@@ -1,6 +1,7 @@
 import { classifySink } from "./sinks.js";
 import { lineOf, lineStarts, maskSource, matchClose } from "./mask.js";
 import { splitArgs } from "./extract-js.js";
+import { innermostFinder, tick } from "./budget.js";
 import type { FileExtract, IndexCall, IndexRoute, IndexSymbol } from "./types.js";
 
 const KEYWORDS = new Set(["if", "elif", "while", "for", "return", "not", "and", "or", "in", "is", "lambda", "assert", "with", "except", "yield", "await", "raise", "import", "from", "del", "def", "class", "print_", "async"]);
@@ -26,18 +27,23 @@ export function extractPy(file: string, src: string): FileExtract {
     off += l.length + 1;
   }
   const endOfBlock = (offset: number, indent: number): number => {
-    const idx = stmt.findIndex((s) => s.offset > offset && s.indent <= indent);
-    return idx === -1 ? src.length : stmt[idx]!.offset;
+    // First statement after the header (binary search), then forward to the first one that is not deeper.
+    let lo = 0, hi = stmt.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (stmt[mid]!.offset > offset) hi = mid; else lo = mid + 1; }
+    for (let i = lo; i < stmt.length; i++) { tick(); if (stmt[i]!.indent <= indent) return stmt[i]!.offset; }
+    return src.length;
   };
 
   const blocks: Block[] = [];
   for (const m of masked.matchAll(new RegExp(`^([ \\t]*)(?:(async\\s+)?def|(class))\\s+(${IDENT})`, "gm"))) {
+    tick();
     const isClass = m[3] !== undefined;
     const indent = m[1]!.length;
     const nameOffset = m.index! + m[0].length - m[4]!.length;
     let headerEnd = nameOffset;
-    const open = masked.indexOf("(", nameOffset);
-    const colonSearch = open !== -1 && open < nameOffset + m[4]!.length + 4 ? matchClose(masked, open) : nameOffset;
+    const afterName = nameOffset + m[4]!.length;
+    const open = /^[ \t]{0,3}\(/.test(masked.slice(afterName, afterName + 4)) ? masked.indexOf("(", afterName) : -1;
+    const colonSearch = open !== -1 ? matchClose(masked, open) : nameOffset;
     if (colonSearch !== -1) headerEnd = colonSearch;
     blocks.push({ name: m[4]!, indent, start: m.index! + m[1]!.length, end: endOfBlock(m.index!, indent), nameOffset, headerEnd, isClass });
   }
@@ -53,9 +59,14 @@ export function extractPy(file: string, src: string): FileExtract {
   };
   const moduleSym = mk("<module>", "<module>", "module", 0, src.length);
   const defSyms = new Map<Block, IndexSymbol>();
+  // Blocks come in source order and nest by indentation, so a stack of open blocks gives each one's container.
+  const openBlocks: Block[] = [];
   for (const b of blocks) {
+    tick();
+    while (openBlocks.length > 0 && openBlocks[openBlocks.length - 1]!.end < b.end) openBlocks.pop();
+    const container = openBlocks[openBlocks.length - 1];
+    openBlocks.push(b);
     if (b.isClass) continue;
-    const container = blocks.filter((o) => o !== b && o.start < b.start && o.end >= b.end).sort((x, y) => (x.end - x.start) - (y.end - y.start))[0];
     const method = container?.isClass === true;
     defSyms.set(b, mk(b.name, method ? `${container!.name}.${b.name}` : b.name, method ? "method" : "function", b.start, b.end));
   }
@@ -74,9 +85,11 @@ export function extractPy(file: string, src: string): FileExtract {
     if (!sym) continue;
     const own: typeof decorators = [];
     let cursor = b.start;
-    for (let i = decorators.length - 1; i >= 0; i--) {
+    let lo = 0, hi = decorators.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (decorators[mid]!.end <= b.start) lo = mid + 1; else hi = mid; }
+    for (let i = lo - 1; i >= 0; i--) {
       const d = decorators[i]!;
-      if (d.end <= cursor && masked.slice(d.end, cursor).trim() === "") { own.unshift(d); cursor = d.start; }
+      if (d.end <= cursor && masked.slice(d.end, cursor).trim() === "") { own.unshift(d); cursor = d.start; } else break;
     }
     if (own.length === 0) continue;
     const header = masked.slice(b.nameOffset, b.headerEnd + 1);
@@ -118,11 +131,11 @@ export function extractPy(file: string, src: string): FileExtract {
   }
 
   const calls: IndexCall[] = [];
-  const sorted = [...ranges].sort((a, b) => (a.end - a.start) - (b.end - b.start));
-  const innermost = (offset: number): string => sorted.find((r) => offset >= r.start && offset < r.end)?.id ?? moduleSym.id;
+  const innermost = innermostFinder(ranges, moduleSym.id);
   const defNames = new Set(blocks.map((b) => b.nameOffset));
-  const callRe = new RegExp(`(${IDENT}(?:\\s*\\.\\s*${IDENT})*)\\s*\\(`, "g");
+  const callRe = new RegExp(`(?<![\\w])(${IDENT}(?:\\s*\\.\\s*${IDENT}){0,10})\\s*\\(`, "g");
   for (const m of masked.matchAll(callRe)) {
+    tick();
     const text = m[1]!.replace(/\s+/g, "");
     if (defNames.has(m.index!) || KEYWORDS.has(text.split(".")[0]!)) continue;
     if (/@\s*$/.test(masked.slice(Math.max(0, m.index! - 4), m.index!))) continue;

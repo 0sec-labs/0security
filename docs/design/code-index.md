@@ -83,6 +83,14 @@ Per-repo index behind the `code-index` tool pack: `callers_of`, `callees_of`, `r
   Meta-annotations, Kotlin and Groovy controllers, `web.xml` servlet mappings and functional routes are not indexed.
 - The file budget (`--file-timeout`) bounds each file; a file over it, or over 1 MB, sets `truncated`.
 
+## Limits and untrusted text
+
+The built-in extractor runs on the event loop, so it has time limits: 2 seconds for one file and 20 seconds for a build. A file over its limit is skipped, the index is marked `truncated`, and `skippedSlow` counts the files left out. Generic-argument scans are bounded and brackets are matched in one pass per file, so a hostile file cannot make a regular expression or a loop run for minutes.
+
+The Foxguard backend runs `foxguard graph --file-timeout 30 <folder>` with a reduced environment, a 180-second limit and 128 MB of output. The `graph` command reads no configuration file from the scanned folder, so there is no config to isolate. Over any limit, the built-in index is used.
+
+Every tool result labels its text as repository content and returns it flattened, stripped of control and invisible characters, and cut to 160 characters.
+
 ## Dependencies
 
 `foxguard graph` lives in `crates/foxguard/src/graph/` (`mod.rs` for JavaScript and Python, `java.rs` for Java). The

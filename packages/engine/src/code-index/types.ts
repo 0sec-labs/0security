@@ -65,6 +65,8 @@ export interface CodeIndex {
   /** Source files seen in languages the index cannot parse, by extension. */
   unsupported: Record<string, number>;
   truncated: boolean;
+  /** Files left out because extraction ran over its time budget. */
+  skippedSlow?: number;
   /** Which extractor produced it. */
   engine?: "builtin" | "foxguard";
 }
