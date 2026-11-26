@@ -6,6 +6,7 @@
  * merged. The outcome per finding is kept in a small state file under the home state dir, so a second run skips what
  * is finished and continues with the rest; one metrics row per run is kept there too (`--history`).
  */
+import { UNTRUSTED_GIT_BASE_CONFIG } from "@0/engine";
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
@@ -297,7 +298,7 @@ export function renderHistory(runs: RunMetrics[]): string {
     ...runs.map(r => `${r.startedAt.slice(0, 19)}Z ${String(r.attempted).padStart(9)} ${String(r.proposed).padStart(8)} ${String(r.prsOpened + r.prsUpdated).padStart(3)} ${r.ciResult.padEnd(7)} ${String(r.drafts).padStart(6)} ${String(r.failed).padStart(6)} $${r.costUsd.toFixed(4).padEnd(9)} ${String(r.durationSeconds).padStart(4)}s  ${r.repo}`)].join("\n");
 }
 
-async function gitRoot(dir: string): Promise<string> { return (await exec("git", ["-C", dir, "rev-parse", "--show-toplevel"])).stdout.trim(); }
+async function gitRoot(dir: string): Promise<string> { return (await exec("git", ["-C", dir, ...UNTRUSTED_GIT_BASE_CONFIG, "rev-parse", "--show-toplevel"])).stdout.trim(); }
 
 export function registerBurndownCommand(program: Command, fixDeps: FixDeps = defaultFixDeps, store: StateStore = fileStore()): void {
   const collect = (value: string, previous: string[] = []) => [...previous, value];

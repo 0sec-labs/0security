@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -68,6 +68,36 @@ describe("git scan runner", () => {
     expect(run(clone, "for-each-ref", "refs/0")).toBe("");
     expect(existsSync(join(clone, "new.txt"))).toBe(false);
     expect(run(clone, "rev-parse", "--abbrev-ref", "HEAD")).toBe("main");
+  });
+
+  it("runs nothing the clone's own git config names (fsmonitor, hooks, filter drivers, ssh command)", async () => {
+    const markers = join(root, "markers");
+    const hooks = join(root, "hooks");
+    mkdirSync(markers); mkdirSync(hooks);
+    const mark = (name: string) => `echo x > '${join(markers, name).replaceAll("\\", "/")}'`;
+    for (const hook of ["post-checkout", "reference-transaction"]) writeFileSync(join(hooks, hook), `#!/bin/sh\n${mark(hook)}\nexit 0\n`, { mode: 0o755 });
+    const hostile = (dir: string) => {
+      run(dir, "config", "core.hooksPath", hooks);
+      run(dir, "config", "core.fsmonitor", `${mark("fsmonitor")}; false`);
+      run(dir, "config", "core.sshCommand", `${mark("sshCommand")}; false`);
+      run(dir, "config", "filter.evil.smudge", `${mark("smudge")}; cat`);
+      run(dir, "config", "filter.evil.clean", `${mark("clean")}; cat`);
+      mkdirSync(join(dir, ".git", "info"), { recursive: true });
+      writeFileSync(join(dir, ".git", "info", "attributes"), "*.txt filter=evil\n");
+    };
+    // Control: the same config does run under plain git.
+    const control = join(root, "control");
+    run(root, "clone", "-q", origin, control);
+    hostile(control);
+    run(control, "fetch", "-q", "origin", "feature");
+    run(control, "worktree", "add", "-q", "--detach", join(root, "control-tree"), "origin/feature");
+    expect(readdirSync(markers).length).toBeGreaterThan(0);
+    for (const name of readdirSync(markers)) rmSync(join(markers, name));
+
+    hostile(clone);
+    const result = await gitScanRunner({ checkout: clone, scanCommand: [process.execPath, fakeScan] }).scan(pr());
+    expect(result).toMatchObject({ sha: featureSha, exitCode: 0 });
+    expect(readdirSync(markers)).toEqual([]);
   });
 
   it("fetches real approved HTTP git under restricted egress, rejecting repository mismatches and rewrites", async () => {

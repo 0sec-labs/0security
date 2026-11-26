@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { Option, type Command } from "commander";
-import { assertEgressAllowed, bumpJavaDependency, parseDependencyFinding } from "@0/engine";
+import { assertEgressAllowed, bumpJavaDependency, parseDependencyFinding, untrustedGitActionConfig } from "@0/engine";
 import { fixPrompt, type FixPolicy, type FixPromptFinding, type RootCause } from "@0/engine/shared";
 import { loadFixPolicyFile, type FixPolicyOptions, type LoadedFixPolicy } from "./fix-policy.js";
 import { osecDB, resolveOsecDbPath } from "@0/engine/storage";
@@ -76,7 +76,7 @@ function resolveRow(rows: Array<Record<string, unknown>>, id: string): Record<st
 const defaults: FixDeps = {
   open: defaultScanDeps.open, err: defaultScanDeps.err, sleep: defaultScanDeps.sleep, startConsole: defaultScanDeps.startConsole,
   out: text => process.stdout.write(`${text}\n`),
-  async git(cwd, args) { return (await exec("git", ["-C", cwd, ...args], { maxBuffer: 32 * 1024 * 1024 })).stdout; },
+  async git(cwd, args) { return (await exec("git", ["-C", cwd, ...untrustedGitActionConfig(cwd), ...args], { maxBuffer: 32 * 1024 * 1024 })).stdout; },
   async gh(cwd, args, input) {
     assertEgressAllowed("GitHub (gh)");
     const running = exec("gh", args, { cwd, maxBuffer: 32 * 1024 * 1024 });

@@ -3,6 +3,7 @@
  * `verify`. The model never calls this; the gateway does, after the model ends
  * its turn. Only built-in skills are runnable in this slice.
  */
+import { UNTRUSTED_GIT_BASE_CONFIG } from "@0/engine";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import {
@@ -31,7 +32,7 @@ export function resolveThreadVerifier(id: string): ThreadVerifier {
 
 export async function captureBaseRev(repo: string): Promise<string | undefined> {
   try {
-    const { stdout } = await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: repo, timeout: 10_000 });
+    const { stdout } = await execFileAsync("git", [...UNTRUSTED_GIT_BASE_CONFIG, "rev-parse", "HEAD"], { cwd: repo, timeout: 10_000 });
     return /^[0-9a-f]{40}$/.test(stdout.trim()) ? stdout.trim() : undefined;
   } catch { return undefined; }
 }

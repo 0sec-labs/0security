@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { UNTRUSTED_GIT_BASE_CONFIG, UntrustedGitConfigError, untrustedGitConfig, type GitConfigReader } from "./untrusted-git.js";
+import { UNTRUSTED_GIT_ACTION_CONFIG, UNTRUSTED_GIT_BASE_CONFIG, UntrustedGitConfigError, untrustedGitActionConfig, untrustedGitConfig, type GitConfigReader } from "./untrusted-git.js";
 import { isGitRepo, snapshotHead, snapshotWorktree } from "./snapshot.js";
 
 const GIT_ENV = { ...process.env, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@example.invalid", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@example.invalid" };
@@ -124,5 +124,56 @@ describe("untrustedGitConfig parsing", () => {
 
   it("does not hide a git failure as an empty listing", () => {
     expect(() => untrustedGitConfig("/repo", reader({ status: 128 }))).toThrow();
+  });
+});
+
+/** A checkout whose config names a hooks folder and an ssh command that each leave a marker file behind. */
+function hostileHooksCheckout() {
+  const root = mkdtempSync(join(tmpdir(), "zero-untrusted-git-hooks-"));
+  cleanups.push(root);
+  const repo = join(root, "repo");
+  const markers = join(root, "markers");
+  const hooks = join(root, "hooks");
+  mkdirSync(repo); mkdirSync(markers); mkdirSync(hooks);
+  const git = (...args: string[]) => execFileSync("git", ["-C", repo, ...args], { encoding: "utf8", env: GIT_ENV, stdio: ["ignore", "pipe", "ignore"] });
+  const mark = (name: string) => `echo x > '${join(markers, name).replaceAll("\\", "/")}'`;
+  git("init", "-q");
+  writeFileSync(join(repo, "a.txt"), "one\n");
+  git("add", "a.txt");
+  git("commit", "-qm", "fixture");
+  for (const hook of ["pre-commit", "post-commit", "post-checkout", "pre-push"]) {
+    writeFileSync(join(hooks, hook), `#!/bin/sh\n${mark(hook)}\nexit 0\n`, { mode: 0o755 });
+  }
+  git("config", "core.hooksPath", hooks.replaceAll("\\", "/"));
+  git("config", "core.sshCommand", `${mark("sshCommand")}; false`);
+  git("remote", "add", "origin", "ssh://git@host.invalid/owner/repo.git");
+  return { repo, root, fired: () => readdirSync(markers).sort() };
+}
+
+describe("untrusted git action config", () => {
+  const act = (repo: string, args: string[]) => {
+    try { execFileSync("git", ["-C", repo, ...args], { encoding: "utf8", env: { ...GIT_ENV, GIT_TERMINAL_PROMPT: "0" }, stdio: ["ignore", "pipe", "ignore"], timeout: 30_000 }); } catch { /* exit code is not the point */ }
+  };
+  const writeCommands = (repo: string, root: string, config: string[], tag: string) => {
+    writeFileSync(join(repo, "a.txt"), `one\n${tag}\n`);
+    act(repo, [...config, "add", "-A"]);
+    act(repo, [...config, "commit", "-qm", tag]);
+    act(repo, [...config, "worktree", "add", "-q", "--detach", join(root, `wt-${tag}`), "HEAD"]);
+    act(repo, [...config, "fetch", "--quiet", "origin"]);
+  };
+
+  it("the fixture really runs its hooks and ssh command under plain git (control)", () => {
+    const fixture = hostileHooksCheckout();
+    writeCommands(fixture.repo, fixture.root, [], "plain");
+    expect(fixture.fired()).toEqual(expect.arrayContaining(["pre-commit", "post-commit", "post-checkout", "sshCommand"]));
+  });
+
+  it("commit, worktree add and fetch run no hook and no repository ssh command", () => {
+    const fixture = hostileHooksCheckout();
+    const config = untrustedGitActionConfig(fixture.repo);
+    expect(config).toEqual(expect.arrayContaining([...UNTRUSTED_GIT_ACTION_CONFIG, ...UNTRUSTED_GIT_BASE_CONFIG]));
+    writeCommands(fixture.repo, fixture.root, config, "safe");
+    expect(fixture.fired()).toEqual([]);
+    expect(existsSync(join(fixture.root, "wt-safe", "a.txt"))).toBe(true); // the worktree was still made
   });
 });

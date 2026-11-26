@@ -13,7 +13,7 @@ import { createHash } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readFileSync, unlinkSync, readdirSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 import type { Command } from "commander";
-import { checkBomAgainstOsv, exportReport, generateSbom, untrustedGitConfig, type Advisory, type Bom } from "@0/engine";
+import { UNTRUSTED_GIT_BASE_CONFIG, checkBomAgainstOsv, exportReport, generateSbom, untrustedGitConfig, type Advisory, type Bom } from "@0/engine";
 import { attackerImpactSentence, VERSION, type Finding, type ScanReport } from "@0/engine/shared";
 import { osecDB } from "@0/engine/storage";
 import { findingDatabasePaths, loadFindingFocus } from "../finding-focus.js";
@@ -337,7 +337,7 @@ const defaults: EvidenceDeps = {
     return { findings, unreadable: unreadable.sort() };
   },
   git(repo, args) {
-    try { return execFileSync("git", ["-C", repo, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 15000 }); } catch { return undefined; }
+    try { return execFileSync("git", ["-C", repo, ...UNTRUSTED_GIT_BASE_CONFIG, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 15000 }); } catch { return undefined; }
   },
   now: () => new Date(),
   version: () => VERSION,

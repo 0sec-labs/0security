@@ -20,6 +20,7 @@ import type {
   VerificationCodePredicate,
   VerificationSpec,
 } from "../shared/index.js";
+import { UNTRUSTED_GIT_BASE_CONFIG } from "../verifier/untrusted-git.js";
 
 const execFileAsync = promisify(execFile);
 const MAX_GIT_DIFF_BYTES = 1_000_000;
@@ -217,7 +218,7 @@ async function evaluateGitDiffApplies(
 
   let head: string;
   try {
-    const result = await execFileAsync("git", ["rev-parse", "--verify", "HEAD"], {
+    const result = await execFileAsync("git", [...UNTRUSTED_GIT_BASE_CONFIG, "rev-parse", "--verify", "HEAD"], {
       cwd: repoRoot,
       timeout: GIT_CHECK_TIMEOUT_MS,
       maxBuffer: 4096,
@@ -246,7 +247,7 @@ async function evaluateGitDiffApplies(
     await fs.writeFile(patchPath, predicate.diff, { encoding: "utf8", mode: 0o600 });
     await execFileAsync(
       "git",
-      ["apply", "--check", "--whitespace=nowarn", "--", patchPath],
+      [...UNTRUSTED_GIT_BASE_CONFIG, "apply", "--check", "--whitespace=nowarn", "--", patchPath],
       {
         cwd: repoRoot,
         timeout: GIT_CHECK_TIMEOUT_MS,

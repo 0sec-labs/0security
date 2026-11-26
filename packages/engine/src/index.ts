@@ -250,7 +250,7 @@ export type {
 // both pass.
 export { parseVerifySpec, inlineVerifySpec, verificationLine, isVerified, gateDone, claimsFixed, runVerifier, OciRunner, HostRunner, snapshotWorktree, snapshotHead, isGitRepo, isPinnedImage } from "./verifier/index.js";
 export type { VerifySpec, VerifierResult, ContainerRunner } from "./verifier/index.js";
-export { UNTRUSTED_GIT_BASE_CONFIG, UntrustedGitConfigError, untrustedGitConfig } from "./verifier/untrusted-git.js";
+export { UNTRUSTED_GIT_ACTION_CONFIG, UNTRUSTED_GIT_BASE_CONFIG, UntrustedGitConfigError, untrustedGitActionConfig, untrustedGitConfig } from "./verifier/untrusted-git.js";
 export type { GitConfigReader } from "./verifier/untrusted-git.js";
 export { planPocSpec, executePocForFinding, createExecutedPoc, executedPocConfigFromEnv, executedPocForScan, ExecutedPocBudget } from "./executed-poc/index.js";
 export type { ExecutedPocConfig, ExecutedPocRuntime } from "./executed-poc/index.js";
