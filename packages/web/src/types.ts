@@ -189,7 +189,29 @@ export type DashboardResponse = {
   queue: QueueSummary;
 };
 
+/** Where the finding was cited in source, from its stored review annotation. The file itself is never read. */
+export type FindingLocation = { path: string; startLine: number; endLine?: number; suggestion?: string };
+
+/** One fix `0security findings fix` recorded. Only what the CLI stored, plus the local fix commit when the branch still exists. */
+export type FindingFixRecord = {
+  branch: string | null;
+  result: string;
+  pullRequestUrl: string | null;
+  /** How the pull request was opened. Merged and closed are not recorded. */
+  draft: boolean | null;
+  /** The checks named with --test when the fix ran, on the machine that ran it. Not the code host's CI. */
+  checksPassing: boolean | null;
+  recordedAt: string;
+  diff?: string;
+  diffTruncated?: boolean;
+};
+
+export type FindingFixInfo = { records: FindingFixRecord[]; command: string };
+
 export type FindingFamilyResponse = {
+  /** Optional: absent from older engines. */
+  location?: FindingLocation | null;
+  fix?: FindingFixInfo;
   consoleCommand: string;
   fingerprint: string;
   case: CaseSummary | null;

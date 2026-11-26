@@ -26,6 +26,7 @@ import { SeverityIcon, StatusIcon } from "./finding-icons";
 import { useMissionHrefs } from "./use-mission-href";
 import { useOrgOverview } from "./findings-org";
 import { provenanceLabel } from "./finding-provenance";
+import { CodeLocationSection, FixSection } from "./finding-code-fix";
 import {
   SETTABLE_STATUSES, REVIEW_LOCK_NOTE, statusLockedByReview, SEVERITY_LABELS, STATUS_LABEL, buildActivity, findingCode, findingStatus, normalizeSeverity, type FindingStatus,
 } from "./findings-model";
@@ -84,9 +85,13 @@ export function FindingDetail(props: FindingDetailProps) {
             <p className="min-w-0 max-w-4xl text-[13px] leading-6 whitespace-pre-wrap break-words text-muted-foreground-1">{latest.description || "No description recorded."}</p>
           </section>
 
+          <CodeLocationSection location={family?.location} />
+
           <EvidenceSection group={group} latest={latest} workflow={workflow} fingerprint={fingerprint} />
 
           <ProofSection reproduction={latest.reproduction ?? null} />
+
+          <FixSection fix={family?.fix} />
 
           <section aria-label="Review" className="flex max-w-4xl flex-col gap-3">
             <SectionLabel>Review</SectionLabel>
