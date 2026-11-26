@@ -94,6 +94,24 @@ describe("executed PoC sandbox rules", () => {
     expect(parseExecutedPoc({ ...base, outcome: "executed-proven" })).toBeUndefined();
   });
 
+  it("applies the exclusion inside a directory that Git lists as one entry, such as a submodule", async () => {
+    const dir = repo({ "a.txt": "a" });
+    // A nested repository is listed by Git as one path; its own files are not in the parent listing.
+    mkdirSync(join(dir, "vendor", "lib", ".ssh"), { recursive: true });
+    writeFileSync(join(dir, "vendor", "lib", ".env"), "TOKEN=abc");
+    writeFileSync(join(dir, "vendor", "lib", ".ssh", "id_rsa"), "k");
+    writeFileSync(join(dir, "vendor", "lib", "code.js"), "x");
+    execFileSync("git", ["init", "-q"], { cwd: join(dir, "vendor", "lib") });
+    execFileSync("git", ["add", "-A"], { cwd: join(dir, "vendor", "lib") });
+    execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "x"], { cwd: join(dir, "vendor", "lib"), stdio: "ignore" });
+    execFileSync("git", ["add", "-A"], { cwd: dir, stdio: "ignore" });
+    const snap = await snapshotWorktree(dir, { exclude: looksSecret });
+    cleanups.push(snap.cleanup);
+    expect(existsSync(join(snap.dir, "vendor", "lib", "code.js"))).toBe(true);
+    expect(existsSync(join(snap.dir, "vendor", "lib", ".env"))).toBe(false);
+    expect(existsSync(join(snap.dir, "vendor", "lib", ".ssh", "id_rsa"))).toBe(false);
+  });
+
   it("snapshot exclusion keeps everything else", async () => {
     const dir = repo({ "a.txt": "a", ".env": "S=1" });
     const snap = await snapshotWorktree(dir, { exclude: looksSecret });

@@ -4,7 +4,7 @@
  */
 import { cpSync, lstatSync, mkdirSync, mkdtempSync, readlinkSync, rmSync, symlinkSync, copyFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { exec } from "./process.js";
 
 export interface Snapshot { dir: string; cleanup(): void }
@@ -54,7 +54,13 @@ export async function snapshotWorktree(repo: string, options: SnapshotOptions = 
     mkdirSync(dirname(to), { recursive: true });
     if (stat.isSymbolicLink()) symlinkSync(readlinkSync(from), to);
     else if (stat.isFile()) copyFileSync(from, to);
-    else if (stat.isDirectory()) cpSync(from, to, { recursive: true, verbatimSymlinks: true }); // submodule path
+    else if (stat.isDirectory()) { // submodule path: its files are not in the parent listing, so the filter applies to each of them
+      cpSync(from, to, { recursive: true, verbatimSymlinks: true, filter: (source) => {
+        if (!options.exclude) return true;
+        const inside = relative(from, source).split(sep).join("/");
+        return inside === "" || !options.exclude(`${rel}/${inside}`);
+      } });
+    }
   }
   return handle(dir);
 }
