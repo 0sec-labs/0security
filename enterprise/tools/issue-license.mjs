@@ -2,7 +2,7 @@
 // Licensed under the 0security Enterprise License. See enterprise/LICENSE.
 // Sign a license token.
 //   node enterprise/tools/issue-license.mjs --key <private-key-file> --customer <name> --seats <n> \
-//     --features findings-server,rbac --expires 2027-12-01T00:00:00Z [--id <id>] [--kid k1] [--issued <iso>]
+//     --features findings-server,rbac --expires 2027-12-01T00:00:00Z [--id <id>] [--kid k2] [--issued <iso>]
 // The private key is read from the file path only. It is never printed and never copied. The token is
 // printed to stdout; a one-line summary goes to stderr. Keep a ledger of issued ids outside this repository.
 import { createPrivateKey, randomBytes, sign } from "node:crypto";
@@ -26,7 +26,7 @@ const { values } = parseArgs({
     expires: { type: "string" },
     issued: { type: "string" },
     id: { type: "string" },
-    kid: { type: "string", default: "k1" },
+    kid: { type: "string", default: "k2" },
   },
   strict: true,
 });

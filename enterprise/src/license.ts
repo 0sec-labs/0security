@@ -36,10 +36,11 @@ const MAX_LICENSE_BYTES = 16 * 1024;
 
 /**
  * Public verification keys by key id, as base64 of the SPKI DER. Only public keys live in the
- * repository. A rotation adds a new id here and ships in a release.
+ * repository. A rotation adds a new id here and ships in a release. The first key (k1) was retired before any
+ * license was issued, so it is not trusted.
  */
 export const PRODUCTION_PUBLIC_KEYS: Readonly<Record<string, string>> = {
-  k1: "MCowBQYDK2VwAyEAwpGf0MiOWLDJs7KDAtnswhrMaL23pqcpBUin4bUJMqY=",
+  k2: "MCowBQYDK2VwAyEAUxEPtyoYm5GKqhDt8/eTJ6URcS8Gl/Gkm1ipEF26pNU=",
 };
 
 export interface LicensePayload {
