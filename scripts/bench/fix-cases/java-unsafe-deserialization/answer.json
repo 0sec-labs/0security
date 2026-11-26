@@ -7,5 +7,5 @@
   "expectedFiles": [
     "src/app/SessionCodec.java"
   ],
-  "note": "Decoding must refuse any class other than Session and the types it holds before an object of that class is built. Casting after readObject is not enough. Session round trips keep working."
+  "note": "Decoding must refuse any class other than Session and the types it holds before an object of that class is built. Casting after readObject is not enough. Session round trips keep working. Preserve the codec behavior already accepted by Session: null and long Unicode usernames must round-trip, and previously serialized legitimate Session cookies with serialVersionUID 1 must remain readable."
 }
