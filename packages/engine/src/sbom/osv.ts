@@ -5,7 +5,7 @@ import { assertEgressAllowed } from "../policy/enterprise.js";
  * Check an SBOM's components against the public OSV database (https://osv.dev). The SBOM and the responses are untrusted
  * text: package URLs are validated and bounded, and every string that comes back is cleaned and truncated before use.
  */
-import { fixesFor, severityOf, vulnerableSymbolsFor, type AdvisorySeverity } from "./advisory-facts.js";
+import { fixesFor, severityOf, vulnerableSymbolsWithLimit, type AdvisorySeverity } from "./advisory-facts.js";
 export type { AdvisorySeverity } from "./advisory-facts.js";
 import type { AdvisoryUsage } from "./advisory-usage.js";
 
@@ -72,8 +72,8 @@ function unresolvedOf(bom: unknown): string[] {
 
 function symbolsField(affected: unknown[], purl: string): { vulnerableSymbols?: string[]; vulnerableSymbolsTruncated?: boolean } {
   if (!purl.startsWith("pkg:maven/")) return {};
-  const symbols = vulnerableSymbolsFor(affected, purl);
-  return symbols.length ? { vulnerableSymbols: symbols.slice(0, MAX_SYMBOLS_PER_ADVISORY), ...(symbols.length > MAX_SYMBOLS_PER_ADVISORY ? { vulnerableSymbolsTruncated: true } : {}) } : {};
+  const { symbols, more } = vulnerableSymbolsWithLimit(affected, purl);
+  return symbols.length || more ? { ...(symbols.length ? { vulnerableSymbols: symbols.slice(0, MAX_SYMBOLS_PER_ADVISORY) } : {}), ...(more || symbols.length > MAX_SYMBOLS_PER_ADVISORY ? { vulnerableSymbolsTruncated: true } : {}) } : {};
 }
 
 export async function checkBomAgainstOsv(bom: unknown, options: OsvOptions = {}): Promise<{ checked: number; advisories: Advisory[]; withoutDetails: number; unresolved: string[] }> {

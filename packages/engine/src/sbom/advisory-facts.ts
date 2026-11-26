@@ -115,18 +115,27 @@ const SYMBOL = /^[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+$/;
  * A symbol that starts with a capital letter is qualified with the entry's `path`; a name that cannot be qualified is dropped, never guessed.
  */
 export function vulnerableSymbolsFor(affected: unknown[], purl: string): string[] {
+  return vulnerableSymbolsWithLimit(affected, purl).symbols;
+}
+
+/** The same names, and whether the record had more than were read (a cap was hit), so the caller cannot treat the list as complete. */
+export function vulnerableSymbolsWithLimit(affected: unknown[], purl: string): { symbols: string[]; more: boolean } {
   const found = new Set<string>();
   // Stops at 100 names and 10000 looks: the caller keeps 20 and reports that there were more.
   let looks = 0;
+  let more = false;
   for (const entry of matching(affected, purl)) {
     for (const holder of [entry.ecosystem_specific, entry.database_specific]) {
       if (!isObject(holder) || !Array.isArray(holder.imports)) continue;
+      if (holder.imports.length > 200) more = true;
       for (const item of holder.imports.slice(0, 200)) {
         if (!isObject(item)) continue;
         const path = typeof item.path === "string" && item.path.length <= 200 ? item.path.trim() : "";
-        for (const symbol of (Array.isArray(item.symbols) ? item.symbols : []).slice(0, 200)) {
+        const listed = Array.isArray(item.symbols) ? item.symbols : [];
+        if (listed.length > 200) more = true;
+        for (const symbol of listed.slice(0, 200)) {
           looks += 1;
-          if (looks > 10_000 || found.size >= 100) return [...found].sort();
+          if (looks > 10_000 || found.size >= 100) return { symbols: [...found].sort(), more: true };
           if (typeof symbol !== "string" || symbol.length > 200) continue;
           const bare = symbol.trim();
           // `Server.Serve` is a class and method under the path; `a.b.C` is already qualified.
@@ -136,5 +145,5 @@ export function vulnerableSymbolsFor(affected: unknown[], purl: string): string[
       }
     }
   }
-  return [...found].sort();
+  return { symbols: [...found].sort(), more };
 }

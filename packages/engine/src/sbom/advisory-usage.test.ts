@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { advisoriesToSarif, advisoriesToText, attachJavaUsage, checkBomAgainstOsv, scanJavaUsage, scanLimitText, usageSummary, type Advisory } from "./index.js";
-import { vulnerableSymbolsFor } from "./advisory-facts.js";
+import { vulnerableSymbolsFor, vulnerableSymbolsWithLimit } from "./advisory-facts.js";
 
 const fixtures = join(import.meta.dirname, "fixtures", "usage");
 const bom = JSON.parse(readFileSync(join(fixtures, "sbom.cdx.json"), "utf8"));
@@ -334,5 +334,13 @@ describe("a scan that hit a limit never says not-imported", () => {
     expect(vulnerableSymbolsFor(affected, "pkg:maven/a/b@1").length).toBeLessThanOrEqual(100);
     const ok = [{ ecosystem_specific: { imports: Array.from({ length: 200 }, () => ({ path: "p.q", symbols })) } }];
     expect(vulnerableSymbolsFor(ok, "pkg:maven/a/b@1").length).toBeLessThanOrEqual(100);
+  });
+  it("reports that a record had more symbols than were read, even when few valid names were kept", () => {
+    const junk = Array.from({ length: 12_000 }, () => "not valid");
+    const affected = [{ ecosystem_specific: { imports: [{ path: "p.q", symbols: junk }, { path: "p.q", symbols: ["Real"] }] } }];
+    expect(vulnerableSymbolsWithLimit(affected, "pkg:maven/a/b@1").more).toBe(true);
+    const many = [{ ecosystem_specific: { imports: [{ path: "p.q", symbols: Array.from({ length: 300 }, (_, index) => `S${index}`) }] } }];
+    expect(vulnerableSymbolsWithLimit(many, "pkg:maven/a/b@1").more).toBe(true);
+    expect(vulnerableSymbolsWithLimit([{ ecosystem_specific: { imports: [{ path: "p.q", symbols: ["One"] }] } }], "pkg:maven/a/b@1")).toEqual({ symbols: ["p.q.One"], more: false });
   });
 });
