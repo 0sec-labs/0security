@@ -432,7 +432,7 @@
       "files": [
         "packages/cli/src/commands/dashboard.ts",
         "packages/cli/src/web/dashboard-instance.ts",
-        "packages/cli/src/web/server-mode.ts"
+        "packages/cli/src/web/standalone-page.ts"
       ],
       "when": "Development only, or same-origin requests from the browser page to its own server.",
       "sent": "Nothing leaves the computer.",
