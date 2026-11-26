@@ -5,7 +5,6 @@ import type { AuthConfig } from "../../shared/index.js";
 import type { ToolDefinition, ToolCall, ToolResult, ToolContext, AgentRole } from "../types.js";
 import type { ToolHealthSummary } from "../tool-health.js";
 import { type TrustGraphConfig } from "../trust-graph-runtime.js";
-import { type RunCapture } from "../../telemetry/run-contribution.js";
 import type { ScanCostLedger } from "../cost-ledger.js";
 import type { osecDB } from "../../storage/index.js";
 import type { Finding, AttackResult, TargetInfo } from "../../shared/index.js";
@@ -119,8 +118,6 @@ export interface NativeAgentLoopOptions {
   config: NativeAgentConfig;
   runtime: NativeRuntime;
   db: osecDB | null;
-  /** Explicit permissioned fixture or enrolled run. Absent: only configured enrollment can capture. */
-  contribution?: RunCapture;
   /** Cancels model requests, executable guests, and subsequent tool dispatch. */
   signal?: AbortSignal;
   onTurn?: (

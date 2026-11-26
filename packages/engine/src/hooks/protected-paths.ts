@@ -18,7 +18,7 @@ export const PROTECTED_STATE_NAMES: readonly string[] = [
   "extensions", "plugins", "plugin-enablement", "executable-plugins", "harness-trust", "evolution-authority",
   "tui-settings.json", "workbench.json", "workbench", "backends.json", "engines.json", "engines", "workers",
   "github-webhook-secret.json", "findings-api-access", "teams", "team-configs", "chatgpt-plan", "web-connections.json",
-  "credentials.json", "access-upgrade.json", "access-token", "cloud.env", "AGENTS.md", "workspaces",
+  "credentials.json", "access-upgrade.json", "access-token", "AGENTS.md", "workspaces",
   "console-sessions", "skills-library", "engagements",
 ];
 const isProtectedName = (name: string, caseInsensitive = false): boolean => {

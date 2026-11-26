@@ -51,16 +51,13 @@ function normalizeRunId(value: string): string {
  * Allocate the private state directory for one execution.
  *
  * A local SQLite database is execution state, not a multi-worker system of
- * record. Fresh runs therefore receive distinct paths. Managed workers pass
- * their orchestrator scan id through `ZERO_CLOUD_SCAN_ID`, making the local
- * run directory and the remote scan correlate without sharing a database.
+ * record. Fresh runs therefore receive distinct paths.
  */
 export function resolveOsecRunStorage(
   options: ResolveOsecRunStorageOptions = {},
 ): OsecRunStorage {
   const env = options.env ?? process.env;
-  const cloudRunId = env["ZERO_CLOUD_SCAN_ID"]?.trim() || undefined;
-  let runId = normalizeRunId(options.runId ?? cloudRunId ?? randomUUID());
+  let runId = normalizeRunId(options.runId ?? randomUUID());
   const stateDir = homeStateDir(options.homeDir);
   const configuredRunDir = env["ZERO_RUN_DIR"]?.trim() || undefined;
   const configuredDbPath =

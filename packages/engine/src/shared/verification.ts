@@ -180,13 +180,12 @@ export const VerificationResultSchema = z.object({
   // Optional, additive fields. Existing producers can leave these undefined.
   error_reason: z.string().nullable().optional(),
   summary: z.string().optional(),
-  // #659 / #1278 — evidence provenance surfaced to the cloud verify writeback.
+  // #659 / #1278 — evidence provenance for the verify result.
   //
-  // `evidence_kind` mirrors the cloud contract's VerifyEvidenceKind (0cloud
-  // `@0cloud/cloud-contracts`): a reproduced kind promotes the finding to
+  // `evidence_kind` is the verify evidence kind: a reproduced kind promotes the finding to
   // in_scope, `source-only` never does. Producers that actually reproduced a
   // PoC set it; leave it undefined to let the consumer keep its own default
-  // (the cloud maps a `reproduced` replay to `reproduced-poc` on its own, so
+  // (a consumer maps a `reproduced` replay to `reproduced-poc` on its own, so
   // an undefined kind never downgrades a genuine replay). We only ever emit a
   // REPRODUCED kind here — never `source-only` — for exactly that reason.
   //

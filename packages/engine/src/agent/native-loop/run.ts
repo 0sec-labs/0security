@@ -16,8 +16,6 @@ import { LootLedger } from "../loot.js";
 import { DriftMonitor } from "../drift.js";
 import { maybeCreateTrustGraphSession } from "../trust-graph-runtime.js";
 import { createShadowJournal, type ShadowJournal } from "../journal/shadow.js";
-import { captureNativeRuntime, currentContributionAgent, currentRunContribution, getConfiguredRunContributionClient, withRunContribution } from "../../telemetry/run-contribution.js";
-import { authSecretValues } from "../auth-redaction.js";
 import { detectPlaybooks, buildPlaybookInjection } from "../playbooks.js";
 import { detectDoomLoop, doomLoopNudge, toolCallSignature } from "../doom-loop.js";
 import { SECURITY_RULES, selectRules, buildRuleInjection, type EngagementPhase, type Rule } from "../rules.js";
@@ -53,58 +51,7 @@ export async function runNativeAgentLoop(
 ): Promise<NativeAgentState> {
   assertWorkflowNativeRuntime(opts.runtime);
   opts = { ...opts, config: { ...opts.config, systemPrompt: workflowPhasePrompt(opts.config.systemPrompt) } };
-  const parent = currentRunContribution();
-  const enrollment = opts.contribution ?? parent ?? getConfiguredRunContributionClient();
-  const secrets = enrollment ? [
-    ...authSecretValues(opts.config.authConfig),
-  ] : [];
-  let capture = opts.contribution ?? parent;
-  if (!capture) {
-    try {
-      capture = getConfiguredRunContributionClient()?.begin({
-        runId: opts.config.scanId, model: opts.runtime.resolvedModel?.() ?? opts.config.costModel ?? "unknown",
-        scope: { target: opts.config.target, scopePath: opts.config.scopePath ?? null },
-        objective: opts.config.systemPrompt, versions: { loop: "native-v1", runtime: opts.runtime.type },
-        authSecretValues: secrets,
-      }) ?? undefined;
-    } catch { process.stderr.write("[0] Run contribution unavailable: private spool or enrollment could not be opened.\n"); }
-  }
-  if (!capture) return runNativeAgentLoopInternal(opts);
-  capture.protectSecrets(secrets);
-  if (!parent) capture.setInitialScope({ context: capture.manifest.scope, target: opts.config.target, scopePath: opts.config.scopePath ?? null });
-  const agentId = randomUUID();
-  const parentAgentId = parent === capture ? currentContributionAgent() ?? null : null;
-  return withRunContribution(capture, agentId, parentAgentId, async () => {
-    capture.record("routing", { role: opts.config.role, model: opts.runtime.resolvedModel?.() ?? opts.config.costModel ?? "unknown", runtime: opts.runtime.type });
-    const onEvent: NativeAgentLoopOptions["onEvent"] = (kind, payload) => {
-      if (kind === "session_resumed" || kind === "journal_rehydrated") capture.record("resume", { ...payload, source: kind === "journal_rehydrated" ? "journal" : "persisted_session", sideEffectsReplayed: false });
-      opts.onEvent?.(kind, payload);
-    };
-    const unregister = registerSignalCleanup(() => {
-      if (!parentAgentId) capture.finish("interrupted", "operator_cancelled");
-    });
-    try {
-      const state = await runNativeAgentLoopInternal({ ...opts, runtime: captureNativeRuntime(opts.runtime, capture), onEvent });
-      const termination = opts.signal?.aborted ? "operator_cancelled"
-        : state.costCeilingExceeded ? "run_resource_limit"
-        : state.errorExit ? state.errorExit.source === "harness" ? "harness_error" : "provider_error"
-        : state.outputCapExit ? "run_resource_limit"
-        : state.earlyStopNoProgress ? "no_progress"
-        : state.done ? "plan_exhausted"
-        : opts.config.maxTurns !== undefined && state.turnCount >= opts.config.maxTurns ? "run_resource_limit" : "unknown";
-      const execution = opts.signal?.aborted ? "interrupted" : state.errorExit ? "failed" : state.done ? "completed" : "interrupted";
-      // Completion is not an independently verified security outcome.
-      if (parentAgentId) capture.record("termination", { execution, termination });
-      else capture.finish(execution, termination);
-      if (!parentAgentId && !opts.contribution) void capture.client.upload(capture);
-      return state;
-    } catch (error) {
-      capture.record("termination", { execution: "failed", termination: "harness_error", error: error instanceof Error ? error.message : String(error) });
-      if (!parentAgentId) capture.finish(opts.signal?.aborted ? "interrupted" : "failed", opts.signal?.aborted ? "operator_cancelled" : "harness_error");
-      if (!parentAgentId && !opts.contribution) void capture.client.upload(capture);
-      throw error;
-    } finally { unregister(); }
-  });
+  return runNativeAgentLoopInternal(opts);
 }
 
 async function runNativeAgentLoopInternal(opts: NativeAgentLoopOptions): Promise<NativeAgentState> {
@@ -1004,7 +951,6 @@ async function runNativeAgentLoopInternal(opts: NativeAgentLoopOptions): Promise
       && state.messages.length > 15
     ) {
       const beforeCount = state.messages.length;
-      currentRunContribution()?.record("compaction", { phase: "before", messagesBefore: beforeCount, inputTokens: state.totalUsage.inputTokens, strategy: "llm_with_regex_fallback" });
 
       // Use LLM-based compaction if we have the runtime, otherwise regex.
       // Default opts preserve the scan loop's original behavior (tail count 10,
@@ -1024,7 +970,6 @@ async function runNativeAgentLoopInternal(opts: NativeAgentLoopOptions): Promise
       tokensAtLastCompaction = state.totalUsage.inputTokens;
 
       const afterCount = state.messages.length;
-      currentRunContribution()?.record("compaction", { phase: "after", messagesAfter: afterCount, compactionNumber: compactionCount });
       onEvent?.("context_compacted", {
         turn: state.turnCount,
         inputTokens: state.totalUsage.inputTokens,
@@ -1260,7 +1205,6 @@ async function runNativeAgentLoopInternal(opts: NativeAgentLoopOptions): Promise
         if (pruned.length < beforeCount) {
           contextOverflowRecoveries++;
           state.messages = pruned;
-          currentRunContribution()?.record("truncation", { reason: "context_overflow", messagesBefore: beforeCount, messagesAfter: pruned.length, preserveTailCount });
           tokensAtLastCompaction = state.totalUsage.inputTokens;
           process.stderr.write(
             `[0] context overflow: pruned ${beforeCount - pruned.length} old messages `
@@ -1540,7 +1484,6 @@ async function runNativeAgentLoopInternal(opts: NativeAgentLoopOptions): Promise
           callId: block.id,
         });
 
-        currentRunContribution()?.record("tool_call", { callId: block.id, correlationId, tool: call.name, arguments: call.arguments });
         const execution = executor.execute(call, { correlationId, signal: executionSignal })
           .then((toolResult) => ({ toolResult, toolEndedAt: Date.now() }));
         return { block, call, correlationId, toolStartedAt, execution };
@@ -1554,12 +1497,10 @@ async function runNativeAgentLoopInternal(opts: NativeAgentLoopOptions): Promise
         const outcome = settled[index];
         if (outcome.status === "rejected") {
           const error = outcome.reason;
-          currentRunContribution()?.record("tool_result", { callId: block.id, correlationId, tool: call.name, error: error instanceof Error ? error.message : String(error), durationMs: Date.now() - toolStartedAt });
           batchFailure ??= { error };
           continue;
         }
         const { toolResult, toolEndedAt } = outcome.value;
-        currentRunContribution()?.record("tool_result", { callId: block.id, correlationId, tool: call.name, result: toolResult, durationMs: toolEndedAt - toolStartedAt });
         // Normalize a failed result to a NON-EMPTY, informative reason at the
         // source (see the direct-driver path above): folds any captured exit
         // code / stdout tail into `error` so the model, the action log, the
@@ -1961,7 +1902,6 @@ async function runNativeAgentLoopInternal(opts: NativeAgentLoopOptions): Promise
     // Persist session state periodically
     if (db && state.turnCount % 2 === 0) {
       persistSession(db, state, config, "running");
-      currentRunContribution()?.record("checkpoint", { sessionId: state.sessionId, turn: state.turnCount, storage: "session", storedMessages: Math.min(state.messages.length, 40), sideEffectsReplayed: false });
     }
 
     if (enforceCostCeiling()) break;
@@ -2051,7 +1991,6 @@ async function runNativeAgentLoopInternal(opts: NativeAgentLoopOptions): Promise
   // Final session save
   if (db) {
     persistSession(db, state, config, state.done ? "completed" : "paused");
-    currentRunContribution()?.record("checkpoint", { sessionId: state.sessionId, turn: state.turnCount, storage: "session", status: state.done ? "completed" : "paused", storedMessages: Math.min(state.messages.length, 40) });
     db.logEvent({
       scanId: config.scanId,
       stage: config.role,

@@ -1,7 +1,6 @@
 import { isLocalAdmissionFailure } from "../../runtime/request-admission.js";
 import type { NativeRuntime, NativeMessage, NativeContentBlock, NativeRuntimeResult } from "../../runtime/types.js";
 import { features } from "../features.js";
-import { currentRunContribution } from "../../telemetry/run-contribution.js";
 
 // ── Context Window Compaction (BoxPwnr-style) ──
 // When the conversation grows too large, replace middle messages with a summary
@@ -219,7 +218,6 @@ export async function compactMessagesWithLLM(
       return `${prefix}\n${serializeMessageToText(m)}`;
     })
     .join("\n\n");
-  if (fullConversationText.length > 50_000) currentRunContribution()?.record("truncation", { reason: "compaction_input", originalChars: fullConversationText.length, retainedChars: 50_000 });
   const conversationText = fullConversationText.slice(0, 50_000);
 
   // Also extract regex findings as fallback / supplement
@@ -445,7 +443,6 @@ export async function generateProgressSummary(
       return `${prefix}\n${serializeMessageToText(m)}`;
     })
     .join("\n\n");
-  if (fullConversationText.length > 60_000) currentRunContribution()?.record("truncation", { reason: "progress_summary_input", originalChars: fullConversationText.length, retainedChars: 60_000 });
   const conversationText = fullConversationText.slice(0, 60_000);
 
   const summaryResult = await runtime.executeNative(

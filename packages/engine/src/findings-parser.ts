@@ -89,11 +89,9 @@ export function probeFileRefTarget(absPath: string, scopeRoot?: string): FileRef
 }
 
 /**
- * Repo-relative path rule for review annotations. Mirrors the orchestrator's
- * zod schema (`@0cloud/cloud-contracts` finding.ts `reviewAnnotation.path`
- * refine) EXACTLY — the cloud 400s the ENTIRE finding POST when any of these
- * fail, so every engine path that produces an annotation must pre-check with
- * this predicate:
+ * Repo-relative path rule for review annotations. A receiver rejects the
+ * ENTIRE finding when any of these fail, so every engine path that produces an
+ * annotation must pre-check with this predicate:
  *   - no leading `/`           (absolute POSIX path)
  *   - no `C:\` / `C:/` prefix  (Windows drive-absolute path)
  *   - no backslashes anywhere  (Windows separators break the cloud renderer)

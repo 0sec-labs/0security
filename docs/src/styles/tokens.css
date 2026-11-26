@@ -1,7 +1,7 @@
 /* 0security docs design tokens.
    Names mirror the product (packages/web/src/ui/styles/tokens.css and the
-   .dark block in packages/web/src/styles.css) so the same layer can later be
-   shared with the website (@0cloud/ui product.css). Components consume these
+   .dark block in packages/web/src/styles.css) so the same layer can be
+   reused elsewhere. Components consume these
    tokens; only this file holds raw colours, radii and sizes. Starlight's
    --sl-* variables are mapped at the bottom. */
 

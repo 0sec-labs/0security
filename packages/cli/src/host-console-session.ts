@@ -12,7 +12,7 @@ interface Mirror {
   sourceContext?: ConsoleSession["sourceContext"]; checkpoint?: ConsoleSessionCheckpoint; active?: boolean;
 }
 const DIRECT_CALLBACKS = ["approveTool", "askOperator"] as const;
-const UNSUPPORTED = ["mcpHost", "extensionRuns", "contribution", "developmentSourceRoot"] as const;
+const UNSUPPORTED = ["mcpHost", "extensionRuns", "developmentSourceRoot"] as const;
 const BRIDGED = new Set<string>(["runtime", "skillAuthoring", "skillEditor", "workflowAuthoring", "workflowLifecycle", "conversationHistory", ...DIRECT_CALLBACKS]);
 
 function executionEnvironment(): Record<string, string> {
