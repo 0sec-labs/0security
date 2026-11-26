@@ -25,3 +25,17 @@ export function applyWorkflowDefaults<T extends { budget?: string; model?: strin
   if (wanted.model !== undefined && !explicit("model")) next.model = wanted.model;
   return next;
 }
+
+/**
+ * `findings burndown` runs one fix per finding, so the `fix` workflow's budget is its per-fix cap (`--per-fix`) and its
+ * model is `--model`. The run's total (`--budget`) has no workflow default. A flag or environment value still wins.
+ */
+export function applyBurndownWorkflowDefaults<T extends { perFix?: string; model?: string }>(options: T, command: Pick<Command, "getOptionValueSource"> | undefined, load?: Parameters<typeof workflowDefault>[1]): T {
+  if (!command) return options;
+  const wanted = workflowDefault("fix", load);
+  const explicit = (flag: string) => { const source = command.getOptionValueSource(flag); return source === "cli" || source === "env"; };
+  const next = { ...options };
+  if (wanted.budget !== undefined && !explicit("perFix")) next.perFix = String(wanted.budget);
+  if (wanted.model !== undefined && !explicit("model")) next.model = wanted.model;
+  return next;
+}

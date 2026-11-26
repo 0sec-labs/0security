@@ -105,7 +105,7 @@ Scan, fix and verify can each have a default budget in USD and a default model. 
 
 The budget becomes the default for `--budget` and the model the default for `--model` of `0security scan`, `0security findings fix` and `0security findings verify`. A flag you pass always wins. For verify, the budget is the total for the run.
 
-Only this file sets the defaults. A project settings file cannot, so a repository you open cannot pick your model or your spend. An invalid entry is ignored. `0security findings burndown` does not read these defaults: use its own `--budget`, `--per-fix` and `--model`.
+Only this file sets the defaults. A project settings file cannot, so a repository you open cannot pick your model or your spend. An invalid entry is ignored. `0security findings burndown` reads the `fix` entry: its budget becomes the default for `--per-fix` and its model the default for `--model`. The total `--budget` of a burndown run has no default here.
 
 ## The `0security config` command
 
