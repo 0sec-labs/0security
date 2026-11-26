@@ -30,6 +30,13 @@ APPROVED_REMOTES = {
     "git@github.com:0sec-labs/foxguard.git",
     "ssh://git@github.com/0sec-labs/foxguard",
     "ssh://git@github.com/0sec-labs/foxguard.git",
+    # The engine now lives in the 0security monorepo (crates/foxguard).
+    "https://github.com/0sec-labs/0security",
+    "https://github.com/0sec-labs/0security.git",
+    "git@github.com:0sec-labs/0security",
+    "git@github.com:0sec-labs/0security.git",
+    "ssh://git@github.com/0sec-labs/0security",
+    "ssh://git@github.com/0sec-labs/0security.git",
 }
 
 
