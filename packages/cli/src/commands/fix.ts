@@ -480,7 +480,9 @@ export function registerFixCommand(program: Command, deps: FixDeps = defaults): 
       try {
         const outcome = await runFix(finding, applyWorkflowDefaults("fix", options, command), deps);
         if (!outcome) return;
-        if (options.format !== "json") for (const check of outcome.checks.filter((c) => c.code !== 0)) deps.err(`check failed (exit ${check.code}): ${check.command}\n${check.output.trim().split("\n").slice(-15).join("\n")}`);
+        // Check output comes from the sandboxed build: drop terminal control characters (escape sequences) before printing it.
+        const plain = (text: string): string => text.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, "");
+        if (options.format !== "json") for (const check of outcome.checks.filter((c) => c.code !== 0)) deps.err(plain(`check failed (exit ${check.code}): ${check.command}\n${check.output.trim().split("\n").slice(-15).join("\n")}`));
         if (options.format === "json") deps.out(JSON.stringify(outcome, null, 2));
         else if (outcome.pullRequest) deps.out(`${outcome.pullRequest.created ? "Opened" : "Updated"} ${outcome.pullRequest.draft ? "draft " : ""}pull request: ${outcome.pullRequest.url}`);
         else if (outcome.committed) deps.out(`Committed on ${outcome.branch}.`);
