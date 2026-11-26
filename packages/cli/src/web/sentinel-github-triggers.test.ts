@@ -156,6 +156,50 @@ describe("check-completed trigger", () => {
     expect((await f.activations(id))[0]).toMatchObject({ trigger: { kind: "check-completed", event: { conclusion: "failure", branch: "main", commit: SHA } } });
   });
 
+  // GitHub also delivers check_run for a fork pull request's CI: head_branch is the fork's branch name, pull_requests is empty.
+  const forkCheck = (headBranch: string, sha = "e".repeat(40)) => {
+    const parsed = parseGithubWebhook("check_run", { action: "completed", repository: { full_name: "acme/app" }, check_run: { id: 77, name: "build", conclusion: "failure", head_sha: sha, check_suite: { head_branch: headBranch }, pull_requests: [] } });
+    if (!parsed.ok) throw new Error("fixture");
+    return parsed.event;
+  };
+  const githubFor = (compare: string) => (args: string[]) => args[1] === "repos/acme/app" ? "main\n" : args[1]?.startsWith("repos/acme/app/compare/") ? `${compare}\n` : "";
+
+  it("does not run for a webhook check on a fork commit whose branch is named like the watched branch", async () => {
+    const calls: string[][] = [];
+    const f = fixture(githubFor("diverged"), calls);
+    const { id, triggerId } = await f.armed("check-completed", { branch: "main", conclusion: "failure" });
+    const event = forkCheck("main");
+    expect(f.service.webhookEventTargets(event)).toEqual([{ id: triggerId }]);
+    await f.service.deliverWebhookEvent(triggerId, event);
+    expect(await f.activations(id)).toHaveLength(0);
+    expect(calls).toContainEqual(["api", `repos/acme/app/compare/main...${"e".repeat(40)}`, "--jq", ".status"]);
+  });
+
+  it("does not run for a webhook check on another branch when the trigger watches the default branch", async () => {
+    const calls: string[][] = [];
+    const f = fixture(githubFor("identical"), calls);
+    const { id, triggerId } = await f.armed("check-completed", {});
+    await f.service.deliverWebhookEvent(triggerId, forkCheck("patch-1"));
+    expect(await f.activations(id)).toHaveLength(0);
+    expect(calls.some(args => args[1]?.includes("/compare/"))).toBe(false);
+  });
+
+  it("does not run when GitHub cannot confirm where the commit is", async () => {
+    const f = fixture(args => { if (args[1]?.includes("/compare/")) throw new Error("HTTP 404"); return args[1] === "repos/acme/app" ? "main\n" : ""; }, []);
+    const { id, triggerId } = await f.armed("check-completed", {});
+    await f.service.deliverWebhookEvent(triggerId, forkCheck("main"));
+    expect(await f.activations(id)).toHaveLength(0);
+  });
+
+  it("still runs for a webhook check on a commit of the watched branch", async () => {
+    for (const status of ["identical", "behind"]) {
+      const f = fixture(githubFor(status), []);
+      const { id, triggerId } = await f.armed("check-completed", { conclusion: "failure" });
+      await f.service.deliverWebhookEvent(triggerId, forkCheck("main", SHA));
+      expect((await f.activations(id)).map(run => run.trigger.event.commit)).toEqual([SHA]);
+    }
+  });
+
   it("stops with a clear status when a poll returns more items than the cursor can remember", async () => {
     const many = Array.from({ length: 195 }, (_, index) => run(index + 1, "failure")).join("\n");
     const f = fixture(args => (args[1] === "repos/acme/app" ? "main" : many), []);

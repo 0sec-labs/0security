@@ -267,7 +267,8 @@ describe("check trigger results", () => {
 
   it("never uploads a check that arrived by webhook, because it can belong to a fork pull request", async () => {
     const calls: Call[] = [];
-    const f = fixture(() => "{}", calls);
+    // GitHub confirms the commit is on main, so the run starts; the upload is still refused.
+    const f = fixture(args => (args[1]?.includes("/compare/main...") ? "identical" : "{}"), calls);
     const { id, triggerId } = await f.armed("check-completed", { results: "sarif", branch: "main" });
     const event = checkEvent({ repo: "acme/app", id: 5, name: "build", conclusion: "failure", sha: SHA, branch: "main", pr: 7 })!;
     expect(await f.service.deliverWebhookEvent(triggerId, event)).toBe(true);
