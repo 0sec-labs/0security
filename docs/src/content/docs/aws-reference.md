@@ -32,11 +32,11 @@ https://zero.example.com/api/team/auth/callback
 This sketch uses the default VPC. Save it as `main.tf`, set the variables and run `terraform apply`.
 
 ```hcl
-variable "region"        { default = "eu-central-1" }
-variable "domain"        { description = "DNS name of the console, for example zero.example.com" }
-variable "admin_cidr"    { description = "Your network, for SSH. Use 127.0.0.1/32 to close SSH and use SSM Session Manager." }
-variable "ingress_cidr"  { description = "Networks allowed to reach HTTPS" }
-variable "release_tag"   { description = "Release tag to build, for example v0.45.0" }
+variable "region" { default = "eu-central-1" }
+variable "domain" { description = "DNS name of the console, for example zero.example.com" }
+variable "admin_cidr" { description = "Your network, for SSH. Use 127.0.0.1/32 to close SSH and use SSM Session Manager." }
+variable "ingress_cidr" { description = "Networks allowed to reach HTTPS" }
+variable "release_tag" { description = "Release tag to build, for example v0.45.0" }
 
 provider "aws" { region = var.region }
 
@@ -81,7 +81,7 @@ resource "aws_security_group" "zero" {
 resource "aws_iam_role" "zero" {
   name = "zero-reference"
   assume_role_policy = jsonencode({
-    Version = "2012-10-17"
+    Version   = "2012-10-17"
     Statement = [{ Effect = "Allow", Action = "sts:AssumeRole", Principal = { Service = "ec2.amazonaws.com" } }]
   })
 }
@@ -89,7 +89,7 @@ resource "aws_iam_role" "zero" {
 resource "aws_iam_role_policy" "parameters" {
   role = aws_iam_role.zero.id
   policy = jsonencode({
-    Version = "2012-10-17"
+    Version   = "2012-10-17"
     Statement = [{ Effect = "Allow", Action = ["ssm:GetParametersByPath", "ssm:GetParameter"], Resource = "arn:aws:ssm:*:*:parameter/zero/*" }]
   })
 }
@@ -105,11 +105,11 @@ resource "aws_iam_instance_profile" "zero" {
 }
 
 resource "aws_instance" "zero" {
-  ami                    = data.aws_ssm_parameter.ubuntu.value
-  instance_type          = "t3.xlarge"
-  iam_instance_profile   = aws_iam_instance_profile.zero.name
-  vpc_security_group_ids = [aws_security_group.zero.id]
-  user_data              = templatefile("${path.module}/cloud-init.sh", { domain = var.domain, release_tag = var.release_tag, region = var.region })
+  ami                         = data.aws_ssm_parameter.ubuntu.value
+  instance_type               = "t3.xlarge"
+  iam_instance_profile        = aws_iam_instance_profile.zero.name
+  vpc_security_group_ids      = [aws_security_group.zero.id]
+  user_data                   = templatefile("${path.module}/cloud-init.sh", { domain = var.domain, release_tag = var.release_tag, region = var.region })
   user_data_replace_on_change = true
 
   root_block_device {
@@ -139,7 +139,7 @@ resource "aws_volume_attachment" "data" {
   instance_id = aws_instance.zero.id
 }
 
-output "public_ip"   { value = aws_instance.zero.public_ip }
+output "public_ip" { value = aws_instance.zero.public_ip }
 output "instance_id" { value = aws_instance.zero.id }
 ```
 
@@ -284,7 +284,7 @@ Remove the DNS record yourself.
 
 ## What is not verified
 
-- The Terraform and the start script have not run against an AWS account.
+- The Terraform passes `terraform validate` and `terraform fmt -check`, and the start script passes `bash -n`. Neither has run against an AWS account.
 - The image build on `t3.xlarge` and its duration are not measured.
 - The OIDC flow is covered by the repository's tests with a stub provider. It has not run against a real identity provider behind Caddy on EC2.
 - The `analytics-sent.log` check shows that nothing was sent. It does not replace a network-level check.
