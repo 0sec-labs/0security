@@ -1,0 +1,60 @@
+//// FILE: src/seed.ts
+import { hashPasscode } from "./lib/passcode";
+import { orgRepo } from "./repositories/orgRepo";
+import { userRepo } from "./repositories/userRepo";
+import { projectRepo } from "./repositories/projectRepo";
+import { taskRepo } from "./repositories/taskRepo";
+import { commentRepo } from "./repositories/commentRepo";
+import { invoiceRepo } from "./repositories/invoiceRepo";
+import { webhookRepo } from "./repositories/webhookRepo";
+import { activityRepo } from "./repositories/activityRepo";
+import { boardRepo } from "./repositories/boardRepo";
+import { timeEntryRepo } from "./repositories/timeEntryRepo";
+//@FILLER_SEED_IMPORTS
+
+let seeded = false;
+
+export function seed() {
+  if (seeded) return;
+  seeded = true;
+  const at = "2026-01-05T09:00:00.000Z";
+
+  orgRepo.insert({ id: "org_acme", name: "Acme Robotics", plan: "business", seats: 25, renewsAt: "2026-09-01", paymentMethodLast4: "4242" });
+  orgRepo.insert({ id: "org_globex", name: "Globex Logistics", plan: "team", seats: 8, renewsAt: "2026-06-15", paymentMethodLast4: "1881" });
+  orgRepo.insert({ id: "org_platform", name: "Platform", plan: "business", seats: 5, renewsAt: "2030-01-01", paymentMethodLast4: "0000" });
+
+  userRepo.insert({ id: "usr_alice", orgId: "org_acme", name: "Alice Archer", email: "alice@acme.test", role: "manager", passcode: hashPasscode("pw-alice") });
+  userRepo.insert({ id: "usr_bob", orgId: "org_acme", name: "Bob Baker", email: "bob@acme.test", role: "member", passcode: hashPasscode("pw-bob") });
+  userRepo.insert({ id: "usr_carol", orgId: "org_globex", name: "Carol Cho", email: "carol@globex.test", role: "manager", passcode: hashPasscode("pw-carol") });
+  userRepo.insert({ id: "usr_dave", orgId: "org_globex", name: "Dave Diaz", email: "dave@globex.test", role: "member", passcode: hashPasscode("pw-dave") });
+  userRepo.insert({ id: "usr_root", orgId: "org_platform", name: "Root Operator", email: "root@platform.test", role: "admin", passcode: hashPasscode("pw-root") });
+
+  projectRepo.insert({ id: "prj_acme", orgId: "org_acme", ownerId: "usr_alice", name: "Acme Roadmap", archived: false });
+  projectRepo.insert({ id: "prj_globex", orgId: "org_globex", ownerId: "usr_carol", name: "Globex Fleet", archived: false });
+
+  taskRepo.insert({ id: "tsk_a1", orgId: "org_acme", projectId: "prj_acme", ownerId: "usr_alice", title: "Launch checklist", notes: "public launch items", visibility: "public", watchers: ["usr_alice"], status: "open" });
+  taskRepo.insert({ id: "tsk_a2", orgId: "org_acme", projectId: "prj_acme", ownerId: "usr_alice", title: "Acquisition talks", notes: "confidential: term sheet draft", visibility: "private", watchers: ["usr_alice"], status: "open" });
+  taskRepo.insert({ id: "tsk_a3", orgId: "org_acme", projectId: "prj_acme", ownerId: "usr_bob", parentId: "tsk_a1", title: "Draft launch post", notes: "", visibility: "public", watchers: ["usr_bob"], status: "open" });
+  taskRepo.insert({ id: "tsk_g1", orgId: "org_globex", projectId: "prj_globex", ownerId: "usr_carol", title: "Renew depot lease", notes: "ours", visibility: "private", watchers: ["usr_carol"], status: "open" });
+  taskRepo.insert({ id: "tsk_g2", orgId: "org_globex", projectId: "prj_globex", ownerId: "usr_dave", title: "Route audit", notes: "ours", visibility: "private", watchers: ["usr_dave"], status: "open" });
+
+  activityRepo.insert({ id: "act_a1", orgId: "org_acme", entity: "task", entityId: "tsk_a2", actorId: "usr_alice", action: "updated", detail: "notes: term sheet v3 from Initech Capital", at });
+  activityRepo.insert({ id: "act_g1", orgId: "org_globex", entity: "task", entityId: "tsk_g1", actorId: "usr_carol", action: "created", detail: "Renew depot lease", at });
+
+  commentRepo.insert({ id: "cmt_a1", orgId: "org_acme", taskId: "tsk_a2", authorId: "usr_alice", body: "wire details for the escrow account are in the shared vault", createdAt: at });
+  commentRepo.insert({ id: "cmt_g1", orgId: "org_globex", taskId: "tsk_g1", authorId: "usr_carol", body: "landlord wants a counter by Friday", createdAt: at });
+
+  timeEntryRepo.insert({ id: "tim_a1", orgId: "org_acme", taskId: "tsk_a1", userId: "usr_alice", minutes: 45, note: "kickoff" });
+
+  invoiceRepo.insert({ id: "inv_a1", orgId: "org_acme", number: "ACM-0042", customer: "Initech Ltd", amountCents: 1250000, status: "sent", lines: [{ description: "Pilot fleet licence", amountCents: 1250000 }], internalNote: "margin 38 percent, do not share" });
+  invoiceRepo.insert({ id: "inv_g1", orgId: "org_globex", number: "GLX-0007", customer: "Hooli Retail", amountCents: 420000, status: "draft", lines: [{ description: "Route planning", amountCents: 420000 }], internalNote: "ours" });
+
+  webhookRepo.insert({ id: "whk_a1", orgId: "org_acme", url: "https://hooks.acme.test/ingest", authToken: "acme-hook-token-9f3a", events: ["task.created"], active: true });
+  webhookRepo.insert({ id: "whk_g1", orgId: "org_globex", url: "https://hooks.globex.test/ingest", authToken: "globex-hook-token-77c1", events: ["task.created"], active: true });
+  webhookRepo.addDelivery({ id: "dlv_a1", webhookId: "whk_a1", event: "task.created", requestHeaders: { Authorization: "Bearer acme-hook-token-9f3a", "Content-Type": "application/json" }, requestBody: "{\"taskId\":\"tsk_a2\"}", responseStatus: 200 });
+  webhookRepo.addDelivery({ id: "dlv_g1", webhookId: "whk_g1", event: "task.created", requestHeaders: { Authorization: "Bearer globex-hook-token-77c1", "Content-Type": "application/json" }, requestBody: "{\"taskId\":\"tsk_g1\"}", responseStatus: 200 });
+
+  boardRepo.insert({ id: "brd_a1", orgId: "org_acme", projectId: "prj_acme", slug: "acme-roadmap", published: true });
+  boardRepo.insert({ id: "brd_g1", orgId: "org_globex", projectId: "prj_globex", slug: "globex-fleet", published: false });
+//@FILLER_SEED
+}

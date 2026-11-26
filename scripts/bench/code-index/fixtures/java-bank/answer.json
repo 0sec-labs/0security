@@ -3,7 +3,7 @@
   "skill": null,
   "items": [
     { "id": "jb-account-idor", "path": "src/main/java/bench/bank/AccountController.java", "startLine": 24, "endLine": 27, "category": "authz", "description": "account read by id with no ownership check (the statement route right below calls assertOwns)" },
-    { "id": "jb-approve-self", "path": "src/main/java/bench/bank/TransferController.java", "startLine": 29, "endLine": 33, "category": ["authz", "business-logic"], "description": "any caller, including the person who created the transfer, can approve a pending transfer: no maker-checker separation and no role check", "alsoAt": [{ "path": "src/main/java/bench/bank/TransferService.java", "startLine": 28, "endLine": 35 }] },
+    { "id": "jb-approve-self", "path": "src/main/java/bench/bank/TransferController.java", "startLine": 29, "endLine": 33, "category": ["authz", "business-logic"], "description": "any caller, including the person who created the transfer, can approve a pending transfer: no maker-checker separation and no role check", "alsoAt": [{ "path": "src/main/java/bench/bank/TransferService.java", "startLine": 28, "endLine": 32 }] },
     { "id": "jb-report-export", "path": "src/main/java/bench/bank/AdminReportController.java", "startLine": 17, "endLine": 20, "category": "authz", "description": "/admin/reports export of every transfer without the @PreAuthorize hasRole('ADMIN') that AdminController has" },
     { "id": "jb-reset-confirm", "path": "src/main/java/bench/bank/PasswordResetController.java", "startLine": 28, "endLine": 37, "category": ["authn", "authz", "business-logic"], "description": "reset confirmation takes the customer id from the request body instead of the token's owner, so any valid token resets any customer's password" }
   ],

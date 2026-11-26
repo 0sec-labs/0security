@@ -1,6 +1,26 @@
 // Pure matching of scan findings against a fixture's answer key. No I/O.
 export const LINE_TOLERANCE = 5;
 export const DECOY_TOLERANCE = 2;
+// Strict oracle (hard benchmark): an item with `oracle` is credited only when the finding sits within `lineSlack` lines
+// (default ORACLE_SLACK) of the item or one of its `alsoAt` spots, belongs to one of the item's families, AND its title or
+// description matches one of the item's `oracle.mention` patterns (the route, entity or sink the bug is about). Proximity
+// alone never credits it, so a finding about the neighbouring route cannot be credited to this one.
+export const ORACLE_SLACK = 3;
+// Families that count as a claim about access control or business rules in a file known to be correct.
+const CLEAN_FAMILIES = ["authz", "authn", "business-logic", "mass-assignment"];
+
+const mentionCache = new Map();
+function mentionRegex(source) {
+  if (!mentionCache.has(source)) mentionCache.set(source, new RegExp(source, "i"));
+  return mentionCache.get(source);
+}
+/** True when the item has no oracle, or the finding's title/description matches one of its mention patterns. */
+export function mentions(item, finding) {
+  const list = item.oracle?.mention;
+  if (!list?.length) return true;
+  const text = `${finding.title ?? ""}\n${finding.description ?? ""}`;
+  return list.some((source) => mentionRegex(source).test(text));
+}
 
 // Category families: an answer item matches a finding when the finding belongs to the item's family.
 // A finding can belong to several (a hardcoded key is both a secret and, often, filed as weak crypto).
@@ -125,8 +145,8 @@ export function scoreFindings(answer, findings, { tolerance = LINE_TOLERANCE } =
     // An item may name other places the same flaw shows (`alsoAt`): the sink in a helper file, the route that reaches it.
     const spots = (item) => [item, ...(item.alsoAt ?? [])];
     return items
-      .map((item, index) => ({ index, distance: itemCategories(item).some((c) => families[i].has(c)) ? Math.min(...spots(item).map((s) => (samePath(w.path, s.path) ? lineDistance(w.start, w.end, s.startLine, s.endLine) : Infinity))) : Infinity }))
-      .filter((c) => c.distance <= tolerance)
+      .map((item, index) => ({ index, tol: item.oracle ? item.oracle.lineSlack ?? ORACLE_SLACK : tolerance, distance: itemCategories(item).some((c) => families[i].has(c)) && mentions(item, findings[i]) ? Math.min(...spots(item).map((s) => (samePath(w.path, s.path) ? lineDistance(w.start, w.end, s.startLine, s.endLine) : Infinity))) : Infinity }))
+      .filter((c) => c.distance <= c.tol)
       .sort((a, b) => a.distance - b.distance)
       .map((c) => c.index);
   });
@@ -143,16 +163,21 @@ export function scoreFindings(answer, findings, { tolerance = LINE_TOLERANCE } =
   const credited = new Set(owner.filter((f) => f !== -1));
   const label = (f) => findings[f].id ?? findings[f].title;
   const decoyHits = [];
+  const cleanHits = [];
   const unmatched = [];
   const falsePositives = [];
   findings.forEach((finding, f) => {
     // A duplicate of an item another finding already credits is neither noise nor a miss.
     if (credited.has(f) || candidates[f].length) return;
     const w = where[f];
-    const decoy = w && decoys.find((d) => samePath(w.path, d.path) && lineDistance(w.start, w.end, d.startLine, d.endLine) <= DECOY_TOLERANCE);
+    // A decoy that names `category` is hit only by a finding of that family; one that does not is hit by position alone.
+    const decoy = w && decoys.find((d) => samePath(w.path, d.path) && lineDistance(w.start, w.end, d.startLine, d.endLine) <= DECOY_TOLERANCE && (!d.category || itemCategories(d).some((c) => families[f].has(c))));
+    // Files verified correct by construction (`cleanPaths`): an authorization-class finding there is a false positive.
+    const clean = !decoy && w && (answer.cleanPaths ?? []).some((p) => samePath(w.path, p)) && CLEAN_FAMILIES.some((c) => families[f].has(c));
     if (decoy) decoyHits.push({ finding: label(f), decoy: decoy.id });
+    else if (clean) cleanHits.push({ finding: label(f), path: w.path });
     else unmatched.push({ finding: label(f), title: finding.title, located: Boolean(w) });
-    if (answer.clean || decoy) falsePositives.push(label(f));
+    if (answer.clean || decoy || clean) falsePositives.push(label(f));
   });
   if (answer.clean) for (let f = 0; f < findings.length; f++) if (credited.has(f) || candidates[f].length) falsePositives.push(label(f));
   // Findings that sit on an item (path and lines agree) but whose label names no family of it. They are not credited;
@@ -177,6 +202,7 @@ export function scoreFindings(answer, findings, { tolerance = LINE_TOLERANCE } =
     findings: findings.length,
     falsePositives: falsePositives.length,
     decoyHits,
+    cleanHits,
     unmatched,
     nearMisses,
   };
@@ -219,6 +245,12 @@ export function validateAnswer(answer, { fileLines } = {}) {
   for (const item of answer.items ?? []) {
     for (const c of itemCategories(item)) if (!FAMILIES.includes(c)) problems.push(`${item.id}: unknown category ${c} (known: ${FAMILIES.join(", ")})`);
     if (!item.description) problems.push(`${item.id}: missing description`);
+    for (const source of item.oracle?.mention ?? []) { try { new RegExp(source, "i"); } catch { problems.push(`${item.id}: bad oracle.mention pattern ${source}`); } }
+    if (item.oracle && !item.oracle.mention?.length) problems.push(`${item.id}: oracle needs at least one mention pattern`);
+  }
+  for (const decoy of answer.decoys ?? []) for (const c of decoy.category === undefined ? [] : itemCategories(decoy)) if (!FAMILIES.includes(c)) problems.push(`${decoy.id}: unknown category ${c}`);
+  for (const p of answer.cleanPaths ?? []) {
+    if (fileLines && fileLines[p] === undefined) problems.push(`cleanPaths: file ${p} not found`);
   }
   return problems;
 }
