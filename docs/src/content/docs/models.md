@@ -211,6 +211,8 @@ env ZERO_SELECTED_PROVIDER=bedrock \
 
 `scan`, `findings fix`, `findings verify` and the other model commands send no model of their own when `ZERO_MODEL`, `--provider` or a pinned provider other than OpenAI is set. The engine picks the model from your settings. Against an engine you reach with `--engine-url` or `--computer`, set `ZERO_MODEL` on that engine or pass `--model`.
 
+0 prices Anthropic Claude and Amazon Nova model IDs at the on-demand rate of the model inside the ID. The model picker shows that rate and the cost limit uses it. Regional inference profiles can cost more, so treat the figure as an estimate. Other Bedrock models show an unknown rate.
+
 The IAM policy needs two kinds of resource when the model ID is an inference profile (the default is one). Allow `bedrock:InvokeModel` and `bedrock:InvokeModelWithResponseStream` on the profile and on the foundation model behind it:
 
 ```json

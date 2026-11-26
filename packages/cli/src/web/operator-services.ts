@@ -15,7 +15,7 @@ import {
 import { maybeLoadCodexAuth } from "../codex-auth.js";
 import { PROVIDERS, isRemovedProviderId, providerStates } from "../state/provider-status.js";
 import { createPreferredConsoleRuntime, saveAppliedAccessProgram, saveAppliedModelPreference } from "../state/model-preference.js";
-import { buildFullModelCatalog } from "../state/model-catalog.js";
+import { bedrockPriceLabel, buildFullModelCatalog } from "../state/model-catalog.js";
 import { discoverConnectionModels } from "../state/available-models.js";
 import { ConnectionHealthMonitor, HEALTH_TIMEOUT_MS, connectionFingerprint, probeProviderKey, type ConnectionHealth, type HealthState } from "./connection-health.js";
 
@@ -574,7 +574,7 @@ export class WebOperatorServices {
     const rows = discovered.models.map(model => ({
       id: model.id, provider: model.provider,
       enabled: !isModelDisabled(disabledByProvider.get(model.provider) ?? disabledByProvider.set(model.provider, disabledModelsFor(model.provider, accountStore)).get(model.provider)!, model.id),
-      price: model.provider === "bedrock" ? "Unknown rate" : model.provider === "chatgpt-plan" ? "Shared ChatGPT allowance" : model.provider === "chatgpt-codex" ? "Included in subscription" : metadata.get(`${model.provider}/${model.id}`)?.price ?? "Unknown rate",
+      price: model.provider === "bedrock" ? bedrockPriceLabel(model.id) : model.provider === "chatgpt-plan" ? "Shared ChatGPT allowance" : model.provider === "chatgpt-codex" ? "Included in subscription" : metadata.get(`${model.provider}/${model.id}`)?.price ?? "Unknown rate",
       contextWindowTokens: model.contextTokens ?? resolveContextLimit({ modelId: model.id, providerId: model.provider })?.tokens ?? null,
       source: model.provider === "bedrock" ? "configured" as const : model.provider !== "chatgpt-plan" && model.source === "catalog" ? "public-catalog" as const : "account" as const,
     }));

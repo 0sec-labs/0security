@@ -17,7 +17,7 @@ beforeEach(() => {
 });
 afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); reloadSettings(); rmSync(home, { recursive: true, force: true }); });
 describe("native Bedrock browser configuration", () => {
-  it("saves only non-secret configuration and restores an unpriced picker row without AWS requests", async () => {
+  it("saves only non-secret configuration and restores a priced picker row without AWS requests", async () => {
     const fetcher = vi.spyOn(globalThis, "fetch").mockImplementation(async () => { throw new Error("must stay offline"); });
     const service = new WebOperatorServices();
     const model = "eu.anthropic.claude-sonnet-4-5-20250929-v1:0";
@@ -27,7 +27,7 @@ describe("native Bedrock browser configuration", () => {
     const provider = (saved!.data as any).providers.find((item: any) => item.id === "bedrock");
     expect(provider).toMatchObject({ methods: ["aws-chain"], configured: true, source: "aws-credential-chain", health: { state: "unknown", checking: false }, configuration: { region: "eu-central-1", model } });
     const inventory = await service.handle("/api/console/models", "GET", undefined, new URLSearchParams("providerId=bedrock&fresh=1"));
-    expect(inventory?.data).toMatchObject({ models: [{ id: model, provider: "bedrock", price: "Unknown rate", source: "configured" }], diagnostics: [] });
+    expect(inventory?.data).toMatchObject({ models: [{ id: model, provider: "bedrock", price: "$3/15 per M", source: "configured" }], diagnostics: [] });
     const configuredRuntime = await createWebConsoleRuntime({ providerId: "bedrock", singleModel: true });
     expect(configuredRuntime.runtime.resolvedModel()).toBe(model);
     const selected = await service.handle("/api/console/models/preference", "PATCH", { providerId: "bedrock", model }, new URLSearchParams());
