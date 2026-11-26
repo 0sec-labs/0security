@@ -514,13 +514,26 @@ During the 30 days of grace, nothing changes. After that, a role that is not own
 
 With an enterprise license that includes `scim`, your identity provider can create, update and disable accounts through SCIM 2.0. SCIM needs server mode and a team workspace. The endpoint is `/scim/v2` on your public address.
 
-Only an owner can make, list or revoke SCIM tokens. A role with `users.manage` is not enough, because a token provisions accounts and sets their roles. Make one token for each identity provider. The token is shown once.
+Only an owner can make, list or revoke SCIM tokens. A role with `users.manage` is not enough, because a token provisions accounts and sets their roles. Make one token for each identity provider.
+
+To make a token in the web console:
+
+1. Sign in as an owner and open **Members**.
+2. In the SCIM provisioning section, copy the SCIM base URL into your identity provider.
+3. Enter a name and select **Create token**.
+4. Select **Copy token** and paste it into the provider as the bearer token.
+
+The console shows the token once. 0 keeps only a hash, so you cannot see it again. If you lose it, revoke the token and make a new one. The list shows each token's name, creation date, last use and status, never the token. Select **Revoke** and confirm to stop a provider.
+
+Other roles do not see this section. Without a `scim` license, the section shows how to get one and still lets you list and revoke tokens.
+
+You can also use the API:
 
 ```bash
 curl -X POST "$URL/api/team/scim-tokens" -H "x-0-control-token: $TOKEN" -H "content-type: application/json" -d '{"name":"okta"}'
 ```
 
-Give the provider the base URL `https://your-host/scim/v2` and the token as a bearer token. List tokens with `GET /api/team/scim-tokens` and revoke one with `DELETE /api/team/scim-tokens/<id>`.
+The base URL is `https://your-host/scim/v2`. List tokens with `GET /api/team/scim-tokens` and revoke one with `DELETE /api/team/scim-tokens/<id>`.
 
 SCIM manages the accounts it creates and nothing else. Accounts from the team file or added by an owner are not listed, read or changed through SCIM. A new account has no password. It signs in through OIDC. The first OIDC sign-in links the account only when the ID token has `email_verified` set to true and its `email` matches the account's `userName` or email, ignoring letter case, and only one unlinked account matches. Nothing else links an account: not an unverified email, not `preferred_username`, not an account that already belongs to another subject. After the link, 0 matches the account by the subject and issuer only. A change of group in SCIM that would leave nobody able to manage users is refused with a 409 and nothing changes.
 

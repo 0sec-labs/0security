@@ -104,11 +104,12 @@ export async function handleTeamRequest(req: IncomingMessage, url: URL, auth: Te
     // No other role is enough, whatever permissions it holds (users.manage included).
     if (actor.role !== "owner") throw new TeamAuthError("Only workspace owners can manage SCIM tokens.", 403);
     // Making a token is a paid feature. Listing and revoking tokens always work, so a lapsed license never keeps one alive.
+    // The list also says whether a new token can be made (null) or why not, so the console can show the same notice without guessing.
     if (method === "POST") { const unavailable = requireFeature("scim"); if (unavailable) throw new TeamAuthError(unavailable, 403); }
     const store = auth.scim;
     if (!store) throw new TeamAuthError("SCIM needs the account database.", 409);
     const who = auditActor({ engineRequest: false, teamEnabled: true, displayName: actor.displayName });
-    if (!tokenRoute[1] && method === "GET") return { status: 200, data: { tokens: store.listTokens() } };
+    if (!tokenRoute[1] && method === "GET") return { status: 200, data: { tokens: store.listTokens(), unavailable: requireFeature("scim") } };
     if (!tokenRoute[1] && method === "POST") {
       const parsed = z.object({ name: z.string().trim().min(1).max(80) }).strict().safeParse(await readBody());
       if (!parsed.success) throw new TeamAuthError("Give the token a name of up to 80 characters.", 400);
