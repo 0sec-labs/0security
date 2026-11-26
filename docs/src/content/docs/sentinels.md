@@ -65,6 +65,27 @@ Scheduled and polled turns are autonomous, so the Sentinel must be active and re
 
 A Sentinel has shell access, like a thread. An optional sandbox (SmolVM or Docker) limits it, as does one global setting: **Ask before running commands** under **Settings → Helpers**, off by default. When it is on, a Sentinel needs your approval for its commands, as in threads. See [Configuration](/configuration/#ask-before-running-commands).
 
+### Spend limits
+
+A Sentinel can have a daily and a monthly spend limit, in USD. Once it has spent that much in the UTC day or month, new unattended runs are refused.
+
+```bash
+0security sentinels set SENTINEL_ID --daily-budget 5 --monthly-budget 60
+0security sentinels set SENTINEL_ID --daily-budget none
+```
+
+A trigger can also have a daily and a monthly limit, which count only the runs that trigger started:
+
+```bash
+0security sentinels triggers add SENTINEL_ID --kind schedule --frequency daily --at 03:00 --daily-budget 2
+```
+
+A refused run is recorded in the Sentinel's activity with the reason, for example `Budget reached: $5 of the $5 daily limit for this Sentinel is spent`, and the trigger shows it. A pull request or event that was refused is offered again when the limit resets. A schedule runs at its next time. A turn that waited in the queue is checked again when it starts.
+
+Limits apply to runs that triggers start. Your own messages and manual runs are never refused, but their cost counts toward the daily and monthly spend. A limit is checked before a run starts, so a run that starts just under the limit can pass it. Use the budget per automated run to cap that. While a Sentinel with a limit has a run in progress, its other triggers wait until it ends.
+
+**Settings → Usage** lists the cost of Sentinel runs by Sentinel, model and week for the last 12 weeks, and each Sentinel's spend today and this month against its limits.
+
 ## Triggers
 
 | Trigger | Behavior |
@@ -396,6 +417,8 @@ automations:
           branch: main
           conclusion: failure
 ```
+
+A Sentinel takes `dailyBudgetUsd` and `monthlyBudgetUsd`, and a trigger takes the same two. Changing a limit updates the Sentinel or trigger in place and does not turn the trigger off.
 
 A trigger takes the settings for its kind: `schedule`, `github` (pull requests), `bitbucket` (pull requests), `release`, `check` or `webhook`. The fields are the ones in the JSON examples above. Unknown fields and values outside the limits are refused.
 

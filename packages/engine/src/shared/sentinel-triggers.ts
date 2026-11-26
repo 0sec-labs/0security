@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { DAY_MS } from "./units.js";
+import { budgetCapSchema } from "./sentinel-budget.js";
 
 /**
  * Triggers for Sentinel-owned automations. A trigger starts a run of one automation (workflow definition)
@@ -169,6 +170,9 @@ export const SentinelTriggerCreateSchema = z.strictObject({
   check: SentinelCheckConfigSchema.optional(),
   webhook: SentinelWebhookConfigSchema.optional(),
   bitbucket: SentinelBitbucketPrConfigSchema.optional(),
+  /** Most this trigger may spend per UTC day or month, in USD. Absent or null: no limit. */
+  dailyBudgetUsd: budgetCapSchema.nullable().optional(),
+  monthlyBudgetUsd: budgetCapSchema.nullable().optional(),
   runBudgetUsd: z.number().finite().min(0.01).max(100).optional(),
   runModel: z.object({ providerId: z.string().trim().min(1).max(128), model: z.string().trim().min(1).max(256), reasoning: z.string().trim().min(1).max(32).optional() }).strict().optional(),
   enabled: z.boolean().default(false),
@@ -176,6 +180,8 @@ export const SentinelTriggerCreateSchema = z.strictObject({
 export type SentinelTriggerCreate = z.output<typeof SentinelTriggerCreateSchema>;
 
 export interface SentinelTrigger {
+  dailyBudgetUsd?: number;
+  monthlyBudgetUsd?: number;
   runBudgetUsd?: number;
   runModel?: { providerId: string; model: string; reasoning?: string };
   id: string;

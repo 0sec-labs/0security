@@ -102,7 +102,7 @@ export type SummaryTarget = { repo: string; headSha: string; fork: boolean; sari
 
 export interface SentinelActor { userId: string; displayName: string; role?: "owner" | "editor" | "viewer"; onMissionCreated?: (missionId: string) => void }
 export class SentinelRunError extends Error {
-  constructor(message: string, readonly statusCode: number, readonly kind: "inactive" | "review" | "busy" | "invalid" = "invalid") { super(message); this.name = "SentinelRunError"; }
+  constructor(message: string, readonly statusCode: number, readonly kind: "inactive" | "review" | "busy" | "invalid" | "budget" = "invalid") { super(message); this.name = "SentinelRunError"; }
 }
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error)).slice(0, 4_000);
@@ -777,6 +777,23 @@ export class SentinelRunner {
       if (sentinelNeedsReview(sentinel)) throw new SentinelRunError("Sentinel needs review before it can run on its own.", 409, "review");
     }
     const triggerConfig = options.trigger.triggerId ? this.#store.getTrigger(options.trigger.triggerId) : undefined;
+    if (options.autonomous) {
+      // With a limit set, runs of one Sentinel do not overlap: the spend of a run in flight is not final, so a second one could not be checked against it.
+      const limited = [sentinel.dailyBudgetUsd, sentinel.monthlyBudgetUsd, triggerConfig?.dailyBudgetUsd, triggerConfig?.monthlyBudgetUsd].some(value => typeof value === "number");
+      if (limited && this.#store.listRunningActivations().some(running => running.sentinelId === sentinelId)) throw new SentinelRunError("A run of this Sentinel is still in progress. Its spend limits are checked when it ends.", 409, "busy");
+      // A spend limit that is reached refuses the run. The refusal is one activation, recorded once per cause; a person's own runs are never refused.
+      const refusal = this.#store.budgetRefusal(sentinelId, options.trigger.triggerId, this.#now());
+      if (refusal) {
+        const key = options.idempotencyKey ? `${options.idempotencyKey}:budget` : undefined;
+        if (!key || !this.#store.getTurnByKey(sentinelId, key)) {
+          this.#store.createActivation({
+            sentinelId, sentinelVersion: sentinel.version, trigger: options.trigger, status: "skipped", skills: [...sentinel.skills], error: refusal, finishedAt: isoAt(this.#now()),
+            ...(options.automation ? { automationId: options.automation.id } : {}),
+          }, { ...(options.via ? { via: options.via } : {}), ...(key ? { idempotencyKey: key } : {}) });
+        }
+        throw new SentinelRunError(refusal, 409, "budget");
+      }
+    }
     const effective = triggerConfig?.runModel ? { ...sentinel, model: triggerConfig.runModel } : sentinel;
     const cap = Math.min(sentinel.runBudgetUsd ?? Infinity, triggerConfig?.runBudgetUsd ?? Infinity);
     if (Number.isFinite(cap) && (!this.#missions.cancel || !this.#missions.subscribe || !this.#missions.usage)) throw new SentinelRunError("This runtime cannot enforce a run budget.", 409);

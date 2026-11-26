@@ -105,7 +105,7 @@ export async function runBitbucketTrigger(deps: BitbucketRunDeps, delivered?: De
       return store.createActivation({
         sentinelId: sentinel.id, sentinelVersion: sentinel.version, status, skills: [...sentinel.skills], automationId: deps.automationId,
         trigger: { kind: "bitbucket-pr", automationId: deps.automationId, triggerId: trigger.id, event: info },
-        ...(extra.error ? { error: extra.error } : {}), ...(extra.note ? { note: extra.note } : {}), ...(status !== "running" ? { finishedAt: isoAt(deps.now()) } : {}),
+        ...(extra.error ? { error: extra.error } : {}), ...(extra.note ? { note: extra.note } : {}), startedAt: isoAt(deps.now()), ...(status !== "running" ? { finishedAt: isoAt(deps.now()) } : {}),
       }, { via: deps.via, idempotencyKey });
     };
     if (skip) {
@@ -114,6 +114,13 @@ export async function runBitbucketTrigger(deps: BitbucketRunDeps, delivered?: De
       continue;
     }
     if (store.getTurnByKey(sentinel.id, key)) { handled(); continue; }
+    // A spend limit that is reached refuses the review. It is recorded once per pull request commit and tried again after the limit resets.
+    const refusal = store.budgetRefusal(sentinel.id, trigger.id, deps.now());
+    if (refusal) {
+      if (!store.getTurnByKey(sentinel.id, `${key}:budget`)) record("skipped", { error: refusal }, `${key}:budget`);
+      lastStatus = "budget"; lastError = refusal;
+      break;
+    }
     if (reviews >= MAX_BITBUCKET_REVIEWS_PER_POLL) break;
     reviews += 1;
     const started = record("running", {}, key);
@@ -138,7 +145,7 @@ export async function runBitbucketTrigger(deps: BitbucketRunDeps, delivered?: De
     }
     handled();
     if (outcome.status === "skipped") { store.updateActivation(started.id, { status: "skipped", finishedAt: isoAt(deps.now()) }); continue; }
-    store.updateActivation(started.id, { status: "completed", note: oneLine(describeOutcome(outcome), 400), finishedAt: isoAt(deps.now()) });
+    store.updateActivation(started.id, { status: "completed", note: oneLine(describeOutcome(outcome), 400), ...(outcome.status === "reviewed" && outcome.costUsd !== undefined ? { costUsd: outcome.costUsd } : {}), finishedAt: isoAt(deps.now()) });
     if (lastStatus !== "error") lastStatus = "reviewed";
   }
   return { ...(remember ? { cursor: seen } : {}), lastStatus, ...(lastError ? { lastError } : {}) };

@@ -2040,14 +2040,18 @@ Usage: 0security sentinels set [options] <id>
 Create a Sentinel (--create), or change one: name, purpose, state, triggers, files
 
 Options:
-  --name <name>      Name
-  --purpose <text>   One-line purpose
-  --file <path>      Patch JSON object
-  --version <n>      Reviewed version (default: the current one)
-  --state <state>    active, paused, acknowledged, archived or deleted
-  --db-path <path>   Control database (default: the user database)
-  --format <format>  Output: text or json (choices: "text", "json")
-  -h, --help         display help for command
+  --name <name>           Name
+  --purpose <text>        One-line purpose
+  --file <path>           Patch JSON object
+  --version <n>           Reviewed version (default: the current one)
+  --daily-budget <usd>    Most the Sentinel may spend per UTC day; runs are refused after that (none
+                          removes the limit)
+  --monthly-budget <usd>  Most the Sentinel may spend per UTC month; runs are refused after that
+                          (none removes the limit)
+  --state <state>         active, paused, acknowledged, archived or deleted
+  --db-path <path>        Control database (default: the user database)
+  --format <format>       Output: text or json (choices: "text", "json")
+  -h, --help              display help for command
 
 ### 0security sentinels show (hidden)
 Usage: 0security sentinels show [options] <id>
@@ -2131,6 +2135,9 @@ Options:
   --max-files <n>          bitbucket-pr: skip a pull request that changes more files than this
                            (default: 50)
   --budget <usd>           bitbucket-pr: spend limit for one pull request scan (default: 2)
+  --daily-budget <usd>     Most this trigger may spend per UTC day; its runs are refused after that
+  --monthly-budget <usd>   Most this trigger may spend per UTC month; its runs are refused after
+                           that
   --db-path <path>         Control database (default: the user database)
   --format <format>        Output: text or json (choices: "text", "json")
   -h, --help               display help for command

@@ -10,21 +10,23 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { extname, join } from "node:path";
 import { parseDocument, stringify } from "yaml";
 import { z } from "zod";
-import { SentinelBitbucketPrConfigSchema, SentinelCheckConfigSchema, SentinelGithubPrConfigSchema, SentinelReleaseConfigSchema, SentinelScheduleSchema, SentinelWebhookConfigSchema, createSecurityWorkflowTemplate, type Sentinel } from "@0/engine/shared";
+import { budgetCapSchema, SentinelBitbucketPrConfigSchema, SentinelCheckConfigSchema, SentinelGithubPrConfigSchema, SentinelReleaseConfigSchema, SentinelScheduleSchema, SentinelWebhookConfigSchema, createSecurityWorkflowTemplate, type Sentinel } from "@0/engine/shared";
 import type { SecurityWorkflowStore, SentinelStore } from "@0/engine/storage";
 
 const MAX_FILES = 50;
 const MAX_FILE_BYTES = 256 * 1024;
 const SYNC_FILE = "source.json";
 
+/** Spend limits of one trigger, in USD per UTC day or month. */
+const triggerLimits = { dailyBudgetUsd: budgetCapSchema.optional(), monthlyBudgetUsd: budgetCapSchema.optional() };
 const TriggerSchema = z.discriminatedUnion("kind", [
-  z.strictObject({ kind: z.literal("manual") }),
-  z.strictObject({ kind: z.literal("schedule"), schedule: SentinelScheduleSchema }),
-  z.strictObject({ kind: z.literal("github-pr"), github: SentinelGithubPrConfigSchema }),
-  z.strictObject({ kind: z.literal("bitbucket-pr"), bitbucket: SentinelBitbucketPrConfigSchema }),
-  z.strictObject({ kind: z.literal("release"), release: SentinelReleaseConfigSchema }),
-  z.strictObject({ kind: z.literal("check-completed"), check: SentinelCheckConfigSchema }),
-  z.strictObject({ kind: z.literal("webhook"), webhook: SentinelWebhookConfigSchema }),
+  z.strictObject({ kind: z.literal("manual"), ...triggerLimits }),
+  z.strictObject({ kind: z.literal("schedule"), schedule: SentinelScheduleSchema, ...triggerLimits }),
+  z.strictObject({ kind: z.literal("github-pr"), github: SentinelGithubPrConfigSchema, ...triggerLimits }),
+  z.strictObject({ kind: z.literal("bitbucket-pr"), bitbucket: SentinelBitbucketPrConfigSchema, ...triggerLimits }),
+  z.strictObject({ kind: z.literal("release"), release: SentinelReleaseConfigSchema, ...triggerLimits }),
+  z.strictObject({ kind: z.literal("check-completed"), check: SentinelCheckConfigSchema, ...triggerLimits }),
+  z.strictObject({ kind: z.literal("webhook"), webhook: SentinelWebhookConfigSchema, ...triggerLimits }),
 ]);
 const AutomationSchema = z.strictObject({
   name: z.string().trim().min(1).max(120),
@@ -40,6 +42,9 @@ export const SentinelDefinitionSchema = z.strictObject({
   skills: z.array(z.string().trim().min(1).max(384)).max(64).optional(),
   model: z.strictObject({ providerId: z.string().trim().min(1).max(128), model: z.string().trim().min(1).max(256), reasoning: z.string().trim().min(1).max(32).optional() }).nullable().optional(),
   folder: z.string().trim().min(1).max(4096).nullable().optional(),
+  /** Spend limits in USD per UTC day and per UTC month. Null removes a limit. */
+  dailyBudgetUsd: budgetCapSchema.nullable().optional(),
+  monthlyBudgetUsd: budgetCapSchema.nullable().optional(),
   automations: z.array(AutomationSchema).max(20).default([]),
 });
 export type SentinelDefinition = z.output<typeof SentinelDefinitionSchema>;
@@ -78,7 +83,10 @@ export interface SyncChange { sentinel: string; action: "create" | "update" | "u
 export interface SyncStores { sentinels: SentinelStore; workflows: SecurityWorkflowStore }
 
 const canonical = (value: unknown): string => JSON.stringify(value, (_key, item) => item && typeof item === "object" && !Array.isArray(item) ? Object.fromEntries(Object.entries(item as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : 1))) : item);
-const triggerShape = (trigger: { kind: string; schedule?: unknown; github?: unknown; release?: unknown; check?: unknown; webhook?: unknown; bitbucket?: unknown }) => canonical({ kind: trigger.kind, ...(trigger.schedule ? { schedule: trigger.schedule } : {}), ...(trigger.github ? { github: trigger.github } : {}), ...(trigger.release ? { release: trigger.release } : {}), ...(trigger.check ? { check: trigger.check } : {}), ...(trigger.webhook ? { webhook: trigger.webhook } : {}), ...(trigger.bitbucket ? { bitbucket: trigger.bitbucket } : {}) });
+const triggerShape = (trigger: { kind: string; dailyBudgetUsd?: number | null | undefined; monthlyBudgetUsd?: number | null | undefined; schedule?: unknown; github?: unknown; release?: unknown; check?: unknown; webhook?: unknown; bitbucket?: unknown }) => canonical({ kind: trigger.kind, ...(trigger.dailyBudgetUsd ? { dailyBudgetUsd: trigger.dailyBudgetUsd } : {}), ...(trigger.monthlyBudgetUsd ? { monthlyBudgetUsd: trigger.monthlyBudgetUsd } : {}), ...(trigger.schedule ? { schedule: trigger.schedule } : {}), ...(trigger.github ? { github: trigger.github } : {}), ...(trigger.release ? { release: trigger.release } : {}), ...(trigger.check ? { check: trigger.check } : {}), ...(trigger.webhook ? { webhook: trigger.webhook } : {}), ...(trigger.bitbucket ? { bitbucket: trigger.bitbucket } : {}) });
+
+/** The trigger without its spend limits: two triggers with this shape are the same trigger, and only the limits are edited in place. */
+const triggerIdentity = (trigger: Parameters<typeof triggerShape>[0]) => triggerShape({ ...trigger, dailyBudgetUsd: undefined, monthlyBudgetUsd: undefined });
 
 function diffSentinel(current: Sentinel, instructions: string | undefined, charter: string | undefined, definition: SentinelDefinition): string[] {
   const changes: string[] = [];
@@ -86,6 +94,9 @@ function diffSentinel(current: Sentinel, instructions: string | undefined, chart
   if (definition.skills !== undefined && canonical(definition.skills) !== canonical(current.skills)) changes.push("skills");
   if (definition.model !== undefined && canonical(definition.model) !== canonical(current.model)) changes.push("model");
   if (definition.folder !== undefined && definition.folder !== current.folder) changes.push("folder");
+  for (const [key, label] of [["dailyBudgetUsd", "daily budget"], ["monthlyBudgetUsd", "monthly budget"]] as const) {
+    if (definition[key] !== undefined && definition[key] !== (current[key] ?? null)) changes.push(label);
+  }
   if (instructions !== undefined && instructions.trim() !== (charter ?? "").trim()) changes.push("instructions");
   return changes;
 }
@@ -129,6 +140,8 @@ export function applySync(definitions: LoadedDefinition[], stores: SyncStores, o
       ...(definition.skills !== undefined ? { skills: definition.skills } : {}),
       ...(definition.model !== undefined ? { model: definition.model } : {}),
       ...(definition.folder !== undefined ? { folder: definition.folder } : {}),
+      ...(definition.dailyBudgetUsd !== undefined ? { dailyBudgetUsd: definition.dailyBudgetUsd } : {}),
+      ...(definition.monthlyBudgetUsd !== undefined ? { monthlyBudgetUsd: definition.monthlyBudgetUsd } : {}),
     };
     let sentinel = stores.sentinels.list().find(candidate => candidate.name === definition.name && candidate.status !== "archived");
     if (!sentinel) {
@@ -151,10 +164,14 @@ export function applySync(definitions: LoadedDefinition[], stores: SyncStores, o
         workflow = stores.workflows.save({ ...createSecurityWorkflowTemplate(automation.template, { target: automation.target ?? "." }), name: automation.name, ownerSentinelId: sentinel.id, runIn: automation.runIn ?? "new-mission" });
       }
       const have = stores.sentinels.listTriggers(sentinel.id).filter(trigger => trigger.automationId === workflow!.id);
-      const want = new Map(automation.triggers.map(trigger => [triggerShape(trigger), trigger]));
+      const want = new Map(automation.triggers.map(trigger => [triggerIdentity(trigger), trigger]));
       for (const trigger of have) {
-        if (want.has(triggerShape(trigger))) want.delete(triggerShape(trigger));
-        else stores.sentinels.deleteTrigger(trigger.id);
+        const wanted = want.get(triggerIdentity(trigger));
+        if (!wanted) { stores.sentinels.deleteTrigger(trigger.id); continue; }
+        want.delete(triggerIdentity(trigger));
+        if ((wanted.dailyBudgetUsd ?? null) !== (trigger.dailyBudgetUsd ?? null) || (wanted.monthlyBudgetUsd ?? null) !== (trigger.monthlyBudgetUsd ?? null)) {
+          stores.sentinels.updateTrigger(trigger.id, { dailyBudgetUsd: wanted.dailyBudgetUsd ?? null, monthlyBudgetUsd: wanted.monthlyBudgetUsd ?? null });
+        }
       }
       for (const trigger of want.values()) stores.sentinels.createTrigger(sentinel.id, { automationId: workflow.id, ...trigger, enabled: options.enable === true });
     }
@@ -172,11 +189,12 @@ export function exportDefinition(sentinel: Sentinel, stores: SyncStores): string
     name: sentinel.name, ...(sentinel.mission ? { mission: sentinel.mission } : {}),
     instructions: stores.sentinels.getFile(sentinel.id, "AGENTS.md")?.content ?? "",
     skills: sentinel.skills, ...(sentinel.model ? { model: sentinel.model } : {}), ...(sentinel.folder ? { folder: sentinel.folder } : {}),
+    ...(sentinel.dailyBudgetUsd ? { dailyBudgetUsd: sentinel.dailyBudgetUsd } : {}), ...(sentinel.monthlyBudgetUsd ? { monthlyBudgetUsd: sentinel.monthlyBudgetUsd } : {}),
     automations: owned.flatMap(workflow => {
       const template = (workflow as { template?: { id?: string } }).template?.id;
       if (!template) return [];
       return [{ name: workflow.name, template, ...(workflow.runIn ? { runIn: workflow.runIn as "new-mission" | "sentinel-home" } : {}), ...((workflow as { target?: string }).target ? { target: (workflow as { target?: string }).target! } : {}),
-        triggers: triggers.filter(trigger => trigger.automationId === workflow.id).map(trigger => TriggerSchema.parse({ kind: trigger.kind, ...(trigger.schedule ? { schedule: trigger.schedule } : {}), ...(trigger.github ? { github: trigger.github } : {}), ...(trigger.release ? { release: trigger.release } : {}), ...(trigger.check ? { check: trigger.check } : {}), ...(trigger.webhook ? { webhook: trigger.webhook } : {}), ...(trigger.bitbucket ? { bitbucket: trigger.bitbucket } : {}) })) }];
+        triggers: triggers.filter(trigger => trigger.automationId === workflow.id).map(trigger => TriggerSchema.parse({ kind: trigger.kind, ...(trigger.dailyBudgetUsd ? { dailyBudgetUsd: trigger.dailyBudgetUsd } : {}), ...(trigger.monthlyBudgetUsd ? { monthlyBudgetUsd: trigger.monthlyBudgetUsd } : {}), ...(trigger.schedule ? { schedule: trigger.schedule } : {}), ...(trigger.github ? { github: trigger.github } : {}), ...(trigger.release ? { release: trigger.release } : {}), ...(trigger.check ? { check: trigger.check } : {}), ...(trigger.webhook ? { webhook: trigger.webhook } : {}), ...(trigger.bitbucket ? { bitbucket: trigger.bitbucket } : {}) })) }];
     }),
   };
   return stringify(definition, { lineWidth: 100 });

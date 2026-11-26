@@ -5,7 +5,7 @@ import { useBackendApi } from "@/api";
 import { queryKeys } from "@/queries";
 import {
   SENTINEL_RUN_APPROVAL, SENTINEL_TRIGGER_APPROVAL, SentinelApiError,
-  type AgentTurn, type Sentinel, type SentinelActivation, type SentinelAutomation, type SentinelFile, type SentinelFileEntry, type SentinelFileRevision, type SentinelPreset, type SentinelPresetAutomation, type SentinelSchedule, type SentinelTrigger, type SentinelTriggerKind,
+  type AgentTurn, type Sentinel, type SentinelUsage, type SentinelActivation, type SentinelAutomation, type SentinelFile, type SentinelFileEntry, type SentinelFileRevision, type SentinelPreset, type SentinelPresetAutomation, type SentinelSchedule, type SentinelTrigger, type SentinelTriggerKind,
 } from "./model";
 
 type Fetch = (path: string, init?: RequestInit) => Promise<Response>;
@@ -38,6 +38,7 @@ export function createSentinelClient(webFetch: Fetch) {
         throw error;
       }
     },
+    usage: (signal?: AbortSignal) => call<SentinelUsage>("sentinels/usage", { signal }),
     presets: (signal?: AbortSignal) => call<{ presets: SentinelPreset[] }>("sentinel-presets", { signal }).then(data => data.presets),
     get: (sentinelId: string, signal?: AbortSignal) => call<{ sentinel: Sentinel }>(`sentinels/${id(sentinelId)}`, { signal }).then(data => data.sentinel),
     create: (input: Record<string, unknown>) => call<{ sentinel: Sentinel; suggestedAutomations?: SentinelPresetAutomation[] }>("sentinels", body("POST", input)),
@@ -83,6 +84,11 @@ export function useSentinels(options: { enabled?: boolean; poll?: boolean } = {}
 export function useSentinel(sentinelId: string) {
   const { client, backendId } = useSentinelClient();
   return useQuery({ queryKey: queryKeys.sentinels(backendId, "one", sentinelId), queryFn: ({ signal }) => client.get(sentinelId, signal), enabled: Boolean(sentinelId), refetchInterval: 10_000, retry: false });
+}
+/** Spend of the Sentinels by Sentinel, model and week. Absent on a server that predates it (the query errors and the section hides). */
+export function useSentinelUsage() {
+  const { client, backendId } = useSentinelClient();
+  return useQuery({ queryKey: queryKeys.sentinels(backendId, "usage"), queryFn: ({ signal }) => client.usage(signal), refetchInterval: 15_000, retry: false });
 }
 export function useSentinelPresets(enabled = true) {
   const { client, backendId } = useSentinelClient();

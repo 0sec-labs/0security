@@ -4347,6 +4347,8 @@ Change a Sentinel's settings.
 | `--mission <text>` | — |  |
 | `--file <path>` | — | Patch JSON object |
 | `--version <n>` | — | Reviewed version (default: the current one) |
+| `--daily-budget <usd>` | — | Most the Sentinel may spend per UTC day; runs are refused after that (none removes the limit) |
+| `--monthly-budget <usd>` | — | Most the Sentinel may spend per UTC month; runs are refused after that (none removes the limit) |
 | `--state <state>` | — | active, paused, acknowledged, archived or deleted |
 | `--json` | — | Print machine-readable JSON |
 | `--db-path <path>` | — | Control database (default: the user database) |
@@ -4638,6 +4640,8 @@ Add a trigger for an automation the Sentinel owns; disabled unless --enable --ye
 | `--events <list>` | — | bitbucket-pr: opened, updated or opened,updated (default: both) |
 | `--max-files <n>` | — | bitbucket-pr: skip a pull request that changes more files than this (default: 50) |
 | `--budget <usd>` | — | bitbucket-pr: spend limit for one pull request scan (default: 2) |
+| `--daily-budget <usd>` | — | Most this trigger may spend per UTC day; its runs are refused after that |
+| `--monthly-budget <usd>` | — | Most this trigger may spend per UTC month; its runs are refused after that |
 | `--json` | — | Print machine-readable JSON |
 | `--db-path <path>` | — | Control database (default: the user database) |
 | `--format <format>` | — | Output: text or json Choices: text, json. |
