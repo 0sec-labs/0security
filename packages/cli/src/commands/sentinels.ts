@@ -1,6 +1,6 @@
 import { readFile, stat } from "node:fs/promises";
 import { Option, type Command } from "commander";
-import { SENTINEL_STATUSES, SCHEDULE_FREQUENCIES } from "@0/engine/shared";
+import { SENTINEL_STATUSES, SCHEDULE_FREQUENCIES, SENTINEL_RESULTS_MODES } from "@0/engine/shared";
 import { givenAccessOption, noteIgnoredAccessFlags } from "../ignored-access-flags.js";
 import type { ConsoleClient } from "../console-embed-client.js";
 import { registerSentinelsBitbucketCommands } from "./sentinels-bitbucket.js";
@@ -15,7 +15,7 @@ const webhookText = (view: WebhookView): string => !view.serverMode ? "Not avail
     + (view.deliveries?.length ? `\n\n${renderTable(view.deliveries, [{ header: "TIME", value: d => d.at }, { header: "RESULT", value: d => d.result }, { header: "EVENT", value: d => d.event }, { header: "REASON", value: d => d.reason }])}` : "");
 
 interface Sentinel { id: string; name: string; mission?: string; automationIds?: string[]; status: string; version: number; attention?: { needsYou: boolean; reason?: string } }
-interface Trigger { id: string; automationId: string; kind: string; enabled: boolean; version: number; nextFireAt: string | null; summary?: string; lastStatus?: string; bitbucket?: { repo: string; platform: string }; github?: { repo: string; commentOnPr?: boolean; includeForks?: boolean } }
+interface Trigger { id: string; automationId: string; kind: string; enabled: boolean; version: number; nextFireAt: string | null; summary?: string; lastStatus?: string; bitbucket?: { repo: string; platform: string }; github?: { repo: string; commentOnPr?: boolean; includeForks?: boolean; results?: string } }
 interface SentinelFile { path: string; revision: number; content?: string; updatedAt?: string }
 
 async function sentinel(client: ConsoleClient, reference: string): Promise<Sentinel> {
@@ -51,7 +51,7 @@ function scheduleFrom(options: { frequency?: string; every?: string; at?: string
 }
 const triggerTable = (rows: Trigger[]) => renderTable(rows, [
   { header: "ID", value: t => t.id }, { header: "KIND", value: t => t.kind }, { header: "AUTOMATION", value: t => t.automationId },
-  { header: "ENABLED", value: t => (t.enabled ? "yes" : "no") }, { header: "WHEN", value: t => t.summary ?? (t.bitbucket ? t.bitbucket.repo : t.github ? `${t.github.repo}${t.github.commentOnPr ? ", comments on" : ""}${t.github.includeForks ? ", forks" : ""}` : t.nextFireAt) ?? "-" },
+  { header: "ENABLED", value: t => (t.enabled ? "yes" : "no") }, { header: "WHEN", value: t => t.summary ?? (t.bitbucket ? t.bitbucket.repo : t.github ? `${t.github.repo}${t.github.commentOnPr ? ", comments on" : ""}${t.github.includeForks ? ", forks" : ""}${t.github.results && t.github.results !== "off" ? `, results ${t.github.results}` : ""}` : t.nextFireAt) ?? "-" },
 ]);
 
 /** `0 sentinels`: everything the Sentinels page does. Reads and edits work offline; runs need the engine. */
@@ -181,6 +181,7 @@ export function registerSentinelsCommand(program: Command, deps: ConsoleCommandD
     .option("--repo <owner/name>", "github-pr: repository to watch; bitbucket-pr: workspace/repo (Cloud) or PROJECT/repo (Data Center)").option("--base-branch <branch>", "github-pr: only pull requests into this branch")
     .option("--comment", "github-pr: comment on each pull request with one short summary, edited in place on later pushes (default: off)")
     .option("--include-forks", "github-pr: also review pull requests from forks, marked untrusted (default: skipped)")
+    .option("--results <mode>", `github-pr, release, check-completed: send findings back to GitHub: ${SENTINEL_RESULTS_MODES.join(", ")} (default: off). sarif uploads to code scanning; comment posts one pull request comment`)
     .option("--label <text>", "webhook: a name for this webhook (default: webhook)")
     .option("--platform <platform>", "bitbucket-pr: cloud or dc (Data Center)").option("--url <url>", "bitbucket-pr, Data Center: server URL, for example https://bitbucket.example.com")
     .option("--checkout <folder>", "bitbucket-pr: absolute path of a local clone whose origin is the Bitbucket repository")
@@ -188,27 +189,32 @@ export function registerSentinelsCommand(program: Command, deps: ConsoleCommandD
     .option("--events <list>", "bitbucket-pr: opened, updated or opened,updated (default: both)")
     .option("--max-files <n>", "bitbucket-pr: skip a pull request that changes more files than this (default: 50)")
     .option("--budget <usd>", "bitbucket-pr: spend limit for one pull request scan (default: 2)"))
-    .action((id: string, options: ConsoleFlags & { automation?: string; kind?: string; file?: string; enable?: boolean; yes?: boolean; repo?: string; baseBranch?: string; comment?: boolean; includeForks?: boolean; label?: string; platform?: string; url?: string; checkout?: string; tokenEnv?: string; events?: string; maxFiles?: string; budget?: string; frequency?: string; every?: string; at?: string; weekday?: string; cron?: string; timezone?: string }) => withConsole(options, deps, async client => {
+    .action((id: string, options: ConsoleFlags & { automation?: string; kind?: string; file?: string; enable?: boolean; yes?: boolean; repo?: string; baseBranch?: string; comment?: boolean; includeForks?: boolean; results?: string; label?: string; platform?: string; url?: string; checkout?: string; tokenEnv?: string; events?: string; maxFiles?: string; budget?: string; frequency?: string; every?: string; at?: string; weekday?: string; cron?: string; timezone?: string }) => withConsole(options, deps, async client => {
       const fromFile = options.file ? await readJsonObject(options.file, "Trigger definition") : {};
       const flags = { ...(options.repo ? { repo: options.repo } : {}), ...(options.baseBranch ? { baseBranch: options.baseBranch } : {}), ...(options.comment ? { commentOnPr: true } : {}), ...(options.includeForks ? { includeForks: true } : {}) };
       const scheduled = [options.frequency, options.every, options.at, options.weekday, options.cron, options.timezone].some(value => value !== undefined);
       const kind = options.kind ?? (scheduled ? "schedule" : undefined) ?? fromFile.kind;
       if (scheduled && kind !== "schedule") throw new UsageError("--frequency, --every, --at, --weekday, --cron and --timezone apply to --kind schedule.");
       const schedule = scheduled ? { schedule: scheduleFrom(options, fromFile.schedule) } : {};
+      if (options.results !== undefined) oneOf("--results", SENTINEL_RESULTS_MODES, options.results);
+      if (options.results !== undefined && kind !== "github-pr" && kind !== "release" && kind !== "check-completed") throw new UsageError("--results applies to --kind github-pr, release and check-completed.");
       const { repo: repoFlag, ...githubOnly } = flags;
       if (Object.keys(githubOnly).length && kind !== "github-pr") throw new UsageError("--base-branch, --comment and --include-forks apply to --kind github-pr.");
-      if (repoFlag && kind !== "github-pr" && kind !== "bitbucket-pr") throw new UsageError("--repo applies to --kind github-pr and bitbucket-pr.");
+      if (repoFlag && kind !== "github-pr" && kind !== "bitbucket-pr" && !(options.results !== undefined && (kind === "release" || kind === "check-completed"))) throw new UsageError("--repo applies to --kind github-pr and bitbucket-pr (and release or check-completed together with --results).");
       const bitbucketFlags = { ...(options.platform ? { platform: options.platform } : {}), ...(repoFlag ? { repo: repoFlag } : {}), ...(options.url ? { baseUrl: options.url } : {}), ...(options.checkout ? { checkout: options.checkout } : {}), ...(options.tokenEnv ? { tokenEnv: options.tokenEnv } : {}),
         ...(options.events ? { events: options.events.split(",").map(item => item.trim()).filter(Boolean) } : {}), ...(options.maxFiles !== undefined ? { maxFiles: positive("--max-files", options.maxFiles) } : {}), ...(options.budget !== undefined ? { budgetUsd: positive("--budget", options.budget) } : {}) };
       if (kind !== "bitbucket-pr" && Object.keys(bitbucketFlags).some(key => key !== "repo")) throw new UsageError("--platform, --url, --checkout, --token-env, --events, --max-files and --budget apply to --kind bitbucket-pr.");
       const bitbucket = kind === "bitbucket-pr" ? { bitbucket: { ...(fromFile.bitbucket && typeof fromFile.bitbucket === "object" ? fromFile.bitbucket : {}), ...bitbucketFlags } } : {};
-      const github = Object.keys(flags).length && kind === "github-pr" ? { github: { ...(fromFile.github && typeof fromFile.github === "object" ? fromFile.github : {}), ...flags } } : {};
+      const githubFlags = { ...flags, ...(options.results !== undefined ? { results: options.results } : {}) };
+      const github = Object.keys(githubFlags).length && kind === "github-pr" ? { github: { ...(fromFile.github && typeof fromFile.github === "object" ? fromFile.github : {}), ...githubFlags } } : {};
+      const eventKey = kind === "release" ? "release" : kind === "check-completed" ? "check" : undefined;
+      const eventResults = eventKey && options.results !== undefined ? { [eventKey]: { ...(fromFile[eventKey] && typeof fromFile[eventKey] === "object" ? fromFile[eventKey] : {}), ...(repoFlag ? { repo: repoFlag } : {}), results: options.results } } : {};
       const owner = await sentinel(client, id);
       const owned = owner.automationIds ?? [];
       const automationId = options.automation ?? (typeof fromFile.automationId === "string" ? fromFile.automationId : owned.length === 1 ? owned[0] : undefined);
       if (options.label !== undefined && kind !== "webhook") throw new UsageError("--label applies to --kind webhook.");
       const webhookSettings = kind === "webhook" ? { webhook: { ...(fromFile.webhook && typeof fromFile.webhook === "object" ? fromFile.webhook : {}), ...(options.label !== undefined ? { label: options.label } : {}) } } : {};
-      const body = { ...fromFile, ...github, ...bitbucket, ...schedule, ...webhookSettings, ...(automationId ? { automationId } : {}), ...(kind ? { kind } : {}) };
+      const body = { ...fromFile, ...github, ...eventResults, ...bitbucket, ...schedule, ...webhookSettings, ...(automationId ? { automationId } : {}), ...(kind ? { kind } : {}) };
       if (!body.kind) throw new UsageError("Say what kind: --kind schedule | manual | github-pr | bitbucket-pr | release | check-completed | webhook (a schedule also needs --frequency; bitbucket-pr needs --platform, --repo and --checkout; release and check-completed take their settings with --file).");
       if (!body.automationId) throw new UsageError(owned.length ? `This Sentinel owns ${owned.length} things a trigger can start. Pick one with --automation <id>: ${owned.join(", ")}.` : "A trigger needs something to start, and this Sentinel owns nothing yet that the CLI can list. Create it from a YAML file with `0security sentinels sync <folder> --apply`, which can include a schedule, or add the automation in the console and pass its full id with --automation <id>.");
       if (options.enable) requireYes(options.yes, "Enabling a trigger lets the Sentinel start runs unattended.");

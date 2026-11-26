@@ -4568,6 +4568,7 @@ Add a trigger for an automation the Sentinel owns; disabled unless --enable --ye
 | `--base-branch <branch>` | — | github-pr: only pull requests into this branch |
 | `--comment` | — | github-pr: comment on each pull request with one short summary, edited in place on later pushes (default: off) |
 | `--include-forks` | — | github-pr: also review pull requests from forks, marked untrusted (default: skipped) |
+| `--results <mode>` | — | github-pr, release, check-completed: send findings back to GitHub: off, sarif, comment, both (default: off). sarif uploads to code scanning; comment posts one pull request comment |
 | `--label <text>` | — | webhook: a name for this webhook (default: webhook) |
 | `--platform <platform>` | — | bitbucket-pr: cloud or dc (Data Center) |
 | `--url <url>` | — | bitbucket-pr, Data Center: server URL, for example https://bitbucket.example.com |

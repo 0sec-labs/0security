@@ -18,7 +18,8 @@ export class SentinelStoreError extends Error {
 const MAX_REVISIONS_PER_FILE = 100;
 const MAX_ACTIVATIONS_LIST = 200;
 const MAX_TRIGGERS_PER_SENTINEL = 50;
-const MAX_CURSOR_ENTRIES = 200;
+/** Per trigger: oldest entries are dropped first. Room for the 1,000 open pull requests one poll reads, with headroom for ones that fell out of that window. */
+const MAX_CURSOR_ENTRIES = 3000;
 /** A trigger claim only covers the launch itself; an older one belongs to a crashed engine. */
 export const SENTINEL_CLAIM_STALE_MS = 600_000;
 const MAX_TURNS_LIST = 200;

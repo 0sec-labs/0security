@@ -85,6 +85,8 @@ There is no trigger for a branch push or a new finding.
 
 `github-pr` polls for new and updated pull requests. The first poll only records pull requests that are already open and never reviews them. If `gh` is missing or signed out, the trigger shows a blocked status and retries on the next poll.
 
+The poll reads up to 1,000 open pull requests through `gh`, which pages through the API itself. A trigger remembers up to 3,000 pull requests, oldest first out. If more than 1,000 are open, the poll reads the newest 1,000, the trigger shows that older ones are not reviewed, and a base branch narrows the list.
+
 A new commit on an open pull request wakes the Sentinel in its thread with one turn, recorded in its activity. If an older commit of the same pull request is still waiting, the newer one replaces it. Reviews run one at a time, in the order they arrive. Closed and merged pull requests are ignored.
 
 The run gets the pull request's diff through `gh pr diff`, as untrusted data. 0 does not check out or execute the pull request branch. The run works in the repository's local checked-out folder.
@@ -114,6 +116,8 @@ Draft pull requests are skipped with the reason `draft pull request`, and review
 Changing a trigger's repository, branch or options turns it off and records a new baseline. Turning on comments or forks needs a fresh approval.
 
 The Sentinel's `gh` account needs permission to comment when `--comment` is on, and comments appear as that person. A failed comment shows on the activation and does not fail the review.
+
+A third option, `results`, sends the findings back to GitHub. See [Send findings to GitHub](#send-findings-to-github).
 
 #### Limits for pull request runs
 
@@ -265,6 +269,46 @@ A commit status needs only the status permission of your `gh` token. The context
 A comment carries a hidden marker, so 0 finds and edits its own comment and never adds a second one. The text lists severity, title and a repository path for each finding, with links, markup, `@` mentions and issue references removed. Evidence and proof-of-concept steps are never posted. 0 posts at most one comment per pull request per minute and 30 per hour. A failed post shows on the run and does not fail it.
 
 0 does not create check runs. GitHub allows only a GitHub App to write them, and a `gh` login is not one.
+
+### Send findings to GitHub
+
+A Sentinel run that scans can upload its findings to GitHub code scanning, post one summary comment, or both. Set `results` on a `github-pr`, `release` or `check-completed` trigger. The default is `off`, so nothing is sent.
+
+| Value | What is sent |
+| --- | --- |
+| `off` | Nothing. The result stays in the Sentinel. |
+| `sarif` | A SARIF upload to code scanning, so findings appear in the Security tab and as pull request annotations. |
+| `comment` | One summary comment on the pull request, edited in place on later runs. |
+| `both` | The upload and the comment. |
+
+Set it when you add the trigger:
+
+```bash
+0security sentinels triggers add <sentinel> --kind github-pr --repo owner/name --results sarif
+0security sentinels triggers add <sentinel> --kind release --repo owner/name --results sarif
+```
+
+In a YAML file, set `results: sarif` next to `repo`. In the app, turn on **Send findings to GitHub code scanning** when you add a pull request trigger.
+
+The upload runs `gh api` against `repos/{owner}/{repo}/code-scanning/sarifs`, with the document compressed and base64 encoded, and the commit and ref of the run:
+
+| Trigger | Ref |
+| --- | --- |
+| `github-pr` | `refs/pull/<number>/head`, with the pull request's head commit |
+| `release` | `refs/tags/<tag>`, with the commit the tag points to |
+| `check-completed` | `refs/heads/<branch>`, with the commit of the check. Only checks the poll finds on the tip of a branch are uploaded. A check that arrives by webhook is not, because it can belong to a fork pull request. |
+
+For a `release` or `check-completed` trigger, `results: comment` and `report: comment` do the same thing. `report: commit-status` still posts a commit status next to an upload.
+
+The document holds severity, title, category and a file path and line for each finding. It has no descriptions, evidence, proof-of-concept steps or local paths. A finding without a repository file path is left out. Links, markup, `@` mentions and issue references are removed from titles. A document has at most 1,000 results, most severe first. The run's own findings go in each upload. One category per Sentinel keeps two Sentinels from closing each other's alerts.
+
+Uploads use your own `gh` login, so the account needs permission to write code scanning results (the `security_events` scope for a classic token). Pull requests from forks are never uploaded, even with `includeForks`. Comments follow the rules above, and the same limits apply: one per pull request per minute and 30 per hour for the whole engine.
+
+A failed upload shows on the run and does not fail it. A skipped finding is noted on the run. Code scanning is available on public repositories and on private ones with GitHub Code Security.
+
+0 does not create check runs. GitHub allows only a GitHub App to write them, and a `gh` login is not one. `ZERO_ENTERPRISE` refuses every `gh` call, so nothing is polled or sent.
+
+This path is tested with a fake `gh` and fixtures. It has not been run against live GitHub.
 
 #### Webhook for release and check events
 

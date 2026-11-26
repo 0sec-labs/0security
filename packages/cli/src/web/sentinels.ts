@@ -191,10 +191,12 @@ export class WebSentinelService {
   }
 
   #triggerView(trigger: SentinelTrigger) {
+    const resultsLabel = (mode: string | undefined) => (mode && mode !== "off" ? `, results to GitHub: ${mode === "sarif" ? "code scanning" : mode === "comment" ? "comment" : "code scanning and comment"}` : "");
     const { activeClaim: _claim, ...visible } = trigger;
     const summary = trigger.schedule ? describeSentinelSchedule(trigger.schedule)
-      : trigger.release ? `${trigger.release.on === "tag" ? "Tags" : "Releases"} on ${trigger.release.repo}${trigger.release.tagPrefix ? `, starting with ${trigger.release.tagPrefix}` : ""}${trigger.release.report !== "none" ? `, reports as ${trigger.release.report}` : ""}`
-      : trigger.check ? `${trigger.check.conclusion === "failure" ? "Failed checks" : "Finished checks"} on ${trigger.check.repo}${trigger.check.branch ? ` (${trigger.check.branch})` : ""}${trigger.check.report !== "none" ? `, reports as ${trigger.check.report}` : ""}`
+      : trigger.release ? `${trigger.release.on === "tag" ? "Tags" : "Releases"} on ${trigger.release.repo}${trigger.release.tagPrefix ? `, starting with ${trigger.release.tagPrefix}` : ""}${trigger.release.report !== "none" ? `, reports as ${trigger.release.report}` : ""}${resultsLabel(trigger.release.results)}`
+      : trigger.check ? `${trigger.check.conclusion === "failure" ? "Failed checks" : "Finished checks"} on ${trigger.check.repo}${trigger.check.branch ? ` (${trigger.check.branch})` : ""}${trigger.check.report !== "none" ? `, reports as ${trigger.check.report}` : ""}${resultsLabel(trigger.check.results)}`
+      : trigger.github ? `Pull requests on ${trigger.github.repo}${trigger.github.commentOnPr ? ", comments on" : ""}${trigger.github.includeForks ? ", forks included" : ""}${resultsLabel(trigger.github.results)}`
       : trigger.bitbucket ? `Bitbucket ${trigger.bitbucket.platform === "cloud" ? "Cloud" : "Data Center"} pull requests in ${trigger.bitbucket.repo} (${trigger.bitbucket.events.join(" and ")}), reports as ${[trigger.bitbucket.comments ? "comments" : "", trigger.bitbucket.insights ? "Code Insights" : ""].filter(Boolean).join(" and ") || "nothing"}`
       : trigger.webhook ? `Signed calls to /api/webhooks/trigger/${trigger.id} (${trigger.webhook.label})`
       : undefined;

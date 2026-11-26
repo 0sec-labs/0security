@@ -1320,7 +1320,7 @@ describe("circuit-breaker state preservation across async GitHub PR triggers and
     expect((await f.view(id)).attention).toMatchObject({ needsYou: true, reason: expect.stringMatching(/three failed turns/) });
   });
 
-  it("refuses >190 open pull requests on a poll instead of truncating the 200-entry cursor and re-triggering old PRs", async () => {
+  it("handles more than 190 open pull requests: baselines them all and reviews nothing old", async () => {
     const diffs: string[] = [];
     const open205 = Array.from({ length: 205 }, (_, i) => pr(i + 1, `sha-${i + 1}`));
     const { f, triggerId } = await armedPrPersistent(async args => {
@@ -1329,11 +1329,8 @@ describe("circuit-breaker state preservation across async GitHub PR triggers and
       return { stdout: "" };
     }, false);
 
-    expect(f.store.getTrigger(triggerId)?.lastStatus).toBe("blocked");
-    expect(f.store.getTrigger(triggerId)?.lastError).toMatch(/190/);
-    expect(diffs).toHaveLength(0);
-    expect(f.missions.send).not.toHaveBeenCalled();
-
+    expect(f.store.getTrigger(triggerId)?.lastStatus).toBe("baseline");
+    expect(Object.keys(f.store.getTrigger(triggerId)!.cursor!)).toHaveLength(205);
     await f.service.checkTrigger(triggerId);
     expect(diffs).toHaveLength(0);
     expect(f.missions.send).not.toHaveBeenCalled();

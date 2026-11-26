@@ -187,7 +187,7 @@
       "files": [
         "packages/cli/src/host/gh.ts"
       ],
-      "when": "findings upload (SARIF), sentinel and host integrations that run through the shared gh runner.",
+      "when": "findings upload (SARIF), Sentinel code scanning uploads, and host integrations that run through the shared gh runner.",
       "sent": "The SARIF or API request the operator asked for.",
       "disable": "ZERO_ENTERPRISE refuses to start gh from this runner."
     },
@@ -376,8 +376,8 @@
         "packages/cli/src/host/github.ts",
         "packages/cli/src/web/sentinel-runner.ts"
       ],
-      "when": "Explicit findings fix, threat-model publish, findings import and sentinel review commands, and a Sentinel with release, check or pull request reporting turned on (off by default).",
-      "sent": "A branch push, PR comment or commit status the operator asked for. Sentinel polling reads releases, tags and check runs through gh.",
+      "when": "Explicit findings fix, threat-model publish, findings import and sentinel review commands, and a Sentinel with release, check or pull request reporting or results turned on (off by default).",
+      "sent": "A branch push, PR comment, commit status or code scanning SARIF upload (share-safe finding fields only) the operator asked for. Sentinel polling reads releases, tags, check runs and open pull requests through gh. ZERO_ENTERPRISE refuses every gh call.",
       "disable": "Do not run those commands; use --no-pr."
     },
     {
