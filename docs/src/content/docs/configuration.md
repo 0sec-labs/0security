@@ -78,6 +78,7 @@ Change the setup later:
 | `diagnostics/pending/` | Crash reports waiting for your review, mode `0600`. Used only when `diagnosticReporting` is `ask`. Holds at most 10, oldest removed first. |
 | `analytics-id` | The random install ID for anonymous usage counts. Delete it to start a new one. |
 | `analytics-sent.log` | A copy of every usage payload this machine sent. |
+| `analytics-last-version` | The last version that ran, as a version string only (mode 0600). 0 uses it to send an `update` event. |
 | `telemetry-notice` | Marks that the one-time telemetry notice was shown. Delete it to see the notice again. |
 
 Project settings live in `<project>/.0/tui-settings.json`.
@@ -235,7 +236,7 @@ Each setting is global to your computer, and project settings cannot change it. 
 
 ### First-run notice
 
-The first time you run the CLI or the console, 0security prints one notice to stderr. It is one line. It says that usage counts, crash reports and update checks are on, that they never include code or findings, and that `ZERO_OFFLINE=1` turns them off. It links here for the other switches. 0 prints it once per install, and only when stderr is a terminal. It never prints in CI, with `--format json`, `--json` or other machine formats, with `ZERO_LOG_FORMAT=json`, or when telemetry is already off. The browser app shows the same disclosure under Settings, Privacy.
+The first time you run the CLI or the console, 0security prints one notice to stderr. It is one line. It says that usage counts, command names, crash reports and update checks are on, that they never include code or findings, and that `ZERO_OFFLINE=1` turns them off. It links here for the other switches. 0 prints it once per install, and only when stderr is a terminal. It never prints in CI, with `--format json`, `--json` or other machine formats, with `ZERO_LOG_FORMAT=json`, or when telemetry is already off. The browser app shows the same disclosure under Settings, Privacy.
 
 ### Usage metrics
 
@@ -272,6 +273,8 @@ Every event also carries these common fields:
 Each event also has a timestamp and a `distinct_id`, which is a random UUID (the install ID). It is not derived from your name, email, hostname, MAC address or machine ID. 0 sends counts as increments, shortly after they happen and when the process exits. A send has a 3 second limit and no retries, and failures are silent.
 
 PostHog discards IP addresses, and 0security disables GeoIP lookup. To get a new install ID, delete `~/.0/analytics-id`. `~/.0/analytics-sent.log` records every payload sent, without the project key.
+
+Lifecycle events are not sent for `--help`, `--version`, `help`, shell completion, or the `config`, `reports` and `workbench` commands. They are also not sent in CI (`CI` set) or with machine output (`--json`, `--format json`, `ZERO_LOG_FORMAT=json`), because the notice is not shown there. To send them anyway, run `0security config set analyticsLevel usage`. That explicit choice applies to CI and machine output, not to the commands above.
 
 The opt-outs are the same for every event: `analyticsLevel off`, `ZERO_NO_TELEMETRY`, `DO_NOT_TRACK`, `ZERO_OFFLINE` and `ZERO_ENTERPRISE`.
 

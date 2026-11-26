@@ -11,8 +11,8 @@
       "files": [
         "packages/engine/src/telemetry/analytics-pipeline.ts"
       ],
-      "when": "Batched while a command or the console runs, when analyticsLevel is usage and the build embeds a key.",
-      "sent": "Anonymous counters: version, OS, command name, outcome class.",
+      "when": "Batched while a command or the console runs, when analyticsLevel is usage and the build embeds a key. Also sent with a cloud token: the lifecycle events first_run, command_invoked, update and error_exit. Not sent for --help, --version, shell completion, config, or CI and machine-output runs unless analyticsLevel usage is set in a settings file.",
+      "sent": "Anonymous usage counters: tool, error, finding severity and finding class counts (fixed label sets), turn count, duration, cost, plus version, surface, OS, CPU architecture, runtime and release channel. Lifecycle events carry only the common fields, plus the command name from a fixed list (command_invoked, error_exit), from_version and to_version (update), or an error category (error_exit). Each event has a random install id. No code, findings text, paths, targets or error messages.",
       "disable": "analyticsLevel off, ZERO_NO_TELEMETRY, DO_NOT_TRACK, ZERO_OFFLINE, ZERO_ENTERPRISE."
     },
     {
@@ -25,8 +25,8 @@
       "files": [
         "packages/engine/src/telemetry/analytics-pipeline.ts"
       ],
-      "when": "Only when cloud credentials are configured.",
-      "sent": "The same usage events, to the signed-in cloud account.",
+      "when": "Only when cloud credentials are configured. With credentials, usage counters go here instead of PostHog.",
+      "sent": "The usage counters (not the lifecycle events), to the signed-in cloud account. A signed-in install also sends the lifecycle events to PostHog (see usage-analytics-posthog), not here.",
       "disable": "Same switches; ZERO_ENTERPRISE also stops cloud credentials from loading."
     },
     {

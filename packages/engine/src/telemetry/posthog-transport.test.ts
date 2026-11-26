@@ -287,6 +287,21 @@ describe("finding classes on the usage event", () => {
     expect(posts[0].body).not.toContain("login.php");
     for (const name of Object.keys(event.properties.finding_class_counts as object)) expect(FINDING_CLASSES as readonly string[]).toContain(name);
   });
+  it("does not match class words inside unrelated words", () => {
+    for (const raw of ["random", "random number display", "session", "session list", "header", "page header", "author", "authors page", "authority", "authored by", "dependable", "secretary", "keyboard"]) {
+      expect(classifyFindingClass(raw), raw).toBe("other");
+    }
+  });
+  it("still matches the specific class phrases", () => {
+    const cases: Array<[string, string]> = [
+      ["Weak random number generator", "crypto"], ["Insecure randomness", "crypto"], ["insecure random", "crypto"],
+      ["Session fixation", "auth"], ["Broken authentication", "auth"], ["missing authorization check", "auth"], ["auth bypass", "auth"], ["CSRF", "auth"],
+      ["Missing security headers", "misconfiguration"], ["CORS wildcard", "misconfiguration"],
+      ["Hardcoded API key", "secrets"], ["Hardcoded password", "secrets"], ["SQL injection", "sql-injection"], ["Stored XSS", "xss"],
+      ["outdated dependency", "dependency"], ["Cryptographic failure", "crypto"],
+    ];
+    for (const [raw, expected] of cases) expect(classifyFindingClass(raw), raw).toBe(expected);
+  });
   it("classifyFindingClass only ever returns a member of the fixed list", () => {
     for (const raw of ["ssrf", "Remote Code Execution", "path traversal", "hardcoded secret", "jwt none alg", "weak tls cipher", "unsafe deserialization", "vulnerable dependency", "cors misconfig", "???", ""]) {
       expect(FINDING_CLASSES as readonly string[]).toContain(classifyFindingClass(raw));
@@ -296,6 +311,20 @@ describe("finding classes on the usage event", () => {
 
 describe("lifecycle events (PostHog only)", () => {
   const LIFECYCLE = ["first_run", "command_invoked", "update", "error_exit"];
+
+  afterEach(() => analyticsPipeline.setLifecycleSuppressed(false));
+
+  it("a suppressed run queues no lifecycle event and mints no install id", async () => {
+    analyticsPipeline.setLevel("usage");
+    analyticsPipeline.setLifecycleSuppressed(true);
+    analyticsPipeline.recordStartup({ command: "scan" });
+    analyticsPipeline.recordLifecycle({ event: "error_exit", category: "crash" });
+    expect(analyticsPipeline.hasPending()).toBe(false);
+    await analyticsPipeline.flushNow();
+    expect(posts).toHaveLength(0);
+    expect(existsSync(join(home, ".0", "analytics-id"))).toBe(false);
+    expect(existsSync(join(home, ".0", ANALYTICS_LAST_VERSION_FILENAME))).toBe(false);
+  });
 
   it("a fresh install sends first_run then command_invoked, each with only its allowlisted properties", async () => {
     analyticsPipeline.configure({ knownCommandNames: ["scan", "scan web"] });
