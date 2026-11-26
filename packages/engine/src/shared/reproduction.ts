@@ -252,7 +252,7 @@ export function reproductionLabel(rep: FindingReproduction | undefined): string 
   return rep.proof ? "proposed steps, not run" : undefined;
 }
 
-const REPRO_CLAIM = /\b(reproduced|reproduces|successfully exploited|exploit (was )?confirmed|confirmed exploitable|proven exploitable|proof of exploit)\b/i;
+const REPRO_CLAIM = /\b(executed[- ]proven|proven by execution|reproduced|reproduces|successfully exploited|exploit (was )?confirmed|confirmed exploitable|proven exploitable|proof of exploit)\b/i;
 const REPRO_NEGATED = /\b(not|never|no|n't|unable to|could not|couldn't|cannot|can't|nothing)\b[^.\n]{0,24}\b(reproduced|reproduces|exploited|confirmed|proven)\b/i;
 
 /** True when text claims the issue was reproduced or exploited. */

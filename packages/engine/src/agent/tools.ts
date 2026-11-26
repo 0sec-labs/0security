@@ -1101,9 +1101,10 @@ export class ToolExecutor {
    */
   private async attemptExecutedPoc(finding: Finding): Promise<void> {
     const runtime = this.ctx.executedPoc;
+    const signal = this._executionContext.getStore()?.signal;
     if (!runtime || !this.db || this.ctx.persistFindings === false) return;
     try {
-      const record = await executePocForFinding({ finding, folder: this.ctx.scopePath, runtime });
+      const record = await executePocForFinding({ finding, folder: this.ctx.scopePath, runtime, ...(signal ? { signal } : {}) });
       if (!record) return;
       this.db.setFindingExecutedPoc(finding.id, record);
       finding.executedPoc = record;

@@ -37,7 +37,7 @@ export function buildCreateArgs(name: string, request: StepRequest, options: { s
   const limits = request.limits;
   const readOnly = Boolean(limits?.readOnlyRoot);
   return [
-    "create", "--name", name, "--label", "0.verify=1", "--cap-drop", "ALL", "--cap-add", "DAC_OVERRIDE", "--cap-add", "FOWNER", "--security-opt", "no-new-privileges",
+    "create", "--name", name, "--label", "0.verify=1", ...(limits?.pullNever ? ["--pull=never"] : []), "--cap-drop", "ALL", "--cap-add", "DAC_OVERRIDE", "--cap-add", "FOWNER", "--security-opt", "no-new-privileges",
     "--pids-limit", String(limits?.pidsLimit ?? 512), "--memory", limits?.memory ?? "2g", "--workdir", workdirFor(request),
     ...(limits?.memory ? ["--memory-swap", limits.memory] : []),
     ...(limits?.cpus ? ["--cpus", limits.cpus] : []),
@@ -86,13 +86,14 @@ export class OciRunner implements ContainerRunner {
     const remaining = () => Math.max(1000, request.timeoutMs - (Date.now() - started));
     const run = (args: string[], timeoutMs = remaining()) => this.#exec(bin, args, { timeoutMs, ...(request.signal ? { signal: request.signal } : {}) });
     try {
-      let created = await run(buildCreateArgs(name, request), Math.max(remaining(), 300_000)); // first use may pull the image
+      const createTimeout = () => (request.limits?.pullNever ? remaining() : Math.max(remaining(), 300_000)); // first use may pull the image, unless pulling is off
+      let created = await run(buildCreateArgs(name, request), createTimeout());
       if (created.code !== 0 && request.limits?.storageSize && /storage-opt|storage option|quota/i.test(created.output)) {
         // The storage driver cannot cap the writable layer. Fail closed: refuse to run uncapped unless the caller opted out.
         await this.#exec(bin, ["rm", "-f", name], { timeoutMs: 20_000 });
         if (!request.limits.allowUnboundedStorage) return out({ infraError: STORAGE_LIMIT_UNAVAILABLE });
         notApplied.push("storage-size");
-        created = await run(buildCreateArgs(name, request, { storage: false }), Math.max(remaining(), 300_000));
+        created = await run(buildCreateArgs(name, request, { storage: false }), createTimeout());
       }
       if (created.code !== 0) return out({ infraError: `could not create container: ${created.output.trim().split("\n").pop() ?? ""}` });
       const streamed = Boolean(request.limits?.readOnlyRoot);

@@ -1,22 +1,28 @@
 /**
  * Executed proof of concept: data model, wording and claim rules (pure).
  *
- * After a high or critical finding is saved, the harness tries to build a PoC
- * from the finding's own steps and run it in the sandbox. Three outcomes only:
+ * After a high or critical finding is saved, the harness tries to build a script
+ * from the finding's own steps and run it in the sandbox. The script is written by
+ * the model, so a run shows what the script printed, not that the code is vulnerable:
+ * a script can print its expected text without touching the vulnerable code.
+ * Three outcomes only:
  *
- *  - `executed-proven`: the PoC ran in a container with the network off and its
- *    expected output appeared. Needs a complete container run record.
- *  - `executed-failed`: the PoC ran in a container and its expectation did not hold.
- *    This never means the finding is false; it means this PoC did not work here.
- *  - `static-only`: nothing was proven by execution (no runnable steps, no
- *    sandbox, budget spent, or the run could not finish). The finding stands on
- *    its static evidence alone and must never be presented as proven.
+ *  - `script-matched`: the model-authored script ran in a container with the network
+ *    off and printed the expected text. Needs a complete container run record. It is
+ *    not proof; only a reproduction result written by the reproduction harness
+ *    (`reproduced`, with a canary the harness planted) is.
+ *  - `script-unmatched`: the script ran in a container and the expected text did not
+ *    appear. This never means the finding is false; this script did not work here.
+ *  - `static-only`: nothing ran to a verdict (no runnable steps, no sandbox, budget
+ *    spent, or the run could not finish). The finding stands on its static evidence.
  *
- * Only the harness writes this record. The parser refuses an `executed-proven`
+ * Only the harness writes this record. The parser refuses a `script-matched`
  * record that lacks container isolation, a pinned image digest and a passing run.
+ * Records stored under the first names (`executed-proven`, `executed-failed`) read
+ * back as `script-matched` and `script-unmatched`.
  */
 
-export const EXECUTED_POC_OUTCOMES = ["executed-proven", "executed-failed", "static-only"] as const;
+export const EXECUTED_POC_OUTCOMES = ["script-matched", "script-unmatched", "static-only"] as const;
 export type ExecutedPocOutcome = typeof EXECUTED_POC_OUTCOMES[number];
 
 /** Identifies a record as written by the executed-PoC harness. */
@@ -50,6 +56,8 @@ export interface ExecutedPoc {
   finishedAt: string;
 }
 
+const LEGACY_OUTCOMES: Record<string, ExecutedPocOutcome> = { "executed-proven": "script-matched", "executed-failed": "script-unmatched" };
+
 const SHA256_DIGEST = /^sha256:[0-9a-f]{64}$/;
 const LOG_LIMIT = 2048;
 const RUN_STATUSES = ["pass", "fail", "not-run", "error"];
@@ -76,7 +84,7 @@ function parseRun(value: unknown): ExecutedPocRun | undefined {
 
 /**
  * The only way to turn stored or untrusted data into a record. An executed
- * outcome needs a run record that agrees with it; `executed-proven` also needs
+ * outcome needs a run record that agrees with it; `script-matched` also needs
  * container isolation and a pinned image digest. Anything less is absent,
  * never downgraded or guessed.
  */
@@ -89,17 +97,18 @@ export function parseExecutedPoc(value: unknown): ExecutedPoc | undefined {
   if (!v || typeof v !== "object" || Array.isArray(v)) return undefined;
   const r = v as Record<string, unknown>;
   if (r.schemaVersion !== 1 || r.harness !== EXECUTED_POC_HARNESS) return undefined;
-  if (!(EXECUTED_POC_OUTCOMES as readonly string[]).includes(String(r.outcome))) return undefined;
+  const named = LEGACY_OUTCOMES[String(r.outcome)] ?? String(r.outcome);
+  if (!(EXECUTED_POC_OUTCOMES as readonly string[]).includes(named)) return undefined;
   if (typeof r.reason !== "string") return undefined;
   const start = isoMs(r.startedAt);
   const end = isoMs(r.finishedAt);
   if (start === undefined || end === undefined || end < start) return undefined;
-  const outcome = r.outcome as ExecutedPocOutcome;
+  const outcome = named as ExecutedPocOutcome;
   const run = parseRun(r.run);
-  if (outcome === "executed-proven") {
+  if (outcome === "script-matched") {
     if (!run || run.status !== "pass" || run.isolation !== "container" || !run.imageDigest) return undefined;
   }
-  if (outcome === "executed-failed" && (!run || run.status !== "fail" || run.isolation !== "container")) return undefined;
+  if (outcome === "script-unmatched" && (!run || run.status !== "fail" || run.isolation !== "container")) return undefined;
   if (outcome === "static-only" && run && run.status === "pass") return undefined;
   const stepIds = Array.isArray(r.stepIds) ? r.stepIds.filter((s): s is string => typeof s === "string").slice(0, 50) : [];
   return {
@@ -108,9 +117,9 @@ export function parseExecutedPoc(value: unknown): ExecutedPoc | undefined {
   };
 }
 
-/** True only for a complete harness record of a passing container run. */
-export function isExecutedProven(value: unknown): boolean {
-  return parseExecutedPoc(value)?.outcome === "executed-proven";
+/** True only for a complete harness record of a passing container run of the model's script. Not proof of a vulnerability. */
+export function isScriptMatched(value: unknown): boolean {
+  return parseExecutedPoc(value)?.outcome === "script-matched";
 }
 
 /** Findings of these severities get a PoC attempt. */
@@ -136,19 +145,19 @@ export function executedPocFor(finding: { severity?: string }, stored: ExecutedP
 export function executedPocLabel(record: ExecutedPoc | undefined): string | undefined {
   if (!record) return undefined;
   switch (record.outcome) {
-    case "executed-proven": return "executed-proven (PoC ran in the sandbox)";
-    case "executed-failed": return "executed-failed (PoC ran and did not hold; not proof of safety)";
-    default: return "static-only (not proven by execution)";
+    case "script-matched": return "script-matched (model-written script ran in the sandbox; not a reproduction)";
+    case "script-unmatched": return "script-unmatched (script ran and did not match; not proof of safety)";
+    default: return "static-only (nothing ran)";
   }
 }
 
-/** The one honest line for a record. Only a complete container run earns "proven". */
+/** The one honest line for a record. It never says proven or reproduced: the script is model-written. */
 export function executedPocLine(record: ExecutedPoc | undefined): string {
   if (!record) return "No PoC execution was recorded";
   const image = record.run?.imageDigest ? ` (image ${short(record.run.imageDigest)})` : "";
   switch (record.outcome) {
-    case "executed-proven": return `Executed, proven: the PoC ran in a container with the network off and its expected output appeared${image}. This is an observation of the app as run`;
-    case "executed-failed": return `Executed, failed: the PoC ran in a container and its expected output did not appear${image}. This does not mean the issue is absent`;
-    default: return `Static only: not proven by execution (${why(record.reason)}). The finding rests on static evidence`;
+    case "script-matched": return `Script matched: a script written by the model ran in a container with the network off and printed the expected text${image}. The script may not have touched the vulnerable code, so this is not a reproduction`;
+    case "script-unmatched": return `Script unmatched: a script written by the model ran in a container and the expected text did not appear${image}. This does not mean the issue is absent`;
+    default: return `Static only: nothing ran to a verdict (${why(record.reason)}). The finding rests on static evidence`;
   }
 }

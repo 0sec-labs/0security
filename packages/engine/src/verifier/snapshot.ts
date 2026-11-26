@@ -4,7 +4,7 @@
  */
 import { cpSync, lstatSync, mkdirSync, mkdtempSync, readlinkSync, rmSync, symlinkSync, copyFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { exec } from "./process.js";
 import { UNTRUSTED_GIT_BASE_CONFIG, untrustedGitConfig } from "./untrusted-git.js";
 
@@ -25,12 +25,30 @@ export async function isGitRepo(dir: string): Promise<boolean> {
 const scratch = () => mkdtempSync(join(tmpdir(), "0-verify-snap-"));
 const handle = (dir: string): Snapshot => ({ dir, cleanup: () => rmSync(dir, { recursive: true, force: true }) });
 
+const SECRET_NAME = /^(?:\.env(?:\..*)?|\.npmrc|\.pypirc|\.netrc|\.git-credentials|\.htpasswd|id_(?:rsa|dsa|ecdsa|ed25519)(?:\..*)?|credentials(?:\.(?:json|ya?ml|toml|txt|csv))?|secrets?\.(?:json|ya?ml|toml|env)|.*\.(?:pem|key|p12|pfx|jks|keystore|kdbx|tfstate))$/i;
+const SECRET_DIR = new Set([".ssh", ".aws", ".gnupg", ".kube", ".docker"]);
+const ENV_TEMPLATE = /\.(?:example|sample|template|dist)$/i;
+
+/** True for a path that looks like it holds credentials (env files, keys, cloud and package-manager credentials). Templates are kept. */
+export function looksSecret(rel: string): boolean {
+  const parts = rel.split("/");
+  if (parts.slice(0, -1).some((part) => SECRET_DIR.has(part))) return true;
+  const name = parts[parts.length - 1] ?? "";
+  return SECRET_NAME.test(name) && !ENV_TEMPLATE.test(name);
+}
+
+export interface SnapshotOptions {
+  /** Return true to leave a path out of the copy. */
+  exclude?: (rel: string) => boolean;
+}
+
 /** The working tree as it is now: tracked and untracked files that Git does not ignore. */
-export async function snapshotWorktree(repo: string): Promise<Snapshot> {
+export async function snapshotWorktree(repo: string, options: SnapshotOptions = {}): Promise<Snapshot> {
   const root = resolve(repo);
   const listing = await git(root, ["ls-files", "-z", "--cached", "--others", "--exclude-standard"]);
   const dir = scratch();
   for (const rel of listing.split("\0").filter(Boolean)) {
+    if (options.exclude?.(rel)) continue;
     const from = join(root, rel);
     const to = join(dir, rel);
     let stat;
@@ -38,7 +56,13 @@ export async function snapshotWorktree(repo: string): Promise<Snapshot> {
     mkdirSync(dirname(to), { recursive: true });
     if (stat.isSymbolicLink()) symlinkSync(readlinkSync(from), to);
     else if (stat.isFile()) copyFileSync(from, to);
-    else if (stat.isDirectory()) cpSync(from, to, { recursive: true, verbatimSymlinks: true }); // submodule path
+    else if (stat.isDirectory()) { // submodule path: its files are not in the parent listing, so the filter applies to each of them
+      cpSync(from, to, { recursive: true, verbatimSymlinks: true, filter: (source) => {
+        if (!options.exclude) return true;
+        const inside = relative(from, source).split(sep).join("/");
+        return inside === "" || !options.exclude(`${rel}/${inside}`);
+      } });
+    }
   }
   return handle(dir);
 }
