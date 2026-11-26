@@ -173,9 +173,11 @@ Set `ZERO_SANDBOX_NODE_PERMISSION=off` to leave the flags out, for example for a
 | `env -S 'node script.js'` | The layer is applied. The string is split like GNU env does, with quotes and backslash escapes. |
 | `env` with `-C`, `-0`, `--chdir`, any other option, a `$` variable or `#` comment in `-S`, or a quote that is not closed | Refused. 0 cannot read the call completely. |
 | `env` with a `PATH` that has a relative or empty entry, or a program it cannot find in `PATH` | Refused. 0 cannot tell which program env would start. When `PATH` is unset, 0 searches `/usr/local/bin:/usr/bin:/bin`. |
-| `command`, `exec`, `nice`, `nohup`, `timeout`, `sudo`, `doas`, `setsid`, `stdbuf`, `xargs`, `arch` and similar, when an argument is `node`, a shell, another launcher or names `node` | Refused. They start another program that 0 does not parse. |
-| `sh -c`, `bash -c` and other shells, unless the command string is plain words and paths (no quotes, `$`, globs, pipes or `;`) that start neither node nor a launcher | Refused. A shell string can hide node. |
-| A shell script, `python` or another program that does not name `node` | No Node layer. The operating system sandbox still applies, and 0 says so when there is none. |
+| `command`, `exec`, `nice`, `nohup`, `timeout`, `sudo`, `doas`, `setsid`, `stdbuf`, `xargs`, `arch` and similar, when an argument is `node`, a shell, another launcher or names `node`, or gives an interpreter inline code | Refused. They start another program that 0 does not parse. |
+| Any shell (`sh`, `bash`, `zsh`, `dash`, `ash`, `ksh`, `fish`, `csh`, `tcsh`, `nu`, `xonsh`, `elvish` and similar) given a command string: `-c`, `-lc`, `-ec`, `--command` | Refused, whatever the string says. A shell string can hide node. |
+| `python`, `perl`, `ruby`, `php`, `lua`, `bun`, `deno eval` or `osascript` given inline code (`-c`, `-e`, `-E`, `-r`) | Refused. The code could start node. `node -e` is not refused: it is node, so it gets the layer, and starting a child program still needs `process`. |
+| `cmd`, `powershell` and `pwsh` with any argument (`/c`, `/k`, `-Command`, `-EncodedCommand`) | Refused. 0 does not read their command syntax. |
+| A shell script file, `python script.py` or another program that is not given a command or code string | No Node layer. The operating system sandbox still applies, and 0 says so when there is none. |
 
 To run a refused form, start node directly, for example with an absolute path, or set `ZERO_SANDBOX_NODE_PERMISSION=off`.
 

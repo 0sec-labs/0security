@@ -14,22 +14,38 @@ import path from "node:path";
 
 export type EnvOp = { op: "clear" } | { op: "unset"; name: string } | { op: "set"; name: string; value: string };
 
-const NAME = (p: string): string => path.basename(p).replace(/\.(?:exe|cmd|bat)$/i, "").toLowerCase();
+const NAME = (p: string): string => (p.replace(/^["']+|["']+$/g, "").split(/[\\/]/).pop() ?? "").replace(/\.(?:exe|cmd|bat)$/i, "").toLowerCase();
 
 /** Package runners and version managers: they pick the node binary, so the layer cannot be applied to it. */
 const NODE_CHOOSERS = new Set(["npx", "pnpx", "bunx", "npm", "pnpm", "yarn", "corepack", "volta", "fnm", "nvm", "n", "nodenv", "asdf", "mise", "rtx", "direnv", "nodeenv"]);
 /** Launchers that run the program in their arguments. Refused when those arguments may name node. */
 const WRAPPERS = new Set(["command", "exec", "nice", "nohup", "timeout", "sudo", "doas", "setsid", "stdbuf", "ionice", "chroot", "time", "xargs", "nsenter", "unshare", "taskset", "chrt", "flock", "caffeinate", "arch", "watch", "script", "su", "runuser", "busybox", "builtin", "eval", "sg", "newgrp", "systemd-run", "firejail", "proot", "setpriv", "prlimit"]);
-const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh", "mksh", "ash", "fish", "csh", "tcsh"]);
+const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh", "mksh", "ash", "fish", "csh", "tcsh", "nu", "nushell", "xonsh", "elvish", "rc", "es", "yash", "oksh", "pdksh"]);
+/** Windows shells have a command syntax 0 does not read. Any use of them is refused. */
+const WINDOWS_SHELLS = new Set(["cmd", "powershell", "pwsh"]);
 /** `node` or `nodejs` as a word in a command or a shell string. `node-x`, `node_modules` and `/node/dir` do not match. */
 const MENTIONS_NODE = /(?:^|[\s/;&|()'"`=<>{}!$])node(?:js)?(?:\.exe)?(?=$|[\s;&|()'"`<>{}])/i;
 
 /** What env searches when PATH is unset. */
 const DEFAULT_PATH = "/usr/local/bin:/usr/bin:/bin";
-/** A shell string we can read: words, paths and flags, with no quoting, expansion, globbing, pipes or chaining. */
-const PLAIN_SHELL_WORDS = /^[A-Za-z0-9 _.\/:=@%+,\t-]*$/;
-/** A word that is node, another launcher or a shell, or that names node. It could start node, so a wrapper with it is refused. */
-const riskyWord = (a: string): boolean => { const n = NAME(a); return n === "node" || n === "nodejs" || n === "env" || SHELLS.has(n) || WRAPPERS.has(n) || NODE_CHOOSERS.has(n) || MENTIONS_NODE.test(a); };
+/** Interpreters that run a code string from the command line, and the flags that carry it. */
+const INLINE_INTERPRETERS: ReadonlyArray<readonly [RegExp, RegExp]> = [
+  [/^python[\d.]*$/, /^-[a-zA-Z]*c[a-zA-Z]*$/],
+  [/^perl[\d.]*$/, /^-[a-zA-Z]*[eE][a-zA-Z]*$/],
+  [/^ruby[\d.]*$/, /^-[a-zA-Z]*e[a-zA-Z]*$/],
+  [/^php[\d.]*$/, /^-[a-zA-Z]*r[a-zA-Z]*$/],
+  [/^lua[\d.]*$/, /^-[a-zA-Z]*e[a-zA-Z]*$/],
+  [/^(?:bun|deno)$/, /^(?:-[a-zA-Z]*[ep][a-zA-Z]*|--eval|--print|eval)$/],
+  [/^osascript$/, /^-[a-zA-Z]*e[a-zA-Z]*$/],
+];
+/** A flag that makes a shell run a command string: -c, -lc, -ec, --command, --commands, /c, /k, -Command. cmd, powershell and pwsh are refused with any argument. */
+const SHELL_COMMAND_FLAG = /^(?:-[a-zA-Z]*[cC][a-zA-Z]*|--command[a-z]*(?:=.*)?)$/;
+/** True when `name` is a shell or an interpreter and `rest` gives it a code string, which 0 cannot read. */
+const runsInlineCode = (name: string, rest: readonly string[]): boolean =>
+  (SHELLS.has(name) && rest.some(a => SHELL_COMMAND_FLAG.test(a))) || INLINE_INTERPRETERS.some(([n, f]) => n.test(name) && rest.some(a => f.test(a)));
+/** A word that is node, another launcher or a shell, or that names node, or an interpreter given code. It could start node, so a wrapper with it is refused. */
+const riskyWord = (a: string): boolean => { const n = NAME(a); return n === "node" || WINDOWS_SHELLS.has(n) || n === "nodejs" || n === "env" || SHELLS.has(n) || WRAPPERS.has(n) || NODE_CHOOSERS.has(n) || MENTIONS_NODE.test(a); };
+const hidesInline = (args: readonly string[]): boolean => args.some((a, i) => runsInlineCode(NAME(a).toLowerCase(), args.slice(i + 1)));
 
 export interface LaunchResolved { ok: true; unwrapped: boolean; program: string; args: string[]; env: Record<string, string> }
 export interface LaunchRefused { ok: false; error: string }
@@ -147,11 +163,9 @@ export function resolveLaunch(argv: readonly string[], env: Readonly<Record<stri
     }
     const rest = args.slice(1);
     if (NODE_CHOOSERS.has(name) || NODE_CHOOSERS.has(realName)) return refuse(`${name} picks the node program itself`);
-    if (WRAPPERS.has(name) || WRAPPERS.has(realName)) { if (rest.some(riskyWord)) return refuse(`${name} wraps another program and may start node`); }
-    if ((SHELLS.has(name) || SHELLS.has(realName)) && rest.some(a => /^-[a-z]*c[a-z]*$/i.test(a))) {
-      const cmd = rest.filter(a => !a.startsWith("-"));
-      if (cmd.some(a => !PLAIN_SHELL_WORDS.test(a) || a.split(/\s+/).some(riskyWord))) return refuse(`${name} -c runs a command string that starts node or that 0 cannot read completely`);
-    }
+    if (WRAPPERS.has(name) || WRAPPERS.has(realName)) { if (rest.some(riskyWord) || hidesInline(rest)) return refuse(`${name} wraps another program and may start node`); }
+    if ((WINDOWS_SHELLS.has(name) || WINDOWS_SHELLS.has(realName)) && rest.length) return refuse(`${name} runs a command syntax that 0 cannot read`);
+    if (runsInlineCode(name, rest) || runsInlineCode(realName, rest)) return refuse(`${name} runs a code or command string that 0 cannot read, and it could start node`);
     if (unwrapped) return { ok: true, unwrapped: false, program: host.resolve(argv[0] ?? "", env.PATH ?? ""), args: argv.slice(1), env: { ...env } };
     return { ok: true, unwrapped: false, program, args: rest, env: cur };
   }
