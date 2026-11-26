@@ -20,6 +20,20 @@
 #   --secret id=zero_release_sentry_dsn,env=ZERO_RELEASE_SENTRY_DSN
 #   --secret id=zero_release_posthog_key,env=ZERO_RELEASE_POSTHOG_KEY
 
+# In-repo Foxguard scanner, built once and copied into the toolbox.
+FROM rust:1.93-bookworm@sha256:7c4ae649a84014c467d79319bbf17ce2632ae8b8be123ac2fb2ea5be46823f31 AS foxguard-builder
+# Foxguard is built from this repository (crates/foxguard), not downloaded. The
+# toolchain comes from rust-toolchain.toml through scripts/ensure-rust.sh, so the
+# image, CI and the release binaries use the same compiler.
+ENV CARGO_BUILD_JOBS=2
+WORKDIR /build
+COPY rust-toolchain.toml Cargo.toml Cargo.lock ./
+COPY scripts/ensure-rust.sh scripts/ensure-rust.sh
+RUN bash scripts/ensure-rust.sh
+COPY crates/foxguard crates/foxguard
+RUN cargo build --locked --release -p foxguard --bin foxguard \
+    && install -D -m 0755 target/release/foxguard /out/foxguard
+
 # Shared Node payload; the toolbox does not depend on application compilation.
 FROM node:24.22.3-bookworm@sha256:9d266751ca3d7fdbe651c878ffd5ad0a42fed49a18c283509267c97f025b7496 AS node-runtime
 
@@ -177,9 +191,8 @@ RUN set -eux; \
     chmod +x /usr/local/bin/azurehound; \
     rm -f /tmp/azurehound.zip
 
-# Foxguard — checksum-pinned static scanner.
-COPY scripts/provision-foxguard.sh /tmp/provision-foxguard.sh
-RUN sh /tmp/provision-foxguard.sh && rm /tmp/provision-foxguard.sh
+# Foxguard — static scanner built from crates/foxguard (stage foxguard-builder).
+COPY --from=foxguard-builder /out/foxguard /usr/local/bin/foxguard
 
 # Create the non-root runtime user and a writable work directory.
 # ubuntu:26.04 ships a default ubuntu user (uid 1000).

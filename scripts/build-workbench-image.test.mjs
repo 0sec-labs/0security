@@ -84,11 +84,11 @@ test("Gobuster version compatibility retries only the known rejected subcommand"
   assert.equal(workbenchProbeFallback("other", ["version"], { status: 3, stderr: "No help topic for 'version'" }), null);
 });
 
-test("FoxGuard receipts require the pinned source and both policy versions", () => {
-  const expected = { revision: "a".repeat(40), archiveSha256: "b".repeat(64) };
+test("FoxGuard receipts require the in-repo source and both policy versions", () => {
+  const expected = { source: "crates/foxguard" };
   const metadata = { ...expected, policyVersions: ["v1", "v2"] };
   assert.equal(assertWorkbenchFoxguardSource(metadata, expected), metadata);
-  for (const invalid of [undefined, { ...metadata, revision: "c".repeat(40) }, { ...metadata, archiveSha256: "d".repeat(64) }, { ...metadata, policyVersions: ["v1"] }]) {
+  for (const invalid of [undefined, { ...metadata, source: "https://example.invalid/foxguard" }, { ...metadata, policyVersions: ["v1"] }]) {
     assert.throws(() => assertWorkbenchFoxguardSource(invalid, expected), /source identity/);
   }
 });

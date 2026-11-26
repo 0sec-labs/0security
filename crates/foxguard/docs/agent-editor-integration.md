@@ -219,9 +219,9 @@ Host mapping:
 ## Implementation Boundaries
 
 - Claude Code-specific hook payloads, slash-command names, and marketplace copy
-  stay under `plugins/claude-code/`.
+  stay in the plugin, which is no longer part of this repository.
 - VS Code-specific diagnostics, decorations, and extension packaging stay in the
-  VS Code extension surface.
+  extension, which is no longer part of this repository.
 - Shared behavior belongs in docs and small reusable scripts only when two or more
   integrations need the same implementation.
 - New target integrations should get separate issues once their host payload,

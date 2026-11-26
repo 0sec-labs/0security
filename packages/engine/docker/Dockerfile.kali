@@ -11,6 +11,19 @@
 # Run (manual):
 #   docker run --rm -it ghcr.io/0sec-labs/0-kali:latest bash
 
+FROM rust:1.93-bookworm@sha256:7c4ae649a84014c467d79319bbf17ce2632ae8b8be123ac2fb2ea5be46823f31 AS foxguard-builder
+# Foxguard is built from this repository (crates/foxguard), not downloaded. The
+# toolchain comes from rust-toolchain.toml through scripts/ensure-rust.sh, so the
+# image, CI and the release binaries use the same compiler.
+ENV CARGO_BUILD_JOBS=2
+WORKDIR /build
+COPY rust-toolchain.toml Cargo.toml Cargo.lock ./
+COPY scripts/ensure-rust.sh scripts/ensure-rust.sh
+RUN bash scripts/ensure-rust.sh
+COPY crates/foxguard crates/foxguard
+RUN cargo build --locked --release -p foxguard --bin foxguard \
+    && install -D -m 0755 target/release/foxguard /out/foxguard
+
 FROM kalilinux/kali-rolling
 
 ARG DEBIAN_FRONTEND=noninteractive
@@ -77,9 +90,8 @@ RUN apt-get update -qq && \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
-# Use the same checksum-pinned scanner provisioner as the CLI image and CI.
-COPY scripts/provision-foxguard.sh /tmp/provision-foxguard.sh
-RUN sh /tmp/provision-foxguard.sh && rm /tmp/provision-foxguard.sh
+# Foxguard is built from crates/foxguard, as in the CLI image.
+COPY --from=foxguard-builder /out/foxguard /usr/local/bin/foxguard
 
 # Create a non-root user for running pentesting commands
 RUN useradd -m -s /bin/bash pentester \

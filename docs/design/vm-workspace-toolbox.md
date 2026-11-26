@@ -44,8 +44,8 @@ ffuf 1.1.0 and gobuster 3.5.0. These versions are frozen build inputs, not claim
 that they are the latest security-tool releases.
 
 Node/npm dependencies use existing frozen workspace/publication locks; provider
-CLIs have their separate lock. Bun and FoxGuard use existing checksum-pinned
-provisioning. Playwright browser revision follows the locked package. All package
+CLIs have their separate lock. Bun uses existing checksum-pinned provisioning. FoxGuard is built from
+`crates/foxguard` in the image build. Playwright browser revision follows the locked package. All package
 and browser installation happens while building the image.
 
 At the end of the build, UID 1000 probes every required tool. Failure, missing

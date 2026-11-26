@@ -20,6 +20,29 @@ One page on how the repo is layered and how to keep it that way.
 Allowed edges: `cli -> engine` and `web -> engine`. Everything else is
 forbidden. The engine depends on neither of the other packages.
 
+## Foxguard, the static analysis engine
+
+`crates/foxguard` is a Rust crate in the Cargo workspace at the repository root
+(`Cargo.toml`, `Cargo.lock`, and `rust-toolchain.toml` with an exact compiler
+pin). It is the default pre-pass scanner: `0 scan` runs the `foxguard` binary
+and reads its SARIF. The TypeScript side only knows the executable name
+(`packages/engine/src/shared/scanners.ts`) and finds it in `ZERO_FOXGUARD_PATH`,
+next to `0`, or on `PATH`. There is no Rust-to-TypeScript API.
+
+- `src/engine`, `src/rules`, `src/fix`: parsers, taint tracking, native rules and
+  autofix. `rules/` holds the YAML rules compiled into the binary, `schemas/` the
+  report contracts.
+- `src/bin/foxguard_mcp.rs`: the MCP server (`docs/mcp-server.md` in the crate).
+- Engine docs: `crates/foxguard/docs` (taint tracking, finding contract,
+  precision, Semgrep compatibility).
+- CI: the `rust` job in `.github/workflows/main.yml` runs only when `crates/`,
+  the Cargo files or the toolchain pin change; nightly parity and precision
+  workflows are `foxguard-parity-nightly.yml` and `foxguard-precision-nightly.yml`.
+- Release: `.github/workflows/release.yml` builds `foxguard` on each runner
+  next to `0` and publishes `foxguard-<platform>` in the same `checksums.txt`,
+  attestation and signature as `0`. `install.sh` installs both
+  (`INSTALL_FOXGUARD=0` skips Foxguard).
+
 ## Layering rules
 
 Enforced by `pnpm check:architecture` (`scripts/check-architecture.mjs`, run in

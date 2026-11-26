@@ -14,6 +14,7 @@ on the GitHub Release tag.
 
 ### Added
 
+- Foxguard, the static analysis engine `0 scan` runs first, now lives in this repository as `crates/foxguard` (history preserved) and builds from source in the release workflow. Releases publish `foxguard-darwin-arm64`, `foxguard-linux-x64`, `foxguard-linux-arm64` and `foxguard-windows-x64.exe` next to `0`, listed in the same `checksums.txt` with the same attestation and signature. `install.sh` installs it next to `0` and verifies it against that file; `INSTALL_FOXGUARD=0` still skips it and `ZERO_FOXGUARD_PATH` still overrides it.
 - Anonymous lifecycle events go to PostHog: `first_run`, `command_invoked` (a command name from a fixed list, otherwise `other`), `update` (the two versions) and `error_exit` (an error category only). They go straight to PostHog from the CLI. `DO_NOT_TRACK=1` turns them off.
 - The `usage` event has `finding_class_counts`, findings counted by a fixed list of vulnerability classes. Titles, descriptions, evidence and targets are still never sent.
 
@@ -24,6 +25,7 @@ on the GitHub Release tag.
 
 ### Removed
 
+- The pinned download of an external Foxguard release is gone from `install.sh`, the container images and CI. The images build Foxguard from `crates/foxguard`. The Foxguard GitHub App, VS Code extension, Claude Code plugin, website, pre-commit hook, composite action and Python and npm packaging are not part of this repository.
 - The 0cloud integration is gone. `0` is one product with no hosted account: cloud sign-in and cloud credentials (`ZERO_CLOUD_TOKEN`, `~/.0/cloud.env`), feedback sent to a cloud account, opt-in run contributions and the cloud Windows evidence worker no longer exist. Feedback goes only to your own `ZERO_FEEDBACK_URL`.
 
 ## [0.45.0] - 2026-11-24

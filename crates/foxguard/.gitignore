@@ -7,15 +7,10 @@
 # Node
 node_modules/
 /package-lock.json
-vscode-extension/out/
-vscode-extension/*.vsix
 
 # Python
 __pycache__/
 
-# Build output
-www/dist/
-www/.astro/
 
 # OS
 .DS_Store

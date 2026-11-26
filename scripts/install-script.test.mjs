@@ -275,3 +275,45 @@ test("INSTALL_SIGNATURE=require fails without cosign, and 0 skips the check", ()
     assert.equal(existsSync(join(root, "cosign.log")), false);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+const withFoxguard = ["0security-linux-arm64", "0-linux-arm64", "foxguard-linux-arm64"];
+test("Foxguard is installed next to 0 from the same checksums.txt unless opted out", () => {
+  const { root, home, env } = fixture(false, withFoxguard);
+  try {
+    const installed = spawnSync("bash", ["install.sh"], { env: { ...env, INSTALL_FOXGUARD: "1" }, encoding: "utf8" });
+    assert.equal(installed.status, 0, installed.stderr);
+    const dir = join(home, ".0", "bin");
+    assert.match(installed.stderr, /Installed verified Foxguard/);
+    assert.equal(readFileSync(join(dir, "foxguard"), "utf8"), readFileSync(join(dir, "0security"), "utf8"));
+    assert.ok(readFileSync(join(root, "curl.log"), "utf8").includes("foxguard-linux-arm64"));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+test("INSTALL_FOXGUARD=0 does not download or install Foxguard", () => {
+  const { root, home, env } = fixture(false, withFoxguard);
+  try {
+    const installed = spawnSync("bash", ["install.sh"], { env, encoding: "utf8" });
+    assert.equal(installed.status, 0, installed.stderr);
+    assert.equal(existsSync(join(home, ".0", "bin", "foxguard")), false);
+    assert.ok(!readFileSync(join(root, "curl.log"), "utf8").includes("foxguard"));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+test("a Foxguard checksum mismatch keeps 0security installed and installs no Foxguard", () => {
+  const { root, home, env } = fixture(false, withFoxguard);
+  try {
+    writeFileSync(join(root, "foxguard-linux-arm64"), "tampered\n");
+    const installed = spawnSync("bash", ["install.sh"], { env: { ...env, INSTALL_FOXGUARD: "1" }, encoding: "utf8" });
+    assert.equal(installed.status, 0, installed.stderr);
+    assert.match(installed.stderr, /foxguard-linux-arm64 checksum mismatch/);
+    assert.equal(existsSync(join(home, ".0", "bin", "foxguard")), false);
+    assert.equal(existsSync(join(home, ".0", "bin", "0security")), true);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+test("a release without a Foxguard entry installs 0security and says so", () => {
+  const { root, home, env } = fixture(false, ["0security-linux-arm64", "0-linux-arm64"]);
+  try {
+    const installed = spawnSync("bash", ["install.sh"], { env: { ...env, INSTALL_FOXGUARD: "1" }, encoding: "utf8" });
+    assert.equal(installed.status, 0, installed.stderr);
+    assert.match(installed.stderr, /lists no foxguard-linux-arm64/);
+    assert.equal(existsSync(join(home, ".0", "bin", "foxguard")), false);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

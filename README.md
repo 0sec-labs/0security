@@ -55,7 +55,7 @@ export OPENAI_API_KEY="your-api-key"
 0security scan ./your-repo
 ```
 
-The installer adds the command as `0security` and as the short alias `0`. Both run the same program.
+The installer adds the command as `0security` and as the short alias `0`. Both run the same program. It also installs `foxguard`, the static analysis engine that `0 scan` runs first; it is built from [`crates/foxguard`](crates/foxguard) in this repository and verified against the same `checksums.txt`. Set `INSTALL_FOXGUARD=0` to skip it.
 
 That scans the folder, prints a report and stops at a $5 budget. Any model provider works: set its key instead (see [Models](https://docs.0.security/models/)).
 

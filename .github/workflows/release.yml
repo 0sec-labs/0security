@@ -1,7 +1,8 @@
 name: "0: Release"
 
-# Build the standalone `0` binary natively on each target OS and publish all
-# four (+ checksums) to the GitHub Release. Native builds avoid `bun --compile`
+# Build the standalone `0` binary natively on each target OS, build the Foxguard
+# scanner from crates/foxguard next to it (same runner, same pinned toolchain),
+# and publish all of them (+ checksums) to the GitHub Release. Native builds avoid `bun --compile`
 # cross-compilation, so native parser assets are verified for each platform.
 # Each binary is smoke-tested on its own runner
 # before it ships. Desktop is development-only alpha and is never a release asset.
@@ -32,6 +33,13 @@ on:
       - "scripts/smoke-scan-autostart.mjs"
       - "scripts/check-host-console-worker-bun.ts"
       - "scripts/bundle-cli.mjs"
+      - "scripts/ensure-rust.sh"
+      - "scripts/stage-release-assets.sh"
+      - "install.sh"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - "crates/foxguard/**"
   schedule:
     - cron: "43 2 * * *"
   workflow_dispatch:
@@ -151,6 +159,18 @@ jobs:
           # malformed fails scripts/built-in-posthog-key.mjs before compiling).
           ZERO_RELEASE_POSTHOG_KEY: ${{ secrets.ZERO_RELEASE_POSTHOG_KEY }}
         run: bash scripts/bun-compile.sh "" "dist-bin/${{ matrix.asset }}"
+      - name: Build Foxguard from crates/foxguard
+        # The default scanner ships beside `0` as foxguard-<platform>, built from
+        # this commit with the toolchain pinned in rust-toolchain.toml.
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/ensure-rust.sh
+          cargo build --release --locked -p foxguard --bin foxguard
+          ext=""; case "${{ matrix.asset }}" in *.exe) ext=".exe" ;; esac
+          platform="${{ matrix.asset }}"; platform="${platform#0-}"
+          cp "target/release/foxguard${ext}" "dist-bin/foxguard-${platform}"
+          "dist-bin/foxguard-${platform}" --version
       - name: Smoke the binary
         # Dashboard embed, host console worker, extension install and web setup.
         # One script shared with `scripts/ci-local.sh --only standalone-smoke`.
@@ -159,7 +179,9 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ matrix.asset }}
-          path: dist-bin/${{ matrix.asset }}
+          path: |
+            dist-bin/${{ matrix.asset }}
+            dist-bin/foxguard-*
           if-no-files-found: error
           retention-days: 1
 
@@ -187,16 +209,19 @@ jobs:
           bash scripts/stage-release-assets.sh dist-bin
           cat dist-bin/checksums.txt
           (cd dist-bin && sha256sum --check checksums.txt)
-          test "$(wc -l < dist-bin/checksums.txt)" -eq 8
+          test "$(wc -l < dist-bin/checksums.txt)" -eq 12
           for p in darwin-arm64 linux-x64 linux-arm64 windows-x64.exe; do
             cmp "dist-bin/0-$p" "dist-bin/0security-$p"
+            grep -q " foxguard-$p\$" dist-bin/checksums.txt
           done
       - name: Install from the staged assets
         run: |
           home="$(mktemp -d)"
-          HOME="$home" INSTALL_DIR="$home/bin" INSTALL_ATTESTATION=0 INSTALL_FOXGUARD=0 \
+          HOME="$home" INSTALL_DIR="$home/bin" INSTALL_ATTESTATION=0 INSTALL_SIGNATURE=0 \
             RELEASE_BASE_URL="file://$PWD/dist-bin" bash install.sh
           test -L "$home/bin/0"
+          test -x "$home/bin/foxguard"
+          cmp "$home/bin/foxguard" dist-bin/foxguard-linux-x64
           "$home/bin/0security" --version
           "$home/bin/0" --version
 
@@ -231,7 +256,7 @@ jobs:
           bash src/scripts/stage-release-assets.sh dist-bin
           cat dist-bin/checksums.txt
           (cd dist-bin && sha256sum --check checksums.txt)
-          test "$(wc -l < dist-bin/checksums.txt)" -eq 8
+          test "$(wc -l < dist-bin/checksums.txt)" -eq 12
       - name: Generate release notes from docs/CHANGELOG.md
         env:
           TAG: ${{ github.event.inputs.tag || github.ref_name }}
@@ -265,6 +290,10 @@ jobs:
             dist-bin/0security-linux-x64
             dist-bin/0security-linux-arm64
             dist-bin/0security-windows-x64.exe
+            dist-bin/foxguard-darwin-arm64
+            dist-bin/foxguard-linux-x64
+            dist-bin/foxguard-linux-arm64
+            dist-bin/foxguard-windows-x64.exe
             dist-bin/checksums.txt
             dist-bin/0-sbom.cdx.json
       # Keyless Sigstore signatures with the workflow's OIDC identity: no signing
@@ -293,6 +322,10 @@ jobs:
             dist-bin/0security-linux-x64
             dist-bin/0security-linux-arm64
             dist-bin/0security-windows-x64.exe
+            dist-bin/foxguard-darwin-arm64
+            dist-bin/foxguard-linux-x64
+            dist-bin/foxguard-linux-arm64
+            dist-bin/foxguard-windows-x64.exe
             dist-bin/checksums.txt
             dist-bin/0-sbom.cdx.json
             dist-bin/checksums.txt.sigstore.json

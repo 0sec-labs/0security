@@ -1,6 +1,6 @@
 # Architecture
 
-foxguard is a Rust-native static analyzer with tree-sitter parsers for 12 source languages plus configuration formats (nginx, Apache, HAProxy, Dockerfile, package manifests). It runs at linter speed locally and ships as a CLI, GitHub App, Claude Code plugin, VS Code extension, and GitHub Action.
+foxguard is a Rust-native static analyzer with tree-sitter parsers for 12 source languages plus configuration formats (nginx, Apache, HAProxy, Dockerfile, package manifests). It runs at linter speed locally and ships as a CLI and an MCP server, built from `crates/foxguard` in the 0security repository.
 
 ## Rule model: Rust core + bundled YAML + external YAML
 
@@ -23,9 +23,6 @@ The `queries/` subfolder under `dirty-frag-class/` holds CodeQL `.ql` queries an
 ## Integrations
 
 - **CLI.** The `foxguard` binary, configured from `.foxguard.yml` at repo root for baselines and excludes.
-- **GitHub App.** Webhook receiver under `src/github_app/` (`webhook.rs`, `auth.rs`, `review.rs`, `installation_store.rs`), built behind the `github-app` feature flag. Permissions, events, and Phase 2 plan are in `src/github_app/README.md`.
-- **Claude Code plugin.** `plugins/claude-code/` adds `/foxguard:*` skills and post-edit hooks. Local plugin loading and hook behavior live in `docs/claude-code-integration.md`; the cross-agent contract is in `docs/agent-editor-integration.md`.
-- **VS Code extension.** `vscode-extension/` (TypeScript) scans on save and surfaces findings inline.
 - **GitHub Action.** `action/action.yml` plus `action/entrypoint.sh` wrap the CLI for CI, with SARIF upload to GitHub Code Scanning.
 
 ## Output formats
@@ -34,12 +31,11 @@ The `queries/` subfolder under `dirty-frag-class/` holds CodeQL `.ql` queries an
 
 ## Distribution
 
-`npx foxguard@latest`, `cargo install foxguard`, `curl -fsSL https://foxguard.dev/install.sh | sh` for prebuilt binaries, and a reference `Dockerfile.github-app` for the webhook receiver. Homebrew was retired in favor of the install script (commit 6d55755). The npm wrapper under `packages/npm/` downloads the version-matched binary.
+The release workflow of the 0security repository builds `foxguard` from this crate on each platform and publishes it next to `0` as `foxguard-<platform>`, listed in the same `checksums.txt`, attestation and signature. `install.sh` installs it. The crate is `publish = false`.
 
 ## Learning more
 
-- Adding a rule or language: `CONTRIBUTING.md`.
-- GitHub App internals: `src/github_app/README.md`.
+- Layout and CI: `docs/design/architecture.md` in the repository root.
 - Taint engine scope and limits: `docs/taint-tracking.md`.
 - False-positive policy: `docs/precision.md`.
 - Agent/editor integration contract: `docs/agent-editor-integration.md`.

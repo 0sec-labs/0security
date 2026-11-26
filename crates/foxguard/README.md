@@ -1,36 +1,10 @@
-<p align="center">
-  <a href="https://0.security">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="www/public/foxguard-lockup-dark.png" />
-      <img src="www/public/foxguard-lockup-light.png" width="460" alt="foxguard by 0security" />
-    </picture>
-  </a>
-</p>
+# foxguard
 
-<h1 align="center">foxguard</h1>
+Fast local security scanning for code, secrets, dependencies, and crypto risk.
 
-<p align="center">
-  <strong>Fast local security scanning for code, secrets, dependencies, and crypto risk.</strong>
-  <br />
-  <sub>Integrated into <a href="https://github.com/0sec-labs/0sec">0sec</a>, the open cybersecurity harness.</sub>
-</p>
-
-<p align="center">
-  <a href="https://github.com/0sec-labs/foxguard/actions/workflows/ci.yml"><img src="https://github.com/0sec-labs/foxguard/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
-  <a href="https://github.com/0sec-labs/foxguard"><img src="https://img.shields.io/badge/foxguard-clean-3fb950" alt="foxguard: clean" /></a>
-  <a href="https://crates.io/crates/foxguard"><img src="https://img.shields.io/crates/v/foxguard?color=d97706&label=crates.io" alt="crates.io" /></a>
-  <a href="https://www.npmjs.com/package/foxguard"><img src="https://img.shields.io/npm/v/foxguard?color=d97706&label=npm" alt="npm" /></a>
-  <a href="https://pypi.org/project/foxguard/"><img src="https://img.shields.io/pypi/v/foxguard?color=d97706&label=PyPI" alt="PyPI" /></a>
-  <a href="https://github.com/apps/foxguard-app/installations/new"><img src="https://img.shields.io/badge/GitHub_App-Install-2ea44f?logo=github" alt="Install GitHub App" /></a>
-</p>
-
-```sh
-npx foxguard .
-```
-
-<p align="center">
-  <img src="assets/demo.gif" alt="foxguard scan demo" width="640" />
-</p>
+foxguard is the static analysis engine of [0security](https://github.com/0sec-labs/0security).
+It lives in this repository as `crates/foxguard`, and `0 scan` runs it first and hands
+its findings to the scan as leads. It also works on its own as a CLI and an MCP server.
 
 ## Why
 
@@ -43,69 +17,21 @@ npx foxguard .
 
 ## Install
 
+`0security`'s installer puts `foxguard` next to `0`, verified against the release `checksums.txt`
+(set `INSTALL_FOXGUARD=0` to skip it):
+
 ```sh
-npx foxguard .                                      # zero install
-pipx install foxguard                               # prebuilt CLI from PyPI
-curl -fsSL https://foxguard.dev/install.sh | sh     # prebuilt binary (macOS/Linux)
-cargo install foxguard                              # from source
+curl -fsSL https://raw.githubusercontent.com/0sec-labs/0security/main/install.sh | bash
 ```
 
-Standalone binary installers verify GitHub release binaries against `checksums.txt`. Release binaries also publish GitHub artifact attestations; use `gh attestation verify` for manual verification, or see [release provenance](docs/release-provenance.md).
+From a checkout (the Rust toolchain is pinned in the root `rust-toolchain.toml`):
 
-PyPI wheels support Python 3.9+ on Linux glibc 2.28+ (x86_64/ARM64), macOS
-(Intel/Apple Silicon), and Windows x86_64. In an existing Python virtual
-environment, use `python -m pip install foxguard` instead. These install the native
-CLI without a Rust compiler or a runtime binary download; no Python API is
-provided. Alpine/musl users should use the standalone Linux release binaries.
-
-**GitHub Action:**
-
-```yaml
-- uses: 0sec-labs/foxguard/action@v0.14.3
-  with:
-    path: .
-    severity: medium
-    fail-on-findings: "true"
-    upload-sarif: "true"
+```sh
+cargo build --release -p foxguard --bin foxguard   # target/release/foxguard
 ```
 
-**pre-commit:**
-
-```yaml
-repos:
-  - repo: https://github.com/0sec-labs/foxguard
-    rev: v0.14.3
-    hooks:
-      - id: foxguard
-```
-
-Integrations: [GitHub App](https://github.com/apps/foxguard-app/installations/new), [VS Code](https://marketplace.visualstudio.com/items?itemName=peaktwilight.foxguard), [Claude Code plugin](docs/claude-code-integration.md), and [MCP server](docs/mcp-server.md).
-
-### Hosted GitHub App operations
-
-`foxguard-github-app` writes newline-delimited JSON logs. Completed and failed
-scans use `event=foxguard.scan.completed` and `event=foxguard.scan.failed`, with
-delivery, installation, repository, PR, commit, duration, and `usage_scope`
-fields for correlation. Keep identifiers as log fields, not metric labels.
-
-Set `FOXGUARD_INTERNAL_ACCOUNTS` to a comma-separated list of your own GitHub
-accounts and organizations. Matching is case-insensitive. Other owners are
-classified as `external`; an unset list or missing owner produces `unknown`.
-External activity is not proof of a paying customer, and scans are not people.
-
-The installation registry is reconciled against all pages of GitHub's App
-installation API at startup and hourly. Failed refreshes retain existing state;
-concurrent webhooks take precedence. Sparse webhook metadata preserves known
-account details and observed repository names. Those names are not a complete
-inventory of an installation's accessible repositories.
-
-Persist `FOXGUARD_INSTALLATIONS_PATH` and `FOXGUARD_PULL_REQUEST_JOBS_PATH` on
-durable storage. Monitor `foxguard.installations.reconcile_failed` alongside
-scan failures; `foxguard.installations.reconciled` reports the total and
-internal/external/unknown installation counts after a successful refresh.
-Size `FOXGUARD_PR_WORKERS` against measured scanner peak memory and the
-container memory limit: child-process OOM kills can occur without restarting
-the hosted application.
+Set `ZERO_FOXGUARD_PATH` to make `0 scan` use a specific binary. The MCP server is
+`foxguard-mcp` ([docs](docs/mcp-server.md)).
 
 ## Quick Start
 
@@ -269,7 +195,7 @@ Suppress an accepted finding inline with `// foxguard: ignore[rule-id]`.
 
 ## Documentation
 
-Start with the [documentation index](./docs/README.md). Key references: [architecture](./docs/architecture.md), [Semgrep/OpenGrep compatibility](./docs/compatibility.md), and the [release runbook](./docs/releasing.md).
+Start with the [documentation index](./docs/README.md). Key references: [architecture](./docs/architecture.md) and [Semgrep/OpenGrep compatibility](./docs/compatibility.md).
 
 ## Benchmarks
 
@@ -284,8 +210,8 @@ Reproduce with `./benchmarks/run.sh`; results vary by machine. See [`benchmarks/
 
 ## Contributing
 
-See [`CONTRIBUTING.md`](./CONTRIBUTING.md) for rule authoring, tests, and development setup.
+Rules live in `rules/` and native rules in `src/rules/`. Run `cargo test -p foxguard` (a targeted `--test <name>` subset is fine locally; CI runs the full suite) and `cargo clippy -p foxguard --all-targets -- -D warnings`.
 
 ## License
 
-MIT OR Apache-2.0 -- [0sec Labs](https://0.security)
+MIT OR Apache-2.0, see `LICENSE` and `LICENSE-APACHE` in this folder and the repository `NOTICE`.
