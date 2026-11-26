@@ -6,7 +6,7 @@
  * allowlist for inference, and public rows never establish account entitlement.
  */
 
-import { MODEL_PRICING, getRates, modelProvider } from "@0/engine/shared";
+import { MODEL_PRICING, getRates, hasKnownPricing, modelProvider } from "@0/engine/shared";
 
 import type { SelectorItem } from "./selector.js";
 import { loadCatalogModels, METERED_CATALOG_PROVIDERS, type CatalogSyncOptions } from "./model-catalog-sync.js";
@@ -44,6 +44,13 @@ function formatRate(value: number): string {
 export function formatModelPrice(input: number, output: number): string {
   if (input === 0 && output === 0) return "free";
   return `$${formatRate(input)}/${formatRate(output)} per M`;
+}
+
+/** Bedrock rows show the wrapped model's on-demand rate; ids with no known rate stay "Unknown rate". */
+export function bedrockPriceLabel(id: string): string {
+  if (!hasKnownPricing(`bedrock/${id}`)) return "Unknown rate";
+  const rates = getRates(`bedrock/${id}`);
+  return formatModelPrice(rates.input, rates.output);
 }
 
 export function buildModelCatalog(currentModel?: string): CatalogModel[] {

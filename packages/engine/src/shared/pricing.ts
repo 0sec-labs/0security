@@ -43,6 +43,15 @@ export const MANUAL_PRICING: Record<string, ModelRates> = {
   "claude-sonnet-5-5": { input: 2.00, output: 10.00, cachedInput: 0.10, cacheWrite: 2.50 },
   "claude-sonnet-5.5": { input: 2.00, output: 10.00, cachedInput: 0.10, cacheWrite: 2.50 },
   "claude-haiku-4-5": { input: 0.80, output: 4.00, cachedInput: 0.08 },
+  // Older Claude tiers, also the base for Amazon Bedrock ids (see bedrockPriceKey).
+  "claude-sonnet-4-5": { input: 3.00, output: 15.00, cachedInput: 0.30 },
+  "claude-sonnet-4": { input: 3.00, output: 15.00, cachedInput: 0.30 },
+  "claude-opus-4-5": { input: 5.00, output: 25.00, cachedInput: 0.50 },
+  "claude-opus-4-1": { input: 15.00, output: 75.00, cachedInput: 1.50 },
+  // Amazon Nova on Bedrock (on-demand, us regions).
+  "nova-pro": { input: 0.80, output: 3.20 },
+  "nova-lite": { input: 0.06, output: 0.24 },
+  "nova-micro": { input: 0.035, output: 0.14 },
   // OpenAI codex alias — mirrors gpt-5.5 (OSS feed has only the bare key)
   "gpt-5.5-codex": { input: 5.00, output: 30.00 },
   // LiteLLM no longer carries this exact key; retain its last published rate.
@@ -190,8 +199,20 @@ function azureDeploymentPriceKey(model: string): string | null {
 const MODEL_VENDOR_PREFIXES = [
   "openai/", "azure/", "anthropic/", "google/", "deepseek/", "meta/", "mistral/",
   "z-ai/", "zai/", "kimi/", "moonshot/", "qwen/", "openrouter/", "opencode/",
-  "xai/", "x-ai/", "together/",
+  "xai/", "x-ai/", "together/", "bedrock/",
 ];
+
+/**
+ * Amazon Bedrock model ids wrap a vendor model: an optional geography prefix
+ * (global., us., eu., apac.), the vendor (anthropic., amazon.), the model, an
+ * optional date and a version (-v1:0). Return the bare model name those ids
+ * price as, or the input unchanged when it is not a Bedrock id. Geography
+ * premiums are not modelled, so a regional id is an estimate.
+ */
+export function bedrockPriceKey(model: string): string {
+  const match = /^(?:(?:global|us|eu|apac|jp|au|us-gov)\.)?(?:anthropic|amazon)\.([a-z0-9.-]+?)(?:-\d{8})?-v\d+(?::\d+)?$/.exec(model.toLowerCase());
+  return match ? match[1] : model;
+}
 
 /** Every progressive vendor-prefix-stripped spelling of `model`, raw form first,
  * fully normalized last — e.g. "openrouter/z-ai/glm-5.3-flash" yields
@@ -217,7 +238,7 @@ export function modelNormalizationStages(model: string): string[] {
 /** Vendor-prefix normalization shared by `getRates` and runtime pricing discovery. */
 export function normalizeModel(model: string): string {
   const stages = modelNormalizationStages(model);
-  return stages[stages.length - 1];
+  return bedrockPriceKey(stages[stages.length - 1]);
 }
 
 function lookupRates(model?: string): ModelRates | undefined {
@@ -269,6 +290,7 @@ export function modelProvider(model?: string): string {
   if (!model) return "unknown";
   const lowered = model.toLowerCase();
   if (lowered.startsWith("together/")) return "together";
+  if (lowered.startsWith("bedrock/")) return "bedrock";
   if (lowered.startsWith("openai/")) return "openai";
   if (lowered.startsWith("azure/")) return "azure";
   if (lowered.startsWith("anthropic/")) return "anthropic";
