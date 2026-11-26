@@ -530,6 +530,18 @@ Write one export per repository, then roll them up:
 
 The result counts open findings by severity, category, age and owner. See [findings rollup](/commands/#findings-rollup) for the export format and the counting rules.
 
+To see the change since an earlier run, pass that run's export:
+
+```bash
+0security findings rollup api.json web.json --since last-month.json
+```
+
+It shows findings opened, fixed and net per severity and per repository. To group by team and tier, add a labels file with `--labels labels.yaml`. To count another scanner's SARIF file, name it as an input:
+
+```bash
+0security findings rollup scanner.sarif --repository api --labels labels.yaml
+```
+
 ## Verified fixes
 
 A verified fix is a fix whose checks ran in a container with no network. The pull request says so only when every check passed there.

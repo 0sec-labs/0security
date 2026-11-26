@@ -4,8 +4,8 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { osecDB } from "@0/engine/storage";
 import type { Finding } from "@0/engine/shared";
-import { applyOwners, buildExport, mergeRows, parseExport, renderHtml, renderText, summarise, type RollupRow } from "../findings-rollup-core.js";
-import { runFindingsRollup, type FindingsRollupDeps } from "../findings-rollup.js";
+import { applyLabels, applyOwners, buildExport, computeTrend, mergeRows, parseExport, renderHtml, renderText, summarise, type RollupRow } from "../findings-rollup-core.js";
+import { readLabels, repositoryFromUri, runFindingsRollup, type FindingsRollupDeps } from "../findings-rollup.js";
 
 const NOW = new Date("2026-06-01T00:00:00.000Z");
 const day = (n: number) => new Date(NOW.getTime() - n * 86_400_000).toISOString();
@@ -143,5 +143,161 @@ describe("findings rollup command", () => {
     expect(() => runFindingsRollup([], { format: "pdf" }, deps())).toThrow("--format");
     writeFileSync(join(dir, "bad.json"), "{}");
     expect(() => runFindingsRollup([join(dir, "bad.json")], {}, deps())).toThrow("Could not read");
+  });
+});
+
+describe("rollup trend", () => {
+  const earlier = buildExport([
+    row({ fingerprint: "stays" }), row({ fingerprint: "fixed", severity: "critical" }), row({ fingerprint: "accepted-now" }),
+    row({ fingerprint: "was-accepted", triage: "accepted" }), row({ repository: "gone", fingerprint: "g1" }), row({ repository: "web", fingerprint: "w1", severity: "low" }),
+  ], new Date("2026-05-01T00:00:00.000Z"));
+  const current = [
+    row({ fingerprint: "stays" }), row({ fingerprint: "fixed", severity: "critical", status: "fixed" }), row({ fingerprint: "accepted-now", triage: "accepted" }),
+    row({ fingerprint: "was-accepted" }), row({ fingerprint: "new", severity: "medium" }), row({ repository: "web", fingerprint: "w1", severity: "low", status: "fixed" }),
+    row({ repository: "fresh", fingerprint: "f1", severity: "high" }),
+  ];
+
+  it("counts opened, fixed and net per severity and repository", () => {
+    const t = computeTrend(earlier, current);
+    expect(t).toMatchObject({ since: "2026-05-01T00:00:00.000Z", opened: 3, fixed: 3, net: 0 });
+    const sev = Object.fromEntries(t.bySeverity.map(c => [c.name, [c.opened, c.fixed, c.net]]));
+    expect(sev).toMatchObject({ critical: [0, 1, -1], high: [2, 1, 1], medium: [1, 0, 1], low: [0, 1, -1], info: [0, 0, 0] });
+    expect(t.bySeverity.map(c => c.name)).toEqual(["critical", "high", "medium", "low", "info"]);
+    expect(t.byRepository).toEqual([
+      { name: "api", opened: 2, fixed: 2, net: 0 }, { name: "fresh", opened: 1, fixed: 0, net: 1 }, { name: "web", opened: 0, fixed: 1, net: -1 },
+    ]);
+  });
+
+  it("lists repositories on one side only instead of counting them as fixed", () => {
+    const t = computeTrend(earlier, current);
+    expect(t.missingRepositories).toEqual(["gone"]);
+    expect(t.newRepositories).toEqual(["fresh"]);
+  });
+
+  it("shows the trend in text, html and json, and escapes names", () => {
+    const hostile = buildExport([row({ repository: "<img src=x>", fingerprint: "z" })], NOW);
+    const summary = summarise([row({ repository: "<b>x</b>", fingerprint: "n" })], NOW, hostile);
+    expect(renderText(summary)).toContain("Trend since");
+    const html = renderHtml(summary);
+    expect(html).toContain("Trend by repository");
+    expect(html).not.toContain("<b>x</b>");
+    expect(html).not.toContain("<img");
+    expect(html).toContain("&lt;img src=x&gt;");
+    expect(JSON.parse(JSON.stringify(summary)).trend.opened).toBe(1);
+  });
+});
+
+describe("rollup labels", () => {
+  const rules = [
+    { pattern: "pay-*", path: false, team: "payments", tier: "2" },
+    { pattern: "pay-api", path: false, tier: "1" },
+    { pattern: "src/vault/**", path: true, team: "security" },
+  ];
+  it("prefers a path rule, then an exact name, then the longest glob", () => {
+    const out = applyLabels([
+      row({ repository: "pay-api", fingerprint: "a" }), row({ repository: "pay-web", fingerprint: "b" }),
+      { ...row({ repository: "pay-api", fingerprint: "c" }), path: "src/vault/keys.ts" }, row({ repository: "other", fingerprint: "d" }),
+    ], rules);
+    expect(out.map(r => [r.team, r.tier])).toEqual([["payments", "1"], ["payments", "2"], ["security", "1"], [null, null]]);
+  });
+  it("lets the labels file override a stored label and keeps stored labels when nothing matches", () => {
+    const out = applyLabels([row({ repository: "pay-api", team: "old", tier: "9" }), row({ repository: "zzz", fingerprint: "b", team: "kept" })], rules);
+    expect(out.map(r => [r.team, r.tier])).toEqual([["payments", "1"], ["kept", null]]);
+  });
+  it("counts open findings by team and tier, with unlabelled ones separate", () => {
+    const summary = summarise(applyLabels([row({ repository: "pay-api" }), row({ repository: "o", fingerprint: "b" })], rules), NOW);
+    expect(summary.byTeam).toEqual([{ name: "payments", count: 1 }, { name: "unlabelled", count: 1 }]);
+    expect(renderText(summary)).toContain("By team");
+    expect(renderText(summarise([row()], NOW))).not.toContain("By team");
+  });
+  it("does not let a glob key behave as a regular expression", () => {
+    expect(applyLabels([row({ repository: "apiX" })], [{ pattern: "api.", path: false, team: "t" }])[0]!.team).toBeNull();
+    expect(applyLabels([row({ repository: "a(b" })], [{ pattern: "a(b", path: false, team: "t" }])[0]!.team).toBe("t");
+  });
+  it("keeps team and tier in an export that reads back, and reads old exports without them", () => {
+    const labelled = applyLabels([row({ repository: "pay-api" })], rules);
+    expect(parseExport(JSON.stringify(buildExport(labelled, NOW)), "x").findings[0]).toMatchObject({ team: "payments", tier: "1" });
+    const old = JSON.stringify({ schema: "0.findings-rollup.v1", exportedAt: NOW.toISOString(), findings: [row()] });
+    expect(parseExport(old, "old.json").findings[0]!.team).toBeUndefined();
+  });
+});
+
+describe("rollup command: labels, trend and SARIF input", () => {
+  let dir: string; let out: string[]; let err: string[]; const written: Record<string, string> = {};
+  const deps = (): FindingsRollupDeps => ({ now: () => NOW, defaultDatabases: () => [], out: t => out.push(t), err: t => err.push(t), writeFile: (p, t) => { written[p] = t; } });
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), "0-rollup-")); out = []; err = []; for (const k of Object.keys(written)) delete written[k]; });
+  afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
+  const sarif = (results: unknown[], extra: Record<string, unknown> = {}) => JSON.stringify({ version: "2.1.0", runs: [{ tool: { driver: { name: "scanner", rules: [{ id: "r1", shortDescription: { text: "Rule one" } }] } }, results, ...extra }] });
+  const result = (file: string, line: number, level = "error") => ({ ruleId: "r1", level, message: { text: `bad at ${file}` }, locations: [{ physicalLocation: { artifactLocation: { uri: file }, region: { startLine: line } } }] });
+
+  it("reads a SARIF file directly and names the repository from the flag or the provenance", () => {
+    const file = join(dir, "scan.sarif");
+    writeFileSync(file, sarif([result("src/a.ts", 3), result("src/b.ts", 4, "warning")], { versionControlProvenance: [{ repositoryUri: "https://user:hunter2@git.example.com/org/api.git?x=1" }] }));
+    runFindingsRollup([file], { format: "json" }, deps());
+    const summary = JSON.parse(out[0]!);
+    expect(summary.open).toBe(2);
+    expect(summary.byRepository).toEqual([{ name: "git.example.com/org/api", count: 2 }]);
+    expect(JSON.stringify(summary)).not.toContain("hunter2");
+    out.length = 0;
+    runFindingsRollup([file], { format: "json", repository: "billing" }, deps());
+    expect(JSON.parse(out[0]!).byRepository).toEqual([{ name: "billing", count: 2 }]);
+  });
+
+  it("falls back to the file name and never writes the SARIF path into an export", () => {
+    const file = join(dir, "svc.sarif");
+    writeFileSync(file, sarif([result("src/vault/k.ts", 1)]));
+    runFindingsRollup([file], { export: join(dir, "e.json"), format: "json" }, deps());
+    expect(JSON.parse(out[0]!).byRepository).toEqual([{ name: "svc", count: 1 }]);
+    expect(written[join(dir, "e.json")]).not.toContain("vault");
+  });
+
+  it("applies path labels to SARIF findings from a YAML labels file", () => {
+    const file = join(dir, "x.sarif"); const labels = join(dir, "labels.yaml");
+    writeFileSync(file, sarif([result("src/vault/k.ts", 1), result("src/other.ts", 2)]));
+    writeFileSync(labels, 'x:\n  team: platform\n  tier: 3\n"path:src/vault/**":\n  team: security\n');
+    runFindingsRollup([file], { format: "json", labels }, deps());
+    const summary = JSON.parse(out[0]!);
+    expect(summary.byTeam).toEqual([{ name: "platform", count: 1 }, { name: "security", count: 1 }]);
+    expect(summary.byTier).toEqual([{ name: "3", count: 2 }]);
+  });
+
+  it("scrubs credentials and neutralises hostile SARIF text", () => {
+    const file = join(dir, "h.sarif");
+    const hostile = { ruleId: "<script>alert(1)</script>", level: "error", message: { text: "see https://u:pw@h.example/p?token=abc123 \u001b[2J" }, locations: [{ physicalLocation: { artifactLocation: { uri: "../../etc/passwd" } } }] };
+    writeFileSync(file, sarif([hostile], { versionControlProvenance: [{ repositoryUri: "<img src=x onerror=alert(1)>\u0000" }] }));
+    runFindingsRollup([file], { format: "html" }, deps());
+    expect(out[0]).not.toMatch(/<img|<script/);
+    expect(out[0]).not.toContain("pw@");
+  });
+
+  it("rejects too many results, a bad SARIF version and a bad labels file", () => {
+    const many = join(dir, "many.sarif");
+    writeFileSync(many, sarif(Array.from({ length: 5001 }, (_, i) => result(`f${i}.ts`, 1))));
+    expect(() => runFindingsRollup([many], {}, deps())).toThrow("more than 5000 results");
+    const old = join(dir, "old.sarif");
+    writeFileSync(old, JSON.stringify({ version: "1.0", runs: [] }));
+    expect(() => runFindingsRollup([old], {}, deps())).toThrow("Unsupported SARIF version");
+    for (const bad of ["[1]", "x: 1", "x: {team: 1, extra: 2}", "x: {}", "a: [", ""]) { const p = join(dir, "bad.yaml"); writeFileSync(p, bad); expect(() => readLabels(p)).toThrow("--labels"); }
+    expect(() => readLabels(join(dir, "missing.yaml"))).toThrow("--labels");
+  });
+
+  it("compares with an earlier export through --since", () => {
+    const first = join(dir, "first.json"); const second = join(dir, "second.json");
+    writeFileSync(first, JSON.stringify(buildExport([row({ fingerprint: "a" }), row({ fingerprint: "b", severity: "low" })], new Date("2026-05-01T00:00:00.000Z"))));
+    writeFileSync(second, JSON.stringify(buildExport([row({ fingerprint: "a" }), row({ fingerprint: "c", severity: "critical" })], NOW)));
+    runFindingsRollup([second], { since: first, format: "json" }, deps());
+    const trend = JSON.parse(out[0]!).trend;
+    expect(trend).toMatchObject({ opened: 1, fixed: 1, net: 0 });
+    out.length = 0;
+    runFindingsRollup([second], { since: first }, deps());
+    expect(out[0]).toContain("Trend since 2026-05-01T00:00:00.000Z: 1 opened, 1 fixed, net 0");
+    expect(() => runFindingsRollup([second], { since: join(dir, "nope.json") }, deps())).toThrow("--since");
+    writeFileSync(join(dir, "junk.json"), "{}");
+    expect(() => runFindingsRollup([second], { since: join(dir, "junk.json") }, deps())).toThrow("--since");
+  });
+
+  it("derives a repository name from a URI without credentials", () => {
+    expect(repositoryFromUri("ssh://git@host.example/org/repo.git")).toBe("host.example/org/repo");
+    expect(repositoryFromUri("git@host.example:org/repo.git")).toBe("host.example:org/repo");
   });
 });
