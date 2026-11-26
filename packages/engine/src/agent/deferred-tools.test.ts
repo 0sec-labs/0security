@@ -140,13 +140,6 @@ describe("formatLoadResult", () => {
   });
 });
 
-describe("threshold", () => {
-  it("is a sane positive floor", () => {
-    expect(DEFERRED_TOOLS_MIN).toBeGreaterThan(0);
-  });
-});
-
-
 describe("partitionToolDefinitions", () => {
   it("keeps a small explicit surface available without discovery overhead", () => {
     const tools = [def("specialist_probe"), def("bash")];
