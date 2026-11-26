@@ -2,10 +2,11 @@
 // Second-opinion benchmark: does `0 scan --known <sarif>` find planted bugs that a baseline scanner misses?
 //   node scripts/bench/second-opinion.mjs --baseline-only                 run only the baseline tools (free) and show what they miss
 //   node scripts/bench/second-opinion.mjs --dry-run                       no model, no cost: check the plan
-//   node scripts/bench/second-opinion.mjs --run [--tools foxguard,semgrep] [--repeat 2] [--budget 0.5] [--max-cost 3]
+//   node scripts/bench/second-opinion.mjs --run [--tools foxguard,semgrep,self] [--repeat 2] [--budget 0.5] [--max-cost 3]
 // For each fixture with planted items it runs the baseline tool, scores the tool's own SARIF against the answer key, then
 // scans the fixture with and without `--known <tool sarif>` (fresh HOME per run) and reports, for the items the tool missed,
-// how often the scan found them, and what share of the reported findings are new. See docs/design/benchmark.md.
+// how often the scan found them, and what share of the reported findings are new. The tool "self" uses one plain scan of the
+// fixture as the first pass (its SARIF is the known set); the plain second scan is the fair "just rerun" comparison. See docs/design/benchmark.md.
 import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -36,7 +37,7 @@ export function parseArgs(argv) {
     else throw new Error(`unknown option ${a}`);
   }
   if (o.run === o.dryRun && !o.baselineOnly) throw new Error("pass exactly one of --run (spends model money) or --dry-run (free)");
-  for (const t of o.tools) if (!["foxguard", "semgrep"].includes(t)) throw new Error(`unknown tool ${t} (foxguard, semgrep)`);
+  for (const t of o.tools) if (!["foxguard", "semgrep", "self"].includes(t)) throw new Error(`unknown tool ${t} (foxguard, semgrep, self)`);
   return o;
 }
 
@@ -88,6 +89,11 @@ export function relativize(sarifText, folder) {
   return JSON.stringify(log);
 }
 
+/** A saved JSON report flattens each finding's place to `location`; the SARIF formatter reads it back from `reviewAnnotation`. */
+export function withAnnotations(report) {
+  return { ...report, findings: (report.findings ?? []).map((f) => (f.location?.path && !f.reviewAnnotation ? { ...f, reviewAnnotation: { path: f.location.path, startLine: f.location.startLine, endLine: f.location.endLine } } : f)) };
+}
+
 function scan(fixture, knownFile, o, label) {
   const root = mkdtempSync(join(tmpdir(), "0-so-"));
   const home = join(root, "home");
@@ -107,13 +113,15 @@ async function main() {
   const o = parseArgs(process.argv.slice(2));
   const fixtures = loadFixtures(o.fixtures).filter((fx) => fx.answer.items.length > 0);
   if (o.dryRun && !o.baselineOnly) {
-    const scans = fixtures.length * (o.repeat + o.tools.length * o.repeat);
-    console.log(`${fixtures.length} fixtures with planted items; ${scans} scans (${o.repeat} generic + ${o.tools.length} x ${o.repeat} with --known per fixture); worst case $${(scans * o.budget).toFixed(2)} at --budget ${o.budget}, capped at --max-cost ${o.maxCost}`);
+    const scans = fixtures.length * (o.repeat + o.tools.length * o.repeat + (o.tools.includes("self") ? o.repeat : 0));
+    console.log(`${fixtures.length} fixtures with planted items; ${scans} scans (${o.repeat} generic + ${o.tools.length} x ${o.repeat} with --known per fixture, plus ${o.repeat} first passes for "self"); worst case $${(scans * o.budget).toFixed(2)} at --budget ${o.budget}, capped at --max-cost ${o.maxCost}`);
     return;
   }
   if (!existsSync(o.cli)) throw new Error(`${o.cli} not found: build the engine and the CLI first`);
   const { classifyKnown } = await import(join(repoRoot, "packages/engine/dist/shared/index.js"));
   const { parseSarif } = await import(join(repoRoot, "packages/engine/dist/shared/index.js"));
+  const { loadKnown } = await import(join(repoRoot, "packages/cli/dist/scan-known.js"));
+  const { formatSarif } = await import(join(repoRoot, "packages/engine/dist/report-formatters/sarif.js"));
   let spent = 0;
   const rows = [];
   const results = [];
@@ -121,7 +129,7 @@ async function main() {
     const staging = mkdtempSync(join(tmpdir(), "0-so-stage-"));
     cpSync(fx.dir, join(staging, "app"), { recursive: true, filter: (src) => !src.endsWith("answer.json") });
     const toolInfo = {};
-    for (const tool of o.tools) {
+    for (const tool of o.tools.filter((t) => t !== "self")) {
       const text = runTool(tool, join(staging, "app"));
       let sarif;
       try { sarif = relativize(text, join(staging, "app")); JSON.parse(sarif); } catch { console.log(`${fx.name}: ${tool} produced no SARIF; skipped`); continue; }
@@ -132,35 +140,57 @@ async function main() {
       console.log(`${fx.name}: ${tool} reports ${score.findings} item(s), finds ${score.found}/${score.planted} planted; missed: ${score.missedIds.join(", ") || "none"}`);
     }
     if (o.baselineOnly) continue;
-    const configs = [{ name: "generic", file: undefined }, ...Object.entries(toolInfo).map(([tool, info]) => ({ name: `known-${tool}`, file: info.file, tool }))];
-    for (let rep = 1; rep <= o.repeat; rep++) for (const cfg of configs) {
-      if (spent >= o.maxCost) { console.log(`stopped: spent $${spent.toFixed(3)} reached --max-cost ${o.maxCost}`); break; }
-      const r = scan(fx, cfg.file, o, cfg.name);
-      spent += r.costUsd;
-      const findings = r.report?.findings ?? [];
-      const score = scoreFindings(fx.answer, findings);
-      // Against each tool's known set: how many of the reported findings are new, and which missed items were found.
-      for (const [tool, info] of Object.entries(toolInfo)) {
-        if (cfg.name !== "generic" && cfg.tool !== tool) continue;
-        const located = findings.filter((f) => f.location?.path).map((f) => ({ ...f, reviewAnnotation: { path: f.location.path, startLine: f.location.startLine, endLine: f.location.endLine } }));
-        const classified = classifyKnown(located, info.known);
-        const fresh = classified.filter((f) => f.knownStatus === "new").length + (findings.length - located.length);
-        const missedFound = info.missed.filter((id) => score.foundIds.includes(id));
-        results.push({ fixture: fx.name, config: cfg.name, against: tool, repeat: rep, status: r.status, costUsd: r.costUsd, findings: findings.length, newFindings: fresh, missedByTool: info.missed.length, missedFound: missedFound.length, plantedFound: score.found, planted: score.planted, falsePositives: score.falsePositives });
+    const external = Object.entries(toolInfo);
+    for (let rep = 1; rep <= o.repeat; rep++) {
+      // "self": the first pass is one plain scan of the same fixture, its SARIF is the known set, and the plain second scan
+      // (the generic arm of this repeat) is the fair "just rerun" comparison at the same cost.
+      const infos = { ...toolInfo };
+      if (o.tools.includes("self")) {
+        if (spent >= o.maxCost) { console.log(`stopped: spent $${spent.toFixed(3)} reached --max-cost ${o.maxCost}`); break; }
+        const first = scan(fx, undefined, o, "first");
+        spent += first.costUsd;
+        if (first.report) {
+          const file = join(staging, `self-${rep}.sarif`);
+          writeFileSync(file, formatSarif(withAnnotations(first.report)));
+          const score = scoreFindings(fx.answer, first.report.findings ?? []);
+          infos.self = { file, score, missed: score.missedIds, known: loadKnown([file], [join(staging, "app")]).items };
+          console.log(`  ${fx.name} / first pass / repeat ${rep}: ${first.status}, ${score.found}/${score.planted} planted found, $${first.costUsd.toFixed(4)}`);
+        } else console.log(`  ${fx.name} / first pass / repeat ${rep}: ${first.status}; skipped`);
       }
-      console.log(`  ${fx.name} / ${cfg.name} / repeat ${rep}: ${r.status}, ${score.found}/${score.planted} planted found, ${findings.length} findings, $${r.costUsd.toFixed(4)} (total $${spent.toFixed(3)})${r.stderr ? `\n    ${r.stderr}` : ""}`);
+      const configs = [{ name: "generic", file: undefined }, ...Object.entries(infos).map(([tool, info]) => ({ name: `known-${tool}`, file: info.file, tool }))];
+      for (const cfg of configs) {
+        if (spent >= o.maxCost) { console.log(`stopped: spent $${spent.toFixed(3)} reached --max-cost ${o.maxCost}`); break; }
+        const r = scan(fx, cfg.file, o, cfg.name);
+        spent += r.costUsd;
+        const findings = r.report?.findings ?? [];
+        const score = scoreFindings(fx.answer, findings);
+        // Against each tool's known set: how many of the reported findings are new, and which missed items were found.
+        for (const [tool, info] of Object.entries(infos)) {
+          if (cfg.name !== "generic" && cfg.tool !== tool) continue;
+          const located = findings.filter((f) => f.location?.path).map((f) => ({ ...f, reviewAnnotation: { path: f.location.path, startLine: f.location.startLine, endLine: f.location.endLine } }));
+          const classified = classifyKnown(located, info.known);
+          const fresh = classified.filter((f) => f.knownStatus === "new").length + (findings.length - located.length);
+          const missedFound = info.missed.filter((id) => score.foundIds.includes(id));
+          results.push({ fixture: fx.name, config: cfg.name, against: tool, repeat: rep, status: r.status, costUsd: r.costUsd, findings: findings.length, newFindings: fresh, missedByTool: info.missed.length, missedFound: missedFound.length, plantedFound: score.found, planted: score.planted, falsePositives: score.falsePositives });
+        }
+        console.log(`  ${fx.name} / ${cfg.name} / repeat ${rep}: ${r.status}, ${score.found}/${score.planted} planted found, ${findings.length} findings, ${score.falsePositives} false positives, $${r.costUsd.toFixed(4)} (total $${spent.toFixed(3)})${r.stderr ? `\n    ${r.stderr}` : ""}`);
+      }
     }
   }
   const lines = ["fixture,against,config,repeat,status,cost,findings,new,missedByTool,missedFound,plantedFound,planted,falsePositives", ...results.map((r) => [r.fixture, r.against, r.config, r.repeat, r.status, r.costUsd.toFixed(4), r.findings, r.newFindings, r.missedByTool, r.missedFound, r.plantedFound, r.planted, r.falsePositives].join(","))];
   console.log(`\n${lines.join("\n")}\n\ntotal cost $${spent.toFixed(3)}`);
   if (o.out) writeFileSync(o.out, `${lines.join("\n")}\n`);
-  // Summary per tool: recall of the items the tool missed, generic against --known, and the share of new findings.
+  // Summary per baseline: recall of the items the baseline missed, generic against --known, with the range over repeats.
+  const pct = (a, b) => (b ? `${((a / b) * 100).toFixed(0)}%` : "n/a");
   for (const tool of o.tools) {
-    const sum = (cfg, key) => results.filter((r) => r.against === tool && (cfg === "generic" ? r.config === "generic" : r.config === `known-${tool}`)).reduce((a, r) => a + r[key], 0);
-    const gen = { missed: sum("generic", "missedByTool"), found: sum("generic", "missedFound"), findings: sum("generic", "findings"), fresh: sum("generic", "newFindings") };
-    const kn = { missed: sum("known", "missedByTool"), found: sum("known", "missedFound"), findings: sum("known", "findings"), fresh: sum("known", "newFindings") };
-    const pct = (a, b) => (b ? `${((a / b) * 100).toFixed(0)}%` : "n/a");
-    console.log(`${tool}: items missed by the tool found: generic ${gen.found}/${gen.missed} (${pct(gen.found, gen.missed)}), --known ${kn.found}/${kn.missed} (${pct(kn.found, kn.missed)}); findings new: generic ${gen.fresh}/${gen.findings} (${pct(gen.fresh, gen.findings)}), --known ${kn.fresh}/${kn.findings} (${pct(kn.fresh, kn.findings)})`);
+    const arm = (cfg) => results.filter((r) => r.against === tool && r.config === cfg);
+    const stats = (rows) => {
+      const sum = (key) => rows.reduce((a, r) => a + r[key], 0);
+      const perRepeat = [...new Set(rows.map((r) => r.repeat))].map((rep) => { const rr = rows.filter((r) => r.repeat === rep); const m = rr.reduce((a, r) => a + r.missedByTool, 0); return m ? rr.reduce((a, r) => a + r.missedFound, 0) / m : null; }).filter((v) => v !== null);
+      const range = perRepeat.length ? `${(Math.min(...perRepeat) * 100).toFixed(0)}-${(Math.max(...perRepeat) * 100).toFixed(0)}% over ${perRepeat.length} repeat(s)` : "no repeats";
+      return `items missed by the baseline found ${sum("missedFound")}/${sum("missedByTool")} (${pct(sum("missedFound"), sum("missedByTool"))}, ${range}); findings new ${sum("newFindings")}/${sum("findings")} (${pct(sum("newFindings"), sum("findings"))}); false positives ${sum("falsePositives")}; cost $${sum("costUsd").toFixed(3)} over ${rows.length} scans`;
+    };
+    console.log(`${tool}\n  plain second scan: ${stats(arm("generic"))}\n  --known second scan: ${stats(arm(`known-${tool}`))}`);
   }
 }
 
