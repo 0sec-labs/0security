@@ -1,4 +1,4 @@
-import { compareFindingsBySeverity } from "../shared/index.js";
+import { compareFindingsByBusinessContext } from "../shared/index.js";
 import type { ShimmedDatabase } from "./wasm-shim.js";
 import type * as schema from "./schema.js";
 
@@ -21,6 +21,7 @@ export interface FindingFamilyPrioritySummary {
 interface Metadata {
   id: string; familyKey: string; timestamp: number; severity: string; cvssScore: number | null;
   impactAssessment: string | null;
+  businessContext?: string | null;
 }
 export interface LatestFindingMetadata extends Metadata {
   category: string; status: string; triageStatus: string;
@@ -32,7 +33,8 @@ export function* iterateLatestFindingMetadata(sqlite: ShimmedDatabase, opts: Omi
   let afterId: string | null = null;
   while (true) {
     const page = sqlite.prepare(`SELECT f.id,COALESCE(f.fingerprint,f.id) AS familyKey,f.timestamp,f.severity,f.category,f.status,f.triageStatus,f.cvssScore,
-      CASE WHEN length(CAST(f.impactAssessment AS BLOB)) <= ${MAX_ASSESSMENT_BYTES} THEN f.impactAssessment ELSE NULL END AS impactAssessment
+      CASE WHEN length(CAST(f.impactAssessment AS BLOB)) <= ${MAX_ASSESSMENT_BYTES} THEN f.impactAssessment ELSE NULL END AS impactAssessment,
+      CASE WHEN length(CAST(f.businessContext AS BLOB)) <= 131072 THEN f.businessContext ELSE NULL END AS businessContext
       FROM findings f WHERE (@afterId IS NULL OR f.id>@afterId) AND (@scanId IS NULL OR f.scanId=@scanId)
       AND NOT EXISTS (SELECT 1 FROM findings newer WHERE COALESCE(newer.fingerprint,newer.id)=COALESCE(f.fingerprint,f.id)
         AND (@scanId IS NULL OR newer.scanId=@scanId) AND (newer.timestamp>f.timestamp OR (newer.timestamp=f.timestamp AND newer.id>f.id)))
@@ -52,7 +54,7 @@ export function getFindingFamilyMetadata(sqlite: ShimmedDatabase, key: string, o
 }
 type Candidate = Omit<Metadata, "impactAssessment">;
 function compare(a: Candidate, b: Candidate): number {
-  return compareFindingsBySeverity(a, b) || b.timestamp - a.timestamp || b.id.localeCompare(a.id);
+  return compareFindingsByBusinessContext(a, b) || b.timestamp - a.timestamp || b.id.localeCompare(a.id);
 }
 /** Worst retained item at the root: memory is bounded by the requested limit. */
 function retain(heap: Candidate[], item: Candidate, limit: number): void {
@@ -84,7 +86,8 @@ function rankedFindingRows(sqlite: ShimmedDatabase, opts: RankedFindingOptions, 
     let afterId: string | null = null;
     const statement = sqlite.prepare(`
       SELECT f.id, COALESCE(f.fingerprint, f.id) AS familyKey, f.timestamp, f.severity, f.cvssScore,
-        CASE WHEN length(CAST(f.impactAssessment AS BLOB)) <= ${MAX_ASSESSMENT_BYTES} THEN f.impactAssessment ELSE NULL END AS impactAssessment
+        CASE WHEN length(CAST(f.impactAssessment AS BLOB)) <= ${MAX_ASSESSMENT_BYTES} THEN f.impactAssessment ELSE NULL END AS impactAssessment,
+      CASE WHEN length(CAST(f.businessContext AS BLOB)) <= 131072 THEN f.businessContext ELSE NULL END AS businessContext
       FROM findings f
       WHERE (@afterId IS NULL OR f.id > @afterId)
         AND (@scanId IS NULL OR f.scanId = @scanId)

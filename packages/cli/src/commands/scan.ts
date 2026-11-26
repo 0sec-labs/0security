@@ -23,10 +23,12 @@ import { applyScope, markKnown, mergePasses, scanExitCode, scanJson, toScanRepor
 import { followUpText, reviewDepth, reviewScopeFiles, shallowReviewWarning, toolCallText, unopenedFiles } from "../scan-review.js";
 import { coverageReport, DEFAULT_RETRIES, runBatches, type BatchOutcome, type RunBatchesResult } from "../scan-batches.js";
 import { classifyFailure, type FailureCause, type ScanFailure } from "../scan-failure.js";
-import { coverageJson, coverageText, DEFAULT_BATCH_SIZE, moduleShardOf, planBatchedScan, type BatchedSetup } from "../scan-batched.js";
+import { coverageJson, coverageText, DEFAULT_BATCH_SIZE, moduleShardOf, ownersOfFile, planBatchedScan, type BatchedSetup } from "../scan-batched.js";
 import { planScan, planText } from "../scan-plan.js";
 import { interactiveScopeHint } from "../threat-interview-findings.js";
 import { resumeHint, type ResumeHint } from "../scan-resume.js";
+import { businessContextSteering, loadBusinessContext } from "../business-context.js";
+import { applyBusinessContext } from "../scan-report.js";
 import { loadScope, loadSteering, type Steering } from "../scan-steering.js";
 import { applyTierSettings, loadTierMap, repoIdentifier, resolveTier, settingsSentence, tierSentence, type ResolvedTier } from "../scan-tiers.js";
 import { knownIn, leadsToFindings, loadKnown, type KnownSet } from "../scan-known.js";
@@ -112,6 +114,7 @@ export interface ScanDeps {
   metrics?(record: Omit<RunMetric, "version" | "ci">): void;
   /** Store the declared-scope labels on the findings in the local findings databases. Absent in tests, so they write nothing. */
   saveScope?(labels: ScopeLabelRow[], dbPath?: string): void;
+  saveBusinessContext?(labels: Array<{ id: string; context: NonNullable<import("@0/engine/shared").Finding["businessContext"]> }>, dbPath?: string): void;
   /** The hint line for the end of a scan (findings in classes with no declared scope), or undefined. Prints only on a terminal. */
   scopeHint?(findings: ReadonlyArray<{ category: string }>, entries: ReadonlyArray<{ category?: string | undefined }>, folder: string | undefined, jsonToStdout: boolean): string | undefined;
   /** The URL of the folder's `origin` remote, or undefined. Used to find the folder's tier. */
@@ -138,6 +141,15 @@ function saveScopeLabels(labels: ScopeLabelRow[], dbPath?: string): void {
 export const defaultScanDeps: ScanDeps = {
   nucleiTarget: options => runNucleiTarget(options, { note: text => process.stderr.write(`${text}\n`) }),
   saveTargetFindings: (jsonl, dbPath) => { const path = resolveOsecDbPath(dbPath); assertLocalEngineAvailable(dbPath); return importSarif({ sarifJson: jsonl, dbPath: path, tool: "Nuclei" }); },
+  saveBusinessContext(labels, dbPath) {
+    const paths = dbPath ? [dbPath] : [...new Set([resolveOsecDbPath(), ...listOsecRunDatabasePaths()])].slice(0, 200);
+    for (const path of paths) {
+      if (!existsSync(path)) continue;
+      let db: osecDB | undefined;
+      try { db = new osecDB(path); for (const { id, context } of labels) if (db.getFinding(id)) db.setFindingBusinessContext(id, context); }
+      finally { db?.close(); }
+    }
+  },
   saveScope: saveScopeLabels,
   scopeHint: interactiveScopeHint,
   open: options => openConsole(options),
@@ -196,6 +208,9 @@ export const defaultScanDeps: ScanDeps = {
 
 interface ScanOptions extends ConsoleTransportOptions {
   budget: string; diff?: string; prepass?: string; scanner?: string[]; rules?: string[]; format: string; output?: string; timeout: string; failOn?: string; model?: string; skill: string; passes: string;
+  provider?: string; reasoning?: string;
+  codeowners?: string;
+  businessContext?: string;
   context?: string[]; policy?: string[]; orgPolicy?: string[]; repoContext?: boolean; repoIgnores?: boolean;
   scope?: string; repoScope?: boolean; scopeSarif?: string;
   targetUrl?: string; scopeFile?: string; acknowledgeHost?: string; rateLimit?: string; templates?: string;
@@ -264,6 +279,7 @@ export function resolveSkillId(skill: string): string {
 }
 
 function validate(target: string | undefined, options: ScanOptions): void {
+  if (options.provider && !options.model) throw new UsageError("--provider requires an explicit --model.");
   if (options.plan) {
     if (options.resume !== undefined || options.coverage !== undefined) throw new UsageError("--plan lists what a scan would do; drop --resume and --coverage.");
     if (options.format !== "md" && options.format !== "json") throw new UsageError("--plan prints text, or JSON with --format json.");
@@ -330,6 +346,18 @@ export async function connect(options: ConsoleTransportOptions, deps: Pick<ScanD
 }
 
 interface PassContext { /** The source files a thread is expected to open (empty: no check). */ scopeFiles: readonly string[]; prePass?: PrePassLeads; scope?: string[]; known?: KnownItem[]; extras: Partial<ScanOutcome>; steering: Steering; client: ConsoleClient; deps: ScanDeps; resolved: ResolvedTarget; options: ScanOptions; total: number; budget: number; deadline: number }
+/** Never estimate missing usage as zero. Repeated coverage rounds share cumulative thread usage. */
+function measuredTokens(results: readonly PassResult[]): number | undefined {
+  if (!results.length) return undefined;
+  let total = 0;
+  for (const result of results) {
+    const { inputTokens, outputTokens } = result.done.usage;
+    if (typeof inputTokens !== "number" || typeof outputTokens !== "number" || !Number.isFinite(inputTokens) || !Number.isFinite(outputTokens) || inputTokens < 0 || outputTokens < 0) return undefined;
+    total += inputTokens + outputTokens;
+  }
+  return total;
+}
+
 interface PassResult { threadId: string; done: FinishedThread; stored: ScanReport; budgetExhausted: boolean; timedOut: boolean; /** The batch's own time limit passed before the scan's. */ batchTimedOut: boolean; /** Why the thread failed, when it did and it was not the budget or a time limit. */ failure?: ScanFailure; /** What the thread's tool calls named, across every attempt (a continued thread keeps one transcript). */ toolCalls: string; /** The in-scope files this thread was to open, the ones it did not open, and the follow-up rounds sent. */ files: { expected: readonly string[]; unopened: readonly string[]; rounds: number }; /** The thread was asked to continue once after a transient failure. */ resumed?: boolean; costUsd?: number }
 
 const retryCount = (options: ScanOptions): number => Number(options.retries ?? DEFAULT_RETRIES);
@@ -387,7 +415,7 @@ async function runPass(ctx: PassContext, index: number, extra: PassExtra = {}): 
   const { client, deps, resolved, options, total, deadline } = ctx;
   const budget = extra.budget ?? ctx.budget;
   const prePass = "prePass" in extra ? extra.prePass : ctx.prePass;
-  const runtime = { runtime: { model: options.model ?? DEFAULT_SCAN_MODEL } };
+  const runtime = { runtime: { model: options.model ?? DEFAULT_SCAN_MODEL, ...(options.provider ? { providerId: options.provider } : {}), ...(options.reasoning ? { reasoning: options.reasoning } : {}) } };
   const part = extra.batch ? `batch ${extra.batch.index + 1} of ${extra.batch.total}` : total > 1 ? `pass ${index + 1} of ${total}` : "";
   const title = part ? `Scan ${resolved.label} (${part})` : `Scan ${resolved.label}`;
   const created = asJson(asJson(await client.request("POST", "/api/console/sessions", { ...runtime, title, costCeilingUsd: budget })).session);
@@ -481,17 +509,21 @@ async function inPool<T>(count: number, limit: number, task: (index: number) => 
 }
 
 /** Format the report and write it to --output or standard output. */
-async function writeReport(outcome: ScanOutcome, merged: ReturnType<typeof mergePasses>, stored: ScanReport, name: string, options: ScanOptions, deps: Pick<ScanDeps, "out" | "interactive" | "err" | "writeBytes" | "metrics" | "saveScope" | "scopeHint">): Promise<void> {
+async function writeReport(outcome: ScanOutcome, merged: ReturnType<typeof mergePasses>, stored: ScanReport, name: string, options: ScanOptions, deps: Pick<ScanDeps, "out" | "interactive" | "err" | "writeBytes" | "metrics" | "saveScope" | "saveBusinessContext" | "scopeHint">): Promise<void> {
   // An empty-diff scan (thread "none") writes no line. A tier skip and a pre-pass-only run do: they are runs the operator chose.
   if (outcome.threadId !== "none" || outcome.tier?.skipped || outcome.tier?.prepassOnly) {
     const status = outcome.failed ? "failed" : outcome.tier?.skipped ? "skipped" : outcome.tier?.prepassOnly ? "prepass_only" : outcome.timedOut ? "timeout" : outcome.budgetExhausted ? "budget" : "ok";
-    deps.metrics?.({ at: outcome.startedAt, command: "scan", model: options.model ?? DEFAULT_SCAN_MODEL, budgetUsd: outcome.budgetUsd, costUsd: outcome.costUsd ?? null, durationSeconds: Math.max(0, Math.round((Date.parse(outcome.completedAt) - Date.parse(outcome.startedAt)) / 1000)), findingsAttempted: null, findingsProposed: merged.length, checksPassed: null, tokens: null, status, findingIds: merged.map(finding => finding.id) });
+    deps.metrics?.({ at: outcome.startedAt, command: "scan", model: options.model ?? DEFAULT_SCAN_MODEL, budgetUsd: outcome.budgetUsd, costUsd: outcome.costUsd ?? null, durationSeconds: Math.max(0, Math.round((Date.parse(outcome.completedAt) - Date.parse(outcome.startedAt)) / 1000)), findingsAttempted: null, findingsProposed: merged.length, checksPassed: null, tokens: outcome.tokens ?? null, status, findingIds: merged.map(finding => finding.id) });
   }
   if (outcome.scope) {
     const labelled = applyScope(outcome, merged).filter(finding => finding.scope);
     const out = labelled.filter(finding => finding.scope === "out-of-scope").length;
     deps.saveScope?.(labelled.flatMap(finding => [finding.id, ...(finding.mergedFindingIds ?? [])].map(id => ({ id, scope: finding.scope!, reason: finding.scopeReason ?? "", source: finding.scopeSource ?? outcome.scope!.source }))), options.dbPath);
     deps.err(`scope (${outcome.scope.source}): ${out} finding${out === 1 ? "" : "s"} outside the declared scope, listed apart and left out of the counts and --fail-on`);
+  }
+  if (outcome.businessContext) {
+    const labels = applyBusinessContext(outcome, merged);
+    deps.saveBusinessContext?.(labels.flatMap(finding => [finding.id, ...(finding.mergedFindingIds ?? [])].map(id => ({ id, context: finding.businessContext! }))), options.dbPath);
   }
   let body: Uint8Array | string;
   if (options.format === "json") body = `${JSON.stringify(scanJson(outcome, merged), null, 2)}\n`;
@@ -530,7 +562,7 @@ async function printPlan(resolved: ResolvedTarget, options: ScanOptions, deps: S
     catch { throw new UsageError(`'${options.diff}' is not a git ref in ${resolved.label}, or the folder is not a git work tree.`); }
   }
   const inventory = buildInventory(resolved.folder, scope ? { only: new Set(scope) } : {});
-  const plan = planScan(inventory, { folder: resolved.label, shardOf: moduleShardOf(resolved.folder), batchSize: Number(options.batchSize ?? DEFAULT_BATCH_SIZE), batchesMode: options.batches ?? "auto", budgetUsd: Number(options.budget), ...(tier ? { tier: tierInfo(tier) } : {}) });
+  const plan = planScan(inventory, { folder: resolved.label, shardOf: moduleShardOf(resolved.folder), ownersOf: ownersOfFile(options.codeowners), batchSize: Number(options.batchSize ?? DEFAULT_BATCH_SIZE), batchesMode: options.batches ?? "auto", budgetUsd: Number(options.budget), ...(tier ? { tier: tierInfo(tier) } : {}) });
   deps.out(options.format === "json" ? `${JSON.stringify(plan, null, 2)}\n` : `${planText(plan)}\n`);
 }
 
@@ -580,6 +612,7 @@ async function runBatchedScan(ctx: PassContext, setup: BatchedSetup, before: Set
   const { ledger, scan } = setup;
   const ran = new Map<string, PassResult>();
   const count = setup.batches.length;
+  const batchRuns = new Map<number, { attempts: number; durationMs: number; costUsd: number | null; threadIds: string[] }>();
   deps.err(`${setup.resumed ? `resuming scan ${scan.id}` : `scan ${scan.id}`}: ${setup.summaryText} ${count ? `${count} batch${count === 1 ? "" : "es"} to run` : "nothing is pending"}`);
 
   const run = await runBatches({
@@ -589,9 +622,19 @@ async function runBatchedScan(ctx: PassContext, setup: BatchedSetup, before: Set
       const files = new Set(batch.units.flatMap(unit => unit.files ?? [unit.path]));
       const leads = ctx.prePass?.leads.filter(lead => lead.path !== undefined && files.has(lead.path)) ?? [];
       const prePass = ctx.prePass && leads.length ? { ...ctx.prePass, leads, total: leads.length } : undefined;
-      const info: BatchPromptInfo = { index: batch.index, total: count, units: batch.units, summary: setup.summaryText, ...(batch.module ? { module: batch.module } : {}) };
+      const info: BatchPromptInfo = { index: batch.index, total: count, units: batch.units, summary: setup.summaryText, ...(batch.module ? { module: batch.module } : {}), ...(batch.owners ? { owners: batch.owners } : {}) };
       const inScope = new Set(ctx.scopeFiles);
-      const pass = await runPass(ctx, batch.index, { batch: info, budget: batchBudget, prePass, files: [...files].filter(file => inScope.has(file)).sort(), ...(ctx.known ? { known: knownIn(ctx.known, files) } : {}) });
+      const stats = batchRuns.get(batch.index) ?? { attempts: 0, durationMs: 0, costUsd: 0, threadIds: [] };
+      batchRuns.set(batch.index, stats);
+      stats.attempts++;
+      const attemptStarted = deps.now().getTime();
+      let pass: PassResult;
+      try {
+        pass = await runPass(ctx, batch.index, { batch: info, budget: batchBudget, prePass, files: [...files].filter(file => inScope.has(file)).sort(), ...(ctx.known ? { known: knownIn(ctx.known, files) } : {}) });
+      } catch (error) { stats.costUsd = null; throw error; }
+      finally { stats.durationMs += Math.max(0, deps.now().getTime() - attemptStarted); }
+      stats.threadIds.push(pass.threadId);
+      stats.costUsd = stats.costUsd === null || pass.costUsd === undefined ? null : stats.costUsd + pass.costUsd;
       ran.set(pass.threadId, pass);
       const hardFailure = pass.done.failed && !pass.budgetExhausted && !pass.timedOut && !pass.batchTimedOut;
       const reviewed = !pass.done.failed && !pass.done.claimBlocked && !pass.budgetExhausted && !pass.timedOut && !pass.batchTimedOut;
@@ -619,7 +662,14 @@ async function runBatchedScan(ctx: PassContext, setup: BatchedSetup, before: Set
   const statement = `${coverageSentence(summary)}${neverOpened ? `; ${neverOpened} file${neverOpened === 1 ? "" : "s"} never opened` : ""}`;
   const failures = run.failures.length ? run.failures.map(item => item.message) : run.outcomes.filter(item => !item.outcome.reviewed && item.outcome.failed).map(item => item.outcome.error ?? "no reason given");
   const hint: ResumeHint | undefined = resumeHint(resolved.label, summary, { budgetHit: run.budgetHit, budgetUsd: budget, timedOut: run.timedOut, timeoutSeconds: Number(options.timeout), failures });
-  const coverage = { ...coverageReport(summary, statement, units, { retried: run.retried, failures: run.failures, retriesAllowed: retryCount(options), ...(fileCoverage ? { files: fileCoverage } : {}) }), ...(hint ? { resume: hint.command, stoppedBy: hint.stoppedBy } : {}) };
+  const coverage = { ...coverageReport(summary, statement, units, { retried: run.retried, failures: run.failures, retriesAllowed: retryCount(options), ...(fileCoverage ? { files: fileCoverage } : {}) }), ...(hint ? { resume: hint.command, stoppedBy: hint.stoppedBy } : {}),
+    batchRuns: setup.batches.map(batch => {
+      const stats = batchRuns.get(batch.index) ?? { attempts: 0, durationMs: 0, costUsd: 0, threadIds: [] };
+      const ids = new Set(batch.units.map(unit => unit.id));
+      return { batch: batch.index + 1, ...(batch.module ? { module: batch.module } : {}), ...(batch.owners ? { owners: batch.owners } : {}), ...stats,
+        reviewedUnits: units.filter(unit => ids.has(unit.unitId) && unit.status === "reviewed").length, totalUnits: ids.size };
+    }),
+  };
   // Findings of every thread of this scan, including the threads an earlier run started and partial batches.
   const threadIds = ledger.getScan(scan.id)?.threadIds ?? [...ran.keys()];
   const stored: ScanReport[] = [];
@@ -637,7 +687,8 @@ async function runBatchedScan(ctx: PassContext, setup: BatchedSetup, before: Set
   const customLeads = ctx.prePass?.leads.filter(lead => lead.ruleSource === "custom") ?? [];
   const results = [...ran.values()];
   const cost = results.reduce((sum, result) => sum + (result.costUsd ?? 0), 0);
-  const costKnown = results.some(result => result.costUsd !== undefined);
+  const attemptsComplete = [...batchRuns.values()].every(stats => stats.attempts === stats.threadIds.length);
+  const costKnown = attemptsComplete && results.length > 0 && results.every(result => result.costUsd !== undefined);
   const failed = (results.length > 0 && results.every(result => (result.done.failed && !result.budgetExhausted && !result.timedOut) || result.done.claimBlocked)) || changedError !== undefined;
   const lead = results.reduce<PassResult | undefined>((best, result) => (!best || result.stored.findings.length > best.stored.findings.length ? result : best), undefined);
   const hardError = results.map(result => (!result.budgetExhausted && !result.timedOut ? result.done.error : undefined)).find(Boolean);
@@ -645,7 +696,7 @@ async function runBatchedScan(ctx: PassContext, setup: BatchedSetup, before: Set
   for (const item of run.retried) if (!item.recovered) deps.err(`batch ${item.batch}: still failing after ${item.attempts - 1} ${item.attempts === 2 ? "retry" : "retries"}`);
   const outcome: ScanOutcome = {
     target: resolved.reportTarget, roots: resolved.roots, threadId: threadIds[0] ?? "none", startedAt, completedAt: deps.now().toISOString(), budgetUsd: budget,
-    ...(costKnown ? { costUsd: cost } : {}), budgetExhausted: run.budgetHit, ...(run.timedOut ? { timedOut: true } : {}), failed, ...(options.allowPartial ? { allowPartial: true } : {}),
+    ...(costKnown ? { costUsd: cost } : {}), ...(attemptsComplete && measuredTokens(results) !== undefined ? { tokens: measuredTokens(results) } : {}), budgetExhausted: run.budgetHit, ...(run.timedOut ? { timedOut: true } : {}), failed, ...(options.allowPartial ? { allowPartial: true } : {}),
     ...(changedError ? { error: changedError } : failed && hardError ? { error: hardError } : {}), ...(failure ? { failure } : {}),
     // The thread's own summary can say it covered everything; the ledger's account comes first.
     summary: `Coverage: ${statement}.${lead?.done.reply ? `\n\n${lead.done.reply}` : ""}`,
@@ -723,7 +774,7 @@ async function runPrePassOnly(resolved: ResolvedTarget, options: ScanOptions, de
 }
 
 /** Flags that only make sense for a folder or repository scan; a target scan refuses them rather than ignore them. */
-const FOLDER_ONLY = ["diff", "rules", "policy", "orgPolicy", "context", "known", "tiers", "resume", "coverage", "plan"] as const;
+const FOLDER_ONLY = ["codeowners", "diff", "rules", "policy", "orgPolicy", "context", "businessContext", "known", "tiers", "resume", "coverage", "plan"] as const;
 
 function validateTargetScan(target: string | undefined, options: ScanOptions): void {
   if (options.targetUrl === undefined) throw new UsageError("--scanner nuclei tests a running app: add --target-url <url>.");
@@ -812,8 +863,10 @@ export async function runScan(target: string | undefined, options: ScanOptions, 
     if (options.coverage !== undefined) { await printCoverage(resolved, options, deps); return; }
     const known: KnownSet | undefined = options.known?.length ? loadKnown(options.known, resolved.roots) : undefined;
     if (known) deps.err(`known: ${known.items.length} item${known.items.length === 1 ? "" : "s"} from ${known.tools.join(", ") || "the given files"}; the scan is told to look for what they missed`);
+    const businessContext = options.businessContext ? loadBusinessContext(options.businessContext) : undefined;
     const declaredScope = loadScope(resolved.folder, options, deps.err);
     const extras: Partial<ScanOutcome> = {
+      ...(businessContext ? { businessContext } : {}),
       ...(declaredScope ? { scope: declaredScope, ...(options.scopeSarif === "suppress" ? { scopeSarifSuppress: true } : {}) } : {}),
       ...(tier ? { tier: tierInfo(tier), ...(options.failOnSkip ? { failOnSkip: true } : {}) } : {}),
       ...(known ? { known: { items: known.items, tools: known.tools, ...(options.onlyNew ? { onlyNew: true } : {}) } } : {}),
@@ -829,6 +882,7 @@ export async function runScan(target: string | undefined, options: ScanOptions, 
       return;
     }
     const steering = loadSteering(resolved.folder, options, deps.err);
+    if (businessContext) steering.context.push(businessContextSteering(businessContext));
     if (steering.policies.length && options.skill === "scan") options = { ...options, skill: POLICY_SKILL };
     if (deps.resolveSkill) options = { ...options, skill: deps.resolveSkill(options.skill) };
     const budget = Number(options.budget);
@@ -851,7 +905,7 @@ export async function runScan(target: string | undefined, options: ScanOptions, 
     if (tier?.prepassOnly) { await runPrePassOnly(resolved, options, deps, scope, extras, startedAt); return; }
     // A folder with more entry points than one thread takes is reviewed in batches, each with a ledger row (docs: Large repositories).
     batched = await planBatchedScan({
-      folder: resolved.folder, label: resolved.label, mode: options.batches ?? "auto", batchSize: Number(options.batchSize ?? DEFAULT_BATCH_SIZE), ...(options.resume !== undefined ? { resume: options.resume } : {}),
+      folder: resolved.folder, ...(options.codeowners ? { codeowners: options.codeowners } : {}), label: resolved.label, mode: options.batches ?? "auto", batchSize: Number(options.batchSize ?? DEFAULT_BATCH_SIZE), ...(options.resume !== undefined ? { resume: options.resume } : {}),
       ...(options.force ? { force: true } : {}), budgetUsd: budget, passes: total, singleThread: options.skill !== "scan", ...(scope ? { scope } : {}), ...(options.dbPath ? { dbPath: options.dbPath } : {}),
       openLedger: deps.openLedger ?? defaultScanDeps.openLedger!, gitHead: deps.gitHead ?? defaultScanDeps.gitHead!, err: deps.err,
     });
@@ -893,7 +947,7 @@ export async function runScan(target: string | undefined, options: ScanOptions, 
     const budgetExhausted = results.some(result => result.budgetExhausted);
     const timedOut = results.some(result => result.timedOut);
     const cost = results.reduce((sum, result) => sum + (result.costUsd ?? 0), 0);
-    const costKnown = results.some(result => result.costUsd !== undefined);
+    const costKnown = results.length > 0 && results.every(result => result.costUsd !== undefined);
     // The summary of the pass that found the most is the best account of what was covered.
     const lead = results.reduce((best, result) => (result.stored.findings.length > best.stored.findings.length ? result : best), results[0]!);
     const failed = results.every(result => (result.done.failed && !result.budgetExhausted && !result.timedOut) || result.done.claimBlocked) || changedError !== undefined;
@@ -907,7 +961,7 @@ export async function runScan(target: string | undefined, options: ScanOptions, 
     const fileCoverage = fileCoverageOf(results, coverageRounds(options));
     const outcome: ScanOutcome = {
       target: resolved.reportTarget, roots: resolved.roots, threadId: results[0]!.threadId, startedAt, completedAt: deps.now().toISOString(), budgetUsd: budget,
-      ...(costKnown ? { costUsd: cost } : {}), budgetExhausted, ...(timedOut ? { timedOut } : {}), failed, ...(options.allowPartial ? { allowPartial: true } : {}),
+      ...(costKnown ? { costUsd: cost } : {}), ...(measuredTokens(results) !== undefined ? { tokens: measuredTokens(results) } : {}), budgetExhausted, ...(timedOut ? { timedOut } : {}), failed, ...(options.allowPartial ? { allowPartial: true } : {}),
       ...(changedError ? { error: changedError } : failed && firstError ? { error: firstError } : {}), ...(failure ? { failure } : {}), ...(lead.done.reply ? { summary: lead.done.reply } : {}),
       ...(customLeads?.length ? { customLeads } : {}),
       ...(shallow ? { shallowReview: shallow } : {}),
@@ -951,6 +1005,7 @@ export function registerScanCommand(program: Command, deps: ScanDeps = defaultSc
     .option("--rate-limit <n>", `With --target-url: Nuclei requests per second (1 to 150)`, "10")
     .option("--templates <path>", "With --target-url: a Nuclei template file or folder to run instead of the templates Nuclei has installed. 0 never downloads templates")
     .option("--rules <file-or-folder>", "Semgrep or OpenGrep rules for the pre-pass (a file or a folder); repeat for several. Replaces the default rules and needs --scanner semgrep or opengrep. Rules are never read from the scanned folder unless you name them", (value: string, previous: string[] = []) => [...previous, value])
+    .option("--business-context <file>", "Operator-owned JSON tags and notes for investigation and work ordering; keeps technical severity unchanged")
     .option("--context <file>", "Give the scan this file (a threat model, notes on who may do what) as lower-priority background; repeat for several. It can steer what the scan weighs but cannot change how it works", (value: string, previous: string[] = []) => [...previous, value])
     .option("--policy <file-or-folder>", "Check the code against these Markdown policies (a file or a folder of .md files) and report pass or fail for each; repeat for several. Runs the policy-check skill", (value: string, previous: string[] = []) => [...previous, value])
     .option("--org-policy <folder>", "An organisation's policy folder: evaluated first, and wins when a --policy says otherwise or uses the same id; repeat for several", (value: string, previous: string[] = []) => [...previous, value])
@@ -961,7 +1016,10 @@ export function registerScanCommand(program: Command, deps: ScanDeps = defaultSc
     .option("--repo-ignores", "Also let the pre-pass scanners read their configuration and ignore files from the scanned folder (.foxguard.yml, .semgrepignore, .gitleaks.toml, .gitleaksignore, .trivyignore, osv-scanner.toml, .checkov.yaml). Off by default: a change under review can use them to hide findings. Inline suppressions such as nosemgrep always apply")
     .option("--skill <id>", "Skill that holds the scan method", "scan")
     .option("--model <model>", `Model for the scan thread (default: ${DEFAULT_SCAN_MODEL})`)
+    .option("--provider <id>", "Explicit model provider for this scan (use with --model)")
+    .option("--reasoning <effort>", "Reasoning effort for a model that supports it")
     .option("--batches <mode>", "auto reviews a large folder in batches, one thread per group of entry points, and records what each batch covered; on always does; off keeps one thread", "auto")
+    .option("--codeowners <file>", "Group batches by an operator-provided CODEOWNERS file as well as build module; reads no ownership file automatically and never skips unowned code")
     .option("--batch-size <n>", `Entry points one batch reviews (1 to ${MAX_BATCH_SIZE}); a folder with more than this many is split under --batches auto`, String(DEFAULT_BATCH_SIZE))
     .option("--retries <n>", `Run a batch again when it fails for a reason that may pass: a dropped connection, a provider timeout, rate limit or server error (0 to ${MAX_RETRIES}; 0 turns it off). A thread that is not a batch is asked once to continue. The cost of every attempt counts against --budget`, String(DEFAULT_RETRIES))
     .option("--coverage-rounds <n>", `After a thread ends, send it a follow-up that names the source files it never opened, up to this many times (0 to ${MAX_COVERAGE_ROUNDS}; 0 turns it off). Each round counts against --budget`, String(DEFAULT_COVERAGE_ROUNDS))

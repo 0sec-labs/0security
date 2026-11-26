@@ -41,7 +41,7 @@ describe("PROVIDERS", () => {
     for (const provider of PROVIDERS) {
       expect(provider.methods.length).toBeGreaterThan(0);
       for (const method of provider.methods) {
-        expect(["api-key", "oauth"]).toContain(method);
+        expect(["api-key", "oauth", "aws-chain"]).toContain(method);
       }
     }
   });
@@ -68,6 +68,7 @@ describe("PROVIDERS", () => {
     const oauthCapable = new Set(["chatgpt-plan", "chatgpt-codex", "xai", "kimi", "openrouter"]);
     for (const provider of PROVIDERS) {
       if (oauthCapable.has(provider.id)) continue;
+      if (provider.id === "bedrock") { expect(provider.methods).toEqual(["aws-chain"]); continue; }
       expect(provider.methods).toEqual(["api-key"]);
     }
   });
@@ -101,6 +102,7 @@ describe("PROVIDERS", () => {
       [
         "anthropic",
         "azure",
+        "bedrock",
         "chatgpt-codex",
         "chatgpt-plan",
         "deepseek",
@@ -210,6 +212,7 @@ describe("providerStates", () => {
 
     it("configures each provider from its own documented var", () => {
     for (const provider of PROVIDERS) {
+      if (provider.id === "bedrock") continue; // AWS chain sources have paired fields and do not all authenticate individually.
       for (const name of provider.envVars) {
         const state = stateFor(provider.id, { [name]: name === "AZURE_OPENAI_AUTH" ? "entra" : "value" });
         expect(state.configured).toBe(true);
@@ -252,5 +255,17 @@ describe("isProviderConfigured", () => {
     for (const state of providerStates(env)) {
       expect(isProviderConfigured(state.id, env)).toBe(state.configured);
     }
+  });
+});
+
+
+describe("Bedrock host identity", () => {
+  it("requires a credential-chain signal and never treats a partial access key as usable", () => {
+    expect(isProviderConfigured("bedrock", {})).toBe(false);
+    expect(isProviderConfigured("bedrock", { AWS_ACCESS_KEY_ID: "partial" })).toBe(false);
+    expect(isProviderConfigured("bedrock", { AWS_REGION: "eu-central-1" })).toBe(true);
+    expect(isProviderConfigured("bedrock", { AWS_PROFILE: "work" })).toBe(true);
+    expect(providerSupportsMethod("bedrock", "api-key")).toBe(false);
+    expect(providerSupportsMethod("bedrock", "aws-chain")).toBe(true);
   });
 });

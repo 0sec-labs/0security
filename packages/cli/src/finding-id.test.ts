@@ -25,3 +25,18 @@ describe("finding ids", () => {
     expect(resolveFindingId(rows, "  ")).toBeUndefined();
   });
 });
+
+describe("web finding codes", () => {
+  const first = { id: `${scan}-0123456789abcdef01234567`, fingerprint: `${scan}:sarif:0123456789abcdef01234567` };
+  const second = { id: `${scan}-abcdef0123456789abcdef01`, fingerprint: `${scan}:sarif:abcdef0123456789abcdef01` };
+  it("accepts the displayed structured code without changing full ids or old CLI aliases", () => {
+    expect(resolveFindingId([first, second], "F-0123456789")).toBe(first);
+    expect(resolveFindingId([first, second], "f-abcdef0123")).toBe(second);
+    expect(resolveFindingId([first, second], first.id)).toBe(first);
+    expect(resolveFindingId([first, second], shortFindingId(first.id))).toBe(first);
+  });
+  it("refuses an actual short-code collision rather than selecting an arbitrary finding", () => {
+    const collision = { id: `${scan}-0123456789ffffabcdef0123`, fingerprint: `${scan}:sarif:0123456789ffffabcdef0123` };
+    expect(() => resolveFindingId([first, collision], "F-0123456789")).toThrow("ambiguous");
+  });
+});

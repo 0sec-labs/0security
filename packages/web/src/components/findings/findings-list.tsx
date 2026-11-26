@@ -230,7 +230,7 @@ const FindingRow = memo(function FindingRow({ group, style, thread, threadHref, 
         {selected ? <Check className="size-3" strokeWidth={3} /> : null}
       </button>
       <span className="grid size-4 shrink-0 place-items-center"><StatusIcon status={status} /></span>
-      <span className="w-16 shrink-0 whitespace-nowrap text-xs tabular-nums text-muted-foreground-2 @max-lg/list:hidden">{findingCode(fingerprint)}</span>
+      <span className="w-24 shrink-0 whitespace-nowrap text-xs tabular-nums text-muted-foreground-2 @max-lg/list:hidden">{findingCode(fingerprint)}</span>
       <span className={cn("min-w-[10ch] flex-1 truncate", closed ? "text-muted-foreground-1" : "text-foreground")} title={latest.title}>
         <Link
           to={findingPath(fingerprint)}

@@ -85,13 +85,20 @@ export function FindingDetail(props: FindingDetailProps) {
             <p className="min-w-0 max-w-4xl text-[13px] leading-6 whitespace-pre-wrap break-words text-muted-foreground-1">{latest.description || "No description recorded."}</p>
           </section>
 
+          {latest.businessContext ? <section aria-label="Operator business context" className="flex max-w-4xl flex-col gap-2">
+            <SectionLabel>Operator business context</SectionLabel>
+            <p className="text-xs text-muted-foreground-1">Unverified operator declaration for work ordering. Technical severity and verification are unchanged.</p>
+            <p className="text-[13px] leading-6 break-words text-foreground">{latest.businessContext.rationale}</p>
+            <p className="text-xs text-muted-foreground-1">Repository: {latest.businessContext.repository}</p>
+          </section> : null}
+
           <CodeLocationSection location={family?.location} />
 
           <EvidenceSection group={group} latest={latest} workflow={workflow} fingerprint={fingerprint} />
 
           <ProofSection reproduction={latest.reproduction ?? null} />
 
-          <FixSection fix={family?.fix} />
+          <FixSection fix={family?.fix} findingId={latest.id} onRefresh={() => void familyQuery.refetch()} refreshing={familyQuery.isFetching} />
 
           <section aria-label="Review" className="flex max-w-4xl flex-col gap-3">
             <SectionLabel>Review</SectionLabel>

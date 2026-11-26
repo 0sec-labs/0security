@@ -47,6 +47,7 @@ function connectionRows(providers: Provider[]): ConnectionRow[] {
 
 function accountKind(row: ConnectionRow): string {
   const { provider, account } = row;
+  if (provider.id === "bedrock") return "Host AWS credential chain";
   if (!account) return "From environment";
   if (account.status === "signed-out") return "Signed out";
   if (account.status === "reauth-required") return "Sign-in required";

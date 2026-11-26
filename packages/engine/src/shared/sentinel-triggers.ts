@@ -155,11 +155,15 @@ export const SentinelTriggerCreateSchema = z.strictObject({
   check: SentinelCheckConfigSchema.optional(),
   webhook: SentinelWebhookConfigSchema.optional(),
   bitbucket: SentinelBitbucketPrConfigSchema.optional(),
+  runBudgetUsd: z.number().finite().min(0.01).max(100).optional(),
+  runModel: z.object({ providerId: z.string().trim().min(1).max(128), model: z.string().trim().min(1).max(256), reasoning: z.string().trim().min(1).max(32).optional() }).strict().optional(),
   enabled: z.boolean().default(false),
 });
 export type SentinelTriggerCreate = z.output<typeof SentinelTriggerCreateSchema>;
 
 export interface SentinelTrigger {
+  runBudgetUsd?: number;
+  runModel?: { providerId: string; model: string; reasoning?: string };
   id: string;
   sentinelId: string;
   automationId: string;

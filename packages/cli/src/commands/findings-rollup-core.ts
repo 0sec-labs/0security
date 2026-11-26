@@ -28,6 +28,8 @@ const row = z.object({
   /** Triage state: new, accepted or suppressed. A lapsed acceptance is written as new. */
   triage: text(20),
   owner: text(100).nullable(),
+  team: text(100).nullable().optional(),
+  tier: text(100).nullable().optional(),
   /** ISO time the finding was first seen. */
   firstSeen: z.iso.datetime({ offset: true }),
   /** ISO time it was last seen. */
@@ -37,12 +39,14 @@ export const rollupExportSchema = z.object({
   schema: z.literal(ROLLUP_SCHEMA),
   exportedAt: z.iso.datetime({ offset: true }),
   findings: z.array(row).max(MAX_ROLLUP_ROWS),
+  /** Includes empty repositories so a later zero-finding snapshot can replace an older one. */
+  repositories: z.array(text(200).min(1)).max(MAX_ROLLUP_ROWS).optional(),
 });
 export type RollupRow = z.infer<typeof row>;
 export type RollupExport = z.infer<typeof rollupExportSchema>;
 
-export function buildExport(findings: RollupRow[], now: Date): RollupExport {
-  return { schema: ROLLUP_SCHEMA, exportedAt: now.toISOString(), findings };
+export function buildExport(findings: RollupRow[], now: Date, repositories?: string[]): RollupExport {
+  return { schema: ROLLUP_SCHEMA, exportedAt: now.toISOString(), findings, ...(repositories ? { repositories } : {}) };
 }
 
 /** Parses an export file. Throws a plain message that names the first problem. */
@@ -110,6 +114,8 @@ export interface RollupSummary {
   /** Open findings by owner; findings with no owner count as unassigned. */
   byOwner: Count[];
   byRepository: Count[];
+  byTeam: Count[];
+  byTier: Count[];
 }
 
 const tally = (names: string[]): Count[] => {
@@ -145,6 +151,8 @@ export function summarise(rows: readonly RollupRow[], now: Date): RollupSummary 
     byAge: AGE_BUCKETS.map(name => ({ name, count: ages.find(a => a.name === name)?.count ?? 0 })),
     byOwner: tally(open.map(r => r.owner ?? "unassigned")),
     byRepository: tally(open.map(r => r.repository)),
+    byTeam: tally(open.map(r => r.team ?? "unassigned")),
+    byTier: tally(open.map(r => r.tier ?? "unassigned")),
   };
 }
 
@@ -162,7 +170,7 @@ export function renderText(summary: RollupSummary): string {
     `${summary.open} open findings across ${summary.repositories} ${summary.repositories === 1 ? "repository" : "repositories"}`,
     `Left out of the open count: ${ex.fixed} fixed, ${ex["false-positive"]} false positive, ${ex.accepted} accepted, ${ex.suppressed} suppressed.`,
     ...section("By severity", summary.bySeverity), ...section("By category", summary.byCategory), ...section("By age", summary.byAge),
-    ...section("By owner", summary.byOwner), ...section("By repository", summary.byRepository),
+    ...section("By team", summary.byTeam), ...section("By tier", summary.byTier), ...section("By owner", summary.byOwner), ...section("By repository", summary.byRepository),
   ].join("\n");
 }
 
@@ -173,5 +181,5 @@ export function renderHtml(summary: RollupSummary): string {
   const table = (title: string, counts: Count[]) => `<h2>${escapeHtml(title)}</h2><table>${counts.length ? counts.map(c => `<tr><td>${escapeHtml(plain(c.name))}</td><td class="n">${c.count}</td></tr>`).join("") : "<tr><td>none</td><td class=\"n\">0</td></tr>"}</table>`;
   const ex = summary.excluded;
   const repos = `${summary.repositories} ${summary.repositories === 1 ? "repository" : "repositories"}`;
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Findings rollup</title><style>body{font:16px/1.5 system-ui,sans-serif;max-width:46rem;margin:2rem auto;padding:0 1rem;color:#1a1a1a}h1{font-size:1.6rem}h2{font-size:1.1rem;margin-top:1.6rem}table{border-collapse:collapse;width:100%}td{padding:.25rem .5rem;border-bottom:1px solid #ddd}.n{text-align:right;font-variant-numeric:tabular-nums}.big{font-size:2.4rem;font-weight:600}</style></head><body><h1>Findings rollup</h1><p class="big">${summary.open}</p><p>open findings across ${repos}. Left out: ${ex.fixed} fixed, ${ex["false-positive"]} false positive, ${ex.accepted} accepted, ${ex.suppressed} suppressed.</p>${table("By severity", summary.bySeverity)}${table("By category", summary.byCategory)}${table("By age", summary.byAge)}${table("By owner", summary.byOwner)}${table("By repository", summary.byRepository)}<p>Generated ${escapeHtml(summary.generatedAt)}.</p></body></html>\n`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Findings rollup</title><style>body{font:16px/1.5 system-ui,sans-serif;max-width:46rem;margin:2rem auto;padding:0 1rem;color:#1a1a1a}h1{font-size:1.6rem}h2{font-size:1.1rem;margin-top:1.6rem}table{border-collapse:collapse;width:100%}td{padding:.25rem .5rem;border-bottom:1px solid #ddd}.n{text-align:right;font-variant-numeric:tabular-nums}.big{font-size:2.4rem;font-weight:600}</style></head><body><h1>Findings rollup</h1><p class="big">${summary.open}</p><p>open findings across ${repos}. Left out: ${ex.fixed} fixed, ${ex["false-positive"]} false positive, ${ex.accepted} accepted, ${ex.suppressed} suppressed.</p>${table("By severity", summary.bySeverity)}${table("By category", summary.byCategory)}${table("By age", summary.byAge)}${table("By team", summary.byTeam)}${table("By tier", summary.byTier)}${table("By owner", summary.byOwner)}${table("By repository", summary.byRepository)}<p>Generated ${escapeHtml(summary.generatedAt)}.</p></body></html>\n`;
 }

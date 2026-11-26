@@ -62,7 +62,7 @@ function walk(folder: string, limit: { left: number; truncated: boolean }): stri
   const files: string[] = [];
   const visit = (dir: string): void => {
     let entries;
-    try { entries = readdirSync(dir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1)); } catch { return; }
+    try { entries = readdirSync(dir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1)); } catch { limit.truncated = true; return; }
     for (const entry of entries) {
       if (entry.isSymbolicLink()) continue;
       if (entry.isDirectory()) { if (!SKIP.has(entry.name) && !entry.name.startsWith(".")) visit(join(dir, entry.name)); continue; }
@@ -96,17 +96,21 @@ export function scanJavaUsage(folder: string, components: Array<{ name: string; 
   let scanned = 0;
   for (const file of files) {
     let text: string;
-    try { if (statSync(file).size > MAX_FILE_BYTES) continue; text = readFileSync(file, "utf8"); } catch { continue; }
+    try { if (statSync(file).size > MAX_FILE_BYTES) { limit.truncated = true; continue; } text = readFileSync(file, "utf8"); } catch { limit.truncated = true; continue; }
     scanned += 1;
     const path = relative(folder, file).split("\\").join("/");
     const test = isTestPath(path);
     for (const item of parseImports(text)) imports.push({ path, line: item.line, import: item.name, test });
   }
+  const artifactPrefixes = components.flatMap(component => prefixes(component.name).artifact);
+  // Do not credit an exact artifact import to every sibling with the same Maven group.
+  const groupCandidates = imports.filter(item => !artifactPrefixes.some(prefix => startsWithPackage(item.import, prefix)));
   const usage = components.map((component): JavaUsage => {
     const { artifact, group } = prefixes(component.name);
     const exact = imports.filter(item => artifact.some(prefix => startsWithPackage(item.import, prefix)));
-    const byGroup = exact.length || KNOWN_PACKAGES[component.name] ? [] : imports.filter(item => startsWithPackage(item.import, group));
+    const byGroup = exact.length || KNOWN_PACKAGES[component.name] ? [] : groupCandidates.filter(item => startsWithPackage(item.import, group));
     const hits = exact.length ? exact : byGroup;
+    if (hits.length > MAX_IMPORTS_PER_COMPONENT) limit.truncated = true;
     return {
       purl: component.purl, name: component.name, version: component.version,
       verdict: exact.length ? "imported" : byGroup.length ? "imported-by-group" : "no-import-found",
@@ -128,6 +132,6 @@ export function javaUsageToText(report: JavaUsageReport): string {
   const none = report.usage.length - hit.length;
   lines.push(`${hit.length} of ${report.usage.length} Maven components are imported by the ${report.filesScanned} source files read; ${none} have no import in the application's own code (normal for a transitive dependency).`);
   lines.push("An import is not a call: this shows where a package is named, not that a vulnerable method runs.");
-  if (report.truncated) lines.push(`Stopped after ${MAX_FILES} files.`);
+  if (report.truncated) lines.push(`Source evidence is incomplete (file, import or readability limit).`);
   return `${lines.join("\n")}\n`;
 }

@@ -1,3 +1,4 @@
+import { metricPullRequest } from "../metric-pr.js";
 /**
  * `0 fix <finding>`: a thread that follows the `fix-finding` skill in an isolated git work tree, then a pull request.
  *
@@ -19,11 +20,12 @@ import { osecDB, resolveOsecDbPath } from "@0/engine/storage";
 import { consoleTransportOptions, type ConsoleClient, type ConsoleTransportOptions } from "../console-client.js";
 import { connect, DEFAULT_SCAN_MODEL, defaultScanDeps, waitForThread, type ScanDeps } from "./scan.js";
 import { resolveFindingId, shortFindingId } from "../finding-id.js";
-import { selectHost, type Host } from "../host/index.js";
+import type { Host } from "../host/index.js";
+import { selectFixHost } from "../host/fix-host.js";
 import { MAX_REVIEWERS, commitSubject, footerText, isDraft, needsTicket, parseTicket, pullRequestTitle, renderBodyTemplate, resolveBranchPrefix, type PullRequestConventions } from "./fix-conventions.js";
 import { CODEOWNERS_PATHS, reviewersFromCodeowners } from "./fix-codeowners.js";
 import { finishWithError, UsageError } from "./output.js";
-import { isPinnedImage, makeSandboxCache, NETWORK_CANARY, runInSandbox, sandboxLabel, validateSandboxImage, type SandboxSpec } from "./fix-sandbox.js";
+import { applySandboxProfile, validateMavenSettingsFile, isPinnedImage, makeSandboxCache, NETWORK_CANARY, runInSandbox, sandboxLabel, validateSandboxImage, type SandboxSpec } from "./fix-sandbox.js";
 import { appendRunMetric, type RunMetric } from "../run-metrics.js";
 import { applyWorkflowDefaults } from "../workflow-defaults.js";
 
@@ -173,7 +175,8 @@ export function pullRequestBody(finding: FindingToFix, summary: string | undefin
 }
 
 export interface FixOptions extends ConsoleTransportOptions {
-  repo?: string; base?: string; test?: string[]; ready?: boolean; budget: string; model?: string; timeout: string; pr: boolean; format?: string; policy?: string; repoPolicy?: boolean; sandbox?: string; sandboxImage?: string; sandboxNetwork?: boolean; sandboxSetup?: string[]; ticket?: string;
+  host?: string; bitbucketUrl?: string;
+  repo?: string; base?: string; test?: string[]; ready?: boolean; budget: string; model?: string; timeout: string; pr: boolean; format?: string; policy?: string; repoPolicy?: boolean; sandbox?: string; sandboxImage?: string; sandboxNetwork?: boolean; sandboxSetup?: string[]; sandboxProfile?: string; sandboxMavenSettings?: string; ticket?: string;
 }
 
 export interface FixOutcome {
@@ -185,6 +188,7 @@ export interface FixOutcome {
 export function fixMetric(outcome: FixOutcome | undefined, options: Pick<FixOptions, "model" | "budget">, startedAt: number, endedAt: number): Omit<RunMetric, "version" | "ci"> {
   const status = !outcome ? "failed" : outcome.timedOut ? "timeout" : outcome.budgetExhausted ? "budget" : outcome.committed ? "ok" : "failed";
   return {
+    ...(metricPullRequest(outcome?.pullRequest?.url) ?? {}),
     at: new Date(startedAt).toISOString(), command: "fix", model: options.model ?? DEFAULT_SCAN_MODEL, budgetUsd: Number(options.budget), costUsd: outcome?.costUsd ?? null,
     durationSeconds: Math.max(0, Math.round((endedAt - startedAt) / 1000)), findingsAttempted: 1, findingsProposed: outcome?.committed ? 1 : 0, checksPassed: outcome?.committed && outcome.verified ? 1 : 0,
     tokens: outcome?.tokens ?? null, status, findingIds: outcome ? [outcome.finding] : [],
@@ -203,6 +207,8 @@ async function defaultBase(deps: FixDeps, repo: string, requested?: string): Pro
 
 /** Check the sandbox flags together. Without --sandbox the checks run on this machine with your privileges. */
 export function sandboxSpec(options: FixOptions, env: NodeJS.ProcessEnv = process.env): SandboxSpec | undefined {
+  try { options = applySandboxProfile(options); } catch (error) { throw new UsageError((error as Error).message); }
+  if (options.sandboxMavenSettings && !options.sandboxSetup?.length) throw new UsageError("--sandbox-maven-settings requires an online --sandbox-setup or --sandbox-profile java.");
   if (!options.sandbox) {
     if (options.sandboxImage || options.sandboxNetwork || options.sandboxSetup?.length) throw new UsageError("--sandbox-image, --sandbox-network and --sandbox-setup need --sandbox docker.");
     return undefined;
@@ -240,10 +246,11 @@ async function runFixFlow(id: string, options: FixOptions, deps: FixDeps): Promi
   let committedBranch = false;
   let cache: string | undefined;
   try {
+    try { options = applySandboxProfile(options); } catch (error) { throw new UsageError((error as Error).message); }
     const budget = Number(options.budget);
     if (!Number.isFinite(budget) || budget <= 0) throw new UsageError("--budget must be a positive number of USD.");
     if (!Number.isFinite(Number(options.timeout)) || Number(options.timeout) <= 0) throw new UsageError("--timeout must be a positive number of seconds.");
-    const sandbox = sandboxSpec(options);
+    const sandbox = sandboxSpec({ ...options, sandboxProfile: undefined });
     if (options.computer || options.engineUrl) throw new UsageError("0security fix edits files on this machine; run it against the local console.");
     const finding = deps.loadFinding(id, options.dbPath);
     const remember = async (outcome: FixOutcome): Promise<void> => {
@@ -251,6 +258,9 @@ async function runFixFlow(id: string, options: FixOptions, deps: FixDeps): Promi
     };
     try { repo = (await deps.git(resolve(options.repo ?? process.cwd()), ["rev-parse", "--show-toplevel"])).trim(); }
     catch { throw new UsageError("Run this inside the git repository the finding is in, or pass --repo."); }
+    if (options.sandboxMavenSettings) validateMavenSettingsFile(options.sandboxMavenSettings, repo);
+    // Resolve the target and require credentials before starting work or pushing a fix.
+    const host = options.pr ? await selectFixHost({ host: options.host, bitbucketUrl: options.bitbucketUrl, run: (args, input) => deps.gh(tree || repo, args, input), git: args => deps.git(tree || repo, args) }) : undefined;
     const base = await defaultBase(deps, repo, options.base);
     // The policy is read before anything is created: a bad pull request setting stops the run first.
     const loaded = deps.loadPolicy(repo, options);
@@ -305,7 +315,7 @@ async function runFixFlow(id: string, options: FixOptions, deps: FixDeps): Promi
     if (sandbox && options.sandboxSetup?.length) {
       // Setup downloads dependencies into a cache folder with the network on. The checks then reuse that cache with the network off.
       cache = makeSandboxCache();
-      const online = { ...sandbox, network: true, cache };
+      const online = { ...sandbox, network: true, cache, ...(options.sandboxMavenSettings ? { mavenSettingsFile: options.sandboxMavenSettings } : {}) };
       const offline = { ...sandbox, network: false, cache };
       sandboxNotes = { setup: true, pinned: isPinnedImage(sandbox.image) };
       let ready = true;
@@ -337,12 +347,13 @@ async function runFixFlow(id: string, options: FixOptions, deps: FixDeps): Promi
     if (!options.pr) { deps.err(`committed on ${branch}; not pushed (--no-pr).`); await remember(outcome); return outcome; }
 
     // The branch is ours and only ours: never the base, always with a lease so a person's later push is not overwritten.
-    const host = selectHost({ run: (args, input) => deps.gh(tree, args, input), git: args => deps.git(tree, args) });
+    if (!host) throw new Error("No pull request host was selected.");
+    // Check API access and locate the existing PR before writing to the git remote.
+    const existing = await host.findOpenPullRequest(branch, base.name);
     await host.pushBranch(branch);
     const bodyFile = join(temp, "body.md");
     const draft = isDraft(verified, conventions, !checks.length && !options.ready);
     deps.writeFile(bodyFile, pullRequestBody(finding, thread.reply, checks, footerText(conventions), draft && verified && !checks.length, conventions?.bodyTemplate ? { template: conventions.bodyTemplate, ...(ticket ? { ticket } : {}) } : undefined, direct.applied, sandboxNotes));
-    const existing = await host.findOpenPullRequest(branch);
     let url: string; let created = false;
     if (existing) {
       url = existing.url;
@@ -387,7 +398,7 @@ async function chooseReviewers(deps: FixDeps, repo: string, baseRef: string, con
 
 /** Labels that exist (or can be made) and reviewers go on the pull request. A refusal is a warning: the pull request is already open. */
 async function decoratePullRequest(host: Host, url: string, conventions: PullRequestConventions, warn: (text: string) => void): Promise<void> {
-  const number = Number(/\/pull\/(\d+)/.exec(url)?.[1]);
+  const number = Number(/\/(?:pull|pull-requests)\/(\d+)$/.exec(url)?.[1]);
   if (!Number.isInteger(number) || number < 1) { warn(`could not tell the pull request number from ${url}; labels and reviewers were not added`); return; }
   try {
     let labels: string[] = [];
@@ -430,7 +441,7 @@ async function runThread(client: ConsoleClient, deps: FixDeps, folder: string, f
   const id = String(created.id);
   const path = `/api/console/sessions/${encodeURIComponent(id)}`;
   await client.request("PATCH", `${path}/configuration`, { workspacePath: folder });
-  await client.request("POST", `${path}/messages`, { text: fixPrompt(finding, { tests: options.test ?? [], policy, sandboxed, ...(isJavaDependencyFinding(finding) ? { skill: "java-dependency-fix" } : {}) }) });
+  await client.request("POST", `${path}/messages`, { text: fixPrompt(finding, { tests: options.test ?? [], policy, sandboxed, ...(isJavaDependencyFinding(finding) ? { skill: "java-dependency-fix" } : options.sandboxProfile === "java" ? { skill: "java-security-fix" } : {}) }) });
   deps.err(`working in thread ${id} (budget $${Number(budget.toFixed(4))})`);
   const { snapshot, timedOut } = await waitForThread(client, deps, id, Date.now() + Number(options.timeout) * 1000);
   const done = finishedThread(snapshot);
@@ -443,11 +454,15 @@ export function registerFixCommand(program: Command, deps: FixDeps = defaults): 
   const collect = (value: string, previous: string[] = []) => [...previous, value];
   consoleTransportOptions(program.command("fix <finding>")
     .description("Fix one finding in an isolated git work tree and open a pull request for review")
+    .option("--host <host>", "Code host: github, bitbucket-cloud or bitbucket-dc (inferred from origin)")
+    .option("--bitbucket-url <url>", "Bitbucket Data Center HTTPS base URL, including any context path (or BITBUCKET_URL)")
     .option("--repo <dir>", "Git repository the finding is in (default: the current directory)")
     .option("--base <branch>", "Branch to start from and open the pull request against (default: the remote's default branch)")
     .option("--test <command>", "Check to run after the change; repeat for several. A failing check makes the pull request a draft", collect)
     .option("--ready", "Open the pull request ready for review even when no --test ran. Without it, a pull request with no checks is a draft")
     .addOption(new Option("--sandbox <mode>", "Run the --test commands in a container instead of on this machine (docker)").choices(["docker"]))
+    .option("--sandbox-profile <profile>", "Use the pinned Maven/JDK 21 verifier: online dependency setup then offline verify (java)")
+    .option("--sandbox-maven-settings <file>", "Owner-only short-lived Maven credentials outside the repository; read-only mount for online setup only; setup output withheld")
     .option("--sandbox-image <image>", "Image for --sandbox docker, for example maven:3-eclipse-temurin-21. It must hold the tools and dependencies the tests need")
     .option("--sandbox-network", "Give the sandbox network access (to download dependencies). Off by default")
     .option("--sandbox-setup <command>", "With --sandbox docker: run this once with the network on to download dependencies (for example mvn -q dependency:go-offline), then run the --test checks with the network off; repeat for several", collect)

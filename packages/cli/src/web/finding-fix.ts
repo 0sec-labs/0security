@@ -1,6 +1,6 @@
 // What the finding detail page shows about where a finding is and what `findings fix` recorded for it.
 // Everything comes from stored data: the finding's own review annotation and the fix state file. The only
-// other read is a local `git diff` of the recorded fix branch, which never touches the network.
+// other reads are a local `git diff` and bounded, cached CI status from the configured code host.
 import { execFile } from "node:child_process";
 import { statSync } from "node:fs";
 import { isAbsolute } from "node:path";
@@ -30,7 +30,15 @@ export interface FindingFixRecord {
   /** The fix commit as a unified diff, read from the local branch. Absent when the branch is gone or has more than one commit. */
   diff?: string;
   diffTruncated?: boolean;
+  /** Live code-host checks, separate from the recorded local --test result. */
+  ci?: FindingCiStatus;
 }
+export interface FindingCiStatus {
+  status: "passing" | "failing" | "pending" | "none" | "unavailable";
+  checkedAt: string;
+  url?: string;
+}
+export type FindingChecksReader = (repo: string, url: string) => Promise<FindingCiStatus>;
 export interface FindingFixInfo { records: FindingFixRecord[]; command: string }
 
 /** The cited source location of the newest row that has one. The file itself is never read. */
@@ -79,7 +87,7 @@ const safeUrl = (text: string | undefined): string | null => {
  * Fix records for one finding, newest first. A scoped account only gets records of repositories inside its scope
  * and never sees a repository path.
  */
-export async function findingFixInfo(fingerprint: string, findingId: string, scope?: TargetFilter, store: StateStore = fileStore()): Promise<FindingFixInfo> {
+export async function findingFixInfo(fingerprint: string, findingId: string, scope?: TargetFilter, store: StateStore = fileStore(), readChecks: FindingChecksReader = readHostedChecks): Promise<FindingFixInfo> {
   const command = `0security findings fix ${shortFindingId(findingId)}`;
   let state;
   try { state = store.load(); } catch { return { records: [], command }; }
@@ -92,12 +100,46 @@ export async function findingFixInfo(fingerprint: string, findingId: string, sco
   const records: FindingFixRecord[] = [];
   for (const { repo, record } of matches) {
     const branch = typeof record.branch === "string" && BRANCH.test(record.branch) ? record.branch : null;
-    const diff = branch ? await readFixDiff(repo, branch) : null;
+    const pullRequestUrl = safeUrl(record.pullRequestUrl);
+    const [diff, ci] = await Promise.all([
+      branch ? readFixDiff(repo, branch) : null,
+      pullRequestUrl ? readChecks(repo, pullRequestUrl).catch(() => ({ status: "unavailable" as const, checkedAt: new Date().toISOString() })) : undefined,
+    ]);
     records.push({
-      branch, result: record.result, pullRequestUrl: safeUrl(record.pullRequestUrl),
+      branch, result: record.result, pullRequestUrl, ...(ci ? { ci } : {}),
       draft: typeof record.draft === "boolean" ? record.draft : null, checksPassing: typeof record.checksPassing === "boolean" ? record.checksPassing : null,
       recordedAt: String(record.updatedAt), ...(diff ? { diff: diff.diff, diffTruncated: diff.truncated } : {}),
     });
   }
   return { records, command };
+}
+
+// Bound memory and host traffic: family polling shares an in-flight read and a 30-second snapshot.
+const ciCache = new Map<string, { expires: number; result: Promise<FindingCiStatus> }>();
+export async function readHostedChecks(repo: string, url: string): Promise<FindingCiStatus> {
+  const key = `${repo}\u0000${url}`;
+  const cached = ciCache.get(key);
+  if (cached && cached.expires > Date.now()) return cached.result;
+  const result = (async (): Promise<FindingCiStatus> => {
+    try {
+      if (!isAbsolute(repo) || !statSync(repo).isDirectory()) throw new Error("Repository unavailable");
+      const { selectFixHost } = await import("../host/fix-host.js");
+      const signal = AbortSignal.timeout(7_000);
+      const host = await selectFixHost({
+        fetch: (input, init) => fetch(input, { ...init, signal: init?.signal ? AbortSignal.any([signal, init.signal]) : signal }),
+        git: async args => (await git(repo, args)).stdout,
+        run: async args => {
+          const { assertEgressAllowed } = await import("@0/engine");
+          assertEgressAllowed("Code host CI (gh)");
+          return (await exec("gh", args, { cwd: repo, timeout: 5_000, maxBuffer: 200_000, encoding: "utf8", env: GIT_ENV })).stdout;
+        },
+      });
+      if (!host.pullRequestChecks) throw new Error("Host checks unavailable");
+      const checks = await host.pullRequestChecks(url);
+      return { status: checks.status, checkedAt: new Date().toISOString(), ...(safeUrl(checks.url) ? { url: safeUrl(checks.url)! } : {}) };
+    } catch { return { status: "unavailable", checkedAt: new Date().toISOString() }; }
+  })();
+  if (ciCache.size >= 500) ciCache.delete(ciCache.keys().next().value!);
+  ciCache.set(key, { expires: Date.now() + 30_000, result });
+  return result;
 }

@@ -1,5 +1,6 @@
+import { businessContextLabel } from "../shared/business-context.js";
 import { posix, win32 } from "node:path";
-import { attackerImpactSentence, describeAttackerImpact, compareFindingsBySeverity, reproductionFor, reproductionLine, proofLine } from "../shared/index.js";
+import { attackerImpactSentence, describeAttackerImpact, compareFindingsByBusinessContext, reproductionFor, reproductionLine, proofLine } from "../shared/index.js";
 import type { PocStep, ScanReport, Finding, Severity } from "../shared/index.js";
 import { VERSION } from "../shared/index.js";
 
@@ -155,7 +156,7 @@ function findingToResult(finding: Finding, target: string, suppressOutOfScope = 
   const result: SarifResult = {
     ruleId: finding.templateId,
     level: severityToLevel(finding.severity),
-    message: { text: [finding.description, attackerImpactSentence(finding) ? `${describeAttackerImpact(finding)?.label ?? "What an attacker can do"}: ${attackerImpactSentence(finding)}` : ""].filter(Boolean).join("\n\n") },
+    message: { text: [finding.description, businessContextLabel(finding.businessContext), attackerImpactSentence(finding) ? `${describeAttackerImpact(finding)?.label ?? "What an attacker can do"}: ${attackerImpactSentence(finding)}` : ""].filter(Boolean).join("\n\n") },
     locations: [{ physicalLocation: findingLocation(finding, target) }],
     partialFingerprints: {
       primary: stableFingerprint(finding, target),
@@ -194,6 +195,7 @@ function findingToResult(finding: Finding, target: string, suppressOutOfScope = 
   if (finding.knownStatus) result.properties["knownStatus"] = finding.knownStatus;
   if (finding.knownBy) result.properties["knownBy"] = finding.knownBy;
   if (finding.confirmedIndependently) result.properties["confirmedIndependently"] = true;
+  if (finding.businessContext) result.properties["businessContext"] = finding.businessContext;
   if (finding.impactAssessment) result.properties["impactAssessment"] = finding.impactAssessment;
   if (finding.cvssScore !== undefined) result.properties["cvssScore"] = finding.cvssScore;
   if (finding.cvssVector) result.properties["cvssVector"] = finding.cvssVector;
@@ -263,7 +265,7 @@ export function formatSarif(report: ScanReport): string {
           },
         },
         results: [
-          ...[...report.findings].sort(compareFindingsBySeverity).map((f) => findingToResult(f, report.target, report.scopeInfo?.sarifSuppress === true)),
+          ...[...report.findings].sort(compareFindingsByBusinessContext).map((f) => findingToResult(f, report.target, report.scopeInfo?.sarifSuppress === true)),
           ...(report.reviewChecks ?? []).map(check => ({
             ruleId: `review-check/${check.id}`,
             kind: check.status === "pass" ? "pass" : check.status === "issue" ? "fail" : "open",

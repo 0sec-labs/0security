@@ -90,6 +90,7 @@ function harness(conventions: PullRequestConventions | undefined, extra: { fromR
     git: async (_cwd, args) => {
       calls.push(`git ${args.join(" ")}`);
       if (args[0] === "rev-parse" && args[1] === "--show-toplevel") return "/repo\n";
+      if (args[0] === "remote" && args[1] === "get-url") return "https://github.com/o/r.git\n";
       if (args[0] === "symbolic-ref") return "origin/main\n";
       if (args[0] === "status") return " M src/db.ts\n";
       if (args[0] === "show") { if (extra.codeowners !== undefined && args[1] === "origin/main:.github/CODEOWNERS") return extra.codeowners; throw new Error("fatal: path does not exist"); }
@@ -130,8 +131,8 @@ describe("0 findings fix with conventions", () => {
     expect(create).toContain("--title SEC-9 high: SQL injection in search");
     expect(create).toContain("--draft");
     expect(h.bodies[0]!.endsWith("Tracked in SEC-9")).toBe(true);
-    expect(h.calls).toContain("gh pr edit 7 --add-label=exists");
-    expect(h.calls).toContain("gh pr edit 7 --add-reviewer=alice --add-reviewer=acme/appsec");
+    expect(h.calls).toContain("gh pr edit 7 --add-label=exists --repo o/r");
+    expect(h.calls).toContain("gh pr edit 7 --add-reviewer=alice --add-reviewer=acme/appsec --repo o/r");
     // The label that does not exist could not be created: a warning, not a failure.
     expect(h.warnings.some(w => /could not create label 'security'/.test(w))).toBe(true);
   });
@@ -237,7 +238,7 @@ describe("pull request conventions: ticket key, body template and CODEOWNERS rev
     const h = harness({ reviewers: ["alice"], reviewersFromCodeowners: true }, { codeowners: "/src/ @acme/backend @dba @alice\n" });
     await runFix("f-1", options(), h.deps);
     expect(h.calls).toContain("git show origin/main:.github/CODEOWNERS");
-    expect(h.calls).toContain("gh pr edit 7 --add-reviewer=alice --add-reviewer=acme/backend --add-reviewer=dba");
+    expect(h.calls).toContain("gh pr edit 7 --add-reviewer=alice --add-reviewer=acme/backend --add-reviewer=dba --repo o/r");
   });
 
   it("says so when there is no CODEOWNERS file or entry, and still opens the pull request", async () => {

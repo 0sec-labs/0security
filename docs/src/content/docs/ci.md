@@ -805,3 +805,9 @@ The stage is `early-warning`, `notification` or `final`. The draft takes the tit
 Anything you do not supply stays a visible `[to be completed by the manufacturer: ...]` blank. The draft never claims exploitation, user impact or a patch that you did not state. A person reviews the draft and submits it through the channel the authority designates. 0 sends nothing.
 
 Article 14 of the Regulation is the starting point. Confirm current requirements and deadlines with the authority and your advisers.
+
+## Packaged Bitbucket Pipe and Jenkins library
+
+The repository includes a buildable Bitbucket Pipe in `ci/bitbucket-pipe/` and an exportable Jenkins Shared Library in `ci/jenkins-library/`. The Pipe installs a pinned release with its published SHA-256 verification. Both integrations use separate scan and publish execution: the untrusted scan gets the model key, and the trusted publisher gets the Bitbucket token. The Jenkins library requires separate physical nodes.
+
+Build, configure and qualify them with [the packaging guide](https://github.com/0sec-labs/0security/tree/main/ci/packaging). The guide includes a manual Bitbucket qualification pipeline, a Jenkins example and an actual scanner/image rehearsal with an optional paid model stage. The image and library artifacts require release publication; source files and local tests do not establish live Bitbucket, Jenkins or Azure qualification. The existing Azure Pipelines template above remains available without an extension.

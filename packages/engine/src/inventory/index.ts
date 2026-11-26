@@ -211,14 +211,17 @@ export interface Batch {
   units: InventoryUnit[];
   /** The build module (a directory relative to the folder) every unit of this batch sits in, when the plan was made by module. */
   module?: string;
+  /** CODEOWNERS labels used only to group work, never to omit a unit. */
+  owners?: string[];
 }
 
 export interface PlanBatchOptions {
   /** Says which shard (for Java, a build module) a unit belongs to. A batch never mixes shards. */
   shardOf?: (unit: InventoryUnit) => string | undefined;
+  ownersOf?: (unit: InventoryUnit) => readonly string[];
 }
 
-type RawBatch = { units: InventoryUnit[]; module?: string };
+type RawBatch = { units: InventoryUnit[]; module?: string; owners?: string[] };
 const numbered = (batches: RawBatch[]): Batch[] => batches.map((batch, index) => ({ index, ...batch }));
 
 /**
@@ -227,17 +230,22 @@ const numbered = (batches: RawBatch[]): Batch[] => batches.map((batch, index) =>
  * its own, in shard order, so a batch stays inside one shard; with one shard or none the result is the plain plan.
  */
 export function planBatches(units: readonly InventoryUnit[], size = 8, options: PlanBatchOptions = {}): Batch[] {
-  const shardOf = options.shardOf;
-  if (!shardOf) return numbered(planGroup(units, size).map(group => ({ units: group })));
-  const shards = new Map<string, InventoryUnit[]>();
+  if (!options.shardOf && !options.ownersOf) return numbered(planGroup(units, size).map(group => ({ units: group })));
+  const shards = new Map<string, { module: string; owners: string[]; units: InventoryUnit[] }>();
   for (const unit of units) {
-    const key = shardOf(unit) ?? "";
-    const list = shards.get(key);
-    if (list) list.push(unit); else shards.set(key, [unit]);
+    const module = options.shardOf?.(unit) ?? "";
+    const owners = [...new Set(options.ownersOf?.(unit) ?? [])].sort();
+    const key = JSON.stringify([module, owners]);
+    const shard = shards.get(key);
+    if (shard) shard.units.push(unit); else shards.set(key, { module, owners, units: [unit] });
   }
   const out: RawBatch[] = [];
   for (const key of [...shards.keys()].sort()) {
-    for (const group of planGroup(shards.get(key)!, size)) out.push({ units: group, ...(key && (shards.size > 1 || key !== ".") ? { module: key } : {}) });
+    const shard = shards.get(key)!;
+    for (const group of planGroup(shard.units, size)) out.push({ units: group,
+      ...(shard.module && (shards.size > 1 || shard.module !== ".") ? { module: shard.module } : {}),
+      ...(shard.owners.length ? { owners: shard.owners } : {}),
+    });
   }
   return numbered(out);
 }

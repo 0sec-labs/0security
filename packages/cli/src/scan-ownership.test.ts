@@ -1,0 +1,21 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, expect, it } from "vitest";
+import { planBatches, type InventoryUnit } from "@0/engine";
+import { ownersOfFile } from "./scan-batched.js";
+const dirs: string[] = [];
+afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
+it("keeps module boundaries, applies last matching owner rule and unions grouped-file owners", () => {
+  const dir = mkdtempSync(join(tmpdir(), "0-owners-")); dirs.push(dir);
+  const path = join(dir, "CODEOWNERS");
+  writeFileSync(path, "* @default\n/core/ @core\n/core/private/ @security @core\n/core/unowned.js\n");
+  const ownersOf = ownersOfFile(path)!;
+  const units = ["core/a.js", "core/private/b.js", "core/unowned.js", "other/a.js"].map((path, index) => ({ id: String(index), path, kind: "http-route", startLine: 1 } as InventoryUnit));
+  expect(ownersOf(units[2]!)).toEqual([]);
+  expect(ownersOf({ ...units[0]!, kind: "other", files: ["core/a.js", "other/a.js"] })).toEqual(["@core", "@default"]);
+  const batches = planBatches(units, 8, { shardOf: unit => unit.path.split("/")[0], ownersOf });
+  expect(batches).toHaveLength(4);
+  expect(batches.flatMap(batch => batch.units.map(unit => unit.id)).sort()).toEqual(["0", "1", "2", "3"]);
+  expect(batches.find(batch => batch.units[0]!.id === "1")).toMatchObject({ module: "core", owners: ["@core", "@security"] });
+});

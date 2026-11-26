@@ -8,10 +8,10 @@ import { REMOVED_PROVIDER_IDS } from "../state/provider-status.js";
 const BASE_URL_VARS: Readonly<Record<string, string>> = {
   deepseek: "DEEPSEEK_BASE_URL", anthropic: "ANTHROPIC_BASE_URL", azure: "AZURE_OPENAI_BASE_URL",
   openai: "OPENAI_BASE_URL", "z-ai": "Z_AI_BASE_URL", kimi: "KIMI_BASE_URL", qwen: "QWEN_BASE_URL",
-  xai: "XAI_BASE_URL", opencode: "OPENCODE_BASE_URL", together: "TOGETHER_BASE_URL",
+  bedrock: "BEDROCK_BASE_URL", xai: "XAI_BASE_URL", opencode: "OPENCODE_BASE_URL", together: "TOGETHER_BASE_URL",
 };
 export function connectionBaseUrlVar(providerId: string): string | undefined { return BASE_URL_VARS[providerId]; }
-interface ConnectionConfig { baseUrl?: string; model?: string }
+interface ConnectionConfig { baseUrl?: string; model?: string; region?: string }
 
 export function validateConnectionConfig(providerId: string, value: ConnectionConfig): ConnectionConfig {
   const result: ConnectionConfig = {};
@@ -25,9 +25,13 @@ export function validateConnectionConfig(providerId: string, value: ConnectionCo
     result.baseUrl = url.href.replace(/\/$/, "");
   }
   if (value.model !== undefined) {
-    if (providerId !== "azure" && providerId !== "openai") throw new Error("Connection model configuration is supported for Azure and custom OpenAI-compatible providers.");
+    if (providerId !== "azure" && providerId !== "openai" && providerId !== "bedrock") throw new Error("Connection model configuration is supported for Azure, Bedrock and custom OpenAI-compatible providers.");
     if (!value.model.trim() || value.model.length > 256 || /[\s\x00-\x1f\x7f]/.test(value.model)) throw new Error("Invalid deployment model.");
     result.model = value.model;
+  }
+  if (value.region !== undefined) {
+    if (providerId !== "bedrock" || !/^[a-z]{2}(?:-[a-z]+)+-\d+$/.test(value.region)) throw new Error("Choose a valid AWS region for Bedrock.");
+    result.region = value.region;
   }
   return result;
 }
@@ -45,6 +49,7 @@ export function loadConnectionConfigs(homeDir?: string): Record<string, Connecti
       result[providerId] = validateConnectionConfig(providerId, {
         ...(typeof config.baseUrl === "string" ? { baseUrl: config.baseUrl } : {}),
         ...(typeof config.model === "string" ? { model: config.model } : {}),
+        ...(typeof config.region === "string" ? { region: config.region } : {}),
       });
     } catch { /* A malformed persisted endpoint cannot redirect requests. */ }
   }
@@ -80,6 +85,8 @@ export function connectionConfigEnvPatch(env: NodeJS.ProcessEnv, homeDir?: strin
   for (const [id, config] of Object.entries(loadConnectionConfigs(homeDir))) {
     const variable = BASE_URL_VARS[id];
     if (variable && config.baseUrl && !env[variable]) patch[variable] = config.baseUrl;
+    if (id === "bedrock" && config.region && !env.AWS_REGION && !env.AWS_DEFAULT_REGION) patch.AWS_REGION = config.region;
+    if (id === "bedrock" && config.model && !env.ZERO_BEDROCK_MODEL) patch.ZERO_BEDROCK_MODEL = config.model;
     if (id === "azure" && config.model && !env.AZURE_OPENAI_MODEL) patch.AZURE_OPENAI_MODEL = config.model;
     if (id === "openai" && config.model && !env.OPENAI_MODEL) patch.OPENAI_MODEL = config.model;
   }

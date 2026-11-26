@@ -1,3 +1,4 @@
+import type { MetricIdentity } from "../run-metrics.js";
 /**
  * The pieces every Bitbucket review needs, built from plain settings: the API client, the scan runner and the review options.
  * `0security sentinels bitbucket review|watch` and the `bitbucket-pr` Sentinel trigger both build their reviewer here, so the two
@@ -12,6 +13,7 @@ export type PlatformName = "cloud" | "dc";
 export const PLATFORMS: Record<PlatformName, Platform> = { cloud: "bitbucket-cloud", dc: "bitbucket-dc" };
 
 export interface ReviewerSettings {
+  metricIdentity?: MetricIdentity;
   platform: PlatformName;
   /** `workspace/repo` (Cloud) or `PROJECT/repo` (Data Center). */
   repo: string;
@@ -22,6 +24,7 @@ export interface ReviewerSettings {
   /** Spend limit for one scan, in USD, as the scan command takes it. */
   budget?: string;
   model?: string | undefined;
+  providerId?: string; reasoning?: string;
   maxFiles: number;
   maxInline: number;
   reportId: string;
@@ -55,7 +58,7 @@ export function createReviewer(settings: ReviewerSettings, seams: { http?: Http;
     allowInsecureHttp: settings.allowInsecureHttp === true, ...(seams.http ? { http: seams.http } : {}),
   });
   const runner = gitScanRunner({
-    checkout: resolve(settings.checkout), budget: settings.budget ?? "2", ...(settings.model ? { model: settings.model } : {}),
+    metricIdentity: settings.metricIdentity, checkout: resolve(settings.checkout), budget: settings.budget ?? "2", ...(settings.model ? { model: settings.model } : {}), ...(settings.providerId ? { providerId: settings.providerId } : {}), ...(settings.reasoning ? { reasoning: settings.reasoning } : {}),
     ...(settings.secretVariables ? { secretVariables: settings.secretVariables } : {}), ...(seams.exec ? { exec: seams.exec } : {}),
   });
   return {

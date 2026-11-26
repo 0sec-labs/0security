@@ -7,6 +7,8 @@
  */
 import { createHash } from "node:crypto";
 import { classifyFinding, classifyKnown, labelWithScope, linesWithin, orderByScope, sameFlaw, type Finding, type KnownItem, type ScanCoverage, type ScanFileCoverage, type ScanKnownSummary, type ScanReport, type ScanTierInfo } from "@0/engine/shared";
+import { labelBusinessContext, type BusinessContext } from "./business-context.js";
+import { compareFindingsByBusinessContext } from "@0/engine/shared";
 import { tagCustomFindings } from "./scan-rules.js";
 import type { ScopeDeclaration } from "./scan-steering.js";
 
@@ -19,6 +21,8 @@ const rank = (severity: string): number => { const index = (SEVERITIES as readon
 export interface ScanOutcome {
   /** A label that is the same on every machine: a git URL without credentials, or the folder's name. Never an absolute path. */
   target: string;
+  /** Explicit operator declarations, used for work ordering only. */
+  businessContext?: BusinessContext;
   /** Where the scanned code was on this machine (the folder, and its real path); finding paths are made relative to it. */
   roots?: readonly string[];
   threadId: string;
@@ -26,6 +30,8 @@ export interface ScanOutcome {
   completedAt: string;
   budgetUsd: number;
   costUsd?: number;
+  /** Sum of actual reported input/output usage for this invocation, absent if any thread lacks usage. */
+  tokens?: number;
   /** The thread stopped at its cost ceiling; the findings are partial. */
   budgetExhausted: boolean;
   /** The scan hit --timeout and was cancelled; the findings are partial. */
@@ -177,14 +183,18 @@ const scopeSummary = (outcome: ScanOutcome) => outcome.scope ? { source: outcome
 const count = (findings: readonly Finding[], severity: ScanSeverity) => findings.filter(finding => finding.severity === severity).length;
 const compareRank = (a: Finding, b: Finding): number => rank(a.severity) - rank(b.severity) || a.title.localeCompare(b.title);
 /** In scope first (declared in-scope vectors before the rest), then findings outside the declared scope; each part by severity. */
-const byRank = (findings: readonly Finding[]): Finding[] => orderByScope(findings, compareRank);
+const byRank = (findings: readonly Finding[]): Finding[] => orderByScope(findings, (a, b) => compareFindingsByBusinessContext(a, b) || compareRank(a, b));
+
+export function applyBusinessContext<T extends Finding>(outcome: ScanOutcome, findings: readonly T[]): T[] {
+  return outcome.businessContext ? findings.map(finding => labelBusinessContext(finding, outcome.businessContext!, outcome.target)) : [...findings];
+}
 
 /** The shared report type the exporter understands (md, sarif, html, pdf), with this scan's facts on top of the stored rows. */
 export function toScanReport(outcome: ScanOutcome, stored: ScanReport): ScanReport {
   const total = outcome.passes?.requested ?? 1;
   const tagged = tagCustomFindings(stored.findings.map(finding => reportFinding(finding, outcome.roots ?? [])), outcome.customLeads);
   const known = markKnown(outcome, applyScope(outcome, tagged));
-  const findings = byRank(known.findings.map(shaped => {
+  const findings = byRank(applyBusinessContext(outcome, known.findings).map(shaped => {
     const found = (shaped as MergedFinding).foundInPasses;
     // The exporters have no field for it, so say it where every format shows it.
     return total > 1 && found ? { ...shaped, description: `${shaped.description}\n\nFound in ${found} of ${total} scan passes.` } : shaped;
@@ -232,7 +242,7 @@ export function scanStatus(outcome: ScanOutcome): string {
 /** The documented JSON contract of `0 scan --format json`. Field names are stable within a schemaVersion. */
 export function scanJson(outcome: ScanOutcome, stored: readonly Finding[]): Record<string, unknown> {
   const known = markKnown(outcome, applyScope(outcome, tagCustomFindings(stored.map(finding => reportFinding(finding, outcome.roots ?? [])), outcome.customLeads)));
-  const findings = byRank(known.findings);
+  const findings = byRank(applyBusinessContext(outcome, known.findings));
   const inScope = inScopeOf(findings);
   const outside = outOfScopeOf(findings);
   return {
@@ -269,6 +279,7 @@ export function scanJson(outcome: ScanOutcome, stored: readonly Finding[]): Reco
       ...(finding.knownBy ? { knownBy: finding.knownBy } : {}),
       severity: finding.severity,
       category: finding.category,
+      ...(finding.businessContext ? { businessContext: finding.businessContext } : {}),
       status: finding.status,
       ...(finding.scope ? { scope: finding.scope, ...(finding.scopeReason ? { scopeReason: finding.scopeReason } : {}), ...(finding.scopeSource ? { scopeSource: finding.scopeSource } : {}) } : {}),
       // With several passes: how many of them found this flaw. A flaw only one pass found is real but less certain.

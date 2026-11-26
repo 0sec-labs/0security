@@ -4,6 +4,8 @@
  */
 import { buildInventory, inventorySummaryText, javaModuleResolver, planBatches, type Batch, type Inventory, type InventoryUnit } from "@0/engine";
 import { coverageSentence, summarizeCoverage, type CoverageLedger, type LedgerScan, type LedgerUnit } from "@0/engine/storage";
+import { readFileSync, statSync } from "node:fs";
+import { codeownersResolver } from "./commands/fix-codeowners.js";
 import { UsageError } from "./commands/output.js";
 import { unitFromLedger } from "./scan-batches.js";
 
@@ -20,6 +22,17 @@ export function moduleShardOf(folder: string): (unit: InventoryUnit) => string |
   return unit => moduleOf(unit.path, unit.kind === "other")?.root;
 }
 
+/** Only the operator-named file is read. Ownership groups never suppress files or grant execution authority. */
+export function ownersOfFile(path?: string): ((unit: InventoryUnit) => string[]) | undefined {
+  if (path === undefined) return undefined;
+  try {
+    const stat = statSync(path);
+    if (!stat.isFile() || stat.size > 1024 * 1024) throw new Error("not a bounded regular file");
+    const resolve = codeownersResolver(readFileSync(path, "utf8"));
+    return unit => [...new Set((unit.files ?? [unit.path]).flatMap(file => resolve(file)))].sort();
+  } catch { throw new UsageError("--codeowners must name a readable regular file of at most 1 MB."); }
+}
+
 export interface BatchedSetup {
   ledger: CoverageLedger;
   scan: LedgerScan;
@@ -32,6 +45,7 @@ export interface BatchedSetup {
 
 export interface PlanInput {
   folder: string;
+  codeowners?: string;
   label: string;
   mode: string;
   batchSize: number;
@@ -57,6 +71,7 @@ export function shouldBatch(inventory: Inventory, batchSize: number): boolean {
 
 /** The plan for a batched scan, or undefined when the scan runs as one thread as before. Throws UsageError on a bad resume. */
 export async function planBatchedScan(input: PlanInput): Promise<BatchedSetup | undefined> {
+  const ownersOf = ownersOfFile(input.codeowners);
   const resuming = input.resume !== undefined;
   if (!resuming && (input.mode === "off" || (input.mode === "auto" && (input.passes > 1 || input.singleThread)))) return undefined;
   const inventory = buildInventory(input.folder, input.scope ? { only: new Set(input.scope) } : {});
@@ -75,13 +90,13 @@ export async function planBatchedScan(input: PlanInput): Promise<BatchedSetup | 
         input.err(`warning: continuing scan ${scan.id} although the git HEAD changed (${short(scan.gitHead)}, now ${short(head)}); some units may no longer match the code`);
       }
       const pending = ledger.units(scan.id, "pending");
-      return { ledger, scan, inventory, summaryText, resumed: true, batches: planBatches(pending.map(unitFromLedger), scan.batchSize, { shardOf: moduleShardOf(input.folder) }) };
+      return { ledger, scan, inventory, summaryText, resumed: true, batches: planBatches(pending.map(unitFromLedger), scan.batchSize, { shardOf: moduleShardOf(input.folder), ...(ownersOf ? { ownersOf } : {}) }) };
     } catch (error) { ledger.close(); throw error; }
   }
 
   if (input.mode === "auto" && !shouldBatch(inventory, input.batchSize)) return undefined;
   if (!inventory.units.length) return undefined;
-  const batches = planBatches(inventory.units, input.batchSize, { shardOf: moduleShardOf(input.folder) });
+  const batches = planBatches(inventory.units, input.batchSize, { shardOf: moduleShardOf(input.folder), ...(ownersOf ? { ownersOf } : {}) });
   const batchOf = new Map<string, number>();
   for (const batch of batches) for (const unit of batch.units) batchOf.set(unit.id, batch.index);
   const ledger = input.openLedger(input.dbPath);

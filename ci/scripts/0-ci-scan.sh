@@ -12,6 +12,7 @@
 #   ZEROCI_TARGET        folder to scan (default: .)
 #   ZEROCI_FAIL_ON       critical, high, medium, low or info (default: high)
 #   ZEROCI_BUDGET        spend limit in USD (default: 3)
+#   ZEROCI_PREPASS_ONLY=1  run installed pattern scanners only; no model or model charge
 #   ZEROCI_COMMIT        the pull request's source commit. Default: the second parent when HEAD is a merge commit, else HEAD.
 #   ZEROCI_EXIT_WITH_RESULT=1  exit with the scan's code (3 becomes 0) instead of always exiting 0.
 set -eu
@@ -39,8 +40,19 @@ case "$commit" in *[!0-9a-f]*|'') fail "the commit is not a 40-character hash" ;
 
 git fetch --no-tags --depth=1 origin "+refs/heads/${base}:refs/remotes/origin/${base}"
 
+set -- scan "$target" --diff "origin/${base}" --format json -o "$out/scan.json" --fail-on "$fail_on" --budget "$budget"
+case "${ZEROCI_PREPASS_ONLY:-0}" in
+  0) ;;
+  1)
+    tier_file="$(mktemp)"
+    trap 'rm -f "$tier_file"' EXIT HUP INT TERM
+    printf '%s\n' '{"default":"standard","tiers":{"standard":{"prepassOnly":true}}}' > "$tier_file"
+    set -- "$@" --tiers "$tier_file"
+    ;;
+  *) fail "ZEROCI_PREPASS_ONLY must be 0 or 1" ;;
+esac
 code=0
-0security scan "$target" --diff "origin/${base}" --format json -o "$out/scan.json" --fail-on "$fail_on" --budget "$budget" || code=$?
+0security "$@" || code=$?
 printf '%s\n' "$code" > "$out/scan.exit"
 printf '%s\n' "$commit" > "$out/scan.commit"
 

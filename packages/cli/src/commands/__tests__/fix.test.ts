@@ -33,6 +33,7 @@ function harness(overrides: Partial<{ status: string; checks: Record<string, num
     git: async (_cwd, args) => {
       calls.push(`git ${args.join(" ")}`);
       if (args[0] === "rev-parse" && args[1] === "--show-toplevel") return "/repo\n";
+      if (args[0] === "remote" && args[1] === "get-url") return "https://github.com/o/r.git\n";
       if (args[0] === "symbolic-ref") return "origin/main\n";
       if (args[0] === "status") return overrides.status ?? " M src/db.ts\n";
       return "";
@@ -97,8 +98,8 @@ describe("0 findings fix", () => {
     const outcome = await runFix("f-1", options({ test: ["pnpm test"] }), h.deps);
     expect(outcome?.pullRequest).toMatchObject({ created: false, draft: false });
     expect(h.calls.some(call => call.startsWith("gh pr create"))).toBe(false);
-    expect(h.calls).toContain(`gh pr edit 7 --body-file ${join("/tmp/x", "body.md")}`);
-    expect(h.calls).toContain("gh pr ready 7");
+    expect(h.calls).toContain(`gh pr edit 7 --body-file ${join("/tmp/x", "body.md")} --repo o/r`);
+    expect(h.calls).toContain("gh pr ready 7 --repo o/r");
   });
 
   describe("a Maven dependency finding", () => {
@@ -315,5 +316,13 @@ describe("0 findings fix records its outcome for export-fixes", () => {
     await runFix("f-1", options(), { ...harness({ status: "" }).deps, record: e => { seen.push(`${e.outcome.changed}/${e.outcome.committed}`); } });
     await runFix("f-1", options({ pr: false }), { ...harness().deps, record: e => { seen.push(`${e.outcome.changed}/${e.outcome.committed}`); } });
     expect(seen).toEqual(["false/false", "true/true"]);
+  });
+});
+
+describe("fix metric host association", () => {
+  it("captures the actual returned PR URL, never a guessed URL from a branch or count", () => {
+    const record = fixMetric({ finding: "f-1", committed: true, verified: true, pullRequest: { url: "https://bitbucket.org/o/r/pull-requests/8", created: true, draft: true } } as never, { budget: "1" }, 0, 1);
+    expect(record.pullRequestUrl).toBe("https://bitbucket.org/o/r/pull-requests/8"); expect(record.repositoryId).toMatch(/^[a-f0-9]{64}$/);
+    expect(fixMetric({ finding: "f-1", committed: true, branch: "0/fix-a" } as never, { budget: "1" }, 0, 1).pullRequestUrl).toBeUndefined();
   });
 });

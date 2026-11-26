@@ -18,7 +18,7 @@ const officialAuthHosts: Record<string, readonly string[]> = {
   "chatgpt-plan": ["auth.openai.com"], "chatgpt-codex": ["auth.openai.com"], codex: ["auth.openai.com"],
   xai: ["auth.x.ai"], kimi: ["auth.kimi.com"], openrouter: ["openrouter.ai"],
 };
-const supportsEndpoint: Record<string, true> = { deepseek: true, anthropic: true, azure: true, openai: true, "z-ai": true, kimi: true, qwen: true, xai: true, opencode: true, together: true };
+const supportsEndpoint: Record<string, true> = { deepseek: true, anthropic: true, azure: true, openai: true, "z-ai": true, kimi: true, qwen: true, xai: true, opencode: true, together: true, bedrock: true };
 const providerHost: Record<string, string> = {
   "chatgpt-codex": "chatgpt.com", "chatgpt-plan": "chatgpt.com", anthropic: "api.anthropic.com", openai: "api.openai.com",
   openrouter: "openrouter.ai", xai: "api.x.ai", deepseek: "api.deepseek.com", kimi: "api.kimi.ai", "z-ai": "api.z.ai",
@@ -35,6 +35,7 @@ export function providerTitle(provider: Pick<Provider, "id" | "label">): string 
   return provider.id === "chatgpt-codex" ? "Codex" : provider.id === "chatgpt-plan" ? "ChatGPT plan" : provider.label;
 }
 export function providerSubtitle(provider: Provider): string {
+  if (provider.id === "bedrock") return "Host AWS credential chain";
   if (provider.id === "chatgpt-codex") return "Codex sign-in";
   if (provider.id === "chatgpt-plan") return "ChatGPT plan allowance";
   const host = provider.configuration?.baseUrl ? safeHost(provider.configuration.baseUrl) : providerHost[provider.id];
@@ -59,6 +60,7 @@ export function ConnectionSheet({ open, onOpenChange, providers, initialProvider
   const [apiKey, setApiKey] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
   const [model, setModel] = useState("");
+  const [region, setRegion] = useState("");
   const [another, setAnother] = useState(false);
   const [accountLabel, setAccountLabel] = useState("");
   const picked = providers.find(item => item.id === pickedId);
@@ -66,7 +68,7 @@ export function ConnectionSheet({ open, onOpenChange, providers, initialProvider
 
   useEffect(() => { if (open) { setPickedId(initialProviderId ?? null); setQuery(""); } }, [open, initialProviderId]);
   useEffect(() => {
-    setApiKey(""); setAnother(false); setAccountLabel(""); setBaseUrl(picked?.configuration?.baseUrl ?? ""); setModel(picked?.configuration?.model ?? "");
+    setApiKey(""); setAnother(false); setAccountLabel(""); setBaseUrl(picked?.configuration?.baseUrl ?? ""); setModel(picked?.configuration?.model ?? ""); setRegion(picked?.configuration?.region ?? "");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pickedId, picked?.connectionIdentity]);
   // Remember whether the provider was already connected when it was chosen, so only a new sign-in auto-closes.
@@ -89,6 +91,10 @@ export function ConnectionSheet({ open, onOpenChange, providers, initialProvider
       try { return await Promise.race([connect(provider), offline]); } finally { window.removeEventListener("offline", onOffline); }
       async function connect(provider: Provider) {
       const key = apiKey.trim();
+      if (provider.id === "bedrock") {
+        if (!region.trim() || !model.trim()) throw new Error("Choose an AWS region and a Bedrock model or inference profile ID.");
+        return webFetchJson<ProvidersResponse>("/api/console/connections", jsonBody({ providerId: "bedrock", action: "configure", region: region.trim(), model: model.trim(), ...(baseUrl.trim() ? { baseUrl: baseUrl.trim() } : {}) }));
+      }
       if (baseUrl.trim()) {
         const url = new URL(baseUrl.trim());
         if (url.username || url.password || url.search || url.hash || (url.protocol !== "https:" && !(url.protocol === "http:" && (provider.id === "openai" || ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname))))) throw new Error("Enter a plain https:// URL (custom OpenAI-compatible providers also support http://).");
@@ -138,7 +144,8 @@ export function ConnectionSheet({ open, onOpenChange, providers, initialProvider
   const needle = query.trim().toLowerCase();
   const matches = providers.filter(item => !needle || `${providerTitle(item)} ${item.id} ${providerSubtitle(item)}`.toLowerCase().includes(needle));
   const subscriptions = matches.filter(item => item.methods.includes("oauth")).sort((a, b) => (a.id === "chatgpt-codex" ? -1 : b.id === "chatgpt-codex" ? 1 : 0));
-  const apiKeys = matches.filter(item => !item.methods.includes("oauth"));
+  const chains = matches.filter(item => item.methods.includes("aws-chain"));
+  const apiKeys = matches.filter(item => !item.methods.includes("oauth") && !item.methods.includes("aws-chain"));
   const authUrl = picked ? officialAuthUrl(picked.id, picked.auth.verificationUrl) : null;
   const link = picked ? keyLinks[picked.id] : undefined;
 
@@ -152,10 +159,11 @@ export function ConnectionSheet({ open, onOpenChange, providers, initialProvider
   return <Sheet open={open} onOpenChange={close}>
     <SheetContent className="data-[side=right]:w-full data-[side=right]:sm:max-w-[640px]">
       {!picked ? <>
-        <SheetHeader><SheetTitle>Add a connection</SheetTitle><SheetDescription className="sr-only">Choose a subscription or API key provider to connect on {hostName}.</SheetDescription></SheetHeader>
+        <SheetHeader><SheetTitle>Add a connection</SheetTitle><SheetDescription className="sr-only">Choose a subscription, API key provider or host identity on {hostName}.</SheetDescription></SheetHeader>
         <div className="flex flex-col gap-6 px-6 pb-6">
           <div className="relative"><Search aria-hidden="true" className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground-2" /><Input type="search" aria-label="Search providers" placeholder="Search providers" autoComplete="off" data-1p-ignore value={query} onChange={event => setQuery(event.target.value)} className="pl-9" /></div>
           {group("Subscriptions", subscriptions)}
+          {group("AWS identity", chains)}
           {group("API keys", apiKeys)}
           {matches.length === 0 && <p className="text-sm text-muted-foreground-2">No providers match your search.</p>}
         </div>
@@ -184,6 +192,15 @@ export function ConnectionSheet({ open, onOpenChange, providers, initialProvider
             </div>
             {picked.id === "chatgpt-plan" && picked.accounts.some(account => account.status === "reauth-required") && <Feedback error="Sign-in required again for an existing ChatGPT connection." />}
           </section>}
+          {picked.id === "bedrock" && <form id="connection-sheet-form" className="flex flex-col gap-4 rounded-(--radius-card) border-[0.5px] border-(--card-hairline) bg-card p-4" onSubmit={event => { event.preventDefault(); save.mutate(picked); }}>
+            <h3 className="text-sm font-medium">AWS identity on {hostName}</h3>
+            <p className="text-sm text-muted-foreground-1">Use an AWS profile, workload role or credentials already configured on this host. AWS secrets never enter this form. Saving settings does not verify credentials, model access or region availability.</p>
+            <p role="status" className="text-sm text-muted-foreground-2">{picked.configured ? "AWS configuration detected; service access unverified." : "No AWS configuration detected. Configure the host AWS identity and region."}</p>
+            <TextField label="AWS region" value={region} onChange={event => { editing(); setRegion(event.target.value); }} placeholder="eu-central-1" maxLength={64} required />
+            <TextField label="Bedrock model or inference profile ID" value={model} onChange={event => { editing(); setModel(event.target.value); }} maxLength={256} required />
+            <TextField label="Bedrock runtime endpoint (optional)" type="url" value={baseUrl} onChange={event => { editing(); setBaseUrl(event.target.value); }} placeholder="https://bedrock-runtime.eu-central-1.amazonaws.com" />
+            <p className="text-xs text-muted-foreground-2">Existing host environment settings take precedence. Pricing is unknown; no model request runs when you save.</p>
+          </form>}
           {picked.methods.includes("api-key") && <form id="connection-sheet-form" className="flex flex-col gap-4 rounded-(--radius-card) border-[0.5px] border-(--card-hairline) bg-card p-4" onSubmit={event => { event.preventDefault(); save.mutate(picked); }}>
             <h3 className="text-sm font-medium">Endpoint</h3>
             {supportsEndpoint[picked.id] && <TextField label={picked.id === "azure" ? "Azure endpoint" : "Base URL"} type="url" value={baseUrl} onChange={event => { editing(); setBaseUrl(event.target.value); }} required={picked.id === "azure"} placeholder={providerHost[picked.id] ? `https://${providerHost[picked.id]}` : "https://…"}  />}
@@ -200,6 +217,7 @@ export function ConnectionSheet({ open, onOpenChange, providers, initialProvider
           {link ? <Button variant="link" className="h-auto min-w-0 whitespace-normal px-0 text-left" render={<a href={link.href} target="_blank" rel="noopener noreferrer" />}>{link.label}<ExternalLink /></Button> : <span />}
           <div className="flex gap-2">
             <Button variant="ghost" disabled={save.isPending} onClick={() => { setDiscardAsked(false); save.reset(); auth.reset(); onOpenChange(false); }}>Cancel</Button>
+            {picked.id === "bedrock" && <SubmitButton type="submit" form="connection-sheet-form" pending={save.isPending} disabled={!region.trim() || !model.trim()}>Save AWS settings</SubmitButton>}
             {picked.methods.includes("api-key") && <SubmitButton type="submit" form="connection-sheet-form" pending={save.isPending} disabled={(!picked.configured && !apiKey.trim()) || (another && (!apiKey.trim() || !accountLabel.trim())) || (picked.id === "azure" && (!baseUrl.trim() || !model.trim()))}>{another ? "Add account" : isConnected(picked) ? "Save" : "Connect"}</SubmitButton>}
           </div>
         </SheetFooter>

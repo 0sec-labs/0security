@@ -107,7 +107,7 @@ describe("settings and storage", () => {
     expect(dc.status).toBe(201);
     const listed = (await h.call("GET", `${P}/${h.sentinelId}/triggers`)).data.triggers as Array<{ kind: string; bitbucket: Record<string, unknown> }>;
     expect(listed.map(item => item.kind)).toEqual(["bitbucket-pr", "bitbucket-pr"]);
-    expect(listed[1]!.bitbucket).toMatchObject({ platform: "dc", baseUrl: "https://bitbucket.example.com", tokenEnv: "BITBUCKET_DC_TOKEN", events: ["updated"], maxFiles: 20, budgetUsd: 0.5 });
+    expect(listed.find(item => item.bitbucket.platform === "dc")?.bitbucket).toMatchObject({ platform: "dc", baseUrl: "https://bitbucket.example.com", tokenEnv: "BITBUCKET_DC_TOKEN", events: ["updated"], maxFiles: 20, budgetUsd: 0.5 });
     expect(h.service.isWebhookTrigger(cloud.data.trigger.id)).toBe(true);
   });
 
@@ -153,6 +153,7 @@ describe.each(["bitbucket-cloud", "bitbucket-dc"] as const)("polling on %s", pla
     fake.pullRequests.push(make(1));
     const config = cloud ? cloudSettings : { platform: "dc", repo: "PRJ/app", baseUrl: fake.url, checkout: "/srv/clones/app", pollMs: 60_000 };
     const trigger = (await h.create(config)).data.trigger.id as string;
+    h.store.updateTrigger(trigger, { runModel: { providerId: "azure", model: "deployment", reasoning: "high" }, enabled: true }, undefined, clock);
 
     await h.tick(0);
     expect(h.trigger(trigger)).toMatchObject({ lastStatus: "baseline", cursor: { "1": expect.any(String) } });
@@ -162,6 +163,7 @@ describe.each(["bitbucket-cloud", "bitbucket-dc"] as const)("polling on %s", pla
     fake.pullRequests.push(make(2));
     await h.tick(1);
     expect(h.scans.map(pr => pr.id)).toEqual([2]);
+    expect(h.settings.at(-1)).toMatchObject({ providerId: "azure", model: "deployment", reasoning: "high" });
     expect(fake.comments.length).toBeGreaterThanOrEqual(2);
     expect(fake.report).toBeDefined();
     expect(h.trigger(trigger)).toMatchObject({ lastStatus: "reviewed" });

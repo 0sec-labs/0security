@@ -1,3 +1,4 @@
+import { handleMetricsRequest, handleMetricHostRefreshRequest } from "./metrics-routes.js";
 // Dashboard HTTP API route handlers (console, scans, findings, control, events).
 import { type IncomingMessage, type ServerResponse } from "node:http";
 import { URL } from "node:url";
@@ -135,6 +136,10 @@ export async function handleWebConsoleApiRequest(
     if (id && !readResume) assertTeamConsoleMutation(req, id, team.auth, team.collaboration, gateway);
   }
   try {
+    const refreshMetrics = await handleMetricHostRefreshRequest(path, method, input, Boolean(team) && (!team!.auth.enabled || member?.role === "owner"));
+    if (refreshMetrics) { json(res, refreshMetrics.status, refreshMetrics.data); return true; }
+    const metrics = handleMetricsRequest(path, method, requestUrl.searchParams, !team?.auth.enabled || member?.role === "owner");
+    if (metrics) { json(res, metrics.status, metrics.data); return true; }
     const auditLog = handleAuditLogRequest(path, method, requestUrl.searchParams, { teamEnabled: team?.auth.enabled === true, ...(member?.role ? { role: member.role, permissions: member.permissions } : {}) });
     if (auditLog) { json(res, auditLog.status, auditLog.data); return true; }
     if (skills) {

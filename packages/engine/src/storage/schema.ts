@@ -117,6 +117,7 @@ export const findings = sqliteTable(
     scope: text("scope"),
     scopeReason: text("scopeReason"),
     scopeSource: text("scopeSource"),
+    businessContext: text("businessContext"), // JSON: operator declaration; not observed impact
     workflowStatus: text("workflowStatus").notNull().default("backlog"),
     workflowAssignee: text("workflowAssignee"),
     workflowUpdatedAt: text("workflowUpdatedAt"),

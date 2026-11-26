@@ -1,3 +1,4 @@
+import { findingFingerprintCode } from "@0/engine/shared/finding-display-id";
 import type { FindingGroup, FindingWorkflowStatus } from "../../types";
 import { missionLabel } from "../../lib/vocabulary";
 import { isFixedFinding, normalizeSeverity, SEVERITY_LABELS, SEVERITY_ORDER, type SeverityLevel } from "../../console/panel/views/findings-model";
@@ -6,10 +7,9 @@ export { normalizeSeverity, SEVERITY_LABELS, SEVERITY_ORDER, type SeverityLevel 
 
 /* ---------- identity ---------- */
 
-/** Short stable ID derived from the family fingerprint, e.g. `F-3A9C1E`. Never changes while the fingerprint is stable. */
+/** Short stable ID derived from the family fingerprint, e.g. `F-3A9C1E` or `F-0123456789` for structured fingerprints. Never changes while the fingerprint is stable. */
 export function findingCode(fingerprint: string): string {
-  const clean = fingerprint.replace(/[^a-z0-9]/gi, "").slice(0, 6).toUpperCase();
-  return `F-${clean || "000000"}`;
+  return findingFingerprintCode(fingerprint);
 }
 
 /** The stable page address of a finding family, so a row can be a real link (middle-click, copy address, open in a new tab). */
@@ -138,7 +138,7 @@ export const toggleValue = <T>(values: readonly T[], value: T): T[] => values.in
 /* ---------- display ---------- */
 
 export type GroupBy = "status" | "severity" | "category" | "mission" | "none";
-export type OrderBy = "severity" | "updated" | "seen" | "title" | "occurrences";
+export type OrderBy = "priority" | "severity" | "updated" | "seen" | "title" | "occurrences";
 export type Direction = "asc" | "desc";
 export type Layout = "list" | "board";
 export type DisplayOptions = { layout: Layout; groupBy: GroupBy; orderBy: OrderBy; direction: Direction };
@@ -148,7 +148,7 @@ export const GROUP_BY_OPTIONS: readonly { value: GroupBy; label: string }[] = [
   { value: "status", label: "Status" }, { value: "severity", label: "Severity" }, { value: "category", label: "Category" }, { value: "mission", label: missionLabel }, { value: "none", label: "No grouping" },
 ];
 export const ORDER_BY_OPTIONS: readonly { value: OrderBy; label: string }[] = [
-  { value: "severity", label: "Severity" }, { value: "updated", label: "Last updated" }, { value: "seen", label: "Last seen" }, { value: "title", label: "Title" }, { value: "occurrences", label: "Occurrences" },
+  { value: "priority", label: "Business priority" }, { value: "severity", label: "Severity" }, { value: "updated", label: "Last updated" }, { value: "seen", label: "Last seen" }, { value: "title", label: "Title" }, { value: "occurrences", label: "Occurrences" },
 ];
 
 const severityRank = (group: FindingGroup) => SEVERITY_ORDER.length - SEVERITY_ORDER.indexOf(normalizeSeverity(group.latest.severity));
@@ -162,6 +162,7 @@ export function sortFindings(groups: readonly FindingGroup[], orderBy: OrderBy, 
   const sign = direction === "asc" ? 1 : -1;
   const primary = (a: FindingGroup, b: FindingGroup) => {
     switch (orderBy) {
+      case "priority": return severityRank(a) + (a.latest.businessContext?.shift ?? 0) - severityRank(b) - (b.latest.businessContext?.shift ?? 0);
       case "severity": return severityRank(a) - severityRank(b);
       case "updated": return updatedAt(a) - updatedAt(b);
       case "seen": return a.latest.timestamp - b.latest.timestamp;

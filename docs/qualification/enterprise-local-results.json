@@ -1,0 +1,215 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-11-25",
+  "sourceBase": "b4dfb3e29",
+  "state": "Local implementation; uncommitted working tree, not published or deployed",
+  "actualChecks": [
+    {
+      "name": "Native team server",
+      "result": "75 checks initially; final metrics ACL extension 78 checks including owner/editor/viewer"
+    },
+    {
+      "name": "Online SQLite backup/restore",
+      "result": "Actual running-server backup, integrity_check ok, finding retained and authenticated export"
+    },
+    {
+      "name": "Signed installer",
+      "release": "0.45.0",
+      "platform": "darwin-arm64",
+      "signature": "required and verified",
+      "attestation": "required and verified",
+      "scannerCompanion": "0.14.2 verified and executable"
+    },
+    {
+      "name": "Offline binary bundle",
+      "result": "Actual signed binary/chart install, executable and SBOM generation under macOS kernel network denial; positive socket control rejected",
+      "limits": "Does not qualify Linux/container/Helm deployment or an internal model endpoint"
+    },
+    {
+      "name": "Java verifier",
+      "result": "Pinned Maven/JDK21 Docker image on arm64; online warm-up then offline verification; three tests passed; removing guard produced two failures; network and setup-only dummy settings checks passed",
+      "limits": "Verifier isolation covers check commands, not the whole fixing model runtime; live private registry unqualified"
+    },
+    {
+      "name": "OSV",
+      "result": "Live public advisory lookup: 11 advisories for 4 of 6 resolved components; main/test usage evidence retained; vulnerable-code reachability unknown"
+    },
+    {
+      "name": "Bitbucket Pipe",
+      "result": "Native arm64 image built with checksum-verified release CLI; actual scanner-only git PR fixture emitted one lead and exit 1; separate no-token publisher sent nothing",
+      "limits": "No live Bitbucket workspace, Jenkins or Azure pipeline; no paid model call"
+    },
+    {
+      "name": "Findings browser",
+      "result": "Actual 1,528 scanner findings imported and browsed, root-bound citation matches source; imported evidence remains unverified; all 1,528 distinct display IDs resolve"
+    },
+    {
+      "name": "Business context browser",
+      "result": "Actual operator setter, persisted rationale, unchanged technical severity, independent review handoff and separate local/host CI states"
+    },
+    {
+      "name": "Bedrock browser",
+      "result": "Host credential-chain form and model selector; no secret fields or AWS/inference calls; access and price explicitly unknown"
+    }
+  ],
+  "deterministicScale": {
+    "scannerCommit": "60243ac5024efbb5542e1b5781aa004ab34d3044",
+    "scannerVersion": "foxguard 0.14.2",
+    "targetCommit": "1333cf9f6de71171c737abdaca53550932a37891",
+    "trackedJavaFiles": 8759,
+    "javaPhysicalNewlines": 1316081,
+    "elapsedSeconds": 23.771,
+    "exitCode": 1,
+    "sarifFindings": 1528,
+    "scope": "deterministic scanner only; no model validation or accuracy claim"
+  },
+  "deterministicOwasp": {
+    "aggregate": {
+      "tp": 312,
+      "fn": 1103,
+      "fp": 52,
+      "tn": 1273,
+      "tpr": 0.2205,
+      "fpr": 0.0392,
+      "precision": 0.8571,
+      "benchmark_score": 0.1812,
+      "total_findings": 1447
+    },
+    "categories": {
+      "cmdi": {
+        "tp": 20,
+        "fn": 106,
+        "fp": 6,
+        "tn": 119
+      },
+      "crypto": {
+        "tp": 0,
+        "fn": 130,
+        "fp": 0,
+        "tn": 116
+      },
+      "hash": {
+        "tp": 0,
+        "fn": 129,
+        "fp": 0,
+        "tn": 107
+      },
+      "ldapi": {
+        "tp": 0,
+        "fn": 27,
+        "fp": 0,
+        "tn": 32
+      },
+      "pathtraver": {
+        "tp": 0,
+        "fn": 133,
+        "fp": 0,
+        "tn": 135
+      },
+      "securecookie": {
+        "tp": 0,
+        "fn": 36,
+        "fp": 0,
+        "tn": 31
+      },
+      "sqli": {
+        "tp": 46,
+        "fn": 226,
+        "fp": 5,
+        "tn": 227
+      },
+      "trustbound": {
+        "tp": 0,
+        "fn": 83,
+        "fp": 0,
+        "tn": 43
+      },
+      "weakrand": {
+        "tp": 0,
+        "fn": 218,
+        "fp": 0,
+        "tn": 275
+      },
+      "xpathi": {
+        "tp": 0,
+        "fn": 15,
+        "fp": 0,
+        "tn": 20
+      },
+      "xss": {
+        "tp": 246,
+        "fn": 0,
+        "fp": 41,
+        "tn": 168
+      }
+    },
+    "findings_by_rule": {
+      "java/no-command-injection": 26,
+      "java/no-hardcoded-secret": 1,
+      "java/no-path-traversal": 13,
+      "java/no-ssrf": 1,
+      "java/no-xss": 1348,
+      "java/no-xxe": 1,
+      "java/taint-command-injection": 6,
+      "java/taint-sql-injection": 51
+    },
+    "benchmark_ref": "10dfcc54ad02dcfcb358b0ba4a0fef8c919a6d17",
+    "elapsedSeconds": 28.854,
+    "scannerCommit": "60243ac5024efbb5542e1b5781aa004ab34d3044",
+    "scope": "deterministic pattern/taint regression signal only; not agent-layer Java accuracy"
+  },
+  "planning": {
+    "sourceFiles": 9870,
+    "entryPoints": 2131,
+    "batches": 575,
+    "mode": "Actual module/explicit ownership plan; no model analysis"
+  },
+  "remaining": [
+    "Approved model spend cap, then full real Java scan -> triage -> fix -> compile/test -> rescan and ground-truth scoring.",
+    "Configured Bitbucket test repository/token and CI environment for live reviews, annotations, fixes and lifecycle verification.",
+    "Renewed AWS authentication and actual model/service permissions for Bedrock/Entra and cloud deployment qualification.",
+    "Enterprise test license and actual identity provider for licensed shared findings and provisioning.",
+    "Live pipeline runs, release publication, deployment and issue acceptance reconciliation; none performed here."
+  ],
+  "architectureLimits": [
+    "HA remains explicitly deferred; supported runtime is single-node.",
+    "Published main application image 0.45.0 is linux/amd64 only by prior build policy; the locally built Pipe image is a separate native arm64 artifact."
+  ],
+  "regression": {
+    "engine": {
+      "passed": 47
+    },
+    "integratedCli": {
+      "passed": 397,
+      "skipped": 4
+    },
+    "ui": {
+      "passed": 30
+    },
+    "enterprise": {
+      "passed": 106
+    },
+    "ciPackagingAndRecipes": {
+      "passed": 25
+    },
+    "additionalHostReceiptFocused": {
+      "passed": 58,
+      "note": "Overlaps integrated CLI cases; do not sum these groups as unique tests."
+    },
+    "additionalProviderRouting": {
+      "passed": 77,
+      "scope": "59 scan/real-git runner tests plus 18 Cloud/DC trigger tests"
+    }
+  },
+  "hostReceiptAssociation": {
+    "implementation": "Actual fix PR capture, canonical repository hash, separate append-only observation ledger, explicit owner refresh, max20 PRs/60seconds, unique PRs per group, truthful unknown state",
+    "qualification": "Focused local tests include real loopback HTTP and actual git; no real vendor receipts populated without credentials."
+  },
+  "implementationDigest": {
+    "algorithm": "sha256",
+    "value": "e31dc5e982033a49cb162ba67c714acab2bf42845791eb3046a5e8edf499f1d2",
+    "files": 171,
+    "definition": "Sorted changed/untracked source paths plus file-content hashes; qualification documents excluded."
+  },
+  "providerSelection": "Bitbucket review jobs preserve the explicit provider, model and reasoning through the CLI into the console runtime, including inherited Sentinel defaults."
+}

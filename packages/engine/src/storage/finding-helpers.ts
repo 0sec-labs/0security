@@ -2,6 +2,7 @@
 import { and, or } from "drizzle-orm";
 import { createHash } from "node:crypto";
 import type { Finding, SourceVerificationSummary, VerificationResult } from "../shared/index.js";
+import { parseFindingBusinessContext, type FindingBusinessContext } from "../shared/business-context.js";
 import { parseFindingReproduction, type FindingReproduction } from "../shared/reproduction.js";
 import { findingWorkflowStatuses, type FindingWorkflowStatusDB } from "./schema.js";
 
@@ -43,6 +44,7 @@ export type FindingReviewAnnotation = NonNullable<Finding["reviewAnnotation"]>;
  * unusable — never present as an empty object.
  */
 export interface PersistedFindingReviewFields {
+  businessContext?: FindingBusinessContext;
   verification_result?: VerificationResult;
   reviewAnnotation?: FindingReviewAnnotation;
   sourceVerification?: SourceVerificationSummary;
@@ -203,6 +205,7 @@ export function restoreFindingReviewFields(
     reviewAnnotation?: unknown;
     sourceVerification?: unknown;
     reproduction?: unknown;
+    businessContext?: unknown;
   } | null | undefined,
 ): PersistedFindingReviewFields {
   if (!row) return {};
@@ -210,11 +213,13 @@ export function restoreFindingReviewFields(
   const reviewAnnotation = parseFindingReviewAnnotation(row.reviewAnnotation);
   const sourceVerification = parseFindingSourceVerification(row.sourceVerification);
   const reproduction = parseFindingReproduction(row.reproduction);
+  const businessContext = parseFindingBusinessContext(row.businessContext);
   return {
     ...(verificationResult ? { verification_result: verificationResult } : {}),
     ...(reviewAnnotation ? { reviewAnnotation } : {}),
     ...(sourceVerification ? { sourceVerification } : {}),
     ...(reproduction ? { reproduction } : {}),
+    ...(businessContext ? { businessContext } : {}),
   };
 }
 

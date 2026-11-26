@@ -1,5 +1,6 @@
 import { ciReportProvenance } from '../ci-report-provenance.js';
 // Database row shapes and pure summarizers that build the dashboard API payloads.
+import { parseFindingBusinessContext } from "@0/engine/shared";
 import { ImpactAssessmentSchema } from "@0/engine/shared";
 import { rowReproduction } from "../finding-reproduction.js";
 import { createPresentationEvent, type FindingTriageStatus, type PresentationEvent, type PresentationSource } from "@0/engine/shared";
@@ -29,6 +30,7 @@ export type DBFindingRow = {
   evidenceResponse: string;
   evidenceAnalysis?: string | null;
   impactAssessment?: unknown;
+  businessContext?: unknown;
   pocSteps?: unknown;
   /** Stored text on the way in; the parsed record after normalizeFinding. */
   reproduction?: unknown;
@@ -353,6 +355,7 @@ export function normalizeFinding(row: DBFindingRow) {
   return {
     ...row,
     impactAssessment: parsedImpact.success ? parsedImpact.data : null,
+    businessContext: parseFindingBusinessContext(row.businessContext) ?? null,
     reproduction: rowReproduction(row) ?? null,
     triageStatus: normalizeTriageStatus(row.triageStatus),
     workflowStatus: normalizeWorkflowStatus(row.workflowStatus, row),

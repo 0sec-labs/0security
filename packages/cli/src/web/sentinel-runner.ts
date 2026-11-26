@@ -1,3 +1,5 @@
+import { cancellationRetry } from "./cancellation-retry.js";
+import { usageTokens, type MetricSink } from "../run-metrics.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { SentinelStore, type SecurityWorkflowStore } from "@0/engine/storage";
@@ -56,7 +58,7 @@ export interface SentinelMissionRuntime {
   subscribe?(id: string, listener: (event: SentinelSessionEvent) => void): () => void;
   cancel?(id: string): Promise<unknown>;
   /** Cumulative cost of the mission so far; costUsd is undefined when pricing is unknown. */
-  usage?(id: string): { costUsd?: number } | undefined;
+  usage?(id: string): { costUsd?: number; costUnavailable?: boolean; inputTokens?: number; outputTokens?: number } | undefined;
   /** Is the mission still live in this engine? Defaults to "yes" when absent. */
   exists?(id: string): boolean;
   /** Restore a saved mission after an engine restart; returns the live id. */
@@ -138,16 +140,18 @@ export class SentinelRunner {
   readonly #executionProfile: () => "local" | "smolvm";
   readonly #checkout: (repo: string) => Promise<string | undefined>;
   readonly #persistent: () => boolean;
+  readonly #metrics: MetricSink | undefined;
   readonly #turns: AgentTurnDelivery;
 
-  constructor(options: { store: SentinelStore; workflows: SecurityWorkflowStore; missions: SentinelMissionRuntime; gh?: SentinelGhClient; now?: () => number; executionProfile?: () => "local" | "smolvm"; checkout?: (repo: string) => Promise<string | undefined>; persistentThread?: () => boolean; bitbucket?: { env?: NodeJS.ProcessEnv; reviewer?: BitbucketRunDeps["reviewer"] } }) {
+  constructor(options: { metrics?: MetricSink; store: SentinelStore; workflows: SecurityWorkflowStore; missions: SentinelMissionRuntime; gh?: SentinelGhClient; now?: () => number; executionProfile?: () => "local" | "smolvm"; checkout?: (repo: string) => Promise<string | undefined>; persistentThread?: () => boolean; bitbucket?: { env?: NodeJS.ProcessEnv; reviewer?: BitbucketRunDeps["reviewer"] } }) {
+    this.#metrics = options.metrics;
     this.#bitbucketEnv = options.bitbucket?.env; this.#bitbucketReviewer = options.bitbucket?.reviewer;
     this.#store = options.store; this.#workflows = options.workflows; this.#missions = options.missions;
     this.#executionProfile = options.executionProfile ?? (() => { try { return consoleExecutionProfile(); } catch { return "local"; } });
     this.#checkout = options.checkout ?? findCheckout;
     this.#gh = options.gh ?? defaultSentinelGh(); this.#now = options.now ?? Date.now;
     this.#persistent = options.persistentThread ?? agentsPersistentThreadFromEnv;
-    this.#turns = new AgentTurnDelivery({ store: this.#store, missions: this.#missions, now: this.#now, ensureHome: sentinel => this.#homeMissionInfo(sentinel, undefined, sentinelReviewFingerprint(sentinel)), postSummary: (sentinel, comment, missionId, turnId, exclude) => this.#postSummary(sentinel, comment, missionId, turnId, exclude, true) });
+    this.#turns = new AgentTurnDelivery({ metrics: options.metrics, store: this.#store, missions: this.#missions, now: this.#now, ensureHome: sentinel => this.#homeMissionInfo(sentinel, undefined, sentinelReviewFingerprint(sentinel)), postSummary: (sentinel, comment, missionId, turnId, exclude) => this.#postSummary(sentinel, comment, missionId, turnId, exclude, true) });
   }
 
   /** Starts the unref'd poll loop (default 15 s). Without it the runner only reacts to manual launches and explicit tick() calls. */
@@ -372,7 +376,17 @@ export class SentinelRunner {
   }
 
   async #deliverSafely(request: Parameters<AgentTurnDelivery["deliver"]>[0]): Promise<TurnResult> {
-    try { return await this.#turns.deliver(request); } catch (error) { return { status: "refused", kind: "failed", reason: message(error) }; }
+    try {
+      const trigger = this.#store.getTrigger(request.trigger.id);
+      if (trigger?.runModel) {
+        if (!trigger.enabled) return { status: "refused", kind: "inactive", reason: "Trigger is off." };
+        await this.launch(request.sentinel.id, { autonomous: true, automation: request.automation, trigger: { kind: request.trigger.kind, triggerId: request.trigger.id, event: request.event }, via: request.via, idempotencyKey: request.idempotencyKey, untrusted: request.untrusted, context: request.context, comment: request.comment });
+        const turn = this.#store.getTurnByKey(request.sentinel.id, request.idempotencyKey);
+        if (!turn) throw new Error("Activation has no turn receipt.");
+        return { status: "queued", turn };
+      }
+      return await this.#turns.deliver(request);
+    } catch (error) { return { status: "refused", kind: "failed", reason: message(error) }; }
   }
   /** What the trigger shows once its turn is queued or refused. The turn's own outcome is written at completion (never overwritten here once it has finished). */
   #turnRelease(outcome: TurnResult, triggerId: string): { lastStatus?: string; lastError?: string } {
@@ -696,6 +710,10 @@ export class SentinelRunner {
       if (sentinel.status !== "active") throw new SentinelRunError("Sentinel is paused.", 409, "inactive");
       if (sentinelNeedsReview(sentinel)) throw new SentinelRunError("Sentinel needs review before it can run on its own.", 409, "review");
     }
+    const triggerConfig = options.trigger.triggerId ? this.#store.getTrigger(options.trigger.triggerId) : undefined;
+    const effective = triggerConfig?.runModel ? { ...sentinel, model: triggerConfig.runModel } : sentinel;
+    const cap = Math.min(sentinel.runBudgetUsd ?? Infinity, triggerConfig?.runBudgetUsd ?? Infinity);
+    if (Number.isFinite(cap) && (!this.#missions.cancel || !this.#missions.subscribe || !this.#missions.usage)) throw new SentinelRunError("This runtime cannot enforce a run budget.", 409);
     const reservation = this.#store.createActivation({
       sentinelId, sentinelVersion: sentinel.version, trigger: options.trigger, status: "running",
       ...(options.automation ? { automationId: options.automation.id } : {}), skills: [...sentinel.skills], ownerPid: process.pid,
@@ -703,13 +721,13 @@ export class SentinelRunner {
     let missionId: string; let home: string; let checkout: string | undefined; let sharedHome: boolean;
     try {
       home = await this.#homeMission(sentinel, options.actor);
-      sharedHome = options.automation?.runIn === "sentinel-home";
+      sharedHome = options.automation?.runIn === "sentinel-home" && !triggerConfig?.runModel;
       const title = `${sentinel.name}: ${options.automation ? options.automation.name : "run"}`;
       missionId = home;
       const prRepo = isGithubKind(options.trigger.kind) ? options.trigger.event?.["repo"] : undefined;
       checkout = !sharedHome && typeof prRepo === "string" ? await this.#checkout(prRepo) : undefined;
       if (!sharedHome) {
-        missionId = this.#missions.create({ ...this.#missionConfig(sentinel, title, checkout), parentSessionId: home }).id;
+        missionId = this.#missions.create({ ...this.#missionConfig(effective, title, checkout), parentSessionId: home }).id;
         options.actor?.onMissionCreated?.(missionId);
       }
     } catch (error) {
@@ -723,7 +741,9 @@ export class SentinelRunner {
     if (options.autonomous) audit({ actor: `sentinel:${sentinelId}`, action: "sentinel.run", subject: sentinel.name, detail: { sentinelId, trigger: typeof options.trigger === "string" ? options.trigger : undefined } });
     const seed = this.#seed(sentinel, options);
     const comment = options.comment;
-    const watch = this.#watch(activation, sentinel, missionId, seed, baseline, comment ? () => this.#postSummary(sentinel, comment, missionId, activation.id) : undefined);
+    let watch: Watch;
+    try { watch = this.#watch(activation, effective, missionId, seed, baseline, cap, comment ? () => this.#postSummary(sentinel, comment, missionId, activation.id) : undefined); }
+    catch (error) { this.#store.updateActivation(activation.id, { status: "failed", error: message(error), finishedAt: isoAt(this.#now()) }); throw error; }
     try {
       await this.#missions.send(missionId, seed, options.actor ? { userId: options.actor.userId, displayName: options.actor.displayName } : undefined, sharedHome ? "queue" : undefined, options.autonomous);
     } catch (error) {
@@ -799,32 +819,43 @@ export class SentinelRunner {
   }
 
   /** Subscribes before the seed is sent so a fast turn cannot be missed. */
-  #watch(activation: SentinelActivation, sentinel: Sentinel, missionId: string, seed: string, baseline: number, afterCompleted?: () => Promise<void>): Watch {
+  #watch(activation: SentinelActivation, sentinel: Sentinel, missionId: string, seed: string, baseline: number, cap: number, afterCompleted?: () => Promise<void>): Watch {
+    let tokenBase = usageTokens(this.#missions.usage?.(missionId));
+    let findingBase = new Set((this.#missions.findings?.(missionId) ?? []).map(finding => finding.id));
     let started = false; let ended = false; let stopping: string | undefined;
     // A turn queued behind another starts from the cost at its own start, so the previous turn's spend is never charged to it.
     let base = baseline;
     const costOf = () => Math.max(0, (this.#missions.usage?.(missionId)?.costUsd ?? base) - base);
+    const costKnown = () => this.#missions.usage?.(missionId)?.costUsd !== undefined && !this.#missions.usage?.(missionId)?.costUnavailable;
     let unsubscribe: (() => void) | undefined;
-    const dispose = () => { unsubscribe?.(); unsubscribe = undefined; };
+    const cancellation = cancellationRetry({
+      cancel: async () => { if (!this.#missions.cancel) throw new Error("Cancellation unavailable"); return this.#missions.cancel(missionId); },
+      active: () => !ended,
+      pending: note => { try { this.#store.updateActivation(activation.id, { note }); } catch { /* deleted */ } },
+    });
+    const dispose = () => { cancellation.dispose(); unsubscribe?.(); unsubscribe = undefined; };
     const finish = (status: SentinelActivation["status"], error?: string) => {
       if (ended) return;
       ended = true; dispose(); this.#watches.delete(activation.id);
-      try { this.#store.updateActivation(activation.id, { status, costUsd: costOf(), finishedAt: isoAt(this.#now()), ...(error ? { error } : {}) }); } catch { /* The Sentinel may have been deleted mid-run. */ }
+      try { this.#store.updateActivation(activation.id, { status, costUsd: costKnown() ? costOf() : undefined, finishedAt: isoAt(this.#now()), ...(error ? { error } : {}) }); } catch { /* The Sentinel may have been deleted mid-run. */ }
+      const tokens = usageTokens(this.#missions.usage?.(missionId));
+      const produced = (this.#missions.findings?.(missionId) ?? []).filter(finding => !findingBase.has(finding.id));
+      this.#metrics?.({ sentinelId: sentinel.id, triggerId: activation.trigger.triggerId, activationId: activation.id, at: activation.startedAt, command: "sentinel", model: sentinel.model?.model ?? "unknown", budgetUsd: Number.isFinite(cap) ? cap : null, costUsd: (this.#missions.usage?.(missionId)?.costUsd === undefined || this.#missions.usage?.(missionId)?.costUnavailable) ? null : costOf(), tokens: tokens === null || tokenBase === null ? null : Math.max(0, tokens - tokenBase), durationSeconds: Math.max(0, (this.#now() - Date.parse(activation.startedAt)) / 1000), findingsAttempted: null, findingsProposed: produced.length, checksPassed: null, findingIds: produced.flatMap(finding => finding.id ? [finding.id] : []), status: stopping === "Run budget reached." ? "budget" : status === "completed" ? "ok" : "failed" });
       if (status === "completed" && afterCompleted) void afterCompleted().catch(() => { /* Reported on the activation by the poster. */ });
     };
     const stop = async (reason: string) => {
-      if (ended || stopping) return;
-      stopping = reason;
-      try { await this.#missions.cancel?.(missionId); } catch { /* The run is closed out below regardless. */ }
-      finish("cancelled", reason);
+      if (ended) return;
+      stopping ??= reason;
+      await cancellation.request();
     };
     const enforce = () => {
       const cost = costOf();
-      try { this.#store.updateActivation(activation.id, { costUsd: cost }); } catch { /* deleted */ }
+      if (Number.isFinite(cap) && (this.#missions.usage?.(missionId)?.costUsd === undefined || this.#missions.usage?.(missionId)?.costUnavailable || cost >= cap)) void stop((this.#missions.usage?.(missionId)?.costUsd === undefined || this.#missions.usage?.(missionId)?.costUnavailable) ? "Cannot price usage under a run budget." : "Run budget reached.");
+      try { this.#store.updateActivation(activation.id, { costUsd: costKnown() ? cost : undefined }); } catch { /* deleted */ }
     };
     const listener = (event: SentinelSessionEvent) => {
       if (ended) return;
-      if (!started) { if (event.type === "user" && event.text === seed) { started = true; base = this.#missions.usage?.(missionId)?.costUsd ?? base; } return; }
+      if (!started) { if (event.type === "user" && event.text === seed) { started = true; base = this.#missions.usage?.(missionId)?.costUsd ?? base; tokenBase = usageTokens(this.#missions.usage?.(missionId)); findingBase = new Set((this.#missions.findings?.(missionId) ?? []).map(finding => finding.id)); } return; }
       if (event.type === "usage") enforce();
       else if (event.type === "turn-complete") {
         const reason = typeof event.stopReason === "string" ? event.stopReason : "end_turn";
@@ -834,7 +865,11 @@ export class SentinelRunner {
       } else if (event.type === "error") finish("failed", typeof event.message === "string" ? event.message.slice(0, 2_000) : "The run failed.");
     };
     if (this.#missions.subscribe) {
-      try { unsubscribe = this.#missions.subscribe(missionId, listener); } catch { /* Mission already gone; reconcile closes it. */ }
+      try { unsubscribe = this.#missions.subscribe(missionId, listener); } catch { /* Checked below for capped runs. */ }
+    }
+    if (Number.isFinite(cap) && typeof unsubscribe !== "function") {
+      cancellation.dispose();
+      throw new SentinelRunError("Cannot observe runtime termination or usage to enforce this run budget.", 409);
     }
     const watch: Watch = { activationId: activation.id, stop, dispose };
     this.#watches.set(activation.id, watch);

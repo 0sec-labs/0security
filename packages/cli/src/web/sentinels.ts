@@ -1,3 +1,4 @@
+import type { MetricSink } from "../run-metrics.js";
 import { z } from "zod";
 import { recordAccessUpgrade } from "../state/access-upgrade.js";
 import { listSessions } from "../state/session-store.js";
@@ -32,12 +33,12 @@ export class WebSentinelService {
    * `scheduler` starts the background tick (schedules, GitHub PR polling, run tracking). Off by default so tests and
    * tools that only need the HTTP surface do not run autonomous work; the dashboard turns it on.
    */
-  constructor(options: { dbPath?: string; missions: SentinelMissionRuntime; now?: () => number; scheduler?: boolean | { pollIntervalMs?: number }; gh?: SentinelGhClient; executionProfile?: () => "local" | "smolvm"; checkout?: (repo: string) => Promise<string | undefined>; persistentThread?: () => boolean; bitbucket?: ConstructorParameters<typeof SentinelRunner>[0]["bitbucket"] }) {
+  constructor(options: { metrics?: MetricSink; dbPath?: string; missions: SentinelMissionRuntime; now?: () => number; scheduler?: boolean | { pollIntervalMs?: number }; gh?: SentinelGhClient; executionProfile?: () => "local" | "smolvm"; checkout?: (repo: string) => Promise<string | undefined>; persistentThread?: () => boolean; bitbucket?: ConstructorParameters<typeof SentinelRunner>[0]["bitbucket"] }) {
     this.#store = new SentinelStore(options.dbPath);
     this.#workflows = new SecurityWorkflowStore(options.dbPath);
     this.#missions = options.missions;
     this.#now = options.now ?? Date.now;
-    this.#runner = new SentinelRunner({ store: this.#store, workflows: this.#workflows, missions: options.missions, now: this.#now, ...(options.gh ? { gh: options.gh } : {}), ...(options.executionProfile ? { executionProfile: options.executionProfile } : {}), ...(options.checkout ? { checkout: options.checkout } : {}), ...(options.persistentThread ? { persistentThread: options.persistentThread } : {}), ...(options.bitbucket ? { bitbucket: options.bitbucket } : {}) });
+    this.#runner = new SentinelRunner({ metrics: options.metrics, store: this.#store, workflows: this.#workflows, missions: options.missions, now: this.#now, ...(options.gh ? { gh: options.gh } : {}), ...(options.executionProfile ? { executionProfile: options.executionProfile } : {}), ...(options.checkout ? { checkout: options.checkout } : {}), ...(options.persistentThread ? { persistentThread: options.persistentThread } : {}), ...(options.bitbucket ? { bitbucket: options.bitbucket } : {}) });
     if (options.scheduler) this.#noteAccessUpgrade();
     if (options.scheduler) this.#runner.start(typeof options.scheduler === "object" ? options.scheduler.pollIntervalMs : undefined);
   }
@@ -223,7 +224,7 @@ export class WebSentinelService {
     this.#requireWriter(actor);
     if (method === "PATCH") {
       const { approval, expectedVersion, ...patch } = bodyOf(input);
-      const body = parse(z.object({ enabled: z.boolean().optional(), schedule: z.unknown().optional(), github: z.unknown().optional(), release: z.unknown().optional(), check: z.unknown().optional(), webhook: z.unknown().optional(), bitbucket: z.unknown().optional() }).strict(), patch);
+      const body = parse(z.object({ runBudgetUsd: z.number().optional(), runModel: z.unknown().optional(), enabled: z.boolean().optional(), schedule: z.unknown().optional(), github: z.unknown().optional(), release: z.unknown().optional(), check: z.unknown().optional(), webhook: z.unknown().optional(), bitbucket: z.unknown().optional() }).strict(), patch);
       if (body.enabled === true && approval !== "enable-reviewed-trigger") throw new SentinelRequestError("Review this trigger before enabling it.", 400);
       const version = expectedVersion === undefined ? undefined : parse(z.number().int().positive(), expectedVersion);
       return { status: 200, data: { trigger: this.#triggerView(this.#store.updateTrigger(triggerId, body, version, this.#now())) } };

@@ -91,6 +91,7 @@ const EXAMPLES: Readonly<Record<string, readonly string[]>> = {
   "sbom agent-config": ["0security sbom agent-config .", "0security sbom agent-config . --fail-on high", "0security sbom agent-config . --format sarif -o agent-config.sarif --allow-host mcp.example.com"],
   "sbom scan-models": ["0security sbom scan-models ./models", "0security sbom scan-models model.pkl", "0security sbom scan-models . --format sarif > models.sarif"],
   "sbom generate": ["0security sbom generate . -o sbom.cdx.json", "0security sbom generate ~/code/app --name app"],
+  "sbom reachability": ["0security sbom reachability sbom.cdx.json .", "0security sbom check sbom.cdx.json --source . --format json"],
   "sbom java-usage": ["0security sbom java-usage sbom.cdx.json .", "0security sbom java-usage sbom.cdx.json ~/code/app --format json"],
   "sbom licenses": ["0security sbom licenses . --preset permissive", "0security sbom licenses sbom.cdx.json --deny 'GPL-*,AGPL-*'", "0security sbom licenses . --policy license-policy.yaml --resolve --format sarif > licenses.sarif"],
   "sbom check": ["0security sbom check sbom.cdx.json", "0security sbom check sbom.cdx.json --format json"],

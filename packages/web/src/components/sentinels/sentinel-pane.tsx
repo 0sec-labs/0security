@@ -122,7 +122,8 @@ function Week({ sentinel }: { sentinel: Sentinel }) {
   const week = turns.data.filter(item => item.status !== "skipped" && Date.now() - Date.parse(item.startedAt ?? item.queuedAt ?? "") < WEEK);
   const failed = week.filter(item => item.status === "failed").length;
   const cost = week.reduce((sum, item) => sum + (item.costUsd ?? 0), 0);
-  return <Section title="Last 7 days"><p className="text-sm tabular-nums text-muted-foreground-1" data-slot="week">{week.length} {week.length === 1 ? "turn" : "turns"} · {failed} failed · ${cost.toFixed(2)}</p></Section>;
+  const unpriced = week.filter(item => item.costUsd === undefined).length;
+  return <Section title="Last 7 days"><p className="text-sm tabular-nums text-muted-foreground-1" data-slot="week">{week.length} {week.length === 1 ? "turn" : "turns"} · {failed} failed · ${cost.toFixed(2)} known cost{unpriced > 0 ? ` · ${unpriced} with unknown spend` : ""}</p></Section>;
 }
 
 /** Other files the Sentinel wrote (reports, handoffs). Nothing shows until one exists. */

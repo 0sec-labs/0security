@@ -230,6 +230,17 @@ In a Maven or Gradle project, each batch stays inside one build module. A module
 
 Batches run module by module, in alphabetical order of the module path. Inside a module, entry points are batched in path order, so files of one package sit together. Each batch prompt names its module.
 
+To keep ownership groups apart as well, pass an operator-maintained CODEOWNERS file:
+
+```bash
+0security scan ./repo --plan --codeowners ./approved-CODEOWNERS --format json
+0security scan ./repo --codeowners ./approved-CODEOWNERS --batches on
+```
+
+The planner respects build-module boundaries and the last matching ownership rule. Unowned units still run. A group of helper files carries the union of its owners. Ownership labels group work; they never grant permissions, suppress a finding or restrict following relevant calls. No CODEOWNERS file is loaded automatically. In CI pass the trusted base branch's copy, and pass the same file again when resuming.
+
+JSON plans include `ownership` groups. Scan JSON includes `coverage.batchRuns` for this invocation: module, owners, attempt count, summed attempt duration, thread IDs, reviewed/total units and actual reported cost. A cost of `null` means at least one attempted thread did not report its cost; retry waits are excluded from duration. Earlier invocations remain in the coverage ledger, while these measurements describe only the current invocation.
+
 Run `--plan` to see the module map, with the files, entry points and batches of each module:
 
 ```bash

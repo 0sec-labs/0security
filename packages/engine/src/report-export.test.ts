@@ -26,7 +26,8 @@ describe("report export", () => {
     expect(html).not.toContain("<script>repository</script>");
   });
   it("returns a PDF document using the existing renderer", async () => {
-    const pdf = await exportReport(report, "pdf");
+    const contextual = { ...report, findings: report.findings.map(f => ({ ...f, businessContext: { provenance: "operator" as const, repository: "shop", tags: ["payments" as const], notes: [], shift: 1, score: 4, rationale: "ranked higher (+1): payments" } })) };
+    const pdf = await exportReport(contextual, "pdf");
     expect(decode(pdf.body.subarray(0, 5))).toBe("%PDF-");
     expect(pdf.contentType).toBe("application/pdf");
   });

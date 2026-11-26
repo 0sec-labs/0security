@@ -28,9 +28,9 @@ function metadata(value: unknown): ModelsResponse | undefined {
   for (const row of data.models) {
     if (!row || typeof row !== "object") return;
     const model = row as Record<string, unknown>;
-    if (!text(model.id, 1024) || !model.id || !text(model.provider, 128) || !model.provider || !text(model.price, 256) || !["account", "public-catalog"].includes(String(model.source))) return;
+    if (!text(model.id, 1024) || !model.id || !text(model.provider, 128) || !model.provider || !text(model.price, 256) || !["account", "public-catalog", "configured"].includes(String(model.source))) return;
     if (model.contextWindowTokens !== null && (typeof model.contextWindowTokens !== "number" || !Number.isFinite(model.contextWindowTokens) || model.contextWindowTokens <= 0)) return;
-    models.push({ id: model.id, provider: model.provider, price: model.price, contextWindowTokens: model.contextWindowTokens as number | null, source: model.source as "account" | "public-catalog", ...(typeof model.enabled === "boolean" ? { enabled: model.enabled } : {}) });
+    models.push({ id: model.id, provider: model.provider, price: model.price, contextWindowTokens: model.contextWindowTokens as number | null, source: model.source as "account" | "public-catalog" | "configured", ...(typeof model.enabled === "boolean" ? { enabled: model.enabled } : {}) });
   }
   if (!data.roles.every(role => text(role, 64)) || !(data.providerId === null || text(data.providerId, 128))) return;
   const recommended: NonNullable<ModelsResponse["recommended"]> = [];

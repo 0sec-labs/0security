@@ -27,6 +27,20 @@ Any value except empty, `0`, `false` or `no` turns it on. With it on, 0:
 
 It is read from the process environment only. A project file such as `<project>/.0/tui-settings.json` cannot set or clear it, so a repository you open cannot switch egress back on. It also counts as an opt-out for the public model and price lookups, which already honor `ZERO_OFFLINE` and `DO_NOT_TRACK`, so those gates cannot drift apart from it.
 
+### Internal Bitbucket Data Center
+
+A self-hosted review or fix workflow can reach one explicitly approved Bitbucket installation while `ZERO_ENTERPRISE=1` stays on:
+
+```bash
+export ZERO_ENTERPRISE=1
+export ZERO_BITBUCKET_URL=https://bitbucket.internal.example/bitbucket
+export BITBUCKET_URL="$ZERO_BITBUCKET_URL"
+```
+
+`ZERO_BITBUCKET_URL` comes only from the process environment. It authorizes that exact origin (scheme, host and port) and its context path, including REST and HTTPS git endpoints. It does not enable any other outbound destination. HTTPS is required except on loopback for local testing. Pagination and redirects cannot move credentials outside that origin or context path. Git reviews reject URL rewrites and mismatched repository origins and disable HTTP redirects; use a direct HTTPS origin such as `https://bitbucket.internal.example/bitbucket/scm/PROJECT/repo.git`. Supply git credentials through the runner's trusted credential setup; the review scan does not receive the Bitbucket API token.
+
+This is an application allowlist, not a network firewall. Configure DNS, TLS trust and network policy for the installation you approved. Public advisory lookup and other automatic third-party calls stay disabled. Cloud's separate API and git origins are not implicitly enabled by this setting.
+
 The switch is off by default. An ordinary install keeps its current behavior. For a container, set it in the container environment; for a managed laptop, set it in the shell profile or the device policy.
 
 Telemetry is separate: `DO_NOT_TRACK=1` keeps `~/.0/analytics-sent.log`, which records every analytics payload that does leave, empty. For a no-egress install, set both.

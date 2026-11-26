@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checksLabel, locationText, parseDiff, pullRequestLabel, safePullRequestHref } from "./finding-fix-model";
+import { checksLabel, ciLabel, locationText, parseDiff, pullRequestLabel, safePullRequestHref } from "./finding-fix-model";
 
 const record = { branch: "0/fix-a", result: "pr-opened", pullRequestUrl: "https://github.com/o/r/pull/1", draft: true, checksPassing: false, recordedAt: "2026-03-01T10:00:00Z" };
 
@@ -36,5 +36,16 @@ describe("parseDiff", () => {
   it("marks added, removed and header lines, and does not mistake file headers for changes", () => {
     const lines = parseDiff("diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n-old\n+new\n same\n");
     expect(lines.map(line => line.kind)).toEqual(["meta", "meta", "meta", "hunk", "remove", "add", "context"]);
+  });
+});
+
+describe("CI labels", () => {
+  it("keeps host checks separate from local test results, including unavailable and empty CI", () => {
+    expect(ciLabel({ ...record, checksPassing: true })).toBe("CI status unavailable");
+    const ci = { checkedAt: "2026-11-25T00:00:00Z" };
+    expect(ciLabel({ ...record, ci: { ...ci, status: "none" } })).toBe("No CI checks reported");
+    expect(ciLabel({ ...record, ci: { ...ci, status: "passing" } })).toBe("CI passed");
+    expect(ciLabel({ ...record, ci: { ...ci, status: "failing" } })).toBe("CI failed");
+    expect(ciLabel({ ...record, ci: { ...ci, status: "pending" } })).toBe("CI pending");
   });
 });

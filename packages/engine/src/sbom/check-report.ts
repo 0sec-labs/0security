@@ -1,4 +1,5 @@
 /** How `0 sbom check` writes its answer: plain text, and SARIF that `0 findings import` accepts. */
+import { dependencyReachabilityToText } from "./java-reachability.js";
 import { createHash } from "node:crypto";
 import { bandOfScore } from "./advisory-facts.js";
 import type { Advisory, AdvisorySeverity } from "./osv.js";
@@ -44,6 +45,7 @@ export function advisoriesToText(advisories: Advisory[], checked: number): strin
       const alias = item.aliases.length ? ` (${item.aliases.join(", ")})` : "";
       if (item.malicious) lines.push(`  MALICIOUS PACKAGE  ${item.id}${alias}  critical`);
       else lines.push(`  ${item.id}${alias}  ${severityText(item)}  ${fixAdvice(item)}`);
+      if (item.reachability) lines.push(`    ${dependencyReachabilityToText([item.reachability]).trimEnd().replace(/\n/g, "\n    ")}`);
       if (item.summary) lines.push(`    ${item.summary}`);
       if (item.malicious) lines.push(`    ${fixAdvice(item)}`);
     }
@@ -91,7 +93,7 @@ export function advisoriesToSarif(advisories: Advisory[], options: { toolVersion
           message: { text: `${what} ${fixAdvice(advisory)}` },
           locations: [{ physicalLocation: { artifactLocation: { uri: options.locate(advisory.purl).split("\\").join("/") }, region: { startLine: 1 } } }],
           partialFingerprints: { "0sbomAdvisory/v1": sha(`${advisory.purl}\n${advisory.id}`) },
-          properties: { purl: advisory.purl, severity: advisory.severity, ...(score !== undefined ? { "security-severity": String(score) } : {}), ...(advisory.fixedVersion ? { fixedVersion: advisory.fixedVersion } : {}), ...(advisory.aliases.length ? { aliases: advisory.aliases } : {}), malicious: advisory.malicious },
+          properties: { purl: advisory.purl, severity: advisory.severity, ...(score !== undefined ? { "security-severity": String(score) } : {}), ...(advisory.fixedVersion ? { fixedVersion: advisory.fixedVersion } : {}), ...(advisory.aliases.length ? { aliases: advisory.aliases } : {}), malicious: advisory.malicious, ...(advisory.reachability ? { reachability: advisory.reachability } : {}) },
         };
       }),
     }],

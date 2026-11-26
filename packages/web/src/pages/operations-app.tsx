@@ -1,3 +1,4 @@
+import { RunMetricsPage } from "@/pages/run-metrics-page";
 import { WhatsNewHost } from "@/components/whats-new-dialog";
 import { usePendingGate } from "@/lib/pending-gate";
 import { queryKeys } from "@/queries";
@@ -99,6 +100,7 @@ export function OperationsApp() {
             {["connections", "models", "settings", "doctor", "tools", "project"].map((route) => (
               <Route key={route} path={`/${route}`} element={<WebConsoleControlsPage />} />
             ))}
+            <Route path="/metrics" element={<RunMetricsPage />} />
             <Route path="/sentinels" element={<SentinelsPage />} />
             <Route path="/sentinels/:sentinelId" element={<SentinelPage />} />
             <Route path="/api-access" element={<FindingsApiAccessPage />} />

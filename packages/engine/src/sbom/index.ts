@@ -14,3 +14,5 @@ export { parseCatalog, parseGradleBuild, parseVersionCatalog } from "./gradle.js
 export { buildToolEnv, mergeComponents, parseDependencyReport, parseGradleTree, parseMavenTree, ResolveFailedError, resolveJvmDependencies, RESOLVE_TIMEOUT_MS, type ResolveOptions, type ResolveResult } from "./resolve.js";
 export { javaUsageToText, parseImports, scanJavaUsage, type JavaImport, type JavaUsage, type JavaUsageReport, type JavaUsageVerdict } from "./java-usage.js";
 export { checkSlopsquat, editDistance, lookalikeOf, slopsquatFails, slopsquatSarifParts, slopsquatToText, SLOPSQUAT_CAP, SLOPSQUAT_NEW_DAYS, type SlopFinding, type SlopOptions, type SlopResult } from "./slopsquat.js";
+
+export { assessJavaDependencyReachability, dependencyReachabilityToText, mavenComponents, type DependencyReachability, type JavaReachabilityReport } from "./java-reachability.js";

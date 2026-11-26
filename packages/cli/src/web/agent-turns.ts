@@ -1,3 +1,5 @@
+import { cancellationRetry } from "./cancellation-retry.js";
+import { usageTokens, type MetricSink } from "../run-metrics.js";
 import { SentinelStore } from "@0/engine/storage";
 import { sentinelNeedsReview, sentinelReviewFingerprint, type AgentTurn, type AgentTurnOriginDetail, type Sentinel, type SecurityWorkflow } from "@0/engine/shared";
 import { audit } from "./audit.js";
@@ -39,6 +41,7 @@ export type TurnResult =
   | { status: "refused"; kind: "failed" | "inactive" | "review"; reason: string };
 
 export interface TurnContext {
+  metrics?: MetricSink;
   store: SentinelStore;
   missions: SentinelMissionRuntime;
   now: () => number;
@@ -52,7 +55,7 @@ export interface TurnContext {
   postSummary?(sentinel: Sentinel, comment: NonNullable<TurnRequest["comment"]>, missionId: string, turnId: string, exclude: ReadonlySet<string>): Promise<void>;
 }
 
-interface Tracked { turnId: string; sentinel: Sentinel; text: string; triggerId?: string; messageId?: string; base: number; /** A person's message: never capped. */ person?: boolean; comment?: TurnRequest["comment"]; baseline?: ReadonlySet<string> }
+interface Tracked { cancellation?: ReturnType<typeof cancellationRetry>; cap?: number; stopping?: boolean; tokenBase?: number | null; startedAt?: string; turnId: string; sentinel: Sentinel; text: string; triggerId?: string; messageId?: string; base: number; /** A person's message: never capped. */ person?: boolean; comment?: TurnRequest["comment"]; baseline?: ReadonlySet<string> }
 /** `home` threads are watched for as long as the engine lives, so a person's messages in them are recorded as turns. */
 interface ThreadWatch { missionId: string; agentId?: string; home?: boolean; unsubscribe?: () => void; queued: Tracked[]; running?: Tracked; inQueue?: Set<string> }
 /** Messages the engine sends on its own (not typed by the person) must not be recorded as the person's turns. */
@@ -75,7 +78,7 @@ export class AgentTurnDelivery {
 
   /** Turn ids this engine is tracking right now. */
   tracking(): Set<string> { return new Set([...this.#watches.values()].flatMap(watch => [...watch.queued, ...(watch.running ? [watch.running] : [])].map(item => item.turnId))); }
-  dispose(): void { for (const watch of this.#watches.values()) watch.unsubscribe?.(); this.#watches.clear(); }
+  dispose(): void { for (const watch of this.#watches.values()) { watch.running?.cancellation?.dispose(); for (const turn of watch.queued) turn.cancellation?.dispose(); watch.unsubscribe?.(); } this.#watches.clear(); }
 
   /** Is this Sentinel's thread already being watched for a person's messages? */
   observing(agentId: string, missionId: string): boolean { return this.#watches.get(missionId)?.home === true && this.#watches.get(missionId)?.agentId === agentId; }
@@ -141,6 +144,8 @@ export class AgentTurnDelivery {
       const turn = ctx.store.recordSkippedTurn({ ...base, sessionId: home.id, reason: "Waiting on you", idempotencyKey: `${request.idempotencyKey}:waiting` });
       return { status: "skipped", turn, reason: "Waiting on you", consumed: false };
     }
+    const cap = Math.min(sentinel.runBudgetUsd ?? Infinity, ctx.store.getTrigger(request.trigger.id)?.runBudgetUsd ?? Infinity);
+    if (Number.isFinite(cap) && (!ctx.missions.cancel || !ctx.missions.subscribe || !ctx.missions.usage || typeof this.#watches.get(home.id)?.unsubscribe !== "function")) return { status: "refused", kind: "failed", reason: "This runtime cannot enforce a run budget." };
     const interrupted = ctx.store.lastDeliveredTurn(sentinel.id)?.note === "interrupted";
     const reserved = ctx.store.reserveTurn({
       ...base, sessionId: home.id, idempotencyKey: request.idempotencyKey, ownerPid: process.pid,
@@ -153,7 +158,7 @@ export class AgentTurnDelivery {
     const turn = reserved.turn;
     const text = this.#compose(request, turn, { notices: [...(home.replaced === "lost" ? ["Your earlier conversation could not be restored, so this is a fresh thread. Your notes below are the record of earlier work."] : home.replaced === "changed" ? ["Your folder, model or skills changed, so you are on a fresh thread configured with the current ones. Your notes below are the record of earlier work."] : []), ...(interrupted ? ["Your previous turn was interrupted when the engine stopped; check what it left half done before you continue."] : [])] });
     const watch = this.#watch(home.id);
-    const tracked: Tracked = { turnId: turn.id, sentinel, text, triggerId: request.trigger.id, base: ctx.missions.usage?.(home.id)?.costUsd ?? 0, ...(request.comment ? { comment: request.comment } : {}) };
+    const tracked: Tracked = { cap, turnId: turn.id, sentinel, text, triggerId: request.trigger.id, base: ctx.missions.usage?.(home.id)?.costUsd ?? 0, ...(request.comment ? { comment: request.comment } : {}) };
     watch.queued.push(tracked);
     let messageId: string | undefined;
     try {
@@ -274,6 +279,9 @@ export class AgentTurnDelivery {
         if (!next) { this.#beginPersonTurn(watch, event); return; }
         watch.queued = watch.queued.filter(item => item !== next);
         next.base = this.#ctx.missions.usage?.(watch.missionId)?.costUsd ?? next.base;
+        next.tokenBase = usageTokens(this.#ctx.missions.usage?.(watch.missionId));
+        next.startedAt = isoAt(this.#ctx.now());
+        next.baseline = new Set((this.#ctx.missions.findings?.(watch.missionId) ?? []).flatMap(finding => finding.id ? [finding.id] : []));
         if (next.comment) { try { next.baseline = new Set((this.#ctx.missions.findings?.(watch.missionId) ?? []).flatMap(finding => finding.id ? [finding.id] : [])); } catch { next.baseline = new Set(); } }
         watch.running = next;
         try { this.#ctx.store.updateTurn(next.turnId, { status: "running", startedAt: isoAt(this.#ctx.now()), sessionId: watch.missionId }); } catch { /* The Sentinel was deleted. */ }
@@ -310,15 +318,31 @@ export class AgentTurnDelivery {
     } catch { /* The Sentinel was deleted. */ }
   }
 
-  /** Keeps the turn's cost current. There is no cap: the thread's total cost is shown, never enforced. */
+  /** Keep actual per-turn spend current; automated caps are checked at each usage receipt. */
   #enforce(watch: ThreadWatch, turn: Tracked): void {
-    try { this.#ctx.store.updateTurn(turn.turnId, { costUsd: this.#costOf(watch, turn) }); } catch { /* The Sentinel was deleted. */ }
+    const cost = this.#costOf(watch, turn);
+    if (!turn.person && Number.isFinite(turn.cap) && (this.#ctx.missions.usage?.(watch.missionId)?.costUsd === undefined || this.#ctx.missions.usage?.(watch.missionId)?.costUnavailable || cost >= turn.cap!)) {
+      turn.stopping = true;
+      turn.cancellation ??= cancellationRetry({
+        cancel: async () => { if (!this.#ctx.missions.cancel) throw new Error("Cancellation unavailable"); return this.#ctx.missions.cancel(watch.missionId); },
+        active: () => watch.running === turn,
+        pending: note => { try { this.#ctx.store.updateTurn(turn.turnId, { note }); } catch { /* deleted */ } },
+      });
+      void turn.cancellation.request();
+    }
+    try { this.#ctx.store.updateTurn(turn.turnId, { costUsd: this.#ctx.missions.usage?.(watch.missionId)?.costUsd !== undefined && !this.#ctx.missions.usage?.(watch.missionId)?.costUnavailable ? cost : undefined }); } catch { /* The Sentinel was deleted. */ }
   }
 
   #finish(watch: ThreadWatch, turn: Tracked, status: "completed" | "failed" | "cancelled", error?: string): void {
+    turn.cancellation?.dispose();
     watch.running = undefined;
     const cost = this.#costOf(watch, turn);
-    this.#end(turn.turnId, turn.triggerId, status, error, { costUsd: cost });
+    this.#end(turn.turnId, turn.triggerId, status, error, { costUsd: this.#ctx.missions.usage?.(watch.missionId)?.costUsd !== undefined && !this.#ctx.missions.usage?.(watch.missionId)?.costUnavailable ? cost : undefined });
+    if (!turn.person && turn.startedAt) {
+      const tokens = usageTokens(this.#ctx.missions.usage?.(watch.missionId));
+      const produced = (this.#ctx.missions.findings?.(watch.missionId) ?? []).filter(finding => finding.id && !turn.baseline?.has(finding.id));
+      this.#ctx.metrics?.({ sentinelId: turn.sentinel.id, triggerId: turn.triggerId, activationId: turn.turnId, at: turn.startedAt, command: "sentinel", model: turn.sentinel.model?.model ?? "unknown", budgetUsd: Number.isFinite(turn.cap) ? turn.cap! : null, costUsd: (this.#ctx.missions.usage?.(watch.missionId)?.costUsd === undefined || this.#ctx.missions.usage?.(watch.missionId)?.costUnavailable) ? null : cost, tokens: tokens === null || turn.tokenBase == null ? null : Math.max(0, tokens - turn.tokenBase), durationSeconds: Math.max(0, (this.#ctx.now() - Date.parse(turn.startedAt)) / 1000), findingsAttempted: null, findingsProposed: produced.length, checksPassed: null, findingIds: produced.flatMap(finding => finding.id ? [finding.id] : []), status: turn.stopping ? "budget" : status === "completed" ? "ok" : "failed" });
+    }
     if (status === "completed" && turn.comment && this.#ctx.postSummary) void this.#ctx.postSummary(turn.sentinel, turn.comment, watch.missionId, turn.turnId, turn.baseline ?? new Set()).catch(() => { /* Reported on the turn by the poster. */ });
     // A cancelled turn pauses the gateway queue; trigger turns behind it must still run.
     const next = watch.queued.find(item => item.messageId);
@@ -335,7 +359,7 @@ export class AgentTurnDelivery {
     this.#messageIds.delete(turnId);
     try {
       store.updateTurn(turnId, {
-        status: extra.skipped ? "skipped" : status, finishedAt: isoAt(this.#ctx.now()), ...(extra.costUsd !== undefined ? { costUsd: extra.costUsd } : {}),
+        status: extra.skipped ? "skipped" : status, finishedAt: isoAt(this.#ctx.now()), ...("costUsd" in extra ? { costUsd: extra.costUsd } : {}),
         ...(error ? { error } : {}), ...(extra.skipped && error ? { skippedReason: error } : {}), ...(extra.interrupted ? { note: "interrupted" } : {}),
       });
     } catch { return; /* The Sentinel was deleted mid-turn. */ }

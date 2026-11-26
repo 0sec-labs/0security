@@ -209,7 +209,7 @@ env ZERO_SELECTED_PROVIDER=bedrock \
 | Endpoint | `BEDROCK_BASE_URL` for a VPC endpoint or an internal proxy. Otherwise the regional `bedrock-runtime` endpoint. |
 | Model | A Bedrock model ID or cross-region inference profile ID your account can invoke. The default is `global.anthropic.claude-sonnet-4-5-20250929-v1:0`. |
 
-The model must support tool use through the Converse API. Prices for Bedrock models show as unknown. The model picker does not list Bedrock models, so pass the ID with `--model` or `ZERO_MODEL`. You can use `bedrock:<model>` in [`ZERO_LLM_FALLBACK`](#failover) when AWS credentials are set. To reach Bedrock through a LiteLLM proxy instead, use an [OpenAI-compatible gateway](#custom-and-local-providers).
+The model must support tool use through the Converse API. Prices for Bedrock models show as unknown. In **Connections → AWS identity → Amazon Bedrock**, save a region and a model or inference-profile ID. The model then appears in the picker with an unknown rate. This is an operator-configured choice, not a list of models your account is entitled to invoke. AWS credentials stay on the host; the browser accepts only non-secret region, model and endpoint settings. Saving does not make an AWS request, verify access or establish that credentials have not expired. The connection badge stays **AWS chain · unverified**. Existing host region settings take precedence. CLI users can still pass `--model` or `ZERO_MODEL`. You can use `bedrock:<model>` in [`ZERO_LLM_FALLBACK`](#failover) when AWS credentials are set. To reach Bedrock through a LiteLLM proxy instead, use an [OpenAI-compatible gateway](#custom-and-local-providers).
 
 ### Together AI
 

@@ -1,11 +1,13 @@
+import { readHostObservations, refreshMetricHostReceipts, type MetricHostObservation } from "../metric-host-receipts.js";
+import { resolve } from "node:path";
 import { Option, type Command } from "commander";
 import { METRIC_COMMANDS, METRIC_GROUPS, groupMetrics, parseSince, readRunMetrics, renderGroups, renderGroupsCsv, renderMetrics, summarizeMetrics, type MetricCommand, type MetricGroup, type RunMetric } from "../run-metrics.js";
 import { finishWithError, UsageError } from "./output.js";
 
-export interface FindingsMetricsOptions { since?: string; command?: string; format?: string; by?: string }
-export interface FindingsMetricsDeps { read(): RunMetric[]; out(text: string): void; now(): number }
+export interface FindingsMetricsOptions { since?: string; command?: string; format?: string; by?: string; refreshHost?: boolean; repo?: string; bitbucketUrl?: string }
+export interface FindingsMetricsDeps { read(): RunMetric[]; out(text: string): void; now(): number; observations?(): MetricHostObservation[]; refresh?: typeof refreshMetricHostReceipts }
 
-const defaults: FindingsMetricsDeps = { read: () => readRunMetrics(), out: text => process.stdout.write(`${text}\n`), now: Date.now };
+const defaults: FindingsMetricsDeps = { read: () => readRunMetrics(), observations: () => readHostObservations(), refresh: refreshMetricHostReceipts, out: text => process.stdout.write(`${text}\n`), now: Date.now };
 
 /** `0 findings metrics`: what the scan, fix and verify runs cost and produced, from the local metrics file. */
 export function runFindingsMetrics(options: FindingsMetricsOptions, deps: FindingsMetricsDeps = defaults): void {
@@ -16,27 +18,37 @@ export function runFindingsMetrics(options: FindingsMetricsOptions, deps: Findin
   }
   if (options.command !== undefined && !(METRIC_COMMANDS as readonly string[]).includes(options.command)) throw new UsageError(`--command must be one of ${METRIC_COMMANDS.join(", ")}.`);
   if (options.by !== undefined && !(METRIC_GROUPS as readonly string[]).includes(options.by)) throw new UsageError(`--by must be one of ${METRIC_GROUPS.join(", ")}.`);
-  if (options.format === "csv" && !options.by) throw new UsageError("--format csv needs --by command, week or model.");
+  if (options.format === "csv" && !options.by) throw new UsageError("--format csv needs --by command, week, model, sentinel or trigger.");
   const filter = { ...(since !== undefined ? { since } : {}), ...(options.command ? { command: options.command as MetricCommand } : {}) };
   if (options.by) {
     const by = options.by as MetricGroup;
-    const rows = groupMetrics(deps.read(), by, filter);
+    const rows = groupMetrics(deps.read(), by, filter, deps.observations?.() ?? []);
     deps.out(options.format === "json" ? JSON.stringify({ by, ...(options.since ? { since: new Date(since!).toISOString() } : {}), rows }, null, 2) : options.format === "csv" ? renderGroupsCsv(by, rows) : renderGroups(by, rows));
     return;
   }
-  const summary = summarizeMetrics(deps.read(), filter);
+  const summary = summarizeMetrics(deps.read(), filter, deps.observations?.() ?? []);
   deps.out(options.format === "json" ? JSON.stringify({ ...summary, ...(options.since ? { since: new Date(since!).toISOString() } : {}) }, null, 2) : renderMetrics(summary));
 }
 
 export function registerFindingsMetricsCommand(parent: Command, deps: FindingsMetricsDeps = defaults): void {
   parent.command("metrics")
     .description("Show what scan, fix and verify runs cost and produced: cost per proposed fix and the share that passed their checks")
+    .option("--refresh-host", "Read current PR lifecycle and CI for up to 20 recorded PRs (requires --repo; no host writes)")
+    .option("--repo <checkout>", "Explicit local checkout for --refresh-host")
+    .option("--bitbucket-url <url>", "Bitbucket Data Center server base for the explicit checkout")
     .option("--since <when>", "Only runs since then: 36h, 7d, 2w or a date such as 2026-11-01")
     .option("--command <name>", `Only this command: ${METRIC_COMMANDS.join(", ")}`)
-    .addOption(new Option("--by <group>", "One row per command, week (Monday start) or model").choices([...METRIC_GROUPS]))
+    .addOption(new Option("--by <group>", "One row per command, week (Monday start), model, Sentinel or trigger").choices([...METRIC_GROUPS]))
     .addOption(new Option("--format <format>", "Output: text, json, or csv (with --by)").choices(["text", "json", "csv"]))
     .addHelpText("after", "\nEach run adds one line of counts, cost and finding ids to ~/.0/metrics.ndjson (no finding text or paths). The file keeps about 2 MB of history.")
-    .action((options: FindingsMetricsOptions) => {
-      try { runFindingsMetrics(options, deps); } catch (error) { finishWithError(error, { err: text => process.stderr.write(`${text}\n` ) }, options.format === "json"); }
+    .action(async (options: FindingsMetricsOptions) => {
+      try {
+        if (options.refreshHost) {
+          if (!options.repo) throw new UsageError("--refresh-host requires an explicit --repo checkout.");
+          if (!deps.refresh) throw new UsageError("Host refresh is unavailable in this metrics adapter.");
+          await deps.refresh(deps.read(), resolve(options.repo), { bitbucketUrl: options.bitbucketUrl });
+        }
+        runFindingsMetrics(options, deps);
+      } catch (error) { finishWithError(error, { err: text => process.stderr.write(`${text}\n` ) }, options.format === "json"); }
     });
 }

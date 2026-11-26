@@ -1,4 +1,5 @@
 // FindingRepository: persistence for findings.
+import { parseFindingBusinessContext, type FindingBusinessContext } from "../../shared/business-context.js";
 import { ImpactAssessmentSchema, type ImpactAssessment } from "../../shared/index.js";
 import { eq, desc, and, or } from "drizzle-orm";
 import type { Finding, FindingTriageStatus } from "../../shared/index.js";
@@ -185,6 +186,13 @@ export class FindingRepository extends Repository {
    * source-fix gate semantics; a source-only check is never replay evidence.
    * Each key is omitted when absent, including for pre-migration rows.
    */
+  /** Only the operator scan path writes this field; ordinary model finding saves cannot forge it. */
+  setFindingBusinessContext(findingId: string, context: FindingBusinessContext | undefined): void {
+    const parsed = context === undefined ? undefined : parseFindingBusinessContext(context);
+    if (context !== undefined && !parsed) throw new Error("Invalid operator business context");
+    this.db.update(schema.findings).set({ businessContext: parsed ? JSON.stringify(parsed) : null }).where(eq(schema.findings.id, findingId)).run();
+  }
+
   getFindingReviewFields(findingId: string): PersistedFindingReviewFields {
     return restoreFindingReviewFields(this.owner.getFinding(findingId));
   }

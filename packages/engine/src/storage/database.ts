@@ -224,6 +224,10 @@ export class osecDB {
     return this.repos.findings.getFindingModelVerification(findingId);
   }
 
+  setFindingBusinessContext(findingId: string, context: import("../shared/business-context.js").FindingBusinessContext | undefined): void {
+    return this.repos.findings.setFindingBusinessContext(findingId, context);
+  }
+
   setFindingScope(findingId: string, label: { scope: "in-scope" | "out-of-scope"; reason: string; source: string }): void {
     return this.repos.findings.setFindingScope(findingId, label);
   }

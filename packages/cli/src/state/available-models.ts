@@ -1,5 +1,5 @@
 import { getSiwcConnection } from "./chatgpt-plan-store.js";
-import { createNativeApiRuntime,  type RuntimeConfig } from "@0/engine";
+import { BEDROCK_DEFAULT_MODEL, createNativeApiRuntime,  type RuntimeConfig } from "@0/engine";
 
 interface AvailableModel { id: string; provider: string; contextTokens?: number; source?: "catalog" }
 interface ModelDiscoveryResult { models: AvailableModel[]; diagnostics: Array<{ providerId: string; message: string }> }
@@ -33,8 +33,10 @@ export async function discoverConnectionModels(
   providerIds: readonly string[],
   signal?: AbortSignal,
 ): Promise<ModelDiscoveryResult> {
-  const results = await Promise.all(providerIds.map(async providerId => {
+  const results = await Promise.all(providerIds.map(async (providerId): Promise<ModelDiscoveryResult> => {
     try {
+      // No signed model-list or inference request: account/region entitlement is not established by a catalog row.
+      if (providerId === "bedrock") return { models: [{ id: env.ZERO_BEDROCK_MODEL || (env.ZERO_SELECTED_PROVIDER === "bedrock" ? env.ZERO_MODEL : undefined) || BEDROCK_DEFAULT_MODEL, provider: providerId, source: "catalog" as const }], diagnostics: [] };
       const models = await boundedCatalog(async discoverySignal => {
         const runtime = createNativeApiRuntime({ type: "api", timeout: DISCOVERY_TIMEOUT_MS,
           provider: providerId as RuntimeConfig["provider"], model: "probe",

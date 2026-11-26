@@ -670,6 +670,8 @@ export interface Finding {
   scopeReason?: string;
   /** Where the scope came from: a file name, never a path outside the scan. */
   scopeSource?: string;
+  /** Operator-supplied work priority, independent of technical severity and observed impact. */
+  businessContext?: import("./business-context.js").FindingBusinessContext;
   /**
    * Append-only list of triage layer verdicts, ordered by execution.
    * Empty until the triage stage runs. See {@link LayerVerdict} for details.
@@ -1421,6 +1423,9 @@ export interface ScanCoverage extends Partial<ScanFileCoverage> {
   /** Entry points not reached, by reason. */
   notReached: Record<string, number>;
   batches: { total: number; reviewed: number; pending: number };
+  /** Current invocation only, including retries. Costs stay null when any attempted thread did not report cost. */
+  batchRuns?: Array<{ batch: number; module?: string; owners?: string[]; attempts: number; durationMs: number; costUsd: number | null; threadIds: string[]; reviewedUnits: number; totalUnits: number }>;
+
   /** The first units not reached (at most 100). */
   pendingUnits: Array<{ kind: string; path: string; startLine?: number; name?: string; reason?: string }>;
   /** What stopped the scan, when it ended with units pending: the budget, the time limit or failed batches. */

@@ -455,6 +455,7 @@ export class SentinelStore {
       const stamp = new Date(nowMs).toISOString();
       const trigger: SentinelTrigger = {
         id: randomUUID(), sentinelId, automationId: input.automationId, kind: input.kind, enabled: input.enabled, version: 1,
+        ...(input.runBudgetUsd !== undefined ? { runBudgetUsd: input.runBudgetUsd } : {}), ...(input.runModel ? { runModel: input.runModel } : {}),
         ...(input.schedule ? { schedule: input.schedule } : {}), ...(input.github ? { github: input.github } : {}),
         ...(input.release ? { release: input.release } : {}), ...(input.check ? { check: input.check } : {}), ...(input.webhook ? { webhook: input.webhook } : {}), ...(input.bitbucket ? { bitbucket: input.bitbucket } : {}),
         nextFireAt: input.schedule ? new Date(nextSentinelFire(input.schedule, nowMs)).toISOString() : input.github || input.release || input.check || input.bitbucket ? stamp : null,
@@ -465,18 +466,18 @@ export class SentinelStore {
     })();
   }
   /** Editing timing or source never silently keeps a trigger enabled; the caller re-enables explicitly. */
-  updateTrigger(id: string, patch: { enabled?: boolean; schedule?: unknown; github?: unknown; release?: unknown; check?: unknown; webhook?: unknown; bitbucket?: unknown }, expectedVersion?: number, nowMs = Date.now()): SentinelTrigger {
+  updateTrigger(id: string, patch: { runBudgetUsd?: number; runModel?: unknown; enabled?: boolean; schedule?: unknown; github?: unknown; release?: unknown; check?: unknown; webhook?: unknown; bitbucket?: unknown }, expectedVersion?: number, nowMs = Date.now()): SentinelTrigger {
     return this.#db.transaction(() => {
       const current = this.getTrigger(id);
       if (!current) throw new SentinelStoreError("Trigger not found.", 404);
       if (expectedVersion !== undefined && current.version !== expectedVersion) throw new SentinelStoreError("Trigger changed. Reload before saving.", 409);
       if (current.activeClaim) throw new SentinelStoreError("Trigger is launching a run; try again in a moment.", 409);
-      const merged = SentinelTriggerCreateSchema.safeParse({ automationId: current.automationId, kind: current.kind, schedule: patch.schedule ?? current.schedule, github: patch.github ?? current.github, release: patch.release ?? current.release, check: patch.check ?? current.check, webhook: patch.webhook ?? current.webhook, bitbucket: patch.bitbucket ?? current.bitbucket, enabled: patch.enabled ?? current.enabled });
+      const merged = SentinelTriggerCreateSchema.safeParse({ automationId: current.automationId, kind: current.kind, schedule: patch.schedule ?? current.schedule, github: patch.github ?? current.github, release: patch.release ?? current.release, check: patch.check ?? current.check, webhook: patch.webhook ?? current.webhook, bitbucket: patch.bitbucket ?? current.bitbucket, runBudgetUsd: patch.runBudgetUsd ?? current.runBudgetUsd, runModel: patch.runModel ?? current.runModel, enabled: patch.enabled ?? current.enabled });
       if (!merged.success) return invalid(new Error(merged.error.issues.map(issue => issue.message).join("; ")));
-      const changedSource = patch.schedule !== undefined || patch.github !== undefined || patch.release !== undefined || patch.check !== undefined || patch.webhook !== undefined || patch.bitbucket !== undefined;
+      const changedSource = patch.runBudgetUsd !== undefined || patch.runModel !== undefined || patch.schedule !== undefined || patch.github !== undefined || patch.release !== undefined || patch.check !== undefined || patch.webhook !== undefined || patch.bitbucket !== undefined;
       const enabled = changedSource && patch.enabled === undefined ? false : merged.data.enabled;
       const next: SentinelTrigger = {
-        ...current, enabled, version: current.version + 1, updatedAt: new Date(nowMs).toISOString(),
+        ...current, ...(merged.data.runBudgetUsd !== undefined ? { runBudgetUsd: merged.data.runBudgetUsd } : {}), ...(merged.data.runModel ? { runModel: merged.data.runModel } : {}), enabled, version: current.version + 1, updatedAt: new Date(nowMs).toISOString(),
         ...(merged.data.schedule ? { schedule: merged.data.schedule } : {}), ...(merged.data.github ? { github: merged.data.github } : {}),
         ...(merged.data.release ? { release: merged.data.release } : {}), ...(merged.data.check ? { check: merged.data.check } : {}), ...(merged.data.webhook ? { webhook: merged.data.webhook } : {}), ...(merged.data.bitbucket ? { bitbucket: merged.data.bitbucket } : {}),
         nextFireAt: merged.data.schedule ? new Date(nextSentinelFire(merged.data.schedule, nowMs)).toISOString() : merged.data.github || merged.data.release || merged.data.check || merged.data.bitbucket ? new Date(nowMs).toISOString() : null,

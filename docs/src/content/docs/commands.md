@@ -186,6 +186,7 @@ Add `--allow-partial` when a partial scan should not fail the job. The exit code
 | `--rate-limit <n>` | `10` | With --target-url: Nuclei requests per second (1 to 150) |
 | `--templates <path>` | — | With --target-url: a Nuclei template file or folder to run instead of the templates Nuclei has installed. 0 never downloads templates |
 | `--rules <file-or-folder>` | — | Semgrep or OpenGrep rules for the pre-pass (a file or a folder); repeat for several. Replaces the default rules and needs --scanner semgrep or opengrep. Rules are never read from the scanned folder unless you name them |
+| `--business-context <file>` | — | Operator-owned JSON tags and notes for investigation and work ordering; keeps technical severity unchanged |
 | `--context <file>` | — | Give the scan this file (a threat model, notes on who may do what) as lower-priority background; repeat for several. It can steer what the scan weighs but cannot change how it works |
 | `--policy <file-or-folder>` | — | Check the code against these Markdown policies (a file or a folder of .md files) and report pass or fail for each; repeat for several. Runs the policy-check skill |
 | `--org-policy <folder>` | — | An organisation's policy folder: evaluated first, and wins when a --policy says otherwise or uses the same id; repeat for several |
@@ -196,7 +197,10 @@ Add `--allow-partial` when a partial scan should not fail the job. The exit code
 | `--repo-ignores` | — | Also let the pre-pass scanners read their configuration and ignore files from the scanned folder (.foxguard.yml, .semgrepignore, .gitleaks.toml, .gitleaksignore, .trivyignore, osv-scanner.toml, .checkov.yaml). Off by default: a change under review can use them to hide findings. Inline suppressions such as nosemgrep always apply |
 | `--skill <id>` | `scan` | Skill that holds the scan method |
 | `--model <model>` | — | Model for the scan thread (default: gpt-6-luna) |
+| `--provider <id>` | — | Explicit model provider for this scan (use with --model) |
+| `--reasoning <effort>` | — | Reasoning effort for a model that supports it |
 | `--batches <mode>` | `auto` | auto reviews a large folder in batches, one thread per group of entry points, and records what each batch covered; on always does; off keeps one thread |
+| `--codeowners <file>` | — | Group batches by an operator-provided CODEOWNERS file as well as build module; reads no ownership file automatically and never skips unowned code |
 | `--batch-size <n>` | `8` | Entry points one batch reviews (1 to 50); a folder with more than this many is split under --batches auto |
 | `--retries <n>` | `2` | Run a batch again when it fails for a reason that may pass: a dropped connection, a provider timeout, rate limit or server error (0 to 5; 0 turns it off). A thread that is not a batch is asked once to continue. The cost of every attempt counts against --budget |
 | `--coverage-rounds <n>` | `1` | After a thread ends, send it a follow-up that names the source files it never opened, up to this many times (0 to 5; 0 turns it off). Each round counts against --budget |
@@ -1305,7 +1309,7 @@ Generate an SBOM from lockfiles, check one against known advisories, and scan mo
 0security sbom
 ```
 
-Subcommands: [generate](#sbom-generate) · [check](#sbom-check) · [licenses](#sbom-licenses) · [scan-models](#sbom-scan-models) · [agent-config](#sbom-agent-config) · [java-usage](#sbom-java-usage).
+Subcommands: [generate](#sbom-generate) · [check](#sbom-check) · [licenses](#sbom-licenses) · [scan-models](#sbom-scan-models) · [agent-config](#sbom-agent-config) · [java-usage](#sbom-java-usage) · [reachability](#sbom-reachability).
 
 #### sbom generate
 
@@ -1528,6 +1532,7 @@ The network use is the lookup at `https://api.osv.dev`: package URLs go out and 
 | --- | --- | --- |
 | `--format <format>` | `text` | Output: text, json or sarif (SARIF imports with `0security findings import`) |
 | `-o, --output <file>` | — | Write the result to a file instead of stdout |
+| `--source <folder>` | — | Attach JVM source-import and dependency-path evidence; does not suppress advisories or establish vulnerable-code reachability |
 | `--outdated` | — | Also list components with a newer version (looks packages up at https://api.deps.dev; information only, not a vulnerability) |
 | `--registry` | — | Also look each npm and PyPI package up on its public registry for invented or planted names (sends package names to registry.npmjs.org, api.npmjs.org and pypi.org) |
 | `--new-days <days>` | — | With --registry: a package first published fewer days ago than this is new (default 30) |
@@ -1680,6 +1685,30 @@ Each finding has a rule id, a severity, the file and line, a short snippet and a
 | `--fail-on <severity>` | — | Exit 1 when a finding is at or above this severity: critical, high, medium, low or info |
 | `--allow-host <host>` | — | Host a remote MCP server may use; repeat the option or separate hosts with commas. `*.example.com` allows subdomains |
 
+#### sbom reachability
+
+```text
+0security sbom reachability [options] <file> [folder]
+```
+
+Read JVM source-import candidates and follow the SBOM's dependency graph offline. Nothing runs or is sent over the network. Main-source and test-source evidence are kept separate. Every vulnerable-code verdict stays `unknown`: imports and package dependency edges do not prove that vulnerable methods execute, and missing imports do not prove absence of use.
+
+```bash
+0security sbom reachability sbom.cdx.json . --format json
+0security sbom check sbom.cdx.json --source . --format sarif -o deps.sarif
+```
+
+`sbom check --source` attaches the same evidence to advisory results in text, JSON and SARIF. It does not suppress advisories, lower severity or change the advisory exit code. Source stays local; the advisory check still sends package URLs to OSV. Source and graph limits are reported as incomplete evidence.
+
+| Option | Registered default | Description |
+| --- | --- | --- |
+| `--format <format>` | `text` | Output: text or json |
+
+| Argument | Required | Description |
+| --- | --- | --- |
+| `file` | Yes | CycloneDX SBOM (JSON), including the resolved dependency graph when available |
+| `folder` | No | Source folder to read (default: .) |
+
 #### sbom java-usage
 
 List which Maven components of an SBOM your Java, Kotlin, Scala or Groovy source imports
@@ -1795,7 +1824,7 @@ An accepted risk shows `accepted until <date>`. Once that date passes, the findi
 
 ##### Business context
 
-A scan cannot know what your business depends on. Tell 0 in a small JSON file, and `--context` uses it to order the list:
+Supply business context in a small operator-owned JSON file. Use `scan --business-context context.json` to steer investigation and persist a separate work-priority label. Use `findings list --context context.json` to override the labels for one list:
 
 ```bash
 0security findings list --context context.json
@@ -1826,7 +1855,11 @@ A tag moves a finding up or down in the order, in steps of severity. The tags an
 
 Steps add up, and the total is held to between -2 and +2. A medium finding in `src/payments/**` with `payments` and `personal-data` ranks with the critical ones. Set `weights` in the file to change a tag, for example `"weights": { "payments": 2 }`. A weight is a whole number from -2 to 2.
 
-Each finding that matched shows a line such as `Business context: ranked higher (+2): payments, personal-data. card checkout`. The order changes and nothing else does: a finding keeps its severity, none is hidden, and verification and fixes are unaffected. 0 reads the file only from the path you pass, never from a repository you scan. The file is limited to 64 KB. Without `--context` the order is by severity as before.
+A matching finding shows `Operator business context (unverified): ranked higher (+2): payments, personal-data. card checkout`. Technical severity, CVSS, verification, counts, scope and `--fail-on` remain unchanged; no finding is hidden. The tags and notes are operator declarations, not observed deployment exposure or exploitability.
+
+`scan --business-context context.json` passes the declarations as labelled background, orders JSON/Markdown/HTML/PDF/SARIF reports within scope groups, and stores the separate declaration with each local finding. The JSON finding and SARIF result property are named `businessContext` and include `provenance: "operator"`, repository, tags, notes, shift, work score and rationale. Later list, burndown and retained exports use the stored labels without reopening the file. The console shows the declaration separately and offers a **Business priority** sort; **Severity** still sorts technical severity. A scan's ordinary model finding saves cannot set the operator declaration field.
+
+0 reads context only from the path explicitly passed. The file is limited to 64 KB; it is never discovered automatically in a scanned repository. Use one file per scanned repository. Stored labels carry that scan's repository label; they do not establish a global multi-repository policy. Without a stored declaration or an explicit list context, ordering remains technical severity. `scan --context` continues to mean prose background and is a separate option.
 
 The context applies to `findings list`. Scans, `findings burndown` and exports do not use it yet.
 
@@ -2002,11 +2035,15 @@ A policy file inside the repository being fixed is not read unless you pass `--r
 
 | Option | Registered default | Description |
 | --- | --- | --- |
+| `--host <host>` | — | Code host: github, bitbucket-cloud or bitbucket-dc (inferred from origin) |
+| `--bitbucket-url <url>` | — | Bitbucket Data Center HTTPS base URL, including any context path (or BITBUCKET_URL) |
 | `--repo <dir>` | — | Git repository the finding is in (default: the current directory) |
 | `--base <branch>` | — | Branch to start from and open the pull request against (default: the remote's default branch) |
 | `--test <command>` | — | Check to run after the change; repeat for several. A failing check makes the pull request a draft |
 | `--ready` | — | Open the pull request ready for review even when no --test ran. Without it, a pull request with no checks is a draft |
 | `--sandbox <mode>` | — | Run the --test commands in a container instead of on this machine (docker) Choices: docker. |
+| `--sandbox-profile <profile>` | — | Use the pinned Maven/JDK 21 verifier: online dependency setup then offline verify (java) |
+| `--sandbox-maven-settings <file>` | — | Owner-only short-lived Maven credentials outside the repository; read-only mount for online setup only; setup output withheld |
 | `--sandbox-image <image>` | — | Image for --sandbox docker, for example maven:3-eclipse-temurin-21. It must hold the tools and dependencies the tests need |
 | `--sandbox-network` | — | Give the sandbox network access (to download dependencies). Off by default |
 | `--sandbox-setup <command>` | — | With --sandbox docker: run this once with the network on to download dependencies (for example mvn -q dependency:go-offline), then run the --test checks with the network off; repeat for several |
@@ -2303,9 +2340,12 @@ The summary lists runs, cost, average time and counts per command. A proposed fi
 
 | Option | Registered default | Description |
 | --- | --- | --- |
+| `--refresh-host` | — | Read current PR lifecycle and CI for up to 20 recorded PRs (requires --repo; no host writes) |
+| `--repo <checkout>` | — | Explicit local checkout for --refresh-host |
+| `--bitbucket-url <url>` | — | Bitbucket Data Center server base for the explicit checkout |
 | `--since <when>` | — | Only runs since then: 36h, 7d, 2w or a date such as 2026-11-01 |
-| `--command <name>` | — | Only this command: scan, fix, verify |
-| `--by <group>` | — | One row per command, week (Monday start) or model Choices: command, week, model. |
+| `--command <name>` | — | Only this command: scan, fix, verify, sentinel |
+| `--by <group>` | — | One row per command, week (Monday start), model, Sentinel or trigger Choices: command, week, model, sentinel, trigger. |
 | `--format <format>` | — | Output: text, json, or csv (with --by) Choices: text, json, csv. |
 
 #### findings rollup
@@ -2325,7 +2365,7 @@ Run it once per repository with `--export` to write a rollup export. Put the fil
 
 How it counts:
 
-- A flaw counts once per repository. Rows with the same repository and fingerprint merge, even across files. The newest row sets its state and the oldest sets its age. The same fingerprint in two repositories counts twice.
+- Each input export is a complete snapshot of the repositories it names. The latest `exportedAt` wins per repository in the current view, even if a finding’s `lastSeen` did not change. Within one timestamp a flaw counts once per repository by fingerprint; its newest row sets state and its oldest first-seen sets age. The same flaw remains present in each historical snapshot. The same fingerprint in two repositories counts twice.
 - The open count leaves out findings that are fixed, marked false positive, accepted or suppressed. An acceptance past its expiry counts as open. The output shows how many were left out and why.
 - Age is the time since the finding was first seen: under 7 days, 7 to 30, 30 to 90, over 90.
 - The owner is the finding's assignee. If it has none, the owner comes from the `--owners` file. Otherwise it counts as unassigned. 0 does not read CODEOWNERS, because that file comes from the repository you scan.
@@ -2339,7 +2379,27 @@ The `--owners` file is a JSON object that maps a repository name to an owner or 
 
 An export has the schema `0.findings-rollup.v1`: `schema`, `exportedAt` and `findings`. Each finding has `repository`, `fingerprint`, `title`, `severity`, `category`, `status`, `triage` (new, accepted or suppressed), `owner` (a string or null), `firstSeen` and `lastSeen` (ISO times). To bring in another scanner's results first, use [findings import](#findings-import).
 
-The rollup does not keep history, so it shows no trend. Keep the JSON output of each run to compare them.
+Use `--labels labels.json` to fill missing `team` and `tier` labels from explicit operator input:
+
+```json
+{ "api": { "team": "payments", "tier": "tier-1" }, "web": { "team": "growth", "tier": "tier-2" } }
+```
+
+Existing labels on historical rows win. Labels are not inferred from source files. Old exports with no labels still work and count as unassigned. A v1 export can include a `repositories` array, including repositories with zero findings; this lets a later clean snapshot replace its older findings. When exporting an empty database, supply `--repository` to retain its identity.
+
+Keep dated source snapshots with `--history`, then add later exports to that archive:
+
+```bash
+0security findings rollup api-2026-11-01.json web-2026-11-01.json --history history.json
+0security findings rollup history.json api-2026-11-25.json --history history-next.json --format json -o report.json
+0security findings rollup history-next.json --format csv -o dashboard-counts.csv
+```
+
+The archive schema is `0.findings-rollup.history.v1`: `snapshots` contains v1 exports plus each input’s basename as `source`. It retains captured timestamps and states; it contains finding titles and labels, but no evidence or absolute input paths. `--export` writes a consolidated current snapshot at the time of this command; use `--history` to preserve original observation times.
+
+The JSON report schema is `0.findings-rollup.report.v1`. Existing top-level counts remain, with `byTeam`, `byTier`, snapshot provenance, current per-repository `observations`, and a chronological `trend`. Each trend point includes only repositories observed at that timestamp, listed explicitly; changes in coverage are not interpreted as fixes. Each repository’s most recent snapshot supplies the current view, so repositories in it can have different observation dates. Empty repositories still count as observed.
+
+CSV uses the same report schema in a stable long-form table: `schema,snapshot_at,scope,dimension,label,count,repositories,sources`. `scope=current` means a view assembled from the latest snapshot per repository at report-generation time; `scope=snapshot` means the timestamp was actually captured. `dimension` is `headline`, `excluded` or a grouping such as `byTeam` or `byTier`. The final two columns are JSON arrays inside CSV cells. Import JSON or CSV into your dashboard; this command does not connect to DefectDojo or Dependency-Track. For those tools’ own scanner formats, use the existing SARIF or CycloneDX exports and verify their importer separately. Direct SARIF input to rollup is not supported; import it into a findings database first.
 
 | Argument | Required | Description |
 | --- | --- | --- |
@@ -2348,9 +2408,11 @@ The rollup does not keep history, so it shows no trend. Keep the JSON output of 
 | Option | Registered default | Description |
 | --- | --- | --- |
 | `--export <file>` | — | Also write these findings as a rollup export file that another rollup can read |
+| `--history <file>` | — | Write a reusable dated snapshot archive, preserving the input timestamps and provenance |
+| `--labels <file>` | — | JSON repository-to-team/tier map; fills missing labels without overwriting historical labels |
 | `--owners <file>` | — | JSON file mapping repository names to owners, used when a finding has no assignee |
 | `--repository <name>` | — | Repository name for findings read from a database (default: the scan target's folder name) |
-| `--format <format>` | — | Output: text, json or html Choices: text, json, html. |
+| `--format <format>` | — | Output: text, json, html or csv Choices: text, json, html, csv. |
 | `-o, --output <file>` | — | Write the rollup to a file instead of stdout |
 
 #### findings reproduce

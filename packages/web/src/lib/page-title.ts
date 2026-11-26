@@ -5,6 +5,7 @@ import { LEGACY_REDIRECTS } from "./workspace-navigation";
 const SUFFIX = "0security";
 
 const TITLES: Array<[RegExp, string]> = [
+  [/^\/metrics(?:\/|$)/, "Run metrics"],
   [/^\/chats(?:\/|$)/, "Home"],
   [/^\/findings(?:\/|$)/, "Findings"],
   [/^\/sentinels(?:\/|$)/, "Sentinels"],

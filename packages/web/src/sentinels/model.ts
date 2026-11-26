@@ -29,6 +29,7 @@ export interface Sentinel {
   folder?: string | null;
   hostId?: string | null;
   model?: SentinelModelChoice | null;
+  runBudgetUsd?: number | null;
   notifications: SentinelNotifications;
   status: SentinelStatus;
   automationIds: string[];

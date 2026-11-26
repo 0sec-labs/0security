@@ -17,6 +17,7 @@ import { reproductionDetail, reproductionPhrase, rowReproduction } from "../find
 import { auditTriage, buildTriageRequest, triageLabel, type TriageFlags } from "./findings-triage.js";
 import { UsageError } from "./output.js";
 import { foldSimilarGroups } from "./findings-dedupe.js";
+import { parseFindingBusinessContext, compareFindingsByBusinessContext } from "@0/engine/shared";
 import { adjustmentFor, contextScore, describeAdjustment, findingPath, loadBusinessContext, type BusinessContext } from "../business-context.js";
 
 type FindingsListOptions = {
@@ -187,7 +188,7 @@ function priorityFinding(row: PriorityRow) {
   return { severity: row.severity, category: row.category, cvssScore: row.cvssScore, impactAssessment };
 }
 function compareRows(a: PriorityRow, b: PriorityRow): number {
-  return compareFindingsBySeverity(priorityFinding(a), priorityFinding(b)) || b.timestamp - a.timestamp || b.id.localeCompare(a.id);
+  return compareFindingsByBusinessContext({ ...priorityFinding(a), businessContext: (a as { businessContext?: unknown }).businessContext }, { ...priorityFinding(b), businessContext: (b as { businessContext?: unknown }).businessContext }) || b.timestamp - a.timestamp || b.id.localeCompare(a.id);
 }
 function renderVerification(row: FindingRow, withProof = true): void {
   const phrase = verificationPhrase(rowVerification(row));
@@ -198,12 +199,12 @@ function renderVerification(row: FindingRow, withProof = true): void {
 /** Orders by severity moved by your business context, then as without it. Severity itself is never changed. */
 function contextComparer(context: BusinessContext): (a: FindingRow, b: FindingRow) => number {
   const score = (row: FindingRow) => contextScore(row.severity, adjustmentFor(context, findingPath((row as { reviewAnnotation?: unknown }).reviewAnnotation)));
-  return (a, b) => score(b) - score(a) || compareRows(a, b);
+  return (a, b) => score(b) - score(a) || compareFindingsBySeverity(priorityFinding(a), priorityFinding(b)) || b.timestamp - a.timestamp || b.id.localeCompare(a.id);
 }
 function renderPriority(row: FindingRow, context?: BusinessContext): void {
   console.log(`  ${chalk.white.bold(row.title)}${row.scope === "out-of-scope" ? chalk.yellow("  [out of scope]") : ""}`);
-  const why = context ? describeAdjustment(adjustmentFor(context, findingPath((row as { reviewAnnotation?: unknown }).reviewAnnotation))) : "";
-  if (why) console.log(`  ${chalk.gray("Business context:")} ${why}`);
+  const why = context ? describeAdjustment(adjustmentFor(context, findingPath((row as { reviewAnnotation?: unknown }).reviewAnnotation))) : parseFindingBusinessContext((row as { businessContext?: unknown }).businessContext)?.rationale ?? "";
+  if (why) console.log(`  ${chalk.gray("Operator business context (unverified):")} ${why}`);
   if (row.scope === "out-of-scope") console.log(`  ${chalk.gray("Outside declared scope:")} ${row.scopeReason ?? "no reason given"}${row.scopeSource ? chalk.gray(` (${row.scopeSource})`) : ""}`);
   const attacker = describeAttackerImpact(priorityFinding(row));
   if (attacker) console.log(`  ${chalk.gray(`${attacker.label ?? "What an attacker can do"}:`)} ${attacker.can}`);

@@ -1,5 +1,6 @@
+import { businessContextLabel } from "../shared/business-context.js";
 import type { ScanReport, Finding, Severity } from "../shared/index.js";
-import { describeAttackerImpact, compareFindingsBySeverity, orderByScope, isOutOfScope, reproductionFor } from "../shared/index.js";
+import { describeAttackerImpact, compareFindingsByBusinessContext, orderByScope, isOutOfScope, reproductionFor } from "../shared/index.js";
 import { findingPresentation, targetLabel, reportDate, safeHttpUrl } from "./presentation.js";
 import { renderOverview, type ReportWithOverview } from "./overview.js";
 
@@ -18,6 +19,7 @@ function renderFinding(f: Finding, i: number, deploymentNote?: string): string {
     ${copy.deployment ? `<aside class="finding-deployment"><span>${e(copy.deployment.label)}</span><p>${e(copy.deployment.note)}</p>${(() => { const sources = (copy.deployment.sources ?? []).flatMap(source => { const href = safeHttpUrl(source.url); return href ? [`<a href="${e(href)}" target="_blank" rel="noreferrer">${e(source.label)} ↗</a>`] : []; }); return sources.length ? `<div class="deployment-sources">${sources.join("")}</div>` : ""; })()}</aside>` : deploymentNote ? `<aside class="finding-deployment"><span>Deployment not confirmed for this finding</span><p>Confirm that this specific code path is active before treating its potential impact as production exposure.</p></aside>` : ""}
     <header class="finding-heading"><span class="badge" style="--severity:${colors[f.severity]}"><i></i>${f.severity}</span><h2>${e(copy.title)}</h2><p class="lead">${e(copy.summary)}</p></header>
     ${copy.action ? `<section class="fix"><span class="eyebrow">Recommended fix</span><p>${e(copy.action)}</p></section>` : ""}
+    ${f.businessContext ? block("Operator business context", businessContextLabel(f.businessContext)) : ""}
     ${scopeBanner}
     <nav class="tabs" aria-label="Finding ${i + 1} sections"><button type="button" class="tab active" data-section="context" aria-pressed="true">Technical detail</button><button type="button" class="tab" data-section="evidence" aria-pressed="false">Evidence</button><button type="button" class="tab" data-section="assessment" aria-pressed="false">Assessment</button></nav>
     <div class="tab-panel" data-panel="context">
@@ -37,7 +39,7 @@ function renderFinding(f: Finding, i: number, deploymentNote?: string): string {
   </article>`;
 }
 export function formatHtml(report: ReportWithOverview): string {
-  const e = escapeHtml, sorted = orderByScope(report.findings, compareFindingsBySeverity), target = targetLabel(report.target);
+  const e = escapeHtml, sorted = orderByScope(report.findings, compareFindingsByBusinessContext), target = targetLabel(report.target);
   // Keep human-provided target text available without exposing local checkout paths.
   const targetReference = report.target.startsWith("/") || report.target.startsWith("\\") || /^(?:[a-z]:|https?:\/\/)/i.test(report.target) ? target : report.target;
   // Escape '<' so source evidence cannot terminate the inert JSON script element.

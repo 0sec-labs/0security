@@ -96,7 +96,7 @@ describe("findings list --context", () => {
     // medium + 2 = critical level, ties broken as without a context; the demo critical drops two steps to medium.
     expect(first.indexOf("checkout-medium")).toBeLessThan(first.indexOf("admin-high"));
     expect(first.indexOf("admin-high")).toBeLessThan(first.indexOf("docs-critical"));
-    expect(first).toContain("Business context: ranked higher (+2): payments, personal-data. card data");
+    expect(first).toContain("Operator business context (unverified): ranked higher (+2): payments, personal-data. card data");
     expect(first).toContain("ranked lower (-2): non-production");
     expect(first).toContain("Technical severity: critical");
 
@@ -122,5 +122,23 @@ describe("findings list --context", () => {
     const bad = join(directory, "bad.json"); writeFileSync(bad, "{}");
     await expect(list(["--db-path", path, "--context", bad])).rejects.toThrow("entries");
     await expect(list(["--db-path", path, "--context", join(directory, "missing.json")])).rejects.toThrow("does not exist");
+  });
+});
+
+describe("stored operator business context", () => {
+  it("survives list without re-reading a context file and gives explicit override priority", async () => {
+    const { db, path, directory, insert } = fixture();
+    try {
+      insert("admin-high", "high", "admin/a.java");
+      insert("payments-medium", "medium", "payments/a.java");
+      db.setFindingBusinessContext("payments-medium", { provenance: "operator", repository: "shop", tags: ["payments", "personal-data"], notes: [], shift: 2, score: 4, rationale: "ranked higher (+2): payments, personal-data" });
+    } finally { db.close(); }
+    const persisted = await list(["--db-path", path]);
+    expect(persisted.indexOf("payments-medium")).toBeLessThan(persisted.indexOf("admin-high"));
+    expect(persisted).toContain("Operator business context (unverified)");
+    const override = join(directory, "override.json");
+    writeFileSync(override, JSON.stringify({ entries: [{ match: "admin/**", tags: ["operationally-critical"] }] }));
+    const overridden = await list(["--db-path", path, "--context", override]);
+    expect(overridden.indexOf("admin-high")).toBeLessThan(overridden.indexOf("payments-medium"));
   });
 });

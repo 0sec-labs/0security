@@ -1,0 +1,12 @@
+{
+  "checkedOn": "2026-11-25",
+  "source": "https://registry-1.docker.io/v2/library/maven/manifests/3.9.11-eclipse-temurin-21",
+  "repository": "docker.io/library/maven",
+  "tag": "3.9.11-eclipse-temurin-21",
+  "indexDigest": "sha256:6fdc855a6ed81d288ca7ca37ac6ff5e9308b612485c0801d70b25a858c83d237",
+  "platforms": {
+    "linux/amd64": "sha256:463a1849665463254b2dd56e3a5b316f1596bc93d0571065c06ea05bb48ab8f4",
+    "linux/arm64/v8": "sha256:d1d89ba5f782ba5dd52272e7da5aed592abb192dff6435523b852ffab3ee8484"
+  },
+  "method": "Authenticated Docker Hub pull-scope token used transiently; Docker-Content-Digest header and OCI index entries checked. No token retained."
+}

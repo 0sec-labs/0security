@@ -1,8 +1,9 @@
+import { businessContextLabel } from "../shared/business-context.js";
 // Resolve PDFKit at runtime so compiled binaries can locate its font assets.
 import { createRequire } from "node:module";
 import { createWriteStream } from "node:fs";
 import type { ScanReport } from "../shared/index.js";
-import { compareFindingsBySeverity, orderByScope, isOutOfScope } from "../shared/index.js";
+import { compareFindingsByBusinessContext, orderByScope, isOutOfScope } from "../shared/index.js";
 import type PDFDocumentType from "pdfkit";
 import { findingPresentation, targetLabel, reportDate } from "./presentation.js";
 
@@ -18,7 +19,7 @@ export async function generatePdfReport(report: ScanReport, outputPath: string):
   const stream = createWriteStream(outputPath);
   const done = new Promise<void>((resolve, reject) => { stream.on("finish", resolve); stream.on("error", reject); doc.on("error", reject); });
   doc.pipe(stream);
-  const sorted = orderByScope(report.findings, compareFindingsBySeverity);
+  const sorted = orderByScope(report.findings, compareFindingsByBusinessContext);
   const outside = sorted.filter(isOutOfScope).length;
   function text(value: string, size = 11, color = "#4d4d57", bold = false): void {
     doc.font(bold ? "Helvetica-Bold" : "Helvetica").fontSize(size).fillColor(color).text(plain(value), M, doc.y, { width: W, lineGap: 3 });
@@ -42,12 +43,14 @@ export async function generatePdfReport(report: ScanReport, outputPath: string):
   sorted.forEach((f, i) => {
     const copy = findingPresentation(f);
     const measure = (value: string, size: number, bold = false) => doc.font(bold ? "Helvetica-Bold" : "Helvetica").fontSize(size).heightOfString(plain(value), { width: W, lineGap: 3 });
-    const height = 22 + measure(copy.title, 17, true) + 10 + measure(copy.summary, 11) + (copy.action ? 18 + measure(`Fix: ${copy.action}`, 10) : 0) + 34;
+    const height = 22 + measure(copy.title, 17, true) + 10 + measure(copy.summary, 11) + (copy.action ? 18 + measure(`Fix: ${copy.action}`, 10) : 0) + (businessContextLabel(f.businessContext) ? 8 + measure(businessContextLabel(f.businessContext)!, 10) : 0) + 34;
     if (doc.y + height > 710 && doc.y > 80) page();
     const start = doc.y;
     text(`${String(i + 1).padStart(2, "0")} / ${f.severity.toUpperCase()}${isOutOfScope(f) ? " / OUTSIDE DECLARED SCOPE" : ""}`, 8, colors[f.severity], true);
     doc.y += 7; text(copy.title, 17, "#202025", true);
     doc.y += 7; text(copy.summary);
+    const business = businessContextLabel(f.businessContext);
+    if (business) { doc.y += 8; text(business, 10, "#73737d"); }
     if (copy.action) { doc.y += 10; text(`Fix: ${copy.action}`, 10, "#3d6550"); }
     if (isOutOfScope(f)) { doc.y += 8; text(`Out of scope: ${f.scopeReason ?? "no reason given"}`, 10, "#73737d"); }
     doc.y += 20; line(doc.y); doc.y += 20;

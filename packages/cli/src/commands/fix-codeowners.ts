@@ -36,17 +36,25 @@ function matcher(pattern: string): ((path: string) => boolean) | undefined {
 }
 
 /** The owners of the last rule that matches `path`; empty when none does. Later lines win, as on GitHub. */
-export function codeownersFor(text: string, path: string): string[] {
-  const target = path.replace(/^\.?\//, "");
-  let owners: string[] = [];
+export function codeownersResolver(text: string): (path: string) => string[] {
+  const rules: Array<{ test: (path: string) => boolean; owners: string[] }> = [];
   for (const raw of text.split("\n").slice(0, MAX_LINES)) {
     const line = raw.replace(/\r$/, "").replace(/(^|\s)#.*$/, "").trim();
     if (!line || line.startsWith("[")) continue;
-    const [pattern, ...rest] = line.split(/\s+/);
+    const [pattern, ...owners] = line.split(/\s+/);
     const test = pattern ? matcher(pattern) : undefined;
-    if (test?.(target)) owners = rest;
+    if (test) rules.push({ test, owners });
   }
-  return owners;
+  return path => {
+    const target = path.replace(/^\.?\//, "");
+    let owners: string[] = [];
+    for (const rule of rules) if (rule.test(target)) owners = rule.owners;
+    return [...owners];
+  };
+}
+
+export function codeownersFor(text: string, path: string): string[] {
+  return codeownersResolver(text)(path);
 }
 
 /** User names and org/team slugs of the owners that can be asked for a review. */

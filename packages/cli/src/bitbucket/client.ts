@@ -11,10 +11,10 @@
  *   `nextPageStart`), `.../pull-requests/{id}.diff`, comments at `.../comments` (`{text, anchor}`) and, for reading
  *   them, `.../activities` (the comments endpoint needs a file path).
  *
- * Every request carries the token as a bearer token, goes through `assertEgressAllowed`, and never follows a redirect
+ * Every request carries the token as a bearer token, goes through the restricted-destination gate, and never follows a redirect
  * to another origin. The token never appears in an error message.
  */
-import { assertEgressAllowed } from "@0/engine";
+import { assertEgressAllowed, enterpriseMode } from "@0/engine";
 import { postCodeInsights, type CodeInsightsPayload, type CodeInsightsPlatform } from "../code-insights.js";
 
 export type Platform = CodeInsightsPlatform;
@@ -74,8 +74,30 @@ export function checkServerUrl(url: string, allowInsecureHttp: boolean): URL {
   if (parsed.protocol !== "https:" && parsed.protocol !== "http:") throw new BitbucketError("The Bitbucket URL must start with https://.");
   const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(parsed.hostname);
   if (parsed.protocol === "http:" && !loopback && !allowInsecureHttp) throw new BitbucketError("Refusing to send the Bitbucket token over plain HTTP. Use an https:// URL, or pass --allow-insecure-http on a network you trust.");
+  if (parsed.search || parsed.hash) throw new BitbucketError("The Bitbucket URL must not contain a query or fragment.");
   if (parsed.username || parsed.password) throw new BitbucketError("Put no credentials in the Bitbucket URL.");
   return parsed;
+}
+
+/** Process-only opt-in for one operator-managed Bitbucket installation in restricted-egress mode.
+ * This is a server base URL (including a Data Center context path), never a wildcard or a repository setting.
+ * No other engine egress gate is affected. Validate every request, pagination link and redirect before credentials leave.
+ */
+export function assertBitbucketDestination(input: string, env: NodeJS.ProcessEnv = process.env): void {
+  if (!enterpriseMode(env)) return;
+  const configured = env["ZERO_BITBUCKET_URL"];
+  if (!configured) { assertEgressAllowed("Bitbucket (set ZERO_BITBUCKET_URL to the approved server base URL)", env); return; }
+  const base = checkServerUrl(configured, false);
+  let url: URL;
+  try { url = new URL(input); } catch { throw new BitbucketError("The Bitbucket destination URL is not valid."); }
+  if (url.username || url.password || url.hash) throw new BitbucketError("Bitbucket destinations must not contain credentials or fragments.");
+  const checked = new URL(url); checked.search = "";
+  checkServerUrl(checked.href, false);
+  if (/%(?:2e|2f|5c)/i.test(base.pathname) || /%(?:2e|2f|5c)/i.test(url.pathname)) throw new BitbucketError("Encoded path separators or dot segments are not allowed in Bitbucket destinations.");
+  const path = base.pathname.replace(/\/+$/, "");
+  if (url.origin !== base.origin || (path && url.pathname !== path && !url.pathname.startsWith(`${path}/`))) {
+    throw new BitbucketError("Restricted-egress Bitbucket requests must stay inside ZERO_BITBUCKET_URL.");
+  }
 }
 
 export class BitbucketClient {
@@ -105,8 +127,9 @@ export class BitbucketClient {
   #clean(message: string): string { return message.split(this.#token).join("***"); }
 
   async #send(method: string, url: string, body?: unknown, redirects = 0): Promise<{ status: number; body: string }> {
+    if (new URL(url).username || new URL(url).password || new URL(url).hash) throw new BitbucketError("Bitbucket destinations must not contain credentials or fragments.");
     if (new URL(url).origin !== this.#origin) throw new BitbucketError("Refusing to send the token to a different host than the Bitbucket server.");
-    assertEgressAllowed("Bitbucket");
+    assertBitbucketDestination(url);
     let response;
     try {
       response = await this.#http(url, {
@@ -154,8 +177,9 @@ export class BitbucketClient {
   async publishInsights(payload: CodeInsightsPayload, target: { owner: string; repo: string; commit: string }): Promise<void> {
     this.#repoPath(target.owner, target.repo);
     const fetcher: Parameters<typeof postCodeInsights>[3] = (url, init) => {
-      if (new URL(url).origin !== this.#origin) throw new BitbucketError("Refusing to send the token to a different host than the Bitbucket server.");
-      assertEgressAllowed("Bitbucket");
+      if (new URL(url).username || new URL(url).password || new URL(url).hash) throw new BitbucketError("Bitbucket destinations must not contain credentials or fragments.");
+    if (new URL(url).origin !== this.#origin) throw new BitbucketError("Refusing to send the token to a different host than the Bitbucket server.");
+      assertBitbucketDestination(url);
       return this.#http(url, { ...init, signal: AbortSignal.timeout(this.#timeout) });
     };
     await postCodeInsights(payload, { ...target, ...(this.#baseUrl ? { baseUrl: this.#baseUrl } : {}), ...(this.#cloudApiUrl ? { cloudApiUrl: this.#cloudApiUrl } : {}) }, this.#token, fetcher);

@@ -4,8 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { BurndownState, StateStore } from "../commands/burndown.js";
-import { findingFixInfo, locationOf, readFixDiff, MAX_DIFF_BYTES } from "./finding-fix.js";
+import { findingFixInfo as readFixInfo, locationOf, readFixDiff, MAX_DIFF_BYTES } from "./finding-fix.js";
 
+const findingFixInfo = (...[fingerprint, findingId, scope, state, readChecks]: Parameters<typeof readFixInfo>) =>
+  readFixInfo(fingerprint, findingId, scope, state, readChecks ?? (async () => ({ status: "unavailable", checkedAt: "2026-11-25T00:00:00Z" })));
 let dir: string;
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), "0-finding-fix-")); });
 afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
@@ -78,6 +80,23 @@ describe("findingFixInfo", () => {
     expect((await findingFixInfo("fp-a", "f-1", undefined, store({}))).records).toEqual([]);
     expect((await findingFixInfo("fp-a", "f-1", undefined, store({ [key(dir, "fp-a")]: { ...record, result: "no-change" } }))).records).toEqual([]);
     expect((await findingFixInfo("fp-a", "f-1", undefined, { load: () => { throw new Error("bad"); }, save: () => undefined })).records).toEqual([]);
+  });
+  it("includes actual host CI without confusing it with local checks", async () => {
+    const info = await findingFixInfo("fp-a", "f-1", undefined, store({ [key(dir, "fp-a")]: record }), async (repo, url) => {
+      expect(repo).toBe(dir);
+      expect(url).toBe(record.pullRequestUrl);
+      return { status: "passing", checkedAt: "2026-11-25T00:00:00Z", url: "https://github.com/o/r/pull/1/checks" };
+    });
+    expect(info.records[0]).toMatchObject({ checksPassing: false, ci: { status: "passing" } });
+  });
+  it("keeps the recorded fix when host CI cannot be read", async () => {
+    const info = await findingFixInfo("fp-a", "f-1", undefined, store({ [key(dir, "fp-a")]: record }), async () => { throw new Error("no credentials"); });
+    expect(info.records[0]).toMatchObject({ pullRequestUrl: record.pullRequestUrl, ci: { status: "unavailable" } });
+  });
+  it("does not ask the host about records outside scope", async () => {
+    let calls = 0;
+    await findingFixInfo("fp-a", "f-1", () => false, store({ [key(dir, "fp-a")]: record }), async () => { calls++; return { status: "passing", checkedAt: "now" }; });
+    expect(calls).toBe(0);
   });
   it("drops a pull request link that is not http or https", async () => {
     const info = await findingFixInfo("fp-a", "f-1", undefined, store({ [key(dir, "fp-a")]: { ...record, pullRequestUrl: "javascript:alert(1)", branch: "bad branch" } }));

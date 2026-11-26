@@ -39,13 +39,18 @@ describe("0 findings metrics", () => {
 
   it("exports CSV with a header and empty cells for n/a", () => {
     const lines = run({ by: "command", format: "csv" }, rows).split("\n");
-    expect(lines[0]).toBe("command,runs,cost_usd,duration_seconds,attempted,proposed,checks_passed,tokens,failed,cost_per_proposed_fix,share_verified");
-    expect(lines[1]).toBe("fix,2,0.4,20,2,1,1,0,1,0.4,1");
-    expect(lines[2]).toBe("scan,1,0.1,10,0,1,1,0,0,,");
+    expect(lines[0]).toBe("command,runs,cost_usd,duration_seconds,attempted,proposed,checks_passed,tokens,failed,cost_per_proposed_fix,share_verified,unknown_cost_runs,unknown_token_runs,pull_requests,merged_pull_requests,closed_pull_requests,open_pull_requests,unknown_pull_requests,share_merged,ci_passing,ci_failing,ci_pending,ci_none,ci_unknown,host_last_checked_at,unlinked_fix_runs");
+    expect(lines[1]).toBe("fix,2,0.4,20,2,1,1,,1,0.4,1,0,2,0,0,0,0,0,,0,0,0,0,0,,1");
+    expect(lines[2]).toBe("scan,1,0.1,10,0,1,1,,0,,,0,1,0,0,0,0,0,,0,0,0,0,0,,0");
   });
 
+  it("groups stored workflow identities and leaves historical runs unassigned", () => {
+    const json = JSON.parse(run({ by: "sentinel", format: "json" }, [...rows, row({ sentinelId: "agent-1", triggerId: "trigger-1" })]));
+    expect(json.rows.map((r: { key: string }) => r.key)).toEqual(["agent-1", "unassigned"]);
+    expect(JSON.parse(run({ by: "trigger", format: "json" }, [row({ triggerId: "t-1" })])).rows[0].key).toBe("t-1");
+  });
   it("refuses a bad --by and CSV without --by", () => {
-    expect(() => run({ by: "sentinel" }, rows)).toThrow(/--by/);
+    expect(() => run({ by: "invalid" }, rows)).toThrow(/--by/);
     expect(() => run({ format: "csv" }, rows)).toThrow(/--by/);
   });
 

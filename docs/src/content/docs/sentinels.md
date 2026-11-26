@@ -184,7 +184,7 @@ For faster reviews in [server mode](/server-mode/), create the trigger's secret 
 
 Point the webhook at `https://<your server>/api/webhooks/trigger/<trigger-id>` and use the secret as the webhook secret. On Cloud, turn on **Pull request created** and **Pull request updated**. On Data Center, turn on **Opened** and **Source branch updated**. Bitbucket signs each body with `X-Hub-Signature`, and 0 checks it with the limits in the [webhook trigger](#webhook-trigger). A delivery only names a pull request in the repository the trigger watches. Everything else comes from the trigger's settings.
 
-Every request to Bitbucket and every git fetch is refused when `ZERO_ENTERPRISE` is set. The trigger then shows a blocked status. The scan reads code written by the pull request's author, so run 0 on a machine that holds nothing you cannot lose, and use a model key with a spend cap.
+With `ZERO_ENTERPRISE` set, Bitbucket requests and git fetches are blocked unless the operator explicitly sets `ZERO_BITBUCKET_URL` to an approved Data Center HTTPS server. That exception is limited to the exact origin and context path; git URL rewrites, redirects and SSH fetches remain refused. See [restricted egress](/data-flow/). A refused request shows a blocked status. The scan reads code written by the pull request's author, so run 0 on a machine that holds nothing you cannot lose, and use a model key with a spend cap.
 
 This trigger was tested against Atlassian's published API descriptions and webhook payload examples, with fake servers. It has not run against a live Bitbucket Cloud workspace or Data Center server.
 

@@ -99,3 +99,30 @@ describe("loadPolicies", () => {
   });
   it("rejects a folder with no policies", () => expect(() => loadPolicies([folder()], "policy")).toThrow(/no .md policy files/));
 });
+
+describe("scan --business-context", () => {
+  it("uses only the explicit JSON file, labels declarations in the prompt and saves context separately", async () => {
+    const dir = folder(), contextPath = join(folder(), "context.json");
+    write(join(dir, ".0", "business-context.json"), "UNTRUSTED-REPOSITORY-CONTEXT");
+    writeFileSync(contextPath, JSON.stringify({ entries: [{ match: "src/**", tags: ["payments"], note: "operator note" }] }));
+    const { deps, prompt } = fakes();
+    const save = vi.fn(); deps.saveBusinessContext = save;
+    deps.loadReport = vi.fn(async () => ({ ...report, findings: [{ id: "f1", templateId: "t", title: "x", description: "d", severity: "medium", category: "xss", status: "discovered", evidence: { request: "r", response: "s" }, timestamp: 1, reviewAnnotation: { path: "src/A.java", startLine: 1 } }] } as never));
+    await runScan(dir, options({ businessContext: contextPath }), deps);
+    expect(prompt()).toContain("Operator-supplied business context, not verified facts");
+    expect(prompt()).toContain("operator note");
+    expect(prompt()).not.toContain("UNTRUSTED-REPOSITORY-CONTEXT");
+    expect(save).toHaveBeenCalledWith([expect.objectContaining({ id: "f1", context: expect.objectContaining({ provenance: "operator", shift: 1 }) })], undefined);
+  });
+  it("rejects invalid declarations before connecting to a model or writing persisted labels", async () => {
+    const dir = folder(), contextPath = join(folder(), "context.json");
+    writeFileSync(contextPath, JSON.stringify({ entries: [{ tags: ["verified-exposed"] }] }));
+    const { deps } = fakes();
+    const open = vi.fn(deps.open); deps.open = open;
+    const save = vi.fn(); deps.saveBusinessContext = save;
+    await runScan(dir, options({ businessContext: contextPath }), deps);
+    expect(open).not.toHaveBeenCalled();
+    expect(save).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(2);
+  });
+});

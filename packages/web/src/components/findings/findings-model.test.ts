@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CLOSED_ACCEPT_NOTE, REVIEW_LOCK_NOTE, REVIEW_STAGE_NOTE, boardColumns, resolveDrop, type FindingStatus } from "./findings-model";
+import { CLOSED_ACCEPT_NOTE, REVIEW_LOCK_NOTE, REVIEW_STAGE_NOTE, boardColumns, resolveDrop, sortFindings, findingCode, type FindingStatus } from "./findings-model";
 import { patchDashboardTriage, patchDashboardWorkflow, triageForWorkflow } from "./use-finding-mutations";
 import { findingStatus } from "./findings-model";
 import type { DashboardResponse, FindingGroup, FindingWorkflowStatus } from "@/types";
@@ -74,4 +74,21 @@ describe("findings merged from scan runs", () => {
     expect(next.groups[0]!.workflow.status).toBe("in_progress");
     expect(next.groups[1]!.workflow.status).toBe("backlog");
   });
+});
+
+it("offers operator work priority separately from technical severity", () => {
+  const high = group("high", "todo"), medium = group("payments", "todo");
+  medium.latest.severity = "medium";
+  medium.latest.businessContext = { provenance: "operator", repository: "shop", tags: ["payments", "personal-data"], notes: [], shift: 2, score: 4, rationale: "operator declaration" };
+  expect(sortFindings([high, medium], "priority", "desc").map(row => row.fingerprint)).toEqual(["payments", "high"]);
+  expect(sortFindings([high, medium], "severity", "desc").map(row => row.fingerprint)).toEqual(["high", "payments"]);
+  expect(medium.latest.severity).toBe("medium");
+});
+
+it("gives imported and located findings distinct per-finding UI codes", () => {
+  const scan = `sarif-${"8".repeat(64)}`;
+  expect(findingCode(`${scan}:sarif:0123456789abcdef`)).toBe("F-0123456789");
+  expect(findingCode(`${scan}:sarif:abcdef0123456789`)).toBe("F-ABCDEF0123");
+  expect(findingCode("loc:abcdef0123456789")).toBe("F-ABCDEF0123");
+  expect(findingCode("deadbeefabcd")).toBe("F-DEADBE");
 });
