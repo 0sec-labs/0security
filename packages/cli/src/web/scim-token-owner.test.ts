@@ -67,7 +67,8 @@ describe("the owner", () => {
     const { auth, call } = await start();
     const made = await call("owner", "POST", "scim-tokens", { name: "okta" });
     expect(made).toMatchObject({ status: 201, data: { token: expect.stringMatching(/^scim_/), record: { name: "okta" } } });
-    const listed = (await call("owner", "GET", "scim-tokens"))!.data as { tokens: Array<{ id: string }> };
+    const listed = (await call("owner", "GET", "scim-tokens"))!.data as { tokens: Array<{ id: string }>; unavailable: string | null };
+    expect(listed.unavailable).toBeNull();
     expect(listed.tokens).toHaveLength(1);
     expect(JSON.stringify(listed)).not.toContain((made!.data as { token: string }).token);
     const id = listed.tokens[0]!.id;
@@ -80,7 +81,14 @@ describe("the owner", () => {
     const { auth, call } = await start();
     await expect(call("owner", "POST", "scim-tokens", { name: "okta" })).rejects.toMatchObject({ statusCode: 403, message: expect.stringContaining("license") });
     const old = auth.scim!.createToken("old");
-    expect((await call("owner", "GET", "scim-tokens"))!.status).toBe(200);
+    const listed = await call("owner", "GET", "scim-tokens");
+    expect(listed!.status).toBe(200);
+    // The list says why a new token cannot be made: the license URL and both variable names, and no token.
+    const notice = (listed!.data as { unavailable: string }).unavailable;
+    expect(notice).toContain("ZERO_LICENSE");
+    expect(notice).toContain("ZERO_LICENSE_FILE");
+    expect(notice).toMatch(/https:\/\//);
+    expect(JSON.stringify(listed!.data)).not.toContain(old.token);
     expect((await call("owner", "DELETE", `scim-tokens/${old.record.id}`))!.status).toBe(200);
   });
 });

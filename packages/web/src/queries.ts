@@ -66,6 +66,7 @@ export const queryKeys = {
   teamSession: key("team-session"),
   teamUsers: key("team-users"),
   teamRoles: key("team-roles"),
+  teamScimTokens: key("team-scim-tokens"),
   teamWorkspacePresence: key("team-workspace-presence"),
   // Sentinels: ["sentinels", backendId, "list" | "one" | ...]
   sentinels: key("sentinels"),

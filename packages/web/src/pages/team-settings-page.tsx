@@ -12,6 +12,7 @@ import { Select } from "@/components/ui/select";
 import { WorkspaceChoice } from "@/components/workspace-choice";
 import { Feedback, QueryState } from "@/components/console-control/control-ui";
 import { errorText } from "@/lib/api-error";
+import { ScimTokens } from "@/components/scim-tokens";
 
 type WorkspaceMember = { userId: string; displayName: string; role: string; scope?: { repos?: string[]; businessUnits?: string[] } };
 type NewMember = { userId: string; displayName: string; password: string; role: string };
@@ -113,6 +114,7 @@ export function TeamSettingsPage() {
       <div className="flex gap-2"><Button type="submit" disabled={busy || !userId.trim() || !displayName.trim() || password.length < 12}>{busy ? "Adding…" : "Add teammate"}</Button><Button type="button" variant="outline" disabled={busy} onClick={cancel}>Cancel</Button></div>
     </form>}
     <Feedback message={message} />
+    {owner && <ScimTokens workspaceId={team.workspace?.id} />}
     <Link className="inline-block text-sm underline" to="/api-access">Findings API</Link>
   </>;
 }
