@@ -31,6 +31,7 @@ const FAMILY_PATTERNS = {
   transport: /insecure (http|transport|connection)|cleartext|plain-?text (http|transport)|unencrypted|without (tls|https|ssl)|no (tls|https)|http (instead|rather)|\bhttps\b/i,
   misconfig: /stack ?trace|x-powered-by|verbose error|debug mode|debug=true|misconfig|security header|query logging|logging (of )?(sensitive|queries)/i,
   "rate-limit": /rate[-_ ]?limit|brute[-_ ]?force|resource consumption|throttl|lockout/i,
+  "business-logic": /business[-_ ]?logic|missing[-_ ]validation|logic (flaw|bug|error)|state (check|machine|transition)|workflow|maker[-_ ]checker|separation of dut|four[-_ ]eyes|over-?refund|refund|replay|not bound|unbound|binding/i,
   "mass-assignment": /mass[-_ ]assign|over-?posting|admin (flag|field|role).*(register|request|body)/i,
 };
 export const FAMILIES = Object.keys(FAMILY_PATTERNS);
@@ -49,6 +50,7 @@ export const CATEGORY_FAMILIES = {
   "insecure-storage": ["secret", "weak-crypto"],
   "insecure-transport": ["transport"],
   "missing-rate-limit": ["rate-limit"],
+  "missing-validation": ["business-logic"],
   "sql-injection": ["sqli"],
   "command-injection": ["command-injection"],
   "code-injection": ["command-injection"],

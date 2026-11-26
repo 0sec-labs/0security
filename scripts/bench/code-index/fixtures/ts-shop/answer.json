@@ -1,0 +1,18 @@
+{
+  "fixture": "ts-shop",
+  "skill": null,
+  "items": [
+    { "id": "ts-order-idor", "path": "src/routes/orders.ts", "startLine": 13, "endLine": 17, "category": "authz", "description": "order read by id with only requireAuth: no check that the order belongs to the caller (the cancel route right below uses requireOrderOwner)" },
+    { "id": "ts-role-change", "path": "src/routes/admin.ts", "startLine": 11, "endLine": 16, "category": "authz", "description": "role change route under /admin has requireAuth but not requireRole('admin'), so any signed-in user can make themselves admin" },
+    { "id": "ts-refund", "path": "src/routes/refunds.ts", "startLine": 8, "endLine": 12, "category": ["authz", "business-logic"], "description": "refund route: any signed-in user can refund any order, and the amount is neither checked against what was paid nor against what was already refunded", "alsoAt": [{ "path": "src/services/orderService.ts", "startLine": 9, "endLine": 12 }] },
+    { "id": "ts-invite-hijack", "path": "src/routes/teams.ts", "startLine": 17, "endLine": 23, "category": ["authz", "authn", "business-logic"], "description": "invite acceptance never compares the invite's email with the caller, so anyone holding or guessing the token joins the team with the invited role (including owner)" }
+  ],
+  "decoys": [
+    { "id": "ts-decoy-cancel", "path": "src/routes/orders.ts", "startLine": 19, "endLine": 21, "description": "cancel route is guarded by requireOrderOwner (defined in middleware/auth.ts)" },
+    { "id": "ts-decoy-orders-list", "path": "src/routes/orders.ts", "startLine": 8, "endLine": 11, "description": "list route filters on the caller's id" },
+    { "id": "ts-decoy-admin-list", "path": "src/routes/admin.ts", "startLine": 7, "endLine": 9, "description": "admin user list is guarded by requireRole('admin')" },
+    { "id": "ts-decoy-admin-delete", "path": "src/routes/admin.ts", "startLine": 18, "endLine": 21, "description": "admin delete is guarded by requireRole('admin')" },
+    { "id": "ts-decoy-profile", "path": "src/routes/profile.ts", "startLine": 7, "endLine": 12, "description": "profile update compares the caller with the path id" },
+    { "id": "ts-decoy-invite-create", "path": "src/routes/teams.ts", "startLine": 9, "endLine": 15, "description": "invite creation asserts the caller owns the team (services/teamService.ts)" }
+  ]
+}

@@ -12,6 +12,8 @@ A small benchmark to measure whether scans and skills help: tiny apps with known
 - Matching (`match.mjs`, pure, unit tested): a finding finds a planted item when the path agrees (suffix match), its line range is within 5 lines of the item's, and it belongs to the item's category family (from the finding's category, then title, then description). Matching is one-to-one, so a single finding never credits two items. A finding on a decoy (within 2 lines), or any finding in the clean app, is a false positive. A finding that is neither is reported as "unmatched" (a real extra issue or noise; read them) and is not counted as a false positive.
 - The report is Markdown and JSON in `scripts/bench/results/` (git-ignored apart from `example.md` and the `ai-security-*.md` reports): recall, false positives, unmatched, cost and time per fixture and configuration, as mean with min-max over repeats.
 
+Real-model measurement of the code-index tools, variant hunting and executed PoC labels: [code-index-variants-measurement.md](code-index-variants-measurement.md). The result there is mostly "no measurable benefit" for the tools and a clear gain for variant hunting.
+
 AI security (agent configuration files and LLM application code) has its own page: [Benchmark: AI security](benchmark-ai-security.md).
 
 ## Running it

@@ -1,0 +1,754 @@
+{
+  "meta": {
+    "mode": "variants",
+    "date": "2026-11-26T16:56:53.625Z",
+    "requestedModel": "gpt-6-luna",
+    "providers": [
+      "chatgpt-codex"
+    ],
+    "models": [
+      "gpt-6-luna"
+    ],
+    "runs": 6,
+    "stoppedEarly": null,
+    "repeat": 3,
+    "arms": [
+      "variants",
+      "plain-scan"
+    ],
+    "budgetPerRun": 1,
+    "label": "main"
+  },
+  "rows": [
+    {
+      "fixture": "variants-docs",
+      "arm": "variants",
+      "runs": 3,
+      "complete": 3,
+      "planted": 6,
+      "found": [
+        6,
+        6,
+        6
+      ],
+      "recall": [
+        1,
+        1,
+        1
+      ],
+      "falsePositives": [
+        0,
+        0,
+        0
+      ],
+      "unmatched": [
+        0,
+        0,
+        0
+      ],
+      "authzFound": [],
+      "authzPlanted": null,
+      "tokens": [
+        31463,
+        29868,
+        32084
+      ],
+      "turns": [
+        4,
+        4,
+        4
+      ],
+      "seconds": [
+        39.224,
+        39.143,
+        42.722
+      ],
+      "costUsd": [
+        0.00227918,
+        0.0022861599999999998,
+        0.00169624
+      ],
+      "indexToolCalls": []
+    },
+    {
+      "fixture": "variants-docs",
+      "arm": "plain-scan",
+      "runs": 3,
+      "complete": 3,
+      "planted": 6,
+      "found": [
+        3,
+        2,
+        3
+      ],
+      "recall": [
+        0.5,
+        0.3333333333333333,
+        0.5
+      ],
+      "falsePositives": [
+        0,
+        0,
+        0
+      ],
+      "unmatched": [
+        1,
+        1,
+        1
+      ],
+      "authzFound": [
+        3,
+        2,
+        3
+      ],
+      "authzPlanted": 6,
+      "tokens": [
+        179346,
+        159760,
+        161003
+      ],
+      "turns": [
+        19,
+        17,
+        17
+      ],
+      "seconds": [
+        134.65,
+        109.231,
+        123.527
+      ],
+      "costUsd": [
+        0.0077817999999999984,
+        0.0059348,
+        0.00820846
+      ],
+      "indexToolCalls": [
+        0,
+        0,
+        0
+      ]
+    }
+  ],
+  "runs": [
+    {
+      "kind": "variants",
+      "fixture": "variants-docs",
+      "arm": "variants",
+      "repeat": 1,
+      "status": "complete",
+      "seconds": 39.224,
+      "costUsd": 0.00227918,
+      "tokens": 31463,
+      "threads": 1,
+      "turns": 4,
+      "toolCalls": {
+        "load_skill": 1,
+        "bash": 2
+      },
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "rootCauseSource": "derived",
+      "skipped": 0,
+      "score": {
+        "planted": 6,
+        "found": 6,
+        "foundIds": [
+          "vd-put",
+          "vd-delete",
+          "vd-export",
+          "vd-versions",
+          "vd-bulk",
+          "vd-share"
+        ],
+        "missedIds": [],
+        "recall": 1,
+        "findings": 6,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [],
+        "nearMisses": []
+      },
+      "findings": [
+        {
+          "title": "Any signed-in user can delete another user's documents through bulk-delete",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "routes/docs.js",
+            "startLine": 52,
+            "endLine": 54
+          },
+          "variantOf": null
+        },
+        {
+          "title": "Any signed-in user can share another user's document",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "routes/collab.js",
+            "startLine": 5,
+            "endLine": 9
+          },
+          "variantOf": null
+        },
+        {
+          "title": "Any signed-in user can read another user's document version history",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "routes/docs.js",
+            "startLine": 41,
+            "endLine": 45
+          },
+          "variantOf": null
+        },
+        {
+          "title": "Any signed-in user can export another user's document",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "routes/docs.js",
+            "startLine": 35,
+            "endLine": 39
+          },
+          "variantOf": null
+        },
+        {
+          "title": "Any signed-in user can delete another user's document",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "routes/docs.js",
+            "startLine": 30,
+            "endLine": 32
+          },
+          "variantOf": null
+        },
+        {
+          "title": "Any signed-in user can modify another user's document",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "routes/docs.js",
+            "startLine": 22,
+            "endLine": 27
+          },
+          "variantOf": null
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "variants",
+      "fixture": "variants-docs",
+      "arm": "variants",
+      "repeat": 2,
+      "status": "complete",
+      "seconds": 39.143,
+      "costUsd": 0.0022861599999999998,
+      "tokens": 29868,
+      "threads": 1,
+      "turns": 4,
+      "toolCalls": {
+        "load_skill": 1,
+        "bash": 2
+      },
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "rootCauseSource": "derived",
+      "skipped": 0,
+      "score": {
+        "planted": 6,
+        "found": 6,
+        "foundIds": [
+          "vd-put",
+          "vd-delete",
+          "vd-export",
+          "vd-versions",
+          "vd-bulk",
+          "vd-share"
+        ],
+        "missedIds": [],
+        "recall": 1,
+        "findings": 6,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [],
+        "nearMisses": []
+      },
+      "findings": [
+        {
+          "title": "Any signed-in user can share another user's document",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "routes/collab.js",
+            "startLine": 5,
+            "endLine": 10
+          },
+          "variantOf": null
+        },
+        {
+          "title": "Any signed-in user can bulk-delete documents they do not own",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "routes/docs.js",
+            "startLine": 52,
+            "endLine": 54
+          },
+          "variantOf": null
+        },
+        {
+          "title": "Any signed-in user can read any document's versions",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "routes/docs.js",
+            "startLine": 41,
+            "endLine": 45
+          },
+          "variantOf": null
+        },
+        {
+          "title": "Any signed-in user can export any document",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "routes/docs.js",
+            "startLine": 35,
+            "endLine": 39
+          },
+          "variantOf": null
+        },
+        {
+          "title": "Any signed-in user can delete any document",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "routes/docs.js",
+            "startLine": 30,
+            "endLine": 32
+          },
+          "variantOf": null
+        },
+        {
+          "title": "Any signed-in user can update any document",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "routes/docs.js",
+            "startLine": 22,
+            "endLine": 27
+          },
+          "variantOf": null
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "variants",
+      "fixture": "variants-docs",
+      "arm": "plain-scan",
+      "repeat": 1,
+      "status": "complete",
+      "seconds": 134.65,
+      "costUsd": 0.0077817999999999984,
+      "tokens": 179346,
+      "threads": 3,
+      "turns": 19,
+      "toolCalls": {
+        "load_skill": 3,
+        "bash": 7,
+        "finding": 6
+      },
+      "indexToolCalls": 0,
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "coverage": "reviewed 13 of 13 entry points; 2 of 2 groups of other files reviewed",
+      "score": {
+        "planted": 6,
+        "found": 3,
+        "foundIds": [
+          "vd-put",
+          "vd-bulk",
+          "vd-share"
+        ],
+        "missedIds": [
+          "vd-delete",
+          "vd-export",
+          "vd-versions"
+        ],
+        "recall": 0.5,
+        "findings": 4,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [
+          {
+            "finding": "8af6c7c7-40f5-4454-b0b6-4d691ed7964d",
+            "title": "User identity is accepted directly from spoofable request header",
+            "located": true
+          }
+        ],
+        "nearMisses": []
+      },
+      "authz": {
+        "planted": 6,
+        "found": 3
+      },
+      "findings": [
+        {
+          "title": "User identity is accepted directly from spoofable request header",
+          "category": "broken-authentication",
+          "severity": "critical",
+          "location": {
+            "path": "middleware/auth.js",
+            "startLine": 3,
+            "endLine": 5
+          }
+        },
+        {
+          "title": "Any authenticated user can grant document sharing access",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "routes/collab.js",
+            "startLine": 5,
+            "endLine": 10
+          }
+        },
+        {
+          "title": "Bulk-delete removes documents without ownership checks",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "routes/docs.js",
+            "startLine": 52,
+            "endLine": 54
+          }
+        },
+        {
+          "title": "Document mutation and read routes omit document ownership checks",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "routes/docs.js",
+            "startLine": 22,
+            "endLine": 27
+          }
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "variants",
+      "fixture": "variants-docs",
+      "arm": "variants",
+      "repeat": 3,
+      "status": "complete",
+      "seconds": 42.722,
+      "costUsd": 0.00169624,
+      "tokens": 32084,
+      "threads": 1,
+      "turns": 4,
+      "toolCalls": {
+        "load_skill": 1,
+        "bash": 2
+      },
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "rootCauseSource": "derived",
+      "skipped": 0,
+      "score": {
+        "planted": 6,
+        "found": 6,
+        "foundIds": [
+          "vd-put",
+          "vd-delete",
+          "vd-export",
+          "vd-versions",
+          "vd-bulk",
+          "vd-share"
+        ],
+        "missedIds": [],
+        "recall": 1,
+        "findings": 6,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [],
+        "nearMisses": []
+      },
+      "findings": [
+        {
+          "title": "Document sharing by ID lacks owner authorization",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "routes/collab.js",
+            "startLine": 5,
+            "endLine": 10
+          },
+          "variantOf": null
+        },
+        {
+          "title": "Bulk document deletion lacks per-document owner authorization",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "routes/docs.js",
+            "startLine": 52,
+            "endLine": 54
+          },
+          "variantOf": null
+        },
+        {
+          "title": "Document version history by ID lacks owner authorization",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "routes/docs.js",
+            "startLine": 41,
+            "endLine": 45
+          },
+          "variantOf": null
+        },
+        {
+          "title": "Document export by ID lacks owner authorization",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "routes/docs.js",
+            "startLine": 35,
+            "endLine": 39
+          },
+          "variantOf": null
+        },
+        {
+          "title": "Document deletion by ID lacks owner authorization",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "routes/docs.js",
+            "startLine": 30,
+            "endLine": 32
+          },
+          "variantOf": null
+        },
+        {
+          "title": "Document update by ID lacks owner authorization",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "routes/docs.js",
+            "startLine": 22,
+            "endLine": 27
+          },
+          "variantOf": null
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "variants",
+      "fixture": "variants-docs",
+      "arm": "plain-scan",
+      "repeat": 2,
+      "status": "complete",
+      "seconds": 109.231,
+      "costUsd": 0.0059348,
+      "tokens": 159760,
+      "threads": 3,
+      "turns": 17,
+      "toolCalls": {
+        "load_skill": 3,
+        "bash": 5,
+        "finding": 6
+      },
+      "indexToolCalls": 0,
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "coverage": "reviewed 13 of 13 entry points; 2 of 2 groups of other files reviewed",
+      "score": {
+        "planted": 6,
+        "found": 2,
+        "foundIds": [
+          "vd-put",
+          "vd-share"
+        ],
+        "missedIds": [
+          "vd-delete",
+          "vd-export",
+          "vd-versions",
+          "vd-bulk"
+        ],
+        "recall": 0.3333333333333333,
+        "findings": 3,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [
+          {
+            "finding": "8d734aa0-2abf-47bd-aea3-7623c605ec17",
+            "title": "Caller-controlled x-user-id bypasses authentication",
+            "located": true
+          }
+        ],
+        "nearMisses": []
+      },
+      "authz": {
+        "planted": 6,
+        "found": 2
+      },
+      "findings": [
+        {
+          "title": "Caller-controlled x-user-id bypasses authentication",
+          "category": "broken-authentication",
+          "severity": "critical",
+          "location": {
+            "path": "middleware/auth.js",
+            "startLine": 3,
+            "endLine": 10
+          }
+        },
+        {
+          "title": "Any authenticated user can grant themselves document access or share another user's document",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "routes/collab.js",
+            "startLine": 5,
+            "endLine": 9
+          }
+        },
+        {
+          "title": "Document endpoints omit owner authorization",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "routes/docs.js",
+            "startLine": 22,
+            "endLine": 27
+          }
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "variants",
+      "fixture": "variants-docs",
+      "arm": "plain-scan",
+      "repeat": 3,
+      "status": "complete",
+      "seconds": 123.527,
+      "costUsd": 0.00820846,
+      "tokens": 161003,
+      "threads": 3,
+      "turns": 17,
+      "toolCalls": {
+        "load_skill": 3,
+        "bash": 5,
+        "finding": 6
+      },
+      "indexToolCalls": 0,
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "coverage": "reviewed 13 of 13 entry points; 2 of 2 groups of other files reviewed",
+      "score": {
+        "planted": 6,
+        "found": 3,
+        "foundIds": [
+          "vd-put",
+          "vd-bulk",
+          "vd-share"
+        ],
+        "missedIds": [
+          "vd-delete",
+          "vd-export",
+          "vd-versions"
+        ],
+        "recall": 0.5,
+        "findings": 4,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [
+          {
+            "finding": "9b88318e-4d5f-40e3-93ed-62dd0ce18811",
+            "title": "Caller-controlled identity header bypasses authentication",
+            "located": true
+          }
+        ],
+        "nearMisses": []
+      },
+      "authz": {
+        "planted": 6,
+        "found": 3
+      },
+      "findings": [
+        {
+          "title": "Caller-controlled identity header bypasses authentication",
+          "category": "broken-authentication",
+          "severity": "critical",
+          "location": {
+            "path": "middleware/auth.js",
+            "startLine": 3,
+            "endLine": 5
+          }
+        },
+        {
+          "title": "Any authenticated user can grant document sharing access",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "routes/collab.js",
+            "startLine": 5,
+            "endLine": 9
+          }
+        },
+        {
+          "title": "Document ID routes omit ownership checks",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "routes/docs.js",
+            "startLine": 22,
+            "endLine": 27
+          }
+        },
+        {
+          "title": "Bulk delete removes documents without ownership checks",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "routes/docs.js",
+            "startLine": 52,
+            "endLine": 54
+          }
+        }
+      ],
+      "rateLimited": false
+    }
+  ]
+}

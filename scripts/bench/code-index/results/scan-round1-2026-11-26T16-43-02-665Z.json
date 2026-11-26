@@ -1,0 +1,3889 @@
+{
+  "meta": {
+    "mode": "scan",
+    "date": "2026-11-26T16:43:02.664Z",
+    "requestedModel": "gpt-6-luna",
+    "providers": [
+      "chatgpt-codex"
+    ],
+    "models": [
+      "gpt-6-luna"
+    ],
+    "runs": 27,
+    "stoppedEarly": null,
+    "repeat": 3,
+    "arms": [
+      "baseline",
+      "index-full",
+      "index-skill"
+    ],
+    "budgetPerRun": 1,
+    "label": "main"
+  },
+  "rows": [
+    {
+      "fixture": "ts-shop",
+      "arm": "baseline",
+      "runs": 3,
+      "complete": 3,
+      "planted": 4,
+      "found": [
+        4,
+        4,
+        4
+      ],
+      "recall": [
+        1,
+        1,
+        1
+      ],
+      "falsePositives": [
+        0,
+        0,
+        0
+      ],
+      "unmatched": [
+        0,
+        0,
+        0
+      ],
+      "authzFound": [
+        4,
+        4,
+        4
+      ],
+      "authzPlanted": 4,
+      "tokens": [
+        191826,
+        179188,
+        190605
+      ],
+      "turns": [
+        20,
+        19,
+        20
+      ],
+      "seconds": [
+        125.278,
+        137.236,
+        136.285
+      ],
+      "costUsd": [
+        0.00784644,
+        0.0081984,
+        0.010265779999999999
+      ],
+      "indexToolCalls": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "fixture": "ts-shop",
+      "arm": "index-full",
+      "runs": 3,
+      "complete": 3,
+      "planted": 4,
+      "found": [
+        4,
+        4,
+        4
+      ],
+      "recall": [
+        1,
+        1,
+        1
+      ],
+      "falsePositives": [
+        0,
+        0,
+        0
+      ],
+      "unmatched": [
+        0,
+        0,
+        0
+      ],
+      "authzFound": [
+        4,
+        4,
+        4
+      ],
+      "authzPlanted": 4,
+      "tokens": [
+        216426,
+        163647,
+        201105
+      ],
+      "turns": [
+        21,
+        17,
+        20
+      ],
+      "seconds": [
+        147.793,
+        113.043,
+        119.855
+      ],
+      "costUsd": [
+        0.00926732,
+        0.007800860000000001,
+        0.00844938
+      ],
+      "indexToolCalls": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "fixture": "ts-shop",
+      "arm": "index-skill",
+      "runs": 3,
+      "complete": 3,
+      "planted": 4,
+      "found": [
+        3,
+        3,
+        3
+      ],
+      "recall": [
+        0.75,
+        0.75,
+        0.75
+      ],
+      "falsePositives": [
+        0,
+        0,
+        0
+      ],
+      "unmatched": [
+        0,
+        0,
+        0
+      ],
+      "authzFound": [
+        3,
+        3,
+        3
+      ],
+      "authzPlanted": 4,
+      "tokens": [
+        192805,
+        298598,
+        205728
+      ],
+      "turns": [
+        11,
+        17,
+        12
+      ],
+      "seconds": [
+        73.658,
+        71.659,
+        63.155
+      ],
+      "costUsd": [
+        0.00837882,
+        0.013823720000000001,
+        0.00957632
+      ],
+      "indexToolCalls": [
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "fixture": "java-bank",
+      "arm": "baseline",
+      "runs": 3,
+      "complete": 3,
+      "planted": 4,
+      "found": [
+        4,
+        4,
+        4
+      ],
+      "recall": [
+        1,
+        1,
+        1
+      ],
+      "falsePositives": [
+        0,
+        0,
+        0
+      ],
+      "unmatched": [
+        1,
+        0,
+        0
+      ],
+      "authzFound": [
+        4,
+        4,
+        4
+      ],
+      "authzPlanted": 4,
+      "tokens": [
+        185701,
+        189792,
+        197270
+      ],
+      "turns": [
+        19,
+        19,
+        20
+      ],
+      "seconds": [
+        156.815,
+        121.222,
+        138.044
+      ],
+      "costUsd": [
+        0.0091933,
+        0.00827816,
+        0.00856556
+      ],
+      "indexToolCalls": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "fixture": "java-bank",
+      "arm": "index-full",
+      "runs": 3,
+      "complete": 3,
+      "planted": 4,
+      "found": [
+        4,
+        4,
+        4
+      ],
+      "recall": [
+        1,
+        1,
+        1
+      ],
+      "falsePositives": [
+        0,
+        0,
+        0
+      ],
+      "unmatched": [
+        0,
+        0,
+        0
+      ],
+      "authzFound": [
+        4,
+        4,
+        4
+      ],
+      "authzPlanted": 4,
+      "tokens": [
+        172811,
+        210714,
+        157873
+      ],
+      "turns": [
+        17,
+        21,
+        16
+      ],
+      "seconds": [
+        124.361,
+        128.428,
+        101.45
+      ],
+      "costUsd": [
+        0.006741980000000002,
+        0.0081626,
+        0.00704626
+      ],
+      "indexToolCalls": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "fixture": "java-bank",
+      "arm": "index-skill",
+      "runs": 3,
+      "complete": 3,
+      "planted": 4,
+      "found": [
+        3,
+        4,
+        4
+      ],
+      "recall": [
+        0.75,
+        1,
+        1
+      ],
+      "falsePositives": [
+        0,
+        0,
+        0
+      ],
+      "unmatched": [
+        1,
+        0,
+        1
+      ],
+      "authzFound": [
+        3,
+        4,
+        4
+      ],
+      "authzPlanted": 4,
+      "tokens": [
+        267340,
+        459694,
+        368586
+      ],
+      "turns": [
+        11,
+        20,
+        15
+      ],
+      "seconds": [
+        96.813,
+        85.814,
+        70.135
+      ],
+      "costUsd": [
+        0.013613840000000002,
+        0.020927160000000004,
+        0.01355348
+      ],
+      "indexToolCalls": [
+        0,
+        0,
+        1
+      ]
+    },
+    {
+      "fixture": "medium-app",
+      "arm": "baseline",
+      "runs": 3,
+      "complete": 3,
+      "planted": 10,
+      "found": [
+        10,
+        10,
+        10
+      ],
+      "recall": [
+        1,
+        1,
+        1
+      ],
+      "falsePositives": [
+        0,
+        0,
+        0
+      ],
+      "unmatched": [
+        2,
+        6,
+        3
+      ],
+      "authzFound": [
+        2,
+        2,
+        2
+      ],
+      "authzPlanted": 2,
+      "tokens": [
+        1501132,
+        4095226,
+        1196515
+      ],
+      "turns": [
+        78,
+        111,
+        65
+      ],
+      "seconds": [
+        460.377,
+        788.174,
+        537.709
+      ],
+      "costUsd": [
+        0.06375688,
+        0.18976116,
+        0.056367900000000006
+      ],
+      "indexToolCalls": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "fixture": "medium-app",
+      "arm": "index-skill",
+      "runs": 3,
+      "complete": 3,
+      "planted": 10,
+      "found": [
+        6,
+        7,
+        8
+      ],
+      "recall": [
+        0.6,
+        0.7,
+        0.8
+      ],
+      "falsePositives": [
+        0,
+        0,
+        0
+      ],
+      "unmatched": [
+        0,
+        0,
+        0
+      ],
+      "authzFound": [
+        2,
+        2,
+        2
+      ],
+      "authzPlanted": 2,
+      "tokens": [
+        440594,
+        414256,
+        486039
+      ],
+      "turns": [
+        13,
+        15,
+        16
+      ],
+      "seconds": [
+        76.048,
+        108.63,
+        120.909
+      ],
+      "costUsd": [
+        0.020670679999999997,
+        0.013989039999999998,
+        0.01978262
+      ],
+      "indexToolCalls": [
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "fixture": "medium-app",
+      "arm": "index-full",
+      "runs": 3,
+      "complete": 3,
+      "planted": 10,
+      "found": [
+        10,
+        10,
+        10
+      ],
+      "recall": [
+        1,
+        1,
+        1
+      ],
+      "falsePositives": [
+        1,
+        0,
+        1
+      ],
+      "unmatched": [
+        2,
+        4,
+        2
+      ],
+      "authzFound": [
+        2,
+        2,
+        2
+      ],
+      "authzPlanted": 2,
+      "tokens": [
+        3432655,
+        1688420,
+        3265649
+      ],
+      "turns": [
+        108,
+        65,
+        94
+      ],
+      "seconds": [
+        619.936,
+        611.267,
+        784.904
+      ],
+      "costUsd": [
+        0.14535374,
+        0.08103752000000002,
+        0.14299066000000002
+      ],
+      "indexToolCalls": [
+        1,
+        1,
+        0
+      ]
+    }
+  ],
+  "runs": [
+    {
+      "kind": "scan",
+      "fixture": "ts-shop",
+      "arm": "baseline",
+      "repeat": 1,
+      "status": "complete",
+      "seconds": 125.278,
+      "costUsd": 0.00784644,
+      "tokens": 191826,
+      "threads": 3,
+      "turns": 20,
+      "toolCalls": {
+        "load_skill": 3,
+        "bash": 7,
+        "finding": 7
+      },
+      "indexToolCalls": 0,
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "coverage": "reviewed 10 of 10 entry points; 3 of 3 groups of other files reviewed",
+      "score": {
+        "planted": 4,
+        "found": 4,
+        "foundIds": [
+          "ts-order-idor",
+          "ts-role-change",
+          "ts-refund",
+          "ts-invite-hijack"
+        ],
+        "missedIds": [],
+        "recall": 1,
+        "findings": 4,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [],
+        "nearMisses": []
+      },
+      "authz": {
+        "planted": 4,
+        "found": 4
+      },
+      "findings": [
+        {
+          "title": "Authenticated users can promote themselves to admin",
+          "category": "broken-access-control",
+          "severity": "critical",
+          "location": {
+            "path": "src/routes/admin.ts",
+            "startLine": 11,
+            "endLine": 15
+          }
+        },
+        {
+          "title": "Any authenticated user can issue refunds against arbitrary orders",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/refunds.ts",
+            "startLine": 8,
+            "endLine": 12
+          }
+        },
+        {
+          "title": "Invite acceptance ignores invited email, allowing arbitrary account to join",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/teams.ts",
+            "startLine": 18,
+            "endLine": 21
+          }
+        },
+        {
+          "title": "Order detail endpoint exposes other users' orders",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/orders.ts",
+            "startLine": 13,
+            "endLine": 16
+          }
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "scan",
+      "fixture": "ts-shop",
+      "arm": "index-full",
+      "repeat": 1,
+      "status": "complete",
+      "seconds": 147.793,
+      "costUsd": 0.00926732,
+      "tokens": 216426,
+      "threads": 3,
+      "turns": 21,
+      "toolCalls": {
+        "load_skill": 3,
+        "bash": 8,
+        "finding": 8
+      },
+      "indexToolCalls": 0,
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "coverage": "reviewed 10 of 10 entry points; 3 of 3 groups of other files reviewed",
+      "score": {
+        "planted": 4,
+        "found": 4,
+        "foundIds": [
+          "ts-order-idor",
+          "ts-role-change",
+          "ts-refund",
+          "ts-invite-hijack"
+        ],
+        "missedIds": [],
+        "recall": 1,
+        "findings": 4,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [],
+        "nearMisses": []
+      },
+      "authz": {
+        "planted": 4,
+        "found": 4
+      },
+      "findings": [
+        {
+          "title": "Any authenticated user can issue arbitrary refunds",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/refunds.ts",
+            "startLine": 8,
+            "endLine": 12
+          }
+        },
+        {
+          "title": "Authenticated users can promote accounts and assign arbitrary roles",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/admin.ts",
+            "startLine": 11,
+            "endLine": 15
+          }
+        },
+        {
+          "title": "Invite acceptance ignores the invited email",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/teams.ts",
+            "startLine": 18,
+            "endLine": 21
+          }
+        },
+        {
+          "title": "Order details and refunds lack object ownership authorization",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/orders.ts",
+            "startLine": 13,
+            "endLine": 16
+          }
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "scan",
+      "fixture": "ts-shop",
+      "arm": "index-skill",
+      "repeat": 1,
+      "status": "complete",
+      "seconds": 73.658,
+      "costUsd": 0.00837882,
+      "tokens": 192805,
+      "threads": 1,
+      "turns": 11,
+      "toolCalls": {
+        "load_skill": 1,
+        "bash": 4,
+        "spawn_agent": 1,
+        "routes": 1,
+        "finding": 3
+      },
+      "indexToolCalls": 1,
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "coverage": null,
+      "score": {
+        "planted": 4,
+        "found": 3,
+        "foundIds": [
+          "ts-order-idor",
+          "ts-role-change",
+          "ts-refund"
+        ],
+        "missedIds": [
+          "ts-invite-hijack"
+        ],
+        "recall": 0.75,
+        "findings": 3,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [],
+        "nearMisses": []
+      },
+      "authz": {
+        "planted": 4,
+        "found": 3
+      },
+      "findings": [
+        {
+          "title": "Authenticated users can promote themselves or others to admin",
+          "category": "broken-access-control",
+          "severity": "critical",
+          "location": {
+            "path": "src/routes/admin.ts",
+            "startLine": 11,
+            "endLine": 15
+          }
+        },
+        {
+          "title": "Authenticated users can issue arbitrary refunds against any order",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/refunds.ts",
+            "startLine": 8,
+            "endLine": 12
+          }
+        },
+        {
+          "title": "Order lookup exposes other users’ orders",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/orders.ts",
+            "startLine": 13,
+            "endLine": 16
+          }
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "scan",
+      "fixture": "java-bank",
+      "arm": "baseline",
+      "repeat": 1,
+      "status": "complete",
+      "seconds": 156.815,
+      "costUsd": 0.0091933,
+      "tokens": 185701,
+      "threads": 3,
+      "turns": 19,
+      "toolCalls": {
+        "load_skill": 3,
+        "bash": 6,
+        "finding": 7
+      },
+      "indexToolCalls": 0,
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "coverage": "reviewed 15 of 15 entry points; 1 of 1 groups of other files reviewed",
+      "score": {
+        "planted": 4,
+        "found": 4,
+        "foundIds": [
+          "jb-account-idor",
+          "jb-approve-self",
+          "jb-report-export",
+          "jb-reset-confirm"
+        ],
+        "missedIds": [],
+        "recall": 1,
+        "findings": 6,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [
+          {
+            "finding": "63176240-bcc1-4abb-95cb-fb78fedea866",
+            "title": "Negative transfer amounts are accepted and marked completed",
+            "located": true
+          }
+        ],
+        "nearMisses": []
+      },
+      "authz": {
+        "planted": 4,
+        "found": 4
+      },
+      "findings": [
+        {
+          "title": "Admin transfer export lacks an administrator authorization check",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/AdminReportController.java",
+            "startLine": 8,
+            "endLine": 19
+          }
+        },
+        {
+          "title": "Any authenticated user can approve high-value transfers",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/TransferService.java",
+            "startLine": 24,
+            "endLine": 30
+          }
+        },
+        {
+          "title": "Any authenticated user can approve pending transfers",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/TransferController.java",
+            "startLine": 29,
+            "endLine": 33
+          }
+        },
+        {
+          "title": "Negative transfer amounts are accepted and marked completed",
+          "category": "missing-validation",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/TransferService.java",
+            "startLine": 18,
+            "endLine": 21
+          }
+        },
+        {
+          "title": "Password reset token is not bound to the customer being changed",
+          "category": "broken-authentication",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/PasswordResetController.java",
+            "startLine": 34,
+            "endLine": 35
+          }
+        },
+        {
+          "title": "Unauthenticated account lookup exposes account records",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/AccountController.java",
+            "startLine": 24,
+            "endLine": 26
+          }
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "scan",
+      "fixture": "java-bank",
+      "arm": "index-full",
+      "repeat": 1,
+      "status": "complete",
+      "seconds": 124.361,
+      "costUsd": 0.006741980000000002,
+      "tokens": 172811,
+      "threads": 3,
+      "turns": 17,
+      "toolCalls": {
+        "load_skill": 3,
+        "bash": 6,
+        "finding": 5
+      },
+      "indexToolCalls": 0,
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "coverage": "reviewed 15 of 15 entry points; 1 of 1 groups of other files reviewed",
+      "score": {
+        "planted": 4,
+        "found": 4,
+        "foundIds": [
+          "jb-account-idor",
+          "jb-approve-self",
+          "jb-report-export",
+          "jb-reset-confirm"
+        ],
+        "missedIds": [],
+        "recall": 1,
+        "findings": 5,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [],
+        "nearMisses": []
+      },
+      "authz": {
+        "planted": 4,
+        "found": 4
+      },
+      "findings": [
+        {
+          "title": "Account lookup exposes accounts without ownership check",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/AccountController.java",
+            "startLine": 24,
+            "endLine": 26
+          }
+        },
+        {
+          "title": "Admin transfer export lacks administrator authorization",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/AdminReportController.java",
+            "startLine": 8,
+            "endLine": 19
+          }
+        },
+        {
+          "title": "Any authenticated user can approve any pending transfer",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/TransferController.java",
+            "startLine": 29,
+            "endLine": 33
+          }
+        },
+        {
+          "title": "Any authenticated user can approve pending transfers",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/TransferService.java",
+            "startLine": 24,
+            "endLine": 30
+          }
+        },
+        {
+          "title": "Password reset token is not bound to the customer being changed",
+          "category": "broken-authentication",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/PasswordResetController.java",
+            "startLine": 30,
+            "endLine": 36
+          }
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "scan",
+      "fixture": "java-bank",
+      "arm": "index-skill",
+      "repeat": 1,
+      "status": "complete",
+      "seconds": 96.813,
+      "costUsd": 0.013613840000000002,
+      "tokens": 267340,
+      "threads": 1,
+      "turns": 11,
+      "toolCalls": {
+        "load_skill": 1,
+        "bash": 3,
+        "spawn_agent": 1,
+        "finding": 5
+      },
+      "indexToolCalls": 0,
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "coverage": null,
+      "score": {
+        "planted": 4,
+        "found": 3,
+        "foundIds": [
+          "jb-account-idor",
+          "jb-approve-self",
+          "jb-reset-confirm"
+        ],
+        "missedIds": [
+          "jb-report-export"
+        ],
+        "recall": 0.75,
+        "findings": 4,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [
+          {
+            "finding": "cb8f169b-2847-495f-8087-41820203434f",
+            "title": "Admin transfer report has no visible ADMIN authorization",
+            "located": true
+          }
+        ],
+        "nearMisses": []
+      },
+      "authz": {
+        "planted": 4,
+        "found": 3
+      },
+      "findings": [
+        {
+          "title": "Password reset token is not bound to requested customer",
+          "category": "broken-authentication",
+          "severity": "critical",
+          "location": {
+            "path": "src/main/java/bench/bank/PasswordResetController.java",
+            "startLine": 30,
+            "endLine": 37
+          }
+        },
+        {
+          "title": "Account ID endpoint exposes accounts without owner check",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/AccountController.java",
+            "startLine": 24,
+            "endLine": 26
+          }
+        },
+        {
+          "title": "Any user can approve another user's pending transfer",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/TransferController.java",
+            "startLine": 29,
+            "endLine": 32
+          }
+        },
+        {
+          "title": "Admin transfer report has no visible ADMIN authorization",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/main/java/bench/bank/AdminReportController.java",
+            "startLine": 8,
+            "endLine": 10
+          }
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "scan",
+      "fixture": "medium-app",
+      "arm": "baseline",
+      "repeat": 1,
+      "status": "complete",
+      "seconds": 460.377,
+      "costUsd": 0.06375688,
+      "tokens": 1501132,
+      "threads": 8,
+      "turns": 78,
+      "toolCalls": {
+        "load_skill": 8,
+        "bash": 26,
+        "finding": 14,
+        "spawn_agent": 19
+      },
+      "indexToolCalls": 0,
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "coverage": "reviewed 71 of 71 entry points; 6 of 6 groups of other files reviewed",
+      "score": {
+        "planted": 10,
+        "found": 10,
+        "foundIds": [
+          "ma-xss",
+          "ma-order-idor",
+          "ma-sqli",
+          "ma-traversal",
+          "ma-admin-role",
+          "ma-cmdi",
+          "ma-secret",
+          "ma-md5",
+          "ma-ssrf",
+          "ma-pickle"
+        ],
+        "missedIds": [],
+        "recall": 1,
+        "findings": 12,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [
+          {
+            "finding": "034ef4fe-7f84-4382-baf8-067e5d0d4939",
+            "title": "Orders can be created for zero cost using invalid product IDs",
+            "located": true
+          },
+          {
+            "finding": "f69b597a-58e4-4c0b-b0b7-6fd08ee62e09",
+            "title": "Logout does not invalidate issued bearer tokens",
+            "located": true
+          }
+        ],
+        "nearMisses": []
+      },
+      "authz": {
+        "planted": 2,
+        "found": 2
+      },
+      "findings": [
+        {
+          "title": "Any authenticated user can change arbitrary account roles",
+          "category": "broken-access-control",
+          "severity": "critical",
+          "location": {
+            "path": "routes/admin.js",
+            "startLine": 13,
+            "endLine": 15
+          }
+        },
+        {
+          "title": "Hardcoded JWT signing secret permits token forgery",
+          "category": "hardcoded-secret",
+          "severity": "critical",
+          "location": {
+            "path": "config.js",
+            "startLine": 6,
+            "endLine": 6
+          }
+        },
+        {
+          "title": "Unauthenticated pickle deserialization in reports snapshot endpoint",
+          "category": "unsafe-deserialization",
+          "severity": "critical",
+          "location": {
+            "path": "reports-svc/app.py",
+            "startLine": 24,
+            "endLine": 28
+          }
+        },
+        {
+          "title": "Authenticated file download permits path traversal",
+          "category": "path-traversal",
+          "severity": "high",
+          "location": {
+            "path": "routes/files.js",
+            "startLine": 21,
+            "endLine": 24
+          }
+        },
+        {
+          "title": "Order detail endpoint exposes other users' orders",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "routes/orders.js",
+            "startLine": 19,
+            "endLine": 23
+          }
+        },
+        {
+          "title": "Orders can be created for zero cost using invalid product IDs",
+          "category": "other",
+          "severity": "high",
+          "location": {
+            "path": "services/pricing.js",
+            "startLine": 3,
+            "endLine": 9
+          }
+        },
+        {
+          "title": "Password credentials stored with fast MD5 hashing",
+          "category": "crypto-misuse",
+          "severity": "high",
+          "location": {
+            "path": "lib/crypto.js",
+            "startLine": 3,
+            "endLine": 5
+          }
+        },
+        {
+          "title": "Shell command injection in sales export format",
+          "category": "command-injection",
+          "severity": "high",
+          "location": {
+            "path": "services/exporter.js",
+            "startLine": 18,
+            "endLine": 18
+          }
+        },
+        {
+          "title": "SQL injection in unauthenticated order search",
+          "category": "sql-injection",
+          "severity": "high",
+          "location": {
+            "path": "routes/search.js",
+            "startLine": 15,
+            "endLine": 15
+          }
+        },
+        {
+          "title": "Authenticated notification hook can make arbitrary outbound requests",
+          "category": "ssrf",
+          "severity": "medium",
+          "location": {
+            "path": "routes/notifications.js",
+            "startLine": 19,
+            "endLine": 21
+          }
+        },
+        {
+          "title": "Logout does not invalidate issued bearer tokens",
+          "category": "broken-authentication",
+          "severity": "medium",
+          "location": {
+            "path": "routes/auth.js",
+            "startLine": 20,
+            "endLine": 20
+          }
+        },
+        {
+          "title": "Stored cross-site scripting in user cards",
+          "category": "xss",
+          "severity": "medium",
+          "location": {
+            "path": "routes/users.js",
+            "startLine": 20,
+            "endLine": 20
+          }
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "scan",
+      "fixture": "medium-app",
+      "arm": "index-skill",
+      "repeat": 1,
+      "status": "complete",
+      "seconds": 76.048,
+      "costUsd": 0.020670679999999997,
+      "tokens": 440594,
+      "threads": 1,
+      "turns": 13,
+      "toolCalls": {
+        "load_skill": 1,
+        "bash": 3,
+        "spawn_agent": 4,
+        "routes": 1,
+        "finding": 3
+      },
+      "indexToolCalls": 1,
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "coverage": null,
+      "score": {
+        "planted": 10,
+        "found": 6,
+        "foundIds": [
+          "ma-order-idor",
+          "ma-sqli",
+          "ma-traversal",
+          "ma-admin-role",
+          "ma-cmdi",
+          "ma-pickle"
+        ],
+        "missedIds": [
+          "ma-xss",
+          "ma-secret",
+          "ma-md5",
+          "ma-ssrf"
+        ],
+        "recall": 0.6,
+        "findings": 6,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [],
+        "nearMisses": []
+      },
+      "authz": {
+        "planted": 2,
+        "found": 2
+      },
+      "findings": [
+        {
+          "title": "Authenticated arbitrary command execution via sales export format",
+          "category": "command-injection",
+          "severity": "critical",
+          "location": {
+            "path": "services/exporter.js",
+            "startLine": 18,
+            "endLine": 18
+          }
+        },
+        {
+          "title": "Authenticated users can promote themselves to admin",
+          "category": "broken-access-control",
+          "severity": "critical",
+          "location": {
+            "path": "routes/admin.js",
+            "startLine": 13,
+            "endLine": 15
+          }
+        },
+        {
+          "title": "Unauthenticated snapshot endpoint executes attacker-controlled pickle",
+          "category": "unsafe-deserialization",
+          "severity": "critical",
+          "location": {
+            "path": "reports-svc/app.py",
+            "startLine": 22,
+            "endLine": 28
+          }
+        },
+        {
+          "title": "Authenticated arbitrary file read via path traversal",
+          "category": "path-traversal",
+          "severity": "high",
+          "location": {
+            "path": "routes/files.js",
+            "startLine": 21,
+            "endLine": 23
+          }
+        },
+        {
+          "title": "Authenticated order endpoint exposes other users' order details",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "routes/orders.js",
+            "startLine": 19,
+            "endLine": 23
+          }
+        },
+        {
+          "title": "Unauthenticated order search permits SQL injection through sort",
+          "category": "sql-injection",
+          "severity": "high",
+          "location": {
+            "path": "routes/search.js",
+            "startLine": 12,
+            "endLine": 16
+          }
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "scan",
+      "fixture": "ts-shop",
+      "arm": "baseline",
+      "repeat": 2,
+      "status": "complete",
+      "seconds": 137.236,
+      "costUsd": 0.0081984,
+      "tokens": 179188,
+      "threads": 3,
+      "turns": 19,
+      "toolCalls": {
+        "load_skill": 3,
+        "bash": 7,
+        "finding": 7
+      },
+      "indexToolCalls": 0,
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "coverage": "reviewed 10 of 10 entry points; 3 of 3 groups of other files reviewed",
+      "score": {
+        "planted": 4,
+        "found": 4,
+        "foundIds": [
+          "ts-order-idor",
+          "ts-role-change",
+          "ts-refund",
+          "ts-invite-hijack"
+        ],
+        "missedIds": [],
+        "recall": 1,
+        "findings": 4,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [],
+        "nearMisses": []
+      },
+      "authz": {
+        "planted": 4,
+        "found": 4
+      },
+      "findings": [
+        {
+          "title": "Authenticated users can promote themselves to admin",
+          "category": "broken-access-control",
+          "severity": "critical",
+          "location": {
+            "path": "src/routes/admin.ts",
+            "startLine": 11,
+            "endLine": 15
+          }
+        },
+        {
+          "title": "Authenticated callers can issue refunds against arbitrary orders and amounts",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/refunds.ts",
+            "startLine": 8,
+            "endLine": 12
+          }
+        },
+        {
+          "title": "Order detail endpoint exposes other users' orders",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/orders.ts",
+            "startLine": 13,
+            "endLine": 17
+          }
+        },
+        {
+          "title": "Invite acceptance does not bind invite to its target email",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/routes/teams.ts",
+            "startLine": 18,
+            "endLine": 21
+          }
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "scan",
+      "fixture": "medium-app",
+      "arm": "index-full",
+      "repeat": 1,
+      "status": "complete",
+      "seconds": 619.936,
+      "costUsd": 0.14535374,
+      "tokens": 3432655,
+      "threads": 8,
+      "turns": 108,
+      "toolCalls": {
+        "load_skill": 8,
+        "bash": 36,
+        "spawn_agent": 34,
+        "finding": 17,
+        "callers_of": 1
+      },
+      "indexToolCalls": 1,
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "coverage": "reviewed 71 of 71 entry points; 6 of 6 groups of other files reviewed",
+      "score": {
+        "planted": 10,
+        "found": 10,
+        "foundIds": [
+          "ma-xss",
+          "ma-order-idor",
+          "ma-sqli",
+          "ma-traversal",
+          "ma-admin-role",
+          "ma-cmdi",
+          "ma-secret",
+          "ma-md5",
+          "ma-ssrf",
+          "ma-pickle"
+        ],
+        "missedIds": [],
+        "recall": 1,
+        "findings": 13,
+        "falsePositives": 1,
+        "decoyHits": [
+          {
+            "finding": "08c3694f-2964-4407-80d1-fcecee6d4d68",
+            "decoy": "ma-decoy-cancel"
+          }
+        ],
+        "unmatched": [
+          {
+            "finding": "c2bcc780-94a0-4d9a-b852-c0f3204f0be7",
+            "title": "Unauthenticated search exposes orders belonging to arbitrary users",
+            "located": true
+          },
+          {
+            "finding": "c96f6a5e-164e-44a4-ac3d-6d6029ef2ef6",
+            "title": "Order pricing accepts arbitrary items and silently underprices unknown products",
+            "located": true
+          }
+        ],
+        "nearMisses": []
+      },
+      "authz": {
+        "planted": 2,
+        "found": 2
+      },
+      "findings": [
+        {
+          "title": "Hardcoded JWT signing secret permits token forgery",
+          "category": "hardcoded-secret",
+          "severity": "critical",
+          "location": {
+            "path": "config.js",
+            "startLine": 6,
+            "endLine": 6
+          }
+        },
+        {
+          "title": "Unauthenticated pickle deserialization in snapshot endpoint",
+          "category": "unsafe-deserialization",
+          "severity": "critical",
+          "location": {
+            "path": "reports-svc/app.py",
+            "startLine": 27,
+            "endLine": 27
+          }
+        },
+        {
+          "title": "Authenticated user can read arbitrary local files via download path",
+          "category": "path-traversal",
+          "severity": "high",
+          "location": {
+            "path": "routes/files.js",
+            "startLine": 21,
+            "endLine": 23
+          }
+        },
+        {
+          "title": "Authenticated users can promote themselves to admin",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "routes/admin.js",
+            "startLine": 13,
+            "endLine": 15
+          }
+        },
+        {
+          "title": "MD5 password hashes are trivially crackable",
+          "category": "crypto-misuse",
+          "severity": "high",
+          "location": {
+            "path": "lib/crypto.js",
+            "startLine": 3,
+            "endLine": 4
+          }
+        },
+        {
+          "title": "Notifications hook allows server-side request forgery",
+          "category": "ssrf",
+          "severity": "high",
+          "location": {
+            "path": "routes/notifications.js",
+            "startLine": 19,
+            "endLine": 21
+          }
+        },
+        {
+          "title": "Order detail endpoint exposes other users' orders",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "routes/orders.js",
+            "startLine": 22,
+            "endLine": 23
+          }
+        },
+        {
+          "title": "Shell command injection in sales export format",
+          "category": "command-injection",
+          "severity": "high",
+          "location": {
+            "path": "services/exporter.js",
+            "startLine": 18,
+            "endLine": 18
+          }
+        },
+        {
+          "title": "SQL injection in search orders sort and status",
+          "category": "sql-injection",
+          "severity": "high",
+          "location": {
+            "path": "routes/search.js",
+            "startLine": 13,
+            "endLine": 16
+          }
+        },
+        {
+          "title": "Stored XSS through user display cards",
+          "category": "xss",
+          "severity": "high",
+          "location": {
+            "path": "routes/users.js",
+            "startLine": 20,
+            "endLine": 20
+          }
+        },
+        {
+          "title": "Unauthenticated search exposes orders belonging to arbitrary users",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "routes/search.js",
+            "startLine": 19,
+            "endLine": 21
+          }
+        },
+        {
+          "title": "Order pricing accepts arbitrary items and silently underprices unknown products",
+          "category": "missing-validation",
+          "severity": "medium",
+          "location": {
+            "path": "services/pricing.js",
+            "startLine": 3,
+            "endLine": 9
+          }
+        },
+        {
+          "title": "Order cancellation ignores current payment/shipping status",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "routes/orders.js",
+            "startLine": 30,
+            "endLine": 30
+          }
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "scan",
+      "fixture": "ts-shop",
+      "arm": "index-skill",
+      "repeat": 2,
+      "status": "complete",
+      "seconds": 71.659,
+      "costUsd": 0.013823720000000001,
+      "tokens": 298598,
+      "threads": 1,
+      "turns": 17,
+      "toolCalls": {
+        "load_skill": 1,
+        "bash": 5,
+        "spawn_agent": 6,
+        "routes": 1,
+        "finding": 3
+      },
+      "indexToolCalls": 1,
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "coverage": null,
+      "score": {
+        "planted": 4,
+        "found": 3,
+        "foundIds": [
+          "ts-order-idor",
+          "ts-role-change",
+          "ts-refund"
+        ],
+        "missedIds": [
+          "ts-invite-hijack"
+        ],
+        "recall": 0.75,
+        "findings": 3,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [],
+        "nearMisses": []
+      },
+      "authz": {
+        "planted": 4,
+        "found": 3
+      },
+      "findings": [
+        {
+          "title": "Unauthenticated privilege escalation via role update route",
+          "category": "broken-access-control",
+          "severity": "critical",
+          "location": {
+            "path": "src/routes/admin.ts",
+            "startLine": 11,
+            "endLine": 15
+          }
+        },
+        {
+          "title": "Any authenticated user can issue unbounded refunds on any order",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/refunds.ts",
+            "startLine": 8,
+            "endLine": 12
+          }
+        },
+        {
+          "title": "Order detail endpoint exposes other users' orders",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/orders.ts",
+            "startLine": 13,
+            "endLine": 17
+          }
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "scan",
+      "fixture": "ts-shop",
+      "arm": "index-full",
+      "repeat": 2,
+      "status": "complete",
+      "seconds": 113.043,
+      "costUsd": 0.007800860000000001,
+      "tokens": 163647,
+      "threads": 3,
+      "turns": 17,
+      "toolCalls": {
+        "load_skill": 3,
+        "bash": 7,
+        "finding": 5
+      },
+      "indexToolCalls": 0,
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "coverage": "reviewed 10 of 10 entry points; 3 of 3 groups of other files reviewed",
+      "score": {
+        "planted": 4,
+        "found": 4,
+        "foundIds": [
+          "ts-order-idor",
+          "ts-role-change",
+          "ts-refund",
+          "ts-invite-hijack"
+        ],
+        "missedIds": [],
+        "recall": 1,
+        "findings": 5,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [],
+        "nearMisses": []
+      },
+      "authz": {
+        "planted": 4,
+        "found": 4
+      },
+      "findings": [
+        {
+          "title": "Authenticated users can promote themselves to admin",
+          "category": "broken-access-control",
+          "severity": "critical",
+          "location": {
+            "path": "src/routes/admin.ts",
+            "startLine": 11,
+            "endLine": 15
+          }
+        },
+        {
+          "title": "Any authenticated user can issue refunds against arbitrary orders",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/refunds.ts",
+            "startLine": 8,
+            "endLine": 12
+          }
+        },
+        {
+          "title": "Authenticated users can refund any order without ownership or amount limits",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/services/orderService.ts",
+            "startLine": 9,
+            "endLine": 11
+          }
+        },
+        {
+          "title": "Invite acceptance ignores invitee email and permits owner-role takeover",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/teams.ts",
+            "startLine": 17,
+            "endLine": 21
+          }
+        },
+        {
+          "title": "Order details endpoint omits order ownership check",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/orders.ts",
+            "startLine": 13,
+            "endLine": 16
+          }
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "scan",
+      "fixture": "java-bank",
+      "arm": "baseline",
+      "repeat": 2,
+      "status": "complete",
+      "seconds": 121.222,
+      "costUsd": 0.00827816,
+      "tokens": 189792,
+      "threads": 3,
+      "turns": 19,
+      "toolCalls": {
+        "load_skill": 3,
+        "bash": 8,
+        "finding": 6
+      },
+      "indexToolCalls": 0,
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "coverage": "reviewed 15 of 15 entry points; 1 of 1 groups of other files reviewed",
+      "score": {
+        "planted": 4,
+        "found": 4,
+        "foundIds": [
+          "jb-account-idor",
+          "jb-approve-self",
+          "jb-report-export",
+          "jb-reset-confirm"
+        ],
+        "missedIds": [],
+        "recall": 1,
+        "findings": 4,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [],
+        "nearMisses": []
+      },
+      "authz": {
+        "planted": 4,
+        "found": 4
+      },
+      "findings": [
+        {
+          "title": "Account detail endpoint exposes accounts without ownership checks",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/AccountController.java",
+            "startLine": 24,
+            "endLine": 26
+          }
+        },
+        {
+          "title": "Admin transfer report is missing authorization",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/AdminReportController.java",
+            "startLine": 8,
+            "endLine": 19
+          }
+        },
+        {
+          "title": "Any authenticated user can approve pending transfers",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/TransferController.java",
+            "startLine": 29,
+            "endLine": 32
+          }
+        },
+        {
+          "title": "Password reset token is not bound to customer ID",
+          "category": "broken-authentication",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/PasswordResetController.java",
+            "startLine": 30,
+            "endLine": 36
+          }
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "scan",
+      "fixture": "java-bank",
+      "arm": "index-full",
+      "repeat": 2,
+      "status": "complete",
+      "seconds": 128.428,
+      "costUsd": 0.0081626,
+      "tokens": 210714,
+      "threads": 3,
+      "turns": 21,
+      "toolCalls": {
+        "load_skill": 3,
+        "bash": 9,
+        "finding": 6
+      },
+      "indexToolCalls": 0,
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "coverage": "reviewed 15 of 15 entry points; 1 of 1 groups of other files reviewed",
+      "score": {
+        "planted": 4,
+        "found": 4,
+        "foundIds": [
+          "jb-account-idor",
+          "jb-approve-self",
+          "jb-report-export",
+          "jb-reset-confirm"
+        ],
+        "missedIds": [],
+        "recall": 1,
+        "findings": 4,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [],
+        "nearMisses": []
+      },
+      "authz": {
+        "planted": 4,
+        "found": 4
+      },
+      "findings": [
+        {
+          "title": "Password reset token is not bound to the customer being reset",
+          "category": "broken-authentication",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/PasswordResetController.java",
+            "startLine": 30,
+            "endLine": 36
+          }
+        },
+        {
+          "title": "Account lookup endpoint exposes accounts without ownership check",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/AccountController.java",
+            "startLine": 24,
+            "endLine": 27
+          }
+        },
+        {
+          "title": "Admin transfer report lacks admin authorization",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/AdminReportController.java",
+            "startLine": 8,
+            "endLine": 19
+          }
+        },
+        {
+          "title": "Any authenticated user can approve pending transfers",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/TransferController.java",
+            "startLine": 29,
+            "endLine": 33
+          }
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "scan",
+      "fixture": "java-bank",
+      "arm": "index-skill",
+      "repeat": 2,
+      "status": "complete",
+      "seconds": 85.814,
+      "costUsd": 0.020927160000000004,
+      "tokens": 459694,
+      "threads": 1,
+      "turns": 20,
+      "toolCalls": {
+        "load_skill": 1,
+        "bash": 7,
+        "spawn_agent": 6,
+        "finding": 4
+      },
+      "indexToolCalls": 0,
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "coverage": null,
+      "score": {
+        "planted": 4,
+        "found": 4,
+        "foundIds": [
+          "jb-account-idor",
+          "jb-approve-self",
+          "jb-report-export",
+          "jb-reset-confirm"
+        ],
+        "missedIds": [],
+        "recall": 1,
+        "findings": 4,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [],
+        "nearMisses": []
+      },
+      "authz": {
+        "planted": 4,
+        "found": 4
+      },
+      "findings": [
+        {
+          "title": "Admin transfer report lacks admin authorization",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/AdminReportController.java",
+            "startLine": 8,
+            "endLine": 19
+          }
+        },
+        {
+          "title": "Authenticated users can approve any pending transfer",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/TransferController.java",
+            "startLine": 29,
+            "endLine": 32
+          }
+        },
+        {
+          "title": "Reset token is not bound to the requested customer",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/PasswordResetController.java",
+            "startLine": 30,
+            "endLine": 37
+          }
+        },
+        {
+          "title": "Unauthenticated account lookup exposes account data",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/AccountController.java",
+            "startLine": 24,
+            "endLine": 27
+          }
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "scan",
+      "fixture": "medium-app",
+      "arm": "index-full",
+      "repeat": 2,
+      "status": "complete",
+      "seconds": 611.267,
+      "costUsd": 0.08103752000000002,
+      "tokens": 1688420,
+      "threads": 8,
+      "turns": 65,
+      "toolCalls": {
+        "load_skill": 8,
+        "bash": 26,
+        "finding": 18,
+        "spawn_agent": 5,
+        "callers_of": 1
+      },
+      "indexToolCalls": 1,
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "coverage": "reviewed 71 of 71 entry points; 6 of 6 groups of other files reviewed",
+      "score": {
+        "planted": 10,
+        "found": 10,
+        "foundIds": [
+          "ma-xss",
+          "ma-order-idor",
+          "ma-sqli",
+          "ma-traversal",
+          "ma-admin-role",
+          "ma-cmdi",
+          "ma-secret",
+          "ma-md5",
+          "ma-ssrf",
+          "ma-pickle"
+        ],
+        "missedIds": [],
+        "recall": 1,
+        "findings": 14,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [
+          {
+            "finding": "fef0f86e-dd55-4272-9eaf-1eabb4b45ba7",
+            "title": "Authenticated user can query other users' orders",
+            "located": true
+          },
+          {
+            "finding": "f72e4282-1fa8-4b85-b7bb-c752dfb68cc1",
+            "title": "Rate limiter retains every client-minute key indefinitely",
+            "located": true
+          },
+          {
+            "finding": "c2323664-e61a-447a-9b85-6460c8231ba1",
+            "title": "Unknown product IDs silently receive a zero price",
+            "located": true
+          },
+          {
+            "finding": "65c89fa4-06a4-4c9c-8511-c0201575da80",
+            "title": "Products delete route accepts invalid ID and returns success",
+            "located": true
+          }
+        ],
+        "nearMisses": []
+      },
+      "authz": {
+        "planted": 2,
+        "found": 2
+      },
+      "findings": [
+        {
+          "title": "Unauthenticated pickle deserialization on snapshot endpoint",
+          "category": "unsafe-deserialization",
+          "severity": "critical",
+          "location": {
+            "path": "reports-svc/app.py",
+            "startLine": 22,
+            "endLine": 28
+          }
+        },
+        {
+          "title": "Hardcoded JWT signing secret allows token forgery",
+          "category": "hardcoded-secret",
+          "severity": "critical",
+          "location": {
+            "path": "config.js",
+            "startLine": 6,
+            "endLine": 6
+          }
+        },
+        {
+          "title": "Unauthenticated users can change roles",
+          "category": "broken-access-control",
+          "severity": "critical",
+          "location": {
+            "path": "routes/admin.js",
+            "startLine": 13,
+            "endLine": 15
+          }
+        },
+        {
+          "title": "Shell command injection in sales export format",
+          "category": "command-injection",
+          "severity": "high",
+          "location": {
+            "path": "services/exporter.js",
+            "startLine": 18,
+            "endLine": 18
+          }
+        },
+        {
+          "title": "Order detail endpoint exposes other users' orders",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "routes/orders.js",
+            "startLine": 19,
+            "endLine": 23
+          }
+        },
+        {
+          "title": "Authenticated file download permits path traversal",
+          "category": "path-traversal",
+          "severity": "high",
+          "location": {
+            "path": "routes/files.js",
+            "startLine": 21,
+            "endLine": 24
+          }
+        },
+        {
+          "title": "Authenticated user can query other users' orders",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "routes/search.js",
+            "startLine": 19,
+            "endLine": 22
+          }
+        },
+        {
+          "title": "Notifications hook permits server-side request forgery",
+          "category": "ssrf",
+          "severity": "high",
+          "location": {
+            "path": "routes/notifications.js",
+            "startLine": 19,
+            "endLine": 21
+          }
+        },
+        {
+          "title": "Passwords stored using fast unsalted MD5 hashes",
+          "category": "crypto-misuse",
+          "severity": "high",
+          "location": {
+            "path": "lib/crypto.js",
+            "startLine": 3,
+            "endLine": 4
+          }
+        },
+        {
+          "title": "SQL injection in order search parameters",
+          "category": "sql-injection",
+          "severity": "high",
+          "location": {
+            "path": "routes/search.js",
+            "startLine": 15,
+            "endLine": 15
+          }
+        },
+        {
+          "title": "Rate limiter retains every client-minute key indefinitely",
+          "category": "denial-of-service",
+          "severity": "medium",
+          "location": {
+            "path": "middleware/rateLimit.js",
+            "startLine": 1,
+            "endLine": 7
+          }
+        },
+        {
+          "title": "Stored cross-site scripting in user cards",
+          "category": "xss",
+          "severity": "medium",
+          "location": {
+            "path": "routes/users.js",
+            "startLine": 20,
+            "endLine": 20
+          }
+        },
+        {
+          "title": "Unknown product IDs silently receive a zero price",
+          "category": "missing-validation",
+          "severity": "medium",
+          "location": {
+            "path": "services/pricing.js",
+            "startLine": 4,
+            "endLine": 8
+          }
+        },
+        {
+          "title": "Products delete route accepts invalid ID and returns success",
+          "category": "missing-validation",
+          "severity": "low",
+          "location": {
+            "path": "routes/products.js",
+            "startLine": 27,
+            "endLine": 28
+          }
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "scan",
+      "fixture": "medium-app",
+      "arm": "index-skill",
+      "repeat": 2,
+      "status": "complete",
+      "seconds": 108.63,
+      "costUsd": 0.013989039999999998,
+      "tokens": 414256,
+      "threads": 1,
+      "turns": 15,
+      "toolCalls": {
+        "load_skill": 1,
+        "bash": 3,
+        "spawn_agent": 1,
+        "routes": 1,
+        "finding": 8
+      },
+      "indexToolCalls": 1,
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "coverage": null,
+      "score": {
+        "planted": 10,
+        "found": 7,
+        "foundIds": [
+          "ma-order-idor",
+          "ma-sqli",
+          "ma-traversal",
+          "ma-admin-role",
+          "ma-cmdi",
+          "ma-ssrf",
+          "ma-pickle"
+        ],
+        "missedIds": [
+          "ma-xss",
+          "ma-secret",
+          "ma-md5"
+        ],
+        "recall": 0.7,
+        "findings": 7,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [],
+        "nearMisses": []
+      },
+      "authz": {
+        "planted": 2,
+        "found": 2
+      },
+      "findings": [
+        {
+          "title": "Unauthenticated pickle deserialization in reporting snapshot endpoint",
+          "category": "unsafe-deserialization",
+          "severity": "critical",
+          "location": {
+            "path": "reports-svc/app.py",
+            "startLine": 22,
+            "endLine": 29
+          }
+        },
+        {
+          "title": "Admin report export allows shell command injection via format",
+          "category": "command-injection",
+          "severity": "high",
+          "location": {
+            "path": "services/exporter.js",
+            "startLine": 15,
+            "endLine": 19
+          }
+        },
+        {
+          "title": "Authenticated file download allows path traversal outside upload directory",
+          "category": "path-traversal",
+          "severity": "high",
+          "location": {
+            "path": "routes/files.js",
+            "startLine": 21,
+            "endLine": 24
+          }
+        },
+        {
+          "title": "Authenticated users can promote accounts to administrator",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "routes/admin.js",
+            "startLine": 13,
+            "endLine": 15
+          }
+        },
+        {
+          "title": "Unauthenticated SQL injection through search sort and status parameters",
+          "category": "sql-injection",
+          "severity": "high",
+          "location": {
+            "path": "routes/search.js",
+            "startLine": 12,
+            "endLine": 16
+          }
+        },
+        {
+          "title": "Authenticated notification hook permits server-side request forgery",
+          "category": "ssrf",
+          "severity": "medium",
+          "location": {
+            "path": "routes/notifications.js",
+            "startLine": 19,
+            "endLine": 21
+          }
+        },
+        {
+          "title": "Authenticated order lookup exposes other users' orders",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "routes/orders.js",
+            "startLine": 19,
+            "endLine": 23
+          }
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "scan",
+      "fixture": "medium-app",
+      "arm": "baseline",
+      "repeat": 2,
+      "status": "complete",
+      "seconds": 788.174,
+      "costUsd": 0.18976116,
+      "tokens": 4095226,
+      "threads": 9,
+      "turns": 111,
+      "toolCalls": {
+        "load_skill": 9,
+        "bash": 40,
+        "finding": 21,
+        "spawn_agent": 26,
+        "list_tools": 1,
+        "list_conversations": 1
+      },
+      "indexToolCalls": 0,
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "coverage": "reviewed 71 of 71 entry points; 6 of 6 groups of other files reviewed",
+      "score": {
+        "planted": 10,
+        "found": 10,
+        "foundIds": [
+          "ma-xss",
+          "ma-order-idor",
+          "ma-sqli",
+          "ma-traversal",
+          "ma-admin-role",
+          "ma-cmdi",
+          "ma-secret",
+          "ma-md5",
+          "ma-ssrf",
+          "ma-pickle"
+        ],
+        "missedIds": [],
+        "recall": 1,
+        "findings": 18,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [
+          {
+            "finding": "59111005-7806-43d9-bc1f-75331d4fa6c7",
+            "title": "Authenticated uploads can exhaust disk without a storage quota",
+            "located": true
+          },
+          {
+            "finding": "8c308ccc-4813-4e1b-aa8c-100771e90fd7",
+            "title": "Logout endpoint does not invalidate issued JWTs",
+            "located": true
+          },
+          {
+            "finding": "c688b7ac-5d48-44fe-b5c3-03e632703cd2",
+            "title": "Rate-limit counters accumulate indefinitely and allow memory exhaustion",
+            "located": true
+          },
+          {
+            "finding": "5298af0a-2977-499c-9428-54aaf7635355",
+            "title": "Unauthenticated user-order lookup exposes order records by ID",
+            "located": true
+          },
+          {
+            "finding": "7a796f32-3640-48d1-9a61-4f9b6dd2ef4c",
+            "title": "Unknown product IDs are silently priced at zero",
+            "located": true
+          },
+          {
+            "finding": "367951fa-7947-416d-b68e-5c1485b845d7",
+            "title": "No finding: migration CLI and /health endpoint",
+            "located": true
+          }
+        ],
+        "nearMisses": []
+      },
+      "authz": {
+        "planted": 2,
+        "found": 2
+      },
+      "findings": [
+        {
+          "title": "Unauthenticated snapshot endpoint deserializes attacker-controlled pickle",
+          "category": "unsafe-deserialization",
+          "severity": "critical",
+          "location": {
+            "path": "reports-svc/app.py",
+            "startLine": 22,
+            "endLine": 28
+          }
+        },
+        {
+          "title": "Broken authorization lets any authenticated user change account roles",
+          "category": "broken-access-control",
+          "severity": "critical",
+          "location": {
+            "path": "routes/admin.js",
+            "startLine": 13,
+            "endLine": 15
+          }
+        },
+        {
+          "title": "Hardcoded JWT signing secret permits token forgery",
+          "category": "hardcoded-secret",
+          "severity": "critical",
+          "location": {
+            "path": "config.js",
+            "startLine": 6,
+            "endLine": 6
+          }
+        },
+        {
+          "title": "SSRF via notification hook URL",
+          "category": "ssrf",
+          "severity": "high",
+          "location": {
+            "path": "lib/http.js",
+            "startLine": 4,
+            "endLine": 8
+          }
+        },
+        {
+          "title": "Authenticated download path traversal reads files outside uploads",
+          "category": "path-traversal",
+          "severity": "high",
+          "location": {
+            "path": "routes/files.js",
+            "startLine": 22,
+            "endLine": 23
+          }
+        },
+        {
+          "title": "Authenticated notification hook permits server-side request forgery",
+          "category": "ssrf",
+          "severity": "high",
+          "location": {
+            "path": "routes/notifications.js",
+            "startLine": 19,
+            "endLine": 20
+          }
+        },
+        {
+          "title": "Order detail endpoint exposes other users' orders (IDOR)",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "routes/orders.js",
+            "startLine": 19,
+            "endLine": 23
+          }
+        },
+        {
+          "title": "Passwords stored with fast unsalted MD5 hashes",
+          "category": "crypto-misuse",
+          "severity": "high",
+          "location": {
+            "path": "lib/crypto.js",
+            "startLine": 3,
+            "endLine": 5
+          }
+        },
+        {
+          "title": "Shell injection in sales export format",
+          "category": "command-injection",
+          "severity": "high",
+          "location": {
+            "path": "services/exporter.js",
+            "startLine": 18,
+            "endLine": 18
+          }
+        },
+        {
+          "title": "Unauthenticated search orders endpoint exposes SQL injection",
+          "category": "sql-injection",
+          "severity": "high",
+          "location": {
+            "path": "routes/search.js",
+            "startLine": 12,
+            "endLine": 16
+          }
+        },
+        {
+          "title": "User passwords stored with fast unsalted MD5",
+          "category": "crypto-misuse",
+          "severity": "high",
+          "location": {
+            "path": "services/userService.js",
+            "startLine": 4,
+            "endLine": 11
+          }
+        },
+        {
+          "title": "Authenticated uploads can exhaust disk without a storage quota",
+          "category": "denial-of-service",
+          "severity": "medium",
+          "location": {
+            "path": "routes/files.js",
+            "startLine": 10,
+            "endLine": 10
+          }
+        },
+        {
+          "title": "Logout endpoint does not invalidate issued JWTs",
+          "category": "broken-authentication",
+          "severity": "medium",
+          "location": {
+            "path": "routes/auth.js",
+            "startLine": 20,
+            "endLine": 20
+          }
+        },
+        {
+          "title": "Rate-limit counters accumulate indefinitely and allow memory exhaustion",
+          "category": "denial-of-service",
+          "severity": "medium",
+          "location": {
+            "path": "middleware/rateLimit.js",
+            "startLine": 1,
+            "endLine": 7
+          }
+        },
+        {
+          "title": "Stored and reflected HTML injection in user card route",
+          "category": "xss",
+          "severity": "medium",
+          "location": {
+            "path": "routes/users.js",
+            "startLine": 19,
+            "endLine": 20
+          }
+        },
+        {
+          "title": "Unauthenticated user-order lookup exposes order records by ID",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "routes/search.js",
+            "startLine": 19,
+            "endLine": 21
+          }
+        },
+        {
+          "title": "Unknown product IDs are silently priced at zero",
+          "category": "missing-validation",
+          "severity": "medium",
+          "location": {
+            "path": "services/pricing.js",
+            "startLine": 4,
+            "endLine": 8
+          }
+        },
+        {
+          "title": "No finding: migration CLI and /health endpoint",
+          "category": "information-disclosure",
+          "severity": "info",
+          "location": {
+            "path": "scripts/migrate.js",
+            "startLine": 9,
+            "endLine": 11
+          }
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "scan",
+      "fixture": "ts-shop",
+      "arm": "index-full",
+      "repeat": 3,
+      "status": "complete",
+      "seconds": 119.855,
+      "costUsd": 0.00844938,
+      "tokens": 201105,
+      "threads": 3,
+      "turns": 20,
+      "toolCalls": {
+        "load_skill": 3,
+        "bash": 7,
+        "finding": 7
+      },
+      "indexToolCalls": 0,
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "coverage": "reviewed 10 of 10 entry points; 3 of 3 groups of other files reviewed",
+      "score": {
+        "planted": 4,
+        "found": 4,
+        "foundIds": [
+          "ts-order-idor",
+          "ts-role-change",
+          "ts-refund",
+          "ts-invite-hijack"
+        ],
+        "missedIds": [],
+        "recall": 1,
+        "findings": 4,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [],
+        "nearMisses": []
+      },
+      "authz": {
+        "planted": 4,
+        "found": 4
+      },
+      "findings": [
+        {
+          "title": "Authenticated user can promote accounts to admin",
+          "category": "broken-access-control",
+          "severity": "critical",
+          "location": {
+            "path": "src/routes/admin.ts",
+            "startLine": 11,
+            "endLine": 15
+          }
+        },
+        {
+          "title": "Authenticated caller can issue unrestricted refunds on any order",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/refunds.ts",
+            "startLine": 8,
+            "endLine": 12
+          }
+        },
+        {
+          "title": "Invite acceptance does not bind the authenticated user to the invited email",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/teams.ts",
+            "startLine": 18,
+            "endLine": 21
+          }
+        },
+        {
+          "title": "Order details endpoint exposes other users' orders",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/orders.ts",
+            "startLine": 13,
+            "endLine": 17
+          }
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "scan",
+      "fixture": "ts-shop",
+      "arm": "baseline",
+      "repeat": 3,
+      "status": "complete",
+      "seconds": 136.285,
+      "costUsd": 0.010265779999999999,
+      "tokens": 190605,
+      "threads": 3,
+      "turns": 20,
+      "toolCalls": {
+        "load_skill": 3,
+        "bash": 7,
+        "finding": 7
+      },
+      "indexToolCalls": 0,
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "coverage": "reviewed 10 of 10 entry points; 3 of 3 groups of other files reviewed",
+      "score": {
+        "planted": 4,
+        "found": 4,
+        "foundIds": [
+          "ts-order-idor",
+          "ts-role-change",
+          "ts-refund",
+          "ts-invite-hijack"
+        ],
+        "missedIds": [],
+        "recall": 1,
+        "findings": 4,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [],
+        "nearMisses": []
+      },
+      "authz": {
+        "planted": 4,
+        "found": 4
+      },
+      "findings": [
+        {
+          "title": "Authenticated users can promote themselves to admin",
+          "category": "broken-access-control",
+          "severity": "critical",
+          "location": {
+            "path": "src/routes/admin.ts",
+            "startLine": 11,
+            "endLine": 15
+          }
+        },
+        {
+          "title": "Authenticated callers can issue arbitrary refunds against any order",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/refunds.ts",
+            "startLine": 8,
+            "endLine": 12
+          }
+        },
+        {
+          "title": "Authenticated users can read any order by ID",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/orders.ts",
+            "startLine": 13,
+            "endLine": 16
+          }
+        },
+        {
+          "title": "Invite acceptance is not bound to the invited email",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/teams.ts",
+            "startLine": 18,
+            "endLine": 21
+          }
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "scan",
+      "fixture": "ts-shop",
+      "arm": "index-skill",
+      "repeat": 3,
+      "status": "complete",
+      "seconds": 63.155,
+      "costUsd": 0.00957632,
+      "tokens": 205728,
+      "threads": 1,
+      "turns": 12,
+      "toolCalls": {
+        "load_skill": 1,
+        "bash": 3,
+        "spawn_agent": 2,
+        "routes": 1,
+        "finding": 5
+      },
+      "indexToolCalls": 1,
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "coverage": null,
+      "score": {
+        "planted": 4,
+        "found": 3,
+        "foundIds": [
+          "ts-order-idor",
+          "ts-role-change",
+          "ts-refund"
+        ],
+        "missedIds": [
+          "ts-invite-hijack"
+        ],
+        "recall": 0.75,
+        "findings": 4,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [],
+        "nearMisses": []
+      },
+      "authz": {
+        "planted": 4,
+        "found": 3
+      },
+      "findings": [
+        {
+          "title": "Authenticated users can promote themselves to admin",
+          "category": "broken-access-control",
+          "severity": "critical",
+          "location": {
+            "path": "src/routes/admin.ts",
+            "startLine": 11,
+            "endLine": 15
+          }
+        },
+        {
+          "title": "Any authenticated user can trigger refunds on any order",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/refunds.ts",
+            "startLine": 8,
+            "endLine": 13
+          }
+        },
+        {
+          "title": "Authenticated users can read other users' orders",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/orders.ts",
+            "startLine": 13,
+            "endLine": 17
+          }
+        },
+        {
+          "title": "Cross-user order refund allows unauthorized refund state changes",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/services/orderService.ts",
+            "startLine": 9,
+            "endLine": 12
+          }
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "scan",
+      "fixture": "java-bank",
+      "arm": "baseline",
+      "repeat": 3,
+      "status": "complete",
+      "seconds": 138.044,
+      "costUsd": 0.00856556,
+      "tokens": 197270,
+      "threads": 3,
+      "turns": 20,
+      "toolCalls": {
+        "load_skill": 3,
+        "bash": 6,
+        "finding": 8
+      },
+      "indexToolCalls": 0,
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "coverage": "reviewed 15 of 15 entry points; 1 of 1 groups of other files reviewed",
+      "score": {
+        "planted": 4,
+        "found": 4,
+        "foundIds": [
+          "jb-account-idor",
+          "jb-approve-self",
+          "jb-report-export",
+          "jb-reset-confirm"
+        ],
+        "missedIds": [],
+        "recall": 1,
+        "findings": 4,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [],
+        "nearMisses": []
+      },
+      "authz": {
+        "planted": 4,
+        "found": 4
+      },
+      "findings": [
+        {
+          "title": "Password-reset token is not bound to the customer being reset",
+          "category": "broken-authentication",
+          "severity": "critical",
+          "location": {
+            "path": "src/main/java/bench/bank/PasswordResetController.java",
+            "startLine": 34,
+            "endLine": 36
+          }
+        },
+        {
+          "title": "Account read exposes accounts without ownership check",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/AccountController.java",
+            "startLine": 24,
+            "endLine": 27
+          }
+        },
+        {
+          "title": "Any authenticated caller can approve another user's transfer",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/TransferController.java",
+            "startLine": 30,
+            "endLine": 32
+          }
+        },
+        {
+          "title": "Transfer report endpoint lacks administrator authorization",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/AdminReportController.java",
+            "startLine": 8,
+            "endLine": 19
+          }
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "scan",
+      "fixture": "java-bank",
+      "arm": "index-full",
+      "repeat": 3,
+      "status": "complete",
+      "seconds": 101.45,
+      "costUsd": 0.00704626,
+      "tokens": 157873,
+      "threads": 3,
+      "turns": 16,
+      "toolCalls": {
+        "load_skill": 3,
+        "bash": 6,
+        "finding": 4
+      },
+      "indexToolCalls": 0,
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "coverage": "reviewed 15 of 15 entry points; 1 of 1 groups of other files reviewed",
+      "score": {
+        "planted": 4,
+        "found": 4,
+        "foundIds": [
+          "jb-account-idor",
+          "jb-approve-self",
+          "jb-report-export",
+          "jb-reset-confirm"
+        ],
+        "missedIds": [],
+        "recall": 1,
+        "findings": 4,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [],
+        "nearMisses": []
+      },
+      "authz": {
+        "planted": 4,
+        "found": 4
+      },
+      "findings": [
+        {
+          "title": "Account ID endpoint exposes accounts without ownership check",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/AccountController.java",
+            "startLine": 24,
+            "endLine": 26
+          }
+        },
+        {
+          "title": "Admin transfer report lacks administrator authorization",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/AdminReportController.java",
+            "startLine": 17,
+            "endLine": 19
+          }
+        },
+        {
+          "title": "Password reset token is not bound to target customer",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/PasswordResetController.java",
+            "startLine": 28,
+            "endLine": 37
+          }
+        },
+        {
+          "title": "Transfer approval lacks authorization and permits self-approval",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/TransferController.java",
+            "startLine": 29,
+            "endLine": 32
+          }
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "scan",
+      "fixture": "java-bank",
+      "arm": "index-skill",
+      "repeat": 3,
+      "status": "complete",
+      "seconds": 70.135,
+      "costUsd": 0.01355348,
+      "tokens": 368586,
+      "threads": 1,
+      "turns": 15,
+      "toolCalls": {
+        "load_skill": 1,
+        "bash": 4,
+        "spawn_agent": 4,
+        "finding": 3,
+        "routes": 1,
+        "list_conversations": 1
+      },
+      "indexToolCalls": 1,
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "coverage": null,
+      "score": {
+        "planted": 4,
+        "found": 4,
+        "foundIds": [
+          "jb-account-idor",
+          "jb-approve-self",
+          "jb-report-export",
+          "jb-reset-confirm"
+        ],
+        "missedIds": [],
+        "recall": 1,
+        "findings": 5,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [
+          {
+            "finding": "00f8a5f5-64ac-4068-9fdc-210a565aed6d",
+            "title": "Transfer creation accepts non-positive amounts and unchecked destination account",
+            "located": true
+          }
+        ],
+        "nearMisses": []
+      },
+      "authz": {
+        "planted": 4,
+        "found": 4
+      },
+      "findings": [
+        {
+          "title": "Admin transfer report lacks authorization",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/AdminReportController.java",
+            "startLine": 8,
+            "endLine": 19
+          }
+        },
+        {
+          "title": "Password reset token is not bound to the target customer",
+          "category": "broken-authentication",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/PasswordResetController.java",
+            "startLine": 30,
+            "endLine": 36
+          }
+        },
+        {
+          "title": "Transfer approval endpoint allows any caller to approve pending transfers",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/TransferController.java",
+            "startLine": 29,
+            "endLine": 32
+          }
+        },
+        {
+          "title": "Unauthenticated account IDOR exposes account details",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/AccountController.java",
+            "startLine": 24,
+            "endLine": 26
+          }
+        },
+        {
+          "title": "Transfer creation accepts non-positive amounts and unchecked destination account",
+          "category": "missing-validation",
+          "severity": "medium",
+          "location": {
+            "path": "src/main/java/bench/bank/TransferService.java",
+            "startLine": 18,
+            "endLine": 21
+          }
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "scan",
+      "fixture": "medium-app",
+      "arm": "baseline",
+      "repeat": 3,
+      "status": "complete",
+      "seconds": 537.709,
+      "costUsd": 0.056367900000000006,
+      "tokens": 1196515,
+      "threads": 8,
+      "turns": 65,
+      "toolCalls": {
+        "load_skill": 8,
+        "bash": 24,
+        "finding": 27,
+        "spawn_agent": 1
+      },
+      "indexToolCalls": 0,
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "coverage": "reviewed 71 of 71 entry points; 6 of 6 groups of other files reviewed",
+      "score": {
+        "planted": 10,
+        "found": 10,
+        "foundIds": [
+          "ma-xss",
+          "ma-order-idor",
+          "ma-sqli",
+          "ma-traversal",
+          "ma-admin-role",
+          "ma-cmdi",
+          "ma-secret",
+          "ma-md5",
+          "ma-ssrf",
+          "ma-pickle"
+        ],
+        "missedIds": [],
+        "recall": 1,
+        "findings": 13,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [
+          {
+            "finding": "4e33b7f9-fbbd-4107-b038-a7a75a21689c",
+            "title": "Order creation accepts nonexistent products at zero price",
+            "located": true
+          },
+          {
+            "finding": "df5a275a-bf7b-4393-9c2d-f3a08c8480ed",
+            "title": "Orders endpoint exposes other users' order records",
+            "located": true
+          },
+          {
+            "finding": "3aee0ec5-15c4-4bb3-92d5-c0c954263e46",
+            "title": "Unauthenticated access to arbitrary users' order data",
+            "located": true
+          }
+        ],
+        "nearMisses": []
+      },
+      "authz": {
+        "planted": 2,
+        "found": 2
+      },
+      "findings": [
+        {
+          "title": "Authenticated users can promote themselves to admin",
+          "category": "broken-access-control",
+          "severity": "critical",
+          "location": {
+            "path": "routes/admin.js",
+            "startLine": 13,
+            "endLine": 15
+          }
+        },
+        {
+          "title": "Hardcoded JWT signing secret",
+          "category": "hardcoded-secret",
+          "severity": "critical",
+          "location": {
+            "path": "config.js",
+            "startLine": 6,
+            "endLine": 6
+          }
+        },
+        {
+          "title": "Unauthenticated pickle deserialization in reports snapshot endpoint",
+          "category": "unsafe-deserialization",
+          "severity": "critical",
+          "location": {
+            "path": "reports-svc/app.py",
+            "startLine": 22,
+            "endLine": 28
+          }
+        },
+        {
+          "title": "Authenticated notification hook allows server-side request forgery",
+          "category": "ssrf",
+          "severity": "high",
+          "location": {
+            "path": "routes/notifications.js",
+            "startLine": 19,
+            "endLine": 21
+          }
+        },
+        {
+          "title": "Order creation accepts nonexistent products at zero price",
+          "category": "missing-validation",
+          "severity": "high",
+          "location": {
+            "path": "services/pricing.js",
+            "startLine": 4,
+            "endLine": 8
+          }
+        },
+        {
+          "title": "Order detail endpoint exposes other users’ orders (IDOR)",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "routes/orders.js",
+            "startLine": 19,
+            "endLine": 23
+          }
+        },
+        {
+          "title": "Orders endpoint exposes other users' order records",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "services/orderService.js",
+            "startLine": 8,
+            "endLine": 10
+          }
+        },
+        {
+          "title": "Passwords stored with fast MD5 hashing",
+          "category": "crypto-misuse",
+          "severity": "high",
+          "location": {
+            "path": "lib/crypto.js",
+            "startLine": 3,
+            "endLine": 4
+          }
+        },
+        {
+          "title": "Shell command injection in sales export format",
+          "category": "command-injection",
+          "severity": "high",
+          "location": {
+            "path": "services/exporter.js",
+            "startLine": 15,
+            "endLine": 18
+          }
+        },
+        {
+          "title": "SQL injection through search order status and sort",
+          "category": "sql-injection",
+          "severity": "high",
+          "location": {
+            "path": "routes/search.js",
+            "startLine": 12,
+            "endLine": 16
+          }
+        },
+        {
+          "title": "Unauthenticated-to-user file download path traversal",
+          "category": "path-traversal",
+          "severity": "high",
+          "location": {
+            "path": "routes/files.js",
+            "startLine": 21,
+            "endLine": 23
+          }
+        },
+        {
+          "title": "Stored/reflected HTML injection in user card",
+          "category": "xss",
+          "severity": "medium",
+          "location": {
+            "path": "routes/users.js",
+            "startLine": 17,
+            "endLine": 20
+          }
+        },
+        {
+          "title": "Unauthenticated access to arbitrary users' order data",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "routes/search.js",
+            "startLine": 19,
+            "endLine": 21
+          }
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "scan",
+      "fixture": "medium-app",
+      "arm": "index-skill",
+      "repeat": 3,
+      "status": "complete",
+      "seconds": 120.909,
+      "costUsd": 0.01978262,
+      "tokens": 486039,
+      "threads": 1,
+      "turns": 16,
+      "toolCalls": {
+        "load_skill": 1,
+        "bash": 5,
+        "spawn_agent": 1,
+        "routes": 1,
+        "finding": 7
+      },
+      "indexToolCalls": 1,
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "coverage": null,
+      "score": {
+        "planted": 10,
+        "found": 8,
+        "foundIds": [
+          "ma-xss",
+          "ma-order-idor",
+          "ma-sqli",
+          "ma-admin-role",
+          "ma-cmdi",
+          "ma-secret",
+          "ma-ssrf",
+          "ma-pickle"
+        ],
+        "missedIds": [
+          "ma-traversal",
+          "ma-md5"
+        ],
+        "recall": 0.8,
+        "findings": 8,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [],
+        "nearMisses": []
+      },
+      "authz": {
+        "planted": 2,
+        "found": 2
+      },
+      "findings": [
+        {
+          "title": "Any authenticated user can promote arbitrary accounts to admin",
+          "category": "broken-access-control",
+          "severity": "critical",
+          "location": {
+            "path": "routes/admin.js",
+            "startLine": 13,
+            "endLine": 15
+          }
+        },
+        {
+          "title": "Hardcoded JWT signing secret permits token forgery",
+          "category": "hardcoded-secret",
+          "severity": "critical",
+          "location": {
+            "path": "config.js",
+            "startLine": 6,
+            "endLine": 6
+          }
+        },
+        {
+          "title": "Admin report export format permits shell command injection",
+          "category": "command-injection",
+          "severity": "high",
+          "location": {
+            "path": "services/exporter.js",
+            "startLine": 18,
+            "endLine": 18
+          }
+        },
+        {
+          "title": "Authenticated server-side request forgery through notification hook",
+          "category": "ssrf",
+          "severity": "high",
+          "location": {
+            "path": "lib/http.js",
+            "startLine": 4,
+            "endLine": 13
+          }
+        },
+        {
+          "title": "Order endpoint exposes other users' order records",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "routes/orders.js",
+            "startLine": 19,
+            "endLine": 24
+          }
+        },
+        {
+          "title": "Pickle deserialization enables code execution on reporting service",
+          "category": "unsafe-deserialization",
+          "severity": "high",
+          "location": {
+            "path": "reports-svc/app.py",
+            "startLine": 27,
+            "endLine": 27
+          }
+        },
+        {
+          "title": "Unauthenticated SQL injection and order data exposure in search endpoint",
+          "category": "sql-injection",
+          "severity": "high",
+          "location": {
+            "path": "routes/search.js",
+            "startLine": 12,
+            "endLine": 16
+          }
+        },
+        {
+          "title": "Stored and reflected cross-site scripting in user card response",
+          "category": "xss",
+          "severity": "medium",
+          "location": {
+            "path": "routes/users.js",
+            "startLine": 17,
+            "endLine": 20
+          }
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "scan",
+      "fixture": "medium-app",
+      "arm": "index-full",
+      "repeat": 3,
+      "status": "complete",
+      "seconds": 784.904,
+      "costUsd": 0.14299066000000002,
+      "tokens": 3265649,
+      "threads": 8,
+      "turns": 94,
+      "toolCalls": {
+        "load_skill": 8,
+        "spawn_agent": 23,
+        "bash": 33,
+        "finding": 22
+      },
+      "indexToolCalls": 0,
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "coverage": "reviewed 71 of 71 entry points; 6 of 6 groups of other files reviewed",
+      "score": {
+        "planted": 10,
+        "found": 10,
+        "foundIds": [
+          "ma-xss",
+          "ma-order-idor",
+          "ma-sqli",
+          "ma-traversal",
+          "ma-admin-role",
+          "ma-cmdi",
+          "ma-secret",
+          "ma-md5",
+          "ma-ssrf",
+          "ma-pickle"
+        ],
+        "missedIds": [],
+        "recall": 1,
+        "findings": 14,
+        "falsePositives": 1,
+        "decoyHits": [
+          {
+            "finding": "3bc1e37e-af74-4492-a481-3333a59dcfce",
+            "decoy": "ma-decoy-avatar"
+          }
+        ],
+        "unmatched": [
+          {
+            "finding": "87cce407-cbf3-4277-a33f-43174e22c795",
+            "title": "Unauthenticated search endpoint exposes any user's order status",
+            "located": true
+          },
+          {
+            "finding": "cc839440-130a-4bd9-a992-df35a78ba30d",
+            "title": "Unbounded rate-limit key map enables memory exhaustion",
+            "located": true
+          }
+        ],
+        "nearMisses": []
+      },
+      "authz": {
+        "planted": 2,
+        "found": 2
+      },
+      "findings": [
+        {
+          "title": "Unauthenticated pickle deserialization in reports service",
+          "category": "unsafe-deserialization",
+          "severity": "critical",
+          "location": {
+            "path": "reports-svc/app.py",
+            "startLine": 22,
+            "endLine": 28
+          }
+        },
+        {
+          "title": "Hardcoded JWT signing secret enables token forgery",
+          "category": "hardcoded-secret",
+          "severity": "critical",
+          "location": {
+            "path": "config.js",
+            "startLine": 6,
+            "endLine": 6
+          }
+        },
+        {
+          "title": "Password hashes use unsalted MD5",
+          "category": "crypto-misuse",
+          "severity": "high",
+          "location": {
+            "path": "lib/crypto.js",
+            "startLine": 3,
+            "endLine": 4
+          }
+        },
+        {
+          "title": "Authenticated notification hook can SSRF arbitrary URLs",
+          "category": "ssrf",
+          "severity": "high",
+          "location": {
+            "path": "routes/notifications.js",
+            "startLine": 19,
+            "endLine": 21
+          }
+        },
+        {
+          "title": "Authenticated users can read other users’ orders by ID",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "routes/orders.js",
+            "startLine": 19,
+            "endLine": 23
+          }
+        },
+        {
+          "title": "Authenticated arbitrary file read via /files/download",
+          "category": "path-traversal",
+          "severity": "high",
+          "location": {
+            "path": "routes/files.js",
+            "startLine": 21,
+            "endLine": 23
+          }
+        },
+        {
+          "title": "Authenticated users can promote accounts through role endpoint",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "routes/admin.js",
+            "startLine": 13,
+            "endLine": 15
+          }
+        },
+        {
+          "title": "Passwords stored with fast unsalted MD5 hashes",
+          "category": "crypto-misuse",
+          "severity": "high",
+          "location": {
+            "path": "services/userService.js",
+            "startLine": 5,
+            "endLine": 5
+          }
+        },
+        {
+          "title": "Reports export format enables shell command injection",
+          "category": "command-injection",
+          "severity": "high",
+          "location": {
+            "path": "services/exporter.js",
+            "startLine": 15,
+            "endLine": 18
+          }
+        },
+        {
+          "title": "SQL injection in search orders sort and status",
+          "category": "sql-injection",
+          "severity": "high",
+          "location": {
+            "path": "routes/search.js",
+            "startLine": 13,
+            "endLine": 16
+          }
+        },
+        {
+          "title": "Stored HTML injection in user cards",
+          "category": "xss",
+          "severity": "medium",
+          "location": {
+            "path": "routes/users.js",
+            "startLine": 20,
+            "endLine": 20
+          }
+        },
+        {
+          "title": "Unauthenticated search endpoint exposes any user's order status",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "routes/search.js",
+            "startLine": 19,
+            "endLine": 21
+          }
+        },
+        {
+          "title": "Unbounded rate-limit key map enables memory exhaustion",
+          "category": "denial-of-service",
+          "severity": "medium",
+          "location": {
+            "path": "middleware/rateLimit.js",
+            "startLine": 5,
+            "endLine": 7
+          }
+        },
+        {
+          "title": "Uploaded files are readable by any authenticated user",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "routes/files.js",
+            "startLine": 17,
+            "endLine": 19
+          }
+        }
+      ],
+      "rateLimited": false
+    }
+  ]
+}
