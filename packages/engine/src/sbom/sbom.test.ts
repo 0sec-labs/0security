@@ -78,6 +78,22 @@ describe("more ecosystems", () => {
   });
 });
 
+describe("hostile lockfiles", () => {
+  it("strips requirements comments and continuations as before", () => {
+    expect(names(parseRequirements("flask==2.0.1   # web\nrequests==2.31.0 \\\n  --hash=sha256:abc\nnot-pinned>=1\n"))).toEqual(["flask@2.0.1", "requests@2.31.0"]);
+    expect(parseRequirements("\n\n  --index-url https://corp.example/simple\nflask==2.0.1\n")[0]!.local).toBe("private-registry");
+  });
+  it("parses long runs of spaces, newlines, markers and digits in linear time", () => {
+    // Each of these took minutes or more with the regexes they replace; a lockfile may be up to 64 MiB.
+    const run = 200_000;
+    const started = Date.now();
+    expect(parseRequirements(`${" ".repeat(run)}x\n${"\n".repeat(run)}!`)).toEqual([]);
+    expect(parseGoMod(`${"/".repeat(run)}\n${" ".repeat(run)}x\n`)).toEqual([]);
+    expect(parsePnpmLock(`lockfileVersion: '6.0'\npackages:\n  /${"(".repeat(run)}x:\n    resolution: {}\n  /${"_".repeat(run)}x:\n    resolution: {}\n`)).toEqual([]);
+    expect(Date.now() - started).toBeLessThan(5000);
+  });
+});
+
 describe("package URLs", () => {
   it("encodes scoped npm names, normalises Python names, and keeps Go paths", () => {
     expect(packageUrl({ ecosystem: "npm", name: "@Babel/Core", version: "7.1.0" })).toBe("pkg:npm/%40babel/core@7.1.0");
