@@ -375,6 +375,46 @@ tuned for. Every item here is verifiable in the code or the git log.
   method calls remain reported. This does not establish redirect safety or
   runtime authorization. See `tests/js_ssrf_precision.rs`.
 
+- **Java flow veto: constants and helpers.** The Java sink rules ask a small
+  flow-sensitive interpreter (`src/rules/java_flow.rs`) whether every sink
+  argument is provably built from constants; if so the finding is dropped.
+  Two rules decide what counts as a constant:
+  - An UPPER_SNAKE identifier is a constant only when it resolves to a
+    `static final` field (or an interface field, enum constant or by-name static
+    import) of an enclosing class in the same file, with a safe initialiser.
+    Method parameters, lambda, catch and loop variables, locals, and any name
+    declared in the enclosing method shadow it, so
+    `void run(@RequestParam String USER_INPUT)` is request data. A constant
+    declared in another file (including an inherited one) is unknown, not safe.
+  - `Helper.method(args)` with only safe arguments is read from the helper's
+    body when `Helper` is declared in the scanned file (a body that reads a
+    `ThreadLocal`, a static field, `RequestContextHolder` or any source is
+    unknown). Calls on request-context holders (`RequestContextHolder`,
+    `SecurityContextHolder`, `LocaleContextHolder`, `MDC`, ...) and accessors of
+    per-request state (`getAttribute`, `getSession`, `getAuthentication`, ...)
+    are never trusted.
+
+  **Residual risk (assumed, not proven).** A call to a project helper whose
+  class is not declared in the scanned file, and that receives only safe
+  arguments, is assumed to return a value that depends only on those
+  arguments. A helper that ignores its arguments and reads hidden state (a
+  `ThreadLocal`, a static field filled from a request, a context holder it
+  reaches internally) is therefore treated as safe, and a real finding behind
+  such a call is suppressed, for example
+  `Runtime.getRuntime().exec(Helper.currentInput())` with `Helper` in another
+  file. We keep this because closing it costs precision: on the shared Java
+  benchmark scorer, treating every unresolved project helper as
+  unknown leaves true positives unchanged (1319) but raises false positives
+  from 66 to 164 (score 0.882 to 0.808, cmdi 0.689 to 0.321, xss 0.900 to
+  0.804, pathtraver 0.776 to 0.687, sqli 0.938 to 0.860), because that
+  benchmark's own helper classes are separate files. Trusting only calls that
+  have at least one argument leaves 125 false positives (score 0.838). The
+  switch is `TRUST_UNRESOLVED_PROJECT_HELPERS` in `java_flow.rs`; the maintainer
+  can set it to `false` to take the sound but noisier behaviour. Resolving
+  helper bodies across files (a per-method "returns safe when its arguments are
+  safe" summary) would remove most of the cost for whole-project scans and is
+  the intended follow-up.
+
 ## Section 4: How to report a false positive
 
 If foxguard fires on code you believe is safe, open a GitHub issue with the
