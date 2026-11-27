@@ -4,7 +4,7 @@
  */
 import { createServer, type Server } from "node:http";
 import { BodyError, WindowCounter, readBodyCapped } from "../web/github-webhook.js";
-import type { BitbucketClient, Platform, PullRequest } from "./client.js";
+import { MAX_PULL_REQUESTS, type BitbucketClient, type Platform, type PullRequest } from "./client.js";
 import { parseDelivery, verifySignature } from "./events.js";
 import { prKey, type ReviewOutcome, type ReviewState } from "./review.js";
 
@@ -19,17 +19,22 @@ const SOURCE_LIMIT_PER_MINUTE = 30;
 const MAX_SOURCES = 5_000;
 
 /**
- * Where the state remembers the head commit whose review failed. A failed review is not retried until the pull request
- * changes: a retry on every poll would spend the budget again each time. It is kept apart from the reviewed commit, so
- * `review --pr` can still run that commit again by hand.
+ * Where the state remembers the head commit whose review failed after its paid scan ran. That commit is not retried until
+ * the pull request changes: a retry on every poll would spend the budget again each time. A failure before the scan costs
+ * nothing and is retried. The entry is kept apart from the reviewed commit, so `review --pr` can still run that commit
+ * again by hand, and it is removed once a later review of the pull request finishes or the pull request is no longer open.
  */
 export const failedKey = (pr: Pick<PullRequest, "platform" | "owner" | "repo" | "id">): string => `failed:${prKey(pr)}`;
 const sameCommit = (a: string | undefined, b: string): boolean => a !== undefined && a.slice(0, 12) === b.slice(0, 12);
 
+/** The review state, plus removal, so failure records do not pile up. */
+export interface WatchState extends ReviewState { delete(key: string): void; keys(): Iterable<string> }
+
 export interface QueueDeps {
-  review(pr: PullRequest): Promise<ReviewOutcome>;
-  /** Records the head commit of a review that failed, so that commit is not reviewed again. */
-  state: ReviewState;
+  /** Runs one review. It calls `scanStarted` when the paid scan begins, so a failure can say whether money was spent. */
+  review(pr: PullRequest, scanStarted: () => void): Promise<ReviewOutcome>;
+  /** Records the head commit of a review that failed after its scan, so that commit is not scanned again. */
+  state: WatchState;
   log(line: string): void;
 }
 
@@ -58,14 +63,23 @@ export class ReviewQueue {
         this.#waiting.delete(key);
         this.#current = key;
         if (sameCommit(this.deps.state.get(failedKey(pr)), pr.headSha)) {
-          this.deps.log(`${key}: skipped (the review of ${pr.headSha.slice(0, 7)} failed; not retried until the pull request changes)`);
+          this.deps.log(`${key}: skipped (the review of ${pr.headSha.slice(0, 7)} failed after its scan; not retried until the pull request changes)`);
         } else {
+          let scanned = false;
           try {
-            const outcome = await this.deps.review(pr);
+            const outcome = await this.deps.review(pr, () => { scanned = true; });
             this.deps.log(`${key}: ${describeOutcome(outcome)}`);
+            if (this.deps.state.get(failedKey(pr)) !== undefined) {
+              try { this.deps.state.delete(failedKey(pr)); } catch { /* The state file could not be written; the entry is removed later. */ }
+            }
           } catch (error) {
-            try { this.deps.state.set(failedKey(pr), pr.headSha); } catch { /* The state file could not be written; a later poll tries this commit again. */ }
-            this.deps.log(`${key}: review failed: ${(error instanceof Error ? error.message : String(error)).split("\n")[0]!.slice(0, 300)}; not retried until the pull request changes (fix the cause, then push a commit or run review --pr ${pr.id})`);
+            const reason = (error instanceof Error ? error.message : String(error)).split("\n")[0]!.slice(0, 300);
+            if (scanned) {
+              try { this.deps.state.set(failedKey(pr), pr.headSha); } catch { /* The state file could not be written; a later poll tries this commit again. */ }
+              this.deps.log(`${key}: review failed after the scan: ${reason}; not retried until the pull request changes (fix the cause, then push a commit or run review --pr ${pr.id})`);
+            } else {
+              this.deps.log(`${key}: review failed before the scan: ${reason}; tried again on the next poll`);
+            }
           }
         }
         this.#current = undefined;
@@ -80,10 +94,21 @@ export function describeOutcome(outcome: ReviewOutcome): string {
   return `reviewed ${outcome.sha.slice(0, 7)}, ${outcome.total} finding(s)${outcome.partial ? ", partial" : ""}${outcome.warnings.length ? `, ${outcome.warnings.length} warning(s): ${outcome.warnings.join(" | ")}` : ""}`;
 }
 
-/** Queue the open pull requests whose head commit changed since the last review, or the last failed one. Returns how many were queued. */
-export async function pollOnce(client: BitbucketClient, repo: { owner: string; repo: string }, queue: ReviewQueue, state: { get(key: string): string | undefined }, limit = 5): Promise<number> {
+/**
+ * Queue the open pull requests whose head commit changed since the last review, or the last failed one. Removes the
+ * failure records of this repository's pull requests that are no longer open. Returns how many were queued.
+ */
+export async function pollOnce(client: BitbucketClient, repo: { owner: string; repo: string }, queue: ReviewQueue, state: Pick<WatchState, "get" | "delete" | "keys">, limit = 5): Promise<number> {
+  const open = await client.listOpenPullRequests(repo.owner, repo.repo);
+  // A list cut at the cap may leave out pull requests that are still open, so nothing is removed then.
+  if (open.length < MAX_PULL_REQUESTS) {
+    // The failure key of this repository's pull request #0, cut after the "#": the start every one of its keys shares.
+    const prefix = failedKey({ platform: client.platform, owner: repo.owner, repo: repo.repo, id: 0 }).replace(/#0$/, "#");
+    const stillOpen = new Set(open.map(failedKey));
+    for (const key of [...state.keys()]) if (key.startsWith(prefix) && !stillOpen.has(key)) state.delete(key);
+  }
   let queued = 0;
-  for (const pr of await client.listOpenPullRequests(repo.owner, repo.repo)) {
+  for (const pr of open) {
     if (queued >= limit) break;
     if (pr.draft || pr.fork) continue;
     if (sameCommit(state.get(prKey(pr)), pr.headSha) || sameCommit(state.get(failedKey(pr)), pr.headSha)) continue;

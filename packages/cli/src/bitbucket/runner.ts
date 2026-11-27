@@ -112,8 +112,14 @@ export function gitScanRunner(options: RunnerOptions): ReviewRunner {
   };
 }
 
-export function fileState(path: string, io: { read(path: string): string | undefined; write(path: string, text: string): void }): { get(key: string): string | undefined; set(key: string, sha: string): void } {
+export function fileState(path: string, io: { read(path: string): string | undefined; write(path: string, text: string): void }): { get(key: string): string | undefined; set(key: string, sha: string): void; delete(key: string): void; keys(): string[] } {
   let data: Record<string, string> = {};
   try { const raw = io.read(path); if (raw) { const parsed: unknown = JSON.parse(raw); if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) data = Object.fromEntries(Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === "string")); } } catch { data = {}; }
-  return { get: key => data[key], set(key, sha) { data[key] = sha; io.write(path, JSON.stringify(data, null, 1)); } };
+  const save = () => io.write(path, JSON.stringify(data, null, 1));
+  return {
+    get: key => data[key],
+    set(key, sha) { data[key] = sha; save(); },
+    delete(key) { if (Object.hasOwn(data, key)) { delete data[key]; save(); } },
+    keys: () => Object.keys(data),
+  };
 }

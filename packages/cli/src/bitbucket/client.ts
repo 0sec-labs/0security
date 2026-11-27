@@ -53,7 +53,7 @@ export interface ClientOptions {
 }
 
 export const MAX_DIFF_BYTES = 8 * 1024 * 1024;
-const MAX_PULL_REQUESTS = 1000;
+export const MAX_PULL_REQUESTS = 1000;
 const MAX_COMMENT_PAGES = 20;
 const PAGE = 50;
 const SLUG = /^[A-Za-z0-9._~-]{1,200}$/;

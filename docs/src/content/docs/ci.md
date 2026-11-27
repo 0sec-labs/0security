@@ -818,7 +818,7 @@ The listener reads a body before it can check the signature, so it limits what a
 - Skips a pull request that changes more than `--max-files` files (default 50) and says so in a comment.
 - Stops one scan at `--budget` USD (default 2). A scan that stops early is marked partial in the summary.
 - Reviews a commit once. A new commit on the pull request is reviewed again.
-- Does not retry a review that failed, for example because the token cannot write comments. A retry on every poll would spend `--budget` again each time. The log says so; fix the cause, then push a new commit or run `0security sentinels bitbucket review --pr <number>` to review the same commit again. The state file (`--state`) remembers the failed commit, so a new `watch` or `watch --once` run does not retry it either.
+- Does not retry a review that failed after its scan ran, for example because the token cannot write comments. A retry on every poll would spend `--budget` again each time. The log says so; fix the cause, then push a new commit or run `0security sentinels bitbucket review --pr <number>` to review the same commit again. The state file (`--state`) remembers the failed commit, so a new `watch` or `watch --once` run does not retry it either, and forgets it once a later review of that pull request finishes or the pull request closes. A failure before the scan (listing pull requests, reading the diff or the comments) costs nothing and is tried again on the next poll.
 - Edits its own summary comment instead of adding another, leaves inline comments that still apply, and removes the ones whose finding is gone.
 - Leaves out findings in files the pull request did not change.
 
