@@ -539,6 +539,20 @@
       "disable": "Do not run the command, or leave BITBUCKET_TOKEN unset (the payload is printed instead)."
     },
     {
+      "id": "policy-bundle-fetch",
+      "class": "operator",
+      "enterprise": "blocked",
+      "destinations": [
+        "the https URL you pass to --policy-bundle"
+      ],
+      "files": [
+        "packages/cli/src/policy-bundle/load.ts"
+      ],
+      "when": "Explicit `0 findings fix --policy-bundle https://...`. A file path never goes out.",
+      "sent": "One GET request for the bundle, with no credentials. https only, no redirects, private and local addresses refused, 192 KiB ceiling.",
+      "disable": "Pass a file path instead of a URL; ZERO_ENTERPRISE refuses the fetch."
+    },
+    {
       "id": "jira-issues",
       "class": "operator",
       "enterprise": "blocked",
