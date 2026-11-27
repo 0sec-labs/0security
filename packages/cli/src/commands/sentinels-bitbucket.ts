@@ -93,7 +93,7 @@ export function registerSentinelsBitbucketCommands(group: Command): void {
         const interval = positive("--interval", options.interval, 120);
         if (interval < 30) throw new UsageError("--interval must be at least 30 seconds.");
         const limit = positive("--max-reviews", options.maxReviews, 5);
-        const queue = new ReviewQueue({ review: pr => reviewPullRequest(pr, { client, runner, state }, review), log });
+        const queue = new ReviewQueue({ review: pr => reviewPullRequest(pr, { client, runner, state }, review), state, log });
         const poll = async () => { try { const queued = await pollOnce(client, { owner, repo }, queue, state, limit); log(`poll: ${queued} pull request(s) queued`); } catch (error) { log(`poll failed: ${(error instanceof Error ? error.message : String(error)).slice(0, 300)}`); } };
         if (options.once) { await poll(); await queue.idle(); return; }
         if (options.listen) {

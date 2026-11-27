@@ -6,7 +6,7 @@ import { createServer, type Server } from "node:http";
 import { BodyError, WindowCounter, readBodyCapped } from "../web/github-webhook.js";
 import type { BitbucketClient, Platform, PullRequest } from "./client.js";
 import { parseDelivery, verifySignature } from "./events.js";
-import { prKey, type ReviewOutcome } from "./review.js";
+import { prKey, type ReviewOutcome, type ReviewState } from "./review.js";
 
 export const MAX_WEBHOOK_BODY = 1024 * 1024;
 /**
@@ -18,8 +18,18 @@ export const MAX_WEBHOOK_CONNECTIONS = 32;
 const SOURCE_LIMIT_PER_MINUTE = 30;
 const MAX_SOURCES = 5_000;
 
+/**
+ * Where the state remembers the head commit whose review failed. A failed review is not retried until the pull request
+ * changes: a retry on every poll would spend the budget again each time. It is kept apart from the reviewed commit, so
+ * `review --pr` can still run that commit again by hand.
+ */
+export const failedKey = (pr: Pick<PullRequest, "platform" | "owner" | "repo" | "id">): string => `failed:${prKey(pr)}`;
+const sameCommit = (a: string | undefined, b: string): boolean => a !== undefined && a.slice(0, 12) === b.slice(0, 12);
+
 export interface QueueDeps {
   review(pr: PullRequest): Promise<ReviewOutcome>;
+  /** Records the head commit of a review that failed, so that commit is not reviewed again. */
+  state: ReviewState;
   log(line: string): void;
 }
 
@@ -40,16 +50,23 @@ export class ReviewQueue {
   get pending(): number { return this.#waiting.size + (this.#current ? 1 : 0); }
 
   async #drain(): Promise<void> {
+    // Yield once first: a drain that only skips never awaits, and would clear #running before add() stores this promise.
+    await Promise.resolve();
     try {
       while (this.#waiting.size) {
         const [key, pr] = this.#waiting.entries().next().value as [string, PullRequest];
         this.#waiting.delete(key);
         this.#current = key;
-        try {
-          const outcome = await this.deps.review(pr);
-          this.deps.log(`${key}: ${describeOutcome(outcome)}`);
-        } catch (error) {
-          this.deps.log(`${key}: review failed: ${(error instanceof Error ? error.message : String(error)).split("\n")[0]!.slice(0, 300)}`);
+        if (sameCommit(this.deps.state.get(failedKey(pr)), pr.headSha)) {
+          this.deps.log(`${key}: skipped (the review of ${pr.headSha.slice(0, 7)} failed; not retried until the pull request changes)`);
+        } else {
+          try {
+            const outcome = await this.deps.review(pr);
+            this.deps.log(`${key}: ${describeOutcome(outcome)}`);
+          } catch (error) {
+            try { this.deps.state.set(failedKey(pr), pr.headSha); } catch { /* The state file could not be written; a later poll tries this commit again. */ }
+            this.deps.log(`${key}: review failed: ${(error instanceof Error ? error.message : String(error)).split("\n")[0]!.slice(0, 300)}; not retried until the pull request changes (fix the cause, then push a commit or run review --pr ${pr.id})`);
+          }
         }
         this.#current = undefined;
       }
@@ -63,14 +80,13 @@ export function describeOutcome(outcome: ReviewOutcome): string {
   return `reviewed ${outcome.sha.slice(0, 7)}, ${outcome.total} finding(s)${outcome.partial ? ", partial" : ""}${outcome.warnings.length ? `, ${outcome.warnings.length} warning(s): ${outcome.warnings.join(" | ")}` : ""}`;
 }
 
-/** Queue the open pull requests whose head commit changed since the last review. Returns how many were queued. */
+/** Queue the open pull requests whose head commit changed since the last review, or the last failed one. Returns how many were queued. */
 export async function pollOnce(client: BitbucketClient, repo: { owner: string; repo: string }, queue: ReviewQueue, state: { get(key: string): string | undefined }, limit = 5): Promise<number> {
   let queued = 0;
   for (const pr of await client.listOpenPullRequests(repo.owner, repo.repo)) {
     if (queued >= limit) break;
     if (pr.draft || pr.fork) continue;
-    const seen = state.get(prKey(pr));
-    if (seen && seen.slice(0, 12) === pr.headSha.slice(0, 12)) continue;
+    if (sameCommit(state.get(prKey(pr)), pr.headSha) || sameCommit(state.get(failedKey(pr)), pr.headSha)) continue;
     queue.add(pr);
     queued++;
   }

@@ -4,10 +4,13 @@ import { connect, type AddressInfo, type Socket } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BitbucketClient, type PullRequest } from "../client.js";
 import { parseDiff } from "../diff.js";
+import { reviewPullRequest, type ReviewRunner } from "../review.js";
+import { fileState } from "../runner.js";
 import { MAX_WEBHOOK_BODY, MAX_WEBHOOK_CONNECTIONS, createWebhookServer, pollOnce, ReviewQueue } from "../watch.js";
 import { cloudPr, startFakeBitbucket, type FakeBitbucket } from "./fake-bitbucket.js";
 
 const pr = (id: number, over: Partial<PullRequest> = {}): PullRequest => ({ platform: "bitbucket-cloud", owner: "workspace", repo: "repo", id, title: "t", draft: false, fork: false, open: true, headSha: "a".repeat(40), headBranch: "b", baseBranch: "main", ...over });
+const memory = () => { const data = new Map<string, string>(); return { get: (key: string) => data.get(key), set: (key: string, sha: string) => { data.set(key, sha); } }; };
 const sample = (name: string) => readFileSync(new URL(`../../__fixtures__/bitbucket/${name}`, import.meta.url), "utf8");
 
 describe("diff reading", () => {
@@ -33,6 +36,7 @@ describe("review queue", () => {
     const gate = new Promise<void>(done => { release = done; });
     const queue = new ReviewQueue({
       review: async item => { order.push(`start ${item.id}`); if (item.id === 1) await gate; order.push(`end ${item.id}`); return { status: "skipped", reason: "unchanged" }; },
+      state: memory(),
       log: () => undefined,
     });
     queue.add(pr(1));
@@ -48,11 +52,14 @@ describe("review queue", () => {
 
   it("logs a failed review and carries on", async () => {
     const lines: string[] = [];
-    const queue = new ReviewQueue({ review: async item => { if (item.id === 1) throw new Error("boom\nsecond line"); return { status: "skipped", reason: "draft" }; }, log: line => lines.push(line) });
+    const queue = new ReviewQueue({ review: async item => { if (item.id === 1) throw new Error("boom\nsecond line"); return { status: "skipped", reason: "draft" }; }, state: memory(), log: line => lines.push(line) });
     queue.add(pr(1));
     queue.add(pr(2));
     await queue.idle();
-    expect(lines).toEqual(["bitbucket-cloud:workspace/repo#1: review failed: boom", "bitbucket-cloud:workspace/repo#2: skipped (draft)"]);
+    expect(lines).toEqual([
+      "bitbucket-cloud:workspace/repo#1: review failed: boom; not retried until the pull request changes (fix the cause, then push a commit or run review --pr 1)",
+      "bitbucket-cloud:workspace/repo#2: skipped (draft)",
+    ]);
   });
 });
 
@@ -65,12 +72,67 @@ describe("polling", () => {
     fake.pullRequests.push(cloudPr(1), cloudPr(2, { draft: true }), cloudPr(3, { source: { branch: { name: "f" }, commit: { hash: "cccccccccccc" }, repository: { full_name: "other/fork" } } }), cloudPr(4), cloudPr(5), cloudPr(6));
     const client = new BitbucketClient({ platform: "bitbucket-cloud", token: fake.token, cloudApiUrl: `${fake.url}/2.0` });
     const queued: number[] = [];
-    const queue = new ReviewQueue({ review: async item => { queued.push(item.id); return { status: "skipped", reason: "unchanged" }; }, log: () => undefined });
+    const queue = new ReviewQueue({ review: async item => { queued.push(item.id); return { status: "skipped", reason: "unchanged" }; }, state: memory(), log: () => undefined });
     const reviewed = new Map([["bitbucket-cloud:ws/app#4", "aaaaaaaaaaa4zzzz"]]);
     const count = await pollOnce(client, { owner: "ws", repo: "app" }, queue, { get: key => reviewed.get(key) }, 2);
     await queue.idle();
     expect(count).toBe(2);
     expect(queued).toEqual([1, 5]);
+  });
+});
+
+describe("a review that fails", () => {
+  let fake: FakeBitbucket | undefined;
+  afterEach(async () => { await fake?.close(); fake = undefined; });
+  const DIFF = ["diff --git a/app/db.py b/app/db.py", "--- a/app/db.py", "+++ b/app/db.py", "@@ -1,1 +1,2 @@", " import os", "+run(query)", ""].join("\n");
+
+  it("is not reviewed again for the same head commit, by poll, webhook or the next --once run, until the pull request changes", async () => {
+    fake = await startFakeBitbucket("bitbucket-cloud");
+    fake.diff = DIFF;
+    fake.pullRequests.push(cloudPr(7));
+    const client = new BitbucketClient({ platform: "bitbucket-cloud", token: fake.token, cloudApiUrl: `${fake.url}/2.0` });
+    // The token can read pull requests but not comment, so every review throws after the paid scan.
+    const addComment = client.addComment.bind(client);
+    client.addComment = async () => { throw Object.assign(new Error("Bitbucket 403: token lacks pull request write"), { status: 403 }); };
+    let scans = 0;
+    const runner: ReviewRunner = { async scan(item) { scans++; return { sha: item.headSha.padEnd(40, "0"), json: JSON.stringify({ findings: [] }), exitCode: 0 }; } };
+    const files = new Map<string, string>();
+    const io = { read: (path: string) => files.get(path), write: (path: string, text: string) => { files.set(path, text); } };
+    const repo = { owner: "ws", repo: "app" };
+    // One `watch` process: it reads the state file when it starts, as the command does.
+    const start = () => {
+      const state = fileState("state.json", io);
+      const logs: string[] = [];
+      const queue = new ReviewQueue({ review: item => reviewPullRequest(item, { client, runner, state }), state, log: line => logs.push(line) });
+      return { state, logs, queue };
+    };
+
+    const watch = start();
+    for (let poll = 0; poll < 3; poll++) { await pollOnce(client, repo, watch.queue, watch.state); await watch.queue.idle(); }
+    expect(scans).toBe(1);
+    expect(watch.logs).toEqual([expect.stringMatching(/^bitbucket-cloud:ws\/app#7: review failed: Bitbucket 403: token lacks pull request write; not retried until the pull request changes/)]);
+
+    // A webhook for the same commit (Cloud sends pullrequest:updated for a title edit) does not run it again either.
+    watch.queue.add((await client.getPullRequest("ws", "app", 7))!);
+    await watch.queue.idle();
+    expect(scans).toBe(1);
+
+    // A scheduled `watch --once` is a new process reading the same state file: nothing to queue.
+    const next = start();
+    expect(await pollOnce(client, repo, next.queue, next.state)).toBe(0);
+
+    // A new commit on the pull request is reviewed.
+    fake.pullRequests[0] = cloudPr(7, { source: { branch: { name: "feature-7" }, commit: { hash: "cccccccccccc" }, repository: { full_name: "ws/app" } } });
+    expect(await pollOnce(client, repo, next.queue, next.state)).toBe(1);
+    await next.queue.idle();
+    expect(scans).toBe(2);
+
+    // With the token fixed, `review --pr 7` reviews the failed commit by hand, and polls then leave it alone.
+    client.addComment = addComment;
+    const pr = (await client.getPullRequest("ws", "app", 7))!;
+    expect(await reviewPullRequest(pr, { client, runner, state: next.state })).toMatchObject({ status: "reviewed" });
+    expect(scans).toBe(3);
+    expect(await pollOnce(client, repo, next.queue, next.state)).toBe(0);
   });
 });
 
@@ -83,7 +145,7 @@ describe("webhook server", () => {
   async function start(platform: "bitbucket-cloud" | "bitbucket-dc", repo: { owner: string; repo: string }) {
     const queued: PullRequest[] = [];
     const logs: string[] = [];
-    const queue = new ReviewQueue({ review: async item => { queued.push(item); return { status: "skipped", reason: "unchanged" }; }, log: () => undefined });
+    const queue = new ReviewQueue({ review: async item => { queued.push(item); return { status: "skipped", reason: "unchanged" }; }, state: memory(), log: () => undefined });
     server = createWebhookServer({ platform, secret, repo, queue, log: line => logs.push(line) });
     await new Promise<void>(done => server!.listen(0, "127.0.0.1", done));
     const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/`;

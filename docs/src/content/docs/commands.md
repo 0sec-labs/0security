@@ -4584,7 +4584,7 @@ export BITBUCKET_WEBHOOK_SECRET=...
 0security sentinels bitbucket watch --platform dc --repo PROJ/app --checkout ~/code/app --url https://bitbucket.example.com --listen 127.0.0.1:7777
 ```
 
-The command polls the open pull requests every `--interval` seconds. With `--listen` it also accepts webhook deliveries signed with `BITBUCKET_WEBHOOK_SECRET`. Reviews run one at a time. Use `--once` to poll once and exit, for a scheduled job.
+The command polls the open pull requests every `--interval` seconds. With `--listen` it also accepts webhook deliveries signed with `BITBUCKET_WEBHOOK_SECRET`. Reviews run one at a time. Use `--once` to poll once and exit, for a scheduled job. A review that fails is not retried for the same commit, so it does not spend the budget again on every poll: fix the cause, then push a new commit or run `sentinels bitbucket review --pr <number>`.
 
 | Option | Registered default | Description |
 | --- | --- | --- |
