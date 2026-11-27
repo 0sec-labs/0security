@@ -77,6 +77,158 @@ const STRING_PASSTHROUGH: &[&str] = &[
     "charAt",
 ];
 
+/// Method names that read from the outside world even when every argument is a
+/// constant, so their result is never provably free of external input.
+const READS_EXTERNAL_INPUT: &[&str] = &[
+    // Reads of files, sockets, streams, classpath resources and databases: the
+    // result depends on what is stored or sent, not on the arguments.
+    "lines",
+    "list",
+    "listFiles",
+    "walk",
+    "newBufferedReader",
+    "newInputStream",
+    "openStream",
+    "openConnection",
+    "getContent",
+    "getResourceAsStream",
+    "readFully",
+    "readUTF",
+    "readObject",
+    "readLine",
+    "accept",
+    "receive",
+    "executeQuery",
+    "getString",
+    "getObject",
+    "getenv",
+    "readLine",
+    "read",
+    "readAllLines",
+    "readAllBytes",
+    "readString",
+    "nextLine",
+    "next",
+    "getParameter",
+    "getParameterValues",
+    "getParameterMap",
+    "getHeader",
+    "getHeaders",
+    "getCookies",
+    "getQueryString",
+    "getRequestURI",
+    "getRequestURL",
+    "getInputStream",
+    "getReader",
+    "getPathInfo",
+];
+
+/// Whether `Type.method(safe args)` on a project type that is not declared in
+/// the scanned file (so its body cannot be read) is assumed to return a safe
+/// value because its arguments are safe.
+///
+/// `false` (the default) is sound: such a helper is unknown, because it may
+/// ignore its arguments and read request, thread or static state. The price is
+/// extra false alarms on code that routes constants through helper factories
+/// declared in other files; the later verification step is the place to prune
+/// them. `true` restores the old assumption (it recovers that precision but can
+/// hide a real finding behind e.g. `exec(Helper.currentInput())`). This is a
+/// build-time constant, not a user-facing option. See `docs/precision.md`.
+const TRUST_UNRESOLVED_PROJECT_HELPERS: bool = false;
+
+/// Accessors of per-request or per-thread state: what they return does not
+/// depend on their arguments.
+const READS_REQUEST_CONTEXT: &[&str] = &[
+    "getAttribute",
+    "getAttributes",
+    "getSession",
+    "getRequest",
+    "getRequestAttributes",
+    "currentRequestAttributes",
+    "getAuthentication",
+    "getPrincipal",
+    "getUserPrincipal",
+    "getRemoteUser",
+    "getContext",
+];
+
+/// Types whose static methods read request, thread or security context rather
+/// than their arguments.
+const REQUEST_CONTEXT_TYPES: &[&str] = &[
+    "RequestContextHolder",
+    "SecurityContextHolder",
+    "LocaleContextHolder",
+    "TransactionSynchronizationManager",
+    "MDC",
+    "ThreadContext",
+    "ServletActionContext",
+    "ActionContext",
+    "FacesContext",
+    "ExternalContext",
+    "ServletRequestAttributes",
+    "RequestAttributes",
+];
+
+/// Package prefixes of the JDK and widely used libraries.
+const LIBRARY_PREFIXES: &[&str] = &[
+    "java.",
+    "javax.",
+    "jakarta.",
+    "org.w3c.",
+    "org.xml.",
+    "org.apache.",
+    "com.google.",
+    "org.springframework.",
+    "org.slf4j.",
+    "org.owasp.esapi.",
+    "org.owasp.encoder.",
+    "org.json.",
+    "com.fasterxml.",
+];
+
+/// JDK types usable without an import, or commonly brought in by a wildcard.
+const JDK_TYPES: &[&str] = &[
+    "String",
+    "Integer",
+    "Long",
+    "Double",
+    "Float",
+    "Short",
+    "Byte",
+    "Boolean",
+    "Character",
+    "Math",
+    "StrictMath",
+    "System",
+    "Objects",
+    "Arrays",
+    "Collections",
+    "List",
+    "Set",
+    "Map",
+    "Optional",
+    "UUID",
+    "Paths",
+    "Path",
+    "Files",
+    "Base64",
+    "Pattern",
+    "Collectors",
+    "Stream",
+    "StandardCharsets",
+    "Instant",
+    "LocalDate",
+    "LocalDateTime",
+    "Duration",
+    "Locale",
+    "BigInteger",
+    "BigDecimal",
+    "Thread",
+    "Character",
+    "Number",
+    "Enum",
+];
+
 const MAX_DEPTH: usize = 3;
 const STEP_BUDGET: usize = 50_000;
 
@@ -180,11 +332,19 @@ struct Interp<'a> {
     src: &'a str,
     root: Node<'a>,
     html: bool,
+    /// `Some(names)`: calls to helpers that receive only safe arguments count
+    /// as safe, except calls to a method in `names` (the rule's own sources).
+    /// `None`: every call we cannot interpret is not proven safe.
+    trusted_helpers: Option<Vec<String>>,
     depth: usize,
+    /// Nesting of field initialisers being evaluated for constant lookups.
+    const_depth: usize,
     steps: usize,
     aborted: bool,
     /// Sink byte range -> every argument safe on every visit.
     rec: HashMap<(usize, usize), bool>,
+    /// Per-argument safety of each recorded call, merged across visits.
+    rec_args: HashMap<(usize, usize), Vec<bool>>,
     returns: Vec<Val>,
     /// Environments captured at `break`/`continue`, joined at the enclosing
     /// loop or switch exit so a value assigned just before leaving survives.
@@ -194,7 +354,20 @@ struct Interp<'a> {
 /// True when the call or `new` expression `call` sits in a method body and
 /// every argument is proven safe on every path that reaches it. With `html`
 /// set, known HTML encoders count as sanitisers (use for XSS sinks only).
-pub fn sink_args_safe(call: Node<'_>, source: &str, html: bool) -> bool {
+pub fn sink_args_safe(call: Node<'_>, source: &str, html: bool, only: &[usize]) -> bool {
+    sink_args_safe_with(call, source, html, only, Some(Vec::new()))
+}
+
+/// Like [`sink_args_safe`], with control over whether helper calls that receive
+/// only safe arguments are trusted to return safe values (see
+/// `Interp::trusted_helpers`).
+pub fn sink_args_safe_with(
+    call: Node<'_>,
+    source: &str,
+    html: bool,
+    only: &[usize],
+    trusted_helpers: Option<Vec<String>>,
+) -> bool {
     let mut method = call;
     loop {
         match method.kind() {
@@ -216,21 +389,46 @@ pub fn sink_args_safe(call: Node<'_>, source: &str, html: bool) -> bool {
         src: source,
         root,
         html,
+        trusted_helpers,
         depth: 0,
+        const_depth: 0,
         steps: 0,
         aborted: false,
         rec: HashMap::new(),
+        rec_args: HashMap::new(),
         returns: Vec::new(),
         exits: Vec::new(),
     };
+    // Parameters are caller-controlled: seed them so they shadow any field.
     let mut env = Env::new();
+    if let Some(ps) = method.child_by_field_name("parameters") {
+        let mut c = ps.walk();
+        for p in ps.named_children(&mut c) {
+            let name = p.child_by_field_name("name").or_else(|| {
+                let mut c2 = p.walk();
+                let found = p
+                    .named_children(&mut c2)
+                    .find_map(|d| d.child_by_field_name("name"));
+                found
+            });
+            if let Some(n) = name {
+                env.insert(it.text(n).to_string(), Val::Maybe);
+            }
+        }
+    }
     it.exec(body, &mut env);
-    !it.aborted
-        && it
-            .rec
-            .get(&(call.start_byte(), call.end_byte()))
-            .copied()
-            .unwrap_or(false)
+    let key = (call.start_byte(), call.end_byte());
+    if it.aborted {
+        return false;
+    }
+    if only.is_empty() {
+        return it.rec.get(&key).copied().unwrap_or(false);
+    }
+    // Only the listed argument positions have to be proven safe.
+    match it.rec_args.get(&key) {
+        Some(args) => only.iter().all(|i| args.get(*i).copied().unwrap_or(true)),
+        None => false,
+    }
 }
 
 impl<'a> Interp<'a> {
@@ -642,7 +840,13 @@ impl<'a> Interp<'a> {
             "true" => Val::Bool(true),
             "false" => Val::Bool(false),
             "null_literal" => Val::Null,
-            "identifier" => env.get(self.text(node)).cloned().unwrap_or(Val::Maybe),
+            "identifier" => match env.get(self.text(node)) {
+                Some(v) => v.clone(),
+                // A name that is not a local or parameter is only a constant
+                // when it resolves to a `static final` field (or an enum
+                // constant or static import); spelling alone proves nothing.
+                None => self.resolve_constant(node),
+            },
             "parenthesized_expression" => node
                 .named_child(0)
                 .map_or(Val::Maybe, |n| self.eval(n, env)),
@@ -678,8 +882,12 @@ impl<'a> Interp<'a> {
                     Val::Bool(true) => self.eval(t, env),
                     Val::Bool(false) => self.eval(f, env),
                     _ => {
-                        let a = self.eval(t, env);
-                        let b = self.eval(f, env);
+                        // Each branch runs on its own copy: only one of them runs.
+                        let mut e1 = env.clone();
+                        let a = self.eval(t, &mut e1);
+                        let mut e2 = env.clone();
+                        let b = self.eval(f, &mut e2);
+                        *env = join_env(&e1, &e2);
                         join(&a, &b)
                     }
                 }
@@ -716,11 +924,37 @@ impl<'a> Interp<'a> {
                         return Val::Safe;
                     }
                 }
-                // `Type.UPPER_SNAKE` is a compile-time constant by convention.
-                if field.is_some_and(is_constant_name)
-                    && obj.is_some_and(|o| o.kind() != "method_invocation")
-                {
-                    return Val::Safe;
+                if let (Some(o), Some(f)) = (obj, field) {
+                    // `this.NAME` is whatever the enclosing class declares.
+                    if o.kind() == "this" {
+                        if !is_constant_name(f) {
+                            return Val::Maybe;
+                        }
+                        return self.resolve_field(node, f, None).unwrap_or(Val::Maybe);
+                    }
+                    if !self.is_static_type_ref(o, env) {
+                        return Val::Maybe;
+                    }
+                    let text = self.text(o);
+                    let last = text.rsplit('.').next().unwrap_or("");
+                    // A class of this file declares what `Type.NAME` is: only a
+                    // `static final` field with a safe initialiser is a constant.
+                    if self.class_declared_in_file(last) {
+                        if !is_constant_name(f) {
+                            return Val::Maybe;
+                        }
+                        return self
+                            .resolve_field(node, f, Some(last))
+                            .unwrap_or(Val::Maybe);
+                    }
+                    // A field of a class we cannot read may be a public static
+                    // that another file assigns request data to.
+                    if self.library_type(text) && !REQUEST_CONTEXT_TYPES.contains(&last) {
+                        return Val::Safe;
+                    }
+                    if TRUST_UNRESOLVED_PROJECT_HELPERS && is_constant_name(f) {
+                        return Val::Safe;
+                    }
                 }
                 Val::Maybe
             }
@@ -748,7 +982,19 @@ impl<'a> Interp<'a> {
             ("||", Val::Bool(true)) => return Val::Bool(true),
             _ => {}
         }
-        let r = self.eval(rn, env);
+        // The right operand of `&&` / `||` runs only on some paths, so what it
+        // assigns must not replace the old value for the code that follows.
+        let right_always_runs =
+            matches!((op, &l), ("&&", Val::Bool(true)) | ("||", Val::Bool(false)))
+                || !matches!(op, "&&" | "||");
+        let r = if right_always_runs {
+            self.eval(rn, env)
+        } else {
+            let mut branch = env.clone();
+            let r = self.eval(rn, &mut branch);
+            *env = join_env(env, &branch);
+            r
+        };
         if let (Some(a), Some(b)) = (l.as_int(), r.as_int()) {
             let both_int = matches!(l, Val::Int(_)) || matches!(r, Val::Int(_));
             let folded = match op {
@@ -765,6 +1011,11 @@ impl<'a> Interp<'a> {
                 "!=" => Some(Val::Bool(a != b)),
                 _ => None,
             };
+            // Java ints wrap at 32 bits; a result outside that range is not folded.
+            let folded = folded.filter(|v| match v {
+                Val::Int(i) => i32::try_from(*i).is_ok(),
+                _ => true,
+            });
             if let Some(v) = folded {
                 // `'a' + 1` style char arithmetic stays an int.
                 let _ = both_int;
@@ -774,8 +1025,13 @@ impl<'a> Interp<'a> {
         match (op, &l, &r) {
             ("&&", Val::Bool(a), Val::Bool(b)) => return Val::Bool(*a && *b),
             ("||", Val::Bool(a), Val::Bool(b)) => return Val::Bool(*a || *b),
-            ("==", a, b) if a.is_const() && b.is_const() => return Val::Bool(a == b),
-            ("!=", a, b) if a.is_const() && b.is_const() => return Val::Bool(a != b),
+            // `==` on strings compares references, which constant folding cannot see.
+            ("==", a, b) if a.is_const() && b.is_const() && !is_str_pair(a, b) => {
+                return Val::Bool(a == b)
+            }
+            ("!=", a, b) if a.is_const() && b.is_const() && !is_str_pair(a, b) => {
+                return Val::Bool(a != b)
+            }
             ("+", Val::Str(a), b) | ("+", b, Val::Str(a)) if b.is_const() => {
                 let other = match b {
                     Val::Str(s) => s.clone(),
@@ -826,6 +1082,12 @@ impl<'a> Interp<'a> {
             return rv;
         }
         let name = self.text(left).to_string();
+        // Only locals are tracked: a field can be changed by any call, so what
+        // was assigned to it here proves nothing about what a later read sees.
+        if let std::collections::hash_map::Entry::Vacant(slot) = env.entry(name.clone()) {
+            slot.insert(Val::Maybe);
+            return Val::Maybe;
+        }
         let nv = if op == "=" {
             rv
         } else {
@@ -876,6 +1138,16 @@ impl<'a> Interp<'a> {
             .entry((node.start_byte(), node.end_byte()))
             .or_insert(true);
         *e = *e && safe;
+        let per_arg = self
+            .rec_args
+            .entry((node.start_byte(), node.end_byte()))
+            .or_insert_with(|| vec![true; args.len()]);
+        if per_arg.len() < args.len() {
+            per_arg.resize(args.len(), true);
+        }
+        for (slot, v) in per_arg.iter_mut().zip(args) {
+            *slot = *slot && v.is_safe();
+        }
     }
 
     fn eval_new(&mut self, node: Node<'a>, env: &mut Env) -> Val {
@@ -957,24 +1229,307 @@ impl<'a> Interp<'a> {
             (Some(_), Some(o)) if is_static_value_call(self.text(o), name) && all_safe => {
                 return Val::Safe;
             }
+            // A call to a library or project helper that receives only constants
+            // (or values derived from constants) cannot hand back request data:
+            // nothing request-derived goes in. Calls that read from the outside
+            // world are excluded by name.
+            (Some(_), Some(o))
+                if all_safe
+                    && self.helper_is_trusted(name)
+                    && self.is_static_type_ref(o, env)
+                    && self.static_call_trusted(o) =>
+            {
+                return Val::Safe;
+            }
+            (Some(r), Some(o))
+                if all_safe
+                    && self.helper_is_trusted(name)
+                    && r.is_safe()
+                    && self.receiver_call_trusted(o) =>
+            {
+                return Val::Safe;
+            }
             _ => {}
         }
 
         // Same-file helper (unqualified, `this.` or `new LocalClass().`).
-        let local_receiver = match obj_node {
-            None => true,
-            Some(o) if o.kind() == "this" => true,
-            Some(o) if o.kind() == "object_creation_expression" => o
-                .child_by_field_name("type")
-                .is_some_and(|t| self.class_declared_in_file(self.text(t))),
-            _ => false,
-        };
-        if local_receiver && self.depth < MAX_DEPTH {
-            if let Some(m) = self.unique_method(name, args.len()) {
+        if self.depth < MAX_DEPTH {
+            let target = match obj_node {
+                None => self.unique_method_at(node, name, args.len()),
+                Some(o) if o.kind() == "this" => self.unique_method_at(node, name, args.len()),
+                // `new LocalClass().m()` dispatches on exactly that class.
+                Some(o) if o.kind() == "object_creation_expression" => o
+                    .child_by_field_name("type")
+                    .map(|t| self.text(t))
+                    .filter(|t| self.class_declared_in_file(t))
+                    .and_then(|t| self.unique_method_in(t, name, args.len())),
+                _ => None,
+            };
+            if let Some(m) = target {
                 return self.call_helper(m, args);
             }
         }
+        // `Helper.method(..)` where `Helper` is declared in this file: read its
+        // body instead of guessing.
+        if let Some(o) = obj_node {
+            if self.depth < MAX_DEPTH
+                && self.is_static_type_ref(o, env)
+                && self.class_declared_in_file(self.text(o))
+            {
+                if let Some(m) = self.unique_method_in(self.text(o), name, args.len()) {
+                    return self.call_helper(m, args);
+                }
+            }
+        }
         Val::Maybe
+    }
+
+    /// Value of an identifier that is not in the environment. Locals,
+    /// parameters, lambda, catch and loop variables all shadow fields, so a
+    /// name declared anywhere in the enclosing method is never a constant.
+    /// Otherwise the name must resolve to a field declared by an enclosing
+    /// class, or be statically imported by name; anything else is unknown.
+    fn resolve_constant(&mut self, node: Node<'a>) -> Val {
+        let name = self.text(node);
+        if !is_constant_name(name) || self.declared_in_method(node, name) {
+            return Val::Maybe;
+        }
+        if let Some(v) = self.resolve_field(node, name, None) {
+            return v;
+        }
+        if self.statically_imported(name) {
+            return Val::Safe;
+        }
+        Val::Maybe
+    }
+
+    fn declared_in_method(&self, node: Node<'a>, name: &str) -> bool {
+        let mut cur = node;
+        let method = loop {
+            match cur.kind() {
+                "method_declaration" | "constructor_declaration" => break cur,
+                _ => match cur.parent() {
+                    Some(p) => cur = p,
+                    None => return false,
+                },
+            }
+        };
+        let mut found = false;
+        walk(method, &mut |n| {
+            if found {
+                return;
+            }
+            if let Some(p) = n.parent() {
+                if n.kind() == "identifier"
+                    && self.text(n) == name
+                    && (p.child_by_field_name("name") == Some(n)
+                        || matches!(
+                            p.kind(),
+                            "lambda_expression" | "inferred_parameters" | "spread_parameter"
+                        ))
+                {
+                    found = true;
+                }
+            }
+        });
+        found
+    }
+
+    /// Look `name` up in the field declarations of `class` (by name) or, with
+    /// `None`, of the classes enclosing `at`, innermost first. `Some(Safe)` for
+    /// a `static final` field with a safe initialiser, an interface field or an
+    /// enum constant; `Some(Maybe)` for any other declaration; `None` when no
+    /// such class declares it.
+    fn resolve_field(&mut self, at: Node<'a>, name: &str, class: Option<&str>) -> Option<Val> {
+        let mut scopes = Vec::new();
+        match class {
+            Some(ty) => walk(self.root, &mut |n| {
+                if n.kind() == "class_declaration"
+                    && n.child_by_field_name("name")
+                        .is_some_and(|x| self.text(x) == ty)
+                {
+                    scopes.push(n);
+                }
+            }),
+            None => {
+                let mut cur = at.parent();
+                while let Some(n) = cur {
+                    if matches!(
+                        n.kind(),
+                        "class_declaration"
+                            | "interface_declaration"
+                            | "enum_declaration"
+                            | "record_declaration"
+                            | "object_creation_expression"
+                    ) {
+                        scopes.push(n);
+                    }
+                    cur = n.parent();
+                }
+            }
+        }
+        for scope in scopes {
+            let interface = scope.kind() == "interface_declaration";
+            let Some(body) = scope
+                .child_by_field_name("body")
+                .or_else(|| find_child(scope, "class_body"))
+            else {
+                continue;
+            };
+            let mut members = Vec::new();
+            let mut c = body.walk();
+            for m in body.named_children(&mut c) {
+                if m.kind() == "enum_body_declarations" {
+                    let mut c2 = m.walk();
+                    members.extend(m.named_children(&mut c2));
+                } else {
+                    members.push(m);
+                }
+            }
+            for m in members {
+                if m.kind() == "enum_constant"
+                    && m.child_by_field_name("name")
+                        .is_some_and(|x| self.text(x) == name)
+                {
+                    return Some(Val::Safe);
+                }
+                if !matches!(m.kind(), "field_declaration" | "constant_declaration") {
+                    continue;
+                }
+                let modifiers = find_child(m, "modifiers").map_or("", |x| self.text(x));
+                let words: Vec<&str> = modifiers.split_whitespace().collect();
+                let constant = interface || (words.contains(&"static") && words.contains(&"final"));
+                let mut c3 = m.walk();
+                for d in m.children_by_field_name("declarator", &mut c3) {
+                    if d.child_by_field_name("name")
+                        .is_none_or(|x| self.text(x) != name)
+                    {
+                        continue;
+                    }
+                    if !constant || self.const_depth >= 4 {
+                        return Some(Val::Maybe);
+                    }
+                    let Some(init) = d.child_by_field_name("value") else {
+                        return Some(Val::Maybe);
+                    };
+                    self.const_depth += 1;
+                    let v = self.eval(init, &mut Env::new());
+                    self.const_depth -= 1;
+                    return Some(v.degrade());
+                }
+            }
+        }
+        None
+    }
+
+    fn statically_imported(&self, name: &str) -> bool {
+        let mut found = false;
+        let mut c = self.root.walk();
+        for n in self.root.named_children(&mut c) {
+            if n.kind() == "import_declaration" {
+                let t = self.text(n);
+                if t.contains("static")
+                    && t.trim_end_matches(';').trim().rsplit('.').next() == Some(name)
+                {
+                    found = true;
+                }
+            }
+        }
+        found
+    }
+
+    /// May a `Type.method(safe args)` call be assumed to return a safe value?
+    ///
+    /// Never for request, thread or security context holders, whose result does
+    /// not depend on the arguments. Never for a class declared in this file: its
+    /// body is interpreted instead (a helper that reads context then comes back
+    /// unknown). A type whose body is not available is trusted only if it is a
+    /// JDK or well-known library type, unless
+    /// [`TRUST_UNRESOLVED_PROJECT_HELPERS`] is set.
+    fn static_call_trusted(&self, receiver: Node<'a>) -> bool {
+        let text = self.text(receiver);
+        let last = text.rsplit('.').next().unwrap_or("");
+        if REQUEST_CONTEXT_TYPES.contains(&last) || self.class_declared_in_file(last) {
+            return false;
+        }
+        TRUST_UNRESOLVED_PROJECT_HELPERS || self.library_type(text)
+    }
+
+    /// Is `text` (`Type`, `pkg.Type`) a JDK or well-known library type, judged by
+    /// its qualifier, its import, or its membership in the JDK list?
+    fn library_type(&self, text: &str) -> bool {
+        let head = text.split('.').next().unwrap_or("");
+        if head.starts_with(|c: char| c.is_ascii_lowercase()) {
+            return LIBRARY_PREFIXES.iter().any(|p| text.starts_with(p));
+        }
+        let mut c = self.root.walk();
+        for n in self.root.named_children(&mut c) {
+            if n.kind() != "import_declaration" {
+                continue;
+            }
+            let t = self.text(n);
+            if t.contains("static") {
+                continue;
+            }
+            let path = t
+                .trim_start_matches("import")
+                .trim()
+                .trim_end_matches(';')
+                .trim();
+            if path.rsplit('.').next() == Some(head) {
+                return LIBRARY_PREFIXES.iter().any(|p| path.starts_with(p));
+            }
+        }
+        JDK_TYPES.contains(&head)
+    }
+
+    /// Same question for `value.method(safe args)` on a receiver already proven
+    /// safe: never when the chain starts at a request-context holder.
+    fn receiver_call_trusted(&self, receiver: Node<'a>) -> bool {
+        let mut cur = receiver;
+        loop {
+            match cur.kind() {
+                "method_invocation" => match cur.child_by_field_name("object") {
+                    Some(o) => cur = o,
+                    None => return true,
+                },
+                "field_access" | "scoped_identifier" => {
+                    let last = self.text(cur).rsplit('.').next().unwrap_or("");
+                    return !REQUEST_CONTEXT_TYPES.contains(&last);
+                }
+                _ => return !REQUEST_CONTEXT_TYPES.contains(&self.text(cur)),
+            }
+        }
+    }
+
+    fn helper_is_trusted(&self, name: &str) -> bool {
+        !READS_EXTERNAL_INPUT.contains(&name)
+            && !READS_REQUEST_CONTEXT.contains(&name)
+            && self
+                .trusted_helpers
+                .as_ref()
+                .is_some_and(|sources| !sources.iter().any(|s| s == name))
+    }
+
+    /// `Type.method(..)` / `pkg.Type.method(..)`: the receiver names a class, not
+    /// a variable in scope.
+    fn is_static_type_ref(&self, node: Node<'a>, env: &Env) -> bool {
+        if !matches!(
+            node.kind(),
+            "identifier" | "field_access" | "scoped_identifier"
+        ) {
+            return false;
+        }
+        let text = self.text(node);
+        let mut parts = text.split('.');
+        let first = parts.next().unwrap_or("");
+        let last = text.rsplit('.').next().unwrap_or("");
+        env.get(first).is_none()
+            && !is_constant_name(last)
+            && last.starts_with(|c: char| c.is_ascii_uppercase())
+            && text
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '_' || c == '.')
     }
 
     fn collection_call(&mut self, var: &str, name: &str, args: Vec<Val>, env: &mut Env) -> Val {
@@ -1059,18 +1614,25 @@ impl<'a> Interp<'a> {
         found
     }
 
-    fn unique_method(&self, name: &str, arity: usize) -> Option<Node<'a>> {
+    fn unique_method_in(&self, class: &str, name: &str, arity: usize) -> Option<Node<'a>> {
         let mut hits = Vec::new();
         walk(self.root, &mut |n| {
-            if n.kind() == "method_declaration" {
-                if let (Some(nm), Some(ps)) = (
-                    n.child_by_field_name("name"),
-                    n.child_by_field_name("parameters"),
-                ) {
-                    if self.text(nm) == name && ps.named_child_count() == arity {
-                        hits.push(n);
+            if n.kind() == "class_declaration"
+                && n.child_by_field_name("name")
+                    .is_some_and(|x| self.text(x) == class)
+            {
+                walk(n, &mut |m| {
+                    if m.kind() == "method_declaration" {
+                        if let (Some(nm), Some(ps)) = (
+                            m.child_by_field_name("name"),
+                            m.child_by_field_name("parameters"),
+                        ) {
+                            if self.text(nm) == name && ps.named_child_count() == arity {
+                                hits.push(m);
+                            }
+                        }
                     }
-                }
+                });
             }
         });
         if hits.len() == 1 {
@@ -1078,6 +1640,56 @@ impl<'a> Interp<'a> {
         } else {
             None
         }
+    }
+
+    /// The method an unqualified or `this.` call resolves to: declared by the
+    /// innermost enclosing class that declares one of that name and arity, and
+    /// not overridable (private, static or final, or in a final class), since a
+    /// subclass elsewhere could otherwise substitute its own body.
+    fn unique_method_at(&self, call: Node<'a>, name: &str, arity: usize) -> Option<Node<'a>> {
+        let mut up = call.parent();
+        while let Some(scope) = up {
+            if matches!(
+                scope.kind(),
+                "class_declaration" | "enum_declaration" | "record_declaration"
+            ) {
+                let class_final = find_child(scope, "modifiers")
+                    .is_some_and(|m| self.text(m).split_whitespace().any(|w| w == "final"));
+                let body = scope.child_by_field_name("body");
+                let mut hits = Vec::new();
+                if let Some(body) = body {
+                    let mut c = body.walk();
+                    for m in body.named_children(&mut c) {
+                        if m.kind() != "method_declaration" {
+                            continue;
+                        }
+                        if let (Some(nm), Some(ps)) = (
+                            m.child_by_field_name("name"),
+                            m.child_by_field_name("parameters"),
+                        ) {
+                            if self.text(nm) == name && ps.named_child_count() == arity {
+                                hits.push(m);
+                            }
+                        }
+                    }
+                }
+                if !hits.is_empty() {
+                    if hits.len() != 1 {
+                        return None;
+                    }
+                    let m = hits[0];
+                    let fixed = class_final
+                        || find_child(m, "modifiers").is_some_and(|mods| {
+                            self.text(mods)
+                                .split_whitespace()
+                                .any(|w| matches!(w, "private" | "static" | "final"))
+                        });
+                    return fixed.then_some(m);
+                }
+            }
+            up = scope.parent();
+        }
+        None
     }
 
     fn call_helper(&mut self, method: Node<'a>, args: Vec<Val>) -> Val {
@@ -1113,6 +1725,16 @@ impl<'a> Interp<'a> {
     }
 }
 
+fn is_str_pair(a: &Val, b: &Val) -> bool {
+    matches!((a, b), (Val::Str(_), Val::Str(_)))
+}
+
+fn find_child<'t>(node: Node<'t>, kind: &str) -> Option<Node<'t>> {
+    let mut c = node.walk();
+    let found = node.named_children(&mut c).find(|n| n.kind() == kind);
+    found
+}
+
 fn is_constant_name(name: &str) -> bool {
     name.len() > 1
         && name.starts_with(|c: char| c.is_ascii_uppercase())
@@ -1128,7 +1750,15 @@ fn idx_ok(i: &Val, len: usize) -> bool {
 fn is_value_type(base: &str) -> bool {
     matches!(
         base,
-        "String" | "StringBuilder" | "StringBuffer" | "Integer" | "Long" | "Object"
+        "String"
+            | "StringBuilder"
+            | "StringBuffer"
+            | "Integer"
+            | "Long"
+            | "Object"
+            | "File"
+            | "URI"
+            | "URL"
     )
 }
 
@@ -1180,11 +1810,42 @@ mod tests {
                 found = Some(n);
             }
         });
-        sink_args_safe(found.expect("sink call"), src, html)
+        sink_args_safe(found.expect("sink call"), src, html, &[])
     }
 
     fn method(body: &str) -> String {
         format!("class T {{ void m(HttpServletRequest req) {{ String param = req.getParameter(\"x\"); {body} }} }}")
+    }
+
+    #[test]
+    fn static_helper_with_constant_arguments_is_safe_but_input_readers_are_not() {
+        // JDK and library helpers depend only on their arguments. (The old
+        // expectation also trusted `Helpers.name("k")` for an unknown project
+        // class; that assumption is gone, see the next test.)
+        assert!(safe(
+            &method("String v = java.util.Objects.toString(\"k\"); sink(v);"),
+            false
+        ));
+        assert!(safe(
+            &method("String v = java.util.Arrays.asList(\"k\").get(0); sink(v);"),
+            false
+        ));
+        assert!(!safe(
+            &method("String v = Helpers.name(param); sink(v);"),
+            false
+        ));
+        assert!(!safe(
+            &method("String v = System.getenv(\"HOME\"); sink(v);"),
+            false
+        ));
+    }
+
+    #[test]
+    fn upper_snake_names_are_constants_and_any_unsafe_argument_blocks_the_veto() {
+        let src = "class T { static final String BASE_DIR = \"/srv\"; void m() { sink(BASE_DIR + \"x\"); } }";
+        assert!(safe(src, false));
+        let src = "class T { void m(HttpServletRequest req) { String p = req.getParameter(\"x\"); sink(\"fixed\", p); } }";
+        assert!(!safe(src, false));
     }
 
     #[test]
@@ -1265,5 +1926,191 @@ mod tests {
     fn unknown_values_are_not_safe() {
         assert!(!safe("class T { void m() { sink(field); } }", false));
         assert!(!safe("class T { void m() { sink(other()); } }", false));
+    }
+
+    #[test]
+    fn upper_snake_parameters_and_other_declared_names_are_never_constants() {
+        for src in [
+            "class T { void m(@RequestParam String USER_INPUT) { sink(USER_INPUT); } }",
+            "class T { void m(HttpServletRequest req, String USER_INPUT) { sink(USER_INPUT); } }",
+            "class T { void m(String... ARGS) { sink(ARGS); } }",
+            "class T { void m() { items.forEach(ITEM -> sink(ITEM)); } }",
+            "class T { void m() { items.forEach((String ITEM) -> sink(ITEM)); } }",
+            "class T { void m(java.util.List<String> xs) { for (String ITEM : xs) { sink(ITEM); } } }",
+            "class T { void m() { try { run(); } catch (Exception ERR) { sink(ERR); } } }",
+            "class T { void m(HttpServletRequest req) { String RAW; RAW = req.getParameter(\"x\"); sink(RAW); } }",
+            // A parameter shadows a constant field of the same name.
+            "class T { static final String CMD = \"ls\"; void m(String CMD) { sink(CMD); } }",
+            // A plain or merely static field is not a constant.
+            "class T { static String MODE = \"a\"; void m() { sink(MODE); } }",
+            "class T { final String MODE = \"a\"; void m() { sink(MODE); } }",
+            "class T { static final String HOME = System.getenv(\"HOME\"); void m() { sink(HOME); } }",
+            // Nothing declares it: unknown, not a constant.
+            "class T { void m() { sink(UNDECLARED_NAME); } }",
+            "class T { void m() { sink(this.UNDECLARED_NAME); } }",
+        ] {
+            assert!(!safe(src, false), "{src}");
+        }
+    }
+
+    #[test]
+    fn upper_snake_names_that_resolve_to_constants_are_safe() {
+        for src in [
+            "class T { static final String BASE = \"ls\"; void m() { sink(BASE); } }",
+            "class T { private static final String BASE = \"ls\"; static final String FULL = BASE + \" -l\"; void m() { sink(FULL); } }",
+            "class T { static final String BASE = \"ls\"; void m() { sink(T.BASE); } }",
+            "class T { static final String BASE = \"ls\"; void m() { sink(this.BASE); } }",
+            "interface K { String BASE = \"ls\"; default void m() { sink(BASE); } }",
+            "enum E { FIRST, SECOND; void m() { sink(FIRST); } }",
+            "import static a.b.Config.BASE; class T { void m() { sink(BASE); } }",
+            "class T { static class N { static final String BASE = \"ls\"; void m() { sink(BASE); } } }",
+        ] {
+            assert!(safe(src, false), "{src}");
+        }
+    }
+
+    #[test]
+    fn helpers_that_read_request_context_are_not_safe() {
+        for src in [
+            // Body is in the file and reads thread state.
+            "class T { static final ThreadLocal<String> CURRENT = new ThreadLocal<>(); void m() { sink(Helper.currentInput()); } } class Helper { static final ThreadLocal<String> CURRENT = new ThreadLocal<>(); static String currentInput() { return CURRENT.get(); } }",
+            // Body is in the file and returns a static field set from a request.
+            "class T { void m() { sink(Helper.last()); } } class Helper { static String last; static void set(HttpServletRequest r) { last = r.getParameter(\"x\"); } static String last() { return last; } }",
+            // Body is in the file and calls a source.
+            "class T { void m() { sink(Helper.fromRequest()); } } class Helper { static String fromRequest() { return ((javax.servlet.http.HttpServletRequest) RequestContextHolder.getRequestAttributes()).getParameter(\"x\"); } }",
+            // Context holders are never trusted, in the file or not.
+            "class T { void m() { sink(RequestContextHolder.currentRequestAttributes()); } }",
+            "class T { void m() { sink(RequestContextHolder.currentRequestAttributes().getAttribute(\"user\", 0)); } }",
+            "class T { void m() { sink(SecurityContextHolder.getContext().getAuthentication().getName()); } }",
+            "class T { void m() { sink(MDC.get(\"user\")); } }",
+            // An overloaded or recursive helper cannot be resolved.
+            "class T { void m() { sink(Helper.a(\"k\")); } } class Helper { static String a(String k) { return CURRENT.get(); } static String a(int k) { return \"x\"; } }",
+        ] {
+            assert!(!safe(src, false), "{src}");
+        }
+    }
+
+    #[test]
+    fn helpers_whose_body_is_in_the_file_are_judged_by_the_body() {
+        for src in [
+            "class T { void m() { sink(Helper.name(\"k\")); } } class Helper { static String name(String k) { return k + \"x\"; } }",
+            "class T { void m() { sink(Helper.fixed()); } } class Helper { static final String BASE = \"a\"; static String fixed() { return BASE; } }",
+        ] {
+            assert!(safe(src, false), "{src}");
+        }
+        // The body returns its (request-derived) argument.
+        let src = "class T { void m(HttpServletRequest req) { sink(Helper.id(req.getParameter(\"x\"))); } } class Helper { static String id(String k) { return k; } }";
+        assert!(!safe(src, false));
+    }
+
+    #[test]
+    fn project_helper_declared_elsewhere_is_unknown_even_with_safe_arguments() {
+        // The body is not available: it may ignore its arguments and read
+        // request, thread or static state, so nothing is proven.
+        for body in [
+            "sink(Elsewhere.make(\"k\"));",
+            "sink(Elsewhere.currentInput());",
+            "sink(pkg.Elsewhere.make(\"k\"));",
+            "String v = pkg.Helpers.make().name(\"k\"); sink(v);",
+            "sink(Elsewhere.make(param));",
+        ] {
+            assert!(!safe(&method(body), false), "{body}");
+        }
+        // JDK and well-known library calls are still a function of their arguments.
+        assert!(safe(&method("sink(String.valueOf(\"k\"));"), false));
+        assert!(safe(
+            &method("sink(java.nio.file.Paths.get(\"/srv\", \"k\"));"),
+            false
+        ));
+    }
+
+    #[test]
+    fn qualified_fields_are_constants_only_when_resolved_or_from_the_jdk() {
+        for src in [
+            // Another file may assign request data to a public static field.
+            "class T { void m() { sink(OtherState.USER_COMMAND); } }",
+            "class T { void m() { sink(pkg.OtherState.USER_COMMAND); } }",
+            "class T { void m() { sink(OtherState.userCommand); } }",
+            // A class of this file declares it, but not as a constant.
+            "class T { void m() { sink(State.USER_COMMAND); } } class State { public static String USER_COMMAND; }",
+            "class T { void m() { sink(State.USER_COMMAND); } } class State { public static final String USER_COMMAND = System.getenv(\"X\"); }",
+            "class T { void m() { sink(State.MISSING); } } class State { }",
+            // A local value's field is not a type's constant.
+            "class T { void m(Holder HOLDER) { sink(HOLDER.NAME); } }",
+        ] {
+            assert!(!safe(src, false), "{src}");
+        }
+        for src in [
+            "class T { void m() { sink(State.COMMAND); } } class State { public static final String COMMAND = \"ls\"; }",
+            "import java.io.File; class T { void m() { sink(File.separator); } }",
+            "class T { void m() { sink(java.io.File.pathSeparator); } }",
+            "class T { void m() { sink(StandardCharsets.UTF_8); } }",
+            "class T { void m() { sink(Integer.MAX_VALUE); } }",
+            "import java.util.concurrent.TimeUnit; class T { void m() { sink(TimeUnit.SECONDS); } }",
+        ] {
+            assert!(safe(src, false), "{src}");
+        }
+    }
+
+    #[test]
+    fn assignments_in_conditionally_evaluated_expressions_do_not_replace_the_value() {
+        for body in [
+            "boolean ok = check() && (param = \"fixed\") != null; sink(param);",
+            "boolean ok = check() || (param = \"fixed\") != null; sink(param);",
+            "String q = check() ? (param = \"fixed\") : \"other\"; sink(param);",
+        ] {
+            assert!(!safe(&method(body), false), "{body}");
+        }
+        // Always evaluated: the replacement stands.
+        assert!(safe(
+            &method("String p2 = param; p2 = \"fixed\"; sink(p2);"),
+            false
+        ));
+        assert!(safe(
+            &method("boolean ok = true && (param = \"fixed\") != null; sink(param);"),
+            false
+        ));
+    }
+
+    #[test]
+    fn fields_and_overridable_methods_are_not_trusted_state() {
+        // A field assigned here can be changed by the call before the read.
+        assert!(!safe(
+            "class T { String cmd; void m() { cmd = \"ls\"; reload(); sink(cmd); } }",
+            false
+        ));
+        // A local cannot.
+        assert!(safe(
+            "class T { void m() { String cmd = \"ls\"; reload(); sink(cmd); } }",
+            false
+        ));
+        // A private helper is read; an overridable one is not (a subclass elsewhere may replace it).
+        assert!(safe(
+            "class T { void m() { sink(name()); } private String name() { return \"ls\"; } }",
+            false
+        ));
+        assert!(!safe(
+            "class T { void m() { sink(name()); } String name() { return \"ls\"; } }",
+            false
+        ));
+        // A same-named method of another class is not the one being called.
+        assert!(!safe(
+            "class T { void m() { sink(name()); } } class U { private String name() { return \"ls\"; } }",
+            false
+        ));
+    }
+
+    #[test]
+    fn constant_folding_follows_java_semantics() {
+        // String `==` compares references: a built string is not the literal.
+        assert!(!safe(
+            "class T { void m(HttpServletRequest req) { String a = \"x\"; String b = a + \"y\"; String r; if (b == \"xy\") { r = \"safe\"; } else { r = req.getParameter(\"q\"); } sink(r); } }",
+            false
+        ));
+        // Ints wrap at 32 bits: this condition is false, not true.
+        assert!(!safe(
+            "class T { void m(HttpServletRequest req) { String r; if (2147483647 + 1 > 0) { r = \"safe\"; } else { r = req.getParameter(\"q\"); } sink(r); } }",
+            false
+        ));
     }
 }

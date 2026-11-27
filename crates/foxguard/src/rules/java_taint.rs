@@ -43,22 +43,75 @@ struct TaintInfo {
     labels: Option<BTreeSet<String>>,
 }
 
+/// Taint of local names within one scope.
+///
+/// The walk that builds it is flow-insensitive, but a clean reassignment must
+/// only hide taint from the statements that come after it: `exec(p); p = "x";`
+/// still sends `p` to the sink. Taint and unconditional clears are therefore
+/// recorded with the byte offset at which they take effect and read back with
+/// [`TaintState::info_at`].
 #[derive(Default)]
 struct TaintState {
     tainted: HashMap<String, TaintInfo>,
+    /// Offsets after which a name holds a clean value (straight-line only).
+    clears: HashMap<String, BTreeSet<usize>>,
+    /// Offsets at which a name became tainted.
+    events: HashMap<String, BTreeSet<usize>>,
+    /// Offset at which the node being walked takes effect.
+    cursor: usize,
 }
 
 impl TaintState {
     fn taint(&mut self, name: String, info: TaintInfo) {
+        self.events
+            .entry(name.clone())
+            .or_default()
+            .insert(self.cursor);
         self.tainted.insert(name, info);
     }
 
     fn clear(&mut self, name: &str) {
-        self.tainted.remove(name);
+        self.clears
+            .entry(name.to_string())
+            .or_default()
+            .insert(self.cursor);
     }
 
+    /// Whether the name was ever tainted, ignoring clean reassignments.
     fn info(&self, name: &str) -> Option<&TaintInfo> {
         self.tainted.get(name)
+    }
+
+    /// Taint of `name` as read at `at`. A clean reassignment before `at` hides
+    /// it unless the name was tainted again between the two, or, inside a loop,
+    /// later in a loop that also contains `at` (the value flows around the back
+    /// edge).
+    fn info_at(&self, name: &str, at: Node<'_>) -> Option<&TaintInfo> {
+        let info = self.tainted.get(name)?;
+        let pos = at.start_byte();
+        let Some(clear) = self
+            .clears
+            .get(name)
+            .and_then(|c| c.range(..=pos).next_back())
+        else {
+            return Some(info);
+        };
+        let events = self.events.get(name)?;
+        if events.range(clear + 1..=pos).next().is_some() {
+            return Some(info);
+        }
+        let mut up = at.parent();
+        while let Some(n) = up {
+            if matches!(
+                n.kind(),
+                "for_statement" | "enhanced_for_statement" | "while_statement" | "do_statement"
+            ) && events.range(pos + 1..n.end_byte()).next().is_some()
+            {
+                return Some(info);
+            }
+            up = n.parent();
+        }
+        None
     }
 }
 
@@ -74,7 +127,33 @@ pub fn analyze_tree(
     spec: &TaintSpec,
     aliases: Option<&AliasTable>,
 ) -> Vec<TaintFinding> {
-    analyze_tree_with_propagators(root, source, spec, aliases, &[])
+    analyze_tree_with_propagators(root, source, spec, aliases, &default_propagators())
+}
+
+/// Container and builder mutators whose arguments end up inside the receiver:
+/// `list.add(x)`, `map.put(k, x)`, `sb.append(x)`. Reading the container back
+/// (`list.get(0)`, `sb.toString()`) then yields tainted data. The flow-sensitive
+/// veto in `java_flow` still clears reads that provably return a constant.
+fn default_propagators() -> Vec<Propagator> {
+    [
+        "add",
+        "addAll",
+        "put",
+        "putAll",
+        "append",
+        "insert",
+        "push",
+        "offer",
+        "addFirst",
+        "addLast",
+        "addElement",
+    ]
+    .iter()
+    .map(|m| Propagator {
+        method: Some((*m).to_string()),
+        description: format!("{m}() stores its argument in the receiver"),
+    })
+    .collect()
 }
 
 /// Like [`analyze_tree`] but also applies a list of taint [`Propagator`]s
@@ -115,11 +194,32 @@ pub fn analyze_tree_labeled(
     findings
 }
 
+/// Rule id for request data reaching an argument of a fixed, non-shell program.
+/// The command-injection sinks find these flows; a fixed program rules out
+/// shell metacharacters but not option injection (`find -exec`, `tar
+/// --checkpoint-action`, `git -c`, `curl -o`, `ssh -o ProxyCommand`), so they are
+/// reported under their own rule instead of being dropped.
+pub const ARGUMENT_INJECTION_RULE: &str = "java/taint-argument-injection";
+
+/// Whether `finding` (from [`analyze_tree`]) is reported by rule `rule_id`: the
+/// argument-injection rule owns the findings tagged for it, every other rule
+/// the rest.
+pub fn finding_belongs_to(rule_id: &str, finding: &TaintFinding) -> bool {
+    (finding.rule_id_hint.as_deref() == Some(ARGUMENT_INJECTION_RULE))
+        == (rule_id == ARGUMENT_INJECTION_RULE)
+}
+
 /// All Java taint rule IDs paired with their specs.
 pub fn java_taint_rule_specs() -> Vec<(&'static str, TaintSpec)> {
     vec![
         ("java/taint-sql-injection", sql_injection_spec()),
         ("java/taint-command-injection", command_injection_spec()),
+        // Same sinks as command injection; reports only the flows whose program
+        // is a fixed non-shell executable (see `ARGUMENT_INJECTION_RULE`).
+        (ARGUMENT_INJECTION_RULE, command_injection_spec()),
+        ("java/taint-path-traversal", path_traversal_spec()),
+        ("java/taint-ldap-injection", ldap_injection_spec()),
+        ("java/taint-xpath-injection", xpath_injection_spec()),
         ("java/taint-ssrf", ssrf_spec()),
         (
             "java/taint-unsafe-deserialization",
@@ -158,6 +258,47 @@ pub fn java_taint_sources() -> Vec<NodeMatcher> {
             });
         }
     }
+    // Any variable, parameter or field DECLARED as a servlet request, whatever
+    // it is called (`HttpServletRequest httpRequest`, `ServletRequest r`).
+    sources.push(NodeMatcher::TypedReceiverCall {
+        receiver_types: strings(&[
+            "HttpServletRequest",
+            "ServletRequest",
+            "HttpServletRequestWrapper",
+            "ServletRequestWrapper",
+        ]),
+        receiver_hints: vec![],
+        methods: strings(&[
+            "getParameter",
+            "getParameterMap",
+            "getParameterValues",
+            "getParameterNames",
+            "getHeader",
+            "getHeaders",
+            "getHeaderNames",
+            "getRequestURI",
+            "getRequestURL",
+            "getPathInfo",
+            "getPathTranslated",
+            "getQueryString",
+            "getServletPath",
+            "getInputStream",
+            "getReader",
+            "getCookies",
+        ]),
+        arg_indices: vec![],
+        fixed_program_safe: false,
+        description: "HttpServletRequest data".into(),
+    });
+    // Cookie contents, however the cookie was obtained.
+    sources.push(NodeMatcher::TypedReceiverCall {
+        receiver_types: strings(&["Cookie"]),
+        receiver_hints: vec![],
+        methods: strings(&["getValue", "getName"]),
+        arg_indices: vec![],
+        fixed_program_safe: false,
+        description: "Cookie.getValue()".into(),
+    });
     sources.push(NodeMatcher::Call {
         canonical: "System.getenv".into(),
         description: "System.getenv()".into(),
@@ -174,6 +315,10 @@ pub fn java_taint_sources() -> Vec<NodeMatcher> {
         description: "Spring MVC annotated parameter".into(),
     });
     sources
+}
+
+fn strings(items: &[&str]) -> Vec<String> {
+    items.iter().map(|s| (*s).to_string()).collect()
 }
 
 fn sql_injection_spec() -> TaintSpec {
@@ -200,6 +345,49 @@ fn sql_injection_spec() -> TaintSpec {
                 method: "prepareStatement".into(),
                 description: "prepareStatement() with tainted query".into(),
             },
+            NodeMatcher::MethodName {
+                method: "prepareCall".into(),
+                description: "prepareCall() with tainted query".into(),
+            },
+            NodeMatcher::MethodName {
+                method: "executeUpdate".into(),
+                description: "executeUpdate() with tainted query".into(),
+            },
+            NodeMatcher::MethodName {
+                method: "executeLargeUpdate".into(),
+                description: "executeLargeUpdate() with tainted query".into(),
+            },
+            NodeMatcher::MethodName {
+                method: "addBatch".into(),
+                description: "addBatch() with tainted query".into(),
+            },
+            // Spring JDBC: the SQL text is the first argument. Values bound at
+            // later positions are parameters, never part of the statement.
+            NodeMatcher::TypedReceiverCall {
+                receiver_types: strings(&[
+                    "JdbcTemplate",
+                    "JdbcOperations",
+                    "NamedParameterJdbcTemplate",
+                    "NamedParameterJdbcOperations",
+                    "JdbcDaoSupport",
+                ]),
+                receiver_hints: strings(&["jdbctemplate"]),
+                methods: strings(&[
+                    "query",
+                    "queryForObject",
+                    "queryForList",
+                    "queryForMap",
+                    "queryForLong",
+                    "queryForInt",
+                    "queryForRowSet",
+                    "queryForStream",
+                    "update",
+                    "batchUpdate",
+                ]),
+                arg_indices: vec![0],
+                fixed_program_safe: false,
+                description: "JdbcTemplate query with tainted SQL text".into(),
+            },
         ],
         sanitizers: vec![],
     }
@@ -209,13 +397,138 @@ fn command_injection_spec() -> TaintSpec {
     TaintSpec {
         sources: java_taint_sources(),
         sinks: vec![
-            NodeMatcher::Call {
-                canonical: "Runtime.exec".into(),
+            // `Runtime.getRuntime().exec(..)`, `Runtime r = ..; r.exec(..)` and
+            // any receiver whose name mentions the runtime.
+            NodeMatcher::TypedReceiverCall {
+                receiver_types: strings(&["Runtime"]),
+                receiver_hints: strings(&["runtime"]),
+                methods: strings(&["exec"]),
+                arg_indices: vec![],
+                fixed_program_safe: true,
                 description: "Runtime.exec() with tainted argument".into(),
             },
-            NodeMatcher::Call {
-                canonical: "ProcessBuilder".into(),
+            NodeMatcher::TypedConstructorSink {
+                type_names: strings(&["ProcessBuilder"]),
+                arg_indices: vec![],
+                fixed_program_safe: true,
                 description: "ProcessBuilder() with tainted argument".into(),
+            },
+            NodeMatcher::TypedReceiverCall {
+                receiver_types: strings(&["ProcessBuilder"]),
+                receiver_hints: vec![],
+                methods: strings(&["command"]),
+                arg_indices: vec![],
+                fixed_program_safe: true,
+                description: "ProcessBuilder.command() with tainted argument".into(),
+            },
+        ],
+        sanitizers: vec![],
+    }
+}
+
+fn path_traversal_spec() -> TaintSpec {
+    TaintSpec {
+        sources: java_taint_sources(),
+        sinks: vec![
+            NodeMatcher::TypedConstructorSink {
+                type_names: strings(&[
+                    "File",
+                    "FileInputStream",
+                    "FileOutputStream",
+                    "FileReader",
+                    "FileWriter",
+                    "RandomAccessFile",
+                ]),
+                arg_indices: vec![],
+                fixed_program_safe: false,
+                description: "file or stream constructor with tainted path".into(),
+            },
+            NodeMatcher::TypedReceiverCall {
+                receiver_types: strings(&["Paths", "Path"]),
+                receiver_hints: vec![],
+                methods: strings(&["get", "of"]),
+                arg_indices: vec![],
+                fixed_program_safe: false,
+                description: "Paths.get() with tainted path".into(),
+            },
+            NodeMatcher::TypedReceiverCall {
+                receiver_types: strings(&["Files"]),
+                receiver_hints: vec![],
+                methods: strings(&[
+                    "readAllBytes",
+                    "readAllLines",
+                    "readString",
+                    "lines",
+                    "newInputStream",
+                    "newOutputStream",
+                    "newBufferedReader",
+                    "newBufferedWriter",
+                    "write",
+                    "writeString",
+                    "copy",
+                    "move",
+                    "delete",
+                    "deleteIfExists",
+                    "createFile",
+                    "createDirectory",
+                    "createDirectories",
+                    "list",
+                    "walk",
+                    "newDirectoryStream",
+                ]),
+                arg_indices: vec![],
+                fixed_program_safe: false,
+                description: "Files method with tainted path".into(),
+            },
+        ],
+        sanitizers: vec![],
+    }
+}
+
+/// LDAP search filters and names built from request data. The parameterised
+/// form `search(name, "(uid={0})", new Object[] { value }, ..)` keeps the
+/// request data out of the first two arguments and is therefore quiet.
+fn ldap_injection_spec() -> TaintSpec {
+    TaintSpec {
+        sources: java_taint_sources(),
+        sinks: vec![NodeMatcher::TypedReceiverCall {
+            receiver_types: strings(&[
+                "DirContext",
+                "InitialDirContext",
+                "LdapContext",
+                "InitialLdapContext",
+            ]),
+            receiver_hints: vec![],
+            methods: strings(&["search"]),
+            arg_indices: vec![0, 1],
+            fixed_program_safe: false,
+            description: "DirContext.search() with tainted name or filter".into(),
+        }],
+        sanitizers: vec![],
+    }
+}
+
+/// XPath expressions built from request data. Variable bindings through an
+/// `XPathVariableResolver` never appear in the expression text.
+fn xpath_injection_spec() -> TaintSpec {
+    TaintSpec {
+        sources: java_taint_sources(),
+        sinks: vec![
+            NodeMatcher::TypedReceiverCall {
+                receiver_types: strings(&["XPath"]),
+                receiver_hints: vec![],
+                methods: strings(&["evaluate", "evaluateExpression", "compile"]),
+                arg_indices: vec![0],
+                fixed_program_safe: false,
+                description: "XPath expression with tainted text".into(),
+            },
+            NodeMatcher::TypedReceiverCall {
+                receiver_types: vec![],
+                receiver_hints: vec![],
+                methods: strings(&["selectNodes", "selectSingleNode"]),
+                arg_indices: vec![0],
+                fixed_program_safe: false,
+                description: "XPath selection with tainted expression".into(),
             },
         ],
         sanitizers: vec![],
@@ -444,7 +757,7 @@ fn summarize_java_method(
             };
             let mut findings = Vec::new();
             analyze_scope(method_node, source, &synthetic, &[], None, &mut findings);
-            if let Some(finding) = findings.first() {
+            if let Some(finding) = findings.iter().find(|f| finding_belongs_to(rule_id, f)) {
                 params_to_sink.push(ParamSinkFlow {
                     param_index: param_idx,
                     sink_rule_id: rule_id.to_string(),
@@ -479,7 +792,7 @@ fn java_param_flows_to_return(method_node: Node<'_>, param_name: &str, source: &
     let mut state = TaintState::default();
     collect_param_sources(method_node, source, &synthetic, None, &mut state);
     for _ in 0..3 {
-        propagate_assignments(body, source, &synthetic, None, &mut state);
+        propagate_assignments(body, source, &synthetic, &[], None, &mut state);
     }
 
     let mut flows = false;
@@ -551,7 +864,7 @@ fn resolve_cross_file_scope(
     let mut state = TaintState::default();
     collect_param_sources(scope_node, source, source_spec, None, &mut state);
     for _ in 0..3 {
-        propagate_assignments(body, source, source_spec, None, &mut state);
+        propagate_assignments(body, source, source_spec, &[], None, &mut state);
     }
 
     walk_scope_nodes(body, source, &mut |node, src| {
@@ -725,7 +1038,7 @@ fn compose_java_method(
         let mut state = TaintState::default();
         collect_param_sources(method_node, source, &synthetic, None, &mut state);
         for _ in 0..3 {
-            propagate_assignments(body, source, &synthetic, None, &mut state);
+            propagate_assignments(body, source, &synthetic, &[], None, &mut state);
         }
 
         walk_scope_nodes(body, source, &mut |node, src| {
@@ -797,67 +1110,58 @@ fn analyze_scope(
     // `source -> local -> sb.append(local) -> stmt.execute(sb.toString())`
     // resolves as taint flows through the body.
     for _ in 0..3 {
-        propagate_assignments(body, source, spec, policy, &mut state);
-        apply_propagators(body, source, spec, propagators, policy, &mut state);
+        propagate_assignments(body, source, spec, propagators, policy, &mut state);
     }
     find_sinks(body, source, spec, policy, &state, out);
 }
 
-/// Apply "argument taints receiver" [`Propagator`]s: for each
+/// Apply "argument taints receiver" [`Propagator`]s to one node: for a
 /// `receiver.method(args)` call whose method matches a propagator and one of
 /// whose arguments is tainted, mark the receiver variable tainted.
 ///
 /// Confined to the tractable subset: the receiver must be a plain identifier
 /// (`sb.append(x)`), not a nested member/index expression, so we never
-/// over-taint a whole receiver chain. New taint is collected during the walk
-/// and applied afterward to keep the read/write phases separate.
-fn apply_propagators(
-    scope: Node<'_>,
+/// over-taint a whole receiver chain. It runs inside the source-order
+/// assignment walk, so a later read of the container sees the taint even when
+/// the container is declared again on the next pass.
+fn apply_propagator_call(
+    node: Node<'_>,
     source: &str,
     spec: &TaintSpec,
     propagators: &[Propagator],
     policy: Option<&LabelPolicy>,
     state: &mut TaintState,
 ) {
-    if propagators.is_empty() {
+    if propagators.is_empty() || node.kind() != "method_invocation" {
         return;
     }
-    let mut pending: Vec<(String, TaintInfo)> = Vec::new();
-    walk_scope_nodes(scope, source, &mut |node, src| {
-        if node.kind() != "method_invocation" {
-            return;
-        }
-        let Some(recv) = node.child_by_field_name("object") else {
-            return;
-        };
-        if recv.kind() != "identifier" {
-            return;
-        }
-        let Some(method) = call_method_name(node, src) else {
-            return;
-        };
-        let method_matches = propagators
-            .iter()
-            .any(|p| p.method.as_deref().is_none_or(|m| m == method));
-        if !method_matches {
-            return;
-        }
-        let recv_name = node_text(recv, src);
-        // Already tainted — keep the existing (earlier/better) taint info.
-        if state.info(recv_name).is_some() {
-            return;
-        }
-        if let Some(info) = sink_argument_taint(node, src, spec, policy, state) {
-            // A relabel propagator such as `(StringBuilder $SB).append($INPUT)`
-            // with `label: CONCAT, requires: INPUT` builds a string on the
-            // receiver: apply the string-building relabel so the receiver picks
-            // up the emitted label (e.g. `CONCAT`).
-            let info = relabel_through(node, src, info, policy);
-            pending.push((recv_name.to_string(), bump_hops(info)));
-        }
-    });
-    for (name, info) in pending {
-        state.taint(name, info);
+    let Some(recv) = node.child_by_field_name("object") else {
+        return;
+    };
+    if recv.kind() != "identifier" {
+        return;
+    }
+    let Some(method) = call_method_name(node, source) else {
+        return;
+    };
+    if !propagators
+        .iter()
+        .any(|p| p.method.as_deref().is_none_or(|m| m == method))
+    {
+        return;
+    }
+    let recv_name = node_text(recv, source);
+    // Already tainted — keep the existing (earlier/better) taint info.
+    if state.info(recv_name).is_some() {
+        return;
+    }
+    if let Some(info) = sink_argument_taint(node, source, spec, policy, state) {
+        // A relabel propagator such as `(StringBuilder $SB).append($INPUT)`
+        // with `label: CONCAT, requires: INPUT` builds a string on the
+        // receiver: apply the string-building relabel so the receiver picks
+        // up the emitted label (e.g. `CONCAT`).
+        let info = relabel_through(node, source, info, policy);
+        state.taint(recv_name.to_string(), bump_hops(info));
     }
 }
 
@@ -940,10 +1244,13 @@ fn propagate_assignments(
     scope: Node<'_>,
     source: &str,
     spec: &TaintSpec,
+    propagators: &[Propagator],
     policy: Option<&LabelPolicy>,
     state: &mut TaintState,
 ) {
     walk_scope_nodes(scope, source, &mut |node, src| {
+        state.cursor = node.end_byte();
+        apply_propagator_call(node, src, spec, propagators, policy, state);
         if node.kind() == "variable_declarator" {
             let Some(name_node) = node.child_by_field_name("name") else {
                 return;
@@ -990,6 +1297,7 @@ fn propagate_assignments(
                 node.child_by_field_name("value"),
             ) {
                 let name = node_text(name_node, src).to_string();
+                state.cursor = name_node.end_byte();
                 match expression_taint(iterable, src, spec, policy, state) {
                     Some(info) => state.taint(name, bump_hops(info)),
                     None => state.clear(&name),
@@ -1019,10 +1327,47 @@ fn propagate_assignments(
                     };
                     state.taint(name.to_string(), bump_hops(info));
                 }
-                None => state.clear(name),
+                // A clean value stored under a branch, loop or handler only
+                // replaces the old one on some paths (`if (p == null) p = "";`),
+                // so the name stays tainted. A straight-line reassignment
+                // replaces it for good.
+                None if is_unconditional(node, scope) => state.clear(name),
+                None => {}
             }
         }
     });
+}
+
+/// True when `node` runs on every path through `scope`: none of its ancestors
+/// below `scope` is a branch, loop, switch, ternary, short-circuit operand or
+/// exception handler.
+fn is_unconditional(node: Node<'_>, scope: Node<'_>) -> bool {
+    let mut current = node.parent();
+    while let Some(n) = current {
+        if n.id() == scope.id() {
+            return true;
+        }
+        match n.kind() {
+            "if_statement"
+            | "for_statement"
+            | "enhanced_for_statement"
+            | "while_statement"
+            | "do_statement"
+            | "switch_statement"
+            | "switch_expression"
+            | "switch_block_statement_group"
+            | "switch_rule"
+            | "ternary_expression"
+            | "try_statement"
+            | "try_with_resources_statement"
+            | "binary_expression"
+            | "catch_clause"
+            | "lambda_expression" => return false,
+            _ => {}
+        }
+        current = n.parent();
+    }
+    true
 }
 
 fn find_sinks(
@@ -1051,6 +1396,13 @@ fn find_sinks(
         .iter()
         .any(|m| matches!(m, NodeMatcher::MethodArgSink { .. }));
 
+    let has_typed_sink = spec.sinks.iter().any(|m| {
+        matches!(
+            m,
+            NodeMatcher::TypedReceiverCall { .. } | NodeMatcher::TypedConstructorSink { .. }
+        )
+    });
+
     walk_scope_nodes(scope, source, &mut |node, src| {
         // Typed-assignment / declaration sinks fire on declaration and
         // assignment nodes, which the call-only walk below never inspects.
@@ -1068,6 +1420,9 @@ fn find_sinks(
         if node.kind() != "method_invocation" && node.kind() != "object_creation_expression" {
             return;
         }
+        if has_typed_sink {
+            check_typed_sinks(node, src, spec, policy, state, out);
+        }
         let Some(sink_description) = match_sink(node, src, spec) else {
             return;
         };
@@ -1076,7 +1431,13 @@ fn find_sinks(
         if let Some(info) = taint {
             // Flow-sensitive veto: the insensitive walk above cannot see a value
             // that was replaced or folded to a constant before this call.
-            if crate::rules::java_flow::sink_args_safe(node, src, false) {
+            if crate::rules::java_flow::sink_args_safe_with(
+                node,
+                src,
+                false,
+                &[],
+                trusted_helper_names(spec),
+            ) {
                 return;
             }
             // Taint-labels gating: when a `LabelPolicy` is active the sink fires
@@ -1222,6 +1583,378 @@ fn check_method_arg_sinks(
     }
 }
 
+/// Fire the [`NodeMatcher::TypedReceiverCall`] and
+/// [`NodeMatcher::TypedConstructorSink`] sinks. Only the argument positions the
+/// matcher lists are inspected, so a parameterised call whose SQL text, LDAP
+/// filter or XPath expression is constant stays silent even when the values
+/// bound to it come from the request.
+fn check_typed_sinks(
+    node: Node<'_>,
+    source: &str,
+    spec: &TaintSpec,
+    policy: Option<&LabelPolicy>,
+    state: &TaintState,
+    out: &mut Vec<TaintFinding>,
+) {
+    let Some(args) = call_arguments(node) else {
+        return;
+    };
+    let mut cursor = args.walk();
+    let arg_nodes: Vec<Node<'_>> = args.named_children(&mut cursor).collect();
+    for matcher in &spec.sinks {
+        let (indices, fixed_program_safe, description) = match matcher {
+            NodeMatcher::TypedReceiverCall {
+                receiver_types,
+                receiver_hints,
+                methods,
+                arg_indices,
+                fixed_program_safe,
+                description,
+            } if node.kind() == "method_invocation"
+                && typed_call_matches(node, source, receiver_types, receiver_hints, methods) =>
+            {
+                (arg_indices, *fixed_program_safe, description)
+            }
+            NodeMatcher::TypedConstructorSink {
+                type_names,
+                arg_indices,
+                fixed_program_safe,
+                description,
+            } if node.kind() == "object_creation_expression"
+                && object_creation_type(node, source)
+                    .map(type_final_segment)
+                    .is_some_and(|ty| type_names.iter().any(|n| n == ty)) =>
+            {
+                (arg_indices, *fixed_program_safe, description)
+            }
+            _ => continue,
+        };
+        let selected: Vec<usize> = if indices.is_empty() {
+            (0..arg_nodes.len()).collect()
+        } else {
+            indices
+                .iter()
+                .copied()
+                .filter(|i| *i < arg_nodes.len())
+                .collect()
+        };
+        let Some(info) = selected
+            .iter()
+            .find_map(|i| expression_taint(arg_nodes[*i], source, spec, policy, state))
+        else {
+            continue;
+        };
+        let fixed_program = fixed_program_safe
+            && (arg_nodes.len() == 1 && has_fixed_program(arg_nodes[0], source)
+                || node.kind() == "object_creation_expression"
+                    && arg_nodes.len() > 1
+                    && has_fixed_program(arg_nodes[0], source));
+        // A `new File(..)` handed straight to another path sink is reported once,
+        // at the outer constructor that opens the file.
+        if node.kind() == "object_creation_expression"
+            && is_wrapped_by_typed_sink(node, source, spec)
+        {
+            continue;
+        }
+        if crate::rules::java_flow::sink_args_safe_with(
+            node,
+            source,
+            false,
+            &selected,
+            trusted_helper_names(spec),
+        ) {
+            continue;
+        }
+        if let Some(p) = policy {
+            let labels = info.labels.clone().unwrap_or_default();
+            if !p.sink_requires.eval(&labels) {
+                continue;
+            }
+        }
+        let mut finding = taint_finding_for_node(node, info, description.clone());
+        if fixed_program {
+            finding.rule_id_hint = Some(ARGUMENT_INJECTION_RULE.to_string());
+        }
+        out.push(finding);
+        return;
+    }
+}
+
+/// Which helper calls the flow-sensitive veto may trust for `spec`: only when
+/// every source is a named call, a typed receiver call, a parameter or a typed
+/// variable (request getters, `System.getenv`, annotated parameters). Sources
+/// that name arbitrary calls or provenance cannot be told apart from a helper,
+/// so for those no helper is trusted. The names of the spec's own source calls
+/// are always excluded.
+fn trusted_helper_names(spec: &TaintSpec) -> Option<Vec<String>> {
+    let mut names = Vec::new();
+    for source in &spec.sources {
+        match source {
+            NodeMatcher::Call { canonical, .. } => names.push(
+                canonical
+                    .rsplit('.')
+                    .next()
+                    .unwrap_or(canonical)
+                    .to_string(),
+            ),
+            NodeMatcher::TypedReceiverCall { methods, .. } => names.extend(methods.clone()),
+            NodeMatcher::ParamName { .. } | NodeMatcher::TypedName { .. } => {}
+            _ => return None,
+        }
+    }
+    Some(names)
+}
+
+/// True when `node` (an object creation) is itself an argument of another
+/// `new T(..)` that is also a typed constructor sink.
+fn is_wrapped_by_typed_sink(node: Node<'_>, source: &str, spec: &TaintSpec) -> bool {
+    let Some(args) = node.parent().filter(|p| p.kind() == "argument_list") else {
+        return false;
+    };
+    let Some(outer) = args
+        .parent()
+        .filter(|p| p.kind() == "object_creation_expression")
+    else {
+        return false;
+    };
+    let Some(ty) = object_creation_type(outer, source).map(type_final_segment) else {
+        return false;
+    };
+    spec.sinks.iter().any(|m| {
+        matches!(m, NodeMatcher::TypedConstructorSink { type_names, .. }
+            if type_names.iter().any(|n| n == ty))
+    })
+}
+
+/// Programs that interpret a command string or script. A fixed program that is
+/// one of these still lets a tainted argument inject commands.
+const SHELL_LIKE_PROGRAMS: &[&str] = &[
+    "sh",
+    "bash",
+    "zsh",
+    "dash",
+    "ksh",
+    "csh",
+    "tcsh",
+    "fish",
+    "ash",
+    "busybox",
+    "cmd",
+    "powershell",
+    "pwsh",
+    "env",
+    "sudo",
+    "su",
+    "xargs",
+    "nohup",
+    "python",
+    "python2",
+    "python3",
+    "perl",
+    "ruby",
+    "node",
+    "php",
+    "lua",
+    "awk",
+    "gawk",
+    "osascript",
+    "wscript",
+    "cscript",
+    "java",
+    "ssh",
+    "eval",
+    "exec",
+    "start",
+];
+
+/// True when the single command argument is an inline array or list whose first
+/// element, the program, is a string literal naming something other than a
+/// shell or interpreter (`new String[] { "ls", arg }`, `List.of("ls", arg)`),
+/// or when it is itself such a literal followed by plain arguments.
+fn has_fixed_program(arg: Node<'_>, source: &str) -> bool {
+    let first = match arg.kind() {
+        "array_creation_expression" => arg
+            .children(&mut arg.walk())
+            .find(|c| c.kind() == "array_initializer")
+            .and_then(|init| init.named_child(0)),
+        "method_invocation" => {
+            let name = call_method_name(arg, source).unwrap_or("");
+            let recv = call_receiver_text(arg, source).unwrap_or("");
+            let recv = recv.rsplit('.').next().unwrap_or(recv);
+            if matches!((recv, name), ("Arrays", "asList") | ("List", "of")) {
+                call_arguments(arg).and_then(|a| a.named_child(0))
+            } else {
+                None
+            }
+        }
+        "string_literal" => Some(arg),
+        _ => None,
+    };
+    let Some(first) = first.filter(|f| f.kind() == "string_literal") else {
+        return false;
+    };
+    let text = node_text(first, source).trim_matches('"');
+    if text.is_empty() || text.contains(char::is_whitespace) {
+        return false;
+    }
+    let base = text
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(text)
+        .to_ascii_lowercase();
+    let base = base.strip_suffix(".exe").unwrap_or(&base);
+    let base = base.trim_end_matches(|c: char| c.is_ascii_digit() || c == '.');
+    !SHELL_LIKE_PROGRAMS.contains(&base)
+}
+
+/// True when `node` is a method call whose name is in `methods` and whose
+/// receiver is either of one of `types` (see [`receiver_type`]) or contains one
+/// of the lowercase `hints`. Empty `types` and `hints` match any receiver.
+fn typed_call_matches(
+    node: Node<'_>,
+    source: &str,
+    types: &[String],
+    hints: &[String],
+    methods: &[String],
+) -> bool {
+    let Some(method) = call_method_name(node, source) else {
+        return false;
+    };
+    if !methods.iter().any(|m| m == method) {
+        return false;
+    }
+    if types.is_empty() && hints.is_empty() {
+        return true;
+    }
+    let Some(receiver) = node.child_by_field_name("object") else {
+        return false;
+    };
+    let lower = node_text(receiver, source).to_ascii_lowercase();
+    if hints.iter().any(|h| lower.contains(h.as_str())) {
+        return true;
+    }
+    receiver_type(receiver, source).is_some_and(|ty| types.contains(&ty))
+}
+
+/// Best-effort static type of a receiver expression: the declared type of a
+/// variable, parameter or field, the type of a `new T(..)` or cast, a static
+/// `Type.method()` receiver, or the result of a few well-known factories.
+fn receiver_type(node: Node<'_>, source: &str) -> Option<String> {
+    match node.kind() {
+        "identifier" => {
+            let name = node_text(node, source);
+            declared_type_of(node, name, source).or_else(|| {
+                name.chars()
+                    .next()
+                    .filter(|c| c.is_uppercase())
+                    .map(|_| name.to_string())
+            })
+        }
+        "field_access" => {
+            let obj = node.child_by_field_name("object")?;
+            let field = node.child_by_field_name("field")?;
+            let field_name = node_text(field, source);
+            if obj.kind() == "this" {
+                return declared_type_of(node, field_name, source);
+            }
+            // `java.nio.file.Files` written as a qualified name.
+            field_name
+                .chars()
+                .next()
+                .filter(|c| c.is_uppercase())
+                .map(|_| field_name.to_string())
+        }
+        "scoped_identifier" => node_text(node, source)
+            .rsplit('.')
+            .next()
+            .map(str::to_string),
+        "object_creation_expression" => object_creation_type(node, source)
+            .map(type_final_segment)
+            .map(str::to_string),
+        "parenthesized_expression" => node
+            .named_child(0)
+            .and_then(|inner| receiver_type(inner, source)),
+        "cast_expression" => node
+            .child_by_field_name("type")
+            .map(|t| type_final_segment(node_text(t, source)).to_string()),
+        "method_invocation" => {
+            let name = call_method_name(node, source)?;
+            match name {
+                "getRuntime" => Some("Runtime".to_string()),
+                "newXPath" => Some("XPath".to_string()),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+/// The declared type (final segment) of the variable `name` as seen from
+/// `from`: nearest enclosing parameter, local, resource, loop variable or field.
+fn declared_type_of(from: Node<'_>, name: &str, source: &str) -> Option<String> {
+    let mut current = from.parent();
+    while let Some(scope) = current {
+        let mut cursor = scope.walk();
+        for child in scope.named_children(&mut cursor) {
+            match child.kind() {
+                "local_variable_declaration" | "field_declaration" => {
+                    let mut c = child.walk();
+                    let declares = child.children(&mut c).any(|d| {
+                        d.kind() == "variable_declarator"
+                            && d.child_by_field_name("name")
+                                .is_some_and(|n| node_text(n, source) == name)
+                    });
+                    if declares {
+                        if let Some(ty) = child.child_by_field_name("type") {
+                            let text = node_text(ty, source);
+                            if text != "var" {
+                                return Some(type_final_segment(text).to_string());
+                            }
+                            // `var x = new T(..)`
+                            let mut c2 = child.walk();
+                            let init = child
+                                .children(&mut c2)
+                                .filter(|d| d.kind() == "variable_declarator")
+                                .find_map(|d| d.child_by_field_name("value"));
+                            return init.and_then(|v| receiver_type(v, source));
+                        }
+                    }
+                }
+                "formal_parameters" => {
+                    let mut c = child.walk();
+                    for p in child.named_children(&mut c) {
+                        if formal_parameter_name(p, source) == Some(name) {
+                            return formal_parameter_type(p, source)
+                                .map(|t| type_final_segment(t).to_string());
+                        }
+                    }
+                }
+                "resource" | "catch_formal_parameter"
+                    if child
+                        .child_by_field_name("name")
+                        .is_some_and(|n| node_text(n, source) == name) =>
+                {
+                    return child
+                        .child_by_field_name("type")
+                        .map(|t| type_final_segment(node_text(t, source)).to_string());
+                }
+                _ => {}
+            }
+        }
+        if scope.kind() == "enhanced_for_statement"
+            && scope
+                .child_by_field_name("name")
+                .is_some_and(|n| node_text(n, source) == name)
+        {
+            return scope
+                .child_by_field_name("type")
+                .map(|t| type_final_segment(node_text(t, source)).to_string());
+        }
+        current = scope.parent();
+    }
+    None
+}
+
 /// Build a map from local-variable name to its declared type text for every
 /// `local_variable_declaration` inside `scope`. Used to resolve the declared
 /// type of a bare `assignment_expression` LHS (`f = ...`) against a
@@ -1326,12 +2059,12 @@ fn expression_taint_core(
     state: &TaintState,
 ) -> Option<TaintInfo> {
     let text = node_text(node, source);
-    if let Some(info) = state.info(text) {
+    if let Some(info) = state.info_at(text, node) {
         return Some(info.clone());
     }
 
     if node.kind() == "identifier" {
-        return state.info(text).cloned();
+        return None;
     }
 
     if is_sanitizer_call(node, source, spec) {
@@ -1486,17 +2219,21 @@ fn classify_source_expr(node: Node<'_>, source: &str, spec: &TaintSpec) -> Optio
         }
     }
 
-    spec.sources.iter().find_map(|matcher| {
-        if let NodeMatcher::Call {
+    spec.sources.iter().find_map(|matcher| match matcher {
+        NodeMatcher::Call {
             canonical,
             description,
-        } = matcher
-        {
-            if match_java_method_canonical(canonical, receiver, method) {
-                return Some(description.clone());
-            }
+        } if match_java_method_canonical(canonical, receiver, method) => Some(description.clone()),
+        NodeMatcher::TypedReceiverCall {
+            receiver_types,
+            receiver_hints,
+            methods,
+            description,
+            ..
+        } if typed_call_matches(node, source, receiver_types, receiver_hints, methods) => {
+            Some(description.clone())
         }
-        None
+        _ => None,
     })
 }
 
@@ -1735,7 +2472,9 @@ fn matcher_matches_call(matcher: &NodeMatcher, node: Node<'_>, source: &str) -> 
             match_java_method_canonical(canonical, receiver, method)
         }
         NodeMatcher::Call { canonical, .. } if node.kind() == "object_creation_expression" => {
-            object_creation_type(node, source).is_some_and(|actual| actual == canonical)
+            object_creation_type(node, source).is_some_and(|actual| {
+                actual == canonical || type_final_segment(actual) == canonical
+            })
         }
         // Any-receiver method-name regex sink `$OBJ.$M(...)` + `metavariable-regex`
         // pinning `$M` (e.g. the `formatted-sql-string` SQL-exec methods). The
@@ -1814,7 +2553,7 @@ fn expression_taint_without_sources(
     state: &TaintState,
 ) -> Option<TaintInfo> {
     let text = node_text(node, source);
-    if let Some(info) = state.info(text) {
+    if let Some(info) = state.info_at(text, node) {
         return Some(info.clone());
     }
     let mut cursor = node.walk();
@@ -2026,6 +2765,82 @@ mod tests {
             panic!("Java fixture should parse");
         };
         analyze_tree(tree.root_node(), src, spec, None)
+    }
+
+    fn run_rule(rule_id: &str, src: &str) -> usize {
+        let spec = java_taint_rule_specs()
+            .into_iter()
+            .find(|(id, _)| *id == rule_id)
+            .map(|(_, spec)| spec)
+            .expect("rule spec");
+        analyze(src, &spec)
+            .iter()
+            .filter(|f| finding_belongs_to(rule_id, f))
+            .count()
+    }
+
+    #[test]
+    fn request_is_recognised_by_declared_type_not_name() {
+        let vulnerable = "class C { void f(javax.servlet.http.HttpServletRequest incoming) throws Exception { new java.io.FileReader(incoming.getParameter(\"a\")); } }";
+        let other_type = "class C { void f(Properties incoming) throws Exception { new java.io.FileReader(incoming.getParameter(\"a\")); } }";
+        assert_eq!(run_rule("java/taint-path-traversal", vulnerable), 1);
+        assert_eq!(run_rule("java/taint-path-traversal", other_type), 0);
+    }
+
+    #[test]
+    fn conditional_clean_reassignment_keeps_taint_but_straight_line_clears_it() {
+        let conditional = "class C { void f(HttpServletRequest request) throws Exception { String p = request.getParameter(\"a\"); if (p == null) p = \"\"; new java.io.FileReader(p); } }";
+        let straight = "class C { void f(HttpServletRequest request) throws Exception { String p = request.getParameter(\"a\"); p = \"fixed\"; new java.io.FileReader(p); } }";
+        assert_eq!(run_rule("java/taint-path-traversal", conditional), 1);
+        assert_eq!(run_rule("java/taint-path-traversal", straight), 0);
+    }
+
+    #[test]
+    fn only_the_sql_text_of_a_jdbc_template_call_is_a_sink() {
+        let text = "class C { JdbcTemplate jdbc; void f(HttpServletRequest request) { jdbc.queryForObject(\"select \" + request.getParameter(\"a\"), Long.class); } }";
+        let bound = "class C { JdbcTemplate jdbc; void f(HttpServletRequest request) { jdbc.queryForObject(\"select ?\", new Object[] { request.getParameter(\"a\") }, Long.class); } }";
+        assert_eq!(run_rule("java/taint-sql-injection", text), 1);
+        assert_eq!(run_rule("java/taint-sql-injection", bound), 0);
+    }
+
+    #[test]
+    fn fixed_non_shell_program_is_argument_injection_and_a_shell_is_command_injection() {
+        let fixed = "class C { void f(HttpServletRequest request) throws Exception { Runtime.getRuntime().exec(new String[] { \"ls\", request.getParameter(\"a\") }); } }";
+        let shell = "class C { void f(HttpServletRequest request) throws Exception { Runtime.getRuntime().exec(new String[] { \"/bin/sh\", \"-c\", request.getParameter(\"a\") }); } }";
+        // A fixed program rules out shell metacharacters, not option injection.
+        assert_eq!(run_rule("java/taint-command-injection", fixed), 0);
+        assert_eq!(run_rule(ARGUMENT_INJECTION_RULE, fixed), 1);
+        assert_eq!(run_rule("java/taint-command-injection", shell), 1);
+        assert_eq!(run_rule(ARGUMENT_INJECTION_RULE, shell), 0);
+    }
+
+    #[test]
+    fn a_clean_reassignment_only_hides_taint_from_later_statements() {
+        let head = "class C { void f(HttpServletRequest request) throws Exception { String p = request.getParameter(\"a\"); ";
+        let tail = " } }";
+        let cases = [
+            // The sink runs before the value is replaced.
+            ("new java.io.FileReader(p); p = \"fixed\";", 1),
+            // The replacement may not run: the sink can still see the request value.
+            ("try { run(); p = \"fixed\"; } catch (Exception e) { } new java.io.FileReader(p);", 1),
+            ("boolean ok = check() && (p = \"fixed\") != null; new java.io.FileReader(p);", 1),
+            // Back edge: the request value reaches the sink on the next iteration.
+            ("p = \"fixed\"; while (more()) { new java.io.FileReader(p); p = request.getParameter(\"b\"); }", 1),
+            // Straight-line replacement before the sink.
+            ("p = \"fixed\"; new java.io.FileReader(p);", 0),
+            // Tainted again after the replacement.
+            ("p = \"fixed\"; p = request.getParameter(\"b\"); new java.io.FileReader(p);", 1),
+        ];
+        for (body, want) in cases {
+            let src = format!("{head}{body}{tail}");
+            assert_eq!(run_rule("java/taint-path-traversal", &src), want, "{body}");
+        }
+    }
+
+    #[test]
+    fn container_add_then_get_carries_taint() {
+        let src = "class C { void f(HttpServletRequest request) throws Exception { java.util.List<String> l = new java.util.ArrayList<String>(); l.add(request.getParameter(\"a\")); new java.io.FileReader(l.get(0)); } }";
+        assert_eq!(run_rule("java/taint-path-traversal", src), 1);
     }
 
     #[test]
