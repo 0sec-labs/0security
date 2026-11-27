@@ -15,6 +15,7 @@ pub mod go_taint;
 pub mod groovy;
 pub mod java;
 pub mod java_flow;
+pub mod java_index;
 pub mod java_primitives;
 pub mod java_taint;
 pub mod javascript;

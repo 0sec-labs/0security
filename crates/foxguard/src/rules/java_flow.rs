@@ -22,8 +22,40 @@
 //! statements) is *maybe tainted*, so using this check to suppress findings
 //! never hides a flow it cannot explain.
 
+use crate::rules::java_index::{self, ImportCtx, JavaProjectIndex};
+use std::cell::{OnceCell, RefCell};
 use std::collections::HashMap;
+use std::sync::Arc;
 use tree_sitter::Node;
+
+thread_local! {
+    /// The index of the project being scanned, installed by the scanner around
+    /// the analysis of one file (see [`install_project_index`]). Without it
+    /// only declarations in the scanned file are readable.
+    static PROJECT_INDEX: RefCell<Option<Arc<JavaProjectIndex>>> = const { RefCell::new(None) };
+}
+
+/// Keeps a project index installed on this thread until dropped.
+pub struct ProjectIndexGuard(Option<Arc<JavaProjectIndex>>);
+
+impl Drop for ProjectIndexGuard {
+    fn drop(&mut self) {
+        let prev = self.0.take();
+        PROJECT_INDEX.with(|p| *p.borrow_mut() = prev);
+    }
+}
+
+/// Make `index` the project index for the flow checks run on this thread
+/// until the guard is dropped. The scanner installs it per file, so concurrent
+/// scans of different projects never see each other's index.
+pub fn install_project_index(index: Arc<JavaProjectIndex>) -> ProjectIndexGuard {
+    let prev = PROJECT_INDEX.with(|p| p.borrow_mut().replace(index));
+    ProjectIndexGuard(prev)
+}
+
+fn current_project_index() -> Option<Arc<JavaProjectIndex>> {
+    PROJECT_INDEX.with(|p| p.borrow().clone())
+}
 
 /// Output encoders whose result is safe inside an HTML response.
 const HTML_ENCODERS: &[&str] = &[
@@ -339,6 +371,13 @@ struct Interp<'a> {
     depth: usize,
     /// Nesting of field initialisers being evaluated for constant lookups.
     const_depth: usize,
+    /// Fields whose initialisers are being evaluated, innermost last: a field
+    /// that reaches itself again is not a constant.
+    const_stack: Vec<String>,
+    /// Types and fields of the whole scanned project, when known.
+    index: Option<Arc<JavaProjectIndex>>,
+    /// Package and imports of the file being interpreted.
+    ctx: OnceCell<ImportCtx>,
     steps: usize,
     aborted: bool,
     /// Sink byte range -> every argument safe on every visit.
@@ -385,20 +424,7 @@ pub fn sink_args_safe_with(
     let Some(body) = method.child_by_field_name("body") else {
         return false;
     };
-    let mut it = Interp {
-        src: source,
-        root,
-        html,
-        trusted_helpers,
-        depth: 0,
-        const_depth: 0,
-        steps: 0,
-        aborted: false,
-        rec: HashMap::new(),
-        rec_args: HashMap::new(),
-        returns: Vec::new(),
-        exits: Vec::new(),
-    };
+    let mut it = Interp::new(source, root, html, trusted_helpers);
     // Parameters are caller-controlled: seed them so they shadow any field.
     let mut env = Env::new();
     if let Some(ps) = method.child_by_field_name("parameters") {
@@ -432,6 +458,26 @@ pub fn sink_args_safe_with(
 }
 
 impl<'a> Interp<'a> {
+    fn new(src: &'a str, root: Node<'a>, html: bool, trusted_helpers: Option<Vec<String>>) -> Self {
+        Interp {
+            src,
+            root,
+            html,
+            trusted_helpers,
+            depth: 0,
+            const_depth: 0,
+            const_stack: Vec::new(),
+            index: current_project_index(),
+            ctx: OnceCell::new(),
+            steps: 0,
+            aborted: false,
+            rec: HashMap::new(),
+            rec_args: HashMap::new(),
+            returns: Vec::new(),
+            exits: Vec::new(),
+        }
+    }
+
     fn text(&self, n: Node<'_>) -> &'a str {
         &self.src[n.byte_range()]
     }
@@ -947,6 +993,14 @@ impl<'a> Interp<'a> {
                             .resolve_field(node, f, Some(last))
                             .unwrap_or(Val::Maybe);
                     }
+                    // A class of the scanned project, declared in another file
+                    // (or a same-file interface, enum or record): its field is
+                    // read from the index when the class is unambiguous.
+                    if is_constant_name(f) {
+                        if let Some(v) = self.project_qualified(text, f) {
+                            return v;
+                        }
+                    }
                     // A field of a class we cannot read may be a public static
                     // that another file assigns request data to.
                     if self.library_type(text) && !REQUEST_CONTEXT_TYPES.contains(&last) {
@@ -1297,10 +1351,46 @@ impl<'a> Interp<'a> {
         if let Some(v) = self.resolve_field(node, name, None) {
             return v;
         }
-        if self.statically_imported(name) {
-            return Val::Safe;
+        if let Some(index) = self.index.clone() {
+            // A name imported from a scanned class is read from that class.
+            let named: Vec<String> = self.import_ctx().static_import_classes(name).to_vec();
+            let mut found = false;
+            let mut owners: Vec<String> = Vec::new();
+            for c in &named {
+                if let Some(class) = index.resolve_type(self.import_ctx(), c) {
+                    found = true;
+                    owners.extend(index.field_owners(&class, name));
+                }
+            }
+            if !found {
+                let wild: Vec<String> = self.import_ctx().static_on_demand_classes().to_vec();
+                for c in &wild {
+                    if let Some(class) = index.resolve_type(self.import_ctx(), c) {
+                        owners.extend(index.field_owners(&class, name));
+                    }
+                }
+                if owners.is_empty() {
+                    return self.library_static_import(name);
+                }
+            }
+            owners.sort();
+            owners.dedup();
+            return match owners.as_slice() {
+                [one] => self.project_field(&index, one, name),
+                _ => Val::Maybe,
+            };
         }
-        Val::Maybe
+        self.library_static_import(name)
+    }
+
+    /// A name statically imported from a class that is not in the scanned
+    /// project is taken to be a library constant (see the audit table).
+    fn library_static_import(&self, name: &str) -> Val {
+        if self.statically_imported(name) {
+            Val::Safe
+        } else {
+            Val::Maybe
+        }
     }
 
     fn declared_in_method(&self, node: Node<'a>, name: &str) -> bool {
@@ -1418,8 +1508,105 @@ impl<'a> Interp<'a> {
                     return Some(v.degrade());
                 }
             }
+            // Not declared here: a field inherited from a scanned supertype.
+            if let Some(v) = self.inherited_in(scope, name) {
+                return Some(v);
+            }
         }
         None
+    }
+
+    fn import_ctx(&self) -> &ImportCtx {
+        self.ctx
+            .get_or_init(|| ImportCtx::from_tree(self.root, self.src))
+    }
+
+    /// `Type.NAME` where `Type` is an unambiguous class of the scanned project.
+    /// `None` when it is not (the caller then treats the field as unknown or a
+    /// library constant).
+    fn project_qualified(&mut self, class_text: &str, name: &str) -> Option<Val> {
+        let index = self.index.clone()?;
+        let class = index.resolve_type(self.import_ctx(), class_text)?;
+        Some(self.project_field(&index, &class, name))
+    }
+
+    /// Fields `name` inherited by the type declaration `scope` from scanned
+    /// supertypes. `None` when no scanned supertype declares it.
+    fn inherited_in(&mut self, scope: Node<'a>, name: &str) -> Option<Val> {
+        let index = self.index.clone()?;
+        let mut owners: Vec<String> = Vec::new();
+        for t in java_index::super_types(scope, self.src) {
+            if let Some(class) = index.resolve_type(self.import_ctx(), &t) {
+                owners.extend(index.field_owners(&class, name));
+            }
+        }
+        owners.sort();
+        owners.dedup();
+        match owners.as_slice() {
+            [] => None,
+            [one] => Some(self.project_field(&index, one, name)),
+            _ => Some(Val::Maybe),
+        }
+    }
+
+    /// The value of field `name` of scanned class `class` (declared there or
+    /// inherited). A constant only if exactly one declaration is found, it is
+    /// `static final` (or an interface field or enum constant) of an immutable
+    /// value type, nothing in the project assigns that name, and its
+    /// initialiser is itself safe when read in the declaring file.
+    fn project_field(&mut self, index: &Arc<JavaProjectIndex>, class: &str, name: &str) -> Val {
+        let owners = index.field_owners(class, name);
+        let [owner] = owners.as_slice() else {
+            return Val::Maybe;
+        };
+        let Some(f) = index.field(owner, name) else {
+            return Val::Maybe;
+        };
+        if !f.constant || !f.value_type || index.is_assigned(name) {
+            return Val::Maybe;
+        }
+        if f.enum_constant {
+            return Val::Safe;
+        }
+        let Some((start, end)) = f.init else {
+            return Val::Maybe;
+        };
+        let field_key = format!("{owner}#{name}");
+        if self.const_depth >= 4 || self.const_stack.contains(&field_key) {
+            return Val::Maybe;
+        }
+        let top = self.const_stack.is_empty() && self.const_depth == 0;
+        let cache_key = format!("{field_key}|{}|{:?}", self.html, self.trusted_helpers);
+        if top {
+            if let Some(safe) = index.cached_result(&cache_key) {
+                return if safe { Val::Safe } else { Val::Maybe };
+            }
+        }
+        let Some(parsed) = index.class_file(owner).and_then(|file| index.load(file)) else {
+            return Val::Maybe;
+        };
+        let root = parsed.tree.root_node();
+        let Some(mut init) = root.descendant_for_byte_range(start, end) else {
+            return Val::Maybe;
+        };
+        while let Some(p) = init.parent() {
+            if p.start_byte() == start && p.end_byte() == end && p.kind() != "variable_declarator" {
+                init = p;
+            } else {
+                break;
+            }
+        }
+        let mut sub = Interp::new(&parsed.src, root, self.html, self.trusted_helpers.clone());
+        sub.index = Some(index.clone());
+        sub.const_depth = self.const_depth + 1;
+        sub.const_stack = self.const_stack.clone();
+        sub.const_stack.push(field_key);
+        let v = sub.eval(init, &mut Env::new()).degrade();
+        let v = if sub.aborted { Val::Maybe } else { v };
+        if top {
+            index.store_result(cache_key, v.is_safe());
+        }
+        v
     }
 
     fn statically_imported(&self, name: &str) -> bool {
@@ -2112,5 +2299,323 @@ mod tests {
             "class T { void m(HttpServletRequest req) { String r; if (2147483647 + 1 > 0) { r = \"safe\"; } else { r = req.getParameter(\"q\"); } sink(r); } }",
             false
         ));
+    }
+
+    // ── constants declared in other files of the project ───────────────────
+
+    /// Is `sink(..)` in `main` (written as `app/T.java`) safe when the other
+    /// `(path, source)` files are part of the scanned project?
+    fn safe_with_project(files: &[(&str, &str)], main: &str) -> bool {
+        let dir = tempfile::tempdir().unwrap();
+        let mut paths = Vec::new();
+        for (rel, text) in files.iter().chain(std::iter::once(&("app/T.java", main))) {
+            let path = dir.path().join(rel);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, text).unwrap();
+            paths.push(path);
+        }
+        let index = Arc::new(JavaProjectIndex::build(&paths, 1 << 20));
+        let _guard = install_project_index(index);
+        safe(main, false)
+    }
+
+    fn main_with(imports: &str, body: &str) -> String {
+        format!(
+            "package app; {imports} class T {{ void m(HttpServletRequest req) {{ String param = req.getParameter(\"x\"); {body} }} }}"
+        )
+    }
+
+    const CONSTS: (&str, &str) = (
+        "lib/Consts.java",
+        "package lib; public class Consts { public static final String DIR = \"/srv/data/\"; public static final String NAME = DIR + \"name\"; public static final int SIZE = 4 * 1024; }",
+    );
+
+    #[test]
+    fn a_static_final_constant_of_a_class_in_another_file_is_safe() {
+        for (imports, body) in [
+            ("import lib.Consts;", "sink(Consts.DIR);"),
+            ("import lib.Consts;", "sink(Consts.NAME);"),
+            (
+                "import lib.Consts;",
+                "sink(Consts.DIR + \"a\" + Consts.SIZE);",
+            ),
+            ("import lib.*;", "sink(Consts.DIR);"),
+            ("", "sink(lib.Consts.DIR);"),
+            ("", "sink(lib.Consts.NAME);"),
+        ] {
+            let m = main_with(imports, body);
+            assert!(safe_with_project(&[CONSTS], &m), "{m}");
+        }
+        // The same package needs no import.
+        let same = (
+            "app/Consts.java",
+            "package app; public class Consts { public static final String DIR = \"/srv\"; }",
+        );
+        let m = main_with("", "sink(Consts.DIR);");
+        assert!(safe_with_project(&[same], &m), "{m}");
+    }
+
+    #[test]
+    fn the_unsafe_twins_of_a_cross_file_constant_stay_unknown() {
+        let twins: &[(&str, &str)] = &[
+            // Not final: another class may assign request data to it.
+            (
+                "package lib; public class Consts { public static String DIR = \"/srv\"; }",
+                "sink(Consts.DIR);",
+            ),
+            // Final, but the initialiser reads the environment.
+            (
+                "package lib; public class Consts { public static final String DIR = System.getenv(\"D\"); }",
+                "sink(Consts.DIR);",
+            ),
+            // Final, but a call to a project helper.
+            (
+                "package lib; public class Consts { public static final String DIR = Helpers.read(); }",
+                "sink(Consts.DIR);",
+            ),
+            // A blank final is set by an initialiser block.
+            (
+                "package lib; public class Consts { public static final String DIR; static { DIR = System.getenv(\"D\"); } }",
+                "sink(Consts.DIR);",
+            ),
+            // A chain whose last link is unsafe.
+            (
+                "package lib; public class Consts { static final String BASE = System.getenv(\"D\"); public static final String DIR = BASE + \"/x\"; }",
+                "sink(Consts.DIR);",
+            ),
+            // A reference cycle is not a value.
+            (
+                "package lib; public class Consts { public static final String A = B; public static final String B = A; }",
+                "sink(Consts.A);",
+            ),
+            // Mutable objects keep their contents open to change.
+            (
+                "package lib; public class Consts { public static final String[] ARGS = {\"a\"}; }",
+                "sink(Consts.ARGS);",
+            ),
+            (
+                "package lib; public class Consts { public static final StringBuilder SB = new StringBuilder(\"a\"); }",
+                "sink(Consts.SB);",
+            ),
+            // Not an UPPER_SNAKE name.
+            (
+                "package lib; public class Consts { public static final String dir = \"/srv\"; }",
+                "sink(Consts.dir);",
+            ),
+            // The field does not exist there.
+            (
+                "package lib; public class Consts { public static final String DIR = \"/srv\"; }",
+                "sink(Consts.OTHER);",
+            ),
+        ];
+        for (consts, body) in twins {
+            let m = main_with("import lib.Consts;", body);
+            assert!(
+                !safe_with_project(&[("lib/Consts.java", consts)], &m),
+                "{consts} / {body}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_name_assigned_anywhere_in_the_project_is_not_a_constant() {
+        let writer = (
+            "lib/Writer.java",
+            "package lib; class Writer { void set(String v) { Consts.DIR = v; } }",
+        );
+        let m = main_with("import lib.Consts;", "sink(Consts.DIR);");
+        assert!(safe_with_project(&[CONSTS], &m));
+        assert!(!safe_with_project(&[CONSTS, writer], &m));
+        let incr = (
+            "lib/Counter.java",
+            "package lib; class Counter { void bump() { Consts.SIZE++; } }",
+        );
+        let m = main_with("import lib.Consts;", "sink(Consts.SIZE);");
+        assert!(!safe_with_project(&[CONSTS, incr], &m));
+    }
+
+    #[test]
+    fn a_class_name_that_is_not_unique_or_not_visible_stays_unknown() {
+        let safe_a = (
+            "a/Consts.java",
+            "package a; public class Consts { public static final String DIR = \"/srv\"; }",
+        );
+        let unsafe_b = (
+            "b/Consts.java",
+            "package b; public class Consts { public static final String DIR = System.getenv(\"D\"); }",
+        );
+        let body = "sink(Consts.DIR);";
+        // An explicit import picks one class: the safe one, then the unsafe one.
+        assert!(safe_with_project(
+            &[safe_a, unsafe_b],
+            &main_with("import a.Consts;", body)
+        ));
+        assert!(!safe_with_project(
+            &[safe_a, unsafe_b],
+            &main_with("import b.Consts;", body)
+        ));
+        // Two wildcard imports that both provide the name: ambiguous.
+        assert!(!safe_with_project(
+            &[safe_a, unsafe_b],
+            &main_with("import a.*; import b.*;", body)
+        ));
+        let both_safe_b = (
+            "b/Consts.java",
+            "package b; public class Consts { public static final String DIR = \"/tmp\"; }",
+        );
+        assert!(!safe_with_project(
+            &[safe_a, both_safe_b],
+            &main_with("import a.*; import b.*;", body)
+        ));
+        // Without any import the name may be a library class.
+        assert!(!safe_with_project(&[safe_a], &main_with("", body)));
+        // A class from a library is not the scanned one of the same name.
+        assert!(!safe_with_project(
+            &[safe_a],
+            &main_with("import org.other.Consts;", body)
+        ));
+        // A name that resolves to nothing.
+        assert!(!safe_with_project(
+            &[CONSTS],
+            &main_with("import lib.*;", "sink(Missing.DIR);")
+        ));
+    }
+
+    #[test]
+    fn a_type_declared_in_the_scanned_file_hides_a_project_class_of_the_same_name() {
+        let m = "package app; import lib.Consts; class T { interface Consts { String DIR = System.getenv(\"D\"); } void m() { sink(Consts.DIR); } }";
+        assert!(!safe_with_project(&[CONSTS], m));
+        let m = "package app; import lib.Consts; class T { interface Consts { String DIR = \"/srv\"; } void m() { sink(Consts.DIR); } }";
+        assert!(safe_with_project(&[CONSTS], m));
+    }
+
+    #[test]
+    fn interface_and_enum_constants_of_other_files() {
+        let iface = (
+            "lib/Limits.java",
+            "package lib; public interface Limits { String ROOT = \"/srv\"; int MAX = 10; }",
+        );
+        let iface_bad = (
+            "lib/Limits.java",
+            "package lib; public interface Limits { String ROOT = System.getenv(\"R\"); }",
+        );
+        let en = (
+            "lib/Mode.java",
+            "package lib; public enum Mode { READ, WRITE(\"w\"); Mode() {} Mode(String s) {} }",
+        );
+        let m = main_with("import lib.Limits;", "sink(Limits.ROOT);");
+        assert!(safe_with_project(&[iface], &m));
+        assert!(!safe_with_project(&[iface_bad], &m));
+        let m = main_with("import lib.Mode;", "sink(Mode.READ); sink(Mode.WRITE);");
+        assert!(safe_with_project(&[en], &m));
+        // A name the enum does not declare is not a constant.
+        let m = main_with("import lib.Mode;", "sink(Mode.OTHER);");
+        assert!(!safe_with_project(&[en], &m));
+    }
+
+    #[test]
+    fn nested_classes_of_other_files() {
+        let outer = (
+            "lib/Outer.java",
+            "package lib; public class Outer { public static class Inner { public static final String DIR = \"/srv\"; public static String BAD = \"x\"; } }",
+        );
+        let m = main_with("import lib.Outer;", "sink(Outer.Inner.DIR);");
+        assert!(safe_with_project(&[outer], &m));
+        let m = main_with("import lib.Outer;", "sink(Outer.Inner.BAD);");
+        assert!(!safe_with_project(&[outer], &m));
+        let m = main_with("import lib.Outer.Inner;", "sink(Inner.DIR);");
+        assert!(safe_with_project(&[outer], &m));
+    }
+
+    #[test]
+    fn inherited_constants_follow_the_supertypes() {
+        let base = (
+            "lib/Base.java",
+            "package lib; public class Base { protected static final String ROOT = \"/srv\"; protected static String LOOSE = \"x\"; }",
+        );
+        let m = "package app; import lib.Base; class T extends Base { void m() { sink(ROOT); } }";
+        assert!(safe_with_project(&[base], m));
+        let m = "package app; import lib.Base; class T extends Base { void m() { sink(T.ROOT); } }";
+        assert!(safe_with_project(&[base], m));
+        let m = "package app; import lib.Base; class T extends Base { void m() { sink(LOOSE); } }";
+        assert!(!safe_with_project(&[base], m));
+        // Two interfaces that both declare the name: not resolvable.
+        let i1 = (
+            "lib/I1.java",
+            "package lib; public interface I1 { String ROOT = \"/a\"; }",
+        );
+        let i2 = (
+            "lib/I2.java",
+            "package lib; public interface I2 { String ROOT = \"/b\"; }",
+        );
+        let m = "package app; import lib.*; abstract class T implements I1, I2 { void m() { sink(ROOT); } }";
+        assert!(!safe_with_project(&[i1, i2], m));
+        // A supertype from a library, or one that is not scanned, gives nothing.
+        let m =
+            "package app; import org.other.Base; class T extends Base { void m() { sink(ROOT); } }";
+        assert!(!safe_with_project(&[base], m));
+        // A parameter of the same name still shadows the inherited field.
+        let m = "package app; import lib.Base; class T extends Base { void m(String ROOT) { sink(ROOT); } }";
+        assert!(!safe_with_project(&[base], m));
+    }
+
+    #[test]
+    fn static_imports_of_scanned_classes_are_read() {
+        let m = main_with("import static lib.Consts.DIR;", "sink(DIR);");
+        assert!(safe_with_project(&[CONSTS], &m));
+        let m = main_with("import static lib.Consts.*;", "sink(DIR);");
+        assert!(safe_with_project(&[CONSTS], &m));
+        let bad = (
+            "lib/Consts.java",
+            "package lib; public class Consts { public static String DIR = \"/srv\"; public static final String ENV = System.getenv(\"E\"); }",
+        );
+        let m = main_with("import static lib.Consts.DIR;", "sink(DIR);");
+        assert!(!safe_with_project(&[bad], &m));
+        let m = main_with("import static lib.Consts.ENV;", "sink(ENV);");
+        assert!(!safe_with_project(&[bad], &m));
+        let m = main_with("import static lib.Consts.*;", "sink(ENV);");
+        assert!(!safe_with_project(&[bad], &m));
+        // A wildcard that provides nothing named so is not a constant.
+        let m = main_with("import static lib.Consts.*;", "sink(MISSING);");
+        assert!(!safe_with_project(&[CONSTS], &m));
+    }
+
+    #[test]
+    fn trusted_jdk_calls_in_an_initialiser_are_read_like_in_the_same_file() {
+        let paths = (
+            "lib/Paths2.java",
+            "package lib; import java.io.File; public class Paths2 { public static final String HOME = System.getProperty(\"user.dir\") + File.separator; public static final String DATA = HOME + \"data\" + File.separator; }",
+        );
+        let m = main_with("import lib.Paths2;", "sink(Paths2.DATA);");
+        assert!(safe_with_project(&[paths], &m));
+        // Request data in the argument of the same call is not trusted.
+        let bad = (
+            "lib/Paths2.java",
+            "package lib; public class Paths2 { public static final String DATA = System.getProperty(Helpers.key()) + \"x\"; }",
+        );
+        assert!(!safe_with_project(&[bad], &m));
+    }
+
+    #[test]
+    fn a_file_the_index_could_not_read_makes_its_class_name_unknown() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a/Consts.java");
+        let big = dir.path().join("big/Consts.java");
+        std::fs::create_dir_all(a.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(big.parent().unwrap()).unwrap();
+        std::fs::write(
+            &a,
+            "package a; public class Consts { public static final String DIR = \"/srv\"; }",
+        )
+        .unwrap();
+        std::fs::write(&big, format!("package big; // {}\n", "x".repeat(400))).unwrap();
+        // The size limit leaves the second file unindexed: its stem may be a
+        // class that also answers to `Consts` in package `big`.
+        let index = Arc::new(JavaProjectIndex::build(&[a, big], 300));
+        let _guard = install_project_index(index);
+        let same = "package a; class T { void m() { sink(Consts.DIR); } }";
+        assert!(!safe(same, false));
+        let imported = "package app; import a.Consts; class T { void m() { sink(Consts.DIR); } }";
+        assert!(safe(imported, false));
     }
 }
