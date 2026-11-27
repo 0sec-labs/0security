@@ -12,6 +12,12 @@ on the GitHub Release tag.
 
 ## [Unreleased]
 
+### Changed
+
+- `0 scan --skill seedless-depth-review` now reviews a large folder in batches with the batch coverage report, like a plain scan (before, any skill other than `scan` forced one thread and dropped both). Every other skill still keeps one thread; when that skips batching on a folder that would have been split, the report carries a warning and `--batches on` runs the skill per batch.
+- The scan report lists the helper threads the scan started with `spawn_agent`: `children` (count, status, turns, tool calls, tokens, findings, and per helper its scope and result), `coverage.children` and a per-batch count, and a "Helper threads" section in the Markdown report. The JSON report has a `tokens` total, which already included helper threads.
+- The `scan` skill tells a thread to load the new `code-index` skill when it reviews routes or handlers. The default tool list is unchanged (seven tools); the four index tools appear only after `load_skill`. The scan prompt and the `finding` tool now ask for `poc_steps` on high and critical findings when a safe, shell-reproducible check exists, so `findings reproduce` and executed PoC have steps to run.
+
 ## [0.46.0] - 2026-11-26
 
 ### Added

@@ -108,3 +108,25 @@ node scripts/bench/code-index/poc-probe.mjs --image node:24-bookworm-slim@sha256
 ```
 
 The harness needs a built CLI (`pnpm build`) and Foxguard (`bash scripts/build-foxguard.sh`, picked up from `target/foxguard-bin`). Results are written to `scripts/bench/code-index/results/`.
+
+## After the follow-ups (same harness, same model)
+
+The first five follow-ups above were implemented in one change: `seedless-depth-review` batches and keeps the coverage report, other skills that keep one thread say so in the report, the `scan` skill tells a thread to load the small `code-index` skill when it reviews routes, the report lists `spawn_agent` helper threads (count, scope, result, turns, tokens), and the scan prompt and `finding` tool ask for `poc_steps` on high and critical findings. Tokens: the console already charged helper calls to the thread's usage, so the old totals were complete; the saved sessions simply did not contain the helper threads. The report now has a `tokens` total and a `children` breakdown.
+
+Re-run on 2026-11-26 with `--arms baseline,index-skill --fixtures ts-shop,java-bank --repeat 3 --concurrency 2` (12 runs, `gpt-6-luna` through `chatgpt-codex`, raw results in `scripts/bench/code-index/results/scan-after-small-*.json`). "Before" is the table above, recorded earlier the same day on the build before the change (not re-run), so the two are not interleaved.
+
+| fixture | arm | found per run before | found per run after | turns before / after | tokens before / after | index tool calls (sum of 3) before / after |
+|---|---|---|---|---|---|---|
+| ts-shop | baseline | 4, 4, 4 | 4, 4, 4 | 20 / 26 | 187k / 276k | 0 / 10 |
+| ts-shop | index-skill | 3, 3, 3 | 4, 3, 4 | 13 / 23 | 232k / 334k | 3 / 24 |
+| java-bank | baseline | 4, 4, 4 | 4, 4, 4 | 19 / 22 | 191k / 238k | 0 / 3 |
+| java-bank | index-skill | 3, 4, 4 | 4, 4, 3 | 15 / 24 | 365k / 331k | 1 / 8 |
+
+- `index-skill` is now batched (3 threads, "reviewed 10 of 10 entry points" and the like in the coverage), and found 22 of 24 against 20 of 24 before. One item of difference with 3 runs per cell is inside the spread: this shows the loss from one-thread mode is gone, not that the skill adds recall. `ts-invite-hijack` was missed in 1 of 3 runs instead of 3 of 3.
+- The baseline kept 24 of 24. It had no headroom, as before.
+- The guidance changed behaviour: the plain scan called an index tool 13 times over its 6 runs (it called none before), so the tools are now used. It also used more turns and tokens (about 25 to 45 percent more on the baseline), which cannot be told apart from run-to-run spread with these numbers; the harness did not interleave a before arm.
+- Helper threads appeared in 3 of 12 runs (3 to 4 helpers each, 20 to 31 turns) and are now in the report. The report `tokens` equals the metrics total in every run.
+- `poc_steps`: this harness does not record them, so whether the new prompt produces steps was not measured here. The `poc-probe.mjs` path (path traversal with `ZERO_POC_IMAGE`) was not re-run.
+- Not re-run: `medium-app` (recall and cost of the batched skill on the larger folder), and the Java graph backend (Foxguard was not built for this run).
+
+Not done from the list: item 7 (CLI listing details) touches several commands and is a separate change; item 8 (the default for folders of this size) is a product decision that needs more data; item 9 (the variant flow with a recorded root cause) needs new fixtures.

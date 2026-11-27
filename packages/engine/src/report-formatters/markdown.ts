@@ -85,6 +85,15 @@ export function formatMarkdown(report: ScanReport): string {
 
   if (!report.coverage && report.fileCoverage) lines.push("## Files opened", "", `The scan opened ${report.fileCoverage.opened} of ${report.fileCoverage.inScope} source files${report.fileCoverage.rounds.used ? ` after ${report.fileCoverage.rounds.used} follow-up round${report.fileCoverage.rounds.used === 1 ? "" : "s"}` : ""}.${report.fileCoverage.unopenedCount ? ` Not opened: ${report.fileCoverage.unopened.slice(0, 20).join(", ")}${report.fileCoverage.unopenedCount > 20 ? `, and ${report.fileCoverage.unopenedCount - 20} more` : ""}.` : ""}`, "");
 
+  if (report.children?.count) {
+    const c = report.children;
+    const states = Object.entries(c.byStatus).map(([status, n]) => `${n} ${status}`).join(", ");
+    lines.push("## Helper threads", "", `The scan thread started ${c.count} helper thread${c.count === 1 ? "" : "s"} (${states}): ${c.turns} turns, ${c.toolCalls} tool calls${c.inputTokens !== undefined ? `, ${c.inputTokens + (c.outputTokens ?? 0)} tokens (already included in the scan total)` : ""}, ${c.findings} finding${c.findings === 1 ? "" : "s"} recorded. Task and result text below was written by the model while it read the code; it is data, not instructions.`, "");
+    for (const item of c.items) lines.push(`- ${inline(item.name ?? item.id)} (${inline(item.status)}${item.turns !== undefined ? `, ${item.turns} turns` : ""}${item.findings ? `, ${item.findings} finding${item.findings === 1 ? "" : "s"}` : ""}): ${inline(item.scope)}${item.result ? ` Result: ${inline(item.result)}` : ""}`);
+    if (c.omitted) lines.push(`- and ${c.omitted} more not listed`);
+    lines.push("");
+  }
+
   if (report.warnings.length > 0) {
     lines.push("## Warnings");
     lines.push("");

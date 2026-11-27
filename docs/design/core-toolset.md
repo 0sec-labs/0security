@@ -9,7 +9,7 @@ and `spawn_agent`. Files are read through the shell. `str_replace`
 creates a file when `old_string` is empty. A reply with no tool call ends the turn.
 
 Tool packs load only when a built-in skill declares them. The `code-index` pack (`callers_of`,
-`callees_of`, `routes`, `trace_to_sink`) is loaded by the source-review and verify-finding skills. It answers from an
+`callees_of`, `routes`, `trace_to_sink`) is loaded by the source-review, verify-finding and `code-index` skills (the `scan` skill only tells a thread to load `code-index` when it reviews routes; it declares no pack itself). It answers from an
 offline, per-commit index of TypeScript, JavaScript and Python (`packages/engine/src/code-index/`), and reports an
 unsupported language or an unknown symbol as a soft result that points back to `rg`.
 

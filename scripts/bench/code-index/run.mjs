@@ -9,7 +9,7 @@
 //   baseline     plain scan, core toolset
 //   index-full   plain scan prompt, but ZERO_TOOLSET=full so callers_of/callees_of/routes/trace_to_sink are advertised
 //   index-skill  scan with --skill seedless-depth-review, the shipped way to load the code-index pack. Any skill other
-//                than `scan` also turns batching off, so this arm is one thread over the whole folder.
+//                than `scan` also turned batching off before the follow-up change; it now batches like a plain scan.
 //   baseline-single  plain scan with --batches off: the fair control for index-skill
 // Variant arms (fixture variants-docs, one fixed bug and six unfixed siblings):
 //   variants     `findings import` of the seed finding, then `findings variants <id>`; variants are scored
@@ -161,6 +161,8 @@ async function scanRun(fx, arm, rep, o) {
     kind: "scan", fixture: fx.name, arm, repeat: rep + 1, status: report?.status ?? `no-report (exit ${proc.status})`, seconds, costUsd: report?.costUsd ?? metrics.costUsd ?? null,
     tokens: metrics.tokens ?? null, threads: sessions.threads, turns: sessions.turns, toolCalls: sessions.tools, indexToolCalls: INDEX_TOOLS.reduce((n, t) => n + (sessions.tools[t] ?? 0), 0),
     provider: sessions.providers, model: sessions.models, coverage: report?.coverage?.statement ?? null,
+    // From the report itself: its token total includes helper threads; `children` lists them (absent in reports of older builds).
+    reportTokens: report?.tokens ?? null, children: report?.children?.count ?? 0, childTurns: report?.children?.turns ?? 0, childTokens: report?.children ? (report.children.inputTokens ?? 0) + (report.children.outputTokens ?? 0) : 0, warnings: report?.warnings ?? [],
     score: slim(score), authz: authzOf(fx.answer, score),
     findings: (report?.findings ?? []).map((f) => ({ title: f.title, category: f.category, severity: f.severity, location: f.location })),
     rateLimited: RATE_LIMIT.test(`${proc.stderr}\n${report?.error ?? ""}`) && !report,

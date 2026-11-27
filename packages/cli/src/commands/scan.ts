@@ -15,7 +15,7 @@ import type { Command } from "commander";
 import { UNTRUSTED_GIT_BASE_CONFIG, buildInventory, discoverAgentSkills, exportReport, getSkillById, isReportExportFormat, resolveAgentSkillName, untrustedGitConfig, type Batch } from "@0/engine";
 import { CoverageLedger, coverageSentence, listOsecRunDatabasePaths, osecDB, resolveOsecDbPath, summarizeCoverage } from "@0/engine/storage";
 import { consoleTransportOptions, openConsole, type ConsoleClient, type ConsoleTransportOptions } from "../console-client.js";
-import { homeStateDir, parseSarif, parseScannerList, scanPrompt, scannerArguments, scannerById, scannerTakesRules, SCANNERS, type KnownItem, type PrePassLeads, type BatchPromptInfo, type ScanFileCoverage, type ScanReport } from "@0/engine/shared";
+import { homeStateDir, parseSarif, parseScannerList, scanPrompt, scannerArguments, scannerById, scannerTakesRules, SCANNERS, type KnownItem, type PrePassLeads, type BatchPromptInfo, type ScanChildren, type ScanChildThread, type ScanFileCoverage, type ScanReport } from "@0/engine/shared";
 import { runPrePass } from "../prepass.js";
 import { runNucleiTarget, type NucleiTargetRun } from "../nuclei-target.js";
 import { checkRulesScanners, resolveRulePaths } from "../scan-rules.js";
@@ -23,7 +23,8 @@ import { applyScope, markKnown, mergePasses, scanExitCode, scanJson, toScanRepor
 import { followUpText, reviewDepth, reviewScopeFiles, shallowReviewWarning, toolCallText, unopenedFiles } from "../scan-review.js";
 import { coverageReport, DEFAULT_RETRIES, runBatches, type BatchOutcome, type RunBatchesResult } from "../scan-batches.js";
 import { classifyFailure, type FailureCause, type ScanFailure } from "../scan-failure.js";
-import { coverageJson, coverageText, DEFAULT_BATCH_SIZE, moduleShardOf, ownersOfFile, planBatchedScan, type BatchedSetup } from "../scan-batched.js";
+import { coverageJson, coverageText, DEFAULT_BATCH_SIZE, keepsOneThread, moduleShardOf, ownersOfFile, planBatchedScan, unbatchedNote, type BatchedSetup } from "../scan-batched.js";
+import { childrenOf, childTotals, summarizeChildren } from "../scan-children.js";
 import { planScan, planText } from "../scan-plan.js";
 import { interactiveScopeHint } from "../threat-interview-findings.js";
 import { resumeHint, type ResumeHint } from "../scan-resume.js";
@@ -385,7 +386,7 @@ function measuredTokens(results: readonly PassResult[]): number | undefined {
   return total;
 }
 
-interface PassResult { threadId: string; done: FinishedThread; stored: ScanReport; budgetExhausted: boolean; timedOut: boolean; /** The batch's own time limit passed before the scan's. */ batchTimedOut: boolean; /** Why the thread failed, when it did and it was not the budget or a time limit. */ failure?: ScanFailure; /** What the thread's tool calls named, across every attempt (a continued thread keeps one transcript). */ toolCalls: string; /** The in-scope files this thread was to open, the ones it did not open, and the follow-up rounds sent. */ files: { expected: readonly string[]; unopened: readonly string[]; rounds: number }; /** The thread was asked to continue once after a transient failure. */ resumed?: boolean; costUsd?: number }
+interface PassResult { threadId: string; done: FinishedThread; stored: ScanReport; budgetExhausted: boolean; timedOut: boolean; /** The batch's own time limit passed before the scan's. */ batchTimedOut: boolean; /** Why the thread failed, when it did and it was not the budget or a time limit. */ failure?: ScanFailure; /** What the thread's tool calls named, across every attempt (a continued thread keeps one transcript). */ toolCalls: string; /** The in-scope files this thread was to open, the ones it did not open, and the follow-up rounds sent. */ files: { expected: readonly string[]; unopened: readonly string[]; rounds: number }; /** The thread was asked to continue once after a transient failure. */ resumed?: boolean; costUsd?: number; /** Helper threads it started with spawn_agent. */ children: ScanChildThread[] }
 
 const retryCount = (options: ScanOptions): number => Number(options.retries ?? DEFAULT_RETRIES);
 export const coverageRounds = (options: Pick<ScanOptions, "coverageRounds">): number => Number(options.coverageRounds ?? DEFAULT_COVERAGE_ROUNDS);
@@ -522,7 +523,14 @@ async function runPass(ctx: PassContext, index: number, extra: PassExtra = {}): 
   const budgetExhausted = asJson(done.session).costCeilingExceeded === true;
   const batchTimedOut = timedOut && limit < deadline;
   const failure = threadFailure(done, budgetExhausted, timedOut);
-  return { threadId: id, done, stored: await deps.loadReport(client, id), budgetExhausted, timedOut: timedOut && !batchTimedOut, batchTimedOut, toolCalls: calls || toolCallText(snapshot), files: { expected, unopened, rounds }, ...(failure ? { failure } : {}), ...(resumed ? { resumed } : {}), ...(costUsd !== undefined ? { costUsd } : {}) };
+  return { threadId: id, done, stored: await deps.loadReport(client, id), budgetExhausted, timedOut: timedOut && !batchTimedOut, batchTimedOut, toolCalls: calls || toolCallText(snapshot), files: { expected, unopened, rounds }, ...(failure ? { failure } : {}), ...(resumed ? { resumed } : {}), ...(costUsd !== undefined ? { costUsd } : {}), children: childrenOf(snapshot) };
+}
+
+/** The usage line's tail when the scan started helper threads: their share of the total, which is already counted in it. */
+function childLine(children: ScanChildren | undefined): string {
+  if (!children) return "";
+  const tokens = children.inputTokens !== undefined ? `, ${children.inputTokens + (children.outputTokens ?? 0)} tokens (included in the usage above)` : "";
+  return `; ${children.count} helper thread${children.count === 1 ? "" : "s"} (${children.turns} turns, ${children.toolCalls} tool calls${tokens})`;
 }
 
 /** Run `count` tasks, at most `limit` at a time, in order of index. */
@@ -684,17 +692,20 @@ async function runBatchedScan(ctx: PassContext, setup: BatchedSetup, before: Set
   const units = ledger.units(scan.id);
   const summary = summarizeCoverage(scan.id, units);
   const fileCoverage = fileCoverageOf([...ran.values()], coverageRounds(options));
+  const children = summarizeChildren([...ran.values()].map(pass => pass.children));
   // Files of a thread that finished and were never opened: their units are pending ("not opened"), and the sentence says so.
   const neverOpened = coverageRounds(options) > 0 ? new Set([...ran.values()].filter(pass => !pass.done.failed && !pass.budgetExhausted && !pass.timedOut && !pass.batchTimedOut).flatMap(pass => pass.files.unopened)).size : 0;
   const statement = `${coverageSentence(summary)}${neverOpened ? `; ${neverOpened} file${neverOpened === 1 ? "" : "s"} never opened` : ""}`;
   const failures = run.failures.length ? run.failures.map(item => item.message) : run.outcomes.filter(item => !item.outcome.reviewed && item.outcome.failed).map(item => item.outcome.error ?? "no reason given");
   const hint: ResumeHint | undefined = resumeHint(resolved.label, summary, { budgetHit: run.budgetHit, budgetUsd: budget, timedOut: run.timedOut, timeoutSeconds: Number(options.timeout), failures });
   const coverage = { ...coverageReport(summary, statement, units, { retried: run.retried, failures: run.failures, retriesAllowed: retryCount(options), ...(fileCoverage ? { files: fileCoverage } : {}) }), ...(hint ? { resume: hint.command, stoppedBy: hint.stoppedBy } : {}),
+    ...(children ? { children: childTotals(children) } : {}),
     batchRuns: setup.batches.map(batch => {
       const stats = batchRuns.get(batch.index) ?? { attempts: 0, durationMs: 0, costUsd: 0, threadIds: [] };
       const ids = new Set(batch.units.map(unit => unit.id));
       return { batch: batch.index + 1, ...(batch.module ? { module: batch.module } : {}), ...(batch.owners ? { owners: batch.owners } : {}), ...stats,
-        reviewedUnits: units.filter(unit => ids.has(unit.unitId) && unit.status === "reviewed").length, totalUnits: ids.size };
+        reviewedUnits: units.filter(unit => ids.has(unit.unitId) && unit.status === "reviewed").length, totalUnits: ids.size,
+        ...(children ? { children: stats.threadIds.reduce((sum, id) => sum + (ran.get(id)?.children.length ?? 0), 0) } : {}) };
     }),
   };
   // Findings of every thread of this scan, including the threads an earlier run started and partial batches.
@@ -727,7 +738,7 @@ async function runBatchedScan(ctx: PassContext, setup: BatchedSetup, before: Set
     ...(changedError ? { error: changedError } : failed && hardError ? { error: hardError } : {}), ...(failure ? { failure } : {}),
     // The thread's own summary can say it covered everything; the ledger's account comes first.
     summary: `Coverage: ${statement}.${lead?.done.reply ? `\n\n${lead.done.reply}` : ""}`,
-    coverage, ...(threadIds.length > 1 ? { threadIds } : {}),
+    coverage, ...(children ? { children } : {}), ...(threadIds.length > 1 ? { threadIds } : {}),
     ...(customLeads.length ? { customLeads } : {}),
     ...ctx.extras,
   };
@@ -736,7 +747,7 @@ async function runBatchedScan(ctx: PassContext, setup: BatchedSetup, before: Set
   noteKnown(outcome, merged, deps);
   if (failure && !failure.cause.startsWith("budget") && failure.cause !== "timeout") deps.err(`scan ${failed ? "failed" : "stopped early"}: ${failure.message}`);
   if (fileCoverage) deps.err(`opened ${fileCoverage.opened} of ${fileCoverage.inScope} source files${fileCoverage.rounds.used ? ` after ${fileCoverage.rounds.used} follow-up round${fileCoverage.rounds.used === 1 ? "" : "s"}` : ""}`);
-  deps.err(`${merged.length} finding${merged.length === 1 ? "" : "s"}; ${statement}${hint ? `\n${hint.text}` : ""}\nUsage: ${count} batch${count === 1 ? "" : "es"}, cost ${costKnown ? `$${cost.toFixed(4)}` : "unknown"}`);
+  deps.err(`${merged.length} finding${merged.length === 1 ? "" : "s"}; ${statement}${hint ? `\n${hint.text}` : ""}\nUsage: ${count} batch${count === 1 ? "" : "es"}, cost ${costKnown ? `$${cost.toFixed(4)}` : "unknown"}${childLine(children)}`);
   const code = scanExitCode(outcome, merged, options.failOn as typeof SEVERITIES[number] | undefined);
   if (code !== 0) process.exitCode = code;
 }
@@ -939,9 +950,14 @@ export async function runScan(target: string | undefined, options: ScanOptions, 
     // A folder with more entry points than one thread takes is reviewed in batches, each with a ledger row (docs: Large repositories).
     batched = await planBatchedScan({
       folder: resolved.folder, ...(options.codeowners ? { codeowners: options.codeowners } : {}), label: resolved.label, mode: options.batches ?? "auto", batchSize: Number(options.batchSize ?? DEFAULT_BATCH_SIZE), ...(options.resume !== undefined ? { resume: options.resume } : {}),
-      ...(options.force ? { force: true } : {}), budgetUsd: budget, passes: total, singleThread: options.skill !== "scan", ...(scope ? { scope } : {}), ...(options.dbPath ? { dbPath: options.dbPath } : {}),
+      ...(options.force ? { force: true } : {}), budgetUsd: budget, passes: total, singleThread: keepsOneThread(options.skill), ...(scope ? { scope } : {}), ...(options.dbPath ? { dbPath: options.dbPath } : {}),
       openLedger: deps.openLedger ?? defaultScanDeps.openLedger!, gitHead: deps.gitHead ?? defaultScanDeps.gitHead!, err: deps.err,
     });
+    // A skill that is not a source review method keeps one thread. When that costs the batches, the report says so.
+    const unbatched = !batched && keepsOneThread(options.skill) && (options.batches ?? "auto") === "auto" && total === 1 && options.resume === undefined
+      ? unbatchedNote({ folder: resolved.folder, skill: options.skill, batchSize: Number(options.batchSize ?? DEFAULT_BATCH_SIZE), ...(scope ? { scope } : {}) })
+      : undefined;
+    if (unbatched) deps.err(unbatched);
     ({ client, stop: stopConsole } = await connect(options, deps));
     // --budget is the total: each pass gets an equal share, so the cost stays predictable however many passes run.
     let prePass = options.prepass === "off" ? undefined : await runPrePassFor(deps, resolved.folder, options);
@@ -952,7 +968,7 @@ export async function runScan(target: string | undefined, options: ScanOptions, 
       prePass = leads.length ? { ...prePass, leads, total: leads.length } : undefined;
     }
     if (prePass) deps.err(`${prePass.tools.join(", ")} pre-pass: ${prePass.total} lead${prePass.total === 1 ? "" : "s"} for the scan to check`);
-    const scopeFiles = options.skill === "scan" ? reviewScopeFiles(resolved.folder, scope) : [];
+    const scopeFiles = !keepsOneThread(options.skill) ? reviewScopeFiles(resolved.folder, scope) : [];
     const ctx: PassContext = { scopeFiles, extras, ...(known ? { known: known.items } : {}), steering, ...(prePass ? { prePass } : {}), ...(scope ? { scope } : {}), client, deps, resolved, options, total, budget: budget / total, deadline: Date.now() + Number(options.timeout) * 1000 };
     if (batched) { await runBatchedScan(ctx, batched, before, startedAt, budget); return; }
 
@@ -988,10 +1004,11 @@ export async function runScan(target: string | undefined, options: ScanOptions, 
     const partialFailure = results.map(result => result.failure).find(Boolean);
     const failure = scanFailure({ failed, changedError, budgetExhausted, timedOut, batchFailures: partialFailure ? [{ batch: 1, cause: partialFailure.cause, message: partialFailure.message }] : [], hardError: firstError });
     // A scan that found nothing and never named most of the source files has not shown the code is clean: say which files it did not open.
-    const shallow = merged.length === 0 && !failure && !failed && !budgetExhausted && !timedOut && !results.some(result => result.batchTimedOut) && options.skill === "scan"
+    const shallow = merged.length === 0 && !failure && !failed && !budgetExhausted && !timedOut && !results.some(result => result.batchTimedOut) && !keepsOneThread(options.skill)
       ? shallowReviewWarning(reviewDepth(resolved.folder, results.map(result => result.toolCalls).join("\n"), scope))
       : undefined;
     const fileCoverage = fileCoverageOf(results, coverageRounds(options));
+    const children = summarizeChildren(results.map(result => result.children));
     const outcome: ScanOutcome = {
       target: resolved.reportTarget, roots: resolved.roots, threadId: results[0]!.threadId, startedAt, completedAt: deps.now().toISOString(), budgetUsd: budget,
       ...(costKnown ? { costUsd: cost } : {}), ...(measuredTokens(results) !== undefined ? { tokens: measuredTokens(results) } : {}), budgetExhausted, ...(timedOut ? { timedOut } : {}), failed, ...(options.allowPartial ? { allowPartial: true } : {}),
@@ -999,13 +1016,15 @@ export async function runScan(target: string | undefined, options: ScanOptions, 
       ...(customLeads?.length ? { customLeads } : {}),
       ...(shallow ? { shallowReview: shallow } : {}),
       ...(fileCoverage ? { fileCoverage } : {}),
+      ...(children ? { children } : {}),
+      ...(unbatched ? { unbatched } : {}),
       ...(total > 1 ? { passes: { requested: total, completed: results.length, failed: failedPasses }, threadIds: results.map(result => result.threadId) } : {}),
       ...ctx.extras,
     };
 
     await writeReport(outcome, merged, { ...results[0]!.stored, findings: merged }, `0-scan-${results[0]!.threadId}`, options, deps);
     noteKnown(outcome, merged, deps);
-    const usage = results.length === 1 ? usageLine(results[0]!.done.usage) : `Usage: ${results.length} passes, cost ${costKnown ? `$${cost.toFixed(4)}` : "unknown"}`;
+    const usage = (results.length === 1 ? usageLine(results[0]!.done.usage) : `Usage: ${results.length} passes, cost ${costKnown ? `$${cost.toFixed(4)}` : "unknown"}`) + childLine(children);
     if (failure && failure.cause !== "budget" && failure.cause !== "timeout") deps.err(`scan ${failed ? "failed" : "stopped early"}: ${failure.message}${merged.length ? `. The ${merged.length} finding${merged.length === 1 ? "" : "s"} recorded so far ${merged.length === 1 ? "is" : "are"} in the report` : ""}`);
     if (fileCoverage) deps.err(`opened ${fileCoverage.opened} of ${fileCoverage.inScope} source files${fileCoverage.rounds.used ? ` after ${fileCoverage.rounds.used} follow-up round${fileCoverage.rounds.used === 1 ? "" : "s"}` : ""}`);
     deps.err(`${merged.length} finding${merged.length === 1 ? "" : "s"}${total > 1 ? ` from ${results.length} of ${total} passes` : ""}${budgetExhausted ? `, stopped at the $${budget} budget (partial)` : timedOut ? `, stopped at the ${options.timeout}s time limit (partial)` : ""}\n${usage}`);

@@ -10,7 +10,7 @@ import { ToolExecutor } from "../agent/tools.js";
 import { DeferredToolRegistry } from "../agent/deferred-tools.js";
 import { TOOL_DEFINITIONS } from "../agent/tools.js";
 import { TOOL_PACKS } from "../agent/toolset.js";
-import { clearSkillRegistry, loadSkillRegistry } from "../agent/skills/index.js";
+import { clearSkillRegistry, getSkillById, loadSkillRegistry } from "../agent/skills/index.js";
 import type { ToolContext } from "../agent/types.js";
 
 /** Three routes on one router; the export route has no authentication and no ownership check. */
@@ -327,7 +327,14 @@ describe("code index tools through the real tool dispatch", () => {
   describe("skills", () => {
     beforeEach(() => { clearSkillRegistry(); loadSkillRegistry(); });
     afterEach(() => clearSkillRegistry());
-    it.each(["seedless-depth-review", "verify-finding"])("%s loads the code-index pack", async (skill) => {
+    it("the scan skill points at the code-index skill without declaring the pack itself", async () => {
+      const scan = getSkillById("scan")!;
+      expect(scan.tools ?? []).toEqual([]);
+      expect(scan.content).toContain("`code-index`");
+      expect(scan.content).toContain("without_auth_signal");
+      expect(scan.content).toMatch(/poc_steps[^\n]*no network|poc_steps[^\n]*uses no network/);
+    });
+    it.each(["seedless-depth-review", "verify-finding", "code-index"])("%s loads the code-index pack", async (skill) => {
       const registry = new DeferredToolRegistry();
       registry.seed(Object.values(TOOL_DEFINITIONS).filter((d) => TOOL_PACKS["code-index"]!.includes(d.name)));
       const executor = new ToolExecutor({ ...ctx(), packTools: registry } as ToolContext, null);

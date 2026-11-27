@@ -47,6 +47,7 @@ const EXPECTED_SKILL_IDS = [
   "supabase-appsec",
   "python-web-appsec",
   "seedless-depth-review",
+  "code-index",
   "advisory-disclosure",
   "develop-this-app",
   // Sentinel preset skills.
@@ -228,6 +229,7 @@ describe("Skill Registry", () => {
         "blind-exploitation",
         "cardano-eutxo-validators",
         "cloud-iac-review",
+        "code-index",
         "crypto-migration",
         "crypto-misuse",
         "dependency-reachability",
