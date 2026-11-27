@@ -1,0 +1,72 @@
+[
+  {
+    "schema": "0.findings-event",
+    "version": 1,
+    "id": "loc:src/db.ts:12:open",
+    "type": "finding.open",
+    "emittedAt": "2026-01-01T00:00:00.000Z",
+    "finding": {
+      "fingerprint": "loc:src/db.ts:12",
+      "id": "f-1",
+      "title": "SQL injection in order lookup",
+      "description": "User input reaches a query.",
+      "severity": "high",
+      "category": "injection",
+      "status": "open",
+      "location": {
+        "path": "src/db.ts",
+        "startLine": 12,
+        "endLine": 14,
+        "target": "github.com/acme/shop"
+      },
+      "ruleId": "js.sql-injection",
+      "tool": "semgrep",
+      "cvssScore": 8.1
+    }
+  },
+  {
+    "schema": "0.findings-event",
+    "version": 1,
+    "id": "fp-2:fixed",
+    "type": "finding.fixed",
+    "emittedAt": "2026-01-01T00:00:00.000Z",
+    "finding": {
+      "fingerprint": "fp-2",
+      "id": "f-2",
+      "title": "SQL injection in order lookup",
+      "description": "User input reaches a query.",
+      "severity": "high",
+      "category": "injection",
+      "status": "fixed",
+      "location": {
+        "target": "github.com/acme/shop"
+      },
+      "ruleId": "idor"
+    }
+  },
+  {
+    "schema": "0.findings-event",
+    "version": 1,
+    "id": "f-3:suppressed",
+    "type": "finding.suppressed",
+    "emittedAt": "2026-01-01T00:00:00.000Z",
+    "finding": {
+      "fingerprint": "f-3",
+      "id": "f-3",
+      "title": "SQL injection in order lookup",
+      "description": "User input reaches a query.",
+      "severity": "high",
+      "category": "injection",
+      "status": "suppressed",
+      "location": {
+        "path": "src/db.ts",
+        "startLine": 12,
+        "endLine": 14,
+        "target": "github.com/acme/shop"
+      },
+      "ruleId": "js.sql-injection",
+      "tool": "semgrep",
+      "cvssScore": 8.1
+    }
+  }
+]
