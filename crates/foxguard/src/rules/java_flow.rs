@@ -77,6 +77,31 @@ const STRING_PASSTHROUGH: &[&str] = &[
     "charAt",
 ];
 
+/// Method names that read from the outside world even when every argument is a
+/// constant, so their result is never provably free of external input.
+const READS_EXTERNAL_INPUT: &[&str] = &[
+    "getenv",
+    "readLine",
+    "read",
+    "readAllLines",
+    "readAllBytes",
+    "readString",
+    "nextLine",
+    "next",
+    "getParameter",
+    "getParameterValues",
+    "getParameterMap",
+    "getHeader",
+    "getHeaders",
+    "getCookies",
+    "getQueryString",
+    "getRequestURI",
+    "getRequestURL",
+    "getInputStream",
+    "getReader",
+    "getPathInfo",
+];
+
 const MAX_DEPTH: usize = 3;
 const STEP_BUDGET: usize = 50_000;
 
@@ -180,11 +205,17 @@ struct Interp<'a> {
     src: &'a str,
     root: Node<'a>,
     html: bool,
+    /// `Some(names)`: calls to helpers that receive only safe arguments count
+    /// as safe, except calls to a method in `names` (the rule's own sources).
+    /// `None`: every call we cannot interpret is not proven safe.
+    trusted_helpers: Option<Vec<String>>,
     depth: usize,
     steps: usize,
     aborted: bool,
     /// Sink byte range -> every argument safe on every visit.
     rec: HashMap<(usize, usize), bool>,
+    /// Per-argument safety of each recorded call, merged across visits.
+    rec_args: HashMap<(usize, usize), Vec<bool>>,
     returns: Vec<Val>,
     /// Environments captured at `break`/`continue`, joined at the enclosing
     /// loop or switch exit so a value assigned just before leaving survives.
@@ -194,7 +225,20 @@ struct Interp<'a> {
 /// True when the call or `new` expression `call` sits in a method body and
 /// every argument is proven safe on every path that reaches it. With `html`
 /// set, known HTML encoders count as sanitisers (use for XSS sinks only).
-pub fn sink_args_safe(call: Node<'_>, source: &str, html: bool) -> bool {
+pub fn sink_args_safe(call: Node<'_>, source: &str, html: bool, only: &[usize]) -> bool {
+    sink_args_safe_with(call, source, html, only, Some(Vec::new()))
+}
+
+/// Like [`sink_args_safe`], with control over whether helper calls that receive
+/// only safe arguments are trusted to return safe values (see
+/// `Interp::trusted_helpers`).
+pub fn sink_args_safe_with(
+    call: Node<'_>,
+    source: &str,
+    html: bool,
+    only: &[usize],
+    trusted_helpers: Option<Vec<String>>,
+) -> bool {
     let mut method = call;
     loop {
         match method.kind() {
@@ -216,21 +260,29 @@ pub fn sink_args_safe(call: Node<'_>, source: &str, html: bool) -> bool {
         src: source,
         root,
         html,
+        trusted_helpers,
         depth: 0,
         steps: 0,
         aborted: false,
         rec: HashMap::new(),
+        rec_args: HashMap::new(),
         returns: Vec::new(),
         exits: Vec::new(),
     };
     let mut env = Env::new();
     it.exec(body, &mut env);
-    !it.aborted
-        && it
-            .rec
-            .get(&(call.start_byte(), call.end_byte()))
-            .copied()
-            .unwrap_or(false)
+    let key = (call.start_byte(), call.end_byte());
+    if it.aborted {
+        return false;
+    }
+    if only.is_empty() {
+        return it.rec.get(&key).copied().unwrap_or(false);
+    }
+    // Only the listed argument positions have to be proven safe.
+    match it.rec_args.get(&key) {
+        Some(args) => only.iter().all(|i| args.get(*i).copied().unwrap_or(true)),
+        None => false,
+    }
 }
 
 impl<'a> Interp<'a> {
@@ -642,7 +694,12 @@ impl<'a> Interp<'a> {
             "true" => Val::Bool(true),
             "false" => Val::Bool(false),
             "null_literal" => Val::Null,
-            "identifier" => env.get(self.text(node)).cloned().unwrap_or(Val::Maybe),
+            "identifier" => match env.get(self.text(node)) {
+                Some(v) => v.clone(),
+                // An unassigned UPPER_SNAKE name is a constant field.
+                None if is_constant_name(self.text(node)) => Val::Safe,
+                None => Val::Maybe,
+            },
             "parenthesized_expression" => node
                 .named_child(0)
                 .map_or(Val::Maybe, |n| self.eval(n, env)),
@@ -876,6 +933,16 @@ impl<'a> Interp<'a> {
             .entry((node.start_byte(), node.end_byte()))
             .or_insert(true);
         *e = *e && safe;
+        let per_arg = self
+            .rec_args
+            .entry((node.start_byte(), node.end_byte()))
+            .or_insert_with(|| vec![true; args.len()]);
+        if per_arg.len() < args.len() {
+            per_arg.resize(args.len(), true);
+        }
+        for (slot, v) in per_arg.iter_mut().zip(args) {
+            *slot = *slot && v.is_safe();
+        }
     }
 
     fn eval_new(&mut self, node: Node<'a>, env: &mut Env) -> Val {
@@ -957,6 +1024,18 @@ impl<'a> Interp<'a> {
             (Some(_), Some(o)) if is_static_value_call(self.text(o), name) && all_safe => {
                 return Val::Safe;
             }
+            // A call to a library or project helper that receives only constants
+            // (or values derived from constants) cannot hand back request data:
+            // nothing request-derived goes in. Calls that read from the outside
+            // world are excluded by name.
+            (Some(_), Some(o))
+                if all_safe && self.helper_is_trusted(name) && self.is_static_type_ref(o, env) =>
+            {
+                return Val::Safe;
+            }
+            (Some(r), Some(_)) if all_safe && self.helper_is_trusted(name) && r.is_safe() => {
+                return Val::Safe;
+            }
             _ => {}
         }
 
@@ -975,6 +1054,35 @@ impl<'a> Interp<'a> {
             }
         }
         Val::Maybe
+    }
+
+    fn helper_is_trusted(&self, name: &str) -> bool {
+        !READS_EXTERNAL_INPUT.contains(&name)
+            && self
+                .trusted_helpers
+                .as_ref()
+                .is_some_and(|sources| !sources.iter().any(|s| s == name))
+    }
+
+    /// `Type.method(..)` / `pkg.Type.method(..)`: the receiver names a class, not
+    /// a variable in scope.
+    fn is_static_type_ref(&self, node: Node<'a>, env: &Env) -> bool {
+        if !matches!(
+            node.kind(),
+            "identifier" | "field_access" | "scoped_identifier"
+        ) {
+            return false;
+        }
+        let text = self.text(node);
+        let mut parts = text.split('.');
+        let first = parts.next().unwrap_or("");
+        let last = text.rsplit('.').next().unwrap_or("");
+        env.get(first).is_none()
+            && !is_constant_name(last)
+            && last.starts_with(|c: char| c.is_ascii_uppercase())
+            && text
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '_' || c == '.')
     }
 
     fn collection_call(&mut self, var: &str, name: &str, args: Vec<Val>, env: &mut Env) -> Val {
@@ -1128,7 +1236,15 @@ fn idx_ok(i: &Val, len: usize) -> bool {
 fn is_value_type(base: &str) -> bool {
     matches!(
         base,
-        "String" | "StringBuilder" | "StringBuffer" | "Integer" | "Long" | "Object"
+        "String"
+            | "StringBuilder"
+            | "StringBuffer"
+            | "Integer"
+            | "Long"
+            | "Object"
+            | "File"
+            | "URI"
+            | "URL"
     )
 }
 
@@ -1180,11 +1296,38 @@ mod tests {
                 found = Some(n);
             }
         });
-        sink_args_safe(found.expect("sink call"), src, html)
+        sink_args_safe(found.expect("sink call"), src, html, &[])
     }
 
     fn method(body: &str) -> String {
         format!("class T {{ void m(HttpServletRequest req) {{ String param = req.getParameter(\"x\"); {body} }} }}")
+    }
+
+    #[test]
+    fn static_helper_with_constant_arguments_is_safe_but_input_readers_are_not() {
+        assert!(safe(
+            &method("String v = Helpers.name(\"k\"); sink(v);"),
+            false
+        ));
+        assert!(safe(
+            &method("String v = pkg.Helpers.make().name(\"k\"); sink(v);"),
+            false
+        ));
+        assert!(!safe(
+            &method("String v = Helpers.name(param); sink(v);"),
+            false
+        ));
+        assert!(!safe(
+            &method("String v = System.getenv(\"HOME\"); sink(v);"),
+            false
+        ));
+    }
+
+    #[test]
+    fn upper_snake_names_are_constants_and_any_unsafe_argument_blocks_the_veto() {
+        assert!(safe(&method("sink(BASE_DIR + \"x\");"), false));
+        let src = "class T { void m(HttpServletRequest req) { String p = req.getParameter(\"x\"); sink(\"fixed\", p); } }";
+        assert!(!safe(src, false));
     }
 
     #[test]

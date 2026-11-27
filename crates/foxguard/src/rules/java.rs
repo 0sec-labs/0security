@@ -400,7 +400,7 @@ impl_rule! {
                                 if let Some(args) = node.child_by_field_name("arguments") {
                                     if let Some(first_arg) = args.named_child(0) {
                                         if !is_literal(first_arg)
-                                            && !java_flow::sink_args_safe(node, src, false)
+                                            && !java_flow::sink_args_safe(node, src, false, &[])
                                         {
                                             findings.push(make_finding(
                                                 _self.id(),
@@ -427,7 +427,7 @@ impl_rule! {
                         if let Some(args) = node.child_by_field_name("arguments") {
                             if let Some(first_arg) = args.named_child(0) {
                                 if !is_literal(first_arg)
-                                    && !java_flow::sink_args_safe(node, src, false)
+                                    && !java_flow::sink_args_safe(node, src, false, &[])
                                 {
                                     findings.push(make_finding(
                                         _self.id(),
@@ -1093,7 +1093,7 @@ impl_rule! {
                                     if let Some(_first_arg) = dynamic_arg {
                                         // Flag if an argument is not a pure literal
                                         // (i.e. it's a variable, concatenation, method call, etc.)
-                                        if !java_flow::sink_args_safe(node, src, true)
+                                        if !java_flow::sink_args_safe(node, src, true, &[])
                                         {
                                             let mut f = make_finding(
                                                 _self.id(),
@@ -1334,6 +1334,18 @@ fn java_taint_command_injection_desc(src: &str, sink: &str) -> String {
     format!("{src} reaches {sink} — untrusted input can inject OS commands")
 }
 
+fn java_taint_path_traversal_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can read or write files outside the intended directory")
+}
+
+fn java_taint_ldap_injection_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can alter the LDAP query")
+}
+
+fn java_taint_xpath_injection_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can alter the XPath query")
+}
+
 fn java_taint_ssrf_desc(src: &str, sink: &str) -> String {
     format!("{src} reaches {sink} — untrusted input can drive server-side request forgery")
 }
@@ -1365,6 +1377,33 @@ fn java_taint_meta(rule_id: &str) -> Option<JavaTaintRuleMeta<'static>> {
                 "Avoid invoking shell commands with request-controlled data; pass fixed executable names and validated argument arrays",
             ),
             format_description: java_taint_command_injection_desc,
+        }),
+        "java/taint-path-traversal" => Some(JavaTaintRuleMeta {
+            rule_id: "java/taint-path-traversal",
+            severity: Severity::High,
+            cwe: Some("CWE-22"),
+            fix_suggestion: Some(
+                "Do not build file paths from request data; map a request value to a fixed file through an allowlist or a generated identifier",
+            ),
+            format_description: java_taint_path_traversal_desc,
+        }),
+        "java/taint-ldap-injection" => Some(JavaTaintRuleMeta {
+            rule_id: "java/taint-ldap-injection",
+            severity: Severity::High,
+            cwe: Some("CWE-90"),
+            fix_suggestion: Some(
+                "Pass request values as filter arguments (search(name, \"(uid={0})\", new Object[] { value }, controls)) instead of concatenating them into the filter",
+            ),
+            format_description: java_taint_ldap_injection_desc,
+        }),
+        "java/taint-xpath-injection" => Some(JavaTaintRuleMeta {
+            rule_id: "java/taint-xpath-injection",
+            severity: Severity::High,
+            cwe: Some("CWE-643"),
+            fix_suggestion: Some(
+                "Bind request values through an XPathVariableResolver and a $name variable instead of concatenating them into the expression",
+            ),
+            format_description: java_taint_xpath_injection_desc,
         }),
         "java/taint-ssrf" => Some(JavaTaintRuleMeta {
             rule_id: "java/taint-ssrf",
@@ -1547,6 +1586,63 @@ impl_rule! {
     severity = Severity::Critical,
     cwe = Some("CWE-78"),
     description = "Untrusted Java servlet or Spring input reaches command execution sink",
+    language = Language::Java,
+    fn check(_self, source, tree) {
+        let spec = java_taint::java_taint_rule_specs()
+            .into_iter()
+            .find(|(id, _)| *id == _self.id())
+            .map(|(_, spec)| spec)
+            .unwrap_or_default();
+        run_java_taint_single(_self.id(), source, tree, &spec)
+    }
+}
+
+pub struct TaintPathTraversal;
+
+impl_rule! {
+    TaintPathTraversal,
+    id = "java/taint-path-traversal",
+    severity = Severity::High,
+    cwe = Some("CWE-22"),
+    description = "Untrusted Java servlet or Spring input is used to build a file path",
+    language = Language::Java,
+    fn check(_self, source, tree) {
+        let spec = java_taint::java_taint_rule_specs()
+            .into_iter()
+            .find(|(id, _)| *id == _self.id())
+            .map(|(_, spec)| spec)
+            .unwrap_or_default();
+        run_java_taint_single(_self.id(), source, tree, &spec)
+    }
+}
+
+pub struct TaintLdapInjection;
+
+impl_rule! {
+    TaintLdapInjection,
+    id = "java/taint-ldap-injection",
+    severity = Severity::High,
+    cwe = Some("CWE-90"),
+    description = "Untrusted Java servlet or Spring input reaches an LDAP search filter",
+    language = Language::Java,
+    fn check(_self, source, tree) {
+        let spec = java_taint::java_taint_rule_specs()
+            .into_iter()
+            .find(|(id, _)| *id == _self.id())
+            .map(|(_, spec)| spec)
+            .unwrap_or_default();
+        run_java_taint_single(_self.id(), source, tree, &spec)
+    }
+}
+
+pub struct TaintXpathInjection;
+
+impl_rule! {
+    TaintXpathInjection,
+    id = "java/taint-xpath-injection",
+    severity = Severity::High,
+    cwe = Some("CWE-643"),
+    description = "Untrusted Java servlet or Spring input reaches an XPath expression",
     language = Language::Java,
     fn check(_self, source, tree) {
         let spec = java_taint::java_taint_rule_specs()

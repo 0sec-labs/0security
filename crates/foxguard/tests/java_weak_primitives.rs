@@ -155,3 +155,33 @@ fn weak_random_skips_test_sources_seeded_and_foreign_random() {
         assert_eq!(count(&f, "hygiene/java-weak-random"), 0, "{name}: {f:?}");
     }
 }
+
+fn lines(findings: &std::collections::BTreeMap<String, Vec<u64>>, rule: &str) -> Vec<u64> {
+    let mut v = findings.get(rule).cloned().unwrap_or_default();
+    v.sort_unstable();
+    v
+}
+
+#[test]
+fn injection_rules_flag_every_vulnerable_sink() {
+    let f = scan("vulnerable_java_injection.java");
+    assert_eq!(count(&f, "java/taint-path-traversal"), 12, "{f:?}");
+    assert_eq!(count(&f, "java/taint-command-injection"), 5, "{f:?}");
+    assert_eq!(count(&f, "java/taint-sql-injection"), 7, "{f:?}");
+    assert_eq!(count(&f, "java/taint-ldap-injection"), 2, "{f:?}");
+    assert_eq!(count(&f, "java/taint-xpath-injection"), 2, "{f:?}");
+}
+
+#[test]
+fn injection_rules_ignore_constants_parameters_and_shell_free_commands() {
+    let f = scan("safe_java_injection.java");
+    for rule in [
+        "java/taint-path-traversal",
+        "java/taint-command-injection",
+        "java/taint-sql-injection",
+        "java/taint-ldap-injection",
+        "java/taint-xpath-injection",
+    ] {
+        assert_eq!(lines(&f, rule), Vec::<u64>::new(), "{rule}: {f:?}");
+    }
+}
