@@ -647,18 +647,19 @@ fn fields_of(decl: Node<'_>, src: &str) -> HashMap<String, FieldFacts> {
 
 /// A second field of one name makes the name unknowable.
 fn insert_field(out: &mut HashMap<String, FieldFacts>, name: String, f: FieldFacts) {
-    if out.contains_key(&name) {
-        out.insert(
-            name,
-            FieldFacts {
+    use std::collections::hash_map::Entry;
+    match out.entry(name) {
+        Entry::Vacant(v) => {
+            v.insert(f);
+        }
+        Entry::Occupied(mut o) => {
+            o.insert(FieldFacts {
                 constant: false,
                 value_type: false,
                 enum_constant: false,
                 init: None,
-            },
-        );
-    } else {
-        out.insert(name, f);
+            });
+        }
     }
 }
 
