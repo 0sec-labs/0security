@@ -1,8 +1,8 @@
 // Licensed under the 0security Enterprise License. See enterprise/LICENSE.
 // All tests are offline. The signing key is generated in memory; no private key is stored anywhere.
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createPublicKey, generateKeyPairSync, sign, type KeyObject } from "node:crypto";
-import { mkdtempSync, readFileSync, readdirSync, unlinkSync, writeFileSync, rmdirSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, unlinkSync, writeFileSync, rmdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -375,6 +375,139 @@ describe("issue-license tool", () => {
     } finally {
       unlinkSync(keyFile);
       rmdirSync(dir);
+    }
+  });
+});
+
+describe("issuing and revoking tools", () => {
+  const tools = (n: string) => fileURLToPath(new URL(`../tools/${n}`, import.meta.url));
+  const run = (tool: string, args: string[], env: NodeJS.ProcessEnv = {}) =>
+    spawnSync(process.execPath, [tools(tool), ...args], { encoding: "utf8", timeout: 15_000, env: { ...process.env, ...env } });
+  const setup = () => {
+    const dir = mkdtempSync(join(tmpdir(), "0ent-tools-"));
+    const keyFile = join(dir, "k.pem");
+    writeFileSync(keyFile, pair.privateKey.export({ type: "pkcs8", format: "pem" }), { mode: 0o600 });
+    const write = (name: string, data: unknown) => {
+      const f = join(dir, name);
+      writeFileSync(f, typeof data === "string" ? data : JSON.stringify(data));
+      return f;
+    };
+    return { dir, keyFile, write, done: () => rmSync(dir, { recursive: true, force: true }) };
+  };
+  const customer = { customer: "Acme Test", plan: "team", seats: 10, aud: ["cli", "hub"], entitlements: { saml: {}, ha: { nodes: 3 }, "bb-managed": { repos: 200 } }, term: "annual" };
+
+  it("issues a v2 token from a customer file that the verifier accepts", () => {
+    const t = setup();
+    try {
+      const r = run("issue-license.mjs", ["--key", t.keyFile, "--customer-file", t.write("c.json", customer), "--issued", "2026-12-01T00:00:00Z", "--kid", "t1", "--id", "lic_x"]);
+      expect(r.status, r.stderr).toBe(0);
+      const v = verifyLicense(r.stdout.trim(), NOW, KEYS, { audience: "hub" });
+      expect(v).toMatchObject({ ok: true, state: "valid", features: ["saml", "ha"], unknownFeatures: ["bb-managed"], expires: "2028-01-05T00:00:00Z" });
+      expect(v.payload).toMatchObject({ v: 2, id: "lic_x", rid: "lic_x", plan: "team", nbf: "2026-12-01T00:00:00Z", aud: ["cli", "hub"] });
+      expect(entitlementLimit(v, "ha", "nodes")).toBe(3);
+      expect(r.stdout + r.stderr).not.toContain("PRIVATE KEY");
+    } finally {
+      t.done();
+    }
+  });
+
+  it("issues a monthly term of 35 days and an explicit rid and expiry", () => {
+    const t = setup();
+    try {
+      const month = run("issue-license.mjs", ["--key", t.keyFile, "--customer-file", t.write("m.json", { ...customer, term: "monthly" }), "--issued", "2026-12-01T00:00:00Z", "--kid", "t1"]);
+      expect(verify(month.stdout.trim()).expires).toBe("2027-01-05T00:00:00Z");
+      const exp = run("issue-license.mjs", ["--key", t.keyFile, "--customer-file", t.write("e.json", { ...customer, term: undefined, expires: "2027-06-01T00:00:00Z", rid: "rid_9" }), "--issued", "2026-12-01T00:00:00Z", "--kid", "t1"]);
+      expect(verify(exp.stdout.trim()).payload).toMatchObject({ rid: "rid_9", expires: "2027-06-01T00:00:00Z" });
+    } finally {
+      t.done();
+    }
+  });
+
+  it("still issues v1 tokens, now including ha", () => {
+    const t = setup();
+    try {
+      const r = run("issue-license.mjs", ["--key", t.keyFile, "--customer", "Old Co", "--seats", "3", "--features", "ha,rbac", "--expires", "2027-12-01T00:00:00Z", "--issued", "2026-12-01T00:00:00Z", "--kid", "t1"]);
+      expect(r.status, r.stderr).toBe(0);
+      expect(verify(r.stdout.trim())).toMatchObject({ ok: true, features: ["ha", "rbac"] });
+      expect(verify(r.stdout.trim()).payload?.v).toBe(1);
+    } finally {
+      t.done();
+    }
+  });
+
+  it("rejects bad customer files", () => {
+    const t = setup();
+    try {
+      const bad: Record<string, unknown>[] = [
+        { plan: undefined }, { seats: 0 }, { aud: [] }, { aud: ["nowhere"] }, { entitlements: {} }, { entitlements: { Bad_Name: {} } },
+        { entitlements: { saml: { n: -1 } } }, { entitlements: { saml: 3 } }, { term: "weekly" }, { term: undefined }, { expires: "2027-06-01T00:00:00Z" }, { nbf: "2090-01-01T00:00:00Z" },
+      ];
+      for (const over of bad) {
+        const r = run("issue-license.mjs", ["--key", t.keyFile, "--customer-file", t.write("b.json", { ...customer, ...over }), "--issued", "2026-12-01T00:00:00Z"]);
+        expect(r.status, JSON.stringify(over)).toBe(2);
+        expect(r.stdout).toBe("");
+      }
+    } finally {
+      t.done();
+    }
+  });
+
+  it("never reads a key from the environment and never prints one", () => {
+    const t = setup();
+    try {
+      const pem = pair.privateKey.export({ type: "pkcs8", format: "pem" }).toString();
+      const env = { ZERO_LICENSE_KEY: pem, ZERO_SIGNING_KEY: pem, ZERO_PRIVATE_KEY: pem, ZERO_LICENSE_PRIVATE_KEY: pem };
+      for (const [tool, args] of [["issue-license.mjs", ["--customer-file", t.write("c.json", customer)]], ["sign-revocations.mjs", ["--kid", "t1", "--seq", "1", "--revoke", "a@2027-01-01T00:00:00Z"]]] as const) {
+        const r = run(tool, args as unknown as string[], env);
+        expect(r.status, tool).toBe(2);
+        expect(r.stdout + r.stderr).not.toContain("PRIVATE KEY");
+        expect(readFileSync(tools(tool), "utf8"), tool).not.toMatch(/process\.env/);
+      }
+      expect(readFileSync(tools("license-lib.mjs"), "utf8")).not.toMatch(/process\.env/);
+    } finally {
+      t.done();
+    }
+  });
+
+  it("signs a revocation list that verifies and rejects tampering and other keys", () => {
+    const t = setup();
+    try {
+      const pubFile = t.write("k.pub.b64", `${pub(pair)}\n`);
+      const entries = t.write("r.json", { entries: [{ rid: "lic_b", effective: "2027-03-01T00:00:00Z" }, { rid: "lic_a", effective: "2027-02-01T00:00:00Z" }] });
+      const r = run("sign-revocations.mjs", ["--key", t.keyFile, "--kid", "t1", "--seq", "4", "--entries", entries, "--revoke", "lic_c@2027-04-01T00:00:00Z", "--revoke", "lic_a@2027-05-01T00:00:00Z", "--issued", "2027-01-10T00:00:00Z"]);
+      expect(r.status, r.stderr).toBe(0);
+      const token = r.stdout.trim();
+      const [p] = token.split(".");
+      expect(JSON.parse(Buffer.from(p, "base64url").toString())).toEqual({
+        v: 1, kind: "revocations", kid: "t1", seq: 4, issuedAt: "2027-01-10T00:00:00Z",
+        entries: [{ rid: "lic_a", effective: "2027-02-01T00:00:00Z" }, { rid: "lic_b", effective: "2027-03-01T00:00:00Z" }, { rid: "lic_c", effective: "2027-04-01T00:00:00Z" }],
+      });
+      const ok = run("sign-revocations.mjs", ["--verify", t.write("list.txt", token), "--pub", pubFile]);
+      expect(ok.status, ok.stderr).toBe(0);
+      expect(ok.stdout).toContain("seq 4");
+      const flipped = token.slice(0, 5) + (token[5] === "A" ? "B" : "A") + token.slice(6);
+      expect(run("sign-revocations.mjs", ["--verify", t.write("bad.txt", flipped), "--pub", pubFile]).status).toBe(2);
+      expect(run("sign-revocations.mjs", ["--verify", t.write("list2.txt", token), "--pub", t.write("o.pub", `${pub(other)}\n`)]).status).toBe(2);
+    } finally {
+      t.done();
+    }
+  });
+
+  it("rejects bad revocation input", () => {
+    const t = setup();
+    try {
+      const base = ["--key", t.keyFile, "--kid", "t1"];
+      for (const args of [
+        [...base, "--seq", "0", "--revoke", "a@2027-01-01T00:00:00Z"],
+        [...base, "--seq", "1", "--revoke", "a@tomorrow"],
+        [...base, "--seq", "1", "--revoke", "a"],
+        [...base, "--seq", "1"],
+        ["--kid", "t1", "--seq", "1", "--revoke", "a@2027-01-01T00:00:00Z"],
+      ]) expect(run("sign-revocations.mjs", args).status, args.join(" ")).toBe(2);
+      const empty = run("sign-revocations.mjs", [...base, "--seq", "2", "--entries", t.write("e.json", { entries: [] })]);
+      expect(empty.status, empty.stderr).toBe(0);
+    } finally {
+      t.done();
     }
   });
 });
