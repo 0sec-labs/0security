@@ -1404,6 +1404,10 @@ fn java_taint_unsafe_deserialization_desc(src: &str, sink: &str) -> String {
     format!("{src} reaches {sink} — untrusted input can trigger unsafe deserialization")
 }
 
+fn java_taint_trust_boundary_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — unvalidated request data is stored in the trusted session")
+}
+
 fn java_taint_meta(rule_id: &str) -> Option<JavaTaintRuleMeta<'static>> {
     match rule_id {
         "java/taint-sql-injection" => Some(JavaTaintRuleMeta {
@@ -1439,6 +1443,15 @@ fn java_taint_meta(rule_id: &str) -> Option<JavaTaintRuleMeta<'static>> {
                 "Avoid Java native deserialization for request data; use a safe data format and explicit schema validation",
             ),
             format_description: java_taint_unsafe_deserialization_desc,
+        }),
+        "java/taint-trust-boundary" => Some(JavaTaintRuleMeta {
+            rule_id: "java/taint-trust-boundary",
+            severity: Severity::Medium,
+            cwe: Some("CWE-501"),
+            fix_suggestion: Some(
+                "Validate or normalise request data before storing it in the session, and keep untrusted values out of attribute names",
+            ),
+            format_description: java_taint_trust_boundary_desc,
         }),
         _ => None,
     }
@@ -1634,6 +1647,25 @@ impl_rule! {
     severity = Severity::Critical,
     cwe = Some("CWE-502"),
     description = "Untrusted Java servlet or Spring input reaches unsafe deserialization sink",
+    language = Language::Java,
+    fn check(_self, source, tree) {
+        let spec = java_taint::java_taint_rule_specs()
+            .into_iter()
+            .find(|(id, _)| *id == _self.id())
+            .map(|(_, spec)| spec)
+            .unwrap_or_default();
+        run_java_taint_single(_self.id(), source, tree, &spec)
+    }
+}
+
+pub struct TaintTrustBoundary;
+
+impl_rule! {
+    TaintTrustBoundary,
+    id = "java/taint-trust-boundary",
+    severity = Severity::Medium,
+    cwe = Some("CWE-501"),
+    description = "Request-derived data is stored in the HTTP session without validation",
     language = Language::Java,
     fn check(_self, source, tree) {
         let spec = java_taint::java_taint_rule_specs()

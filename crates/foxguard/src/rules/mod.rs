@@ -610,6 +610,7 @@ impl RuleRegistry {
                 java::TaintCommandInjection,
                 java::TaintSsrf,
                 java::TaintUnsafeDeserialization,
+                java::TaintTrustBoundary,
             ]
         );
         registry.register_opt_in(Box::new(java::HardcodedCryptoAlgorithm));
