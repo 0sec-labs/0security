@@ -243,6 +243,45 @@ pub enum NodeMatcher {
         description: String,
     },
 
+    /// Match a METHOD CALL whose receiver is known to be of one of the named
+    /// types (resolved from a local, parameter or field declaration, a `new T(..)`
+    /// receiver, a static `Type.method(..)` call, or `Runtime.getRuntime()`),
+    /// or whose receiver text contains one of the lowercase `receiver_hints`.
+    /// With both lists empty any receiver matches (the method name alone bounds
+    /// the match). Usable as a SOURCE (the call result is tainted, e.g. any
+    /// getter on a variable typed `HttpServletRequest`) and as a SINK.
+    ///
+    /// `arg_indices` restricts a sink to the listed argument positions (an empty
+    /// list means every argument). This is what keeps parameterised forms quiet:
+    /// `jdbc.queryForObject(sql, new Object[] { value }, ..)` only looks at the
+    /// SQL text at index 0, never at the bound values.
+    ///
+    /// `fixed_program_safe` suppresses a command sink whose program is an inline
+    /// string literal naming something that is not a shell or interpreter, e.g.
+    /// `exec(new String[] { "ls", arg })`.
+    ///
+    /// Compiled solely for the Java engine; other engines carry the matcher in
+    /// the spec but no-op it.
+    TypedReceiverCall {
+        receiver_types: Vec<String>,
+        receiver_hints: Vec<String>,
+        methods: Vec<String>,
+        arg_indices: Vec<usize>,
+        fixed_program_safe: bool,
+        description: String,
+    },
+
+    /// Match an OBJECT CREATION `new T(..)` where the final `.`-segment of `T`
+    /// is one of `type_names` and a tainted value reaches one of `arg_indices`
+    /// (empty means any argument). Sink only. See [`NodeMatcher::TypedReceiverCall`]
+    /// for `fixed_program_safe`. Compiled solely for the Java engine.
+    TypedConstructorSink {
+        type_names: Vec<String>,
+        arg_indices: Vec<usize>,
+        fixed_program_safe: bool,
+        description: String,
+    },
+
     /// Match any STRING-LITERAL node as a taint SOURCE — the Semgrep
     /// ellipsis-string source `"..."` ("a string literal is the taint
     /// source"). Compiled from a bare `pattern-sources: - pattern: "..."`
@@ -600,6 +639,8 @@ impl NodeMatcher {
             NodeMatcher::ReturnValue { description, .. } => description,
             NodeMatcher::TypedName { description, .. } => description,
             NodeMatcher::TypedAssignTarget { description, .. } => description,
+            NodeMatcher::TypedReceiverCall { description, .. } => description,
+            NodeMatcher::TypedConstructorSink { description, .. } => description,
             NodeMatcher::LiteralString { description, .. } => description,
             NodeMatcher::LooseEquality { description } => description,
             NodeMatcher::TaintedCallee { description } => description,
@@ -1796,6 +1837,32 @@ pub(super) fn matcher_fingerprint(m: &NodeMatcher) -> String {
             description,
         } => {
             format!("TAT|{type_name}|{description}")
+        }
+        NodeMatcher::TypedReceiverCall {
+            receiver_types,
+            receiver_hints,
+            methods,
+            arg_indices,
+            fixed_program_safe,
+            description,
+        } => {
+            format!(
+                "TRC|{}|{}|{}|{arg_indices:?}|{fixed_program_safe}|{description}",
+                receiver_types.join(","),
+                receiver_hints.join(","),
+                methods.join(",")
+            )
+        }
+        NodeMatcher::TypedConstructorSink {
+            type_names,
+            arg_indices,
+            fixed_program_safe,
+            description,
+        } => {
+            format!(
+                "TCS|{}|{arg_indices:?}|{fixed_program_safe}|{description}",
+                type_names.join(",")
+            )
         }
         NodeMatcher::LiteralString { description, regex } => {
             format!("LS|{}|{description}", regex.as_deref().unwrap_or(""))
