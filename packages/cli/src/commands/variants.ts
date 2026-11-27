@@ -11,8 +11,8 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { Option, type Command } from "commander";
 import {
-  linesWithin, normalizeAttackCategory, parseRescan, parseVariantReport, variantHuntPrompt, variantRescanPrompt,
-  type Finding, type ParsedVariant, type RescanState, type RootCause,
+  linesWithin, normalizeAttackCategory, parseRescan, parseRootCauseReply, parseVariantReport, variantHuntPrompt, variantRescanPrompt, variantRootCausePrompt,
+  type Finding, type ParsedVariant, type PromptCandidate, type RescanState, type RootCause,
 } from "@0/engine/shared";
 import { listOsecRunDatabasePaths, osecDB, resolveOsecDbPath } from "@0/engine/storage";
 import { consoleTransportOptions, type ConsoleClient, type ConsoleTransportOptions } from "../console-client.js";
@@ -67,7 +67,21 @@ export interface VariantStore {
   markFixedPendingMerge(parent: VariantParent, variantId: string): void;
 }
 
+/** The tree-wide candidate list for a seed, computed in code. Tests pass a stub; the default uses the code index. */
+export interface CandidateSource {
+  candidates: PromptCandidate[]; total: number; omitted: number; engine: string; strategy: string; notes: string[];
+}
+export type CandidateFinder = (folder: string, parent: VariantParent, rootCause: RootCause) => Promise<CandidateSource>;
+
+export const defaultCandidateFinder: CandidateFinder = async (folder, parent, rootCause) => {
+  const { variantCandidates } = await import("@0/engine/dist/code-index/variant-candidates.js");
+  const list = await variantCandidates(folder, { ...(parent.path ? { path: parent.path } : {}), ...(parent.startLine ? { startLine: parent.startLine } : {}), ...(parent.endLine ? { endLine: parent.endLine } : {}) }, rootCause);
+  return { candidates: list.candidates.map(c => ({ id: c.id, file: c.file, line: c.line, ...(c.symbol ? { symbol: c.symbol } : {}), entries: c.entries, entriesOmitted: c.entriesOmitted, why: c.why, ...(c.guardHint ? { guardHint: c.guardHint } : {}) })), total: list.total, omitted: list.omitted, engine: list.engine, strategy: list.strategy, notes: list.notes };
+};
+
 export interface VariantDeps extends Pick<ScanDeps, "open" | "err" | "sleep" | "startConsole"> {
+  /** Candidate finder; the default reads the code index. */
+  candidates?: CandidateFinder;
   out(text: string): void;
   store: VariantStore;
   loadParent(id: string, dbPath: string | undefined): VariantParent;
@@ -80,7 +94,13 @@ export interface VariantDeps extends Pick<ScanDeps, "open" | "err" | "sleep" | "
 export interface VariantRunOptions { model?: string; timeout: string; budget: string }
 
 export interface HuntResult {
-  threadId?: string; costUsd?: number; tokens?: number; created: string[]; skipped: number; rootCause?: RootCause; rootCauseSource?: "stored" | "derived"; error?: string;
+  threadId?: string; costUsd?: number; tokens?: number; created: string[]; skipped: number; /** What the code-computed checklist held and how the thread disposed of it. */ checklist?: ChecklistReport; rootCause?: RootCause; rootCauseSource?: "stored" | "derived"; error?: string;
+}
+export interface ChecklistReport {
+  engine: string; strategy: string; total: number; listed: number; omitted: number;
+  verdicts: { variant: number; guarded: number; not_reachable: number; unsure: number }; undisposed: string[];
+  /** Candidate ids of the variants that were stored. */
+  stored: string[]; notes: string[];
 }
 export interface RescanItem { id: string; title: string; state: RescanState | "unchecked"; reasoning?: string }
 export interface RescanResult { threadId?: string; costUsd?: number; tokens?: number; items: RescanItem[]; /** Variants moved from fixed-pending-merge to fixed because the fix pull request was merged. */ settled?: number; error?: string }
@@ -107,30 +127,61 @@ const overlaps = (a: { path?: string; startLine?: number; endLine?: number }, b:
  * Hunt for the same bug elsewhere, seeded from the parent's root cause. A parent with no root cause gets the one the
  * thread derives. A variant that sits on the parent's own lines, or on one already recorded, is not stored again.
  */
-export async function huntVariants(client: ConsoleClient, deps: Pick<VariantDeps, "store" | "err" | "sleep">, folder: string, parent: VariantParent, options: VariantRunOptions, extra: { fixCommit?: string } = {}): Promise<HuntResult> {
+export async function huntVariants(client: ConsoleClient, deps: Pick<VariantDeps, "store" | "err" | "sleep" | "candidates">, folder: string, parent: VariantParent, options: VariantRunOptions, extra: { fixCommit?: string } = {}): Promise<HuntResult> {
   const known = deps.store.variantsOf(parent);
-  const seedCause = parent.rootCause;
+  let seedCause = parent.rootCause;
+  let tokens: number | undefined;
+  let costUsd: number | undefined;
+  const add = (t: PromptThread) => {
+    if (t.tokens !== undefined) tokens = (tokens ?? 0) + t.tokens;
+    if (t.costUsd !== undefined) costUsd = (costUsd ?? 0) + t.costUsd;
+  };
+  const totals = () => ({ ...(tokens !== undefined ? { tokens } : {}), ...(costUsd !== undefined ? { costUsd } : {}) });
+  const seed = { id: parent.id, title: parent.title, category: parent.category, description: parent.description, ...(parent.path ? { path: parent.path } : {}), ...(parent.startLine ? { startLine: parent.startLine } : {}), ...(parent.endLine ? { endLine: parent.endLine } : {}) };
+  const failure = (error: unknown): HuntResult => ({ ...totals(), created: [], skipped: 0, error: error instanceof Error ? error.message.split("\n")[0]! : String(error) });
+  try {
+    // The candidate search needs a root cause. A seed without one gets a short thread that only reads the seed's site and states it.
+    if (!seedCause) {
+      const derive = await runPromptThread(client, deps, folder, `Root cause: ${parent.title}`, variantRootCausePrompt(seed), options);
+      add(derive);
+      seedCause = parseRootCauseReply(derive.reply);
+      if (seedCause) deps.store.saveRootCause(parent, seedCause);
+    }
+  } catch (error) { return failure(error); }
+  let source: CandidateSource | undefined;
+  if (seedCause) {
+    try { source = await (deps.candidates ?? defaultCandidateFinder)(folder, parent, seedCause); } catch (error) { deps.err(`Candidate search failed (${error instanceof Error ? error.message.split("\n")[0] : String(error)}); the thread will search on its own.`); }
+    if (source && !source.candidates.length) deps.err(`Candidate search found no sites${source.notes.length ? ` (${source.notes.join("; ")})` : ""}; the thread will search on its own.`);
+  }
+  const items = source?.candidates ?? [];
   let thread: PromptThread;
   try {
-    thread = await runPromptThread(client, deps, folder, `Variants: ${parent.title}`, variantHuntPrompt(
-      { id: parent.id, title: parent.title, category: parent.category, description: parent.description, ...(parent.path ? { path: parent.path } : {}), ...(parent.startLine ? { startLine: parent.startLine } : {}), ...(parent.endLine ? { endLine: parent.endLine } : {}) },
-      { ...(seedCause ? { rootCause: seedCause } : {}), ...(extra.fixCommit ? { fixCommit: extra.fixCommit } : {}), known: known.map(v => ({ id: v.id, title: v.title, ...(v.path ? { path: v.path } : {}), ...(v.startLine ? { startLine: v.startLine } : {}) })) },
+    thread = await runPromptThread(client, deps, folder, `Variants: ${parent.title}`, variantHuntPrompt(seed,
+      { ...(seedCause ? { rootCause: seedCause } : {}), ...(extra.fixCommit ? { fixCommit: extra.fixCommit } : {}), known: known.map(v => ({ id: v.id, title: v.title, ...(v.path ? { path: v.path } : {}), ...(v.startLine ? { startLine: v.startLine } : {}) })), ...(items.length && source ? { candidates: { items, total: source.total, omitted: source.omitted } } : {}) },
     ), options);
-  } catch (error) {
-    return { created: [], skipped: 0, error: error instanceof Error ? error.message.split("\n")[0]! : String(error) };
-  }
-  const base = { threadId: thread.id, ...(thread.tokens !== undefined ? { tokens: thread.tokens } : {}), ...(thread.costUsd !== undefined ? { costUsd: thread.costUsd } : {}) };
+  } catch (error) { return failure(error); }
+  add(thread);
+  const base = { threadId: thread.id, ...totals() };
   if (!thread.reply) return { ...base, created: [], skipped: 0, error: thread.error ?? "the thread returned no answer" };
-  const report = parseVariantReport(thread.reply);
+  const report = parseVariantReport(thread.reply, items);
   const rootCause = seedCause ?? report.rootCause;
   if (!seedCause && report.rootCause) deps.store.saveRootCause(parent, report.rootCause);
   const created: string[] = [];
+  const stored: string[] = [];
   let skipped = 0;
   for (const variant of report.variants) {
     if (overlaps(variant, parent) || known.some(k => overlaps(variant, k))) { skipped++; continue; }
     created.push(deps.store.saveVariant(parent, variant, rootCause));
+    if (variant.candidateId) stored.push(variant.candidateId);
   }
-  return { ...base, created, skipped, ...(rootCause ? { rootCause, rootCauseSource: seedCause ? "stored" as const : "derived" as const } : {}), ...(thread.error ? { error: thread.error } : {}) };
+  let checklist: ChecklistReport | undefined;
+  if (items.length && source) {
+    const verdicts = { variant: 0, guarded: 0, not_reachable: 0, unsure: 0 };
+    for (const d of report.dispositions) verdicts[d.verdict]++;
+    const answered = new Set(report.dispositions.map(d => d.id));
+    checklist = { engine: source.engine, strategy: source.strategy, total: source.total, listed: items.length, omitted: source.omitted, verdicts, undisposed: items.filter(c => !answered.has(c.id)).map(c => c.id), stored, notes: source.notes };
+  }
+  return { ...base, created, skipped, ...(checklist ? { checklist } : {}), ...(rootCause ? { rootCause, rootCauseSource: parent.rootCause ? "stored" as const : "derived" as const } : {}), ...(thread.error ? { error: thread.error } : {}) };
 }
 
 /**
@@ -178,9 +229,9 @@ export function variantFinding(parent: Pick<VariantParent, "id" | "category" | "
   const capped = severity !== variant.severity;
   return {
     id, templateId: "variant-hunting", title: variant.title,
-    description: `Unverified variant of ${parent.id}: ${parent.title}\n\nA search thread reported this site from the same root cause. Nobody has confirmed it${capped ? `, so its severity is capped at ${severity} (the thread said ${variant.severity})` : ""}. Run \`findings verify\` on it to confirm or reject it.\n\n${variant.description}${variant.suggestedFix ? `\n\nSuggested fix: ${variant.suggestedFix}` : ""}`,
+    description: `Unverified variant of ${parent.id}: ${parent.title}${variant.candidateId ? ` (hunt candidate ${variant.candidateId})` : ""}\n\nA search thread reported this site from the same root cause. Nobody has confirmed it${capped ? `, so its severity is capped at ${severity} (the thread said ${variant.severity})` : ""}. Run \`findings verify\` on it to confirm or reject it.\n\n${variant.description}${variant.suggestedFix ? `\n\nSuggested fix: ${variant.suggestedFix}` : ""}`,
     severity, confidence: VARIANT_CONFIDENCE, category: normalizeAttackCategory(parent.category).category, status: "discovered",
-    evidence: { request: site, response: variant.evidence, analysis: `Same root cause as ${parent.id}.` },
+    evidence: { request: site, response: variant.evidence, analysis: `Same root cause as ${parent.id}.${variant.candidateId ? ` Hunt candidate ${variant.candidateId}.` : ""}` },
     reviewAnnotation: { path: variant.path, startLine: variant.startLine, ...(variant.endLine ? { endLine: variant.endLine } : {}) },
     ...(rootCause ? { rootCause } : {}), variantOf: parent.id, tool: "variant-hunting", timestamp: now,
   };
@@ -308,6 +359,7 @@ export function renderVariantsReport(report: VariantsReport): string {
   const lines = [`Variants of ${shortFindingId(report.finding)} (${report.mode}) in ${report.folder}`];
   if (report.hunt) {
     const h = report.hunt;
+    if (h.checklist) lines.push(`Checklist (${h.checklist.engine}, ${h.checklist.strategy}): ${h.checklist.listed} listed of ${h.checklist.total}; variant ${h.checklist.verdicts.variant}, guarded ${h.checklist.verdicts.guarded}, not reachable ${h.checklist.verdicts.not_reachable}, unsure ${h.checklist.verdicts.unsure}${h.checklist.undisposed.length ? `, ${h.checklist.undisposed.length} not answered` : ""}.`);
     if (h.error && !h.created.length) lines.push(`Hunt failed: ${h.error}`);
     else lines.push(`Recorded ${h.created.length} variant${h.created.length === 1 ? "" : "s"}${h.skipped ? `, ${h.skipped} already known` : ""}${h.rootCause ? `; root cause ${h.rootCauseSource === "stored" ? "from the finding" : "derived and stored on it"}: ${h.rootCause.bugClass}` : "; no root cause was recorded"}.`);
     for (const id of h.created) lines.push(`  ${shortFindingId(id)}`);

@@ -53,6 +53,10 @@ export interface IndexRoute {
   authSources?: AuthSource[];
   /** An explicit `permitAll`, `@PermitAll` or unrestricted `web.xml` constraint opens the route (Foxguard graph). */
   public?: boolean;
+  /** Foxguard graph with `--missing-guard`: the handler reaches a data sink within four hops and no auth signal was found on the route or the way. */
+  missingGuard?: boolean;
+  /** Foxguard graph with `--missing-guard`: sink categories the handler reaches. */
+  sinksReachable?: string[];
 }
 
 export interface AuthSource {

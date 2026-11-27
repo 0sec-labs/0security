@@ -35,6 +35,8 @@ export const graphV1 = z.object({
       signal: bounded(300), source: bounded(400), access: z.enum(["public", "authenticated", "role", "denied", "filter", "annotation"]),
     })).max(100).optional(),
     public: z.boolean().optional(),
+    missingGuard: z.boolean().optional(),
+    sinksReachable: z.array(bounded(40)).max(20).optional(),
   })).max(100_000),
   unsupported: z.record(z.string(), z.number().int().min(0)).default({}),
   truncated: z.boolean().default(false),
@@ -43,6 +45,7 @@ export const graphV1 = z.object({
 });
 
 const probed = new Map<string, boolean>();
+const probedGuard = new Map<string, boolean>();
 
 function findBinary(env: NodeJS.ProcessEnv): string | undefined {
   const explicit = env["ZERO_FOXGUARD_PATH"];
@@ -61,9 +64,9 @@ const GRAPH_FILE_TIMEOUT_SEC = "30";
 const SAFE_ENV = (env: NodeJS.ProcessEnv): NodeJS.ProcessEnv => ({ PATH: env["PATH"] ?? "", HOME: env["HOME"] ?? "", DO_NOT_TRACK: "1" });
 
 /** `foxguard graph` reads no config file from the scanned folder (it takes only the folder and these flags), so no empty-config argument applies. */
-export function graphArgs(root: string): string[] { return ["graph", "--file-timeout", GRAPH_FILE_TIMEOUT_SEC, root]; }
+export function graphArgs(root: string, missingGuard = false): string[] { return ["graph", "--file-timeout", GRAPH_FILE_TIMEOUT_SEC, ...(missingGuard ? ["--missing-guard"] : []), root]; }
 
-export async function foxguardGraph(root: string, commit: string, fingerprint: string, env: NodeJS.ProcessEnv = process.env): Promise<CodeIndex | undefined> {
+export async function foxguardGraph(root: string, commit: string, fingerprint: string, env: NodeJS.ProcessEnv = process.env, options: { missingGuard?: boolean } = {}): Promise<CodeIndex | undefined> {
   const bin = findBinary(env);
   if (!bin) return undefined;
   try {
@@ -73,9 +76,10 @@ export async function foxguardGraph(root: string, commit: string, fingerprint: s
       const help = await run(bin, ["graph", "--help"], { timeout: 10_000, env: SAFE_ENV(env), maxBuffer: 256 * 1024 });
       ok = /schema version 1/i.test(help.stdout) && help.stdout.includes("--file-timeout");
       probed.set(bin, ok);
+      probedGuard.set(bin, ok && help.stdout.includes("--missing-guard"));
     }
     if (!ok) return undefined;
-    const { stdout } = await run(bin, graphArgs(root), { timeout: 180_000, env: SAFE_ENV(env), maxBuffer: GRAPH_MAX_BYTES });
+    const { stdout } = await run(bin, graphArgs(root, options.missingGuard === true && probedGuard.get(bin) === true), { timeout: 180_000, env: SAFE_ENV(env), maxBuffer: GRAPH_MAX_BYTES });
     const parsed = graphV1.safeParse(JSON.parse(stdout));
     if (!parsed.success) return undefined;
     const g = parsed.data;
@@ -85,4 +89,4 @@ export async function foxguardGraph(root: string, commit: string, fingerprint: s
   }
 }
 
-export function clearFoxguardProbe(): void { probed.clear(); }
+export function clearFoxguardProbe(): void { probed.clear(); probedGuard.clear(); }
