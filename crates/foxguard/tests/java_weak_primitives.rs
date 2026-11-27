@@ -185,3 +185,30 @@ fn injection_rules_ignore_constants_parameters_and_shell_free_commands() {
         assert_eq!(lines(&f, rule), Vec::<u64>::new(), "{rule}: {f:?}");
     }
 }
+
+#[test]
+fn upper_snake_parameters_are_request_data_but_static_final_constants_are_not() {
+    let f = scan("vulnerable_java_upper_snake.java");
+    // Spring handler, loop variable, helper parameter and shadowed constant.
+    assert_eq!(
+        lines(&f, "java/no-command-injection"),
+        vec![17, 24, 29, 34],
+        "{f:?}"
+    );
+    assert_eq!(
+        lines(&f, "java/taint-command-injection"),
+        vec![17, 24, 34],
+        "{f:?}"
+    );
+    let f = scan("safe_java_upper_snake.java");
+    assert_eq!(
+        lines(&f, "java/no-command-injection"),
+        Vec::<u64>::new(),
+        "{f:?}"
+    );
+    assert_eq!(
+        lines(&f, "java/taint-command-injection"),
+        Vec::<u64>::new(),
+        "{f:?}"
+    );
+}
