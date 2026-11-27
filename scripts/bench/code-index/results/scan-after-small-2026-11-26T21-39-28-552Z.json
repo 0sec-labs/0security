@@ -1,0 +1,1479 @@
+{
+  "meta": {
+    "mode": "scan",
+    "date": "2026-11-26T21:39:28.551Z",
+    "requestedModel": "gpt-6-luna",
+    "providers": [
+      "chatgpt-codex"
+    ],
+    "models": [
+      "gpt-6-luna"
+    ],
+    "runs": 12,
+    "stoppedEarly": null,
+    "repeat": 3,
+    "arms": [
+      "baseline",
+      "index-skill"
+    ],
+    "budgetPerRun": 1,
+    "label": "after-small"
+  },
+  "rows": [
+    {
+      "fixture": "ts-shop",
+      "arm": "index-skill",
+      "runs": 3,
+      "complete": 3,
+      "planted": 4,
+      "found": [
+        4,
+        3,
+        4
+      ],
+      "recall": [
+        1,
+        0.75,
+        1
+      ],
+      "falsePositives": [
+        0,
+        0,
+        0
+      ],
+      "unmatched": [
+        0,
+        0,
+        0
+      ],
+      "authzFound": [
+        4,
+        3,
+        4
+      ],
+      "authzPlanted": 4,
+      "tokens": [
+        205197,
+        219599,
+        576301
+      ],
+      "turns": [
+        22,
+        23,
+        25
+      ],
+      "seconds": [
+        130.454,
+        141.062,
+        158.985
+      ],
+      "costUsd": [
+        0.00860922,
+        0.0101907,
+        0.02460546
+      ],
+      "indexToolCalls": [
+        8,
+        9,
+        7
+      ]
+    },
+    {
+      "fixture": "ts-shop",
+      "arm": "baseline",
+      "runs": 3,
+      "complete": 3,
+      "planted": 4,
+      "found": [
+        4,
+        4,
+        4
+      ],
+      "recall": [
+        1,
+        1,
+        1
+      ],
+      "falsePositives": [
+        0,
+        0,
+        0
+      ],
+      "unmatched": [
+        0,
+        0,
+        0
+      ],
+      "authzFound": [
+        4,
+        4,
+        4
+      ],
+      "authzPlanted": 4,
+      "tokens": [
+        247811,
+        282198,
+        296824
+      ],
+      "turns": [
+        24,
+        26,
+        27
+      ],
+      "seconds": [
+        144.698,
+        135.376,
+        160.821
+      ],
+      "costUsd": [
+        0.00952798,
+        0.01020596,
+        0.010943280000000001
+      ],
+      "indexToolCalls": [
+        2,
+        5,
+        3
+      ]
+    },
+    {
+      "fixture": "java-bank",
+      "arm": "baseline",
+      "runs": 3,
+      "complete": 3,
+      "planted": 4,
+      "found": [
+        4,
+        4,
+        4
+      ],
+      "recall": [
+        1,
+        1,
+        1
+      ],
+      "falsePositives": [
+        0,
+        0,
+        0
+      ],
+      "unmatched": [
+        0,
+        0,
+        1
+      ],
+      "authzFound": [
+        4,
+        4,
+        4
+      ],
+      "authzPlanted": 4,
+      "tokens": [
+        233692,
+        255235,
+        226040
+      ],
+      "turns": [
+        22,
+        23,
+        21
+      ],
+      "seconds": [
+        134.662,
+        138.684,
+        123.986
+      ],
+      "costUsd": [
+        0.01076496,
+        0.01106006,
+        0.00978832
+      ],
+      "indexToolCalls": [
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "fixture": "java-bank",
+      "arm": "index-skill",
+      "runs": 3,
+      "complete": 3,
+      "planted": 4,
+      "found": [
+        4,
+        4,
+        3
+      ],
+      "recall": [
+        1,
+        1,
+        0.75
+      ],
+      "falsePositives": [
+        0,
+        0,
+        0
+      ],
+      "unmatched": [
+        0,
+        1,
+        1
+      ],
+      "authzFound": [
+        4,
+        4,
+        3
+      ],
+      "authzPlanted": 4,
+      "tokens": [
+        394551,
+        204864,
+        394341
+      ],
+      "turns": [
+        27,
+        21,
+        23
+      ],
+      "seconds": [
+        122.71,
+        112.234,
+        145.519
+      ],
+      "costUsd": [
+        0.0151631,
+        0.007820879999999999,
+        0.0162201
+      ],
+      "indexToolCalls": [
+        4,
+        4,
+        0
+      ]
+    }
+  ],
+  "runs": [
+    {
+      "kind": "scan",
+      "fixture": "ts-shop",
+      "arm": "index-skill",
+      "repeat": 1,
+      "status": "complete",
+      "seconds": 130.454,
+      "costUsd": 0.00860922,
+      "tokens": 205197,
+      "threads": 3,
+      "turns": 22,
+      "toolCalls": {
+        "load_skill": 3,
+        "bash": 6,
+        "routes": 6,
+        "finding": 8,
+        "trace_to_sink": 2
+      },
+      "indexToolCalls": 8,
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "coverage": "reviewed 10 of 10 entry points; 3 of 3 groups of other files reviewed",
+      "reportTokens": 205197,
+      "children": 0,
+      "childTurns": 0,
+      "childTokens": 0,
+      "warnings": [],
+      "score": {
+        "planted": 4,
+        "found": 4,
+        "foundIds": [
+          "ts-order-idor",
+          "ts-role-change",
+          "ts-refund",
+          "ts-invite-hijack"
+        ],
+        "missedIds": [],
+        "recall": 1,
+        "findings": 4,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [],
+        "nearMisses": []
+      },
+      "authz": {
+        "planted": 4,
+        "found": 4
+      },
+      "findings": [
+        {
+          "title": "Authenticated users can change roles of any user",
+          "category": "broken-access-control",
+          "severity": "critical",
+          "location": {
+            "path": "src/routes/admin.ts",
+            "startLine": 11,
+            "endLine": 15
+          }
+        },
+        {
+          "title": "Any authenticated user can issue refunds against arbitrary orders",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/refunds.ts",
+            "startLine": 8,
+            "endLine": 12
+          }
+        },
+        {
+          "title": "Order detail endpoint exposes other users' orders",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/orders.ts",
+            "startLine": 13,
+            "endLine": 16
+          }
+        },
+        {
+          "title": "Invite acceptance ignores the invited email",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/teams.ts",
+            "startLine": 18,
+            "endLine": 21
+          }
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "scan",
+      "fixture": "ts-shop",
+      "arm": "baseline",
+      "repeat": 1,
+      "status": "complete",
+      "seconds": 144.698,
+      "costUsd": 0.00952798,
+      "tokens": 247811,
+      "threads": 3,
+      "turns": 24,
+      "toolCalls": {
+        "load_skill": 6,
+        "bash": 6,
+        "routes": 2,
+        "finding": 7
+      },
+      "indexToolCalls": 2,
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "coverage": "reviewed 10 of 10 entry points; 3 of 3 groups of other files reviewed",
+      "reportTokens": 247811,
+      "children": 0,
+      "childTurns": 0,
+      "childTokens": 0,
+      "warnings": [],
+      "score": {
+        "planted": 4,
+        "found": 4,
+        "foundIds": [
+          "ts-order-idor",
+          "ts-role-change",
+          "ts-refund",
+          "ts-invite-hijack"
+        ],
+        "missedIds": [],
+        "recall": 1,
+        "findings": 5,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [],
+        "nearMisses": []
+      },
+      "authz": {
+        "planted": 4,
+        "found": 4
+      },
+      "findings": [
+        {
+          "title": "Unauthenticated authorization to modify users' roles",
+          "category": "broken-access-control",
+          "severity": "critical",
+          "location": {
+            "path": "src/routes/admin.ts",
+            "startLine": 11,
+            "endLine": 15
+          }
+        },
+        {
+          "title": "Authenticated users can issue refunds against any order",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/refunds.ts",
+            "startLine": 8,
+            "endLine": 12
+          }
+        },
+        {
+          "title": "Order detail endpoint exposes other users' orders",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/orders.ts",
+            "startLine": 13,
+            "endLine": 16
+          }
+        },
+        {
+          "title": "Invite acceptance ignores invitee email",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/routes/teams.ts",
+            "startLine": 17,
+            "endLine": 21
+          }
+        },
+        {
+          "title": "Refund amounts are not constrained to valid refundable balances",
+          "category": "missing-validation",
+          "severity": "medium",
+          "location": {
+            "path": "src/services/orderService.ts",
+            "startLine": 9,
+            "endLine": 11
+          }
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "scan",
+      "fixture": "java-bank",
+      "arm": "baseline",
+      "repeat": 1,
+      "status": "complete",
+      "seconds": 134.662,
+      "costUsd": 0.01076496,
+      "tokens": 233692,
+      "threads": 3,
+      "turns": 22,
+      "toolCalls": {
+        "load_skill": 5,
+        "bash": 6,
+        "finding": 7,
+        "routes": 1
+      },
+      "indexToolCalls": 1,
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "coverage": "reviewed 15 of 15 entry points; 1 of 1 groups of other files reviewed",
+      "reportTokens": 233692,
+      "children": 0,
+      "childTurns": 0,
+      "childTokens": 0,
+      "warnings": [],
+      "score": {
+        "planted": 4,
+        "found": 4,
+        "foundIds": [
+          "jb-account-idor",
+          "jb-approve-self",
+          "jb-report-export",
+          "jb-reset-confirm"
+        ],
+        "missedIds": [],
+        "recall": 1,
+        "findings": 5,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [],
+        "nearMisses": []
+      },
+      "authz": {
+        "planted": 4,
+        "found": 4
+      },
+      "findings": [
+        {
+          "title": "Admin transfer report lacks administrator authorization",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/AdminReportController.java",
+            "startLine": 8,
+            "endLine": 19
+          }
+        },
+        {
+          "title": "Any authenticated user can approve another user's pending transfer",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/TransferController.java",
+            "startLine": 29,
+            "endLine": 32
+          }
+        },
+        {
+          "title": "Password reset token is not bound to the customer being changed",
+          "category": "broken-authentication",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/PasswordResetController.java",
+            "startLine": 30,
+            "endLine": 37
+          }
+        },
+        {
+          "title": "Transfer approval endpoint has no approver authorization check",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/TransferService.java",
+            "startLine": 24,
+            "endLine": 30
+          }
+        },
+        {
+          "title": "Unauthenticated account lookup exposes account records",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/AccountController.java",
+            "startLine": 24,
+            "endLine": 26
+          }
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "scan",
+      "fixture": "java-bank",
+      "arm": "index-skill",
+      "repeat": 1,
+      "status": "complete",
+      "seconds": 122.71,
+      "costUsd": 0.0151631,
+      "tokens": 394551,
+      "threads": 3,
+      "turns": 27,
+      "toolCalls": {
+        "load_skill": 3,
+        "bash": 11,
+        "callers_of": 3,
+        "finding": 5,
+        "routes": 1,
+        "spawn_agent": 4,
+        "list_tools": 1
+      },
+      "indexToolCalls": 4,
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "coverage": "reviewed 15 of 15 entry points; 1 of 1 groups of other files reviewed",
+      "reportTokens": 394551,
+      "children": 3,
+      "childTurns": 20,
+      "childTokens": 140153,
+      "warnings": [],
+      "score": {
+        "planted": 4,
+        "found": 4,
+        "foundIds": [
+          "jb-account-idor",
+          "jb-approve-self",
+          "jb-report-export",
+          "jb-reset-confirm"
+        ],
+        "missedIds": [],
+        "recall": 1,
+        "findings": 4,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [],
+        "nearMisses": []
+      },
+      "authz": {
+        "planted": 4,
+        "found": 4
+      },
+      "findings": [
+        {
+          "title": "Password reset token is not bound to the password-reset target",
+          "category": "broken-access-control",
+          "severity": "critical",
+          "location": {
+            "path": "src/main/java/bench/bank/PasswordResetController.java",
+            "startLine": 30,
+            "endLine": 37
+          }
+        },
+        {
+          "title": "Account lookup omits ownership authorization",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/AccountController.java",
+            "startLine": 24,
+            "endLine": 26
+          }
+        },
+        {
+          "title": "Any authenticated user can approve pending transfers",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/TransferController.java",
+            "startLine": 29,
+            "endLine": 32
+          }
+        },
+        {
+          "title": "Administrative transfer report lacks role authorization",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/main/java/bench/bank/AdminReportController.java",
+            "startLine": 17,
+            "endLine": 20
+          }
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "scan",
+      "fixture": "ts-shop",
+      "arm": "baseline",
+      "repeat": 2,
+      "status": "complete",
+      "seconds": 135.376,
+      "costUsd": 0.01020596,
+      "tokens": 282198,
+      "threads": 3,
+      "turns": 26,
+      "toolCalls": {
+        "load_skill": 6,
+        "bash": 7,
+        "routes": 3,
+        "finding": 7,
+        "trace_to_sink": 2
+      },
+      "indexToolCalls": 5,
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "coverage": "reviewed 10 of 10 entry points; 3 of 3 groups of other files reviewed",
+      "reportTokens": 282198,
+      "children": 0,
+      "childTurns": 0,
+      "childTokens": 0,
+      "warnings": [],
+      "score": {
+        "planted": 4,
+        "found": 4,
+        "foundIds": [
+          "ts-order-idor",
+          "ts-role-change",
+          "ts-refund",
+          "ts-invite-hijack"
+        ],
+        "missedIds": [],
+        "recall": 1,
+        "findings": 4,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [],
+        "nearMisses": []
+      },
+      "authz": {
+        "planted": 4,
+        "found": 4
+      },
+      "findings": [
+        {
+          "title": "Authenticated users can change roles for any account",
+          "category": "broken-access-control",
+          "severity": "critical",
+          "location": {
+            "path": "src/routes/admin.ts",
+            "startLine": 11,
+            "endLine": 15
+          }
+        },
+        {
+          "title": "Authenticated callers can refund orders they do not own",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/refunds.ts",
+            "startLine": 8,
+            "endLine": 12
+          }
+        },
+        {
+          "title": "Invite acceptance does not bind the invite to its email recipient",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/routes/teams.ts",
+            "startLine": 18,
+            "endLine": 21
+          }
+        },
+        {
+          "title": "Order detail endpoint exposes other users' orders",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/routes/orders.ts",
+            "startLine": 13,
+            "endLine": 16
+          }
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "scan",
+      "fixture": "ts-shop",
+      "arm": "index-skill",
+      "repeat": 2,
+      "status": "complete",
+      "seconds": 141.062,
+      "costUsd": 0.0101907,
+      "tokens": 219599,
+      "threads": 3,
+      "turns": 23,
+      "toolCalls": {
+        "load_skill": 3,
+        "routes": 7,
+        "bash": 10,
+        "finding": 6,
+        "callers_of": 2
+      },
+      "indexToolCalls": 9,
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "coverage": "reviewed 10 of 10 entry points; 3 of 3 groups of other files reviewed",
+      "reportTokens": 219599,
+      "children": 0,
+      "childTurns": 0,
+      "childTokens": 0,
+      "warnings": [],
+      "score": {
+        "planted": 4,
+        "found": 3,
+        "foundIds": [
+          "ts-role-change",
+          "ts-refund",
+          "ts-invite-hijack"
+        ],
+        "missedIds": [
+          "ts-order-idor"
+        ],
+        "recall": 0.75,
+        "findings": 3,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [],
+        "nearMisses": []
+      },
+      "authz": {
+        "planted": 4,
+        "found": 3
+      },
+      "findings": [
+        {
+          "title": "Authenticated users can change roles and self-promote to admin",
+          "category": "broken-access-control",
+          "severity": "critical",
+          "location": {
+            "path": "src/routes/admin.ts",
+            "startLine": 11,
+            "endLine": 15
+          }
+        },
+        {
+          "title": "Authenticated users can view and alter other users' orders and issue arbitrary refunds",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/refunds.ts",
+            "startLine": 8,
+            "endLine": 12
+          }
+        },
+        {
+          "title": "Invite acceptance ignores invitee identity",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/teams.ts",
+            "startLine": 18,
+            "endLine": 21
+          }
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "scan",
+      "fixture": "java-bank",
+      "arm": "index-skill",
+      "repeat": 2,
+      "status": "complete",
+      "seconds": 112.234,
+      "costUsd": 0.007820879999999999,
+      "tokens": 204864,
+      "threads": 3,
+      "turns": 21,
+      "toolCalls": {
+        "load_skill": 3,
+        "bash": 9,
+        "callers_of": 2,
+        "finding": 6,
+        "routes": 2
+      },
+      "indexToolCalls": 4,
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "coverage": "reviewed 15 of 15 entry points; 1 of 1 groups of other files reviewed",
+      "reportTokens": 204864,
+      "children": 0,
+      "childTurns": 0,
+      "childTokens": 0,
+      "warnings": [],
+      "score": {
+        "planted": 4,
+        "found": 4,
+        "foundIds": [
+          "jb-account-idor",
+          "jb-approve-self",
+          "jb-report-export",
+          "jb-reset-confirm"
+        ],
+        "missedIds": [],
+        "recall": 1,
+        "findings": 6,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [
+          {
+            "finding": "da522f3a-5edc-4557-ba0f-df8e3a808916",
+            "title": "Account lookup returns accounts without ownership enforcement",
+            "located": true
+          }
+        ],
+        "nearMisses": []
+      },
+      "authz": {
+        "planted": 4,
+        "found": 4
+      },
+      "findings": [
+        {
+          "title": "Password reset token is not bound to requested customer",
+          "category": "broken-authentication",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/PasswordResetController.java",
+            "startLine": 30,
+            "endLine": 35
+          }
+        },
+        {
+          "title": "Any authenticated user can approve any pending transfer",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/TransferController.java",
+            "startLine": 30,
+            "endLine": 32
+          }
+        },
+        {
+          "title": "Account lookup exposes arbitrary account details",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/AccountController.java",
+            "startLine": 24,
+            "endLine": 26
+          }
+        },
+        {
+          "title": "Account lookup returns accounts without ownership enforcement",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/AccountService.java",
+            "startLine": 15,
+            "endLine": 17
+          }
+        },
+        {
+          "title": "Admin transfer report lacks administrator authorization",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/AdminReportController.java",
+            "startLine": 8,
+            "endLine": 19
+          }
+        },
+        {
+          "title": "Transfer approval lacks authorization enforcement",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/TransferService.java",
+            "startLine": 24,
+            "endLine": 30
+          }
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "scan",
+      "fixture": "java-bank",
+      "arm": "baseline",
+      "repeat": 2,
+      "status": "complete",
+      "seconds": 138.684,
+      "costUsd": 0.01106006,
+      "tokens": 255235,
+      "threads": 3,
+      "turns": 23,
+      "toolCalls": {
+        "load_skill": 4,
+        "bash": 7,
+        "finding": 7,
+        "list_tools": 1,
+        "callers_of": 1
+      },
+      "indexToolCalls": 1,
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "coverage": "reviewed 15 of 15 entry points; 1 of 1 groups of other files reviewed",
+      "reportTokens": 255235,
+      "children": 0,
+      "childTurns": 0,
+      "childTokens": 0,
+      "warnings": [],
+      "score": {
+        "planted": 4,
+        "found": 4,
+        "foundIds": [
+          "jb-account-idor",
+          "jb-approve-self",
+          "jb-report-export",
+          "jb-reset-confirm"
+        ],
+        "missedIds": [],
+        "recall": 1,
+        "findings": 4,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [],
+        "nearMisses": []
+      },
+      "authz": {
+        "planted": 4,
+        "found": 4
+      },
+      "findings": [
+        {
+          "title": "Account ID endpoint exposes other customers' account data",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/AccountController.java",
+            "startLine": 24,
+            "endLine": 26
+          }
+        },
+        {
+          "title": "Admin transfer report lacks an authorization guard",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/AdminReportController.java",
+            "startLine": 8,
+            "endLine": 19
+          }
+        },
+        {
+          "title": "Any authenticated user can approve another user's pending transfer",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/TransferController.java",
+            "startLine": 29,
+            "endLine": 32
+          }
+        },
+        {
+          "title": "Reset token is not bound to customer; arbitrary password reset",
+          "category": "broken-authentication",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/PasswordResetController.java",
+            "startLine": 30,
+            "endLine": 37
+          }
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "scan",
+      "fixture": "ts-shop",
+      "arm": "baseline",
+      "repeat": 3,
+      "status": "complete",
+      "seconds": 160.821,
+      "costUsd": 0.010943280000000001,
+      "tokens": 296824,
+      "threads": 3,
+      "turns": 27,
+      "toolCalls": {
+        "load_skill": 6,
+        "bash": 7,
+        "routes": 3,
+        "finding": 9
+      },
+      "indexToolCalls": 3,
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "coverage": "reviewed 10 of 10 entry points; 3 of 3 groups of other files reviewed",
+      "reportTokens": 296824,
+      "children": 0,
+      "childTurns": 0,
+      "childTokens": 0,
+      "warnings": [],
+      "score": {
+        "planted": 4,
+        "found": 4,
+        "foundIds": [
+          "ts-order-idor",
+          "ts-role-change",
+          "ts-refund",
+          "ts-invite-hijack"
+        ],
+        "missedIds": [],
+        "recall": 1,
+        "findings": 4,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [],
+        "nearMisses": []
+      },
+      "authz": {
+        "planted": 4,
+        "found": 4
+      },
+      "findings": [
+        {
+          "title": "Authenticated users can change any account role",
+          "category": "broken-access-control",
+          "severity": "critical",
+          "location": {
+            "path": "src/routes/admin.ts",
+            "startLine": 11,
+            "endLine": 15
+          }
+        },
+        {
+          "title": "Order detail exposes other users' orders",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/orders.ts",
+            "startLine": 13,
+            "endLine": 16
+          }
+        },
+        {
+          "title": "Refund endpoint permits unauthorized, unbounded refunds",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/refunds.ts",
+            "startLine": 8,
+            "endLine": 12
+          }
+        },
+        {
+          "title": "Invite acceptance ignores the invited email",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/routes/teams.ts",
+            "startLine": 17,
+            "endLine": 21
+          }
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "scan",
+      "fixture": "ts-shop",
+      "arm": "index-skill",
+      "repeat": 3,
+      "status": "complete",
+      "seconds": 158.985,
+      "costUsd": 0.02460546,
+      "tokens": 576301,
+      "threads": 3,
+      "turns": 25,
+      "toolCalls": {
+        "load_skill": 3,
+        "spawn_agent": 2,
+        "bash": 6,
+        "routes": 3,
+        "finding": 9,
+        "trace_to_sink": 2,
+        "callers_of": 2
+      },
+      "indexToolCalls": 7,
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "coverage": "reviewed 10 of 10 entry points; 3 of 3 groups of other files reviewed",
+      "reportTokens": 576301,
+      "children": 4,
+      "childTurns": 31,
+      "childTokens": 323679,
+      "warnings": [],
+      "score": {
+        "planted": 4,
+        "found": 4,
+        "foundIds": [
+          "ts-order-idor",
+          "ts-role-change",
+          "ts-refund",
+          "ts-invite-hijack"
+        ],
+        "missedIds": [],
+        "recall": 1,
+        "findings": 4,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [],
+        "nearMisses": []
+      },
+      "authz": {
+        "planted": 4,
+        "found": 4
+      },
+      "findings": [
+        {
+          "title": "Authenticated users can arbitrarily change any account's role",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/admin.ts",
+            "startLine": 11,
+            "endLine": 15
+          }
+        },
+        {
+          "title": "Authenticated users can issue arbitrary refunds against any order",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/refunds.ts",
+            "startLine": 8,
+            "endLine": 12
+          }
+        },
+        {
+          "title": "Order detail endpoint exposes other users' orders",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/orders.ts",
+            "startLine": 13,
+            "endLine": 17
+          }
+        },
+        {
+          "title": "Invite acceptance does not verify invited email",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/routes/teams.ts",
+            "startLine": 18,
+            "endLine": 21
+          }
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "scan",
+      "fixture": "java-bank",
+      "arm": "baseline",
+      "repeat": 3,
+      "status": "complete",
+      "seconds": 123.986,
+      "costUsd": 0.00978832,
+      "tokens": 226040,
+      "threads": 3,
+      "turns": 21,
+      "toolCalls": {
+        "load_skill": 5,
+        "bash": 6,
+        "routes": 1,
+        "finding": 6
+      },
+      "indexToolCalls": 1,
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "coverage": "reviewed 15 of 15 entry points; 1 of 1 groups of other files reviewed",
+      "reportTokens": 226040,
+      "children": 0,
+      "childTurns": 0,
+      "childTokens": 0,
+      "warnings": [],
+      "score": {
+        "planted": 4,
+        "found": 4,
+        "foundIds": [
+          "jb-account-idor",
+          "jb-approve-self",
+          "jb-report-export",
+          "jb-reset-confirm"
+        ],
+        "missedIds": [],
+        "recall": 1,
+        "findings": 6,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [
+          {
+            "finding": "eeeb2156-57cf-4442-a8ef-ccad14ac0e61",
+            "title": "Account lookup permits IDOR through account read route",
+            "located": true
+          }
+        ],
+        "nearMisses": []
+      },
+      "authz": {
+        "planted": 4,
+        "found": 4
+      },
+      "findings": [
+        {
+          "title": "Account lookup exposes any account by ID",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/AccountController.java",
+            "startLine": 24,
+            "endLine": 26
+          }
+        },
+        {
+          "title": "Account lookup permits IDOR through account read route",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/AccountService.java",
+            "startLine": 15,
+            "endLine": 17
+          }
+        },
+        {
+          "title": "Any authenticated user can approve any pending transfer",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/TransferController.java",
+            "startLine": 29,
+            "endLine": 33
+          }
+        },
+        {
+          "title": "Password reset token is not bound to customer",
+          "category": "broken-authentication",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/PasswordResetController.java",
+            "startLine": 30,
+            "endLine": 37
+          }
+        },
+        {
+          "title": "Transfer approval lacks role or authority check",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/TransferService.java",
+            "startLine": 24,
+            "endLine": 30
+          }
+        },
+        {
+          "title": "Transfer report endpoint lacks admin authorization",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/AdminReportController.java",
+            "startLine": 8,
+            "endLine": 19
+          }
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "scan",
+      "fixture": "java-bank",
+      "arm": "index-skill",
+      "repeat": 3,
+      "status": "complete",
+      "seconds": 145.519,
+      "costUsd": 0.0162201,
+      "tokens": 394341,
+      "threads": 3,
+      "turns": 23,
+      "toolCalls": {
+        "load_skill": 3,
+        "bash": 9,
+        "spawn_agent": 3,
+        "finding": 7
+      },
+      "indexToolCalls": 0,
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "coverage": "reviewed 15 of 15 entry points; 1 of 1 groups of other files reviewed",
+      "reportTokens": 394341,
+      "children": 3,
+      "childTurns": 24,
+      "childTokens": 177156,
+      "warnings": [],
+      "score": {
+        "planted": 4,
+        "found": 3,
+        "foundIds": [
+          "jb-account-idor",
+          "jb-approve-self",
+          "jb-reset-confirm"
+        ],
+        "missedIds": [
+          "jb-report-export"
+        ],
+        "recall": 0.75,
+        "findings": 4,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [
+          {
+            "finding": "719b0488-397a-4eef-8627-1f3238706857",
+            "title": "Unauthenticated admin transfer export exposes all transfers",
+            "located": true
+          }
+        ],
+        "nearMisses": []
+      },
+      "authz": {
+        "planted": 4,
+        "found": 3
+      },
+      "findings": [
+        {
+          "title": "Account lookup exposes other customers' account data",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/AccountController.java",
+            "startLine": 24,
+            "endLine": 26
+          }
+        },
+        {
+          "title": "Any authenticated user can approve any pending transfer",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/TransferController.java",
+            "startLine": 29,
+            "endLine": 32
+          }
+        },
+        {
+          "title": "Password reset token is not bound to the requested customer",
+          "category": "broken-authentication",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/PasswordResetController.java",
+            "startLine": 30,
+            "endLine": 37
+          }
+        },
+        {
+          "title": "Unauthenticated admin transfer export exposes all transfers",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/main/java/bench/bank/AdminReportController.java",
+            "startLine": 8,
+            "endLine": 10
+          }
+        }
+      ],
+      "rateLimited": false
+    }
+  ]
+}
