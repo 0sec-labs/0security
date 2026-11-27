@@ -51,7 +51,7 @@ describe("runVerify", () => {
   });
 
   it.each([false, true])("bounds variant hunts by the global remaining receipt budget (unknown=%s)", async unknown => {
-    const h = harness([cand("a"), cand("b")], m => m.includes("<seed>") ? block({ variants: [] }) : block({ finding: idIn(m), verdict: "true-positive", reasoning: "Unsafe sink src/a.ts:3." }), { costs: [0.1, 0.1, unknown ? undefined : 0.3] });
+    const h = harness([cand("a"), cand("b")], m => m.includes("<seed>") ? block({ variants: [] }) : block({ finding: idIn(m), verdict: "true-positive", reasoning: "Unsafe sink src/a.ts:3.", root_cause: { bug_class: "x", unsafe_pattern: { sink: "db.query", source: "id" }, missing_guard: "binding", design_origin: "helper" } }), { costs: [0.1, 0.1, unknown ? undefined : 0.3] });
     h.deps.variants = { variantsOf: () => [], saveRootCause: () => {}, saveVariant: () => "new", markFixedPendingMerge: () => {} };
     const report = await runVerify([], options({ budget: "0.5" }), h.deps);
     expect(h.caps).toHaveLength(3);

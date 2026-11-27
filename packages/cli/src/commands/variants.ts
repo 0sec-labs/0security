@@ -45,6 +45,8 @@ export class VariantBudget {
 const DEFAULT_TIMEOUT_SECONDS = 600;
 /** Candidates one thread judges. */
 export const CANDIDATE_BATCH = 20;
+/** Share of a hunt's spend cap given to the root-cause thread when the seed has none. */
+const DERIVE_SHARE = 0.2;
 /** Findings with this status are the ones a rescan leaves alone (set by a person or a verified fix, never by a rescan). */
 const DONE_STATUS = "fixed";
 
@@ -76,7 +78,7 @@ export interface CandidateSource {
 export type CandidateFinder = (folder: string, parent: VariantParent, rootCause: RootCause) => Promise<CandidateSource>;
 
 export const defaultCandidateFinder: CandidateFinder = async (folder, parent, rootCause) => {
-  const { variantCandidates } = await import("@0/engine/dist/code-index/variant-candidates.js");
+  const { variantCandidates } = await import("@0/engine/code-index/variant-candidates");
   const list = await variantCandidates(folder, { ...(parent.path ? { path: parent.path } : {}), ...(parent.startLine ? { startLine: parent.startLine } : {}), ...(parent.endLine ? { endLine: parent.endLine } : {}) }, rootCause);
   return { candidates: list.candidates.map(c => ({ id: c.id, file: c.file, line: c.line, ...(c.symbol ? { symbol: c.symbol } : {}), entries: c.entries, entriesOmitted: c.entriesOmitted, why: c.why, ...(c.guardHint ? { guardHint: c.guardHint } : {}) })), total: list.total, omitted: list.omitted, engine: list.engine, strategy: list.strategy, notes: list.notes };
 };
@@ -145,7 +147,8 @@ export async function huntVariants(client: ConsoleClient, deps: Pick<VariantDeps
   try {
     // The candidate search needs a root cause. A seed without one gets a short thread that only reads the seed's site and states it.
     if (!seedCause) {
-      const derive = await runPromptThread(client, deps, folder, `Root cause: ${parent.title}`, variantRootCausePrompt(seed), options);
+      // The whole hunt stays inside one allowance: a fifth of it for this thread, the rest is split over the batches below.
+      const derive = await runPromptThread(client, deps, folder, `Root cause: ${parent.title}`, variantRootCausePrompt(seed), { ...options, budget: String(Number(options.budget) * DERIVE_SHARE) });
       add(derive);
       seedCause = parseRootCauseReply(derive.reply);
       if (seedCause) deps.store.saveRootCause(parent, seedCause);
@@ -164,13 +167,14 @@ export async function huntVariants(client: ConsoleClient, deps: Pick<VariantDeps
   for (let i = 0; i < items.length; i += CANDIDATE_BATCH) batches.push(items.slice(i, i + CANDIDATE_BATCH));
   if (!batches.length) batches.push([]);
   interface BatchResult { thread?: PromptThread; report?: ReturnType<typeof parseVariantReport>; error?: string }
+  const batchOptions: VariantRunOptions = { ...options, budget: String(Number(options.budget) * (parent.rootCause ? 1 : 1 - DERIVE_SHARE) / batches.length) };
   const judge = async (batch: PromptCandidate[], index: number): Promise<BatchResult> => {
     const candidates = batch.length && source ? { candidates: { items: batch, total: index === 0 ? source.total : batch.length, omitted: index === 0 ? source.omitted : 0 } } : {};
     let result: BatchResult = {};
     // One repeat for a batch whose answer holds no verdict at all.
     for (let attempt = 0; attempt < (batch.length ? 2 : 1); attempt++) {
       try {
-        const thread = await runPromptThread(client, deps, folder, `Variants${batches.length > 1 ? ` ${index + 1}/${batches.length}` : ""}: ${parent.title}`, variantHuntPrompt(seed, { ...promptOptions, ...candidates }), options);
+        const thread = await runPromptThread(client, deps, folder, `Variants${batches.length > 1 ? ` ${index + 1}/${batches.length}` : ""}: ${parent.title}`, variantHuntPrompt(seed, { ...promptOptions, ...candidates }), batchOptions);
         add(thread);
         result = { thread, ...(thread.reply ? { report: parseVariantReport(thread.reply, batch) } : { error: thread.error ?? "the thread returned no answer" }) };
         if (!batch.length || result.report?.dispositions.length || result.report?.variants.length) break;

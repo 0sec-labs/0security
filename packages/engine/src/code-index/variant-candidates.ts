@@ -74,7 +74,7 @@ const IDENT = /[A-Za-z_$][\w$]*/g;
 const SAFE_NAME = /^[\w$.<>#:/\-@ {}[\]*]+$/;
 const AUTHZ_CLASS = /author|access.control|ownership|tenant|idor|permission|privilege|isolation|scop|missing (auth|guard|check)|cross.org|bola|object.level/i;
 const STOP_WORDS = new Set(["the", "and", "for", "from", "with", "that", "this", "not", "req", "res", "request", "response", "user", "users", "id", "ids", "by", "get", "set", "find", "check", "call", "caller", "callers", "any", "data", "value", "input", "param", "params", "body", "query", "record", "records", "missing", "must", "does", "only", "same", "all", "own", "when", "before", "after", "should", "never", "instead", "using", "used", "load", "loaded", "lookup", "route", "handler", "function", "method", "assert", "ensure", "scoped", "scope", "access", "authorization", "ownership", "comparison", "compare"]);
-const READ_VERBS = ["find", "get", "load", "fetch", "read", "lookup", "list", "all", "search", "export", "select", "query", "by"];
+const READ_VERBS = "find get load fetch read lookup list all search export select query by".split(" ");
 const WRITE_VERBS = ["save", "update", "delete", "remove", "patch", "put", "set", "upsert", "insert", "create", "cancel", "approve"];
 const RECEIVER_SUFFIX = /(Repo|Repository|Store|Dao|DAO|Model|Collection|Service|Manager|Client|Loader)$/;
 

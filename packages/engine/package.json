@@ -19,6 +19,10 @@
       "types": "./dist/shared/*.d.ts",
       "import": "./dist/shared/*.js"
     },
+    "./code-index/variant-candidates": {
+      "types": "./dist/code-index/variant-candidates.d.ts",
+      "import": "./dist/code-index/variant-candidates.js"
+    },
     "./config/deprecated-env": {
       "types": "./dist/config/deprecated-env.d.ts",
       "import": "./dist/config/deprecated-env.js"
