@@ -394,26 +394,32 @@ tuned for. Every item here is verifiable in the code or the git log.
     per-request state (`getAttribute`, `getSession`, `getAuthentication`, ...)
     are never trusted.
 
-  **Residual risk (assumed, not proven).** A call to a project helper whose
-  class is not declared in the scanned file, and that receives only safe
-  arguments, is assumed to return a value that depends only on those
-  arguments. A helper that ignores its arguments and reads hidden state (a
-  `ThreadLocal`, a static field filled from a request, a context holder it
-  reaches internally) is therefore treated as safe, and a real finding behind
-  such a call is suppressed, for example
-  `Runtime.getRuntime().exec(Helper.currentInput())` with `Helper` in another
-  file. We keep this because closing it costs precision: on the shared Java
-  benchmark scorer, treating every unresolved project helper as
-  unknown leaves true positives unchanged (1319) but raises false positives
-  from 66 to 164 (score 0.882 to 0.808, cmdi 0.689 to 0.321, xss 0.900 to
-  0.804, pathtraver 0.776 to 0.687, sqli 0.938 to 0.860), because that
-  benchmark's own helper classes are separate files. Trusting only calls that
-  have at least one argument leaves 125 false positives (score 0.838). The
-  switch is `TRUST_UNRESOLVED_PROJECT_HELPERS` in `java_flow.rs`; the maintainer
-  can set it to `false` to take the sound but noisier behaviour. Resolving
-  helper bodies across files (a per-method "returns safe when its arguments are
-  safe" summary) would remove most of the cost for whole-project scans and is
-  the intended follow-up.
+  **Cross-file helpers are unknown (sound default).** A call to a project
+  helper whose class is not declared in the scanned file is never assumed safe
+  just because its arguments are safe: its body is not available, so it may
+  ignore its arguments and read request, thread or static state
+  (`Helper.currentInput()` with `Helper` in another file is reported). Only
+  JDK and well-known library types (`java.*`, `javax.*`, `org.apache.*`,
+  `org.springframework.*`, and similar) are taken as functions of their
+  arguments.
+
+  **What this costs.** Extra false alarms on code that routes constants through
+  helper factories declared in other files. On the shared Java benchmark scorer
+  true positives are unchanged (1319) and false positives rise from 66 to 164
+  (full score 0.882 to 0.808; cmdi 0.689 to 0.321, xss 0.900 to 0.804,
+  pathtraver 0.776 to 0.687, sqli 0.938 to 0.860, ldapi 0.889 to 0.858, xpathi
+  0.933 to 0.883), because that benchmark's own helper classes are separate
+  files. The extra alarms are an intended hand-off: the verification step that
+  follows a scan is the place to prune them, since a suppressed real finding
+  cannot be recovered later.
+
+  **The old behaviour still exists.** `TRUST_UNRESOLVED_PROJECT_HELPERS` in
+  `src/rules/java_flow.rs` is `false`; setting it to `true` restores the
+  assumption and the lost precision, at the risk of hiding a real finding
+  behind a state-reading helper. It is a build-time constant, not a user-facing
+  option. A per-method "safe when its arguments are safe" summary resolved
+  across files would remove most of the cost for whole-project scans and is the
+  intended follow-up. See `tests/fixtures/java_cross_file_helper/`.
 
 ## Section 4: How to report a false positive
 
