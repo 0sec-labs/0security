@@ -22,7 +22,9 @@ import {
   loadLicense,
   requireFeature,
   verifyLicense,
-  type LicensePayload,
+  entitlementLimit,
+  type LicensePayloadV1,
+  type LicensePayloadV2,
 } from "./index.js";
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -33,7 +35,7 @@ const other = generateKeyPairSync("ed25519");
 const pub = (k: { publicKey: KeyObject }) => k.publicKey.export({ type: "spki", format: "der" }).toString("base64");
 const KEYS = { t1: pub(pair) };
 
-function payload(over: Partial<LicensePayload> = {}): LicensePayload {
+function payload(over: Partial<LicensePayloadV1> = {}): LicensePayloadV1 {
   return {
     v: 1,
     id: "lic_test",
@@ -128,7 +130,7 @@ describe("verifyLicense", () => {
     ]) {
       expect(verify(mint(bad)).reason).toBe("malformed");
     }
-    expect(verify(mint({ ...payload(), v: 2 })).reason).toBe("unsupported-version");
+    expect(verify(mint({ ...payload(), v: 3 })).reason).toBe("unsupported-version");
   });
 
   it("rejects an issuedAt in the future beyond the clock skew", () => {
@@ -256,6 +258,85 @@ describe("licenseStatus", () => {
     expect(grace).toContain("Grace:");
     const expired = formatLicenseStatus(licenseStatus({ ZERO_LICENSE: token }, new Date("2028-03-01T00:00:00Z"), KEYS)).join("\n");
     expect(expired).toContain("Reads, export and verification still work");
+  });
+});
+
+function payload2(over: Partial<LicensePayloadV2> = {}): LicensePayloadV2 {
+  return {
+    v: 2, id: "lic_t2", customer: "Test Customer", plan: "team", seats: 25, aud: ["cli", "hub"],
+    entitlements: { saml: {}, ha: { nodes: 3 }, "bb-managed": { repos: 200 } },
+    issuedAt: "2026-12-01T00:00:00Z", nbf: "2026-12-01T00:00:00Z", expires: "2027-12-01T00:00:00Z", kid: "t1", rid: "rid_t2", ...over,
+  };
+}
+
+describe("license v2", () => {
+  it("grants known entitlements with limits and ignores unknown ones", () => {
+    const v = verify(mint(payload2()));
+    expect(v).toMatchObject({ ok: true, state: "valid", features: ["saml", "ha"], unknownFeatures: ["bb-managed"] });
+    expect(v.entitlements).toEqual({ saml: {}, ha: { nodes: 3 } });
+    expect(entitlementLimit(v, "ha", "nodes")).toBe(3);
+    expect(entitlementLimit(v, "ha", "repos")).toBeUndefined();
+    expect(entitlementLimit(v, "bb-managed", "repos")).toBeUndefined();
+    expect(entitlementLimit(v, "__proto__", "x")).toBeUndefined();
+  });
+
+  it("defaults rid to the id and reports plan and rid in the status", () => {
+    const { rid: _rid, ...noRid } = payload2();
+    const env = { ZERO_LICENSE: mint(noRid) };
+    expect(licenseStatus(env, NOW, KEYS)).toMatchObject({ plan: "team", rid: "lic_t2", licenseId: "lic_t2" });
+    expect(licenseStatus({ ZERO_LICENSE: mint(payload()) }, NOW, KEYS)).toMatchObject({ plan: null, rid: "lic_test" });
+  });
+
+  it("refuses a token whose audience omits the asking component", () => {
+    const token = mint(payload2());
+    expect(verifyLicense(token, NOW, KEYS, { audience: "hub" }).ok).toBe(true);
+    expect(verifyLicense(token, NOW, KEYS, { audience: "brain" })).toMatchObject({ ok: false, reason: "audience-mismatch" });
+    expect(verifyLicense(mint(payload()), NOW, KEYS, { audience: "brain" }).ok).toBe(true);
+    expect(loadLicense({ ZERO_LICENSE: token }, NOW, KEYS, { audience: "runner" }).reason).toBe("audience-mismatch");
+  });
+
+  it("honours nbf within the clock skew and refuses it beyond", () => {
+    expect(verify(mint(payload2({ nbf: "2027-01-15T20:00:00Z" }))).ok).toBe(true);
+    expect(verify(mint(payload2({ nbf: "2027-01-20T00:00:00Z" })))).toMatchObject({ ok: false, reason: "not-yet-valid" });
+  });
+
+  it("keeps grace and read-only behaviour", () => {
+    const token = mint(payload2());
+    expect(verify(token, new Date("2027-12-20T00:00:00Z"))).toMatchObject({ ok: true, state: "grace" });
+    expect(verify(token, new Date("2028-02-01T00:00:00Z"))).toMatchObject({ ok: false, state: "expired" });
+    expect(featureMode("saml", { ZERO_LICENSE: token }, new Date("2028-02-01T00:00:00Z"), KEYS)).toBe("read-only");
+    expect(hasFeature("saml", { ZERO_LICENSE: token }, NOW, KEYS)).toBe(true);
+  });
+
+  it("rejects malformed v2 payloads even when signed", () => {
+    const bad: Record<string, unknown>[] = [
+      { plan: "" }, { aud: [] }, { aud: "cli" }, { aud: [1] }, { nbf: "tomorrow" }, { nbf: "2027-12-01T00:00:00Z" }, { rid: "" }, { rid: 5 },
+      { entitlements: [] }, { entitlements: null }, { entitlements: { saml: [] } }, { entitlements: { saml: { n: 1.5 } } }, { entitlements: { saml: { n: -1 } } }, { entitlements: { saml: { n: "1" } } },
+    ];
+    for (const over of bad) expect(verify(mint({ ...payload2(), ...over })), JSON.stringify(over)).toMatchObject({ ok: false, reason: "malformed" });
+    const { nbf: _n, ...noNbf } = payload2();
+    expect(verify(mint(noNbf)).reason).toBe("malformed");
+    expect(verify(mint({ ...payload2(), v: 3 })).reason).toBe("unsupported-version");
+  });
+
+  it("passes the shared vectors", () => {
+    const file = fileURLToPath(new URL("../test-vectors/license-vectors.json", import.meta.url));
+    const doc = JSON.parse(readFileSync(file, "utf8")) as {
+      defaultNow: string; keys: Record<string, string>; known: string[];
+      cases: { name: string; token: string; now?: string; audience?: string; expect: Record<string, unknown> }[];
+    };
+    expect(doc.known).toEqual([...ENTERPRISE_FEATURES]);
+    expect(doc.cases.length).toBeGreaterThanOrEqual(15);
+    for (const c of doc.cases) {
+      const v = verifyLicense(c.token, new Date(c.now ?? doc.defaultNow), doc.keys, c.audience === undefined ? {} : { audience: c.audience }) as unknown as Record<string, unknown> & { payload: Record<string, unknown> | null };
+      const seen = { ...v, rid: v.payload ? (v.payload.v === 2 ? v.payload.rid : v.payload.id) : null, plan: v.payload?.plan ?? null };
+      for (const [k, want] of Object.entries(c.expect)) expect(seen[k], `${c.name}: ${k}`).toEqual(want);
+    }
+  });
+
+  it("keeps the vectors file in sync with its generator", () => {
+    const gen = fileURLToPath(new URL("../test-vectors/generate.mjs", import.meta.url));
+    expect(() => execFileSync(process.execPath, [gen, "--check"], { stdio: "pipe", timeout: 15_000 })).not.toThrow();
   });
 });
 
