@@ -69,14 +69,6 @@ public class SafeInjection extends HttpServlet {
         st.executeQuery("SELECT 1");
     }
 
-    // A fixed program, a list of fixed arguments plus a request value as data.
-    void shellFree(HttpServletRequest request) throws Exception {
-        String arg = request.getParameter("a");
-        Runtime.getRuntime().exec(new String[] {"/usr/bin/convert", arg});
-        new ProcessBuilder("ls", arg).start();
-        new ProcessBuilder().command(java.util.Arrays.asList("ls", "-l", arg));
-    }
-
     // Not a request: nothing to report.
     void noRequest(String fromElsewhere) throws Exception {
         new FileReader("/etc/hostname");

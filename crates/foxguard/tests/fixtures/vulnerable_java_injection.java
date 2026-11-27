@@ -93,4 +93,13 @@ public class VulnerableInjection extends HttpServlet {
         xp.evaluate("/people/person[@id='" + who + "']", doc); // xpath-injection
         xp.compile("//person[name='" + who + "']"); // xpath-injection
     }
+
+    // A fixed program rules out shell metacharacters, not options: the request value
+    // can still be read as one (`find -exec`, `tar --checkpoint-action`, `git -c`).
+    void shellFree(HttpServletRequest request) throws Exception {
+        String arg = request.getParameter("a");
+        Runtime.getRuntime().exec(new String[] {"/usr/bin/convert", arg}); // argument-injection
+        new ProcessBuilder("ls", arg).start(); // argument-injection
+        new ProcessBuilder().command(java.util.Arrays.asList("ls", "-l", arg)); // argument-injection
+    }
 }

@@ -1338,6 +1338,10 @@ fn java_taint_path_traversal_desc(src: &str, sink: &str) -> String {
     format!("{src} reaches {sink} — untrusted input can read or write files outside the intended directory")
 }
 
+fn java_taint_argument_injection_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — untrusted input can be read as an option of the fixed program (argument injection)")
+}
+
 fn java_taint_ldap_injection_desc(src: &str, sink: &str) -> String {
     format!("{src} reaches {sink} — untrusted input can alter the LDAP query")
 }
@@ -1377,6 +1381,15 @@ fn java_taint_meta(rule_id: &str) -> Option<JavaTaintRuleMeta<'static>> {
                 "Avoid invoking shell commands with request-controlled data; pass fixed executable names and validated argument arrays",
             ),
             format_description: java_taint_command_injection_desc,
+        }),
+        "java/taint-argument-injection" => Some(JavaTaintRuleMeta {
+            rule_id: "java/taint-argument-injection",
+            severity: Severity::Medium,
+            cwe: Some("CWE-88"),
+            fix_suggestion: Some(
+                "Do not pass request data to a command-line tool as an argument; use a fixed argument list, validate against an allowlist, or end the options with `--`",
+            ),
+            format_description: java_taint_argument_injection_desc,
         }),
         "java/taint-path-traversal" => Some(JavaTaintRuleMeta {
             rule_id: "java/taint-path-traversal",
@@ -1502,7 +1515,9 @@ pub fn run_java_taint_batched(
         };
         let raw = java_taint::analyze_tree(tree.root_node(), source, spec, None);
         for finding in raw {
-            findings.push(map_java_taint_finding(&meta, source, finding));
+            if java_taint::finding_belongs_to(rule_id, &finding) {
+                findings.push(map_java_taint_finding(&meta, source, finding));
+            }
         }
     }
 
@@ -1555,6 +1570,7 @@ fn run_java_taint_single(
     };
     let raw = java_taint::analyze_tree(tree.root_node(), source, spec, None);
     raw.into_iter()
+        .filter(|finding| java_taint::finding_belongs_to(rule_id, finding))
         .map(|finding| map_java_taint_finding(&meta, source, finding))
         .collect()
 }
@@ -1586,6 +1602,25 @@ impl_rule! {
     severity = Severity::Critical,
     cwe = Some("CWE-78"),
     description = "Untrusted Java servlet or Spring input reaches command execution sink",
+    language = Language::Java,
+    fn check(_self, source, tree) {
+        let spec = java_taint::java_taint_rule_specs()
+            .into_iter()
+            .find(|(id, _)| *id == _self.id())
+            .map(|(_, spec)| spec)
+            .unwrap_or_default();
+        run_java_taint_single(_self.id(), source, tree, &spec)
+    }
+}
+
+pub struct TaintArgumentInjection;
+
+impl_rule! {
+    TaintArgumentInjection,
+    id = "java/taint-argument-injection",
+    severity = Severity::Medium,
+    cwe = Some("CWE-88"),
+    description = "Untrusted Java servlet or Spring input reaches an argument of a fixed command-line program",
     language = Language::Java,
     fn check(_self, source, tree) {
         let spec = java_taint::java_taint_rule_specs()

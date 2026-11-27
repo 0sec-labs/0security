@@ -80,6 +80,27 @@ const STRING_PASSTHROUGH: &[&str] = &[
 /// Method names that read from the outside world even when every argument is a
 /// constant, so their result is never provably free of external input.
 const READS_EXTERNAL_INPUT: &[&str] = &[
+    // Reads of files, sockets, streams, classpath resources and databases: the
+    // result depends on what is stored or sent, not on the arguments.
+    "lines",
+    "list",
+    "listFiles",
+    "walk",
+    "newBufferedReader",
+    "newInputStream",
+    "openStream",
+    "openConnection",
+    "getContent",
+    "getResourceAsStream",
+    "readFully",
+    "readUTF",
+    "readObject",
+    "readLine",
+    "accept",
+    "receive",
+    "executeQuery",
+    "getString",
+    "getObject",
     "getenv",
     "readLine",
     "read",
@@ -861,8 +882,12 @@ impl<'a> Interp<'a> {
                     Val::Bool(true) => self.eval(t, env),
                     Val::Bool(false) => self.eval(f, env),
                     _ => {
-                        let a = self.eval(t, env);
-                        let b = self.eval(f, env);
+                        // Each branch runs on its own copy: only one of them runs.
+                        let mut e1 = env.clone();
+                        let a = self.eval(t, &mut e1);
+                        let mut e2 = env.clone();
+                        let b = self.eval(f, &mut e2);
+                        *env = join_env(&e1, &e2);
                         join(&a, &b)
                     }
                 }
@@ -900,28 +925,35 @@ impl<'a> Interp<'a> {
                     }
                 }
                 if let (Some(o), Some(f)) = (obj, field) {
-                    if is_constant_name(f) {
-                        match o.kind() {
-                            // `this.NAME` is whatever the enclosing class declares.
-                            "this" => {
-                                return self.resolve_field(node, f, None).unwrap_or(Val::Maybe)
-                            }
-                            // `local.NAME` reads a field off a value.
-                            "identifier" if env.contains_key(self.text(o)) => return Val::Maybe,
-                            // A class of this file declares what `Type.NAME` is.
-                            "identifier" => {
-                                let ty = self.text(o);
-                                if self.class_declared_in_file(ty) {
-                                    if let Some(v) = self.resolve_field(node, f, Some(ty)) {
-                                        return v;
-                                    }
-                                }
-                                return Val::Safe;
-                            }
-                            // `pkg.Type.NAME`: a constant by convention.
-                            "field_access" | "scoped_identifier" => return Val::Safe,
-                            _ => {}
+                    // `this.NAME` is whatever the enclosing class declares.
+                    if o.kind() == "this" {
+                        if !is_constant_name(f) {
+                            return Val::Maybe;
                         }
+                        return self.resolve_field(node, f, None).unwrap_or(Val::Maybe);
+                    }
+                    if !self.is_static_type_ref(o, env) {
+                        return Val::Maybe;
+                    }
+                    let text = self.text(o);
+                    let last = text.rsplit('.').next().unwrap_or("");
+                    // A class of this file declares what `Type.NAME` is: only a
+                    // `static final` field with a safe initialiser is a constant.
+                    if self.class_declared_in_file(last) {
+                        if !is_constant_name(f) {
+                            return Val::Maybe;
+                        }
+                        return self
+                            .resolve_field(node, f, Some(last))
+                            .unwrap_or(Val::Maybe);
+                    }
+                    // A field of a class we cannot read may be a public static
+                    // that another file assigns request data to.
+                    if self.library_type(text) && !REQUEST_CONTEXT_TYPES.contains(&last) {
+                        return Val::Safe;
+                    }
+                    if TRUST_UNRESOLVED_PROJECT_HELPERS && is_constant_name(f) {
+                        return Val::Safe;
                     }
                 }
                 Val::Maybe
@@ -950,7 +982,19 @@ impl<'a> Interp<'a> {
             ("||", Val::Bool(true)) => return Val::Bool(true),
             _ => {}
         }
-        let r = self.eval(rn, env);
+        // The right operand of `&&` / `||` runs only on some paths, so what it
+        // assigns must not replace the old value for the code that follows.
+        let right_always_runs =
+            matches!((op, &l), ("&&", Val::Bool(true)) | ("||", Val::Bool(false)))
+                || !matches!(op, "&&" | "||");
+        let r = if right_always_runs {
+            self.eval(rn, env)
+        } else {
+            let mut branch = env.clone();
+            let r = self.eval(rn, &mut branch);
+            *env = join_env(env, &branch);
+            r
+        };
         if let (Some(a), Some(b)) = (l.as_int(), r.as_int()) {
             let both_int = matches!(l, Val::Int(_)) || matches!(r, Val::Int(_));
             let folded = match op {
@@ -967,6 +1011,11 @@ impl<'a> Interp<'a> {
                 "!=" => Some(Val::Bool(a != b)),
                 _ => None,
             };
+            // Java ints wrap at 32 bits; a result outside that range is not folded.
+            let folded = folded.filter(|v| match v {
+                Val::Int(i) => i32::try_from(*i).is_ok(),
+                _ => true,
+            });
             if let Some(v) = folded {
                 // `'a' + 1` style char arithmetic stays an int.
                 let _ = both_int;
@@ -976,8 +1025,13 @@ impl<'a> Interp<'a> {
         match (op, &l, &r) {
             ("&&", Val::Bool(a), Val::Bool(b)) => return Val::Bool(*a && *b),
             ("||", Val::Bool(a), Val::Bool(b)) => return Val::Bool(*a || *b),
-            ("==", a, b) if a.is_const() && b.is_const() => return Val::Bool(a == b),
-            ("!=", a, b) if a.is_const() && b.is_const() => return Val::Bool(a != b),
+            // `==` on strings compares references, which constant folding cannot see.
+            ("==", a, b) if a.is_const() && b.is_const() && !is_str_pair(a, b) => {
+                return Val::Bool(a == b)
+            }
+            ("!=", a, b) if a.is_const() && b.is_const() && !is_str_pair(a, b) => {
+                return Val::Bool(a != b)
+            }
             ("+", Val::Str(a), b) | ("+", b, Val::Str(a)) if b.is_const() => {
                 let other = match b {
                     Val::Str(s) => s.clone(),
@@ -1028,6 +1082,12 @@ impl<'a> Interp<'a> {
             return rv;
         }
         let name = self.text(left).to_string();
+        // Only locals are tracked: a field can be changed by any call, so what
+        // was assigned to it here proves nothing about what a later read sees.
+        if let std::collections::hash_map::Entry::Vacant(slot) = env.entry(name.clone()) {
+            slot.insert(Val::Maybe);
+            return Val::Maybe;
+        }
         let nv = if op == "=" {
             rv
         } else {
@@ -1193,16 +1253,19 @@ impl<'a> Interp<'a> {
         }
 
         // Same-file helper (unqualified, `this.` or `new LocalClass().`).
-        let local_receiver = match obj_node {
-            None => true,
-            Some(o) if o.kind() == "this" => true,
-            Some(o) if o.kind() == "object_creation_expression" => o
-                .child_by_field_name("type")
-                .is_some_and(|t| self.class_declared_in_file(self.text(t))),
-            _ => false,
-        };
-        if local_receiver && self.depth < MAX_DEPTH {
-            if let Some(m) = self.unique_method(name, args.len()) {
+        if self.depth < MAX_DEPTH {
+            let target = match obj_node {
+                None => self.unique_method_at(node, name, args.len()),
+                Some(o) if o.kind() == "this" => self.unique_method_at(node, name, args.len()),
+                // `new LocalClass().m()` dispatches on exactly that class.
+                Some(o) if o.kind() == "object_creation_expression" => o
+                    .child_by_field_name("type")
+                    .map(|t| self.text(t))
+                    .filter(|t| self.class_declared_in_file(t))
+                    .and_then(|t| self.unique_method_in(t, name, args.len())),
+                _ => None,
+            };
+            if let Some(m) = target {
                 return self.call_helper(m, args);
             }
         }
@@ -1385,14 +1448,17 @@ impl<'a> Interp<'a> {
     /// [`TRUST_UNRESOLVED_PROJECT_HELPERS`] is set.
     fn static_call_trusted(&self, receiver: Node<'a>) -> bool {
         let text = self.text(receiver);
-        let head = text.split('.').next().unwrap_or("");
         let last = text.rsplit('.').next().unwrap_or("");
         if REQUEST_CONTEXT_TYPES.contains(&last) || self.class_declared_in_file(last) {
             return false;
         }
-        if TRUST_UNRESOLVED_PROJECT_HELPERS {
-            return true;
-        }
+        TRUST_UNRESOLVED_PROJECT_HELPERS || self.library_type(text)
+    }
+
+    /// Is `text` (`Type`, `pkg.Type`) a JDK or well-known library type, judged by
+    /// its qualifier, its import, or its membership in the JDK list?
+    fn library_type(&self, text: &str) -> bool {
+        let head = text.split('.').next().unwrap_or("");
         if head.starts_with(|c: char| c.is_ascii_lowercase()) {
             return LIBRARY_PREFIXES.iter().any(|p| text.starts_with(p));
         }
@@ -1576,25 +1642,54 @@ impl<'a> Interp<'a> {
         }
     }
 
-    fn unique_method(&self, name: &str, arity: usize) -> Option<Node<'a>> {
-        let mut hits = Vec::new();
-        walk(self.root, &mut |n| {
-            if n.kind() == "method_declaration" {
-                if let (Some(nm), Some(ps)) = (
-                    n.child_by_field_name("name"),
-                    n.child_by_field_name("parameters"),
-                ) {
-                    if self.text(nm) == name && ps.named_child_count() == arity {
-                        hits.push(n);
+    /// The method an unqualified or `this.` call resolves to: declared by the
+    /// innermost enclosing class that declares one of that name and arity, and
+    /// not overridable (private, static or final, or in a final class), since a
+    /// subclass elsewhere could otherwise substitute its own body.
+    fn unique_method_at(&self, call: Node<'a>, name: &str, arity: usize) -> Option<Node<'a>> {
+        let mut up = call.parent();
+        while let Some(scope) = up {
+            if matches!(
+                scope.kind(),
+                "class_declaration" | "enum_declaration" | "record_declaration"
+            ) {
+                let class_final = find_child(scope, "modifiers")
+                    .is_some_and(|m| self.text(m).split_whitespace().any(|w| w == "final"));
+                let body = scope.child_by_field_name("body");
+                let mut hits = Vec::new();
+                if let Some(body) = body {
+                    let mut c = body.walk();
+                    for m in body.named_children(&mut c) {
+                        if m.kind() != "method_declaration" {
+                            continue;
+                        }
+                        if let (Some(nm), Some(ps)) = (
+                            m.child_by_field_name("name"),
+                            m.child_by_field_name("parameters"),
+                        ) {
+                            if self.text(nm) == name && ps.named_child_count() == arity {
+                                hits.push(m);
+                            }
+                        }
                     }
                 }
+                if !hits.is_empty() {
+                    if hits.len() != 1 {
+                        return None;
+                    }
+                    let m = hits[0];
+                    let fixed = class_final
+                        || find_child(m, "modifiers").is_some_and(|mods| {
+                            self.text(mods)
+                                .split_whitespace()
+                                .any(|w| matches!(w, "private" | "static" | "final"))
+                        });
+                    return fixed.then_some(m);
+                }
             }
-        });
-        if hits.len() == 1 {
-            hits.pop()
-        } else {
-            None
+            up = scope.parent();
         }
+        None
     }
 
     fn call_helper(&mut self, method: Node<'a>, args: Vec<Val>) -> Val {
@@ -1628,6 +1723,10 @@ impl<'a> Interp<'a> {
             .skip(1)
             .fold(rets[0].clone(), |a, b| join(&a, b))
     }
+}
+
+fn is_str_pair(a: &Val, b: &Val) -> bool {
+    matches!((a, b), (Val::Str(_), Val::Str(_)))
 }
 
 fn find_child<'t>(node: Node<'t>, kind: &str) -> Option<Node<'t>> {
@@ -1921,6 +2020,96 @@ mod tests {
         assert!(safe(&method("sink(String.valueOf(\"k\"));"), false));
         assert!(safe(
             &method("sink(java.nio.file.Paths.get(\"/srv\", \"k\"));"),
+            false
+        ));
+    }
+
+    #[test]
+    fn qualified_fields_are_constants_only_when_resolved_or_from_the_jdk() {
+        for src in [
+            // Another file may assign request data to a public static field.
+            "class T { void m() { sink(OtherState.USER_COMMAND); } }",
+            "class T { void m() { sink(pkg.OtherState.USER_COMMAND); } }",
+            "class T { void m() { sink(OtherState.userCommand); } }",
+            // A class of this file declares it, but not as a constant.
+            "class T { void m() { sink(State.USER_COMMAND); } } class State { public static String USER_COMMAND; }",
+            "class T { void m() { sink(State.USER_COMMAND); } } class State { public static final String USER_COMMAND = System.getenv(\"X\"); }",
+            "class T { void m() { sink(State.MISSING); } } class State { }",
+            // A local value's field is not a type's constant.
+            "class T { void m(Holder HOLDER) { sink(HOLDER.NAME); } }",
+        ] {
+            assert!(!safe(src, false), "{src}");
+        }
+        for src in [
+            "class T { void m() { sink(State.COMMAND); } } class State { public static final String COMMAND = \"ls\"; }",
+            "import java.io.File; class T { void m() { sink(File.separator); } }",
+            "class T { void m() { sink(java.io.File.pathSeparator); } }",
+            "class T { void m() { sink(StandardCharsets.UTF_8); } }",
+            "class T { void m() { sink(Integer.MAX_VALUE); } }",
+            "import java.util.concurrent.TimeUnit; class T { void m() { sink(TimeUnit.SECONDS); } }",
+        ] {
+            assert!(safe(src, false), "{src}");
+        }
+    }
+
+    #[test]
+    fn assignments_in_conditionally_evaluated_expressions_do_not_replace_the_value() {
+        for body in [
+            "boolean ok = check() && (param = \"fixed\") != null; sink(param);",
+            "boolean ok = check() || (param = \"fixed\") != null; sink(param);",
+            "String q = check() ? (param = \"fixed\") : \"other\"; sink(param);",
+        ] {
+            assert!(!safe(&method(body), false), "{body}");
+        }
+        // Always evaluated: the replacement stands.
+        assert!(safe(
+            &method("String p2 = param; p2 = \"fixed\"; sink(p2);"),
+            false
+        ));
+        assert!(safe(
+            &method("boolean ok = true && (param = \"fixed\") != null; sink(param);"),
+            false
+        ));
+    }
+
+    #[test]
+    fn fields_and_overridable_methods_are_not_trusted_state() {
+        // A field assigned here can be changed by the call before the read.
+        assert!(!safe(
+            "class T { String cmd; void m() { cmd = \"ls\"; reload(); sink(cmd); } }",
+            false
+        ));
+        // A local cannot.
+        assert!(safe(
+            "class T { void m() { String cmd = \"ls\"; reload(); sink(cmd); } }",
+            false
+        ));
+        // A private helper is read; an overridable one is not (a subclass elsewhere may replace it).
+        assert!(safe(
+            "class T { void m() { sink(name()); } private String name() { return \"ls\"; } }",
+            false
+        ));
+        assert!(!safe(
+            "class T { void m() { sink(name()); } String name() { return \"ls\"; } }",
+            false
+        ));
+        // A same-named method of another class is not the one being called.
+        assert!(!safe(
+            "class T { void m() { sink(name()); } } class U { private String name() { return \"ls\"; } }",
+            false
+        ));
+    }
+
+    #[test]
+    fn constant_folding_follows_java_semantics() {
+        // String `==` compares references: a built string is not the literal.
+        assert!(!safe(
+            "class T { void m(HttpServletRequest req) { String a = \"x\"; String b = a + \"y\"; String r; if (b == \"xy\") { r = \"safe\"; } else { r = req.getParameter(\"q\"); } sink(r); } }",
+            false
+        ));
+        // Ints wrap at 32 bits: this condition is false, not true.
+        assert!(!safe(
+            "class T { void m(HttpServletRequest req) { String r; if (2147483647 + 1 > 0) { r = \"safe\"; } else { r = req.getParameter(\"q\"); } sink(r); } }",
             false
         ));
     }

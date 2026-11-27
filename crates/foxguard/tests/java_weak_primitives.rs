@@ -170,6 +170,7 @@ fn injection_rules_flag_every_vulnerable_sink() {
     assert_eq!(count(&f, "java/taint-sql-injection"), 7, "{f:?}");
     assert_eq!(count(&f, "java/taint-ldap-injection"), 2, "{f:?}");
     assert_eq!(count(&f, "java/taint-xpath-injection"), 2, "{f:?}");
+    assert_eq!(count(&f, "java/taint-argument-injection"), 3, "{f:?}");
 }
 
 #[test]
@@ -181,6 +182,7 @@ fn injection_rules_ignore_constants_parameters_and_shell_free_commands() {
         "java/taint-sql-injection",
         "java/taint-ldap-injection",
         "java/taint-xpath-injection",
+        "java/taint-argument-injection",
     ] {
         assert_eq!(lines(&f, rule), Vec::<u64>::new(), "{rule}: {f:?}");
     }
@@ -242,7 +244,11 @@ fn project_helper_in_another_file_is_not_assumed_safe_but_same_file_helper_is_re
         .collect();
     assert_eq!(
         hits,
-        vec![("CrossFileHandler.java".to_string(), 5)],
+        vec![
+            ("CrossFileHandler.java".to_string(), 5),
+            ("CrossFileHandler.java".to_string(), 9),
+            ("CrossFileHandler.java".to_string(), 13),
+        ],
         "{report}"
     );
     let f = scan("safe_java_same_file_helper.java");

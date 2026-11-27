@@ -13,3 +13,12 @@ class SameFileHelper {
         return "ls -l";
     }
 }
+
+class SameFileState {
+    public static final String COMMAND = "ls";
+
+    void run() throws Exception {
+        Runtime.getRuntime().exec(SameFileState.COMMAND);
+        Runtime.getRuntime().exec(java.io.File.separator);
+    }
+}

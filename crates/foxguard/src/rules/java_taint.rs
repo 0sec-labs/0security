@@ -43,22 +43,75 @@ struct TaintInfo {
     labels: Option<BTreeSet<String>>,
 }
 
+/// Taint of local names within one scope.
+///
+/// The walk that builds it is flow-insensitive, but a clean reassignment must
+/// only hide taint from the statements that come after it: `exec(p); p = "x";`
+/// still sends `p` to the sink. Taint and unconditional clears are therefore
+/// recorded with the byte offset at which they take effect and read back with
+/// [`TaintState::info_at`].
 #[derive(Default)]
 struct TaintState {
     tainted: HashMap<String, TaintInfo>,
+    /// Offsets after which a name holds a clean value (straight-line only).
+    clears: HashMap<String, BTreeSet<usize>>,
+    /// Offsets at which a name became tainted.
+    events: HashMap<String, BTreeSet<usize>>,
+    /// Offset at which the node being walked takes effect.
+    cursor: usize,
 }
 
 impl TaintState {
     fn taint(&mut self, name: String, info: TaintInfo) {
+        self.events
+            .entry(name.clone())
+            .or_default()
+            .insert(self.cursor);
         self.tainted.insert(name, info);
     }
 
     fn clear(&mut self, name: &str) {
-        self.tainted.remove(name);
+        self.clears
+            .entry(name.to_string())
+            .or_default()
+            .insert(self.cursor);
     }
 
+    /// Whether the name was ever tainted, ignoring clean reassignments.
     fn info(&self, name: &str) -> Option<&TaintInfo> {
         self.tainted.get(name)
+    }
+
+    /// Taint of `name` as read at `at`. A clean reassignment before `at` hides
+    /// it unless the name was tainted again between the two, or, inside a loop,
+    /// later in a loop that also contains `at` (the value flows around the back
+    /// edge).
+    fn info_at(&self, name: &str, at: Node<'_>) -> Option<&TaintInfo> {
+        let info = self.tainted.get(name)?;
+        let pos = at.start_byte();
+        let Some(clear) = self
+            .clears
+            .get(name)
+            .and_then(|c| c.range(..=pos).next_back())
+        else {
+            return Some(info);
+        };
+        let events = self.events.get(name)?;
+        if events.range(clear + 1..=pos).next().is_some() {
+            return Some(info);
+        }
+        let mut up = at.parent();
+        while let Some(n) = up {
+            if matches!(
+                n.kind(),
+                "for_statement" | "enhanced_for_statement" | "while_statement" | "do_statement"
+            ) && events.range(pos + 1..n.end_byte()).next().is_some()
+            {
+                return Some(info);
+            }
+            up = n.parent();
+        }
+        None
     }
 }
 
@@ -141,11 +194,29 @@ pub fn analyze_tree_labeled(
     findings
 }
 
+/// Rule id for request data reaching an argument of a fixed, non-shell program.
+/// The command-injection sinks find these flows; a fixed program rules out
+/// shell metacharacters but not option injection (`find -exec`, `tar
+/// --checkpoint-action`, `git -c`, `curl -o`, `ssh -o ProxyCommand`), so they are
+/// reported under their own rule instead of being dropped.
+pub const ARGUMENT_INJECTION_RULE: &str = "java/taint-argument-injection";
+
+/// Whether `finding` (from [`analyze_tree`]) is reported by rule `rule_id`: the
+/// argument-injection rule owns the findings tagged for it, every other rule
+/// the rest.
+pub fn finding_belongs_to(rule_id: &str, finding: &TaintFinding) -> bool {
+    (finding.rule_id_hint.as_deref() == Some(ARGUMENT_INJECTION_RULE))
+        == (rule_id == ARGUMENT_INJECTION_RULE)
+}
+
 /// All Java taint rule IDs paired with their specs.
 pub fn java_taint_rule_specs() -> Vec<(&'static str, TaintSpec)> {
     vec![
         ("java/taint-sql-injection", sql_injection_spec()),
         ("java/taint-command-injection", command_injection_spec()),
+        // Same sinks as command injection; reports only the flows whose program
+        // is a fixed non-shell executable (see `ARGUMENT_INJECTION_RULE`).
+        (ARGUMENT_INJECTION_RULE, command_injection_spec()),
         ("java/taint-path-traversal", path_traversal_spec()),
         ("java/taint-ldap-injection", ldap_injection_spec()),
         ("java/taint-xpath-injection", xpath_injection_spec()),
@@ -686,7 +757,7 @@ fn summarize_java_method(
             };
             let mut findings = Vec::new();
             analyze_scope(method_node, source, &synthetic, &[], None, &mut findings);
-            if let Some(finding) = findings.first() {
+            if let Some(finding) = findings.iter().find(|f| finding_belongs_to(rule_id, f)) {
                 params_to_sink.push(ParamSinkFlow {
                     param_index: param_idx,
                     sink_rule_id: rule_id.to_string(),
@@ -1178,6 +1249,7 @@ fn propagate_assignments(
     state: &mut TaintState,
 ) {
     walk_scope_nodes(scope, source, &mut |node, src| {
+        state.cursor = node.end_byte();
         apply_propagator_call(node, src, spec, propagators, policy, state);
         if node.kind() == "variable_declarator" {
             let Some(name_node) = node.child_by_field_name("name") else {
@@ -1225,6 +1297,7 @@ fn propagate_assignments(
                 node.child_by_field_name("value"),
             ) {
                 let name = node_text(name_node, src).to_string();
+                state.cursor = name_node.end_byte();
                 match expression_taint(iterable, src, spec, policy, state) {
                     Some(info) => state.taint(name, bump_hops(info)),
                     None => state.clear(&name),
@@ -1285,6 +1358,9 @@ fn is_unconditional(node: Node<'_>, scope: Node<'_>) -> bool {
             | "switch_block_statement_group"
             | "switch_rule"
             | "ternary_expression"
+            | "try_statement"
+            | "try_with_resources_statement"
+            | "binary_expression"
             | "catch_clause"
             | "lambda_expression" => return false,
             _ => {}
@@ -1545,7 +1621,6 @@ fn check_typed_sinks(
                 fixed_program_safe,
                 description,
             } if node.kind() == "object_creation_expression"
-                && node.child_by_field_name("body").is_none()
                 && object_creation_type(node, source)
                     .map(type_final_segment)
                     .is_some_and(|ty| type_names.iter().any(|n| n == ty)) =>
@@ -1569,14 +1644,11 @@ fn check_typed_sinks(
         else {
             continue;
         };
-        if fixed_program_safe && arg_nodes.len() == 1 && has_fixed_program(arg_nodes[0], source)
-            || fixed_program_safe
-                && node.kind() == "object_creation_expression"
-                && arg_nodes.len() > 1
-                && has_fixed_program(arg_nodes[0], source)
-        {
-            continue;
-        }
+        let fixed_program = fixed_program_safe
+            && (arg_nodes.len() == 1 && has_fixed_program(arg_nodes[0], source)
+                || node.kind() == "object_creation_expression"
+                    && arg_nodes.len() > 1
+                    && has_fixed_program(arg_nodes[0], source));
         // A `new File(..)` handed straight to another path sink is reported once,
         // at the outer constructor that opens the file.
         if node.kind() == "object_creation_expression"
@@ -1599,7 +1671,11 @@ fn check_typed_sinks(
                 continue;
             }
         }
-        out.push(taint_finding_for_node(node, info, description.clone()));
+        let mut finding = taint_finding_for_node(node, info, description.clone());
+        if fixed_program {
+            finding.rule_id_hint = Some(ARGUMENT_INJECTION_RULE.to_string());
+        }
+        out.push(finding);
         return;
     }
 }
@@ -1983,12 +2059,12 @@ fn expression_taint_core(
     state: &TaintState,
 ) -> Option<TaintInfo> {
     let text = node_text(node, source);
-    if let Some(info) = state.info(text) {
+    if let Some(info) = state.info_at(text, node) {
         return Some(info.clone());
     }
 
     if node.kind() == "identifier" {
-        return state.info(text).cloned();
+        return None;
     }
 
     if is_sanitizer_call(node, source, spec) {
@@ -2477,7 +2553,7 @@ fn expression_taint_without_sources(
     state: &TaintState,
 ) -> Option<TaintInfo> {
     let text = node_text(node, source);
-    if let Some(info) = state.info(text) {
+    if let Some(info) = state.info_at(text, node) {
         return Some(info.clone());
     }
     let mut cursor = node.walk();
@@ -2697,7 +2773,10 @@ mod tests {
             .find(|(id, _)| *id == rule_id)
             .map(|(_, spec)| spec)
             .expect("rule spec");
-        analyze(src, &spec).len()
+        analyze(src, &spec)
+            .iter()
+            .filter(|f| finding_belongs_to(rule_id, f))
+            .count()
     }
 
     #[test]
@@ -2725,11 +2804,37 @@ mod tests {
     }
 
     #[test]
-    fn fixed_non_shell_program_is_quiet_but_a_shell_is_not() {
+    fn fixed_non_shell_program_is_argument_injection_and_a_shell_is_command_injection() {
         let fixed = "class C { void f(HttpServletRequest request) throws Exception { Runtime.getRuntime().exec(new String[] { \"ls\", request.getParameter(\"a\") }); } }";
         let shell = "class C { void f(HttpServletRequest request) throws Exception { Runtime.getRuntime().exec(new String[] { \"/bin/sh\", \"-c\", request.getParameter(\"a\") }); } }";
+        // A fixed program rules out shell metacharacters, not option injection.
         assert_eq!(run_rule("java/taint-command-injection", fixed), 0);
+        assert_eq!(run_rule(ARGUMENT_INJECTION_RULE, fixed), 1);
         assert_eq!(run_rule("java/taint-command-injection", shell), 1);
+        assert_eq!(run_rule(ARGUMENT_INJECTION_RULE, shell), 0);
+    }
+
+    #[test]
+    fn a_clean_reassignment_only_hides_taint_from_later_statements() {
+        let head = "class C { void f(HttpServletRequest request) throws Exception { String p = request.getParameter(\"a\"); ";
+        let tail = " } }";
+        let cases = [
+            // The sink runs before the value is replaced.
+            ("new java.io.FileReader(p); p = \"fixed\";", 1),
+            // The replacement may not run: the sink can still see the request value.
+            ("try { run(); p = \"fixed\"; } catch (Exception e) { } new java.io.FileReader(p);", 1),
+            ("boolean ok = check() && (p = \"fixed\") != null; new java.io.FileReader(p);", 1),
+            // Back edge: the request value reaches the sink on the next iteration.
+            ("p = \"fixed\"; while (more()) { new java.io.FileReader(p); p = request.getParameter(\"b\"); }", 1),
+            // Straight-line replacement before the sink.
+            ("p = \"fixed\"; new java.io.FileReader(p);", 0),
+            // Tainted again after the replacement.
+            ("p = \"fixed\"; p = request.getParameter(\"b\"); new java.io.FileReader(p);", 1),
+        ];
+        for (body, want) in cases {
+            let src = format!("{head}{body}{tail}");
+            assert_eq!(run_rule("java/taint-path-traversal", &src), want, "{body}");
+        }
     }
 
     #[test]

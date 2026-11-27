@@ -421,6 +421,48 @@ tuned for. Every item here is verifiable in the code or the git log.
   across files would remove most of the cost for whole-project scans and is the
   intended follow-up. See `tests/fixtures/java_cross_file_helper/`.
 
+- **Java qualified constants and argument injection.** `Type.NAME` is a
+  constant only when `Type` is declared in the scanned file with a `static
+  final` field of that name and a safe initialiser, or when `Type` is a JDK or
+  well-known library type (`File.separator`, `StandardCharsets.UTF_8`,
+  `Integer.MAX_VALUE`, `TimeUnit.SECONDS`). A field of a class declared in
+  another file is unknown, because that class may declare it as a public static
+  that request data is assigned to (`exec(OtherState.USER_COMMAND)` is
+  reported). On the shared Java benchmark scorer this costs false positives
+  only (full score 0.808 to 0.762, FP 164 to 225, TP unchanged), the benchmark's
+  helper classes being separate files. A fixed non-shell program (`exec(new
+  String[] {"ls", arg})`) no longer suppresses the command rule, because the
+  argument can still be read as an option (`find -exec`, `tar
+  --checkpoint-action`, `git -c`, `curl -o`). It is reported as
+  `java/taint-argument-injection` (CWE-88, medium); the benchmark has no such
+  flows, so the measured cost is zero.
+
+### Java flow veto: suppression audit
+
+Every place the Java rules may drop a sink or treat a value as safe, with the
+assumption it rests on and a concrete flow it would miss.
+
+| Heuristic | Sound? | Assumption kept / what is missed |
+|---|---|---|
+| UPPER_SNAKE names | Yes (fixed) | Only a `static final` field of an enclosing class, interface field, enum constant or by-name static import; parameters and any declared name shadow it. Missed: none known. A constant inherited from a superclass, or only statically imported with `*`, is unknown (extra alarm). |
+| `Type.NAME` / library fields | Yes (fixed) | Library types are assumed to hold no request data in static fields. Missed: a library singleton someone mutated at startup from request data. |
+| Same-file static helper body | Yes | The body is interpreted with the caller's argument values; unknown calls inside stay unknown. |
+| Unqualified / `this.` helper | Yes (fixed) | Resolved only to a private, static or final method (or one in a final class) of the innermost enclosing class that declares it; an overridable method may be replaced by a subclass in another file and is unknown. |
+| Helper in another file | Yes (default) | Unknown; extra alarms only. `TRUST_UNRESOLVED_PROJECT_HELPERS = true` restores the old assumption: missed `exec(Helper.currentInput())`. |
+| JDK / library static call with safe arguments | Assumption | Result depends only on the arguments. Missed: `System.getProperty("x")` where the property was set from request data; `Files.readString` style reads are listed as external input and stay unknown. |
+| External-input and request-context lists | Partly | A denylist of method names (`getenv`, `readLine`, `lines`, `getAttribute`, `getSession`, ...). A reader not on the list, called on a value proven safe, is treated as safe. Missed: `new Foo("const").fetch()` is already unknown, but `Library.fetch("const")` of an unlisted name is trusted. |
+| Request-context holders | Yes | `RequestContextHolder`, `SecurityContextHolder`, `LocaleContextHolder`, `MDC` and similar are never trusted. A holder not on the list is a library call (see above). |
+| Constant folding | Yes (fixed) | Strings are not compared with `==` (reference semantics) and ints that leave the 32-bit range are not folded. Missed: none known. |
+| Clean reassignment (taint engine) | Yes (fixed) | Hides taint only from statements after a straight-line reassignment: not before it, not when the assignment sits under a branch, loop, `try`, handler, ternary or short-circuit operand, and not across a loop back edge. |
+| Clean reassignment (flow interpreter) | Yes (fixed) | Branches of `?:`, `&&` and `||` run on copies and are joined. Fields are not tracked at all: a call between the write and the read may change them. |
+| Collections (`add`/`put`/`get` by constant index) | Yes | A collection handed to another call, aliased, or modified by an unmodelled method stops being tracked. Taint added through `add`/`put`/`append` is propagated. |
+| Fixed program at argument 0 | Yes (fixed) | Reported as argument injection instead of suppressed. A program on the shell-like list (`sh`, `env`, `python`, `ssh`, ...) stays command injection. Not covered: a program that is not a literal. |
+| `arg_indices` (SQL text, LDAP filter, XPath text only) | Assumption | Bound values are data. Missed: a driver or API where a later argument is also interpreted as query text (for example a `PreparedStatementCreator`, or a custom `search` overload). |
+| Wrapped `new File(..)` inside another path sink | Yes | The outer constructor reports it; the outer is only a sink for the same types. |
+| HTML encoders (XSS rule only) | Assumption | Any call named `escapeHtml*`, `encodeForHTML`, ... is an HTML sanitiser whatever its receiver. Missed: HTML-escaped data placed in a JavaScript string, an unquoted attribute or a `javascript:` URL. |
+| Typed receiver recognition | Recall gap | Sink receivers are matched by declared type or name hint in the enclosing scopes. Missed: a `Runtime` held in an inherited field whose name does not contain `runtime`. This lowers recall, it does not suppress. |
+| Test-path skips | n/a | This change adds none. |
+
 ## Section 4: How to report a false positive
 
 If foxguard fires on code you believe is safe, open a GitHub issue with the
