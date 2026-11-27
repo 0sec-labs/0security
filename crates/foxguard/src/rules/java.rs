@@ -21,14 +21,6 @@ fn java_sql_methods_re() -> &'static Regex {
     })
 }
 
-fn java_weak_algo_re() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| {
-        Regex::new(r#"(?i)"(DES|DESede|RC2|RC4|Blowfish|MD5|SHA-?1|.*ECB.*)"#)
-            .expect("static Java weak crypto regex should compile")
-    })
-}
-
 fn java_xxe_factory_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
@@ -695,62 +687,8 @@ impl_rule! {
     }
 }
 
-// ─── Rule 6: no-weak-crypto ────────────────────────────────────────────────
-
-pub struct NoWeakCrypto;
-
-impl_rule! {
-    NoWeakCrypto,
-    id = "java/no-weak-crypto",
-    severity = Severity::Medium,
-    cwe = Some("CWE-327"),
-    description = "Use of weak cryptographic algorithm",
-    language = Language::Java,
-    fn check(_self, source, tree) {
-
-        let mut findings = Vec::new();
-        let weak_algo = java_weak_algo_re();
-
-        walk_tree(tree.root_node(), source, &mut |node, src| {
-            if node.kind() == "method_invocation" {
-                if let Some(name) = node.child_by_field_name("name") {
-                    let name_text = &src[name.byte_range()];
-                    if name_text == "getInstance" {
-                        if let Some(obj) = node.child_by_field_name("object") {
-                            let obj_text = &src[obj.byte_range()];
-                            if obj_text == "Cipher"
-                                || obj_text == "MessageDigest"
-                                || obj_text == "SecretKeyFactory"
-                                || obj_text == "KeyGenerator"
-                            {
-                                if let Some(args) = node.child_by_field_name("arguments") {
-                                    if let Some(first_arg) = args.named_child(0) {
-                                        let arg_text = &src[first_arg.byte_range()];
-                                        if weak_algo.is_match(arg_text) {
-                                            findings.push(make_finding(
-                                                _self.id(),
-                                                _self.severity(),
-                                                _self.cwe(),
-                                                &format!(
-                                                    "{}.getInstance({}) uses a weak algorithm — use AES-GCM, SHA-256, or stronger",
-                                                    obj_text, arg_text
-                                                ),
-                                                node,
-                                                src,
-                                            ));
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        });
-        findings
-
-    }
-}
+// Rule 6, java/no-weak-crypto, lives in java_primitives.rs (WeakCipher) next to
+// java/weak-hash, which took over the MessageDigest half of it.
 
 // ─── Rule: pq-vulnerable-crypto ───────────────────────────────────────────
 
@@ -1404,6 +1342,10 @@ fn java_taint_unsafe_deserialization_desc(src: &str, sink: &str) -> String {
     format!("{src} reaches {sink} — untrusted input can trigger unsafe deserialization")
 }
 
+fn java_taint_trust_boundary_desc(src: &str, sink: &str) -> String {
+    format!("{src} reaches {sink} — unvalidated request data is stored in the trusted session")
+}
+
 fn java_taint_meta(rule_id: &str) -> Option<JavaTaintRuleMeta<'static>> {
     match rule_id {
         "java/taint-sql-injection" => Some(JavaTaintRuleMeta {
@@ -1439,6 +1381,15 @@ fn java_taint_meta(rule_id: &str) -> Option<JavaTaintRuleMeta<'static>> {
                 "Avoid Java native deserialization for request data; use a safe data format and explicit schema validation",
             ),
             format_description: java_taint_unsafe_deserialization_desc,
+        }),
+        "java/taint-trust-boundary" => Some(JavaTaintRuleMeta {
+            rule_id: "java/taint-trust-boundary",
+            severity: Severity::Medium,
+            cwe: Some("CWE-501"),
+            fix_suggestion: Some(
+                "Validate or normalise request data before storing it in the session, and keep untrusted values out of attribute names",
+            ),
+            format_description: java_taint_trust_boundary_desc,
         }),
         _ => None,
     }
@@ -1634,6 +1585,25 @@ impl_rule! {
     severity = Severity::Critical,
     cwe = Some("CWE-502"),
     description = "Untrusted Java servlet or Spring input reaches unsafe deserialization sink",
+    language = Language::Java,
+    fn check(_self, source, tree) {
+        let spec = java_taint::java_taint_rule_specs()
+            .into_iter()
+            .find(|(id, _)| *id == _self.id())
+            .map(|(_, spec)| spec)
+            .unwrap_or_default();
+        run_java_taint_single(_self.id(), source, tree, &spec)
+    }
+}
+
+pub struct TaintTrustBoundary;
+
+impl_rule! {
+    TaintTrustBoundary,
+    id = "java/taint-trust-boundary",
+    severity = Severity::Medium,
+    cwe = Some("CWE-501"),
+    description = "Request-derived data is stored in the HTTP session without validation",
     language = Language::Java,
     fn check(_self, source, tree) {
         let spec = java_taint::java_taint_rule_specs()

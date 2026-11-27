@@ -15,6 +15,7 @@ pub mod go_taint;
 pub mod groovy;
 pub mod java;
 pub mod java_flow;
+pub mod java_primitives;
 pub mod java_taint;
 pub mod javascript;
 pub mod javascript_taint;
@@ -599,7 +600,10 @@ impl RuleRegistry {
                 java::NoUnsafeDeserialization,
                 java::NoSsrf,
                 java::NoPathTraversal,
-                java::NoWeakCrypto,
+                java_primitives::WeakCipher,
+                java_primitives::WeakHash,
+                java_primitives::CookieMissingSecure,
+                java_primitives::WeakRandom,
                 java::PqVulnerableCrypto,
                 java::NoHardcodedSecret,
                 java::NoXxe,
@@ -610,6 +614,7 @@ impl RuleRegistry {
                 java::TaintCommandInjection,
                 java::TaintSsrf,
                 java::TaintUnsafeDeserialization,
+                java::TaintTrustBoundary,
             ]
         );
         registry.register_opt_in(Box::new(java::HardcodedCryptoAlgorithm));

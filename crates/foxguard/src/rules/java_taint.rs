@@ -125,6 +125,7 @@ pub fn java_taint_rule_specs() -> Vec<(&'static str, TaintSpec)> {
             "java/taint-unsafe-deserialization",
             unsafe_deserialization_spec(),
         ),
+        ("java/taint-trust-boundary", trust_boundary_spec()),
     ]
 }
 
@@ -141,6 +142,11 @@ pub fn java_taint_sources() -> Vec<NodeMatcher> {
             "getParameterValues",
             "getHeader",
             "getHeaders",
+            "getParameterNames",
+            "getHeaderNames",
+            "getRequestURI",
+            "getRequestURL",
+            "getPathInfo",
             "getQueryString",
             "getInputStream",
             "getReader",
@@ -268,6 +274,26 @@ fn unsafe_deserialization_spec() -> TaintSpec {
             NodeMatcher::MethodName {
                 method: "load".into(),
                 description: "Yaml.load() with tainted data".into(),
+            },
+        ],
+        sanitizers: vec![],
+    }
+}
+
+/// Request data written into the HTTP session. The session is the server's
+/// trusted store: whatever lands in it is later read back as if the server had
+/// vetted it, so unvalidated request input crosses a trust boundary there.
+fn trust_boundary_spec() -> TaintSpec {
+    TaintSpec {
+        sources: java_taint_sources(),
+        sinks: vec![
+            NodeMatcher::Call {
+                canonical: "session.setAttribute".into(),
+                description: "HttpSession.setAttribute() with request-derived name or value".into(),
+            },
+            NodeMatcher::Call {
+                canonical: "session.putValue".into(),
+                description: "HttpSession.putValue() with request-derived name or value".into(),
             },
         ],
         sanitizers: vec![],
