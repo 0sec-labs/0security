@@ -422,20 +422,51 @@ tuned for. Every item here is verifiable in the code or the git log.
   intended follow-up. See `tests/fixtures/java_cross_file_helper/`.
 
 - **Java qualified constants and argument injection.** `Type.NAME` is a
-  constant only when `Type` is declared in the scanned file with a `static
-  final` field of that name and a safe initialiser, or when `Type` is a JDK or
-  well-known library type (`File.separator`, `StandardCharsets.UTF_8`,
-  `Integer.MAX_VALUE`, `TimeUnit.SECONDS`). A field of a class declared in
-  another file is unknown, because that class may declare it as a public static
-  that request data is assigned to (`exec(OtherState.USER_COMMAND)` is
-  reported). On the shared Java benchmark scorer this costs false positives
-  only (full score 0.808 to 0.762, FP 164 to 225, TP unchanged), the benchmark's
-  helper classes being separate files. A fixed non-shell program (`exec(new
-  String[] {"ls", arg})`) no longer suppresses the command rule, because the
-  argument can still be read as an option (`find -exec`, `tar
-  --checkpoint-action`, `git -c`, `curl -o`). It is reported as
+  constant only when `Type` resolves to a class whose declaration the scan can
+  read: one declared in the scanned file with a `static final` field of that
+  name and a safe initialiser, one of the project's other files (see the next
+  paragraph), or a JDK or well-known library type (`File.separator`,
+  `StandardCharsets.UTF_8`, `Integer.MAX_VALUE`, `TimeUnit.SECONDS`). Anything
+  else is unknown, because that class may declare it as a public static that
+  request data is assigned to (`exec(OtherState.USER_COMMAND)` is reported).
+  Before the cross-file reading below, this cost false positives only on the
+  shared Java benchmark scorer (full score 0.808 to 0.762, FP 164 to 225, TP
+  unchanged), the benchmark's helper classes being separate files. A fixed
+  non-shell program (`exec(new String[] {"ls", arg})`) no longer suppresses the
+  command rule, because the argument can still be read as an option (`find
+  -exec`, `tar --checkpoint-action`, `git -c`, `curl -o`). It is reported as
   `java/taint-argument-injection` (CWE-88, medium); the benchmark has no such
   flows, so the measured cost is zero.
+
+- **Java constants declared in other files.** The scanner indexes the types and
+  fields of every scanned Java file (`src/rules/java_index.rs`) and the flow
+  interpreter reads `Type.NAME`, a name imported with `import static` and a
+  name inherited from a scanned supertype from it. A field is a constant only
+  when all of these hold: the class resolves to exactly one scanned class from
+  the reading file (a single-type import, the same package, one wildcard import
+  that provides it, or a qualified name; a type declared in the reading file
+  wins; a name provided by two wildcard imports, a name that resolves to no
+  scanned class, and a name that an unreadable file may also declare are
+  unknown); the field is `static final`, an interface field or an enum constant
+  of an immutable value type (a string, a primitive or its box, `File`, `Path`;
+  arrays, collections and builders stay unknown); its name is not assigned,
+  incremented or compound-assigned anywhere in the scanned project (the check
+  is by simple name, so it errs toward unknown); exactly one declaration is
+  found through the supertypes; and its initialiser is safe when read in the
+  declaring file (with that file's imports), within a nesting depth of four and
+  with cycle detection. A non-final field, a blank final set in an initialiser
+  block, an initialiser that calls a project helper or reads the environment,
+  and a constant built from one of those are unknown. The initialiser uses the
+  same evaluator as same-file constants, so the trusted-JDK-call assumption of
+  the audit table below applies: `System.getProperty("user.dir") +
+  File.separator` is a constant. A scan that sees only some of the project's
+  files (a diff scan) resolves only what it sees; the rest stays unknown. On
+  the shared benchmark scorer, with the helper classes scanned alongside the
+  tests, path traversal goes from 0.235 to 0.709 (FP 88 to 24, TP unchanged)
+  and the full score from 0.762 to 0.811. The remaining false alarms there are
+  flows through reflection-built helper objects and a `getFD()` chain, not
+  constants. See `tests/fixtures/java_cross_file_constants_safe/` and
+  `..._vulnerable/`.
 
 ### Java flow veto: suppression audit
 
@@ -444,8 +475,9 @@ assumption it rests on and a concrete flow it would miss.
 
 | Heuristic | Sound? | Assumption kept / what is missed |
 |---|---|---|
-| UPPER_SNAKE names | Yes (fixed) | Only a `static final` field of an enclosing class, interface field, enum constant or by-name static import; parameters and any declared name shadow it. Missed: none known. A constant inherited from a superclass, or only statically imported with `*`, is unknown (extra alarm). |
+| UPPER_SNAKE names | Yes (fixed) | Only a `static final` field of an enclosing class, interface field, enum constant, name inherited from a scanned supertype, or by-name static import; parameters and any declared name shadow it. A static import of a scanned class is read from that class; one of a class outside the scan is assumed to be a library constant. Missed: a name statically imported from an unscanned class that a project module fills with request data. |
 | `Type.NAME` / library fields | Yes (fixed) | Library types are assumed to hold no request data in static fields. Missed: a library singleton someone mutated at startup from request data. |
+| `Type.NAME` of a class in another scanned file | Assumption | Constant when the class is unambiguous, the field is `static final` (or interface field or enum constant) of an immutable value type, the name is never assigned in the scan and the initialiser is safe (see above). Assumption: no reflection, no other language and no unscanned code writes the field, and the initialiser's trusted JDK calls return fixed values. Missed: `public static final String DIR = System.getProperty("app.dir")` where startup code sets `app.dir` from request data; an unscanned file that declares a same-named class in the same package. |
 | Same-file static helper body | Yes | The body is interpreted with the caller's argument values; unknown calls inside stay unknown. |
 | Unqualified / `this.` helper | Yes (fixed) | Resolved only to a private, static or final method (or one in a final class) of the innermost enclosing class that declares it; an overridable method may be replaced by a subclass in another file and is unknown. |
 | Helper in another file | Yes (default) | Unknown; extra alarms only. `TRUST_UNRESOLVED_PROJECT_HELPERS = true` restores the old assumption: missed `exec(Helper.currentInput())`. |
