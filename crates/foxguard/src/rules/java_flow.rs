@@ -104,10 +104,16 @@ const READS_EXTERNAL_INPUT: &[&str] = &[
 
 /// Whether `Type.method(safe args)` on a project type that is not declared in
 /// the scanned file (so its body cannot be read) is assumed to return a safe
-/// value. This is the one unsound assumption left in the helper shortcut; see
-/// `docs/precision.md`. Setting it to `false` trusts only JDK and well-known
-/// library types and treats every other helper as unknown.
-const TRUST_UNRESOLVED_PROJECT_HELPERS: bool = true;
+/// value because its arguments are safe.
+///
+/// `false` (the default) is sound: such a helper is unknown, because it may
+/// ignore its arguments and read request, thread or static state. The price is
+/// extra false alarms on code that routes constants through helper factories
+/// declared in other files; the later verification step is the place to prune
+/// them. `true` restores the old assumption (it recovers that precision but can
+/// hide a real finding behind e.g. `exec(Helper.currentInput())`). This is a
+/// build-time constant, not a user-facing option. See `docs/precision.md`.
+const TRUST_UNRESOLVED_PROJECT_HELPERS: bool = false;
 
 /// Accessors of per-request or per-thread state: what they return does not
 /// depend on their arguments.
@@ -1374,10 +1380,9 @@ impl<'a> Interp<'a> {
     /// Never for request, thread or security context holders, whose result does
     /// not depend on the arguments. Never for a class declared in this file: its
     /// body is interpreted instead (a helper that reads context then comes back
-    /// unknown). For a type whose body is not available the result is assumed
-    /// to be a function of its arguments, which is unsound for a project helper
-    /// that reads hidden state; [`TRUST_UNRESOLVED_PROJECT_HELPERS`] controls
-    /// whether that assumption extends beyond the JDK and known libraries.
+    /// unknown). A type whose body is not available is trusted only if it is a
+    /// JDK or well-known library type, unless
+    /// [`TRUST_UNRESOLVED_PROJECT_HELPERS`] is set.
     fn static_call_trusted(&self, receiver: Node<'a>) -> bool {
         let text = self.text(receiver);
         let head = text.split('.').next().unwrap_or("");
@@ -1715,12 +1720,15 @@ mod tests {
 
     #[test]
     fn static_helper_with_constant_arguments_is_safe_but_input_readers_are_not() {
+        // JDK and library helpers depend only on their arguments. (The old
+        // expectation also trusted `Helpers.name("k")` for an unknown project
+        // class; that assumption is gone, see the next test.)
         assert!(safe(
-            &method("String v = Helpers.name(\"k\"); sink(v);"),
+            &method("String v = java.util.Objects.toString(\"k\"); sink(v);"),
             false
         ));
         assert!(safe(
-            &method("String v = pkg.Helpers.make().name(\"k\"); sink(v);"),
+            &method("String v = java.util.Arrays.asList(\"k\").get(0); sink(v);"),
             false
         ));
         assert!(!safe(
@@ -1897,14 +1905,23 @@ mod tests {
     }
 
     #[test]
-    fn project_helper_declared_elsewhere_is_assumed_to_depend_only_on_its_arguments() {
-        // Documented residual assumption (docs/precision.md): the body is not
-        // available, so a call with only safe arguments is taken as safe.
+    fn project_helper_declared_elsewhere_is_unknown_even_with_safe_arguments() {
+        // The body is not available: it may ignore its arguments and read
+        // request, thread or static state, so nothing is proven.
+        for body in [
+            "sink(Elsewhere.make(\"k\"));",
+            "sink(Elsewhere.currentInput());",
+            "sink(pkg.Elsewhere.make(\"k\"));",
+            "String v = pkg.Helpers.make().name(\"k\"); sink(v);",
+            "sink(Elsewhere.make(param));",
+        ] {
+            assert!(!safe(&method(body), false), "{body}");
+        }
+        // JDK and well-known library calls are still a function of their arguments.
+        assert!(safe(&method("sink(String.valueOf(\"k\"));"), false));
         assert!(safe(
-            "class T { void m() { sink(Elsewhere.make(\"k\")); } }",
+            &method("sink(java.nio.file.Paths.get(\"/srv\", \"k\"));"),
             false
         ));
-        // Request data in an argument still blocks it.
-        assert!(!safe(&method("sink(Elsewhere.make(param));"), false));
     }
 }

@@ -212,3 +212,43 @@ fn upper_snake_parameters_are_request_data_but_static_final_constants_are_not() 
         "{f:?}"
     );
 }
+
+#[test]
+fn project_helper_in_another_file_is_not_assumed_safe_but_same_file_helper_is_read() {
+    let output = Command::new(env!("CARGO_BIN_EXE_foxguard"))
+        .args(["--config", "/dev/null", "-f", "json"])
+        .arg(fixture("java_cross_file_helper"))
+        .output()
+        .expect("failed to execute foxguard");
+    let report: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("scan output should be JSON");
+    let hits: Vec<(String, u64)> = report["findings"]
+        .as_array()
+        .expect("findings array")
+        .iter()
+        .filter(|f| f["rule_id"] == "java/no-command-injection")
+        .map(|f| {
+            (
+                f["file"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or_default()
+                    .to_string(),
+                f["line"].as_u64().unwrap_or(0),
+            )
+        })
+        .collect();
+    assert_eq!(
+        hits,
+        vec![("CrossFileHandler.java".to_string(), 5)],
+        "{report}"
+    );
+    let f = scan("safe_java_same_file_helper.java");
+    assert_eq!(
+        lines(&f, "java/no-command-injection"),
+        Vec::<u64>::new(),
+        "{f:?}"
+    );
+}
