@@ -1757,7 +1757,7 @@ fn typed_call_matches(
     if hints.iter().any(|h| lower.contains(h.as_str())) {
         return true;
     }
-    receiver_type(receiver, source).is_some_and(|ty| types.iter().any(|t| *t == ty))
+    receiver_type(receiver, source).is_some_and(|ty| types.contains(&ty))
 }
 
 /// Best-effort static type of a receiver expression: the declared type of a
@@ -1853,15 +1853,14 @@ fn declared_type_of(from: Node<'_>, name: &str, source: &str) -> Option<String> 
                         }
                     }
                 }
-                "resource" | "catch_formal_parameter" => {
+                "resource" | "catch_formal_parameter"
                     if child
                         .child_by_field_name("name")
-                        .is_some_and(|n| node_text(n, source) == name)
-                    {
-                        return child
-                            .child_by_field_name("type")
-                            .map(|t| type_final_segment(node_text(t, source)).to_string());
-                    }
+                        .is_some_and(|n| node_text(n, source) == name) =>
+                {
+                    return child
+                        .child_by_field_name("type")
+                        .map(|t| type_final_segment(node_text(t, source)).to_string());
                 }
                 _ => {}
             }
