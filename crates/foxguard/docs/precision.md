@@ -263,6 +263,16 @@ context to confirm. They are where most known false positives live.
 - `py/no-weak-crypto`, and `*/no-weak-crypto` family — flag `md5`, `sha1`,
   `DES`, `RC4`. False positive on legitimate non-security uses (content
   addressing, cache keys, Git-compatible hashing).
+  Java is the exception: `java/weak-hash` (CWE-328) and `java/no-weak-crypto`
+  (CWE-327) resolve a constant algorithm name (literal, `static final`
+  constant, single-assignment local, `+` concatenation) and report only when
+  it is broken. A name that is not a constant is not reported, and neither is
+  one read from configuration such as `props.getProperty("alg", "SHA-256")`:
+  the literal there is a fallback, not the algorithm in use.
+- `hygiene/java-weak-random` (CWE-330, low) — `new java.util.Random()` and
+  `Math.random()` outside test sources. Hygiene, not a vulnerability claim:
+  it is only a problem where the value guards something. Filter the
+  `hygiene/` namespace to drop it.
 
 Rationale: these rules answer "is a dangerous primitive used with
 non-constant input?" Without flow analysis we cannot answer the stronger

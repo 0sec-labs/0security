@@ -14,7 +14,7 @@ use yaml_serde::Value as YamlValue;
 
 const RESERVED_RULE_ID_NAMESPACES: &[&str] = &[
     "py", "js", "go", "java", "php", "ruby", "cs", "csharp", "swift", "kotlin", "rs", "rust",
-    "config", "manifest",
+    "config", "manifest", "hygiene",
 ];
 
 /// A compiled regex that prefers the fast `regex` crate but transparently falls

@@ -1444,6 +1444,7 @@ mod java {
             "java/no-ssrf",
             "java/no-path-traversal",
             "java/no-weak-crypto",
+            "java/weak-hash",
             "java/no-hardcoded-secret",
             "java/no-xxe",
             "java/spring-csrf-disabled",
