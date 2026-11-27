@@ -1,0 +1,20 @@
+{
+  "description": "Features that shipped free in a release and stay free. No file listed under a feature may call a license gate. See LICENSING.md. Adding an entry is cheap; removing or narrowing one is a public change to that promise and needs a changelog entry and a LICENSING.md edit in the same commit.",
+  "asOf": "v0.46.0",
+  "features": [
+    { "id": "scan", "since": "v0.42.0", "summary": "Scans and the CLI scan command", "paths": ["packages/cli/src/commands/scan.ts"] },
+    { "id": "fix", "since": "v0.42.0", "summary": "Fixes and fix pull requests", "paths": ["packages/cli/src/commands/fix.ts", "packages/cli/src/commands/fix-policy.ts", "packages/cli/src/commands/fix-sandbox.ts"] },
+    { "id": "findings-verify", "since": "v0.42.0", "summary": "Second-look verification of findings", "paths": ["packages/cli/src/commands/verify.ts"] },
+    { "id": "findings-upload", "since": "v0.42.0", "summary": "Findings upload client", "paths": ["packages/cli/src/commands/findings-upload.ts"] },
+    { "id": "sarif", "since": "v0.42.0", "summary": "SARIF export", "paths": ["packages/engine/src/report-formatters/sarif.ts"] },
+    { "id": "github-code-scanning", "since": "v0.42.0", "summary": "GitHub code scanning alerts", "paths": ["packages/cli/src/github-alerts.ts"] },
+    { "id": "sbom", "since": "v0.42.0", "summary": "SBOM generation and checks", "paths": ["packages/cli/src/commands/sbom.ts", "packages/cli/src/commands/sbom-check.ts", "packages/cli/src/commands/sbom-licenses.ts"] },
+    { "id": "threat-model", "since": "v0.42.0", "summary": "Threat model command", "paths": ["packages/cli/src/commands/threat-model.ts"] },
+    { "id": "code-insights", "since": "v0.42.0", "summary": "Bitbucket Code Insights reports", "paths": ["packages/cli/src/code-insights.ts"] },
+    { "id": "evidence-verify", "since": "v0.45.0", "summary": "Evidence bundle and signature verification", "paths": ["packages/cli/src/commands/evidence.ts", "packages/cli/src/commands/evidence-signature.ts"] },
+    { "id": "audit-verify", "since": "v0.45.0", "summary": "Audit log chain verification. The same file holds the proof export and retention flags, which are the only gates allowed in it.", "paths": ["packages/cli/src/commands/audit-log.ts"], "allowedGates": ["auditProofRefusal", "auditPruneRefusal"] },
+    { "id": "bitbucket-review", "since": "v0.45.0", "summary": "Bitbucket pull request review and webhook listener", "paths": ["packages/cli/src/bitbucket", "packages/cli/src/commands/sentinels-bitbucket.ts"] },
+    { "id": "jira-export", "since": "v0.46.0", "summary": "Jira export", "paths": ["packages/cli/src/jira"] },
+    { "id": "bitbucket-pipe", "since": "v0.46.0", "summary": "Bitbucket Pipelines pipe", "paths": ["ci/bitbucket-pipe/pipe.sh"] }
+  ]
+}

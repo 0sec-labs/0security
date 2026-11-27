@@ -583,7 +583,7 @@ The `enterprise/` folder in the same repository holds the paid features:
 - Finer roles, SCIM provisioning and SAML sign-in.
 - Signed compliance evidence bundles, a tamper-evident audit log and retention policies.
 
-That code is source-available under the 0security Enterprise License, not open source. You can read and modify it. Running it in production needs a license key. Development and testing need none. Features already in the open core will not move into `enterprise/`. See [LICENSING.md](https://github.com/0sec-labs/0security/blob/main/LICENSING.md).
+That code is source-available under the 0security Enterprise License, not open source. You can read and modify it. Running it in production needs a license key. Development and testing need none. Features already in the open core will not move into `enterprise/`. The features that shipped free are listed in [released-free-features.json](https://github.com/0sec-labs/0security/blob/main/scripts/released-free-features.json), and a check in CI fails if any of them starts to require a license. See [LICENSING.md](https://github.com/0sec-labs/0security/blob/main/LICENSING.md).
 
 A key is a signed string. 0 checks it on your machine and never contacts a server. Set it in the environment of the process that runs 0:
 
