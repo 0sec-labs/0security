@@ -258,3 +258,59 @@ fn project_helper_in_another_file_is_not_assumed_safe_but_same_file_helper_is_re
         "{f:?}"
     );
 }
+
+fn project_hits(dir: &str, rule: &str) -> Vec<(String, u64)> {
+    let output = Command::new(env!("CARGO_BIN_EXE_foxguard"))
+        .args(["--config", "/dev/null", "-f", "json"])
+        .arg(fixture(dir))
+        .output()
+        .expect("failed to execute foxguard");
+    let report: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("scan output should be JSON");
+    let mut hits: Vec<(String, u64)> = report["findings"]
+        .as_array()
+        .expect("findings array")
+        .iter()
+        .filter(|f| f["rule_id"] == rule)
+        .map(|f| {
+            (
+                f["file"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or_default()
+                    .to_string(),
+                f["line"].as_u64().unwrap_or(0),
+            )
+        })
+        .collect();
+    hits.sort();
+    hits
+}
+
+#[test]
+fn constants_declared_in_other_files_are_read_but_only_when_provably_fixed() {
+    // A `static final` String with a safe initialiser, an enum constant and an
+    // interface constant, all declared in other files, no longer make a path
+    // look unknown.
+    assert_eq!(
+        project_hits(
+            "java_cross_file_constants_safe",
+            "java/taint-path-traversal"
+        ),
+        Vec::<(String, u64)>::new()
+    );
+    // A non-final field that another class assigns request data to, a final
+    // read from the environment, a blank final set in an initialiser, a
+    // constant built from one of those, a class name defined in two packages
+    // and a class that is not in the scan all stay unknown.
+    let lines: Vec<u64> = project_hits(
+        "java_cross_file_constants_vulnerable",
+        "java/taint-path-traversal",
+    )
+    .into_iter()
+    .map(|(_, line)| line)
+    .collect();
+    assert_eq!(lines, vec![23, 24, 25, 26, 27, 28]);
+}
