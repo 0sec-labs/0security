@@ -4,7 +4,7 @@ export type SkillIconName =
   | "Globe" | "Cpu" | "Blocks" | "Lock" | "KeyRound" | "UserCheck" | "Cloud" | "Boxes" | "Package" | "Radar" | "Map"
   | "Bot" | "BotMessageSquare" | "BrainCircuit" | "Sparkles" | "ShieldAlert" | "MessageSquareWarning" | "Plug"
   | "FileText" | "Siren" | "ListChecks" | "Wrench" | "BadgeCheck" | "Workflow" | "GitCompareArrows" | "FileSearch"
-  | "ScanSearch" | "Layers" | "Files" | "Hammer" | "BookOpen";
+  | "ScanSearch" | "Layers" | "Files" | "Hammer" | "BookOpen" | "GitBranch";
 
 /** What a skill with no match shows. Never used by a family. */
 export const DEFAULT_SKILL_ICON: SkillIconName = "BookOpen";
@@ -52,6 +52,7 @@ export const SKILL_FAMILIES: readonly Family[] = [
   { icon: "FileSearch", ids: ["assumption-mining"], words: ["assumption", "invariant", "code review", "review"] },
   { icon: "ScanSearch", ids: ["scan"], words: ["scan", "scanner", "sast", "static analysis"] },
   { icon: "Layers", ids: ["seedless-depth-review"], words: ["depth", "seedless", "layers"] },
+  { icon: "GitBranch", ids: ["code-index"], words: ["code index", "callers", "callees", "routes", "sink"] },
   { icon: "Files", ids: ["variant-hunting"], words: ["variant", "similar", "sibling"] },
   { icon: "Hammer", ids: ["develop-this-app"], words: ["develop", "build", "implement", "feature"] },
 ];
