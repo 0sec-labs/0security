@@ -14,9 +14,10 @@ export function load(files) {
 }
 
 const fmt = (xs, f = (x) => x.toFixed(1)) => (xs.length ? `${f(mean(xs))} (${range(spread(xs), f)})` : "n/a");
+const statusCounts = (rs) => Object.entries(rs.reduce((m, r) => ({ ...m, [r.status.split(" ")[0]]: (m[r.status.split(" ")[0]] ?? 0) + 1 }), {})).map(([a, n]) => `${n} ${a}`).join(", ");
 const k = (n) => `${Math.round(n / 1000)}k`;
 
-/** Group by fixture then arm, keeping only runs that produced a report. Failed runs are counted, not scored. */
+/** Group by fixture then arm, keeping only runs that produced a report. Every run that wrote a report is scored whatever its status (partial, failed and budget_exhausted runs keep the findings they produced; statuses are shown); only runs with no report are left out. */
 export function group(runs) {
   const out = new Map();
   for (const r of runs) {
@@ -24,7 +25,7 @@ export function group(runs) {
     if (!out.has(key)) out.set(key, { fixture: r.fixture, arm: r.arm, all: [], ok: [] });
     const g = out.get(key);
     g.all.push(r);
-    if (r.status === "complete") g.ok.push(r);
+    if (!String(r.status).startsWith("no-report") && r.status !== "no-seed") g.ok.push(r);
   }
   return [...out.values()];
 }
@@ -33,11 +34,11 @@ export function render(runs, { plantedIds = {} } = {}) {
   const groups = group(runs);
   const fixtures = [...new Set(groups.map((g) => g.fixture))];
   const L = [];
-  L.push("| fixture | arm | runs ok/total | found per run | found mean (range) | loose found mean | false pos. per run | unmatched mean | turns | tokens | time (s) | index tool calls |", "|---|---|---|---|---|---|---|---|---|---|---|---|");
+  L.push("| fixture | arm | runs scored/total (statuses) | found per run | found mean (range) | loose found mean | false pos. per run | unmatched mean | turns | tokens | time (s) | index tool calls |", "|---|---|---|---|---|---|---|---|---|---|---|---|");
   for (const g of groups) {
     const ok = g.ok;
     const col = (f) => ok.map(f).filter((x) => x !== null && x !== undefined);
-    L.push(`| ${g.fixture} | ${g.arm} | ${ok.length}/${g.all.length} | ${col((r) => r.score.found).join(", ")} of ${ok[0]?.score.planted ?? "?"} | ${fmt(col((r) => r.score.found))} | ${fmt(col((r) => r.loose?.found ?? r.score.found))} | ${col((r) => r.score.falsePositives).join(", ")} | ${fmt(col((r) => r.score.unmatched.length))} | ${fmt(col((r) => r.turns), (x) => x.toFixed(0))} | ${fmt(col((r) => r.tokens), k)} | ${fmt(col((r) => r.seconds), (x) => x.toFixed(0))} | ${fmt(col((r) => r.indexToolCalls ?? 0))} |`);
+    L.push(`| ${g.fixture} | ${g.arm} | ${ok.length}/${g.all.length} (${statusCounts(g.all)}) | ${col((r) => r.score.found).join(", ")} of ${ok[0]?.score.planted ?? "?"} | ${fmt(col((r) => r.score.found))} | ${fmt(col((r) => r.loose?.found ?? r.score.found))} | ${col((r) => r.score.falsePositives).join(", ")} | ${fmt(col((r) => r.score.unmatched.length))} | ${fmt(col((r) => r.turns), (x) => x.toFixed(0))} | ${fmt(col((r) => r.tokens), k)} | ${fmt(col((r) => r.seconds), (x) => x.toFixed(0))} | ${fmt(col((r) => r.indexToolCalls ?? 0))} |`);
   }
   for (const fx of fixtures) {
     const gs = groups.filter((g) => g.fixture === fx);

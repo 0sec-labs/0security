@@ -1,0 +1,2070 @@
+{
+  "meta": {
+    "mode": "variants",
+    "date": "2026-11-27T01:22:08.712Z",
+    "requestedModel": "gpt-6-luna",
+    "providers": [
+      "chatgpt-codex"
+    ],
+    "models": [
+      "gpt-6-luna"
+    ],
+    "runs": 10,
+    "stoppedEarly": null,
+    "repeat": 5,
+    "arms": [
+      "variants",
+      "plain-scan"
+    ],
+    "budgetPerRun": 3,
+    "label": "hard"
+  },
+  "rows": [
+    {
+      "fixture": "variants-tenant",
+      "arm": "variants",
+      "runs": 5,
+      "complete": 5,
+      "planted": 8,
+      "found": [
+        3,
+        1,
+        1,
+        1,
+        1
+      ],
+      "recall": [
+        0.375,
+        0.125,
+        0.125,
+        0.125,
+        0.125
+      ],
+      "falsePositives": [
+        1,
+        0,
+        0,
+        0,
+        0
+      ],
+      "unmatched": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "authzFound": [],
+      "authzPlanted": null,
+      "tokens": [
+        55669,
+        45804,
+        63356,
+        46499,
+        55585
+      ],
+      "turns": [
+        4,
+        5,
+        6,
+        5,
+        6
+      ],
+      "seconds": [
+        35.195,
+        24.241,
+        33.155,
+        27.541,
+        37.772
+      ],
+      "costUsd": [
+        0.0030361800000000003,
+        0.00172616,
+        0.00315992,
+        0.0031602200000000005,
+        0.0022856200000000004
+      ],
+      "indexToolCalls": []
+    },
+    {
+      "fixture": "variants-tenant",
+      "arm": "plain-scan",
+      "runs": 5,
+      "complete": 5,
+      "planted": 8,
+      "found": [
+        7,
+        7,
+        7,
+        7,
+        8
+      ],
+      "recall": [
+        0.875,
+        0.875,
+        0.875,
+        0.875,
+        1
+      ],
+      "falsePositives": [
+        5,
+        2,
+        4,
+        2,
+        2
+      ],
+      "unmatched": [
+        6,
+        4,
+        5,
+        9,
+        3
+      ],
+      "authzFound": [
+        7,
+        7,
+        7,
+        7,
+        8
+      ],
+      "authzPlanted": 8,
+      "tokens": [
+        5095754,
+        5021902,
+        5995073,
+        6606991,
+        6531807
+      ],
+      "turns": [
+        184,
+        174,
+        222,
+        236,
+        202
+      ],
+      "seconds": [
+        1018.745,
+        1031.834,
+        1023.742,
+        1083.113,
+        1211.594
+      ],
+      "costUsd": [
+        0.21026836000000002,
+        0.22275612000000003,
+        0.24913706,
+        0.25917854,
+        0.27657926000000005
+      ],
+      "indexToolCalls": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    }
+  ],
+  "runs": [
+    {
+      "kind": "variants",
+      "fixture": "variants-tenant",
+      "arm": "variants",
+      "repeat": 1,
+      "status": "complete",
+      "seconds": 35.195,
+      "costUsd": 0.0030361800000000003,
+      "tokens": 55669,
+      "threads": 1,
+      "turns": 4,
+      "toolCalls": {
+        "load_skill": 1,
+        "bash": 2
+      },
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "rootCauseSource": "derived",
+      "skipped": 0,
+      "score": {
+        "planted": 8,
+        "found": 3,
+        "foundIds": [
+          "vt-contract-service",
+          "vt-quote-pdf",
+          "vt-graphql-subscription"
+        ],
+        "missedIds": [
+          "vt-reminder-job",
+          "vt-ws-ticket-subscribe",
+          "vt-import-product",
+          "vt-report-shipment",
+          "vt-payment-webhook"
+        ],
+        "recall": 0.375,
+        "findings": 4,
+        "falsePositives": 1,
+        "decoyHits": [
+          {
+            "finding": "Cross-tenant invoice void through route",
+            "decoy": "vt-decoy-invoice-void"
+          }
+        ],
+        "unmatched": [],
+        "nearMisses": []
+      },
+      "loose": {
+        "found": 3,
+        "foundIds": [
+          "vt-contract-service",
+          "vt-quote-pdf",
+          "vt-graphql-subscription"
+        ],
+        "falsePositives": 1
+      },
+      "findings": [
+        {
+          "title": "Cross-tenant invoice void through route",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/routes/invoices.ts",
+            "startLine": 31,
+            "endLine": 35
+          },
+          "description": "Unverified variant of sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c: Any signed-in user can read any tenant's invoice by id. GET /api/invoices/:id returned any tenant's invoice to any signed-in user because the route loaded the record with the unscoped invoiceRepo.findById(id) and never compared its orgId with the caller's. The fix scoped the lookup to the caller's o\n\nA search thread reported this site from the same root cause. Nobody has confirmed it. Run `findings verify` on it to confirm or reject it.\n\nAn admin or manager can supply another tenant's invoice ID to the void endpoint. The route loads by ID alone and changes the invoice status without verifying its organisation. The role check restricts the caller's role, not tenant ownership.\n\nSuggested fix: Use invoiceRepo.findForOrg(req.user!.orgId, req.params.id) in the void route, returning not found for records outside the caller's organisation.",
+          "variantOf": "sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c"
+        },
+        {
+          "title": "Cross-tenant contract access through service getter",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/services/contractService.ts",
+            "startLine": 10,
+            "endLine": 14
+          },
+          "description": "Unverified variant of sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c: Any signed-in user can read any tenant's invoice by id. GET /api/invoices/:id returned any tenant's invoice to any signed-in user because the route loaded the record with the unscoped invoiceRepo.findById(id) and never compared its orgId with the caller's. The fix scoped the lookup to the caller's o\n\nA search thread reported this site from the same root cause. Nobody has confirmed it. Run `findings verify` on it to confirm or reject it.\n\nA caller of contractService.get(id) can supply a contract ID and receive the contract without an organisation check. The service also exposes getForOrg(orgId, id), which scopes the lookup, but get itself performs an unscoped findById and returns the record.\n\nSuggested fix: Replace the unscoped getter with an organisation-scoped getter that requires orgId, or remove it and route callers through getForOrg.",
+          "variantOf": "sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c"
+        },
+        {
+          "title": "Cross-tenant subscription access through GraphQL",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/graphql/resolvers.ts",
+            "startLine": 26,
+            "endLine": 29
+          },
+          "description": "Unverified variant of sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c: Any signed-in user can read any tenant's invoice by id. GET /api/invoices/:id returned any tenant's invoice to any signed-in user because the route loaded the record with the unscoped invoiceRepo.findById(id) and never compared its orgId with the caller's. The fix scoped the lookup to the caller's o\n\nA search thread reported this site from the same root cause. Nobody has confirmed it. Run `findings verify` on it to confirm or reject it.\n\nA signed-in GraphQL caller supplies args.id to the subscription resolver. It loads the record with subscriptionRepo.findById and returns it without checking the subscription's orgId against ctx.user.orgId.\n\nSuggested fix: Scope the subscription lookup to ctx.user.orgId with the repository's organisation-scoped lookup, and return null when no matching record exists.",
+          "variantOf": "sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c"
+        },
+        {
+          "title": "Cross-tenant quote access through PDF endpoint",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/routes/quotes.ts",
+            "startLine": 23,
+            "endLine": 27
+          },
+          "description": "Unverified variant of sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c: Any signed-in user can read any tenant's invoice by id. GET /api/invoices/:id returned any tenant's invoice to any signed-in user because the route loaded the record with the unscoped invoiceRepo.findById(id) and never compared its orgId with the caller's. The fix scoped the lookup to the caller's o\n\nA search thread reported this site from the same root cause. Nobody has confirmed it. Run `findings verify` on it to confirm or reject it.\n\nAn authenticated caller supplies the quote ID in the route parameter. The PDF endpoint loads it with quoteRepo.findById and renders the quote's title, lines, total, validity date, and internal notes without checking that quote.orgId matches the caller's organisation. The customer lookup is scoped to the quote's organisation, but that does not authorize the caller to read the quote.\n\nSuggested fix: Use quoteRepo.findForOrg(req.user!.orgId, req.params.id) for the PDF route, returning the existing not-found response when it does not match.",
+          "variantOf": "sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c"
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "variants",
+      "fixture": "variants-tenant",
+      "arm": "variants",
+      "repeat": 2,
+      "status": "complete",
+      "seconds": 24.241,
+      "costUsd": 0.00172616,
+      "tokens": 45804,
+      "threads": 1,
+      "turns": 5,
+      "toolCalls": {
+        "load_skill": 1,
+        "bash": 3
+      },
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "rootCauseSource": "derived",
+      "skipped": 0,
+      "score": {
+        "planted": 8,
+        "found": 1,
+        "foundIds": [
+          "vt-quote-pdf"
+        ],
+        "missedIds": [
+          "vt-contract-service",
+          "vt-reminder-job",
+          "vt-graphql-subscription",
+          "vt-ws-ticket-subscribe",
+          "vt-import-product",
+          "vt-report-shipment",
+          "vt-payment-webhook"
+        ],
+        "recall": 0.125,
+        "findings": 1,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [],
+        "nearMisses": []
+      },
+      "loose": {
+        "found": 1,
+        "foundIds": [
+          "vt-quote-pdf"
+        ],
+        "falsePositives": 0
+      },
+      "findings": [
+        {
+          "title": "Quote PDF endpoint returns cross-tenant quote",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/routes/quotes.ts",
+            "startLine": 23,
+            "endLine": 27
+          },
+          "description": "Unverified variant of sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c: Any signed-in user can read any tenant's invoice by id. GET /api/invoices/:id returned any tenant's invoice to any signed-in user because the route loaded the record with the unscoped invoiceRepo.findById(id) and never compared its orgId with the caller's. The fix scoped the lookup to the caller's o\n\nA search thread reported this site from the same root cause. Nobody has confirmed it. Run `findings verify` on it to confirm or reject it.\n\nAn authenticated caller controls req.params.id. The PDF route loads the quote with quoteRepo.findById, does not compare quote.orgId with req.user.orgId, and returns rendered quote content. It also uses the quote's customerId to retrieve that quote's customer, so the caller can receive cross-tenant quote details.\n\nSuggested fix: Use quoteRepo.findForOrg(req.user!.orgId, req.params.id) in the PDF route and return the existing 404 response when it does not find a quote.",
+          "variantOf": "sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c"
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "variants",
+      "fixture": "variants-tenant",
+      "arm": "plain-scan",
+      "repeat": 1,
+      "status": "complete",
+      "seconds": 1018.745,
+      "costUsd": 0.21026836000000002,
+      "tokens": 5095754,
+      "threads": 21,
+      "turns": 184,
+      "toolCalls": {
+        "load_skill": 21,
+        "bash": 93,
+        "finding": 23,
+        "spawn_agent": 23
+      },
+      "indexToolCalls": 0,
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "coverage": "reviewed 181 of 181 entry points; 10 of 10 groups of other files reviewed",
+      "score": {
+        "planted": 8,
+        "found": 7,
+        "foundIds": [
+          "vt-contract-service",
+          "vt-quote-pdf",
+          "vt-reminder-job",
+          "vt-graphql-subscription",
+          "vt-ws-ticket-subscribe",
+          "vt-import-product",
+          "vt-report-shipment"
+        ],
+        "missedIds": [
+          "vt-payment-webhook"
+        ],
+        "recall": 0.875,
+        "findings": 20,
+        "falsePositives": 5,
+        "decoyHits": [
+          {
+            "finding": "a2274e09-7e5d-4954-aa71-f3c1560b49bc",
+            "decoy": "vt-decoy-credit-notes"
+          },
+          {
+            "finding": "422dad7e-4df4-4ff9-b6cd-d7a12b015266",
+            "decoy": "vt-decoy-invoice-void"
+          }
+        ],
+        "unmatched": [
+          {
+            "finding": "e43f072e-c209-4676-adde-229952cfece3",
+            "title": "Payment webhook authenticates timestamp but not event body",
+            "located": true
+          },
+          {
+            "finding": "6b33bff0-4cda-4f39-8a1a-a95bf1940a93",
+            "title": "Payment webhook signature does not authenticate event payload",
+            "located": true
+          },
+          {
+            "finding": "786bd355-8aeb-4854-a41d-912e34787508",
+            "title": "Payment webhook signature does not authenticate event payload",
+            "located": true
+          },
+          {
+            "finding": "1a685989-9edb-40a1-ac0b-0b18c397060c",
+            "title": "Login endpoint allows unlimited password guessing",
+            "located": true
+          },
+          {
+            "finding": "4cb013ee-806b-43b6-9281-76b6a186b64c",
+            "title": "Contact routes enforce tenant scoping; no issue found",
+            "located": true
+          },
+          {
+            "finding": "88ee8656-c84d-4f64-81ec-19d36cfc125c",
+            "title": "Internal API access control enforces shared service token",
+            "located": true
+          }
+        ],
+        "nearMisses": [
+          {
+            "finding": "6b33bff0-4cda-4f39-8a1a-a95bf1940a93",
+            "item": "vt-payment-webhook",
+            "distance": 0
+          }
+        ]
+      },
+      "authz": {
+        "planted": 8,
+        "found": 7
+      },
+      "loose": {
+        "found": 7,
+        "foundIds": [
+          "vt-contract-service",
+          "vt-quote-pdf",
+          "vt-reminder-job",
+          "vt-graphql-subscription",
+          "vt-ws-ticket-subscribe",
+          "vt-import-product",
+          "vt-report-shipment"
+        ],
+        "falsePositives": 2
+      },
+      "findings": [
+        {
+          "title": "Contract detail and summary routes omit tenant authorization",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/contracts.ts",
+            "startLine": 13,
+            "endLine": 18
+          },
+          "description": "Authenticated users can retrieve contracts from other organizations through GET /api/contracts/:id and GET /api/contracts/:id/summary. Both handlers call contractService.get(id), which performs a global findById lookup and checks only existence; unlike the list and PUT handlers, these paths do not scope lookup to req.user.orgId. The summary also exposes contract terms and value."
+        },
+        {
+          "title": "Cross-organization shipment cost report exposes financial data",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/services/reportService.ts",
+            "startLine": 4,
+            "endLine": 15
+          },
+          "description": "Authenticated users can request GET /api/reports/shipments/:id/costs and the route passes the supplied ID to shipmentCostReport without an org ID. The service calls shipmentRepo.get(id), not getForOrg, then returns destination, cost, billedAmount and margin. Any authenticated user who knows another organization's shipment ID can read its financial report. Other shipment accessors are organization-scoped, confirming the missing check on this path."
+        },
+        {
+          "title": "Cross-tenant credit note disclosure via ID lookup",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/creditNotes.ts",
+            "startLine": 12,
+            "endLine": 15
+          },
+          "description": "Any authenticated user can request GET /api/credit-notes/:id. The handler fetches by globally keyed ID before checking organization; it does call assertSameOrg, which properly denies cross-org records. No vulnerability here."
+        },
+        {
+          "title": "Cross-tenant shipment cost report exposes shipment financials",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/reports.ts",
+            "startLine": 10,
+            "endLine": 12
+          },
+          "description": "Any authenticated user can request GET /api/reports/shipments/:id/costs with another organization's shipment ID. The handler calls shipmentCostReport(id), which uses shipmentRepo.get(id) without org scoping and returns destination, carrier, cost, billedAmount, and margin. The sibling timeline endpoint scopes by req.user.orgId, demonstrating the missing boundary."
+        },
+        {
+          "title": "GraphQL subscription resolver exposes cross-organization subscription records",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/graphql/resolvers.ts",
+            "startLine": 26,
+            "endLine": 29
+          },
+          "description": "Any authenticated GraphQL caller can supply another organization's subscription ID. The subscription resolver calls the unscoped subscriptionRepo.findById and returns the full record; unlike customer/invoice resolvers, it never checks ctx.user.orgId. GraphQL projection can request sensitive fields including monthlyAmount and paymentMethodLast4. Trigger: POST /graphql with query `{ subscription(id: \"<other-org-id>\") { id orgId monthlyAmount paymentMethodLast4 } }` using any valid bearer token."
+        },
+        {
+          "title": "Invoice reminder job can send cross-tenant invoice details to attacker-chosen email",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/jobs/reminderJob.ts",
+            "startLine": 6,
+            "endLine": 14
+          },
+          "description": "An authenticated tenant user can POST /api/reminders with another tenant's invoiceId and an email address they control. The route enqueues the job with the caller's org, but invoiceReminder loads by global invoice ID and never compares invoice.orgId to job.orgId. It sends invoice number, line descriptions, total and currency to the supplied address and returns those details in the job result. The result endpoint is limited to caller's org, but the email is delivered directly to the caller-controlled destination."
+        },
+        {
+          "title": "Invoice void endpoint permits cross-organization IDOR",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/invoices.ts",
+            "startLine": 31,
+            "endLine": 35
+          },
+          "description": "An authenticated admin/manager can POST /api/invoices/:id/void using an invoice ID from another organization. The route retrieves by global ID with findById, then assertSameOrg rejects mismatched orgs; this is a proper control, so reconsider? assertSameOrg throws notFound. No bug."
+        },
+        {
+          "title": "Lead update permits cross-tenant orgId reassignment",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/leads.ts",
+            "startLine": 35,
+            "endLine": 38
+          },
+          "description": "An authenticated tenant user can PUT /api/leads/:id for a lead they own and supply orgId in the request body. pick() limits fields to FIELDS, which excludes orgId, so this is not exploitable; do not record."
+        },
+        {
+          "title": "Payment webhook authenticates timestamp but not event body",
+          "category": "broken-authentication",
+          "severity": "high",
+          "location": {
+            "path": "src/integrations/signature.ts",
+            "startLine": 11,
+            "endLine": 13
+          },
+          "description": "The payments webhook verifier calculates the expected HMAC over timestamp alone. paymentWebhook uses that verifier to authorize a request, then trusts the unsigned event, accountId, invoiceId, and reference fields from the request body. Anyone able to observe a valid provider timestamp/signature can replay it within the one-hour freshness window while changing the body, including selecting an invoice and marking it paid. The carrier verifier separately signs timestamp plus serialized body; the payment verifier should bind the body too."
+        },
+        {
+          "title": "Payment webhook signature does not authenticate event payload",
+          "category": "broken-authentication",
+          "severity": "high",
+          "location": {
+            "path": "src/integrations/paymentWebhook.ts",
+            "startLine": 9,
+            "endLine": 20
+          },
+          "description": "The unauthenticated /integrations/payments POST accepts a timestamp HMAC at line 11, but verifyTimestampSignature signs only the timestamp (signature.ts:11-14). The event, accountId, invoiceId and reference body values are not covered. Anyone able to reach the endpoint can submit an arbitrary fresh timestamp and compute its HMAC using the configured webhook secret only if known; however, since signature is HMAC-secret protected this does not itself allow arbitrary callers. The critical issue is replay within the configured 3600-second freshness window: a valid captured signature/timestamp can be reused with a modified body during that hour, allowing settlement of an attacker-chosen invoice identifier for the account bound to a captured payment signature."
+        },
+        {
+          "title": "Payment webhook signature does not authenticate event payload",
+          "category": "crypto-misuse",
+          "severity": "high",
+          "location": {
+            "path": "src/integrations/signature.ts",
+            "startLine": 11,
+            "endLine": 14
+          },
+          "description": "The payment webhook verifies an HMAC over only the timestamp (src/integrations/signature.ts:11-14), while trusting event, accountId, invoiceId, and reference from the unsigned JSON body. Anyone able to observe one valid webhook request can reuse its still-fresh timestamp/signature with a modified body to mark an arbitrary known invoice paid. This bypasses the intended provider authenticity/integrity check; there is no org binding between the resolved account and invoice."
+        },
+        {
+          "title": "Quote PDF endpoint exposes quotes across organizations",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/quotes.ts",
+            "startLine": 23,
+            "endLine": 27
+          },
+          "description": "GET /api/quotes/:id/pdf loads a quote globally by ID and returns its rendered contents without checking that the authenticated user's organization owns it. The ordinary quote detail route uses findForOrg, but the PDF route uses findById."
+        },
+        {
+          "title": "Realtime ticket subscriptions disclose cross-organization ticket data",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/ws/handlers.ts",
+            "startLine": 28,
+            "endLine": 32
+          },
+          "description": "Any authenticated user can POST /rt/sessions then POST /rt/sessions/:sid/messages with {\"type\":\"subscribe\",\"channel\":\"ticket:<id>\"}. The session ownership check only ensures the caller owns the realtime session. subscribeTicket then loads a ticket globally by id and does not compare its orgId or other access policy to session.user before joining the channel and returning the ticket and comments snapshot. This permits cross-organization reads, and the joined channel can receive later published events."
+        },
+        {
+          "title": "Reminder endpoint can email another tenant's invoice details",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/reminders.ts",
+            "startLine": 8,
+            "endLine": 14
+          },
+          "description": "An authenticated user can POST /api/reminders with another organization's invoiceId and an email address they control. The route enqueues the supplied values without verifying invoice ownership. The invoice-reminder job looks up the invoice globally by ID, then includes invoice number, due date, line descriptions, prices and total in an email sent to the supplied recipient. This bypasses job-level tenant scoping because the job itself is tagged with the caller's org, not the invoice's org."
+        },
+        {
+          "title": "Login endpoint allows unlimited password guessing",
+          "category": "missing-rate-limit",
+          "severity": "medium",
+          "location": {
+            "path": "src/routes/auth.ts",
+            "startLine": 9,
+            "endLine": 16
+          },
+          "description": "POST /api/auth/login accepts arbitrary credential attempts and performs scrypt password verification without any throttling, account lockout, or other attempt limit. A remote unauthenticated caller can repeatedly guess passwords for known email addresses; compute cost only slows each attempt and permits resource exhaustion."
+        },
+        {
+          "title": "Order import preview exposes cross-organization product data",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/services/importService.ts",
+            "startLine": 22,
+            "endLine": 23
+          },
+          "description": "An authenticated user can submit a CSV row containing a customer reference belonging to their organization and an arbitrary productId. The customer is scoped by organization, but resolveProduct calls findById without the user's orgId, and the preview response includes the product name, unit price, unit cost, and derived margin. This permits cross-tenant disclosure of product pricing/cost data for known product IDs. The route is mounted under /api with authenticate middleware."
+        },
+        {
+          "title": "Price-list creation and updates lack input validation",
+          "category": "missing-validation",
+          "severity": "medium",
+          "location": {
+            "path": "src/routes/priceLists.ts",
+            "startLine": 26,
+            "endLine": 30
+          },
+          "description": "Any authenticated organisation user can create or update price lists with arbitrary name/currency values. Creation only requires non-empty name; update has no field validation. No role restriction applies to POST or PUT. This permits members/support users to tamper with shared pricing configuration and malformed types can persist in the repository."
+        },
+        {
+          "title": "Product mutations permit members to alter confidential unit cost",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/routes/products.ts",
+            "startLine": 12,
+            "endLine": 14
+          },
+          "description": "The product POST/PUT routes are limited to admin and manager, but their allowed FIELDS include unitCost. This is intentional manager/admin authority; no issue. However GET endpoints expose unitCost to every authenticated org member (list and single product), which leaks internal cost/margin data to member/support roles. Any authenticated tenant user can retrieve it."
+        },
+        {
+          "title": "Contact routes enforce tenant scoping; no issue found",
+          "category": "other",
+          "severity": "info",
+          "location": {
+            "path": "src/routes/contacts.ts",
+            "startLine": 13,
+            "endLine": 18
+          },
+          "description": "Reviewed GET list/detail, POST, PUT, and DELETE paths. The router is mounted beneath app-level authenticate middleware; list/detail and update/delete obtain orgId from req.user and use findForOrg, which compares row.orgId to the authenticated org. POST selects only name/email/phone/title and assigns orgId/id server-side. Delete additionally requires admin or manager. No security finding identified for /contacts."
+        },
+        {
+          "title": "Internal API access control enforces shared service token",
+          "category": "broken-access-control",
+          "severity": "info",
+          "location": {
+            "path": "src/app.ts",
+            "startLine": 25,
+            "endLine": 25
+          },
+          "description": "Reviewed the /api/internal mount and its handlers. The mount applies serviceToken middleware before internalRouter. Middleware rejects absent or non-matching x-service-token with HTTP 401, using timing-safe equality. The configured token is TENANTLY_SERVICE_TOKEN or a process-random 24-byte fallback; no token disclosure or bypass found in this unit. Authenticated endpoints return invoice records or org usage; access is intentionally service-credential scoped, not end-user scoped."
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "variants",
+      "fixture": "variants-tenant",
+      "arm": "variants",
+      "repeat": 3,
+      "status": "complete",
+      "seconds": 33.155,
+      "costUsd": 0.00315992,
+      "tokens": 63356,
+      "threads": 1,
+      "turns": 6,
+      "toolCalls": {
+        "load_skill": 1,
+        "bash": 4
+      },
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "rootCauseSource": "derived",
+      "skipped": 0,
+      "score": {
+        "planted": 8,
+        "found": 1,
+        "foundIds": [
+          "vt-quote-pdf"
+        ],
+        "missedIds": [
+          "vt-contract-service",
+          "vt-reminder-job",
+          "vt-graphql-subscription",
+          "vt-ws-ticket-subscribe",
+          "vt-import-product",
+          "vt-report-shipment",
+          "vt-payment-webhook"
+        ],
+        "recall": 0.125,
+        "findings": 1,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [],
+        "nearMisses": []
+      },
+      "loose": {
+        "found": 1,
+        "foundIds": [
+          "vt-quote-pdf"
+        ],
+        "falsePositives": 0
+      },
+      "findings": [
+        {
+          "title": "Cross-tenant quote disclosure through PDF route",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/routes/quotes.ts",
+            "startLine": 23,
+            "endLine": 27
+          },
+          "description": "Unverified variant of sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c: Any signed-in user can read any tenant's invoice by id. GET /api/invoices/:id returned any tenant's invoice to any signed-in user because the route loaded the record with the unscoped invoiceRepo.findById(id) and never compared its orgId with the caller's. The fix scoped the lookup to the caller's o\n\nA search thread reported this site from the same root cause. Nobody has confirmed it. Run `findings verify` on it to confirm or reject it.\n\nAn authenticated caller supplies a quote ID in the path. The PDF route loads the quote with unscoped quoteRepo.findById and renders its title, line items, totals, validity date, and internal notes without checking that quote.orgId matches req.user!.orgId. It then looks up the customer using the quote's own orgId, so that lookup does not enforce caller ownership.\n\nSuggested fix: Load the quote with quoteRepo.findForOrg(req.user!.orgId, req.params.id) and preserve the existing not-found response when no quote is returned.",
+          "variantOf": "sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c"
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "variants",
+      "fixture": "variants-tenant",
+      "arm": "plain-scan",
+      "repeat": 2,
+      "status": "complete",
+      "seconds": 1031.834,
+      "costUsd": 0.22275612000000003,
+      "tokens": 5021902,
+      "threads": 20,
+      "turns": 174,
+      "toolCalls": {
+        "load_skill": 20,
+        "bash": 89,
+        "finding": 16,
+        "spawn_agent": 27
+      },
+      "indexToolCalls": 0,
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "coverage": "reviewed 181 of 181 entry points; 10 of 10 groups of other files reviewed",
+      "score": {
+        "planted": 8,
+        "found": 7,
+        "foundIds": [
+          "vt-contract-service",
+          "vt-quote-pdf",
+          "vt-reminder-job",
+          "vt-graphql-subscription",
+          "vt-ws-ticket-subscribe",
+          "vt-import-product",
+          "vt-report-shipment"
+        ],
+        "missedIds": [
+          "vt-payment-webhook"
+        ],
+        "recall": 0.875,
+        "findings": 17,
+        "falsePositives": 2,
+        "decoyHits": [],
+        "unmatched": [
+          {
+            "finding": "162a129f-a6eb-4277-ae0d-e20ac369a0ff",
+            "title": "Payment webhook accepts body fields not covered by signature",
+            "located": true
+          },
+          {
+            "finding": "fa9a5b78-3140-40b9-a597-26db89cd310d",
+            "title": "Payment webhook signature authenticates timestamp but not payment payload",
+            "located": true
+          },
+          {
+            "finding": "905d2027-dc30-4830-ad92-e3b5d4f08249",
+            "title": "Shared seed password grants cross-tenant account access",
+            "located": true
+          },
+          {
+            "finding": "458b88b2-00a8-41e7-9f78-2192d92a48da",
+            "title": "Contract renewal endpoint accepts foreign organization contract IDs",
+            "located": true
+          }
+        ],
+        "nearMisses": [
+          {
+            "finding": "162a129f-a6eb-4277-ae0d-e20ac369a0ff",
+            "item": "vt-payment-webhook",
+            "distance": 0
+          }
+        ]
+      },
+      "authz": {
+        "planted": 8,
+        "found": 7
+      },
+      "loose": {
+        "found": 7,
+        "foundIds": [
+          "vt-contract-service",
+          "vt-quote-pdf",
+          "vt-reminder-job",
+          "vt-graphql-subscription",
+          "vt-ws-ticket-subscribe",
+          "vt-import-product",
+          "vt-report-shipment"
+        ],
+        "falsePositives": 0
+      },
+      "findings": [
+        {
+          "title": "Contract read endpoints allow cross-organization access",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/services/contractService.ts",
+            "startLine": 10,
+            "endLine": 14
+          },
+          "description": "The contract detail and summary routes call `contractService.get` with a caller-controlled ID. This method uses unscoped `contractRepo.findById` and returns the full contract, including terms and customer details. Any authenticated user who knows another organization's contract ID can read it; the PUT route correctly uses `getForOrg`, showing the missing check is specific to reads."
+        },
+        {
+          "title": "Cross-organization quote disclosure via PDF route",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/quotes.ts",
+            "startLine": 23,
+            "endLine": 27
+          },
+          "description": "An authenticated user from any organization can request GET /api/quotes/:id/pdf with another organization's quote ID. Unlike GET /:id, this handler uses quoteRepo.findById without scoping to req.user.orgId, then returns rendered quote contents including line items, total, internalNotes, validity, and customer name. The global authenticate middleware only establishes the caller's identity; it does not enforce organization ownership."
+        },
+        {
+          "title": "Cross-tenant contract reads and renewal job enqueue",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/contracts.ts",
+            "startLine": 13,
+            "endLine": 18
+          },
+          "description": "Any authenticated user can request GET /api/contracts/:id or /summary for a contract belonging to another organization: these handlers call contractService.get(id), which uses findById without comparing req.user.orgId. The renewal-notice handler also accepts an arbitrary contract id and enqueues a job using the caller's org without checking contract ownership. Cross-org contract data disclosure and unauthorized renewal-job side effects are reachable with a valid bearer token."
+        },
+        {
+          "title": "Deal updates can reassign records across organisations",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/deals.ts",
+            "startLine": 37,
+            "endLine": 39
+          },
+          "description": "An authenticated user can PUT an in-organization deal while supplying a different customerId. More importantly, pick permits updating only listed fields, but spread preserves orgId from record; so no cross-org via orgId. However customerId can point to another org's customer, creating a cross-tenant relationship and potentially exposing/misassociating CRM data. No validation verifies customerId belongs to caller's org."
+        },
+        {
+          "title": "GraphQL subscription lookup discloses cross-organization billing data",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/graphql/resolvers.ts",
+            "startLine": 26,
+            "endLine": 29
+          },
+          "description": "An authenticated user can query another tenant's subscription by guessing or learning its ID. The subscription resolver uses subscriptionRepo.findById(args.id) without comparing the record's orgId to ctx.user.orgId, and the executor projects any requested fields including monthlyAmount and paymentMethodLast4. The route is behind authenticate, but authentication does not enforce tenant ownership."
+        },
+        {
+          "title": "Invoice reminder accepts cross-organization invoice IDs",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/reminders.ts",
+            "startLine": 8,
+            "endLine": 14
+          },
+          "description": "Any authenticated user can POST an invoiceId belonging to another organization and choose `to`. The route enqueues the reminder without checking invoice ownership; the registered job resolves the invoice globally and sends invoice number, due date, line descriptions/prices, total, and currency to the supplied recipient. This enables cross-tenant invoice data disclosure and unauthorized email delivery."
+        },
+        {
+          "title": "Invoice reminder job reads invoices across organizations",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/jobs/reminderJob.ts",
+            "startLine": 6,
+            "endLine": 14
+          },
+          "description": "An authenticated caller can enqueue an invoice-reminder job with an invoiceId from another organization. invoiceReminder resolves that ID with invoiceRepo.findById without comparing invoice.orgId to job.orgId, then sends invoice details to the caller-supplied recipient and returns the invoice number, line descriptions, total, and currency as job.result. The reminder route scopes retrieval only to the job's organization, which is the requesting user's organization, so the caller can retrieve that result through GET /api/reminders/jobs/:jobId."
+        },
+        {
+          "title": "Order import preview exposes cross-organization product pricing and cost",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/services/importService.ts",
+            "startLine": 33,
+            "endLine": 46
+          },
+          "description": "Any authenticated tenant user can submit a CSV row containing another organization's product ID to POST /api/imports/orders/preview. previewOrderImport scopes the customer lookup to user.orgId but resolves product with productRepo.findById(ref), which performs a global ID lookup. The response includes product name, unitPrice, unitCost and computed margin, exposing another tenant's commercially sensitive catalog data."
+        },
+        {
+          "title": "Payment webhook accepts body fields not covered by signature",
+          "category": "broken-authentication",
+          "severity": "high",
+          "location": {
+            "path": "src/integrations/paymentWebhook.ts",
+            "startLine": 11,
+            "endLine": 20
+          },
+          "description": "The payment webhook authenticates only the timestamp, not the request body. Anyone able to obtain/capture a valid x-pay-timestamp/x-pay-signature pair within the one-hour tolerance can replay that pair with a modified body, selecting any known payments account and invoice ID. The handler then marks that invoice paid without checking that it belongs to the selected account's org. This enables forged settlement state across tenants; source-verified, no runtime test performed."
+        },
+        {
+          "title": "Payment webhook signature authenticates timestamp but not payment payload",
+          "category": "crypto-misuse",
+          "severity": "high",
+          "location": {
+            "path": "src/integrations/signature.ts",
+            "startLine": 10,
+            "endLine": 14
+          },
+          "description": "The payment webhook accepts a signature computed as HMAC(webhookSecret, timestamp), while its request body (event, accountId, invoiceId, reference) is not included in the MAC. A party able to capture a valid webhook timestamp/signature can replay that pair within the 3600-second tolerance with a modified body, select a known payment account and invoice, and cause the invoice to be marked paid with an arbitrary reference. The carrier webhook correctly signs timestamp plus JSON body, highlighting the missing binding here."
+        },
+        {
+          "title": "Realtime ticket subscription leaks cross-tenant ticket data",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/ws/handlers.ts",
+            "startLine": 28,
+            "endLine": 32
+          },
+          "description": "Any authenticated user can POST /rt/sessions/:sid/messages with {type:\"subscribe\",channel:\"ticket:<id>\"} for any existing ticket ID. subscribeTicket uses ticketRepo.findById without checking ticket.orgId or caller membership, then returns the ticket and all comments in the session snapshot and joins the channel, allowing ongoing comment updates too. The bridge's session ownership check only proves the caller owns that session, not that they may read the ticket."
+        },
+        {
+          "title": "Shared seed password grants cross-tenant account access",
+          "category": "broken-authentication",
+          "severity": "high",
+          "location": {
+            "path": "src/seed.ts",
+            "startLine": 25,
+            "endLine": 30
+          },
+          "description": "On app startup, seedDemoData assigns one password to all three seeded users, using TENANTLY_SEED_PASSWORD verbatim when configured. The public /api/auth/login route accepts those email/password pairs and returns signed tokens. Anyone who knows or obtains the configured seed password can authenticate as either tenant's seeded users, including org_a admin Alice; without the env var, startup generates an unpredictable shared password, so the exploitability depends on deployment configuration or exposure."
+        },
+        {
+          "title": "Shipment cost report returns shipment financial data without organization check",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/services/reportService.ts",
+            "startLine": 4,
+            "endLine": 15
+          },
+          "description": "The authenticated shipment cost route passes only the caller-supplied shipment ID to `shipmentCostReport`, which uses an unscoped `shipmentRepo.get`. Any authenticated user who learns another organization's shipment ID can retrieve its destination, carrier, cost, billed amount, and margin. The sibling timeline and carrier reports are org-scoped, but this cost report is not."
+        },
+        {
+          "title": "Contract renewal endpoint accepts foreign organization contract IDs",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/routes/contracts.ts",
+            "startLine": 26,
+            "endLine": 28
+          },
+          "description": "Any authenticated organization member can enqueue a renewal job using another organization's contract ID. The route takes req.params.id without calling getForOrg or otherwise checking ownership. The job handler currently checks job.orgId against the contract orgId and will fail the foreign job, so the code does not show cross-tenant contract action succeeding. The route still allows unauthorized job creation and job/error processing against a foreign ID; do not infer notification or data disclosure from this path."
+        },
+        {
+          "title": "Cross-organization product disclosure in order import preview",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/services/importService.ts",
+            "startLine": 22,
+            "endLine": 24
+          },
+          "description": "An authenticated caller can submit a CSV row containing a customer ID from their own organization and a product ID belonging to another organization. `previewOrderImport` scopes customer lookup to `user.orgId` but resolves the product with `productRepo.findById(ref)` and never checks the product's `orgId`. The returned preview includes the product name, unit price, unit cost, and calculated margin, exposing another organization's product and cost data. The route is mounted under `/api` behind `authenticate`; no role restriction is applied."
+        },
+        {
+          "title": "Purchase-order updates permit non-admin users despite delete role gate",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/routes/purchaseOrders.ts",
+            "startLine": 37,
+            "endLine": 39
+          },
+          "description": "Any authenticated tenant user can reach PUT /api/purchase-orders/:id. The route scopes lookup to req.user.orgId, but has no role check before saving arbitrary allowed fields including amount and status. This permits members/support users to alter purchase-order financial/approval state within their organization. Add an appropriate role authorization before mutation; tenant lookup itself prevents cross-org access."
+        },
+        {
+          "title": "Shipment cost report exposes cross-organization shipment data",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/routes/reports.ts",
+            "startLine": 10,
+            "endLine": 12
+          },
+          "description": "Authenticated users can request GET /api/reports/shipments/:id/costs. Unlike the timeline endpoint, shipmentCostReport calls shipmentRepo.get(shipmentId) without checking req.user.orgId. It returns destination, orderRef, carrier, cost, billed amount and margin for any known shipment ID, including another organization’s."
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "variants",
+      "fixture": "variants-tenant",
+      "arm": "variants",
+      "repeat": 4,
+      "status": "complete",
+      "seconds": 27.541,
+      "costUsd": 0.0031602200000000005,
+      "tokens": 46499,
+      "threads": 1,
+      "turns": 5,
+      "toolCalls": {
+        "load_skill": 1,
+        "bash": 3
+      },
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "rootCauseSource": "derived",
+      "skipped": 0,
+      "score": {
+        "planted": 8,
+        "found": 1,
+        "foundIds": [
+          "vt-quote-pdf"
+        ],
+        "missedIds": [
+          "vt-contract-service",
+          "vt-reminder-job",
+          "vt-graphql-subscription",
+          "vt-ws-ticket-subscribe",
+          "vt-import-product",
+          "vt-report-shipment",
+          "vt-payment-webhook"
+        ],
+        "recall": 0.125,
+        "findings": 1,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [],
+        "nearMisses": []
+      },
+      "loose": {
+        "found": 1,
+        "foundIds": [
+          "vt-quote-pdf"
+        ],
+        "falsePositives": 0
+      },
+      "findings": [
+        {
+          "title": "Cross-tenant quote disclosure through PDF route",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/routes/quotes.ts",
+            "startLine": 23,
+            "endLine": 27
+          },
+          "description": "Unverified variant of sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c: Any signed-in user can read any tenant's invoice by id. GET /api/invoices/:id returned any tenant's invoice to any signed-in user because the route loaded the record with the unscoped invoiceRepo.findById(id) and never compared its orgId with the caller's. The fix scoped the lookup to the caller's o\n\nA search thread reported this site from the same root cause. Nobody has confirmed it. Run `findings verify` on it to confirm or reject it.\n\nAn authenticated caller controls :id in GET /api/quotes/:id/pdf. The route loads the quote with quoteRepo.findById(req.params.id) and renders its title, lines, total, validity date, and internal notes without checking quote.orgId against req.user.orgId. The subsequent customer lookup uses quote.orgId, not the caller's organization, so it does not provide authorization.\n\nSuggested fix: Use quoteRepo.findForOrg(req.user!.orgId, req.params.id), returning 404 when no quote is found, before rendering.",
+          "variantOf": "sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c"
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "variants",
+      "fixture": "variants-tenant",
+      "arm": "plain-scan",
+      "repeat": 3,
+      "status": "complete",
+      "seconds": 1023.742,
+      "costUsd": 0.24913706,
+      "tokens": 5995073,
+      "threads": 22,
+      "turns": 222,
+      "toolCalls": {
+        "load_skill": 22,
+        "bash": 100,
+        "finding": 25,
+        "spawn_agent": 46,
+        "list_conversations": 1
+      },
+      "indexToolCalls": 0,
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "coverage": "reviewed 181 of 181 entry points; 10 of 10 groups of other files reviewed",
+      "score": {
+        "planted": 8,
+        "found": 7,
+        "foundIds": [
+          "vt-contract-service",
+          "vt-quote-pdf",
+          "vt-reminder-job",
+          "vt-graphql-subscription",
+          "vt-ws-ticket-subscribe",
+          "vt-import-product",
+          "vt-report-shipment"
+        ],
+        "missedIds": [
+          "vt-payment-webhook"
+        ],
+        "recall": 0.875,
+        "findings": 19,
+        "falsePositives": 4,
+        "decoyHits": [],
+        "unmatched": [
+          {
+            "finding": "f9500cb0-e647-4988-8190-177b792917c4",
+            "title": "Payment webhook authenticates timestamp but not event body",
+            "located": true
+          },
+          {
+            "finding": "ccb006bf-035c-481e-8ece-22d3b43143a3",
+            "title": "Payment webhook signature does not authenticate event body",
+            "located": true
+          },
+          {
+            "finding": "abba3dda-5712-4d79-8e28-4df26ce160c9",
+            "title": "Carrier webhook signature does not bind request body bytes",
+            "located": false
+          },
+          {
+            "finding": "70bc308f-d152-41d9-b6c6-2755522e2c8a",
+            "title": "Invoice line multiplication accepts finite operands whose total overflows",
+            "located": true
+          },
+          {
+            "finding": "ace0c140-c7fa-4324-a2b2-6db59ab28823",
+            "title": "No confirmed issue in purchase-order routes",
+            "located": false
+          }
+        ],
+        "nearMisses": [
+          {
+            "finding": "ccb006bf-035c-481e-8ece-22d3b43143a3",
+            "item": "vt-payment-webhook",
+            "distance": 0
+          }
+        ]
+      },
+      "authz": {
+        "planted": 8,
+        "found": 7
+      },
+      "loose": {
+        "found": 7,
+        "foundIds": [
+          "vt-contract-service",
+          "vt-quote-pdf",
+          "vt-reminder-job",
+          "vt-graphql-subscription",
+          "vt-ws-ticket-subscribe",
+          "vt-import-product",
+          "vt-report-shipment"
+        ],
+        "falsePositives": 0
+      },
+      "findings": [
+        {
+          "title": "Shipment cost report leaks cross-organization shipment data",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/reports.ts",
+            "startLine": 10,
+            "endLine": 12
+          },
+          "description": "An authenticated user can request GET /api/reports/shipments/:id/costs for any shipment ID. Unlike the timeline handler, the route does not pass req.user.orgId; shipmentCostReport calls shipmentRepo.get(id) without an organization constraint and returns destination, carrier, costs, billed amount, and margin. A user in one tenant can therefore read another tenant's shipment financial and destination data by guessing or obtaining its ID."
+        },
+        {
+          "title": "Contract retrieval service returns records without tenant authorization",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/services/contractService.ts",
+            "startLine": 10,
+            "endLine": 14
+          },
+          "description": "`contractService.get(id)` retrieves a contract globally with `findById`. Its callers in the contracts router use it for GET /:id and GET /:id/summary, both mounted under authenticated /api routes but without an organization check. An authenticated user who knows another organization's contract ID can read contract fields, including terms, through the detail route; the summary also exposes title, customerId, value, status, and end date."
+        },
+        {
+          "title": "Cross-tenant contract disclosure via ID-only reads",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/contracts.ts",
+            "startLine": 13,
+            "endLine": 14
+          },
+          "description": "Authenticated callers can request GET /contracts/:id and GET /contracts/:id/summary with any contract ID. Both call contractService.get(id), which uses findById without comparing orgId to req.user.orgId. This returns the full contract, including terms, customerId and value, across organization boundaries. The PUT route uses getForOrg and is not affected."
+        },
+        {
+          "title": "Cross-tenant invoice reminder email via unscoped invoice lookup",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/reminders.ts",
+            "startLine": 8,
+            "endLine": 14
+          },
+          "description": "Any authenticated user can POST /api/reminders with another organization's invoiceId and an attacker-controlled recipient address. The route validates only string/email shape, then enqueues the job with the caller org. invoiceReminder finds the invoice globally by ID and emails its customer name, invoice line descriptions, amounts, total, currency, and due date to the supplied address without verifying invoice.orgId matches job.orgId. This enables cross-tenant invoice data disclosure by email."
+        },
+        {
+          "title": "GraphQL subscription resolver exposes cross-tenant records",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/graphql/resolvers.ts",
+            "startLine": 26,
+            "endLine": 28
+          },
+          "description": "Any authenticated user can query a subscription by ID. The resolver calls subscriptionRepo.findById(args.id) without checking the record's orgId against ctx.user.orgId, then the GraphQL projector returns selected fields (or all fields when selection is omitted). Subscription records include customerId, monthlyAmount and paymentMethodLast4. An attacker who obtains another tenant's subscription ID can read its data via POST /graphql."
+        },
+        {
+          "title": "Payment webhook authenticates timestamp but not event body",
+          "category": "broken-authentication",
+          "severity": "high",
+          "location": {
+            "path": "src/integrations/signature.ts",
+            "startLine": 10,
+            "endLine": 13
+          },
+          "description": "Payment webhook signatures are HMACs of the timestamp alone, not the request body. Anyone able to observe or capture a valid signed delivery within the configured 3600-second tolerance can reuse its timestamp/signature while changing event, accountId, invoiceId or reference. The payment handler then marks the chosen invoice paid based on those unsigned fields (paymentWebhook.ts:13-20). This can forge payment settlement state; no live reproduction was run."
+        },
+        {
+          "title": "Payment webhook signature does not authenticate event body",
+          "category": "broken-authentication",
+          "severity": "high",
+          "location": {
+            "path": "src/integrations/paymentWebhook.ts",
+            "startLine": 13,
+            "endLine": 20
+          },
+          "description": "The unauthenticated POST /integrations/payments/ endpoint verifies an HMAC over only x-pay-timestamp (signature.ts:10-13), then trusts event/accountId/invoiceId/reference from req.body (paymentWebhook.ts:13-20). Anyone able to capture a valid provider timestamp/signature can alter the body during the one-hour freshness window and submit payment.settled for an arbitrary invoice; the webhook then sets it paid without checking amount, currency, or that the invoice org matches the integration account. This permits forged settlement and can cross tenant boundaries if a captured valid signature is available. No evidence that the signature itself is exposed in this code; exploitation prerequisite is access to a valid signed delivery."
+        },
+        {
+          "title": "Quote PDF endpoint bypasses organization isolation",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/quotes.ts",
+            "startLine": 23,
+            "endLine": 27
+          },
+          "description": "An authenticated user can request GET /api/quotes/:id/pdf with another organization's quote ID. Unlike GET /:id, this handler uses quoteRepo.findById rather than findForOrg and does not compare quote.orgId with req.user.orgId. It then returns the quote's title, line items, prices, total, validity, internalNotes, and associated customer name as text."
+        },
+        {
+          "title": "Realtime ticket subscription leaks cross-organization tickets",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/ws/handlers.ts",
+            "startLine": 28,
+            "endLine": 32
+          },
+          "description": "Any authenticated user who opens a realtime session can subscribe to `ticket:<id>` for a ticket in another organization. `subscribeTicket` retrieves the ticket with `findById` rather than checking `session.user.orgId`, then queues the full ticket and its comments in the session snapshot. Trigger: POST /rt/sessions, then POST /rt/sessions/:sid/messages with {\"type\":\"subscribe\",\"channel\":\"ticket:<other-org-ticket-id>\"}, then GET /rt/sessions/:sid/events. This bypasses the organization-scoped checks used by ticketService."
+        },
+        {
+          "title": "Shipment cost report fetches shipments without organization scoping",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/services/reportService.ts",
+            "startLine": 4,
+            "endLine": 6
+          },
+          "description": "The shipment cost report accepts a shipment ID and performs a global `shipmentRepo.get` lookup. Its HTTP caller, GET /api/reports/shipments/:id/costs, is behind authentication but passes only the path ID and never checks the authenticated user's organization. An authenticated caller who knows another organization's shipment ID can retrieve its order reference, carrier, destination, cost, billed amount, and margin."
+        },
+        {
+          "title": "API key and campaign write access lacks role authorization",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/routes/apiKeys.ts",
+            "startLine": 41,
+            "endLine": 50
+          },
+          "description": "Any authenticated organization member can create or update API-key records and create or update campaigns. The API is mounted behind authenticate, but POST and PUT handlers do not enforce an allowed role. DELETE explicitly calls requireRole with all listed roles, while these write handlers have no equivalent guard; a member can change operational records including API key metadata/scopes."
+        },
+        {
+          "title": "Authenticated non-admins can create or alter price lists",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/routes/priceLists.ts",
+            "startLine": 26,
+            "endLine": 29
+          },
+          "description": "Any authenticated user in an organization, including member or support, can POST a price list or PUT an existing same-organization price list. These routes omit requireRole while DELETE explicitly requires admin; all writes use req.user.orgId-scoped data but no role gate. This permits lower-privilege users to tamper with organization pricing data."
+        },
+        {
+          "title": "Carrier webhook signature does not bind request body bytes",
+          "category": "broken-authentication",
+          "severity": "medium",
+          "description": "Carrier webhook verifies an HMAC over timestamp + JSON.stringify(req.body), rather than the raw HTTP body bytes. JSON parsing and reserialization can alter representation; this does not establish that the signed bytes are the exact delivered payload. However, exploitation depends on provider signing convention and requires knowing the shared secret; no bypass was demonstrated. Route maps authenticated carrier account to its org and scopes shipment lookup correctly."
+        },
+        {
+          "title": "Customer records can be created and edited by any tenant member",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/routes/customers.ts",
+            "startLine": 16,
+            "endLine": 20
+          },
+          "description": "The authenticated /api/customer POST and PUT handlers have no role check. Any account in an organization, including member/support roles, can create customers or alter existing customer names, email addresses, and billing addresses. The route-level app middleware establishes authentication, and findForOrg restricts edits to the caller's org, but neither enforces a role for these writes. This permits lower-privilege users to tamper with tenant customer records."
+        },
+        {
+          "title": "Invoice line multiplication accepts finite operands whose total overflows",
+          "category": "integer-overflow",
+          "severity": "medium",
+          "location": {
+            "path": "src/services/invoiceService.ts",
+            "startLine": 11,
+            "endLine": 14
+          },
+          "description": "An authenticated user can POST /api/invoices with a line whose qty and unitPrice are individually finite but whose product overflows JavaScript Number, for example qty=1e308 and unitPrice=1e308. readLines accepts both operands, then create reduces their product into total without checking the result. The invoice is stored with Infinity; JSON serialization emits null for that total, corrupting the recorded invoice amount and any downstream billing logic that consumes it."
+        },
+        {
+          "title": "Order import preview resolves products across tenant boundaries",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/services/importService.ts",
+            "startLine": 22,
+            "endLine": 23
+          },
+          "description": "An authenticated user can submit a productId belonging to another organization in POST /imports/orders/preview. previewOrderImport scopes customer lookup by user.orgId but resolveProduct calls productRepo.findById, which returns any tenant's product. The response includes product name, unitPrice and unitCost, disclosing cross-tenant catalog and cost data. The route is behind authenticate in app.ts."
+        },
+        {
+          "title": "Reminder job accepts invoice IDs from other organizations",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/jobs/reminderJob.ts",
+            "startLine": 6,
+            "endLine": 14
+          },
+          "description": "Any authenticated user can enqueue a reminder with another organization's invoice ID. The route stores the caller's orgId on the job but does not scope or authorize invoiceId. invoiceReminder then performs global invoiceRepo.findById and returns invoice lines, due date, total and recipient details in the job result; the caller can retrieve that result because the job is tagged with their orgId. It also sends the invoice contents to the attacker-selected email address."
+        },
+        {
+          "title": "Members can delete projects despite role gate intent",
+          "category": "broken-access-control",
+          "severity": "low",
+          "location": {
+            "path": "src/routes/projects.ts",
+            "startLine": 53,
+            "endLine": 55
+          },
+          "description": "The DELETE route permits all three roles, including member, so any authenticated member in an organization can delete any project belonging to that organization. `service.remove` first constrains lookup by the caller's org, preventing cross-org deletion, but there is no narrower privilege check for destructive deletion. Whether members should be allowed to delete is a policy assumption; no route-specific control establishes a restriction."
+        },
+        {
+          "title": "No confirmed issue in purchase-order routes",
+          "category": "broken-access-control",
+          "severity": "info",
+          "description": "CWE: CWE-284\n\nThe inspected route chain provides authentication at the /api mount, organization scoping for list and id-based access, an allowlist preventing client assignment of orgId/id/createdAt, and an admin check for deletion. No exploitable issue was confirmed within the requested routes and called code."
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "variants",
+      "fixture": "variants-tenant",
+      "arm": "variants",
+      "repeat": 5,
+      "status": "complete",
+      "seconds": 37.772,
+      "costUsd": 0.0022856200000000004,
+      "tokens": 55585,
+      "threads": 1,
+      "turns": 6,
+      "toolCalls": {
+        "load_skill": 1,
+        "bash": 4
+      },
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "rootCauseSource": "derived",
+      "skipped": 0,
+      "score": {
+        "planted": 8,
+        "found": 1,
+        "foundIds": [
+          "vt-reminder-job"
+        ],
+        "missedIds": [
+          "vt-contract-service",
+          "vt-quote-pdf",
+          "vt-graphql-subscription",
+          "vt-ws-ticket-subscribe",
+          "vt-import-product",
+          "vt-report-shipment",
+          "vt-payment-webhook"
+        ],
+        "recall": 0.125,
+        "findings": 1,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [],
+        "nearMisses": []
+      },
+      "loose": {
+        "found": 1,
+        "foundIds": [
+          "vt-reminder-job"
+        ],
+        "falsePositives": 0
+      },
+      "findings": [
+        {
+          "title": "Reminder endpoint can send another tenant's invoice details to a caller-chosen address",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/routes/reminders.ts",
+            "startLine": 8,
+            "endLine": 14
+          },
+          "description": "Unverified variant of sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c: Any signed-in user can read any tenant's invoice by id. GET /api/invoices/:id returned any tenant's invoice to any signed-in user because the route loaded the record with the unscoped invoiceRepo.findById(id) and never compared its orgId with the caller's. The fix scoped the lookup to the caller's o\n\nA search thread reported this site from the same root cause. Nobody has confirmed it, so its severity is capped at medium (the thread said high). Run `findings verify` on it to confirm or reject it.\n\nAn authenticated caller controls invoiceId and to in the POST body. The route validates only their types and the email format, then enqueues both values with the caller as job owner. The invoiceReminder worker loads invoiceId using unscoped invoiceRepo.findById and constructs an email containing invoice number, line descriptions, total, and currency, sent to the caller-chosen address. The worker does not compare the invoice organization with the job owner's organization.\n\nSuggested fix: At enqueue time, resolve the invoice with invoiceRepo.findForOrg(req.user!.orgId, invoi",
+          "variantOf": "sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c"
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "variants",
+      "fixture": "variants-tenant",
+      "arm": "plain-scan",
+      "repeat": 4,
+      "status": "complete",
+      "seconds": 1083.113,
+      "costUsd": 0.25917854,
+      "tokens": 6606991,
+      "threads": 22,
+      "turns": 236,
+      "toolCalls": {
+        "load_skill": 21,
+        "bash": 108,
+        "finding": 24,
+        "spawn_agent": 56,
+        "list_conversations": 1
+      },
+      "indexToolCalls": 0,
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "coverage": "reviewed 181 of 181 entry points; 10 of 10 groups of other files reviewed",
+      "score": {
+        "planted": 8,
+        "found": 7,
+        "foundIds": [
+          "vt-contract-service",
+          "vt-quote-pdf",
+          "vt-reminder-job",
+          "vt-graphql-subscription",
+          "vt-ws-ticket-subscribe",
+          "vt-import-product",
+          "vt-report-shipment"
+        ],
+        "missedIds": [
+          "vt-payment-webhook"
+        ],
+        "recall": 0.875,
+        "findings": 20,
+        "falsePositives": 2,
+        "decoyHits": [],
+        "unmatched": [
+          {
+            "finding": "3dfd9917-9b93-4d91-ae35-ca4ec0616ff6",
+            "title": "Payment webhook signature does not authenticate event body",
+            "located": true
+          },
+          {
+            "finding": "c3281646-1cd1-4444-863f-5be996f37b98",
+            "title": "Payment webhook signature does not authenticate the event body",
+            "located": true
+          },
+          {
+            "finding": "62bc54f4-134f-4d27-ac32-8c782f07adf4",
+            "title": "Payment webhook signature does not authenticate the payload",
+            "located": true
+          },
+          {
+            "finding": "337a8469-dbab-4c7c-ba9c-901c8a8be57d",
+            "title": "Carrier webhook accepts replayed signed deliveries",
+            "located": true
+          },
+          {
+            "finding": "ee282ab1-b093-4919-ba96-69df7affe8b6",
+            "title": "Login endpoint lacks throttling for expensive password checks",
+            "located": true
+          },
+          {
+            "finding": "988571b5-1ec7-4ade-bf2a-457e352b09f3",
+            "title": "Webhook signatures use an ephemeral fallback secret",
+            "located": true
+          },
+          {
+            "finding": "59ac17e7-9e8b-4b00-867f-b83c858885c3",
+            "title": "Batch 12 route review: no confirmed exploitable issue",
+            "located": true
+          },
+          {
+            "finding": "2fcdc5b8-7b62-490d-89ab-711d3e379c4a",
+            "title": "Invoice routes reviewed — no confirmed exploitable issue",
+            "located": true
+          },
+          {
+            "finding": "89db2b47-b501-4511-a7a9-94616e693c94",
+            "title": "No exploitable issue in this batch",
+            "located": true
+          }
+        ],
+        "nearMisses": [
+          {
+            "finding": "c3281646-1cd1-4444-863f-5be996f37b98",
+            "item": "vt-payment-webhook",
+            "distance": 0
+          }
+        ]
+      },
+      "authz": {
+        "planted": 8,
+        "found": 7
+      },
+      "loose": {
+        "found": 7,
+        "foundIds": [
+          "vt-contract-service",
+          "vt-quote-pdf",
+          "vt-reminder-job",
+          "vt-graphql-subscription",
+          "vt-ws-ticket-subscribe",
+          "vt-import-product",
+          "vt-report-shipment"
+        ],
+        "falsePositives": 3
+      },
+      "findings": [
+        {
+          "title": "Contract endpoints expose contracts across organizations",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/services/contractService.ts",
+            "startLine": 10,
+            "endLine": 13
+          },
+          "description": "Authenticated callers can fetch any contract by ID through GET /contracts/:id or GET /contracts/:id/summary. Both routes call contractService.get, which uses global findById and has no organization check. The response includes contract details, and summary explicitly includes terms and customerId. The PUT route correctly uses getForOrg, but does not protect these reads."
+        },
+        {
+          "title": "Cross-organization contract disclosure via ID routes",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/contracts.ts",
+            "startLine": 13,
+            "endLine": 18
+          },
+          "description": "Authenticated users can read any organization's contract by supplying its ID to GET /api/contracts/:id or GET /api/contracts/:id/summary. These routes call contractService.get(id), which uses findById without checking orgId; authentication only establishes the caller's org. Contract details include terms, customerId and value. The sibling renewal endpoint checks org ownership in its worker, but does not protect these reads."
+        },
+        {
+          "title": "Cross-tenant shipment cost report disclosure",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/services/reportService.ts",
+            "startLine": 4,
+            "endLine": 15
+          },
+          "description": "The authenticated GET /api/reports/shipments/:id/costs route calls shipmentCostReport with only the attacker-controlled shipment ID. The service does an unscoped shipmentRepo.get and returns destination, carrier, cost, billed amount, and calculated margin. In contrast, timeline and carrier totals are org-scoped."
+        },
+        {
+          "title": "Cross-tenant shipment cost report exposes shipment financial data",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/reports.ts",
+            "startLine": 10,
+            "endLine": 11
+          },
+          "description": "Any authenticated user can request GET /api/reports/shipments/:id/costs. The handler passes the supplied ID to shipmentCostReport, which uses shipmentRepo.get(id) without checking orgId and returns destination, carrier, cost, billedAmount, and margin. A user in another organization can enumerate or obtain shipment IDs and read another tenant's confidential logistics and financial information. The sibling timeline and shipment routes use org-scoped lookup, but this route does not."
+        },
+        {
+          "title": "GraphQL subscription lookup omits tenant authorization",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/graphql/resolvers.ts",
+            "startLine": 26,
+            "endLine": 29
+          },
+          "description": "An authenticated user can query `subscription(id: ...)` with another organisation's subscription ID. The resolver calls `subscriptionRepo.findById` without comparing `ctx.user.orgId` or otherwise checking ownership, unlike the customer and invoice resolvers. `Repo.findById` returns the row globally, and the GraphQL projector exposes requested fields, including subscription financial/payment metadata such as monthlyAmount and paymentMethodLast4. Trigger: POST an authenticated GraphQL query requesting a known foreign subscription ID and its fields."
+        },
+        {
+          "title": "Invoice reminder job omits tenant ownership check",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/jobs/reminderJob.ts",
+            "startLine": 7,
+            "endLine": 14
+          },
+          "description": "An authenticated user can POST /api/reminders with an invoiceId from another organization and an email address they control. The route enqueues the job with the caller's orgId, but invoiceReminder loads the invoice globally by ID and never checks invoice.orgId against job.orgId. It then sends invoice number, due date, line descriptions/prices, total and currency to the supplied address, and returns that content in the job result. The reminders job-status endpoint exposes that result to same-org callers. This allows cross-tenant invoice disclosure and emailing."
+        },
+        {
+          "title": "Payment webhook signature does not authenticate event body",
+          "category": "crypto-misuse",
+          "severity": "high",
+          "location": {
+            "path": "src/integrations/signature.ts",
+            "startLine": 10,
+            "endLine": 13
+          },
+          "description": "`verifyTimestampSignature` authenticates only the delivery timestamp. The payment webhook then trusts unsigned body fields `event`, `accountId`, `invoiceId`, and `reference` to mark an invoice paid. Anyone who obtains a valid signature/timestamp pair can replay it with a modified body during the one-hour freshness window and mark a selected invoice paid, subject to a valid payments integration account ID. The signature is time-limited but not bound to the payload."
+        },
+        {
+          "title": "Payment webhook signature does not authenticate the event body",
+          "category": "broken-authentication",
+          "severity": "high",
+          "location": {
+            "path": "src/integrations/paymentWebhook.ts",
+            "startLine": 8,
+            "endLine": 20
+          },
+          "description": "The public payment webhook validates an HMAC only over the timestamp, not the request body. Anyone able to observe or obtain a valid timestamp/signature pair within the one-hour tolerance can alter event, accountId, invoiceId, and reference while retaining that signature. A forged payment.settled event can mark an invoice in another organization as paid because the handler resolves the invoice globally and does not bind it to the matched integration account's org. This appears reachable without application login via /integrations/payments/."
+        },
+        {
+          "title": "Payment webhook signature does not authenticate the payload",
+          "category": "broken-authentication",
+          "severity": "high",
+          "location": {
+            "path": "src/integrations/signature.ts",
+            "startLine": 10,
+            "endLine": 14
+          },
+          "description": "The payment verifier authenticates only the delivery timestamp, not the request body. Anyone able to obtain a valid timestamp/signature pair (e.g. by observing a legitimate webhook during the one-hour tolerance) can change accountId, event, invoiceId, and reference while replaying that signature. The handler then marks the selected invoice paid without verifying its organization against the integration account."
+        },
+        {
+          "title": "Quote PDF endpoint exposes cross-organization quote data",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/quotes.ts",
+            "startLine": 23,
+            "endLine": 27
+          },
+          "description": "An authenticated user can request GET /api/quotes/:id/pdf using another organization's quote ID. Unlike GET /:id, this handler uses findById without comparing the quote's orgId to req.user.orgId, then renders title, lines, totals, validity and internalNotes. The customer lookup's org parameter is taken from the leaked quote, so it does not enforce the caller's organization."
+        },
+        {
+          "title": "Websocket ticket subscriptions lack tenant and authorization checks",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/ws/handlers.ts",
+            "startLine": 28,
+            "endLine": 32
+          },
+          "description": "An authenticated user can POST /rt/sessions then POST /rt/sessions/:sid/messages with {\"type\":\"subscribe\",\"channel\":\"ticket:<id>\"}. Unlike team subscriptions, subscribeTicket only looks up the ticket by ID and never checks session.user.orgId, assignment, or another permission before joining and returning the ticket plus all comments. Any authenticated user who can guess or obtain a ticket ID can read cross-tenant ticket data; future published ticket comments also flow to the subscribed session."
+        },
+        {
+          "title": "Carrier webhook accepts replayed signed deliveries",
+          "category": "broken-authentication",
+          "severity": "medium",
+          "location": {
+            "path": "src/integrations/carrierWebhook.ts",
+            "startLine": 8,
+            "endLine": 20
+          },
+          "description": "The carrier POST authenticates a delivery by checking a timestamp and HMAC over timestamp plus JSON body, but it has no delivery identifier, nonce, or replay cache. `fresh` accepts timestamps up to `webhookToleranceSeconds` (3600 seconds), and the same valid request can therefore be submitted repeatedly during that window. Each accepted submission appends another shipment event and saves the status, allowing a party holding/capturing one signed delivery to duplicate events and reapply its status for up to an hour. Shipment lookup is scoped to the integration account's org, limiting the affected shipment to that org."
+        },
+        {
+          "title": "Deal creation accepts cross-tenant customerId",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/routes/deals.ts",
+            "startLine": 27,
+            "endLine": 29
+          },
+          "description": "An authenticated user can create a deal with customerId naming a customer in another organisation. The POST handler copies customerId directly from the body and inserts it with the caller orgId without checking the referenced customer belongs to that org. This permits cross-tenant relationship/integrity manipulation; it does not expose the customer record through this route."
+        },
+        {
+          "title": "Generated authentication secrets rotate on each process start",
+          "category": "broken-authentication",
+          "severity": "medium",
+          "location": {
+            "path": "src/lib/config.ts",
+            "startLine": 3,
+            "endLine": 10
+          },
+          "description": "When an authentication secret environment variable is unset, `secret()` generates fresh random bytes at module initialization. `tokenSecret` therefore changes on every process start, invalidating all previously issued bearer tokens; `serviceToken` similarly changes, breaking internal service authentication. In a multi-worker deployment each process can also have a different key, causing intermittent token rejection. This is an availability/operational authentication defect, not a token forgery. Require configured persistent secrets at startup or provision the same securely generated value to every instance."
+        },
+        {
+          "title": "Login endpoint lacks throttling for expensive password checks",
+          "category": "missing-rate-limit",
+          "severity": "medium",
+          "location": {
+            "path": "src/routes/auth.ts",
+            "startLine": 9,
+            "endLine": 16
+          },
+          "description": "Unauthenticated POST /api/auth/login accepts repeated credential attempts without any throttling or lockout. Each attempt for a known user invokes synchronous scryptSync via checkPassword, tying up the Node.js event loop; attackers can also perform high-volume password guessing. This applies to login only; no rate-limit middleware is mounted in app.ts."
+        },
+        {
+          "title": "Order import preview resolves products across organizations",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/services/importService.ts",
+            "startLine": 22,
+            "endLine": 23
+          },
+          "description": "An authenticated user can submit a CSV row containing a product ID belonging to another organization. resolveProduct calls productRepo.findById, which performs a global lookup; unlike the customer lookup at lines 18-19, it does not constrain by user.orgId. The preview then returns product name, unit price and unit cost at lines 37-46, exposing cross-tenant catalog and cost data. Trigger: POST /api/imports/orders/preview with that productId and a customer ID owned by the caller. The /api mount requires authenticate, but that does not enforce tenant ownership for this product lookup."
+        },
+        {
+          "title": "Webhook signatures use an ephemeral fallback secret",
+          "category": "crypto-misuse",
+          "severity": "medium",
+          "location": {
+            "path": "src/lib/config.ts",
+            "startLine": 3,
+            "endLine": 9
+          },
+          "description": "Carrier webhook authentication uses config.webhookSecret, which is generated randomly at process startup when TENANTLY_WEBHOOK_SECRET is unset. This makes signatures from external providers unverifiable after restart and prevents multiple instances from sharing a signing secret; it also means deployment may silently run with a key unknown to configured integrations. If a key is provisioned, this issue does not apply. Fail startup when the required secret is absent rather than silently substituting a random key."
+        },
+        {
+          "title": "Batch 12 route review: no confirmed exploitable issue",
+          "category": "other",
+          "severity": "info",
+          "location": {
+            "path": "src/routes/payments.ts",
+            "startLine": 6,
+            "endLine": 15
+          },
+          "description": "Reviewed the listed payment, price-list, and product routes and their repository/authentication paths. No confirmed vulnerability identified: payment lookup explicitly compares orgId; price-list :id resolution uses findForOrg before reads, updates, and deletion; product item operations use findForOrg or org-scoped listing. All routes are mounted behind authenticate in app.ts. Mutations accept only allowlisted fields. No finding recorded because no exploitable flaw is supported by this code."
+        },
+        {
+          "title": "Invoice routes reviewed — no confirmed exploitable issue",
+          "category": "other",
+          "severity": "info",
+          "location": {
+            "path": "src/routes/invoices.ts",
+            "startLine": 11,
+            "endLine": 41
+          },
+          "description": "No confirmed exploitable security bug identified in the requested routes or the directly called code. GET/list/create/update/share use authenticated req.user.orgId, findForOrg or create scoped to that org; void requires admin/manager and assertSameOrg. Internal routes are mounted with serviceToken before internalRouter. Invoice data is stored in the in-memory Repo and no unsafe query, command, path, template, or outbound request sink is reached."
+        },
+        {
+          "title": "No exploitable issue in this batch",
+          "category": "other",
+          "severity": "info",
+          "location": {
+            "path": "src/routes/leads.ts",
+            "startLine": 14,
+            "endLine": 14
+          },
+          "description": "Reviewed the listed lead, current-user, and note routes. Object lookups and list operations are scoped to req.user.orgId; creation assigns orgId and id server-side after allowlisting request fields; updates merge only allowlisted fields onto an already org-scoped record. The /me routes derive identity from req.user.id and PUT accepts only a bounded name. No exploitable issue identified in these units."
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "variants",
+      "fixture": "variants-tenant",
+      "arm": "plain-scan",
+      "repeat": 5,
+      "status": "complete",
+      "seconds": 1211.594,
+      "costUsd": 0.27657926000000005,
+      "tokens": 6531807,
+      "threads": 20,
+      "turns": 202,
+      "toolCalls": {
+        "load_skill": 20,
+        "bash": 93,
+        "finding": 21,
+        "spawn_agent": 41
+      },
+      "indexToolCalls": 0,
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "coverage": "reviewed 181 of 181 entry points; 10 of 10 groups of other files reviewed",
+      "score": {
+        "planted": 8,
+        "found": 8,
+        "foundIds": [
+          "vt-contract-service",
+          "vt-quote-pdf",
+          "vt-reminder-job",
+          "vt-graphql-subscription",
+          "vt-ws-ticket-subscribe",
+          "vt-import-product",
+          "vt-report-shipment",
+          "vt-payment-webhook"
+        ],
+        "missedIds": [],
+        "recall": 1,
+        "findings": 16,
+        "falsePositives": 2,
+        "decoyHits": [],
+        "unmatched": [
+          {
+            "finding": "73042256-ed4b-4a69-8d01-cf4e433bc5b7",
+            "title": "Payment webhook authenticates timestamp but leaves event body unsigned",
+            "located": true
+          },
+          {
+            "finding": "8966edd0-4d56-46b2-b20d-a3c25c89072d",
+            "title": "Payment webhook signature does not bind the event body",
+            "located": true
+          },
+          {
+            "finding": "c8871f99-8e76-4ef3-bce5-ac4e76f1fd9c",
+            "title": "Seed password is shared across all demo users",
+            "located": true
+          }
+        ],
+        "nearMisses": []
+      },
+      "authz": {
+        "planted": 8,
+        "found": 8
+      },
+      "loose": {
+        "found": 8,
+        "foundIds": [
+          "vt-contract-service",
+          "vt-quote-pdf",
+          "vt-reminder-job",
+          "vt-graphql-subscription",
+          "vt-ws-ticket-subscribe",
+          "vt-import-product",
+          "vt-report-shipment",
+          "vt-payment-webhook"
+        ],
+        "falsePositives": 0
+      },
+      "findings": [
+        {
+          "title": "Contract read and summary endpoints omit tenant ownership checks",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/contracts.ts",
+            "startLine": 13,
+            "endLine": 18
+          },
+          "description": "Any authenticated tenant user who learns another tenant's contract ID can read that contract and its terms using GET /api/contracts/:id, or its summary endpoint. Both routes call contractService.get(id), which uses contractRepo.findById without comparing orgId. The summary explicitly returns contract value and terms. Other contract paths use getForOrg, showing the missing check is local to these reads."
+        },
+        {
+          "title": "Contract read endpoints expose cross-organization contracts",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/services/contractService.ts",
+            "startLine": 10,
+            "endLine": 13
+          },
+          "description": "The authenticated GET /api/contracts/:id route and its /summary variant call contractService.get(id), which does a global findById without org context. A user from another organization who knows a contract ID can retrieve the full contract, including terms, or its summary."
+        },
+        {
+          "title": "Cross-tenant shipment cost report disclosure",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/reports.ts",
+            "startLine": 10,
+            "endLine": 12
+          },
+          "description": "An authenticated user can request GET /api/reports/shipments/:id/costs with another organization's shipment ID. The route passes the ID to shipmentCostReport, which calls shipmentRepo.get(shipmentId) without checking req.user.orgId and returns destination, carrier, cost, billed amount, margin, and order reference. The adjacent timeline and shipment routes demonstrate the available org-scoped lookup, but this cost report bypasses it."
+        },
+        {
+          "title": "GraphQL subscription resolver exposes cross-tenant subscription data",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/graphql/resolvers.ts",
+            "startLine": 26,
+            "endLine": 29
+          },
+          "description": "The authenticated GraphQL `subscription(id:)` resolver performs a global ID lookup and returns the record without checking that its `orgId` matches the authenticated caller. Any authenticated tenant user who obtains or guesses another tenant's subscription ID can read its subscription fields, including monthlyAmount and paymentMethodLast4. Use an org-scoped lookup such as `findForOrg(ctx.user.orgId, id)`."
+        },
+        {
+          "title": "Invoice reminder accepts cross-tenant invoice IDs and emails invoice contents externally",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/reminders.ts",
+            "startLine": 9,
+            "endLine": 14
+          },
+          "description": "Any authenticated user can POST /api/reminders with another organisation's invoiceId and an attacker-controlled recipient address. The route validates only the email syntax, then enqueues the job with the caller's orgId. invoiceReminder loads the invoice using global invoiceRepo.findById(job.payload.invoiceId), without checking that invoice.orgId equals job.orgId, and sends the invoice number, due date, line descriptions, total, and currency to the supplied address. This permits cross-tenant invoice data exfiltration by email."
+        },
+        {
+          "title": "Invoice reminder jobs can send another tenant’s invoice data to an attacker-chosen address",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/jobs/reminderJob.ts",
+            "startLine": 6,
+            "endLine": 13
+          },
+          "description": "An authenticated user can submit any invoiceId and syntactically valid recipient to POST /api/reminders. The queue captures the caller’s orgId, but invoiceReminder loads invoices with global invoiceRepo.findById(job.payload.invoiceId) and never compares invoice.orgId with job.orgId. It then builds the email body from the invoice and sends it to job.payload.to. A caller in one tenant can therefore cause another tenant’s invoice details to be sent to an address they control. This is source-verified; no runtime execution was authorized."
+        },
+        {
+          "title": "Payment webhook authenticates timestamp but leaves event body unsigned",
+          "category": "crypto-misuse",
+          "severity": "high",
+          "location": {
+            "path": "src/integrations/signature.ts",
+            "startLine": 10,
+            "endLine": 13
+          },
+          "description": "The payment webhook signature covers only the timestamp, not the body. A party able to observe/capture a valid timestamp/signature pair can replay it during the one-hour freshness window with modified body fields, including `event`, `accountId`, `invoiceId`, and `reference`. The webhook then marks the selected invoice paid. Bind the signature to the exact raw request body (and preferably enforce replay prevention) as the carrier webhook does."
+        },
+        {
+          "title": "Payment webhook signature does not bind the event body",
+          "category": "broken-authentication",
+          "severity": "high",
+          "location": {
+            "path": "src/integrations/signature.ts",
+            "startLine": 10,
+            "endLine": 14
+          },
+          "description": "The payment webhook accepts an HMAC over only the delivery timestamp. Anyone who obtains a valid timestamp/signature pair can reuse it during the one-hour freshness window while changing accountId, event, invoiceId, or reference. The webhook then processes the attacker-selected body and can mark an invoice paid. This is static source evidence; no runtime reproduction was performed."
+        },
+        {
+          "title": "Quote PDF route skips organization ownership check",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/routes/quotes.ts",
+            "startLine": 23,
+            "endLine": 27
+          },
+          "description": "An authenticated user can request GET /api/quotes/:id/pdf with another organization's quote ID. Unlike the adjacent GET /:id route, the PDF handler calls findById without comparing quote.orgId to req.user.orgId, then renders the quote including internalNotes, line items, prices and customer name. The repository offers findForOrg, but this route does not use it."
+        },
+        {
+          "title": "Realtime ticket subscriptions expose cross-tenant ticket data",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/ws/handlers.ts",
+            "startLine": 28,
+            "endLine": 32
+          },
+          "description": "Any authenticated user can create an /rt session and send {type:\"subscribe\",channel:\"ticket:<id>\"}. subscribeTicket loads tickets globally by ID and checks only existence; unlike subscribeTeam, it never checks ticket.orgId against session.user.orgId or membership/permission. It then joins the shared channel and queues the full ticket plus comments in the session outbox, retrievable through the owned events endpoint. A user from another organization who knows or obtains a ticket ID can read that tenant's ticket data, and receive subsequent channel publications."
+        },
+        {
+          "title": "Seed password is shared across all demo users",
+          "category": "broken-authentication",
+          "severity": "high",
+          "location": {
+            "path": "src/seed.ts",
+            "startLine": 25,
+            "endLine": 30
+          },
+          "description": "createApp() always calls seedDemoData(); seedDemoData derives one password from TENANTLY_SEED_PASSWORD (or a random fallback) and hashes it once for every enabled demo user (src/seed.ts:25-30). Thus anyone who knows/guesses the deployment seed password can authenticate as any of the seeded users, including admins, via unauthenticated POST /api/auth/login. The login handler correctly checks disabled and password (src/routes/auth.ts:9-16), but all three users share that credential. This is conditional on the operator setting/reusing a known TENANTLY_SEED_PASSWORD; absent it, fallback is random at process startup."
+        },
+        {
+          "title": "Shipment cost report permits cross-organization reads",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/services/reportService.ts",
+            "startLine": 4,
+            "endLine": 15
+          },
+          "description": "Authenticated GET /api/reports/shipments/:id/costs invokes shipmentCostReport with only the caller-supplied ID. The service uses shipmentRepo.get(id), without checking the request user's organization, and returns destination and financial cost/billing/margin data. A user who knows another tenant's shipment ID can read those details."
+        },
+        {
+          "title": "Signed payment webhook can settle another organization's invoice",
+          "category": "broken-access-control",
+          "severity": "high",
+          "location": {
+            "path": "src/integrations/paymentWebhook.ts",
+            "startLine": 14,
+            "endLine": 20
+          },
+          "description": "After validating the shared webhook timestamp signature and resolving the supplied payment account, the handler fetches the invoice globally by invoiceId and marks it paid without checking invoice.orgId against account.orgId. Any valid payment integration delivery (including a legitimate event for its own account) can name a different tenant's invoice and change its status/reference. This crosses tenant boundaries and can falsify payment state."
+        },
+        {
+          "title": "Campaign create and update lack role authorization",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/routes/campaigns.ts",
+            "startLine": 41,
+            "endLine": 50
+          },
+          "description": "The API is globally authenticated, but campaign POST and PUT have no role middleware. Their handlers accept any authenticated user's request and create or modify campaign records within that user's org. The DELETE route explicitly limits roles to admin, manager, or member, confirming support is excluded from campaign mutation there while POST/PUT do not enforce that restriction. A support-role user can therefore create campaigns and alter campaign name, channel, budget, and active state in their organization."
+        },
+        {
+          "title": "Order import preview leaks cross-organization product cost",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/services/importService.ts",
+            "startLine": 22,
+            "endLine": 24
+          },
+          "description": "An authenticated user can submit an order-import CSV with a productId belonging to another organization. previewOrderImport resolves products with productRepo.findById(ref), without checking the caller's orgId, then returns the product name, unitPrice, unitCost, and derived margin. Since Product is an OrgRecord, products are organization-scoped; the existing customer lookup is correctly scoped, but the product lookup is not. This exposes another tenant's product and sensitive unit cost via POST /api/imports/orders/preview. Fix by resolving the product with findForOrg(user.orgId, ref) and rejecting inactive products if only active products are meant to be importable."
+        },
+        {
+          "title": "Product unitCost exposed to unprivileged organization members",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/routes/products.ts",
+            "startLine": 12,
+            "endLine": 14
+          },
+          "description": "Any authenticated organization user can GET /api/products or GET /api/products/:id and receive the full Product object, including unitCost. The route has no role check or field-level redaction; this exposes internal cost/margin data to members who are not managers/admins. Organization scoping prevents cross-tenant reads but does not constrain roles."
+        }
+      ],
+      "rateLimited": false
+    }
+  ]
+}
