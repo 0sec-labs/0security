@@ -1,0 +1,851 @@
+{
+  "meta": {
+    "mode": "variants",
+    "date": "2026-11-27T07:06:43.673Z",
+    "requestedModel": "gpt-6-luna",
+    "providers": [
+      "chatgpt-codex"
+    ],
+    "models": [
+      "gpt-6-luna"
+    ],
+    "runs": 5,
+    "stoppedEarly": null,
+    "repeat": 5,
+    "arms": [
+      "variants"
+    ],
+    "budgetPerRun": 3,
+    "label": "candidates-c"
+  },
+  "rows": [
+    {
+      "fixture": "variants-tenant",
+      "arm": "variants",
+      "runs": 5,
+      "complete": 5,
+      "planted": 8,
+      "found": [
+        5,
+        5,
+        8,
+        2,
+        6
+      ],
+      "recall": [
+        0.625,
+        0.625,
+        1,
+        0.25,
+        0.75
+      ],
+      "falsePositives": [
+        1,
+        0,
+        1,
+        0,
+        0
+      ],
+      "unmatched": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "authzFound": [],
+      "authzPlanted": null,
+      "tokens": [
+        158575,
+        212067,
+        193838,
+        225844,
+        214104
+      ],
+      "turns": [
+        13,
+        16,
+        15,
+        19,
+        16
+      ],
+      "seconds": [
+        82.4,
+        75.089,
+        81.476,
+        82.093,
+        95.604
+      ],
+      "costUsd": [
+        0.009894779999999999,
+        0.012489900000000002,
+        0.01106716,
+        0.009672199999999999,
+        0.010998560000000001
+      ],
+      "indexToolCalls": []
+    }
+  ],
+  "runs": [
+    {
+      "kind": "variants",
+      "fixture": "variants-tenant",
+      "arm": "variants",
+      "repeat": 1,
+      "status": "complete",
+      "seconds": 82.4,
+      "costUsd": 0.009894779999999999,
+      "tokens": 158575,
+      "threads": 4,
+      "turns": 13,
+      "toolCalls": {
+        "load_skill": 3,
+        "bash": 6
+      },
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "rootCauseSource": "derived",
+      "checklist": {
+        "engine": "builtin",
+        "strategy": "authorization",
+        "total": 104,
+        "listed": 60,
+        "omitted": 44,
+        "batches": 3,
+        "verdicts": {
+          "variant": 6,
+          "guarded": 40,
+          "not_reachable": 9,
+          "unsure": 3
+        },
+        "undisposed": [
+          "C39",
+          "C40"
+        ],
+        "stored": [
+          "C2",
+          "C3",
+          "C10",
+          "C11",
+          "C38"
+        ],
+        "notes": []
+      },
+      "huntError": null,
+      "skipped": 0,
+      "score": {
+        "planted": 8,
+        "found": 5,
+        "foundIds": [
+          "vt-quote-pdf",
+          "vt-graphql-subscription",
+          "vt-ws-ticket-subscribe",
+          "vt-import-product",
+          "vt-payment-webhook"
+        ],
+        "missedIds": [
+          "vt-contract-service",
+          "vt-reminder-job",
+          "vt-report-shipment"
+        ],
+        "recall": 0.625,
+        "findings": 6,
+        "falsePositives": 1,
+        "decoyHits": [],
+        "unmatched": [],
+        "nearMisses": []
+      },
+      "loose": {
+        "found": 5,
+        "foundIds": [
+          "vt-quote-pdf",
+          "vt-graphql-subscription",
+          "vt-ws-ticket-subscribe",
+          "vt-import-product",
+          "vt-payment-webhook"
+        ],
+        "falsePositives": 0
+      },
+      "findings": [
+        {
+          "title": "Cross-tenant shipment cost report disclosure",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/routes/warehouses.ts",
+            "startLine": 4,
+            "endLine": 15
+          },
+          "description": "Unverified variant of sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c: Any signed-in user can read any tenant's invoice by id. GET /api/invoices/:id returned any tenant's invoice to any signed-in user because the route loaded the record with the unscoped invoiceRepo.findById(id) and never compared its orgId with the caller's. The fix scoped the lookup to the caller's o (hunt candidate C38)\n\nA search thread reported this site from the same root cause. Nobody has confirmed it. Run `findings verify` on it to confirm or reject it.\n\nVariant of the cross-tenant record authorization flaw: shipmentCostReport passes its shipmentId argument directly to shipmentRepo.get and returns financial shipment fields without validating that the shipment belongs to the requesting tenant. The listed caller is GET /shipments/:id/costs.\n\nSuggested fix: Pass the authenticated orgId into shipmentCostReport and load with shipmentRepo.getForOrg(orgId, shipmentId), matching shipmentTimeline's tenant-scoped lookup.",
+          "variantOf": "sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c"
+        },
+        {
+          "title": "Cross-tenant quote PDF disclosure",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/routes/quotes.ts",
+            "startLine": 23,
+            "endLine": 27
+          },
+          "description": "Unverified variant of sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c: Any signed-in user can read any tenant's invoice by id. GET /api/invoices/:id returned any tenant's invoice to any signed-in user because the route loaded the record with the unscoped invoiceRepo.findById(id) and never compared its orgId with the caller's. The fix scoped the lookup to the caller's o (hunt candidate C25)\n\nA search thread reported this site from the same root cause. Nobody has confirmed it. Run `findings verify` on it to confirm or reject it.\n\nVariant of the invoice cross-tenant authorization flaw: GET /:id/pdf uses the request-controlled ID in quoteRepo.findById and renders the resulting quote without a tenant check. The customer lookup is scoped to the quote's own orgId, which does not authorize that org for the caller.\n\nSuggested fix: Load with quoteRepo.findForOrg(req.user!.orgId, req.params.id), or compare quote.orgId to req.user!.orgId and return 404 before rendering.",
+          "variantOf": "sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c"
+        },
+        {
+          "title": "Realtime ticket subscription exposes ticket data across organizations",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/ws/handlers.ts",
+            "startLine": 28,
+            "endLine": 33
+          },
+          "description": "Unverified variant of sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c: Any signed-in user can read any tenant's invoice by id. GET /api/invoices/:id returned any tenant's invoice to any signed-in user because the route loaded the record with the unscoped invoiceRepo.findById(id) and never compared its orgId with the caller's. The fix scoped the lookup to the caller's o (hunt candidate C11)\n\nA search thread reported this site from the same root cause. Nobody has confirmed it, so its severity is capped at medium (the thread said high). Run `findings verify` on it to confirm or reject it.\n\nVariant of the tenant-authorization flaw: an authenticated session sends a subscribe message for a ticket channel; handleMessage parses the ID and subscribeTicket performs an unscoped ticket lookup, joins the channel, and returns the ticket and its comments.\n\nSuggested fix: Before joining or returning the snapshot, verify the ticket belongs to the session user's organization or that the user is explicitly authorized for that ticket.",
+          "variantOf": "sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c"
+        },
+        {
+          "title": "Cross-tenant product data exposure in order import preview",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/services/importService.ts",
+            "startLine": 22,
+            "endLine": 24
+          },
+          "description": "Unverified variant of sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c: Any signed-in user can read any tenant's invoice by id. GET /api/invoices/:id returned any tenant's invoice to any signed-in user because the route loaded the record with the unscoped invoiceRepo.findById(id) and never compared its orgId with the caller's. The fix scoped the lookup to the caller's o (hunt candidate C10)\n\nA search thread reported this site from the same root cause. Nobody has confirmed it. Run `findings verify` on it to confirm or reject it.\n\nVariant of the invoice tenant-authorization flaw: CSV productId reaches productRepo.findById through resolveProduct, and previewOrderImport uses the returned product's name, unitPrice, and unitCost without checking that the product belongs to the caller's organization.\n\nSuggested fix: Pass the authenticated user's orgId into resolveProduct and use productRepo.findForOrg(orgId, ref) before including product data in the preview.",
+          "variantOf": "sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c"
+        },
+        {
+          "title": "Payment webhook can settle an invoice outside the integration account's organization",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/integrations/paymentWebhook.ts",
+            "startLine": 13,
+            "endLine": 21
+          },
+          "description": "Unverified variant of sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c: Any signed-in user can read any tenant's invoice by id. GET /api/invoices/:id returned any tenant's invoice to any signed-in user because the route loaded the record with the unscoped invoiceRepo.findById(id) and never compared its orgId with the caller's. The fix scoped the lookup to the caller's o (hunt candidate C3)\n\nA search thread reported this site from the same root cause. Nobody has confirmed it, so its severity is capped at medium (the thread said high). Run `findings verify` on it to confirm or reject it.\n\nVariant of the tenant-authorization flaw: the webhook body supplies accountId and invoiceId; after signature validation and account lookup, invoiceId reaches invoiceRepo.findById and the resulting invoice is saved as paid without verifying its orgId against the integration account.\n\nSuggested fix: Bind the invoice lookup to the organization associated with the validated integration account, or verify invoice.orgId matches that account before saving or returning invoice data.",
+          "variantOf": "sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c"
+        },
+        {
+          "title": "Cross-tenant subscription disclosure in GraphQL resolver",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/graphql/resolvers.ts",
+            "startLine": 26,
+            "endLine": 28
+          },
+          "description": "Unverified variant of sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c: Any signed-in user can read any tenant's invoice by id. GET /api/invoices/:id returned any tenant's invoice to any signed-in user because the route loaded the record with the unscoped invoiceRepo.findById(id) and never compared its orgId with the caller's. The fix scoped the lookup to the caller's o (hunt candidate C2)\n\nA search thread reported this site from the same root cause. Nobody has confirmed it. Run `findings verify` on it to confirm or reject it.\n\nVariant of the invoice tenant-authorization flaw: an authenticated caller controls args.id in the GraphQL subscription field; the resolver performs an unscoped lookup and returns the subscription.\n\nSuggested fix: Use a tenant-scoped subscription lookup with ctx.user.orgId, or reject records whose orgId differs from ctx.user.orgId.",
+          "variantOf": "sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c"
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "variants",
+      "fixture": "variants-tenant",
+      "arm": "variants",
+      "repeat": 2,
+      "status": "complete",
+      "seconds": 75.089,
+      "costUsd": 0.012489900000000002,
+      "tokens": 212067,
+      "threads": 4,
+      "turns": 16,
+      "toolCalls": {
+        "bash": 9,
+        "load_skill": 3
+      },
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "rootCauseSource": "derived",
+      "checklist": {
+        "engine": "builtin",
+        "strategy": "authorization",
+        "total": 104,
+        "listed": 60,
+        "omitted": 44,
+        "batches": 3,
+        "verdicts": {
+          "variant": 5,
+          "guarded": 40,
+          "not_reachable": 11,
+          "unsure": 4
+        },
+        "undisposed": [],
+        "stored": [
+          "C2",
+          "C3",
+          "C14",
+          "C40"
+        ],
+        "notes": []
+      },
+      "huntError": null,
+      "skipped": 0,
+      "score": {
+        "planted": 8,
+        "found": 5,
+        "foundIds": [
+          "vt-contract-service",
+          "vt-quote-pdf",
+          "vt-graphql-subscription",
+          "vt-report-shipment",
+          "vt-payment-webhook"
+        ],
+        "missedIds": [
+          "vt-reminder-job",
+          "vt-ws-ticket-subscribe",
+          "vt-import-product"
+        ],
+        "recall": 0.625,
+        "findings": 5,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [],
+        "nearMisses": []
+      },
+      "loose": {
+        "found": 5,
+        "foundIds": [
+          "vt-contract-service",
+          "vt-quote-pdf",
+          "vt-graphql-subscription",
+          "vt-report-shipment",
+          "vt-payment-webhook"
+        ],
+        "falsePositives": 0
+      },
+      "findings": [
+        {
+          "title": "Cross-tenant shipment cost report via unscoped lookup",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/services/reportService.ts",
+            "startLine": 4,
+            "endLine": 15
+          },
+          "description": "Unverified variant of sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c: Any signed-in user can read any tenant's invoice by id. GET /api/invoices/:id returned any tenant's invoice to any signed-in user because the route loaded the record with the unscoped invoiceRepo.findById(id) and never compared its orgId with the caller's. The fix scoped the lookup to the caller's o (hunt candidate C40)\n\nA search thread reported this site from the same root cause. Nobody has confirmed it, so its severity is capped at medium (the thread said high). Run `findings verify` on it to confirm or reject it.\n\nAn authenticated caller controls the shipment ID in GET /reports/shipments/:id/costs. The route passes it to shipmentCostReport, which loads by ID with shipmentRepo.get and returns shipment financial details without checking the caller's organization.\n\nSuggested fix: Pass req.user!.orgId into shipmentCostReport and load with shipmentRepo.getForOrg(orgId, shipmentId), returning notFound when no tenant-scoped shipment exists.",
+          "variantOf": "sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c"
+        },
+        {
+          "title": "Cross-tenant quote PDF disclosure via unscoped lookup",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/routes/quotes.ts",
+            "startLine": 23,
+            "endLine": 27
+          },
+          "description": "Unverified variant of sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c: Any signed-in user can read any tenant's invoice by id. GET /api/invoices/:id returned any tenant's invoice to any signed-in user because the route loaded the record with the unscoped invoiceRepo.findById(id) and never compared its orgId with the caller's. The fix scoped the lookup to the caller's o (hunt candidate C25)\n\nA search thread reported this site from the same root cause. Nobody has confirmed it, so its severity is capped at medium (the thread said high). Run `findings verify` on it to confirm or reject it.\n\nAn authenticated caller controls the quote ID in GET /quotes/:id/pdf. quoteRepo.findById loads that quote without tenant scope, and the route renders and returns its content without comparing quote.orgId to the caller's organization.\n\nSuggested fix: Load with quoteRepo.findForOrg(req.user!.orgId, req.params.id), return 404 if absent, and only render the tenant-scoped quote.",
+          "variantOf": "sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c"
+        },
+        {
+          "title": "Contract GET routes return contracts across organizations",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/services/contractService.ts",
+            "startLine": 10,
+            "endLine": 14
+          },
+          "description": "Unverified variant of sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c: Any signed-in user can read any tenant's invoice by id. GET /api/invoices/:id returned any tenant's invoice to any signed-in user because the route loaded the record with the unscoped invoiceRepo.findById(id) and never compared its orgId with the caller's. The fix scoped the lookup to the caller's o (hunt candidate C14)\n\nA search thread reported this site from the same root cause. Nobody has confirmed it, so its severity is capped at medium (the thread said high). Run `findings verify` on it to confirm or reject it.\n\nAn authenticated caller selects a contract ID through either GET route; both call `contractService.get`, which performs an unscoped lookup and returns the organization-owned contract. The service already has a scoped `getForOrg` method, but these reads do not use it.\n\nSuggested fix: Pass `req.user.orgId` to `contractService.getForOrg` in both GET routes, including the summary route.",
+          "variantOf": "sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c"
+        },
+        {
+          "title": "Payment webhook can settle an invoice outside the integration account's organization",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/integrations/paymentWebhook.ts",
+            "startLine": 13,
+            "endLine": 21
+          },
+          "description": "Unverified variant of sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c: Any signed-in user can read any tenant's invoice by id. GET /api/invoices/:id returned any tenant's invoice to any signed-in user because the route loaded the record with the unscoped invoiceRepo.findById(id) and never compared its orgId with the caller's. The fix scoped the lookup to the caller's o (hunt candidate C3)\n\nA search thread reported this site from the same root cause. Nobody has confirmed it, so its severity is capped at medium (the thread said high). Run `findings verify` on it to confirm or reject it.\n\nThe webhook obtains `invoiceId` from the request body, resolves an integration account, then loads the invoice by global ID and marks it paid. No relationship between the account's organization and the invoice is checked. The signature helper signs the timestamp, not the body, so the verified signature does not establish that the invoice ID is authorized for that account.\n\nSuggested fix: Resolve the invoice with the integration account's organization scope and reject mismatches; bind the delivered body to the webhook signature as well.",
+          "variantOf": "sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c"
+        },
+        {
+          "title": "GraphQL subscription resolver returns subscriptions across organizations",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/graphql/resolvers.ts",
+            "startLine": 26,
+            "endLine": 28
+          },
+          "description": "Unverified variant of sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c: Any signed-in user can read any tenant's invoice by id. GET /api/invoices/:id returned any tenant's invoice to any signed-in user because the route loaded the record with the unscoped invoiceRepo.findById(id) and never compared its orgId with the caller's. The fix scoped the lookup to the caller's o (hunt candidate C2)\n\nA search thread reported this site from the same root cause. Nobody has confirmed it, so its severity is capped at medium (the thread said high). Run `findings verify` on it to confirm or reject it.\n\nAn authenticated GraphQL caller supplies `args.id`; the resolver loads the subscription by unscoped ID and returns it without checking its organization. This is the same cross-tenant object-access pattern as the invoice issue.\n\nSuggested fix: Use a tenant-scoped subscription lookup with the caller's orgId, or compare the loaded subscription's orgId with the authenticated context before returning it.",
+          "variantOf": "sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c"
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "variants",
+      "fixture": "variants-tenant",
+      "arm": "variants",
+      "repeat": 3,
+      "status": "complete",
+      "seconds": 81.476,
+      "costUsd": 0.01106716,
+      "tokens": 193838,
+      "threads": 4,
+      "turns": 15,
+      "toolCalls": {
+        "load_skill": 3,
+        "bash": 8
+      },
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "rootCauseSource": "derived",
+      "checklist": {
+        "engine": "builtin",
+        "strategy": "authorization",
+        "total": 104,
+        "listed": 60,
+        "omitted": 44,
+        "batches": 3,
+        "verdicts": {
+          "variant": 9,
+          "guarded": 40,
+          "not_reachable": 11,
+          "unsure": 0
+        },
+        "undisposed": [],
+        "stored": [
+          "C2",
+          "C3",
+          "C10",
+          "C11",
+          "C14",
+          "C15",
+          "C25",
+          "C32",
+          "C40"
+        ],
+        "notes": []
+      },
+      "huntError": null,
+      "skipped": 0,
+      "score": {
+        "planted": 8,
+        "found": 8,
+        "foundIds": [
+          "vt-contract-service",
+          "vt-quote-pdf",
+          "vt-reminder-job",
+          "vt-graphql-subscription",
+          "vt-ws-ticket-subscribe",
+          "vt-import-product",
+          "vt-report-shipment",
+          "vt-payment-webhook"
+        ],
+        "missedIds": [],
+        "recall": 1,
+        "findings": 9,
+        "falsePositives": 1,
+        "decoyHits": [],
+        "unmatched": [],
+        "nearMisses": []
+      },
+      "loose": {
+        "found": 8,
+        "foundIds": [
+          "vt-contract-service",
+          "vt-quote-pdf",
+          "vt-reminder-job",
+          "vt-graphql-subscription",
+          "vt-ws-ticket-subscribe",
+          "vt-import-product",
+          "vt-report-shipment",
+          "vt-payment-webhook"
+        ],
+        "falsePositives": 0
+      },
+      "findings": [
+        {
+          "title": "Cross-tenant shipment cost report disclosure",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/services/reportService.ts",
+            "startLine": 4,
+            "endLine": 15
+          },
+          "description": "Unverified variant of sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c: Any signed-in user can read any tenant's invoice by id. GET /api/invoices/:id returned any tenant's invoice to any signed-in user because the route loaded the record with the unscoped invoiceRepo.findById(id) and never compared its orgId with the caller's. The fix scoped the lookup to the caller's o (hunt candidate C40)\n\nA search thread reported this site from the same root cause. Nobody has confirmed it. Run `findings verify` on it to confirm or reject it.\n\nVariant of the invoice tenant-isolation bug: an authenticated request ID reaches shipmentRepo.get in shipmentCostReport, and the report returns shipment details and financial figures without checking the shipment's orgId against the caller's organization.\n\nSuggested fix: Pass req.user!.orgId into shipmentCostReport and use shipmentRepo.getForOrg(orgId, shipmentId), returning not-found when no shipment belongs to that organization.",
+          "variantOf": "sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c"
+        },
+        {
+          "title": "Cross-tenant category update",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/routes/categories.ts",
+            "startLine": 16,
+            "endLine": 19
+          },
+          "description": "Unverified variant of sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c: Any signed-in user can read any tenant's invoice by id. GET /api/invoices/:id returned any tenant's invoice to any signed-in user because the route loaded the record with the unscoped invoiceRepo.findById(id) and never compared its orgId with the caller's. The fix scoped the lookup to the caller's o (hunt candidate C32)\n\nA search thread reported this site from the same root cause. Nobody has confirmed it. Run `findings verify` on it to confirm or reject it.\n\nVariant of the invoice tenant-isolation bug: PUT /:id loads a category by request ID in the shared load helper and saves it without verifying that it belongs to the caller's organization.\n\nSuggested fix: Resolve the category with findForOrg(req.user!.orgId, req.params.id), or reject when record.orgId differs from req.user!.orgId, before returning it to GET, PUT, or DELETE.",
+          "variantOf": "sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c"
+        },
+        {
+          "title": "Cross-tenant quote PDF disclosure",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/routes/quotes.ts",
+            "startLine": 24,
+            "endLine": 27
+          },
+          "description": "Unverified variant of sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c: Any signed-in user can read any tenant's invoice by id. GET /api/invoices/:id returned any tenant's invoice to any signed-in user because the route loaded the record with the unscoped invoiceRepo.findById(id) and never compared its orgId with the caller's. The fix scoped the lookup to the caller's o (hunt candidate C25)\n\nA search thread reported this site from the same root cause. Nobody has confirmed it. Run `findings verify` on it to confirm or reject it.\n\nVariant of the invoice tenant-isolation bug: GET /:id/pdf passes the request ID to quoteRepo.findById and renders the result without comparing quote.orgId with the caller's orgId.\n\nSuggested fix: Use an organization-scoped quote lookup with req.user!.orgId and req.params.id; return not-found when no quote belongs to that organization.",
+          "variantOf": "sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c"
+        },
+        {
+          "title": "Invoice reminder job can send another tenant's invoice details",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/jobs/reminderJob.ts",
+            "startLine": 6,
+            "endLine": 14
+          },
+          "description": "Unverified variant of sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c: Any signed-in user can read any tenant's invoice by id. GET /api/invoices/:id returned any tenant's invoice to any signed-in user because the route loaded the record with the unscoped invoiceRepo.findById(id) and never compared its orgId with the caller's. The fix scoped the lookup to the caller's o (hunt candidate C15)\n\nA search thread reported this site from the same root cause. Nobody has confirmed it, so its severity is capped at medium (the thread said high). Run `findings verify` on it to confirm or reject it.\n\nA queued reminder job carries an orgId, but invoiceReminder ignores it when loading invoiceId. The selected invoice's number, lines and total are sent to the job's recipient.\n\nSuggested fix: Load the invoice with invoiceRepo.findForOrg(job.orgId, job.payload.invoiceId), rejecting missing or mismatched records before composing or sending the reminder.",
+          "variantOf": "sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c"
+        },
+        {
+          "title": "Contract routes expose records across organizations",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/services/contractService.ts",
+            "startLine": 10,
+            "endLine": 13
+          },
+          "description": "Unverified variant of sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c: Any signed-in user can read any tenant's invoice by id. GET /api/invoices/:id returned any tenant's invoice to any signed-in user because the route loaded the record with the unscoped invoiceRepo.findById(id) and never compared its orgId with the caller's. The fix scoped the lookup to the caller's o (hunt candidate C14)\n\nA search thread reported this site from the same root cause. Nobody has confirmed it, so its severity is capped at medium (the thread said high). Run `findings verify` on it to confirm or reject it.\n\nThe authenticated contract routes pass the caller-supplied ID to contractService.get. That helper globally loads and returns the contract; unlike getForOrg, it does not scope the lookup to the caller.\n\nSuggested fix: Change the routes to call getForOrg with req.user!.orgId, or make the service's public get method require orgId and use contractRepo.findForOrg.",
+          "variantOf": "sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c"
+        },
+        {
+          "title": "WebSocket ticket subscription does not enforce tenant membership",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/ws/handlers.ts",
+            "startLine": 28,
+            "endLine": 32
+          },
+          "description": "Unverified variant of sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c: Any signed-in user can read any tenant's invoice by id. GET /api/invoices/:id returned any tenant's invoice to any signed-in user because the route loaded the record with the unscoped invoiceRepo.findById(id) and never compared its orgId with the caller's. The fix scoped the lookup to the caller's o (hunt candidate C11)\n\nA search thread reported this site from the same root cause. Nobody has confirmed it, so its severity is capped at medium (the thread said high). Run `findings verify` on it to confirm or reject it.\n\nAn authenticated client can request a ticket channel by ID. The handler globally loads the ticket, joins the channel, and returns ticket details and comments without an organization check.\n\nSuggested fix: Use a tenant-scoped ticket lookup with session.user.orgId, or verify the loaded ticket's orgId against the session user before joining or returning data.",
+          "variantOf": "sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c"
+        },
+        {
+          "title": "Order import preview exposes products across organizations",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/services/importService.ts",
+            "startLine": 22,
+            "endLine": 23
+          },
+          "description": "Unverified variant of sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c: Any signed-in user can read any tenant's invoice by id. GET /api/invoices/:id returned any tenant's invoice to any signed-in user because the route loaded the record with the unscoped invoiceRepo.findById(id) and never compared its orgId with the caller's. The fix scoped the lookup to the caller's o (hunt candidate C10)\n\nA search thread reported this site from the same root cause. Nobody has confirmed it. Run `findings verify` on it to confirm or reject it.\n\nPOST /imports supplies CSV to previewOrderImport; its productId field reaches resolveProduct and an unscoped product lookup. The preview includes unitPrice and unitCost, so a caller can obtain another tenant's product data.\n\nSuggested fix: Pass the authenticated user's orgId into resolveProduct and use productRepo.findForOrg(orgId, ref) before including product data in the preview.",
+          "variantOf": "sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c"
+        },
+        {
+          "title": "Payment webhook can update an invoice outside the payment account's tenant",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/integrations/paymentWebhook.ts",
+            "startLine": 14,
+            "endLine": 20
+          },
+          "description": "Unverified variant of sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c: Any signed-in user can read any tenant's invoice by id. GET /api/invoices/:id returned any tenant's invoice to any signed-in user because the route loaded the record with the unscoped invoiceRepo.findById(id) and never compared its orgId with the caller's. The fix scoped the lookup to the caller's o (hunt candidate C3)\n\nA search thread reported this site from the same root cause. Nobody has confirmed it, so its severity is capped at medium (the thread said high). Run `findings verify` on it to confirm or reject it.\n\nA validly signed payment event identifies an integration account and an invoice separately. The handler loads the invoice globally, marks it paid and returns invoice details without verifying the invoice belongs to the account's organization.\n\nSuggested fix: Verify that the account is authorized for the invoice's organization, then load the invoice with a tenant-scoped lookup tied to that account.",
+          "variantOf": "sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c"
+        },
+        {
+          "title": "GraphQL subscription lookup omits tenant authorization",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/graphql/resolvers.ts",
+            "startLine": 26,
+            "endLine": 28
+          },
+          "description": "Unverified variant of sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c: Any signed-in user can read any tenant's invoice by id. GET /api/invoices/:id returned any tenant's invoice to any signed-in user because the route loaded the record with the unscoped invoiceRepo.findById(id) and never compared its orgId with the caller's. The fix scoped the lookup to the caller's o (hunt candidate C2)\n\nA search thread reported this site from the same root cause. Nobody has confirmed it, so its severity is capped at medium (the thread said high). Run `findings verify` on it to confirm or reject it.\n\nAn authenticated GraphQL caller can supply another tenant's subscription ID; the resolver loads and returns that record without checking ctx.user.orgId.\n\nSuggested fix: Use a tenant-scoped subscription lookup with ctx.user.orgId, or compare the returned subscription's orgId to ctx.user.orgId before returning it.",
+          "variantOf": "sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c"
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "variants",
+      "fixture": "variants-tenant",
+      "arm": "variants",
+      "repeat": 4,
+      "status": "complete",
+      "seconds": 82.093,
+      "costUsd": 0.009672199999999999,
+      "tokens": 225844,
+      "threads": 5,
+      "turns": 19,
+      "toolCalls": {
+        "load_skill": 4,
+        "bash": 11
+      },
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "rootCauseSource": "derived",
+      "checklist": {
+        "engine": "builtin",
+        "strategy": "authorization",
+        "total": 104,
+        "listed": 60,
+        "omitted": 44,
+        "batches": 3,
+        "verdicts": {
+          "variant": 2,
+          "guarded": 39,
+          "not_reachable": 12,
+          "unsure": 7
+        },
+        "undisposed": [],
+        "stored": [
+          "C25",
+          "C40"
+        ],
+        "notes": []
+      },
+      "huntError": null,
+      "skipped": 0,
+      "score": {
+        "planted": 8,
+        "found": 2,
+        "foundIds": [
+          "vt-quote-pdf",
+          "vt-report-shipment"
+        ],
+        "missedIds": [
+          "vt-contract-service",
+          "vt-reminder-job",
+          "vt-graphql-subscription",
+          "vt-ws-ticket-subscribe",
+          "vt-import-product",
+          "vt-payment-webhook"
+        ],
+        "recall": 0.25,
+        "findings": 2,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [],
+        "nearMisses": []
+      },
+      "loose": {
+        "found": 2,
+        "foundIds": [
+          "vt-quote-pdf",
+          "vt-report-shipment"
+        ],
+        "falsePositives": 0
+      },
+      "findings": [
+        {
+          "title": "Shipment cost report reads shipment data without tenant authorization",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/services/reportService.ts",
+            "startLine": 4,
+            "endLine": 15
+          },
+          "description": "Unverified variant of sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c: Any signed-in user can read any tenant's invoice by id. GET /api/invoices/:id returned any tenant's invoice to any signed-in user because the route loaded the record with the unscoped invoiceRepo.findById(id) and never compared its orgId with the caller's. The fix scoped the lookup to the caller's o (hunt candidate C40)\n\nA search thread reported this site from the same root cause. Nobody has confirmed it. Run `findings verify` on it to confirm or reject it.\n\nGET /shipments/:id/costs passes the request id to shipmentCostReport. That service loads the shipment with shipmentRepo.get and returns its cost and billed amount without receiving or checking the caller's organization.\n\nSuggested fix: Pass the authenticated user's orgId into shipmentCostReport and use shipmentRepo.getForOrg(orgId, shipmentId), returning not found when no scoped shipment exists.",
+          "variantOf": "sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c"
+        },
+        {
+          "title": "Quote PDF route reads quotes without tenant authorization",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/routes/quotes.ts",
+            "startLine": 23,
+            "endLine": 27
+          },
+          "description": "Unverified variant of sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c: Any signed-in user can read any tenant's invoice by id. GET /api/invoices/:id returned any tenant's invoice to any signed-in user because the route loaded the record with the unscoped invoiceRepo.findById(id) and never compared its orgId with the caller's. The fix scoped the lookup to the caller's o (hunt candidate C25)\n\nA search thread reported this site from the same root cause. Nobody has confirmed it. Run `findings verify` on it to confirm or reject it.\n\nGET /:id/pdf takes req.params.id directly to quoteRepo.findById and renders the resulting quote, including its title, lines, total, and internal notes. The route does not scope the lookup to req.user.orgId or compare quote.orgId before returning the content.\n\nSuggested fix: Use quoteRepo.findForOrg(req.user!.orgId, req.params.id) and return not found when no organization-scoped quote exists.",
+          "variantOf": "sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c"
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "variants",
+      "fixture": "variants-tenant",
+      "arm": "variants",
+      "repeat": 5,
+      "status": "complete",
+      "seconds": 95.604,
+      "costUsd": 0.010998560000000001,
+      "tokens": 214104,
+      "threads": 4,
+      "turns": 16,
+      "toolCalls": {
+        "load_skill": 3,
+        "bash": 9
+      },
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "rootCauseSource": "derived",
+      "checklist": {
+        "engine": "builtin",
+        "strategy": "authorization",
+        "total": 104,
+        "listed": 60,
+        "omitted": 44,
+        "batches": 3,
+        "verdicts": {
+          "variant": 6,
+          "guarded": 47,
+          "not_reachable": 5,
+          "unsure": 2
+        },
+        "undisposed": [],
+        "stored": [
+          "C2",
+          "C10",
+          "C11",
+          "C14",
+          "C25",
+          "C40"
+        ],
+        "notes": []
+      },
+      "huntError": null,
+      "skipped": 0,
+      "score": {
+        "planted": 8,
+        "found": 6,
+        "foundIds": [
+          "vt-contract-service",
+          "vt-quote-pdf",
+          "vt-graphql-subscription",
+          "vt-ws-ticket-subscribe",
+          "vt-import-product",
+          "vt-report-shipment"
+        ],
+        "missedIds": [
+          "vt-reminder-job",
+          "vt-payment-webhook"
+        ],
+        "recall": 0.75,
+        "findings": 6,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [],
+        "nearMisses": []
+      },
+      "loose": {
+        "found": 6,
+        "foundIds": [
+          "vt-contract-service",
+          "vt-quote-pdf",
+          "vt-graphql-subscription",
+          "vt-ws-ticket-subscribe",
+          "vt-import-product",
+          "vt-report-shipment"
+        ],
+        "falsePositives": 0
+      },
+      "findings": [
+        {
+          "title": "Cross-tenant shipment cost disclosure through report route",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/services/reportService.ts",
+            "startLine": 4,
+            "endLine": 15
+          },
+          "description": "Unverified variant of sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c: Any signed-in user can read any tenant's invoice by id. GET /api/invoices/:id returned any tenant's invoice to any signed-in user because the route loaded the record with the unscoped invoiceRepo.findById(id) and never compared its orgId with the caller's. The fix scoped the lookup to the caller's o (hunt candidate C40)\n\nA search thread reported this site from the same root cause. Nobody has confirmed it. Run `findings verify` on it to confirm or reject it.\n\nA signed-in caller controls the shipment ID in GET /api/reports/shipments/:id/costs. The route calls shipmentCostReport with that ID, and the service loads the shipment using shipmentRepo.get without checking the caller's organisation before returning cost, billed amount, and margin.\n\nSuggested fix: Pass req.user!.orgId into shipmentCostReport and load with shipmentRepo.getForOrg(orgId, shipmentId), returning notFound when it is absent.",
+          "variantOf": "sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c"
+        },
+        {
+          "title": "Cross-tenant quote disclosure through PDF route",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/routes/quotes.ts",
+            "startLine": 23,
+            "endLine": 27
+          },
+          "description": "Unverified variant of sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c: Any signed-in user can read any tenant's invoice by id. GET /api/invoices/:id returned any tenant's invoice to any signed-in user because the route loaded the record with the unscoped invoiceRepo.findById(id) and never compared its orgId with the caller's. The fix scoped the lookup to the caller's o (hunt candidate C25)\n\nA search thread reported this site from the same root cause. Nobody has confirmed it. Run `findings verify` on it to confirm or reject it.\n\nA signed-in caller controls the quote ID in GET /api/quotes/:id/pdf. The route loads it with quoteRepo.findById and renders its contents without checking that the quote belongs to the caller's organisation.\n\nSuggested fix: Use quoteRepo.findForOrg(req.user!.orgId, req.params.id), and return 404 when no quote is found.",
+          "variantOf": "sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c"
+        },
+        {
+          "title": "Contract GET endpoints return records without tenant scoping",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/services/contractService.ts",
+            "startLine": 10,
+            "endLine": 14
+          },
+          "description": "Unverified variant of sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c: Any signed-in user can read any tenant's invoice by id. GET /api/invoices/:id returned any tenant's invoice to any signed-in user because the route loaded the record with the unscoped invoiceRepo.findById(id) and never compared its orgId with the caller's. The fix scoped the lookup to the caller's o (hunt candidate C14)\n\nA search thread reported this site from the same root cause. Nobody has confirmed it, so its severity is capped at medium (the thread said high). Run `findings verify` on it to confirm or reject it.\n\nVariant: the route parameter reaches `contractService.get`, which retrieves and returns a contract without checking its organization. Both the detail endpoint and summary endpoint use this helper; the summary exposes contract metadata and terms.\n\nSuggested fix: Pass `req.user!.orgId` into the GET and summary calls and use `contractService.getForOrg`.",
+          "variantOf": "sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c"
+        },
+        {
+          "title": "WebSocket ticket subscription exposes tickets without an access check",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/ws/handlers.ts",
+            "startLine": 28,
+            "endLine": 32
+          },
+          "description": "Unverified variant of sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c: Any signed-in user can read any tenant's invoice by id. GET /api/invoices/:id returned any tenant's invoice to any signed-in user because the route loaded the record with the unscoped invoiceRepo.findById(id) and never compared its orgId with the caller's. The fix scoped the lookup to the caller's o (hunt candidate C11)\n\nA search thread reported this site from the same root cause. Nobody has confirmed it, so its severity is capped at medium (the thread said high). Run `findings verify` on it to confirm or reject it.\n\nVariant: a client message's ticket channel ID flows through `parseChannel` to `ticketRepo.findById`; the handler joins the channel and sends a snapshot containing the ticket and comments without checking the session user's access to that ticket.\n\nSuggested fix: Check the ticket's organization or explicit membership against `session.user` before joining and sending its snapshot.",
+          "variantOf": "sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c"
+        },
+        {
+          "title": "Order import preview resolves products without tenant scoping",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/services/importService.ts",
+            "startLine": 22,
+            "endLine": 24
+          },
+          "description": "Unverified variant of sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c: Any signed-in user can read any tenant's invoice by id. GET /api/invoices/:id returned any tenant's invoice to any signed-in user because the route loaded the record with the unscoped invoiceRepo.findById(id) and never compared its orgId with the caller's. The fix scoped the lookup to the caller's o (hunt candidate C10)\n\nA search thread reported this site from the same root cause. Nobody has confirmed it. Run `findings verify` on it to confirm or reject it.\n\nVariant: CSV product IDs reach `productRepo.findById` through `resolveProduct`; the returned product's name, unit price, and unit cost are included in the authenticated user's preview. No check restricts the product to the user's organization.\n\nSuggested fix: Pass `user` into `resolveProduct` and use `productRepo.findForOrg(user.orgId, ref)`.",
+          "variantOf": "sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c"
+        },
+        {
+          "title": "GraphQL subscription resolver reads subscriptions without tenant scoping",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/graphql/resolvers.ts",
+            "startLine": 26,
+            "endLine": 28
+          },
+          "description": "Unverified variant of sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c: Any signed-in user can read any tenant's invoice by id. GET /api/invoices/:id returned any tenant's invoice to any signed-in user because the route loaded the record with the unscoped invoiceRepo.findById(id) and never compared its orgId with the caller's. The fix scoped the lookup to the caller's o (hunt candidate C2)\n\nA search thread reported this site from the same root cause. Nobody has confirmed it, so its severity is capped at medium (the thread said high). Run `findings verify` on it to confirm or reject it.\n\nVariant: an authenticated user can provide a subscription ID to the GraphQL `subscription` resolver; it performs an unscoped lookup and returns the subscription. The route-level tenant-scoped lookup does not protect this separate resolver.\n\nSuggested fix: Use `subscriptionRepo.findForOrg(ctx.user.orgId, String(args.id))` in this resolver.",
+          "variantOf": "sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c"
+        }
+      ],
+      "rateLimited": false
+    }
+  ]
+}

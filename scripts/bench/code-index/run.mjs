@@ -205,7 +205,7 @@ async function variantsRun(fx, arm, rep, o) {
   return {
     kind: "variants", fixture: fx.name, arm, repeat: rep + 1, status: report?.hunt?.error ? `error: ${report.hunt.error}` : hunt.status === 0 ? "complete" : `exit ${hunt.status}`, seconds,
     costUsd: report?.hunt?.costUsd ?? null, tokens: report?.hunt?.tokens ?? null, threads: sessions.threads, turns: sessions.turns, toolCalls: sessions.tools, provider: sessions.providers, model: sessions.models,
-    rootCauseSource: report?.hunt?.rootCauseSource ?? null, skipped: report?.hunt?.skipped ?? null, score: slim(score), loose: (({ found, foundIds, falsePositives }) => ({ found, foundIds, falsePositives }))(scoreFindings(looseKey(fx.answer), variants)), findings: variants,
+    rootCauseSource: report?.hunt?.rootCauseSource ?? null, checklist: report?.hunt?.checklist ?? null, huntError: report?.hunt?.error ?? null, skipped: report?.hunt?.skipped ?? null, score: slim(score), loose: (({ found, foundIds, falsePositives }) => ({ found, foundIds, falsePositives }))(scoreFindings(looseKey(fx.answer), variants)), findings: variants,
     rateLimited: RATE_LIMIT.test(`${hunt.stderr}${report?.hunt?.error ?? ""}`) && !variants.length,
   };
 }

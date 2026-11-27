@@ -43,6 +43,8 @@ export class VariantBudget {
   get stoppedReason(): string { return this.known ? "overall budget exhausted" : "cost receipt unavailable; further paid work stopped"; }
 }
 const DEFAULT_TIMEOUT_SECONDS = 600;
+/** Candidates one thread judges. */
+export const CANDIDATE_BATCH = 20;
 /** Findings with this status are the ones a rescan leaves alone (set by a person or a verified fix, never by a rescan). */
 const DONE_STATUS = "fixed";
 
@@ -98,6 +100,7 @@ export interface HuntResult {
 }
 export interface ChecklistReport {
   engine: string; strategy: string; total: number; listed: number; omitted: number;
+  /** Threads the checklist was split over. */ batches?: number;
   verdicts: { variant: number; guarded: number; not_reachable: number; unsure: number }; undisposed: string[];
   /** Candidate ids of the variants that were stored. */
   stored: string[]; notes: string[];
@@ -154,34 +157,57 @@ export async function huntVariants(client: ConsoleClient, deps: Pick<VariantDeps
     if (source && !source.candidates.length) deps.err(`Candidate search found no sites${source.notes.length ? ` (${source.notes.join("; ")})` : ""}; the thread will search on its own.`);
   }
   const items = source?.candidates ?? [];
-  let thread: PromptThread;
-  try {
-    thread = await runPromptThread(client, deps, folder, `Variants: ${parent.title}`, variantHuntPrompt(seed,
-      { ...(seedCause ? { rootCause: seedCause } : {}), ...(extra.fixCommit ? { fixCommit: extra.fixCommit } : {}), known: known.map(v => ({ id: v.id, title: v.title, ...(v.path ? { path: v.path } : {}), ...(v.startLine ? { startLine: v.startLine } : {}) })), ...(items.length && source ? { candidates: { items, total: source.total, omitted: source.omitted } } : {}) },
-    ), options);
-  } catch (error) { return failure(error); }
-  add(thread);
-  const base = { threadId: thread.id, ...totals() };
-  if (!thread.reply) return { ...base, created: [], skipped: 0, error: thread.error ?? "the thread returned no answer" };
-  const report = parseVariantReport(thread.reply, items);
-  const rootCause = seedCause ?? report.rootCause;
-  if (!seedCause && report.rootCause) deps.store.saveRootCause(parent, report.rootCause);
+  const knownBlock = known.map(v => ({ id: v.id, title: v.title, ...(v.path ? { path: v.path } : {}), ...(v.startLine ? { startLine: v.startLine } : {}) }));
+  const promptOptions = { ...(seedCause ? { rootCause: seedCause } : {}), ...(extra.fixCommit ? { fixCommit: extra.fixCommit } : {}), known: knownBlock };
+  // A long checklist in one answer is where models drop items or the json block. Judge it in batches, one fresh thread each, in parallel.
+  const batches: PromptCandidate[][] = [];
+  for (let i = 0; i < items.length; i += CANDIDATE_BATCH) batches.push(items.slice(i, i + CANDIDATE_BATCH));
+  if (!batches.length) batches.push([]);
+  interface BatchResult { thread?: PromptThread; report?: ReturnType<typeof parseVariantReport>; error?: string }
+  const judge = async (batch: PromptCandidate[], index: number): Promise<BatchResult> => {
+    const candidates = batch.length && source ? { candidates: { items: batch, total: index === 0 ? source.total : batch.length, omitted: index === 0 ? source.omitted : 0 } } : {};
+    let result: BatchResult = {};
+    // One repeat for a batch whose answer holds no verdict at all.
+    for (let attempt = 0; attempt < (batch.length ? 2 : 1); attempt++) {
+      try {
+        const thread = await runPromptThread(client, deps, folder, `Variants${batches.length > 1 ? ` ${index + 1}/${batches.length}` : ""}: ${parent.title}`, variantHuntPrompt(seed, { ...promptOptions, ...candidates }), options);
+        add(thread);
+        result = { thread, ...(thread.reply ? { report: parseVariantReport(thread.reply, batch) } : { error: thread.error ?? "the thread returned no answer" }) };
+        if (!batch.length || result.report?.dispositions.length || result.report?.variants.length) break;
+      } catch (error) { result = { error: error instanceof Error ? error.message.split("\n")[0]! : String(error) }; }
+    }
+    return result;
+  };
+  const results = await Promise.all(batches.map((batch, i) => judge(batch, i)));
+  const first = results.find(r => r.thread)?.thread;
+  const base = { ...(first ? { threadId: first.id } : {}), ...totals() };
+  const answered = results.filter(r => r.report);
+  if (!answered.length) return { ...base, created: [], skipped: 0, error: results.find(r => r.error)?.error ?? "the thread returned no answer" };
+  const reports = answered.map(r => r.report!);
+  const rootCause = seedCause ?? reports.find(r => r.rootCause)?.rootCause;
+  if (!seedCause && rootCause) deps.store.saveRootCause(parent, rootCause);
   const created: string[] = [];
   const stored: string[] = [];
+  const dispositions = reports.flatMap(r => r.dispositions);
   let skipped = 0;
-  for (const variant of report.variants) {
+  for (const variant of reports.flatMap(r => r.variants)) {
     if (overlaps(variant, parent) || known.some(k => overlaps(variant, k))) { skipped++; continue; }
-    created.push(deps.store.saveVariant(parent, variant, rootCause));
+    const id = deps.store.saveVariant(parent, variant, rootCause);
+    if (created.includes(id)) continue;
+    created.push(id);
     if (variant.candidateId) stored.push(variant.candidateId);
   }
+  const problem = results.find(r => r.error)?.error ?? results.find(r => r.thread?.error)?.thread?.error;
+  const noVerdicts = items.length > 0 && !dispositions.length ? "the answer held no verdict for any checklist candidate" : undefined;
   let checklist: ChecklistReport | undefined;
   if (items.length && source) {
     const verdicts = { variant: 0, guarded: 0, not_reachable: 0, unsure: 0 };
-    for (const d of report.dispositions) verdicts[d.verdict]++;
-    const answered = new Set(report.dispositions.map(d => d.id));
-    checklist = { engine: source.engine, strategy: source.strategy, total: source.total, listed: items.length, omitted: source.omitted, verdicts, undisposed: items.filter(c => !answered.has(c.id)).map(c => c.id), stored, notes: source.notes };
+    for (const d of dispositions) verdicts[d.verdict]++;
+    const done = new Set(dispositions.map(d => d.id));
+    checklist = { engine: source.engine, strategy: source.strategy, total: source.total, listed: items.length, omitted: source.omitted, batches: batches.length, verdicts, undisposed: items.filter(c => !done.has(c.id)).map(c => c.id), stored, notes: source.notes };
   }
-  return { ...base, created, skipped, ...(checklist ? { checklist } : {}), ...(rootCause ? { rootCause, rootCauseSource: parent.rootCause ? "stored" as const : "derived" as const } : {}), ...(thread.error ? { error: thread.error } : {}) };
+  const error = problem ?? noVerdicts;
+  return { ...base, created, skipped, ...(checklist ? { checklist } : {}), ...(rootCause ? { rootCause, rootCauseSource: parent.rootCause ? "stored" as const : "derived" as const } : {}), ...(error ? { error } : {}) };
 }
 
 /**

@@ -1,0 +1,678 @@
+{
+  "meta": {
+    "mode": "variants",
+    "date": "2026-11-27T06:57:38.907Z",
+    "requestedModel": "gpt-6-luna",
+    "providers": [
+      "chatgpt-codex"
+    ],
+    "models": [
+      "gpt-6-luna"
+    ],
+    "runs": 5,
+    "stoppedEarly": null,
+    "repeat": 5,
+    "arms": [
+      "variants"
+    ],
+    "budgetPerRun": 3,
+    "label": "candidates-b"
+  },
+  "rows": [
+    {
+      "fixture": "variants-tenant",
+      "arm": "variants",
+      "runs": 5,
+      "complete": 3,
+      "planted": 8,
+      "found": [
+        5,
+        2,
+        0,
+        1,
+        0
+      ],
+      "recall": [
+        0.625,
+        0.25,
+        0,
+        0.125,
+        0
+      ],
+      "falsePositives": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "unmatched": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "authzFound": [],
+      "authzPlanted": null,
+      "tokens": [
+        124283,
+        796169,
+        63515,
+        122617,
+        112183
+      ],
+      "turns": [
+        8,
+        17,
+        6,
+        7,
+        7
+      ],
+      "seconds": [
+        120.198,
+        158.893,
+        26.283,
+        85.739,
+        46.101
+      ],
+      "costUsd": [
+        0.00649886,
+        0.034861380000000004,
+        0.0007952200000000001,
+        0.00864986,
+        0.0052526199999999995
+      ],
+      "indexToolCalls": []
+    }
+  ],
+  "runs": [
+    {
+      "kind": "variants",
+      "fixture": "variants-tenant",
+      "arm": "variants",
+      "repeat": 1,
+      "status": "complete",
+      "seconds": 120.198,
+      "costUsd": 0.00649886,
+      "tokens": 124283,
+      "threads": 2,
+      "turns": 8,
+      "toolCalls": {
+        "bash": 5,
+        "load_skill": 1
+      },
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "rootCauseSource": "derived",
+      "checklist": {
+        "engine": "builtin",
+        "strategy": "authorization",
+        "total": 104,
+        "listed": 60,
+        "omitted": 44,
+        "verdicts": {
+          "variant": 5,
+          "guarded": 46,
+          "not_reachable": 7,
+          "unsure": 2
+        },
+        "undisposed": [],
+        "stored": [
+          "C2",
+          "C3",
+          "C10",
+          "C11",
+          "C25"
+        ],
+        "notes": []
+      },
+      "huntError": null,
+      "skipped": 0,
+      "score": {
+        "planted": 8,
+        "found": 5,
+        "foundIds": [
+          "vt-quote-pdf",
+          "vt-graphql-subscription",
+          "vt-ws-ticket-subscribe",
+          "vt-import-product",
+          "vt-payment-webhook"
+        ],
+        "missedIds": [
+          "vt-contract-service",
+          "vt-reminder-job",
+          "vt-report-shipment"
+        ],
+        "recall": 0.625,
+        "findings": 5,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [],
+        "nearMisses": []
+      },
+      "loose": {
+        "found": 5,
+        "foundIds": [
+          "vt-quote-pdf",
+          "vt-graphql-subscription",
+          "vt-ws-ticket-subscribe",
+          "vt-import-product",
+          "vt-payment-webhook"
+        ],
+        "falsePositives": 0
+      },
+      "findings": [
+        {
+          "title": "Quote PDF route returns cross-tenant quote data",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/routes/quotes.ts",
+            "startLine": 23,
+            "endLine": 27
+          },
+          "description": "Unverified variant of sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c: Any signed-in user can read any tenant's invoice by id. GET /api/invoices/:id returned any tenant's invoice to any signed-in user because the route loaded the record with the unscoped invoiceRepo.findById(id) and never compared its orgId with the caller's. The fix scoped the lookup to the caller's o (hunt candidate C25)\n\nA search thread reported this site from the same root cause. Nobody has confirmed it. Run `findings verify` on it to confirm or reject it.\n\nA signed-in caller supplies a quote id to the PDF route. The handler loads it globally and renders quote contents, including internalNotes, without verifying the quote belongs to the caller's organisation.\n\nSuggested fix: Use quoteRepo.findForOrg(req.user.orgId, req.params.id) before rendering the PDF.",
+          "variantOf": "sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c"
+        },
+        {
+          "title": "WebSocket ticket subscription exposes tickets without tenant authorization",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/ws/handlers.ts",
+            "startLine": 28,
+            "endLine": 32
+          },
+          "description": "Unverified variant of sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c: Any signed-in user can read any tenant's invoice by id. GET /api/invoices/:id returned any tenant's invoice to any signed-in user because the route loaded the record with the unscoped invoiceRepo.findById(id) and never compared its orgId with the caller's. The fix scoped the lookup to the caller's o (hunt candidate C11)\n\nA search thread reported this site from the same root cause. Nobody has confirmed it, so its severity is capped at medium (the thread said high). Run `findings verify` on it to confirm or reject it.\n\nAn authenticated session submits a ticket channel id. handleMessage dispatches it to subscribeTicket, which finds the ticket by id, joins the channel, and returns the ticket and its comments without an ownership check.\n\nSuggested fix: Scope the ticket lookup to session.user.orgId and verify the user is authorized for the ticket before joining the channel or returning its snapshot.",
+          "variantOf": "sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c"
+        },
+        {
+          "title": "Order import preview resolves products without tenant scope",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/services/importService.ts",
+            "startLine": 22,
+            "endLine": 23
+          },
+          "description": "Unverified variant of sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c: Any signed-in user can read any tenant's invoice by id. GET /api/invoices/:id returned any tenant's invoice to any signed-in user because the route loaded the record with the unscoped invoiceRepo.findById(id) and never compared its orgId with the caller's. The fix scoped the lookup to the caller's o (hunt candidate C10)\n\nA search thread reported this site from the same root cause. Nobody has confirmed it. Run `findings verify` on it to confirm or reject it.\n\nA caller's CSV supplies productId. previewOrderImport passes it to resolveProduct, which calls productRepo.findById without an organisation constraint; the preview exposes product unit cost and derived margin.\n\nSuggested fix: Pass the authenticated user's orgId to resolveProduct and use a tenant-scoped product lookup, rejecting products outside that organisation.",
+          "variantOf": "sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c"
+        },
+        {
+          "title": "Payment webhook can update an invoice outside the integration account's organisation",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/integrations/paymentWebhook.ts",
+            "startLine": 18,
+            "endLine": 20
+          },
+          "description": "Unverified variant of sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c: Any signed-in user can read any tenant's invoice by id. GET /api/invoices/:id returned any tenant's invoice to any signed-in user because the route loaded the record with the unscoped invoiceRepo.findById(id) and never compared its orgId with the caller's. The fix scoped the lookup to the caller's o (hunt candidate C3)\n\nA search thread reported this site from the same root cause. Nobody has confirmed it, so its severity is capped at medium (the thread said high). Run `findings verify` on it to confirm or reject it.\n\nThe webhook body supplies invoiceId. After identifying the payment integration account, the handler finds that invoice globally and saves it as paid, without verifying that its orgId matches the account's orgId.\n\nSuggested fix: Load the invoice with invoiceRepo.findForOrg(account.orgId, invoiceId) so the payment account can only settle invoices belonging to its organisation.",
+          "variantOf": "sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c"
+        },
+        {
+          "title": "GraphQL subscription lookup lacks tenant scope",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/graphql/resolvers.ts",
+            "startLine": 26,
+            "endLine": 28
+          },
+          "description": "Unverified variant of sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c: Any signed-in user can read any tenant's invoice by id. GET /api/invoices/:id returned any tenant's invoice to any signed-in user because the route loaded the record with the unscoped invoiceRepo.findById(id) and never compared its orgId with the caller's. The fix scoped the lookup to the caller's o (hunt candidate C2)\n\nA search thread reported this site from the same root cause. Nobody has confirmed it. Run `findings verify` on it to confirm or reject it.\n\nA signed-in GraphQL caller supplies args.id; the subscription resolver retrieves and returns that record using an unscoped lookup.\n\nSuggested fix: Use an organisation-scoped repository lookup with ctx.user.orgId, or compare the returned subscription's orgId with ctx.user.orgId before returning it.",
+          "variantOf": "sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c"
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "variants",
+      "fixture": "variants-tenant",
+      "arm": "variants",
+      "repeat": 2,
+      "status": "complete",
+      "seconds": 158.893,
+      "costUsd": 0.034861380000000004,
+      "tokens": 796169,
+      "threads": 2,
+      "turns": 17,
+      "toolCalls": {
+        "load_skill": 1,
+        "bash": 8,
+        "spawn_agent": 5
+      },
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "rootCauseSource": "derived",
+      "checklist": {
+        "engine": "builtin",
+        "strategy": "authorization",
+        "total": 132,
+        "listed": 60,
+        "omitted": 72,
+        "verdicts": {
+          "variant": 1,
+          "guarded": 0,
+          "not_reachable": 0,
+          "unsure": 0
+        },
+        "undisposed": [
+          "C1",
+          "C2",
+          "C3",
+          "C4",
+          "C5",
+          "C6",
+          "C7",
+          "C8",
+          "C9",
+          "C10",
+          "C11",
+          "C12",
+          "C13",
+          "C14",
+          "C15",
+          "C16",
+          "C17",
+          "C18",
+          "C19",
+          "C20",
+          "C21",
+          "C22",
+          "C23",
+          "C24",
+          "C25",
+          "C26",
+          "C27",
+          "C28",
+          "C29",
+          "C30",
+          "C31",
+          "C32",
+          "C33",
+          "C34",
+          "C35",
+          "C36",
+          "C37",
+          "C38",
+          "C39",
+          "C40",
+          "C41",
+          "C42",
+          "C43",
+          "C44",
+          "C45",
+          "C46",
+          "C47",
+          "C48",
+          "C49",
+          "C50",
+          "C51",
+          "C52",
+          "C53",
+          "C54",
+          "C55",
+          "C57",
+          "C58",
+          "C59",
+          "C60"
+        ],
+        "stored": [
+          "C56"
+        ],
+        "notes": []
+      },
+      "huntError": null,
+      "skipped": 0,
+      "score": {
+        "planted": 8,
+        "found": 2,
+        "foundIds": [
+          "vt-contract-service",
+          "vt-report-shipment"
+        ],
+        "missedIds": [
+          "vt-quote-pdf",
+          "vt-reminder-job",
+          "vt-graphql-subscription",
+          "vt-ws-ticket-subscribe",
+          "vt-import-product",
+          "vt-payment-webhook"
+        ],
+        "recall": 0.25,
+        "findings": 3,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [],
+        "nearMisses": []
+      },
+      "loose": {
+        "found": 2,
+        "foundIds": [
+          "vt-contract-service",
+          "vt-report-shipment"
+        ],
+        "falsePositives": 0
+      },
+      "findings": [
+        {
+          "title": "Shipment cost report exposes another tenant's shipment data",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/routes/reports.ts",
+            "startLine": 10,
+            "endLine": 12
+          },
+          "description": "Unverified variant of sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c: Any signed-in user can read any tenant's invoice by id. GET /api/invoices/:id returned any tenant's invoice to any signed-in user because the route loaded the record with the unscoped invoiceRepo.findById(id) and never compared its orgId with the caller's. The fix scoped the lookup to the caller's o\n\nA search thread reported this site from the same root cause. Nobody has confirmed it, so its severity is capped at medium (the thread said high). Run `findings verify` on it to confirm or reject it.\n\nThe authenticated report route passes req.params.id to shipmentCostReport without the caller's orgId. That helper uses shipmentRepo.get and returns destination, cost, billed amount, and margin. The neighboring timeline route uses getForOrg.\n\nSuggested fix: Pass req.user!.orgId to shipmentCostReport and use shipmentRepo.getForOrg(orgId, shipmentId).",
+          "variantOf": "sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c"
+        },
+        {
+          "title": "Contract read routes expose records across tenants",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/routes/contracts.ts",
+            "startLine": 13,
+            "endLine": 18
+          },
+          "description": "Unverified variant of sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c: Any signed-in user can read any tenant's invoice by id. GET /api/invoices/:id returned any tenant's invoice to any signed-in user because the route loaded the record with the unscoped invoiceRepo.findById(id) and never compared its orgId with the caller's. The fix scoped the lookup to the caller's o\n\nA search thread reported this site from the same root cause. Nobody has confirmed it, so its severity is capped at medium (the thread said high). Run `findings verify` on it to confirm or reject it.\n\nBoth authenticated contract read routes pass req.params.id to the unscoped contractService.get; the helper uses findById and does not compare the contract's orgId to the caller's.\n\nSuggested fix: Use contractService.getForOrg(req.user!.orgId, req.params.id) in both read routes.",
+          "variantOf": "sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c"
+        },
+        {
+          "title": "Contract routes expose records across tenants",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/services/contractService.ts",
+            "startLine": 10,
+            "endLine": 14
+          },
+          "description": "Unverified variant of sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c: Any signed-in user can read any tenant's invoice by id. GET /api/invoices/:id returned any tenant's invoice to any signed-in user because the route loaded the record with the unscoped invoiceRepo.findById(id) and never compared its orgId with the caller's. The fix scoped the lookup to the caller's o (hunt candidate C56)\n\nA search thread reported this site from the same root cause. Nobody has confirmed it, so its severity is capped at medium (the thread said high). Run `findings verify` on it to confirm or reject it.\n\nGET /api/contracts/:id and /:id/summary pass the request ID to contractService.get, which calls findById and returns the record without checking its orgId against the authenticated user's orgId.\n\nSuggested fix: Use contractService.getForOrg(req.user!.orgId, req.params.id) in both read routes.",
+          "variantOf": "sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c"
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "variants",
+      "fixture": "variants-tenant",
+      "arm": "variants",
+      "repeat": 3,
+      "status": "error: ChatGPT (Codex backend) API error: ChatGPT (Codex backend) transport failure [UND_ERR_SOCKET]: The connection closed before a complete response was received. Request outcome may be unknown. Automatic replay is disabled",
+      "seconds": 26.283,
+      "costUsd": 0.0007952200000000001,
+      "tokens": 63515,
+      "threads": 2,
+      "turns": 6,
+      "toolCalls": {
+        "load_skill": 1,
+        "bash": 4
+      },
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "rootCauseSource": null,
+      "checklist": null,
+      "huntError": "ChatGPT (Codex backend) API error: ChatGPT (Codex backend) transport failure [UND_ERR_SOCKET]: The connection closed before a complete response was received. Request outcome may be unknown. Automatic replay is disabled",
+      "skipped": 0,
+      "score": {
+        "planted": 8,
+        "found": 0,
+        "foundIds": [],
+        "missedIds": [
+          "vt-contract-service",
+          "vt-quote-pdf",
+          "vt-reminder-job",
+          "vt-graphql-subscription",
+          "vt-ws-ticket-subscribe",
+          "vt-import-product",
+          "vt-report-shipment",
+          "vt-payment-webhook"
+        ],
+        "recall": 0,
+        "findings": 0,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [],
+        "nearMisses": []
+      },
+      "loose": {
+        "found": 0,
+        "foundIds": [],
+        "falsePositives": 0
+      },
+      "findings": [],
+      "rateLimited": false
+    },
+    {
+      "kind": "variants",
+      "fixture": "variants-tenant",
+      "arm": "variants",
+      "repeat": 4,
+      "status": "complete",
+      "seconds": 85.739,
+      "costUsd": 0.00864986,
+      "tokens": 122617,
+      "threads": 2,
+      "turns": 7,
+      "toolCalls": {
+        "load_skill": 1,
+        "bash": 4
+      },
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "rootCauseSource": "derived",
+      "checklist": {
+        "engine": "builtin",
+        "strategy": "authorization",
+        "total": 104,
+        "listed": 60,
+        "omitted": 44,
+        "verdicts": {
+          "variant": 1,
+          "guarded": 32,
+          "not_reachable": 21,
+          "unsure": 6
+        },
+        "undisposed": [],
+        "stored": [
+          "C25"
+        ],
+        "notes": []
+      },
+      "huntError": null,
+      "skipped": 0,
+      "score": {
+        "planted": 8,
+        "found": 1,
+        "foundIds": [
+          "vt-quote-pdf"
+        ],
+        "missedIds": [
+          "vt-contract-service",
+          "vt-reminder-job",
+          "vt-graphql-subscription",
+          "vt-ws-ticket-subscribe",
+          "vt-import-product",
+          "vt-report-shipment",
+          "vt-payment-webhook"
+        ],
+        "recall": 0.125,
+        "findings": 1,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [],
+        "nearMisses": []
+      },
+      "loose": {
+        "found": 1,
+        "foundIds": [
+          "vt-quote-pdf"
+        ],
+        "falsePositives": 0
+      },
+      "findings": [
+        {
+          "title": "Quote PDF endpoint returns another organization's quote",
+          "category": "broken-access-control",
+          "severity": "medium",
+          "location": {
+            "path": "src/routes/quotes.ts",
+            "startLine": 23,
+            "endLine": 27
+          },
+          "description": "Unverified variant of sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c: Any signed-in user can read any tenant's invoice by id. GET /api/invoices/:id returned any tenant's invoice to any signed-in user because the route loaded the record with the unscoped invoiceRepo.findById(id) and never compared its orgId with the caller's. The fix scoped the lookup to the caller's o (hunt candidate C25)\n\nA search thread reported this site from the same root cause. Nobody has confirmed it. Run `findings verify` on it to confirm or reject it.\n\nThe authenticated GET /:id/pdf path passes req.params.id to quoteRepo.findById, then renders and returns the quote without checking quote.orgId against req.user.orgId. The customer lookup is scoped to the quote's org, but does not authorize the caller to read the quote.\n\nSuggested fix: Use quoteRepo.findForOrg(req.user!.orgId, req.params.id), returning 404 when absent, before rendering.",
+          "variantOf": "sarif-8fbfc6dbb67477650d1c8f305e9da7608d1e3ef3fafd034142d2a8b3d4c2ca79-526ff360b63f93e7b3b23e9c"
+        }
+      ],
+      "rateLimited": false
+    },
+    {
+      "kind": "variants",
+      "fixture": "variants-tenant",
+      "arm": "variants",
+      "repeat": 5,
+      "status": "error: the answer held no verdict for any checklist candidate",
+      "seconds": 46.101,
+      "costUsd": 0.0052526199999999995,
+      "tokens": 112183,
+      "threads": 2,
+      "turns": 7,
+      "toolCalls": {
+        "load_skill": 1,
+        "bash": 4
+      },
+      "provider": [
+        "chatgpt-codex"
+      ],
+      "model": [
+        "gpt-6-luna"
+      ],
+      "rootCauseSource": "derived",
+      "checklist": {
+        "engine": "builtin",
+        "strategy": "authorization",
+        "total": 104,
+        "listed": 60,
+        "omitted": 44,
+        "verdicts": {
+          "variant": 0,
+          "guarded": 0,
+          "not_reachable": 0,
+          "unsure": 0
+        },
+        "undisposed": [
+          "C1",
+          "C2",
+          "C3",
+          "C4",
+          "C5",
+          "C6",
+          "C7",
+          "C8",
+          "C9",
+          "C10",
+          "C11",
+          "C12",
+          "C13",
+          "C14",
+          "C15",
+          "C16",
+          "C17",
+          "C18",
+          "C19",
+          "C20",
+          "C21",
+          "C22",
+          "C23",
+          "C24",
+          "C25",
+          "C26",
+          "C27",
+          "C28",
+          "C29",
+          "C30",
+          "C31",
+          "C32",
+          "C33",
+          "C34",
+          "C35",
+          "C36",
+          "C37",
+          "C38",
+          "C39",
+          "C40",
+          "C41",
+          "C42",
+          "C43",
+          "C44",
+          "C45",
+          "C46",
+          "C47",
+          "C48",
+          "C49",
+          "C50",
+          "C51",
+          "C52",
+          "C53",
+          "C54",
+          "C55",
+          "C56",
+          "C57",
+          "C58",
+          "C59",
+          "C60"
+        ],
+        "stored": [],
+        "notes": []
+      },
+      "huntError": "the answer held no verdict for any checklist candidate",
+      "skipped": 0,
+      "score": {
+        "planted": 8,
+        "found": 0,
+        "foundIds": [],
+        "missedIds": [
+          "vt-contract-service",
+          "vt-quote-pdf",
+          "vt-reminder-job",
+          "vt-graphql-subscription",
+          "vt-ws-ticket-subscribe",
+          "vt-import-product",
+          "vt-report-shipment",
+          "vt-payment-webhook"
+        ],
+        "recall": 0,
+        "findings": 0,
+        "falsePositives": 0,
+        "decoyHits": [],
+        "unmatched": [],
+        "nearMisses": []
+      },
+      "loose": {
+        "found": 0,
+        "foundIds": [],
+        "falsePositives": 0
+      },
+      "findings": [],
+      "rateLimited": false
+    }
+  ]
+}

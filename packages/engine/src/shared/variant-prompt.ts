@@ -134,7 +134,7 @@ export function parseVariantReport(reply: string | undefined, candidates: readon
   const read = (v: Record<string, unknown>, fallback: { path?: string; startLine?: number }, candidateId?: string): ParsedVariant | undefined => {
     const path = str(v.file ?? v.path, 500).replace(/^\.\//, "") || fallback.path || "";
     const startLine = lineNumber(v.startLine ?? v.start_line ?? v.line) ?? fallback.startLine;
-    const title = str(v.title, 300), description = str(v.description, 3000) || (candidateId ? str(v.reason, 3000) : "");
+    const title = str(v.title, 300), description = str(v.description, 3000) || (candidateId ? str(v.reason, 3000) || str(v.evidence, 3000) || `Marked a variant by the candidate checklist (${candidateId}).` : "");
     if (!title || !description || !path || !startLine || path.startsWith("/") || path.split("/").includes("..") || path.includes("\0")) return undefined;
     const key = `${path}:${startLine}`;
     if (seen.has(key)) return undefined;
@@ -159,7 +159,9 @@ export function parseVariantReport(reply: string | undefined, candidates: readon
     out.dispositions.push({ id, verdict: verdict as CandidateVerdict, reason: str(v.reason, 1000), ...(guard ? { guard } : {}) });
     if (verdict === "variant") {
       // A candidate marked variant keeps its checklist id. The path is the candidate's; the lines are the thread's when given.
-      const parsed = read({ ...v, file: candidate.file }, { path: candidate.file, startLine: candidate.line }, id);
+      // A verdict of variant is enough: a missing title or description is filled from the candidate and the reason.
+      const title = str(v.title, 300) || `Candidate ${id}: ${candidate.symbol ? `${candidate.symbol} in ` : ""}${candidate.file}:${candidate.line}`;
+      const parsed = read({ ...v, title, file: candidate.file }, { path: candidate.file, startLine: candidate.line }, id);
       if (parsed) out.variants.push(parsed);
     }
   }
