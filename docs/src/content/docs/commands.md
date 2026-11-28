@@ -2317,7 +2317,7 @@ A policy file inside the repository being fixed is not read unless you pass `--r
 | `--policy <file>` | — | Policy file (.json or .yaml) of approved libraries and fix rules; any path you name, relative to the current directory. Default: ~/.0/fix-policy.json\|yaml\|yml |
 | `--policy-bundle <file\|https-url>` | — | Signed policy bundle to use instead of --policy; refused unless its Ed25519 signature matches a --policy-bundle-key or --policy-bundle-key-file and its version is newer than the last one accepted |
 | `--policy-bundle-key <key>` | — | Ed25519 public key as inline text (PEM, base64 or hex; never a path) allowed to sign policy bundles; repeat for several. Also ZERO_POLICY_BUNDLE_KEY |
-| `--policy-bundle-key-file <path>` | — | File holding an Ed25519 public key allowed to sign policy bundles: an absolute path, not a symlink, outside the working tree being scanned; repeat for several. Also ZERO_POLICY_BUNDLE_KEY_FILE |
+| `--policy-bundle-key-file <path>` | — | File holding an Ed25519 public key allowed to sign policy bundles: an absolute path, not a symlink, outside the current folder and every repository being fixed (--repo); repeat for several. Also ZERO_POLICY_BUNDLE_KEY_FILE |
 | `--ticket <key>` | — | Ticket key such as SEC-123 for the {ticket} placeholder in your policy's pull request settings |
 | `--repo-policy` | — | Also read fix-policy.* or .zero/fix-policy.* from the repository being fixed (untrusted content; off by default) |
 | `--no-variants` | — | Do not rescan the recorded variants or hunt for the same bug at other sites after the fix |

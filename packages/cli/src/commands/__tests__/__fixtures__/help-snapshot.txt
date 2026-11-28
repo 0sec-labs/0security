@@ -996,9 +996,9 @@ Options:
                                     path) allowed to sign policy bundles; repeat for several. Also
                                     ZERO_POLICY_BUNDLE_KEY
   --policy-bundle-key-file <path>   File holding an Ed25519 public key allowed to sign policy
-                                    bundles: an absolute path, not a symlink, outside the working
-                                    tree being scanned; repeat for several. Also
-                                    ZERO_POLICY_BUNDLE_KEY_FILE
+                                    bundles: an absolute path, not a symlink, outside the current
+                                    folder and every repository being fixed (--repo); repeat for
+                                    several. Also ZERO_POLICY_BUNDLE_KEY_FILE
   --ticket <key>                    Ticket key such as SEC-123 for the {ticket} placeholder in your
                                     policy's pull request settings
   --repo-policy                     Also read fix-policy.* or .zero/fix-policy.* from the repository

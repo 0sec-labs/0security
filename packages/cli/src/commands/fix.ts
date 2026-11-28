@@ -283,7 +283,7 @@ async function runFixFlow(id: string, options: FixOptions, deps: FixDeps): Promi
     const base = await defaultBase(deps, repo, options.base);
     // The policy is read before anything is created: a bad pull request setting stops the run first.
     if (options.policyBundle && options.policy) throw new UsageError("Pass either --policy or --policy-bundle, not both.");
-    const bundle = await loadPolicyBundle(options);
+    const bundle = await loadPolicyBundle({ ...options, scanRoots: [repo, ...(options.repo ? [resolve(options.repo)] : [])] });
     const loaded: LoadedFixPolicy | undefined = bundle
       ? { ...parseFixPolicyDocument(bundle.policyText, "the policy bundle"), source: `signed policy bundle ${bundle.source} (version ${bundle.version})`, fromRepo: false }
       : deps.loadPolicy(repo, options);
@@ -579,7 +579,7 @@ export function registerFixCommand(program: Command, deps: FixDeps = defaults): 
     .option("--policy <file>", "Policy file (.json or .yaml) of approved libraries and fix rules; any path you name, relative to the current directory. Default: ~/.0/fix-policy.json|yaml|yml")
     .option("--policy-bundle <file|https-url>", "Signed policy bundle to use instead of --policy; refused unless its Ed25519 signature matches a --policy-bundle-key or --policy-bundle-key-file and its version is newer than the last one accepted")
     .option("--policy-bundle-key <key>", "Ed25519 public key as inline text (PEM, base64 or hex; never a path) allowed to sign policy bundles; repeat for several. Also ZERO_POLICY_BUNDLE_KEY", collect)
-    .option("--policy-bundle-key-file <path>", "File holding an Ed25519 public key allowed to sign policy bundles: an absolute path, not a symlink, outside the working tree being scanned; repeat for several. Also ZERO_POLICY_BUNDLE_KEY_FILE", collect)
+    .option("--policy-bundle-key-file <path>", "File holding an Ed25519 public key allowed to sign policy bundles: an absolute path, not a symlink, outside the current folder and every repository being fixed (--repo); repeat for several. Also ZERO_POLICY_BUNDLE_KEY_FILE", collect)
     .option("--ticket <key>", "Ticket key such as SEC-123 for the {ticket} placeholder in your policy's pull request settings")
     .option("--repo-policy", "Also read fix-policy.* or .zero/fix-policy.* from the repository being fixed (untrusted content; off by default)")
     .option("--no-variants", "Do not rescan the recorded variants or hunt for the same bug at other sites after the fix")

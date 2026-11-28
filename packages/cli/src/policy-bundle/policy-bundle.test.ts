@@ -116,6 +116,26 @@ describe("key sources", () => {
     expect(() => configuredKeys([], [join(dir, "nope.pem")], {}, repo)).toThrow(/not found/);
     expect(() => configuredKeys([], [], { ZERO_POLICY_BUNDLE_KEY_FILE: inside }, repo)).toThrow(/working tree/);
   });
+  it("refuses a key file inside any repository the command reads, such as --repo", () => {
+    const cwd = join(dir, "cwd"); mkdirSync(cwd);
+    const other = join(dir, "other"); mkdirSync(join(other, ".git"), { recursive: true });
+    const planted = join(other, "k.pem"); writeFileSync(planted, pem(evil.publicKey));
+    const safe = join(dir, "safe.pem"); writeFileSync(safe, pem(a.publicKey));
+    expect(() => configuredKeys([], [planted], {}, [cwd, other])).toThrow(/working tree|repositor/);
+    expect(configuredKeys([], [safe], {}, [cwd, other])).toHaveLength(1);
+    const viaLink = join(dir, "other-link"); symlinkSync(other, viaLink);
+    expect(() => configuredKeys([], [join(viaLink, "k.pem")], {}, [cwd, other])).toThrow(/working tree|repositor/);
+    expect(() => configuredKeys([], [planted], {}, [cwd, viaLink])).toThrow(/working tree|repositor/);
+    expect(() => configuredKeys([], ["other/k.pem"], {}, [cwd, other])).toThrow(/absolute/);
+    const link = join(dir, "link.pem"); symlinkSync(planted, link);
+    expect(() => configuredKeys([], [link], {}, [cwd])).toThrow(/symlink/);
+  });
+  it("loadPolicyBundle applies scanRoots", async () => {
+    const other = join(dir, "other"); mkdirSync(join(other, ".git"), { recursive: true });
+    const planted = join(other, "k.pem"); writeFileSync(planted, pem(a.publicKey));
+    const b = join(dir, "b.json"); writeFileSync(b, bundle(a.privateKey, 1));
+    await expect(loadPolicyBundle({ policyBundle: b, policyBundleKeyFile: [planted], scanRoots: [other] }, dir, {})).rejects.toThrow(/repositor|working tree/);
+  });
   it("a key file's content is never treated as a path and a path is never treated as key text", () => {
     const f = join(dir, "bad.pem"); writeFileSync(f, "not a key");
     expect(() => configuredKeys([], [f], {}, join(tmpdir(), "elsewhere"))).toThrow(/valid Ed25519/);
