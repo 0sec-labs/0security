@@ -3,6 +3,8 @@
 // No network, no model, no Bitbucket.
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { digestPins, findStaleDigests } from "./bump-docs-pins.mjs";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -283,4 +285,33 @@ test("the rehearsal checks its settings and can run dry", () => {
   assert.equal(dry.result.status, 0);
   assert.equal(dry.log, "");
   assert.equal(spawnSync("sh", ["-n", join(repo, "ci/rehearsal/bitbucket-cloud.sh")]).status, 0);
+});
+
+// ---- pinned script digests ----
+
+test("templates download scripts only through the checksummed fetch, and the pins match the files at the tag", () => {
+  for (const file of templates) {
+    const text = read(file);
+    const curls = text.split("\n").filter((l) => /\bcurl\b/.test(l) && !l.includes("fetch() {"));
+    assert.deepEqual(curls, [], `${file}: every download goes through fetch`);
+    const pins = digestPins(text);
+    assert.ok(pins.length >= 2, `${file} pins install.sh and a helper`);
+    for (const pin of pins) assert.equal(pin.version, cliVersion, `${file}: ${pin.path} is pinned for the tag the template fetches`);
+  }
+  assert.deepEqual(findStaleDigests(repo), []);
+});
+
+test("fetch keeps a script whose digest matches and exits non-zero on a different one", () => {
+  const fn = read("ci/gitlab-ci.yml").split("\n").find((l) => l.includes("fetch() {")).replace(/^\s*- /, "");
+  const work = mkdtempSync(join(tmpdir(), "fetch-"));
+  const bin = join(work, "bin");
+  mkdirSync(bin);
+  writeFileSync(join(bin, "curl"), '#!/bin/sh\nwhile [ "$1" != -o ]; do shift; done\nprintf "script body\\n" > "$2"\n');
+  chmodSync(join(bin, "curl"), 0o755);
+  const good = createHash("sha256").update("script body\n").digest("hex");
+  const run = (hex) => spawnSync("sh", ["-c", `${fn}\nRAW=https://example.invalid tools="${work}"\nfetch ci/scripts/x.sh ${hex}`], { encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } });
+  assert.equal(run(good).status, 0);
+  const bad = run("0".repeat(64));
+  assert.equal(bad.status, 1);
+  assert.match(bad.stderr, /checksum mismatch for ci\/scripts\/x\.sh/);
 });

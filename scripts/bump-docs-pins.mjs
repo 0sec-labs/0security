@@ -3,6 +3,8 @@
 // version in packages/cli/package.json, or use `latest`. The release commit runs `node scripts/bump-docs-pins.mjs <version>`
 // to rewrite them; `--check` (wired into `pnpm docs:check`) fails when one lags behind.
 import { readdirSync, readFileSync, statSync, writeFileSync, existsSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { join, relative } from "node:path";
 
 const SKIP_FILES = new Set(["changelog.md"]);
@@ -57,10 +59,59 @@ export function findStale(root, version = cliVersion(root)) {
   return stale;
 }
 
+// CI templates fetch install.sh and the helper scripts by release tag and check each against a SHA-256 written in the
+// template (`fetch <path> <sha256>`, or `echo "<sha256>  $RUNNER_TEMP/install.sh"`). checksums.txt covers only binaries.
+const DIGEST_LINES = [
+  /^(\s*(?:- )?fetch )([\w./-]+)( )([0-9a-f]{64})(\s*)$/,
+  /^(\s*echo ")([0-9a-f]{64})(  \$RUNNER_TEMP\/)(install\.sh)(" \| sha256sum --check -\s*)$/,
+];
+const digestOf = (bytes) => createHash("sha256").update(bytes).digest("hex");
+
+/** Every pinned digest in a text: { line (0-based), path, hex, version (nearest VERSION pin above, if any) }. */
+export function digestPins(text) {
+  const pins = []; let version = null;
+  text.split("\n").forEach((line, line_) => {
+    const v = line.match(/\bVERSION\s*[=:]\s*['"]?(\d+\.\d+\.\d+)/); if (v) version = v[1];
+    let m = line.match(DIGEST_LINES[0]); if (m) return pins.push({ line: line_, path: m[2], hex: m[4], version });
+    m = line.match(DIGEST_LINES[1]); if (m) pins.push({ line: line_, path: m[4], hex: m[2], version });
+  });
+  return pins;
+}
+
+function rewriteDigests(text, digest) {
+  const lines = text.split("\n");
+  for (const pin of digestPins(text)) lines[pin.line] = lines[pin.line].replaceAll(pin.hex, digest(pin.path));
+  return lines.join("\n");
+}
+
+/** The bytes of `path` at tag v<version>; falls back to the working tree only for the version being released. */
+function fileAtTag(root, path, version, current) {
+  try {
+    return execFileSync("git", ["show", `v${version}:${path}`], { cwd: root, stdio: ["ignore", "pipe", "ignore"], maxBuffer: 1 << 26 });
+  } catch {
+    if (version === current) return readFileSync(join(root, path));
+    return null;
+  }
+}
+
+export function findStaleDigests(root, current = cliVersion(root)) {
+  const stale = [];
+  for (const file of pinFiles(root)) {
+    for (const pin of digestPins(readFileSync(file, "utf8"))) {
+      const where = `${relative(root, file)}:${pin.line + 1}: ${pin.path}`;
+      const bytes = pin.version ? fileAtTag(root, pin.path, pin.version, current) : null;
+      if (!bytes) stale.push(`${where}: tag v${pin.version} not available locally (git fetch --tags)`);
+      else if (digestOf(bytes) !== pin.hex) stale.push(`${where}: pinned ${pin.hex.slice(0, 12)}, file at v${pin.version} is ${digestOf(bytes).slice(0, 12)}`);
+    }
+  }
+  return stale;
+}
+
 export function bump(root, version) {
   const changed = [];
+  const digest = (path) => digestOf(readFileSync(join(root, path)));
   for (const file of pinFiles(root)) {
-    const text = readFileSync(file, "utf8"), next = rewrite(text, version);
+    const text = readFileSync(file, "utf8"), next = rewriteDigests(rewrite(text, version), digest);
     if (next !== text) { writeFileSync(file, next); changed.push(relative(root, file)); }
   }
   return changed;
@@ -70,7 +121,12 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
   const root = join(import.meta.dirname, "..");
   const args = process.argv.slice(2);
   if (args.includes("--check")) {
-    const version = cliVersion(root), stale = findStale(root, version);
+    const version = cliVersion(root), stale = findStale(root, version), badDigests = findStaleDigests(root, version);
+    if (badDigests.length) {
+      console.error("pinned script digests in the CI templates and docs must equal the file at the pinned tag; after a release run: node scripts/bump-docs-pins.mjs " + version);
+      for (const line of badDigests) console.error(`  ${line}`);
+      process.exit(1);
+    }
     if (stale.length) {
       console.error(`docs pins must equal the CLI version ${version} (or use latest); run: node scripts/bump-docs-pins.mjs ${version}`);
       for (const line of stale) console.error(`  ${line}`);

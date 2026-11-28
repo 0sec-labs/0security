@@ -14,6 +14,7 @@ on the GitHub Release tag.
 
 ### Changed
 
+- The CI templates (Bitbucket, Jenkins, Azure Pipelines, GitLab) and the GitHub snippet for the SBOM job now check `install.sh` and the helper scripts they download by release tag against a SHA-256 written in the template, and stop on a mismatch. `checksums.txt` covers only the binaries, so these digests are pinned in the templates; `scripts/bump-docs-pins.mjs` rewrites them at release and `pnpm docs:check` fails when one no longer matches the file at the pinned tag.
 - `0security config doctor --help` now shows `config doctor` in its usage line (it showed `doctor`), and the cra-evidence page explains how to check a CycloneDX SBOM made by another tool.
 - New page "Triage findings from any scanner": `findings import` plus `findings verify` as a triage layer over any scanner, with the measured OWASP Benchmark and Vul4J results and their limits.
 - The models page now says which credentials are meant for production and shared use (API keys, Bedrock through the AWS credential chain, an OpenAI-compatible gateway, Azure OpenAI with Entra ID), that consumer or per-seat subscription logins are for individual local use and may be restricted by the provider's terms, and links each provider's own terms.

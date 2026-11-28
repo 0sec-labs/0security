@@ -9,9 +9,10 @@ definitions:
       VERSION=0.46.0 # Pin the CLI
       RAW="https://raw.githubusercontent.com/0sec-labs/0security/v${VERSION}"
       tools="$(mktemp -d)" && export INSTALL_DIR="$tools" PATH="$tools:$PATH"
-      curl -fsSL -o "$tools/install.sh" "$RAW/install.sh"
-      curl -fsSL -o "$tools/0-ci-scan.sh" "$RAW/ci/scripts/0-ci-scan.sh"
-      curl -fsSL -o "$tools/0-ci-publish.sh" "$RAW/ci/scripts/0-ci-publish.sh"
+      fetch() { curl -fsSL -o "$tools/${1##*/}" "$RAW/$1" && [ "$( (sha256sum "$tools/${1##*/}" 2>/dev/null || shasum -a 256 "$tools/${1##*/}") | cut -d' ' -f1)" = "$2" ] || { echo "checksum mismatch for $1" >&2; exit 1; }; }
+      fetch install.sh de830d7fb45f6ac90a1e0b7bfaa7df8305f3b924f64ecd4f4afbe8ae99baebe4
+      fetch ci/scripts/0-ci-scan.sh e01abf1732d721397fa0dbda6d4d6a8721ba05be243e2568978894d165bab1c9
+      fetch ci/scripts/0-ci-publish.sh bc3452fe981ba85f7a7e377cf49126d813839a7e75362e36fd7827aeb85d2762
       (cd "$tools" && RELEASE_BASE_URL="https://github.com/0sec-labs/0security/releases/download/v${VERSION}" sh install.sh)
 
 pipelines:

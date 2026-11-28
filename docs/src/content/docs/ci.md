@@ -470,7 +470,7 @@ This pattern is not tested on a real self-hosted runner yet.
 
 ## Bitbucket, Jenkins and Azure Pipelines
 
-The Action is GitHub only. Elsewhere, install the same pinned release and run the same three steps: scan the change, upload, fail on severity. Every example below installs a release you pin, and the installer refuses a download whose checksum does not match that release's `checksums.txt`.
+The Action is GitHub only. Elsewhere, install the same pinned release and run the same three steps: scan the change, upload, fail on severity. Every example below installs a release you pin, and the installer refuses a download whose checksum does not match that release's `checksums.txt`. Each template also fetches `install.sh` and the helper script by that release tag and checks each against a SHA-256 written in the template before running it, so a changed file at the tag stops the job. `checksums.txt` covers the binaries only, not these scripts, so the digests are pinned in the template; `node scripts/bump-docs-pins.mjs <version>` rewrites them at release and `pnpm docs:check` fails when one no longer matches the file at the pinned tag.
 
 The templates and scripts are tested with stand-in programs. They have not been run on a live Bitbucket, Jenkins, Azure Pipelines or GitLab instance, so try them on a branch first.
 
@@ -526,9 +526,10 @@ definitions:
       VERSION=0.46.0 # Pin the CLI
       RAW="https://raw.githubusercontent.com/0sec-labs/0security/v${VERSION}"
       tools="$(mktemp -d)" && export INSTALL_DIR="$tools" PATH="$tools:$PATH"
-      curl -fsSL -o "$tools/install.sh" "$RAW/install.sh"
-      curl -fsSL -o "$tools/0-ci-scan.sh" "$RAW/ci/scripts/0-ci-scan.sh"
-      curl -fsSL -o "$tools/0-ci-publish.sh" "$RAW/ci/scripts/0-ci-publish.sh"
+      fetch() { curl -fsSL -o "$tools/${1##*/}" "$RAW/$1" && [ "$( (sha256sum "$tools/${1##*/}" 2>/dev/null || shasum -a 256 "$tools/${1##*/}") | cut -d' ' -f1)" = "$2" ] || { echo "checksum mismatch for $1" >&2; exit 1; }; }
+      fetch install.sh de830d7fb45f6ac90a1e0b7bfaa7df8305f3b924f64ecd4f4afbe8ae99baebe4
+      fetch ci/scripts/0-ci-scan.sh e01abf1732d721397fa0dbda6d4d6a8721ba05be243e2568978894d165bab1c9
+      fetch ci/scripts/0-ci-publish.sh bc3452fe981ba85f7a7e377cf49126d813839a7e75362e36fd7827aeb85d2762
       (cd "$tools" && RELEASE_BASE_URL="https://github.com/0sec-labs/0security/releases/download/v${VERSION}" sh install.sh)
 
 pipelines:
@@ -577,8 +578,9 @@ pipeline {
             set -eu
             RAW="https://raw.githubusercontent.com/0sec-labs/0security/v${VERSION}"
             tools="$(mktemp -d)"; export INSTALL_DIR="$tools" PATH="$tools:$PATH"
-            curl -fsSL -o "$tools/install.sh" "$RAW/install.sh"
-            curl -fsSL -o "$tools/0-ci-scan.sh" "$RAW/ci/scripts/0-ci-scan.sh"
+            fetch() { curl -fsSL -o "$tools/${1##*/}" "$RAW/$1" && [ "$( (sha256sum "$tools/${1##*/}" 2>/dev/null || shasum -a 256 "$tools/${1##*/}") | cut -d' ' -f1)" = "$2" ] || { echo "checksum mismatch for $1" >&2; exit 1; }; }
+            fetch install.sh de830d7fb45f6ac90a1e0b7bfaa7df8305f3b924f64ecd4f4afbe8ae99baebe4
+            fetch ci/scripts/0-ci-scan.sh e01abf1732d721397fa0dbda6d4d6a8721ba05be243e2568978894d165bab1c9
             (cd "$tools" && RELEASE_BASE_URL="https://github.com/0sec-labs/0security/releases/download/v${VERSION}" sh install.sh)
             ZEROCI_BASE_BRANCH="$CHANGE_TARGET" sh "$tools/0-ci-scan.sh"
           '''
@@ -594,8 +596,9 @@ pipeline {
             RAW="https://raw.githubusercontent.com/0sec-labs/0security/v${VERSION}"
             tools="$(mktemp -d)"; export INSTALL_DIR="$tools" PATH="$tools:$PATH"
             cp scan.json scan.exit scan.commit "$tools/"
-            curl -fsSL -o "$tools/install.sh" "$RAW/install.sh"
-            curl -fsSL -o "$tools/0-ci-publish.sh" "$RAW/ci/scripts/0-ci-publish.sh"
+            fetch() { curl -fsSL -o "$tools/${1##*/}" "$RAW/$1" && [ "$( (sha256sum "$tools/${1##*/}" 2>/dev/null || shasum -a 256 "$tools/${1##*/}") | cut -d' ' -f1)" = "$2" ] || { echo "checksum mismatch for $1" >&2; exit 1; }; }
+            fetch install.sh de830d7fb45f6ac90a1e0b7bfaa7df8305f3b924f64ecd4f4afbe8ae99baebe4
+            fetch ci/scripts/0-ci-publish.sh bc3452fe981ba85f7a7e377cf49126d813839a7e75362e36fd7827aeb85d2762
             (cd "$tools" && RELEASE_BASE_URL="https://github.com/0sec-labs/0security/releases/download/v${VERSION}" sh install.sh)
             ZEROCI_OUT_DIR="$tools" ZEROCI_UPLOAD_TO=bitbucket-dc sh "$tools/0-ci-publish.sh"
           '''
@@ -633,8 +636,9 @@ steps:
       set -eu
       RAW="https://raw.githubusercontent.com/0sec-labs/0security/v${VERSION}"
       tools="$(mktemp -d)"; export INSTALL_DIR="$tools" PATH="$tools:$PATH"
-      curl -fsSL -o "$tools/install.sh" "$RAW/install.sh"
-      curl -fsSL -o "$tools/0-ci-scan.sh" "$RAW/ci/scripts/0-ci-scan.sh"
+      fetch() { curl -fsSL -o "$tools/${1##*/}" "$RAW/$1" && [ "$( (sha256sum "$tools/${1##*/}" 2>/dev/null || shasum -a 256 "$tools/${1##*/}") | cut -d' ' -f1)" = "$2" ] || { echo "checksum mismatch for $1" >&2; exit 1; }; }
+      fetch install.sh de830d7fb45f6ac90a1e0b7bfaa7df8305f3b924f64ecd4f4afbe8ae99baebe4
+      fetch ci/scripts/0-ci-scan.sh e01abf1732d721397fa0dbda6d4d6a8721ba05be243e2568978894d165bab1c9
       (cd "$tools" && RELEASE_BASE_URL="https://github.com/0sec-labs/0security/releases/download/v${VERSION}" sh install.sh)
       base="${TARGET_BRANCH#refs/heads/}"
       ZEROCI_BASE_BRANCH="$base" ZEROCI_OUT_DIR="$BUILD_ARTIFACTSTAGINGDIRECTORY" sh "$tools/0-ci-scan.sh"
@@ -647,8 +651,9 @@ steps:
       set -eu
       RAW="https://raw.githubusercontent.com/0sec-labs/0security/v${VERSION}"
       tools="$(mktemp -d)"; export INSTALL_DIR="$tools" PATH="$tools:$PATH"
-      curl -fsSL -o "$tools/install.sh" "$RAW/install.sh"
-      curl -fsSL -o "$tools/0-ci-publish.sh" "$RAW/ci/scripts/0-ci-publish.sh"
+      fetch() { curl -fsSL -o "$tools/${1##*/}" "$RAW/$1" && [ "$( (sha256sum "$tools/${1##*/}" 2>/dev/null || shasum -a 256 "$tools/${1##*/}") | cut -d' ' -f1)" = "$2" ] || { echo "checksum mismatch for $1" >&2; exit 1; }; }
+      fetch install.sh de830d7fb45f6ac90a1e0b7bfaa7df8305f3b924f64ecd4f4afbe8ae99baebe4
+      fetch ci/scripts/0-ci-publish.sh bc3452fe981ba85f7a7e377cf49126d813839a7e75362e36fd7827aeb85d2762
       (cd "$tools" && RELEASE_BASE_URL="https://github.com/0sec-labs/0security/releases/download/v${VERSION}" sh install.sh)
       ZEROCI_OUT_DIR="$BUILD_ARTIFACTSTAGINGDIRECTORY" ZEROCI_UPLOAD_TO=bitbucket-cloud sh "$tools/0-ci-publish.sh"
     displayName: Publish report
@@ -686,8 +691,9 @@ zero-security:
   script:
     - RAW="https://raw.githubusercontent.com/0sec-labs/0security/v${VERSION}"
     - tools="$(mktemp -d)" && export INSTALL_DIR="$tools" PATH="$tools:$PATH"
-    - curl -fsSL -o "$tools/install.sh" "$RAW/install.sh"
-    - curl -fsSL -o "$tools/0-ci-scan.sh" "$RAW/ci/scripts/0-ci-scan.sh"
+    - fetch() { curl -fsSL -o "$tools/${1##*/}" "$RAW/$1" && [ "$( (sha256sum "$tools/${1##*/}" 2>/dev/null || shasum -a 256 "$tools/${1##*/}") | cut -d' ' -f1)" = "$2" ] || { echo "checksum mismatch for $1" >&2; exit 1; }; }
+    - fetch install.sh de830d7fb45f6ac90a1e0b7bfaa7df8305f3b924f64ecd4f4afbe8ae99baebe4
+    - fetch ci/scripts/0-ci-scan.sh e01abf1732d721397fa0dbda6d4d6a8721ba05be243e2568978894d165bab1c9
     - (cd "$tools" && RELEASE_BASE_URL="https://github.com/0sec-labs/0security/releases/download/v${VERSION}" sh install.sh)
     - ZEROCI_BASE_BRANCH="$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" ZEROCI_COMMIT="$CI_MERGE_REQUEST_SOURCE_BRANCH_SHA" ZEROCI_EXIT_WITH_RESULT=1 sh "$tools/0-ci-scan.sh"
   artifacts:
@@ -846,7 +852,9 @@ jobs:
       - name: Install 0
         run: |
           VERSION=0.46.0 # Pin the CLI
-          RELEASE_BASE_URL="https://github.com/0sec-labs/0security/releases/download/v${VERSION}" INSTALL_DIR="$RUNNER_TEMP/0" sh <(curl -fsSL "https://raw.githubusercontent.com/0sec-labs/0security/v${VERSION}/install.sh")
+          curl -fsSL -o "$RUNNER_TEMP/install.sh" "https://raw.githubusercontent.com/0sec-labs/0security/v${VERSION}/install.sh"
+          echo "de830d7fb45f6ac90a1e0b7bfaa7df8305f3b924f64ecd4f4afbe8ae99baebe4  $RUNNER_TEMP/install.sh" | sha256sum --check -
+          RELEASE_BASE_URL="https://github.com/0sec-labs/0security/releases/download/v${VERSION}" INSTALL_DIR="$RUNNER_TEMP/0" sh "$RUNNER_TEMP/install.sh"
           echo "$RUNNER_TEMP/0" >> "$GITHUB_PATH"
       - run: 0security sbom generate . -o sbom.cdx.json
       - run: 0security sbom check sbom.cdx.json
