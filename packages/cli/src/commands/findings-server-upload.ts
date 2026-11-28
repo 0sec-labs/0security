@@ -3,6 +3,7 @@
  * `0 scan --format json` to a shared findings server you run. The destination is the one you named; the key comes
  * from ZERO_FINDINGS_API_KEY (a `write:findings` key from `0 findings keys create --scope write`).
  */
+import { UNTRUSTED_GIT_BASE_CONFIG } from "@0/engine";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { UsageError } from "./output.js";
@@ -20,7 +21,7 @@ export interface ServerUploadDeps {
   env?: Record<string, string | undefined>;
   git(args: string[]): Promise<string>;
 }
-export const serverUploadDefaults: Pick<ServerUploadDeps, "git"> = { git: async args => (await exec("git", args, { timeout: 10_000 })).stdout };
+export const serverUploadDefaults: Pick<ServerUploadDeps, "git"> = { git: async args => (await exec("git", [...UNTRUSTED_GIT_BASE_CONFIG, ...args], { timeout: 10_000 })).stdout };
 
 export interface ServerUploadResult { repo: string; source: string; format: string; total: number; created: number; known: number; alreadyImported: boolean }
 

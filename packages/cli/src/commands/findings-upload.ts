@@ -3,6 +3,7 @@
  * pull request annotations). The file comes from `0 scan --format sarif` or any scanner. GitHub keys each alert by its
  * fingerprint, so uploading again for a later commit updates the alerts instead of duplicating them.
  */
+import { UNTRUSTED_GIT_BASE_CONFIG } from "@0/engine";
 import { execFile } from "node:child_process";
 import { readFileSync, statSync } from "node:fs";
 import { gzipSync } from "node:zlib";
@@ -46,7 +47,7 @@ const defaults: UploadDeps = {
     return readFileSync(path, "utf8");
   },
   gh: runGh,
-  git: async args => (await exec("git", args)).stdout,
+  git: async args => (await exec("git", [...UNTRUSTED_GIT_BASE_CONFIG, ...args])).stdout,
 };
 
 /**

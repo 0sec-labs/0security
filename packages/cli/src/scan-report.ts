@@ -6,7 +6,7 @@
  * (the thread itself or a helper agent), so the report reads the store and never the transcript.
  */
 import { createHash } from "node:crypto";
-import { classifyFinding, classifyKnown, labelWithScope, linesWithin, orderByScope, sameFlaw, type Finding, type KnownItem, type ScanCoverage, type ScanFileCoverage, type ScanKnownSummary, type ScanReport, type ScanTierInfo } from "@0/engine/shared";
+import { classifyFinding, classifyKnown, labelWithScope, linesWithin, orderByScope, sameFlaw, type Finding, type KnownItem, type ScanCoverage, type ScanChildren, type ScanFileCoverage, type ScanKnownSummary, type ScanReport, type ScanTierInfo } from "@0/engine/shared";
 import { labelBusinessContext, type BusinessContext } from "./business-context.js";
 import { compareFindingsByBusinessContext } from "@0/engine/shared";
 import { tagCustomFindings } from "./scan-rules.js";
@@ -55,6 +55,12 @@ export interface ScanOutcome {
   fileCoverage?: ScanFileCoverage;
   /** Set when a scan recorded nothing and did not open every source file: what it did not open. The report shows it as a warning. */
   shallowReview?: string;
+  /** Set when the chosen skill kept a folder that would have been batched in one thread: batching and the batch coverage report were off. */
+  unbatched?: string;
+  /** The pattern scanners that ran before the model (their ids), for the evaluation sheet. */
+  prepassTools?: readonly string[];
+  /** Helper threads the scan thread (or its batch threads) started with spawn_agent. */
+  children?: ScanChildren;
   /** Every pass's thread, first to last. */
   threadIds?: readonly string[];
   /** The tier map's decision for this scan, when a tier map applied. */
@@ -224,10 +230,11 @@ export function toScanReport(outcome: ScanOutcome, stored: ScanReport): ScanRepo
     ...(outcome.failure ? { scanFailure: { cause: outcome.failure.cause, message: outcome.failure.message } } : {}),
     ...(outcome.coverage ? { coverage: outcome.coverage } : {}),
     ...(outcome.fileCoverage ? { fileCoverage: outcome.fileCoverage } : {}),
+    ...(outcome.children ? { children: outcome.children } : {}),
     ...(outcome.tier ? { tier: outcome.tier } : {}),
     ...(known.summary ? { known: known.summary } : {}),
     // The stored rows carry a note that the export was rebuilt from a legacy record; a scan is not one.
-    warnings: [...(outcome.tier?.skipped ? [{ stage: "report" as const, message: `Skipped by tier ${outcome.tier.name}${outcome.tier.reason ? `: ${outcome.tier.reason}` : ""}. Nothing was scanned.` }] : []), ...(outcome.tier?.prepassOnly ? [{ stage: "report" as const, message: `Tier ${outcome.tier.name} is pre-pass only: the findings are scanner hits, not reviewed by a model.` }] : []), ...(outcome.coverage && !outcome.coverage.complete ? [{ stage: "report" as const, message: `Partial review: ${outcome.coverage.statement}.${outcome.coverage.resume ? ` ${outcome.coverage.stoppedBy ? `Stopped by ${outcome.coverage.stoppedBy}. ` : ""}Continue with: ${outcome.coverage.resume}` : ""}` }] : []),...(outcome.shallowReview ? [{ stage: "report" as const, message: outcome.shallowReview }] : []),...(outcome.passes && outcome.passes.failed > 0 ? [{ stage: "report" as const, message: `${outcome.passes.failed} of ${outcome.passes.requested} scan passes could not finish; the findings may be incomplete.` }] : [])].concat(outcome.budgetExhausted ? [{ stage: "report" as const, message: `Stopped at the $${outcome.budgetUsd} budget; findings are partial.` }] : outcome.timedOut ? [{ stage: "report" as const, message: "Stopped at the time limit; findings are partial." }] : []),
+    warnings: [...(outcome.tier?.skipped ? [{ stage: "report" as const, message: `Skipped by tier ${outcome.tier.name}${outcome.tier.reason ? `: ${outcome.tier.reason}` : ""}. Nothing was scanned.` }] : []), ...(outcome.tier?.prepassOnly ? [{ stage: "report" as const, message: `Tier ${outcome.tier.name} is pre-pass only: the findings are scanner hits, not reviewed by a model.` }] : []), ...(outcome.coverage && !outcome.coverage.complete ? [{ stage: "report" as const, message: `Partial review: ${outcome.coverage.statement}.${outcome.coverage.resume ? ` ${outcome.coverage.stoppedBy ? `Stopped by ${outcome.coverage.stoppedBy}. ` : ""}Continue with: ${outcome.coverage.resume}` : ""}` }] : []),...(outcome.shallowReview ? [{ stage: "report" as const, message: outcome.shallowReview }] : []),...(outcome.unbatched ? [{ stage: "report" as const, message: outcome.unbatched }] : []),...(outcome.passes && outcome.passes.failed > 0 ? [{ stage: "report" as const, message: `${outcome.passes.failed} of ${outcome.passes.requested} scan passes could not finish; the findings may be incomplete.` }] : [])].concat(outcome.budgetExhausted ? [{ stage: "report" as const, message: `Stopped at the $${outcome.budgetUsd} budget; findings are partial.` }] : outcome.timedOut ? [{ stage: "report" as const, message: "Stopped at the time limit; findings are partial." }] : []),
     executionSuccessful: !outcome.failed,
     ...(outcome.costUsd !== undefined ? { estimatedCostUsd: outcome.costUsd } : {}),
     ...(outcome.budgetExhausted ? { costCeilingExceeded: true, exitReason: "cost_ceiling_exceeded" as const } : {}),
@@ -263,16 +270,19 @@ export function scanJson(outcome: ScanOutcome, stored: readonly Finding[]): Reco
     completedAt: outcome.completedAt,
     budgetUsd: outcome.budgetUsd,
     ...(outcome.costUsd !== undefined ? { costUsd: outcome.costUsd } : {}),
+    // Input plus output tokens of every thread of the scan, helper threads included (the session charges their calls to it).
+    ...(outcome.tokens !== undefined ? { tokens: outcome.tokens } : {}),
     ...(outcome.threadIds && outcome.threadIds.length > 1 ? { threadIds: outcome.threadIds } : {}),
     ...(outcome.passes && outcome.passes.requested > 1 ? { passes: outcome.passes } : {}),
     status: scanStatus(outcome),
     ...(outcome.failure ? { failure: { cause: outcome.failure.cause, message: outcome.failure.message } } : {}),
     ...(outcome.coverage ? { coverage: outcome.coverage } : {}),
     ...(outcome.fileCoverage ? { fileCoverage: outcome.fileCoverage } : {}),
+    ...(outcome.children ? { children: outcome.children } : {}),
     ...(outcome.tier ? { tier: outcome.tier } : {}),
     ...(known.summary ? { known: known.summary } : {}),
     ...(outcome.error ? { error: outcome.error } : {}),
-    ...(outcome.shallowReview ? { warnings: [outcome.shallowReview] } : {}),
+    ...(outcome.shallowReview || outcome.unbatched ? { warnings: [outcome.shallowReview, outcome.unbatched].filter((text): text is string => text !== undefined) } : {}),
     ...(outcome.summary ? { summary: outcome.summary } : {}),
     // Headline counts are the findings inside the declared scope. Out-of-scope findings are counted apart and still listed.
     counts: { total: inScope.length, critical: count(inScope, "critical"), high: count(inScope, "high"), medium: count(inScope, "medium"), low: count(inScope, "low"), info: count(inScope, "info") },

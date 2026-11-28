@@ -100,7 +100,7 @@ function baseEnv(label, enterprise) {
     ZERO_MODEL: "stub",
     CI: "1",
   };
-  if (enterprise) { env.ZERO_ENTERPRISE = "1"; env.DO_NOT_TRACK = "1"; }
+  if (enterprise) { env.ZERO_NO_EGRESS = "1"; env.DO_NOT_TRACK = "1"; }
   return env;
 }
 
@@ -147,7 +147,7 @@ stub.close();
 if (flag("--json")) {
   console.log(JSON.stringify({ ok: !failed, rows, control: { seen: controlSeen, attempts: control.attempts } }, null, 2));
 } else {
-  console.log("No-egress check with ZERO_ENTERPRISE=1 (non-loopback attempts are recorded and refused)\n");
+  console.log("No-egress check with ZERO_NO_EGRESS=1 (non-loopback attempts are recorded and refused)\n");
   for (const row of rows) {
     const verdict = row.attempts.length === 0 && row.behaved ? "ok  " : "FAIL";
     console.log(`${verdict} ${row.scenario.padEnd(20)} exit ${String(row.exit).padEnd(4)} attempts: ${row.attempts.length === 0 ? "none" : row.attempts.join(", ")}`);

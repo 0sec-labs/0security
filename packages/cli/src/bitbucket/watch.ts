@@ -3,11 +3,20 @@
  * pull request already waiting is not queued twice.
  */
 import { createServer, type Server } from "node:http";
+import { BodyError, WindowCounter, readBodyCapped } from "../web/github-webhook.js";
 import type { BitbucketClient, Platform, PullRequest } from "./client.js";
 import { parseDelivery, verifySignature } from "./events.js";
 import { prKey, type ReviewOutcome } from "./review.js";
 
 export const MAX_WEBHOOK_BODY = 1024 * 1024;
+/**
+ * The body is read before the signature can be checked, so anyone who reaches the listener can make it buffer. These bound
+ * that: at most MAX_WEBHOOK_CONNECTIONS sockets, each body capped and read within readBodyCapped's 10 second deadline, slow
+ * headers cut at 10 seconds, and 30 requests a minute from one address. Bitbucket sends small JSON bodies quickly.
+ */
+export const MAX_WEBHOOK_CONNECTIONS = 32;
+const SOURCE_LIMIT_PER_MINUTE = 30;
+const MAX_SOURCES = 5_000;
 
 export interface QueueDeps {
   review(pr: PullRequest): Promise<ReviewOutcome>;
@@ -79,22 +88,22 @@ export interface WebhookOptions {
 
 /** An HTTP server for webhook deliveries: POST only, signed, small, and for the named repository. */
 export function createWebhookServer(options: WebhookOptions): Server {
-  return createServer((request, response) => {
-    const reply = (status: number, body: string) => { response.writeHead(status, { "Content-Type": "text/plain" }); response.end(body); };
+  const sources = new Map<string, WindowCounter>();
+  const sourceAllowed = (client: string, t: number): boolean => {
+    if (sources.size >= MAX_SOURCES) for (const [key, counter] of sources) if (counter.idle(t)) sources.delete(key);
+    if (sources.size >= MAX_SOURCES) sources.clear();
+    let counter = sources.get(client);
+    if (!counter) { counter = new WindowCounter(SOURCE_LIMIT_PER_MINUTE, 60_000); sources.set(client, counter); }
+    return counter.take(t);
+  };
+  const server = createServer({ headersTimeout: 10_000, requestTimeout: 15_000, connectionsCheckingInterval: 1_000 }, (request, response) => {
+    const reply = (status: number, body: string, close = false) => { response.writeHead(status, { "Content-Type": "text/plain", ...(close ? { Connection: "close" } : {}) }); response.end(body); };
+    request.on("error", () => { /* A dropped connection needs no answer. */ });
     if (request.method !== "POST") return reply(405, "Use POST.");
+    if (!sourceAllowed(request.socket.remoteAddress ?? "", Date.now())) { response.setHeader("Retry-After", "60"); return reply(429, "Too many requests.", true); }
     const declared = Number(request.headers["content-length"] ?? 0);
     if (declared > MAX_WEBHOOK_BODY) return reply(413, "Too large.");
-    const chunks: Buffer[] = [];
-    let size = 0;
-    let rejected = false;
-    request.on("data", (chunk: Buffer) => {
-      size += chunk.length;
-      if (size > MAX_WEBHOOK_BODY) { if (!rejected) { rejected = true; reply(413, "Too large."); request.destroy(); } return; }
-      chunks.push(chunk);
-    });
-    request.on("end", () => {
-      if (rejected) return;
-      const body = Buffer.concat(chunks);
+    readBodyCapped(request, MAX_WEBHOOK_BODY).then(body => {
       if (!verifySignature(options.secret, body, header(request.headers["x-hub-signature"]))) { options.log("webhook: signature did not match"); return reply(401, "Bad signature."); }
       const eventKey = header(request.headers["x-event-key"]) ?? "";
       let payload: unknown;
@@ -105,9 +114,15 @@ export function createWebhookServer(options: WebhookOptions): Server {
       if (pr.owner.toLowerCase() !== options.repo.owner.toLowerCase() || pr.repo.toLowerCase() !== options.repo.repo.toLowerCase()) { options.log("webhook: ignored a delivery for another repository"); return reply(202, "Ignored."); }
       options.queue.add(pr);
       reply(202, "Queued.");
+    }, (error: unknown) => {
+      if (!(error instanceof BodyError)) { request.destroy(); return; }
+      const tooLarge = error.reason === "too_large";
+      reply(tooLarge ? 413 : 408, tooLarge ? "Too large." : "Too slow.", true);
+      response.once("finish", () => request.destroy());
     });
-    request.on("error", () => { /* A dropped connection needs no answer. */ });
   });
+  server.maxConnections = MAX_WEBHOOK_CONNECTIONS;
+  return server;
 }
 
 const header = (value: string | string[] | undefined): string | undefined => (Array.isArray(value) ? value[0] : value);

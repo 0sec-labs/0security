@@ -13,7 +13,7 @@
       ],
       "when": "Batched while a command or the console runs, when analyticsLevel is usage and the build embeds a key. Also one small event at first run, at each command, on a version change and on an error exit; not for --help, --version, shell completion, config, or CI and machine-output runs unless analyticsLevel usage is set in a settings file.",
       "sent": "Anonymous counters and lifecycle events: version, OS, command name from a fixed list, outcome class, finding class counts.",
-      "disable": "DO_NOT_TRACK, ZERO_ENTERPRISE."
+      "disable": "DO_NOT_TRACK, ZERO_NO_EGRESS (alias ZERO_ENTERPRISE)."
     },
     {
       "id": "crash-and-feedback",
@@ -28,7 +28,7 @@
       ],
       "when": "A crash with diagnosticReporting automatic, or a feedback message the operator sends.",
       "sent": "Redacted crash envelope, or the reviewed feedback text.",
-      "disable": "diagnosticReporting off, DO_NOT_TRACK, ZERO_ENTERPRISE."
+      "disable": "diagnosticReporting off, DO_NOT_TRACK, ZERO_NO_EGRESS (alias ZERO_ENTERPRISE)."
     },
     {
       "id": "update-check",
@@ -44,7 +44,7 @@
       ],
       "when": "Interactive start-up, console update status, 0 doctor upgrade.",
       "sent": "A GET for the latest release tag; the installer is downloaded on upgrade.",
-      "disable": "updatePolicy off, ZERO_NO_UPDATE_CHECK, ZERO_OFFLINE, ZERO_ENTERPRISE (CI also skips the check)."
+      "disable": "updatePolicy off, ZERO_NO_UPDATE_CHECK, ZERO_OFFLINE, ZERO_NO_EGRESS (alias ZERO_ENTERPRISE) (CI also skips the check)."
     },
     {
       "id": "model-catalog-sync",
@@ -58,7 +58,7 @@
       ],
       "when": "Console model picker refresh.",
       "sent": "A GET of the public model list; nothing about the operator.",
-      "disable": "DO_NOT_TRACK, ZERO_OFFLINE, ZERO_ENTERPRISE."
+      "disable": "DO_NOT_TRACK, ZERO_OFFLINE, ZERO_NO_EGRESS (alias ZERO_ENTERPRISE)."
     },
     {
       "id": "pricing-discovery",
@@ -72,7 +72,7 @@
       ],
       "when": "A model has no built-in price.",
       "sent": "A GET of the public OpenRouter model list.",
-      "disable": "DO_NOT_TRACK, ZERO_OFFLINE, ZERO_ENTERPRISE."
+      "disable": "DO_NOT_TRACK, ZERO_OFFLINE, ZERO_NO_EGRESS (alias ZERO_ENTERPRISE)."
     },
     {
       "id": "web-search-tool",
@@ -90,7 +90,7 @@
       ],
       "when": "The agent calls web_search (on by default). api.keenable.ai is contacted only when ZERO_WEB_SEARCH_PROVIDER=keenable, instead of mcp.parallel.ai.",
       "sent": "The model-written search query. With KEENABLE_API_KEY set, that key goes to api.keenable.ai.",
-      "disable": "ZERO_FEATURE_WEB_SEARCH=0, or ZERO_ENTERPRISE (tool is removed and refuses)."
+      "disable": "ZERO_FEATURE_WEB_SEARCH=0, or ZERO_NO_EGRESS (alias ZERO_ENTERPRISE) (tool is removed and refuses)."
     },
     {
       "id": "osv-advisory-lookup",
@@ -104,7 +104,7 @@
       ],
       "when": "0 sbom check and findings evidence bundles that check advisories.",
       "sent": "Package URLs of SBOM components.",
-      "disable": "Do not run the check; ZERO_ENTERPRISE refuses the lookup."
+      "disable": "Do not run the check; ZERO_NO_EGRESS (alias ZERO_ENTERPRISE) refuses the lookup."
     },
     {
       "id": "foxguard-sca-osv",
@@ -118,7 +118,7 @@
       ],
       "when": "Foxguard runs with --sca, or reads scan.sca from a .foxguard.yml (only with --repo-ignores). 0 never passes --sca.",
       "sent": "Package names, versions and ecosystems from the lockfiles in the scanned folder.",
-      "disable": "Do not pass --sca; --sca-offline or --sca-db keep it local. ZERO_ENTERPRISE or ZERO_OFFLINE makes Foxguard skip the lookup."
+      "disable": "Do not pass --sca; --sca-offline or --sca-db keep it local. ZERO_NO_EGRESS (alias ZERO_ENTERPRISE) or ZERO_OFFLINE makes Foxguard skip the lookup."
     },
     {
       "id": "extension-git-source",
@@ -132,7 +132,7 @@
       ],
       "when": "Installing or updating an extension from a remote git source. Local folders never go out.",
       "sent": "A shallow git fetch of one pinned commit.",
-      "disable": "Install from a local folder; ZERO_ENTERPRISE refuses remote sources."
+      "disable": "Install from a local folder; ZERO_NO_EGRESS (alias ZERO_ENTERPRISE) refuses remote sources."
     },
     {
       "id": "extension-connector-health",
@@ -146,7 +146,7 @@
       ],
       "when": "Console shows connector status.",
       "sent": "A GET with the connector token to its declared health URL.",
-      "disable": "Do not install connectors; ZERO_ENTERPRISE reports health as unknown."
+      "disable": "Do not install connectors; ZERO_NO_EGRESS (alias ZERO_ENTERPRISE) reports health as unknown."
     },
     {
       "id": "smolvm-provision",
@@ -160,7 +160,7 @@
       ],
       "when": "Explicit setup of the macOS sandbox runtime.",
       "sent": "A GET of a pinned release archive, checked against a fixed hash.",
-      "disable": "Preinstall the runtime; ZERO_ENTERPRISE refuses the download."
+      "disable": "Preinstall the runtime; ZERO_NO_EGRESS (alias ZERO_ENTERPRISE) refuses the download."
     },
     {
       "id": "skills-catalog",
@@ -174,7 +174,7 @@
       ],
       "when": "Console skills directory preview or install.",
       "sent": "Read-only GitHub API calls made through the local gh login.",
-      "disable": "ZERO_ENTERPRISE refuses; the bundled catalog list still shows."
+      "disable": "ZERO_NO_EGRESS (alias ZERO_ENTERPRISE) refuses; the bundled catalog list still shows."
     },
     {
       "id": "github-repository-list",
@@ -189,7 +189,7 @@
       ],
       "when": "Console repository picker and GitHub account status.",
       "sent": "gh API reads for the signed-in account.",
-      "disable": "ZERO_ENTERPRISE refuses the repository list and token-expiry lookup."
+      "disable": "ZERO_NO_EGRESS (alias ZERO_ENTERPRISE) refuses the repository list and token-expiry lookup."
     },
     {
       "id": "github-gh-commands",
@@ -203,7 +203,7 @@
       ],
       "when": "findings upload (SARIF), Sentinel code scanning uploads, and host integrations that run through the shared gh runner.",
       "sent": "The SARIF or API request the operator asked for.",
-      "disable": "ZERO_ENTERPRISE refuses to start gh from this runner."
+      "disable": "ZERO_NO_EGRESS (alias ZERO_ENTERPRISE) refuses to start gh from this runner."
     },
     {
       "id": "remote-worker-provisioning",
@@ -217,7 +217,7 @@
       ],
       "when": "0 computers add.",
       "sent": "Package downloads performed by the remote computer.",
-      "disable": "ZERO_ENTERPRISE refuses deployWorker."
+      "disable": "ZERO_NO_EGRESS (alias ZERO_ENTERPRISE) refuses deployWorker."
     },
     {
       "id": "llm-model-endpoint",
@@ -250,7 +250,7 @@
       ],
       "when": "Only when AZURE_OPENAI_AUTH=entra. One token request, then again shortly before the token expires.",
       "sent": "The federated assertion of the workload identity, or a metadata request for the managed identity. No prompts or code.",
-      "disable": "Use an API key. With ZERO_ENTERPRISE the public authority is refused unless AZURE_AUTHORITY_HOST names yours."
+      "disable": "Use an API key. With ZERO_NO_EGRESS (alias ZERO_ENTERPRISE) the public authority is refused unless AZURE_AUTHORITY_HOST names yours."
     },
     {
       "id": "bedrock-aws-credentials",
@@ -264,7 +264,7 @@
       ],
       "when": "Only with ZERO_SELECTED_PROVIDER=bedrock. The AWS SDK looks up credentials at the first model call and again before they expire.",
       "sent": "A credential request (a web identity token or a role assumption goes to the AWS endpoint) and the model requests. No code beyond what the model needs.",
-      "disable": "Use a LiteLLM gateway in your network instead. ZERO_ENTERPRISE does not block these calls: the AWS SDK makes them, and the endpoint is yours. Block other AWS endpoints at the network."
+      "disable": "Use a LiteLLM gateway in your network instead. ZERO_NO_EGRESS (alias ZERO_ENTERPRISE) does not block these calls: the AWS SDK makes them, and the endpoint is yours. Block other AWS endpoints at the network."
     },
     {
       "id": "provider-sign-in",
@@ -327,7 +327,7 @@
       ],
       "when": "Team sign-in with SAML (enterprise license), only when the team config names a metadataUrl. Fetched on first use and again every 12 hours.",
       "sent": "One GET for the identity provider's public metadata. No cookie, no credential, no user data. Redirects are refused.",
-      "disable": "Name a metadataFile instead of a metadataUrl; ZERO_ENTERPRISE refuses the fetch."
+      "disable": "Name a metadataFile instead of a metadataUrl; ZERO_NO_EGRESS (alias ZERO_ENTERPRISE) refuses the fetch."
     },
     {
       "id": "remote-engines",
@@ -373,7 +373,7 @@
         "packages/cli/src/commands/scan.ts"
       ],
       "when": "0 scan with a git URL, 0 probe, and PoC steps against a target the operator authorized.",
-      "sent": "A git clone, or HTTP requests to that target. 0 probe also refuses a public host unless you pass --i-own-this with that exact host, always refuses link-local and cloud metadata addresses, connects to the address it checked, and follows no redirect off the named origin. ZERO_ENTERPRISE leaves it on, because you name the target.",
+      "sent": "A git clone, or HTTP requests to that target. 0 probe also refuses a public host unless you pass --i-own-this with that exact host, always refuses link-local and cloud metadata addresses, connects to the address it checked, and follows no redirect off the named origin. ZERO_NO_EGRESS (alias ZERO_ENTERPRISE) leaves it on, because you name the target.",
       "disable": "Scan local paths."
     },
     {
@@ -387,7 +387,7 @@
         "packages/cli/src/nuclei-target.ts"
       ],
       "when": "0security scan --scanner nuclei --target-url, with a scope file or the typed host. 0 starts Nuclei, which you installed; Nuclei sends the requests.",
-      "sent": "HTTP requests from Nuclei to that one target, at 10 requests per second by default, from http templates only, with no redirect followed, without intrusive, dos or fuzz templates and without out-of-band callbacks. A public host needs --acknowledge-host with the exact host; link-local and cloud metadata addresses are always refused. ZERO_ENTERPRISE refuses every target that is not loopback.",
+      "sent": "HTTP requests from Nuclei to that one target, at 10 requests per second by default, from http templates only, with no redirect followed, without intrusive, dos or fuzz templates and without out-of-band callbacks. A public host needs --acknowledge-host with the exact host; link-local and cloud metadata addresses are always refused. ZERO_NO_EGRESS (alias ZERO_ENTERPRISE) refuses every target that is not loopback.",
       "disable": "Do not use --target-url."
     },
     {
@@ -405,7 +405,7 @@
         "packages/cli/src/web/sentinel-runner.ts"
       ],
       "when": "Explicit findings fix, threat-model publish, findings import and sentinel review commands, and a Sentinel with release, check or pull request reporting or results turned on (off by default).",
-      "sent": "A branch push, PR comment, commit status or code scanning SARIF upload (share-safe finding fields only) the operator asked for. Sentinel polling reads releases, tags, check runs and open pull requests through gh. ZERO_ENTERPRISE refuses every gh call.",
+      "sent": "A branch push, PR comment, commit status or code scanning SARIF upload (share-safe finding fields only) the operator asked for. Sentinel polling reads releases, tags, check runs and open pull requests through gh. ZERO_NO_EGRESS (alias ZERO_ENTERPRISE) refuses every gh call.",
       "disable": "Do not run those commands; use --no-pr."
     },
     {
@@ -463,7 +463,7 @@
       ],
       "when": "0 sbom check --outdated.",
       "sent": "Package names of SBOM components (at most 200).",
-      "disable": "Do not pass --outdated; ZERO_ENTERPRISE refuses the lookup."
+      "disable": "Do not pass --outdated; ZERO_NO_EGRESS (alias ZERO_ENTERPRISE) refuses the lookup."
     },
     {
       "id": "sbom-slopsquat-registry",
@@ -479,7 +479,7 @@
       ],
       "when": "0 sbom check --registry.",
       "sent": "Package names of npm and PyPI components (at most 200). Nothing else: no versions, paths or project details.",
-      "disable": "Do not pass --registry; ZERO_ENTERPRISE and ZERO_OFFLINE refuse the lookup and the report says not checked."
+      "disable": "Do not pass --registry; ZERO_NO_EGRESS (alias ZERO_ENTERPRISE) and ZERO_OFFLINE refuse the lookup and the report says not checked."
     },
     {
       "id": "sbom-licenses-resolve",
@@ -493,7 +493,7 @@
       ],
       "when": "0 sbom licenses --resolve.",
       "sent": "Package names and versions of components that state no license.",
-      "disable": "Do not pass --resolve; ZERO_ENTERPRISE refuses the lookup."
+      "disable": "Do not pass --resolve; ZERO_NO_EGRESS (alias ZERO_ENTERPRISE) refuses the lookup."
     },
     {
       "id": "sbom-resolve-build-tools",
@@ -507,7 +507,7 @@
       ],
       "when": "0 sbom generate --resolve, after --allow-build-tools or a yes at the prompt.",
       "sent": "Whatever the project's mvn or gradle sends: artifact requests to its repositories. The tool also runs the project's build scripts.",
-      "disable": "Do not pass --resolve; ZERO_ENTERPRISE refuses it."
+      "disable": "Do not pass --resolve; ZERO_NO_EGRESS (alias ZERO_ENTERPRISE) refuses it."
     },
     {
       "id": "fix-sandbox-docker",
@@ -519,7 +519,7 @@
       "files": [
         "packages/cli/src/commands/fix-sandbox.ts"
       ],
-      "when": "0 findings fix --sandbox docker. The container has no network unless you pass --sandbox-network; ZERO_ENTERPRISE refuses --sandbox-network and --sandbox-setup.",
+      "when": "0 findings fix --sandbox docker. The container has no network unless you pass --sandbox-network; ZERO_NO_EGRESS (alias ZERO_ENTERPRISE) refuses --sandbox-network and --sandbox-setup.",
       "sent": "Nothing from 0. The Docker daemon pulls the image when it is not present.",
       "disable": "Do not pass --sandbox; use a local image so nothing is pulled."
     },
@@ -539,6 +539,20 @@
       "disable": "Do not run the command, or leave BITBUCKET_TOKEN unset (the payload is printed instead)."
     },
     {
+      "id": "policy-bundle-fetch",
+      "class": "operator",
+      "enterprise": "blocked",
+      "destinations": [
+        "the https URL you pass to --policy-bundle"
+      ],
+      "files": [
+        "packages/cli/src/policy-bundle/load.ts"
+      ],
+      "when": "Explicit `0 findings fix --policy-bundle https://...`. A file path never goes out.",
+      "sent": "One GET request for the bundle, with no credentials. https only, no redirects, private and local addresses refused, 192 KiB ceiling.",
+      "disable": "Pass a file path instead of a URL; ZERO_ENTERPRISE refuses the fetch."
+    },
+    {
       "id": "jira-issues",
       "class": "operator",
       "enterprise": "blocked",
@@ -551,7 +565,7 @@
       ],
       "when": "Explicit `0 findings upload --to jira-cloud|jira-dc` with JIRA_TOKEN set (and JIRA_EMAIL for Cloud). `--dry-run` sends nothing and needs no token.",
       "sent": "A label search and one create-issue request per open finding: its title, severity, location, description, impact, fix advice and finding id. The token goes only in the Authorization header (basic for Cloud, bearer for Data Center). A plain http:// URL is refused unless the host is this machine or --allow-insecure-http is passed; redirects are not followed.",
-      "disable": "Do not run the command, or use --dry-run. ZERO_ENTERPRISE blocks it with no exception."
+      "disable": "Do not run the command, or use --dry-run. ZERO_NO_EGRESS (alias ZERO_ENTERPRISE) blocks it with no exception."
     },
     {
       "id": "bitbucket-pr-review",
@@ -566,8 +580,8 @@
         "packages/cli/src/bitbucket/runner.ts"
       ],
       "when": "Explicit `0 sentinels bitbucket review`, `watch` or `doctor` (the setup check also creates and deletes a throw-away Code Insights report named 0-doctor-<random> unless --read-only, a marker comment only when --pr is given, and runs `git ls-remote origin` in the clone you name with your own git credentials and without the token), with BITBUCKET_TOKEN set, or an enabled `bitbucket-pr` Sentinel trigger whose token variable is set. The webhook server and the signed webhook route only listen; they send nothing.",
-      "sent": "Reads of pull requests, diffs and comments; comments, a Code Insights report and its annotations, with the token as a bearer header. The scan fetches the pull request's commit from the clone's git remote. A plain http:// URL is refused unless the host is this machine or --allow-insecure-http is passed. ZERO_ENTERPRISE blocks requests unless ZERO_BITBUCKET_URL explicitly permits their exact origin and context path. Restricted git transport must use direct HTTPS; SSH and URL rewriting are refused.",
-      "disable": "Do not run the commands, or set ZERO_ENTERPRISE without a ZERO_BITBUCKET_URL exception."
+      "sent": "Reads of pull requests, diffs and comments; comments, a Code Insights report and its annotations, with the token as a bearer header. The scan fetches the pull request's commit from the clone's git remote. A plain http:// URL is refused unless the host is this machine or --allow-insecure-http is passed. ZERO_NO_EGRESS (alias ZERO_ENTERPRISE) blocks requests unless ZERO_BITBUCKET_URL explicitly permits their exact origin and context path. Restricted git transport must use direct HTTPS; SSH and URL rewriting are refused.",
+      "disable": "Do not run the commands, or set ZERO_NO_EGRESS (alias ZERO_ENTERPRISE) without a ZERO_BITBUCKET_URL exception."
     },
     {
       "id": "audit-siem-sink",
@@ -582,6 +596,63 @@
       "when": "Server mode, only when ZERO_AUDIT_SINK_URL is set in the process environment. Off by default. Never read from a repository, a project file or the database.",
       "sent": "Batches of audit events (action, actor, subject, outcome, whitelisted and redacted detail), with ZERO_AUDIT_SINK_TOKEN as a bearer token when set. Plain http and plain TCP syslog are refused except to this machine; UDP is refused.",
       "disable": "Leave ZERO_AUDIT_SINK_URL unset."
+    },
+    {
+      "id": "redteam-decoy-alert",
+      "class": "operator",
+      "enterprise": "allowed",
+      "destinations": [
+        "the https URL you set with --alert-url (plain http only to this machine)"
+      ],
+      "files": [
+        "packages/cli/src/commands/redteam.ts"
+      ],
+      "when": "Only `0 redteam honeypot --decoy` with `--alert-url`, once per call an agent makes to a decoy tool. Never from a scan, a probe, the judge or any other command.",
+      "sent": "One JSON POST per decoy call: the time, the decoy tool name, its privilege class, the call number, the arguments the agent passed (each cut to 300 characters) and a one-line text. Headers from `--alert-header`, where a value may name an environment variable. No redirect is followed.",
+      "disable": "Do not pass --alert-url; the calls are then only written to the trace file."
+    },
+    {
+      "id": "redteam-brain",
+      "class": "operator",
+      "enterprise": "blocked",
+      "destinations": [
+        "the https URL you set with ZERO_BRAIN_URL or --url (plain http only to this machine); never a default"
+      ],
+      "files": [
+        "packages/engine/src/redteam/brain/client.ts",
+        "packages/cli/src/commands/redteam-generate.ts"
+      ],
+      "when": "Only `0 redteam generate` with a brain URL set and not offline. Never from a scan, a probe, the honeypot, the judge or any other command.",
+      "sent": "One JSON POST: the contract version, the task name, the shape of the agent (tool names, a coarse privilege and gate for each, kinds of input source), and optionally a framework name and a count. The bearer token from ZERO_BRAIN_TOKEN goes in the Authorization header only. Never source code, paths, prompts, secrets or findings: the request schema rejects every other field. No redirect is followed, the reply is size-capped and validated, and a failed or invalid reply falls back to the open starter set and says so.",
+      "disable": "Do not set a URL, pass --offline, or set ZERO_OFFLINE. ZERO_NO_EGRESS (alias ZERO_ENTERPRISE) also keeps it off."
+    },
+    {
+      "id": "redteam-attack-model",
+      "class": "operator",
+      "enterprise": "allowed",
+      "destinations": [
+        "the OpenAI-compatible endpoint you set with --attacker-url or OPENAI_BASE_URL (otherwise api.openai.com): your own model"
+      ],
+      "files": [
+        "packages/cli/src/commands/redteam-attack.ts"
+      ],
+      "when": "Only `0 redteam attack` with --attacker adaptive, refine or tree. Never from the other attackers or any other command.",
+      "sent": "The attacker prompt: the objective, a harmless marker, the clipped conversation with the agent under test and the names of the tools it called. The agent's replies can contain whatever it chose to say. The API key goes in the Authorization header only. https only (plain http only to this machine). No redirect is followed; the request and the reply are size-capped.",
+      "disable": "Use --attacker crescendo or manyshot, which send nothing."
+    },
+    {
+      "id": "redteam-attack-brain",
+      "class": "operator",
+      "enterprise": "blocked",
+      "destinations": [
+        "the https URL you set with ZERO_BRAIN_URL; never a default"
+      ],
+      "files": [
+        "packages/cli/src/commands/redteam-attack.ts"
+      ],
+      "when": "Only `0 redteam attack --attacker brain`, with ZERO_BRAIN_URL set and not offline. Without a URL the command refuses; offline or enterprise mode falls back to the local crescendo attacker with a printed note.",
+      "sent": "The objective and generator id and, each turn, the clipped conversation (each text at most 2000 characters, at most the newest 40 entries) and the recorded calls from the fake environment (argument values at most 200 characters). A bearer token from ZERO_BRAIN_TOKEN goes in the Authorization header only. No redirect is followed.",
+      "disable": "Do not use --attacker brain, pass --offline, or set ZERO_OFFLINE. ZERO_NO_EGRESS (alias ZERO_ENTERPRISE) also keeps it off."
     },
     {
       "id": "ha-shared-database",
@@ -623,8 +694,8 @@
         "packages/cli/src/host/fix-host.ts"
       ],
       "when": "Explicit findings fix with PR creation enabled. Local origin selection/config inspection itself sends nothing; publishing uses the selected git runner and REST client.",
-      "sent": "The fix branch, PR title and description, draft state and reviewer identities; reads of matching PRs, lifecycle, commits and build statuses. REST carries BITBUCKET_TOKEN in a bearer header; git uses separately configured credentials. ZERO_ENTERPRISE blocks both transports unless ZERO_BITBUCKET_URL approves the actual destination origin/context. Restricted git requires HTTPS and rejects URL rewrites, differing push destinations and changed origins; redirects are refused.",
-      "disable": "Use --no-pr. Under ZERO_ENTERPRISE, leave ZERO_BITBUCKET_URL unset to keep Bitbucket blocked."
+      "sent": "The fix branch, PR title and description, draft state and reviewer identities; reads of matching PRs, lifecycle, commits and build statuses. REST carries BITBUCKET_TOKEN in a bearer header; git uses separately configured credentials. ZERO_NO_EGRESS (alias ZERO_ENTERPRISE) blocks both transports unless ZERO_BITBUCKET_URL approves the actual destination origin/context. Restricted git requires HTTPS and rejects URL rewrites, differing push destinations and changed origins; redirects are refused.",
+      "disable": "Use --no-pr. Under ZERO_NO_EGRESS (alias ZERO_ENTERPRISE), leave ZERO_BITBUCKET_URL unset to keep Bitbucket blocked."
     },
     {
       "id": "code-host-fix-status",
@@ -638,8 +709,8 @@
         "packages/cli/src/web/finding-fix.ts"
       ],
       "when": "Opening a finding fix review reads current CI status, with a shared 30-second cache. Explicit run-metrics host refresh reads lifecycle and CI status for at most 20 recorded PRs per bounded invocation.",
-      "sent": "Repository, PR and commit identifiers with code-host authentication. Only status/lifecycle reads; no source code, findings bodies or local checkout paths are uploaded. Each request is bound to the selected origin repository and has a deadline. Git commands here inspect local configuration only. ZERO_ENTERPRISE blocks gh; Bitbucket reads require the explicit ZERO_BITBUCKET_URL origin/context exception.",
-      "disable": "Do not open hosted fix review or request metrics refresh. Under ZERO_ENTERPRISE, leave ZERO_BITBUCKET_URL unset to keep Bitbucket reads blocked."
+      "sent": "Repository, PR and commit identifiers with code-host authentication. Only status/lifecycle reads; no source code, findings bodies or local checkout paths are uploaded. Each request is bound to the selected origin repository and has a deadline. Git commands here inspect local configuration only. ZERO_NO_EGRESS (alias ZERO_ENTERPRISE) blocks gh; Bitbucket reads require the explicit ZERO_BITBUCKET_URL origin/context exception.",
+      "disable": "Do not open hosted fix review or request metrics refresh. Under ZERO_NO_EGRESS (alias ZERO_ENTERPRISE), leave ZERO_BITBUCKET_URL unset to keep Bitbucket reads blocked."
     }
   ],
   "knownHosts": [

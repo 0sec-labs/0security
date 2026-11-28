@@ -71,7 +71,7 @@ test("the offline installer verifies the manifest, installs and links 0", () => 
     const installDir = join(root, "bin");
     const ran = spawnSync("sh", [join(out, "install-bundle.sh")], { env: { ...env, INSTALL_DIR: installDir }, encoding: "utf8" });
     assert.equal(ran.status, 0, ran.stderr);
-    assert.match(ran.stderr, /ZERO_ENTERPRISE=1/);
+    assert.match(ran.stderr, /ZERO_NO_EGRESS=1/);
     assert.equal(spawnSync(join(installDir, "0security"), { encoding: "utf8" }).stdout.trim(), "installed");
     assert.equal(lstatSync(join(installDir, "0")).isSymbolicLink(), true);
     assert.equal(readlinkSync(join(installDir, "0")), "0security");

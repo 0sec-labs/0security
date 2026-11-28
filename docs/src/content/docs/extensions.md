@@ -51,7 +51,7 @@ AI coding tools read instruction, rules, MCP and settings files from the reposit
 0security sbom agent-config . --format sarif -o agent-config.sarif
 ```
 
-The check reads files as text. It runs nothing, calls no model and uses no network, so it also works with `ZERO_ENTERPRISE` set. Import the SARIF file with `0security findings import agent-config.sarif`. Add `--allow-host` for each host your remote MCP servers may use.
+The check reads files as text. It runs nothing, calls no model and uses no network, so it also works with `ZERO_NO_EGRESS` set. Import the SARIF file with `0security findings import agent-config.sarif`. Add `--allow-host` for each host your remote MCP servers may use.
 
 | Rule | Severity | What it finds |
 | --- | --- | --- |

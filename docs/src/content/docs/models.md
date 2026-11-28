@@ -46,6 +46,26 @@ Check what 0 found:
 
 It prints the CLI version, runtime and Node.js check, then the status of each API provider: `configured`, `bad` (found but unusable, with the reason) or `missing`. It also lists any `claude`, `codex` and `gemini` CLIs on your `PATH`. A provider marked configured has a key, but 0 does not test it until the first request.
 
+## Which credentials to use
+
+For production and shared use, such as a team, CI or a service, use credentials issued for that purpose:
+
+- A provider API key, such as `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`.
+- Amazon Bedrock through the AWS credential chain ([details](#amazon-bedrock)).
+- An OpenAI-compatible gateway such as LiteLLM ([details](#enterprise-gateway-bedrock-through-litellm)).
+- Azure OpenAI with Entra ID ([details](#azure-openai-with-entra-id)).
+
+Consumer or per-seat subscription logins are for individual local use only. This includes `codex login` and the other sign-in flows that use a personal or per-seat plan, such as [ChatGPT Codex](#chatgpt-codex). A provider's terms may restrict that use. Do not put such a login on a shared machine, in CI or behind a service. A company subscription does not replace API credentials.
+
+Read the provider's own terms for what your account allows:
+
+- Anthropic: [Commercial Terms](https://www.anthropic.com/legal/commercial-terms) for API keys, [Consumer Terms](https://www.anthropic.com/legal/consumer-terms) for Claude subscriptions.
+- OpenAI: [Services Agreement](https://openai.com/policies/services-agreement/) for the API and business plans, [Terms of Use](https://openai.com/policies/row-terms-of-use/) for individual ChatGPT accounts. Accounts in the European Economic Area, Switzerland and the UK have their own terms page, linked from the Terms of Use.
+- Amazon Bedrock: [AWS Service Terms](https://aws.amazon.com/service-terms/).
+- Azure OpenAI: [Microsoft Product Terms](https://www.microsoft.com/licensing/terms/) and the [Code of Conduct for Microsoft AI Services](https://learn.microsoft.com/en-us/legal/ai-code-of-conduct).
+
+For a gateway, read the terms of the provider behind it. This page does not interpret any of these terms.
+
 ## Choose a model
 
 In the browser, the model picker in a thread changes that thread's model while it is idle. **Settings → Models → Default model** sets the default for new threads.
@@ -123,7 +143,7 @@ export DO_NOT_TRACK=1
 - Leave `ZERO_LLM_FALLBACK` unset and do not export other provider keys, so no request can route elsewhere. See [Keep model traffic in one region](#keep-model-traffic-in-one-region).
 - To check the route without a scan, run `ZERO_RUNTIME_TRACE=1 0 -p "reply with ok"`. It prints the chosen provider and model on stderr.
 
-With `DO_NOT_TRACK=1`, 0 sends no usage counts, command names or crash reports. `ZERO_ENTERPRISE=1` does the same and blocks every other automatic call. It also skips the public price and model-catalog lookups, so prices for gateway models show as unknown. To stop the update check as well, set `ZERO_NO_UPDATE_CHECK=1`, or use `ZERO_OFFLINE=1`. With all of these off, model requests go only to `OPENAI_BASE_URL`.
+With `DO_NOT_TRACK=1`, 0 sends no usage counts, command names or crash reports. `ZERO_NO_EGRESS=1` does the same and blocks every other automatic call. It also skips the public price and model-catalog lookups, so prices for gateway models show as unknown. To stop the update check as well, set `ZERO_NO_UPDATE_CHECK=1`, or use `ZERO_OFFLINE=1`. With all of these off, model requests go only to `OPENAI_BASE_URL`.
 
 Some traffic stays under your control. The `web_search` tool is off unless you set `ZERO_FEATURE_WEB_SEARCH=1`. Scan targets are contacted because you point 0 at them. GitHub is contacted only when you scan a GitHub repository.
 
@@ -186,7 +206,7 @@ Set `AZURE_OPENAI_BASE_URL` to your Azure OpenAI endpoint. 0 sends the token onl
 
 Grant the identity the Cognitive Services OpenAI User role on the resource. 0 keeps the token in memory, refreshes it before it expires and sends it as a bearer token. It never writes the token to disk or a log.
 
-With `ZERO_ENTERPRISE` set, 0 refuses the public sign-in authority unless `AZURE_AUTHORITY_HOST` names yours. The metadata addresses are local to the host and stay allowed. The region probe is skipped because it needs a key.
+With `ZERO_NO_EGRESS` set, 0 refuses the public sign-in authority unless `AZURE_AUTHORITY_HOST` names yours. The metadata addresses are local to the host and stay allowed. The region probe is skipped because it needs a key.
 
 ### Amazon Bedrock
 

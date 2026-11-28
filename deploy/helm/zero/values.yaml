@@ -1,5 +1,6 @@
-# The 0 web console, single node. One replica owns one SQLite volume.
-# The replica count is fixed at 1 and cannot be set: two pods on one volume corrupt the database.
+# The 0 web console. By default one replica owns one SQLite volume.
+# replicaCount cannot be set: two pods on one volume corrupt the database. For several replicas,
+# set highAvailability.enabled, which gives each replica its own volume.
 
 image:
   repository: ghcr.io/0sec-labs/0security
@@ -47,7 +48,7 @@ team:
   #     clientSecretEnv: ZERO_TEAM_OIDC_SECRET
   #     redirectUri: https://0.example.com/api/team/auth/callback
 
-# ZERO_ENTERPRISE=1 turns off update checks, registry lookups and other outbound calls except the model endpoint you configured.
+# ZERO_NO_EGRESS=1 (alias ZERO_ENTERPRISE=1) turns off update checks, registry lookups and other outbound calls except the model endpoint you configured.
 # The chart also sets DO_NOT_TRACK=1, a second switch for telemetry.
 enterprise: true
 
@@ -107,8 +108,31 @@ resources:
   limits:
     memory: 8Gi
 
-# The drain deadline is 20 seconds. Add margin.
+# The drain deadline is 20 seconds. Add margin. With highAvailability, add preStopSeconds too.
 terminationGracePeriodSeconds: 40
+
+# Several replicas that share one PostgreSQL database. Needs the enterprise license feature ha.
+# Preview: the replicas share the scheduler role, the job queue and readiness. Findings, accounts
+# and audit data are still stored on each replica's own volume. Read docs/src/content/docs/high-availability.md.
+highAvailability:
+  enabled: false
+  replicas: 2
+  # A Secret you create. The key holds the PostgreSQL URL, for example
+  # postgres://user:password@db.example.com:5432/zero?sslmode=verify-full
+  databaseSecret:
+    name: ""
+    key: database-url
+  # A Secret you create. The key holds the enterprise license file.
+  licenseSecret:
+    name: ""
+    key: license
+  # CIDRs of the database. Needed while networkPolicy is enabled.
+  databaseCIDRs: []
+  databasePort: 5432
+  # Keep at least one replica up during a node drain.
+  podDisruptionBudget: true
+  # Wait this long after the pod is marked terminating before SIGTERM, so the load balancer drops it first.
+  preStopSeconds: 10
 
 nodeSelector: {}
 tolerations: []

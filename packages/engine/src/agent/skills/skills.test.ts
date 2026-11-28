@@ -47,6 +47,7 @@ const EXPECTED_SKILL_IDS = [
   "supabase-appsec",
   "python-web-appsec",
   "seedless-depth-review",
+  "code-index",
   "advisory-disclosure",
   "develop-this-app",
   // Sentinel preset skills.
@@ -60,6 +61,7 @@ const EXPECTED_SKILL_IDS = [
   "verify-finding",
   "llm-app-review",
   "mcp-server-review",
+  "agent-toxic-flow",
   "crypto-migration",
   "artifact-scan",
   "threat-model",
@@ -217,15 +219,16 @@ describe("Skill Registry", () => {
       );
 
       const reviewSkills = listSkillSummaries({ role: "review" }, registry);
-      expect(reviewSkills.length).toBe(32);
       const reviewIds = reviewSkills.map((s) => s.id).sort();
-      expect(reviewIds).toEqual([
+      const expectedReviewIds = [
         "advisory-disclosure",
+        "agent-toxic-flow",
         "artifact-scan",
         "assumption-mining",
         "blind-exploitation",
         "cardano-eutxo-validators",
         "cloud-iac-review",
+        "code-index",
         "crypto-migration",
         "crypto-misuse",
         "dependency-reachability",
@@ -253,7 +256,10 @@ describe("Skill Registry", () => {
         "variant-hunting",
         "verify-finding",
         "workflow-hardening",
-      ]);
+      ];
+      // One list is the source of truth; the count follows it.
+      expect(reviewSkills.length).toBe(expectedReviewIds.length);
+      expect(reviewIds).toEqual(expectedReviewIds);
     });
 
     it("combines tag and role filters", () => {

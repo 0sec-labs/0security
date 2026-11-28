@@ -143,7 +143,9 @@ describe("bitbucket doctor", () => {
       const seen: Array<{ args: string[]; env: NodeJS.ProcessEnv }> = [];
       const exec = (origin: string, lsRemote: number): Exec => async (_file, args, options) => {
         seen.push({ args, env: options.env });
-        const sub = args[2];
+        let at = 2;
+        while (args[at] === "-c") at += 2; // the git safety overrides come first
+        const sub = args[at];
         if (sub === "rev-parse") return { stdout: "true\n", code: 0 };
         if (sub === "remote") return { stdout: `${origin}\n`, code: 0 };
         return { stdout: "", code: lsRemote };
@@ -152,6 +154,8 @@ describe("bitbucket doctor", () => {
       const ok = await runDoctor({ ...base, checkout: dir, readOnly: true }, deps({ http, env, exec: exec("git@bitbucket.org:WS/app.git", 0) }));
       expect(byId(ok, "checkout").status).toBe("PASS");
       expect(seen.length).toBe(3);
+      // Every git call replaces the clone's own ssh command and hooks, so its config cannot run a program.
+      for (const call of seen) expect(call.args.join(" ")).toContain("core.sshCommand=ssh");
       for (const call of seen) { expect(call.env["BITBUCKET_TOKEN"]).toBeUndefined(); expect(call.env["BITBUCKET_WEBHOOK_SECRET"]).toBeUndefined(); expect(call.args.join(" ")).not.toContain(TOKEN); }
       const wrong = await runDoctor({ ...base, checkout: dir, readOnly: true }, deps({ http, exec: exec("https://bitbucket.org/ws/other.git", 0) }));
       expect(byId(wrong, "checkout")).toMatchObject({ status: "FAIL" });

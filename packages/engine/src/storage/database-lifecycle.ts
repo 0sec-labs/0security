@@ -157,3 +157,36 @@ export function assertDatabaseEngineCompatibility(path: string): void {
     "Do not delete WAL/SHM files or rewrite the database header. Alternatively, use the Bun native SQLite runtime.",
   );
 }
+
+
+/**
+ * Explain a failed open. SQLite's own words ("database is locked", "database disk image is
+ * malformed") do not say which file, who is likely to blame or what is safe to do next, and the
+ * obvious fix for the first (delete `-journal` too) is what turns it into the second.
+ * The original error stays the `cause` and its text stays in the message.
+ */
+export function explainDatabaseOpenError(path: string, error: unknown): Error {
+  const text = error instanceof Error ? error.message : String(error);
+  const unchanged = error instanceof Error ? error : new Error(text);
+  if (path === ":memory:") return unchanged;
+  if (/database is locked|SQLITE_BUSY/i.test(text) && existsSync(`${path}.lock`)) {
+    return new Error(
+      `${text}. ${path} is in use by another 0 process, or a process that was killed left ${path}.lock behind. ` +
+      "Stop the other process, or give each concurrent run its own HOME (HOME=<new dir>) or --db-path. " +
+      `If no 0 process is running, remove only the ${path}.lock directory and keep ${path}-journal: ` +
+      "SQLite uses the journal to undo the interrupted write, and deleting it corrupts the database.",
+      { cause: error },
+    );
+  }
+  if (/malformed|not a database|invalid page number|never used|out of order|btreeInitPage|\*\*\* in database/i.test(text)) {
+    return new Error(
+      `${text}. ${path} is damaged. Usual causes: the file was copied while a 0 process was using it, ` +
+      `${path}-journal or ${path}.lock was deleted after a crash, a 0 process was killed during a write, ` +
+      "or another SQLite program or a differently built 0 (npm package and standalone binary) used the same file at the same time. " +
+      `Nothing was changed. To start empty, move ${path} and any ${path}-journal and ${path}.lock aside together (the scan history in it is lost), ` +
+      "and give each concurrent run its own HOME.",
+      { cause: error },
+    );
+  }
+  return unchanged;
+}

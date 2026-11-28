@@ -800,29 +800,55 @@ fn collect_scan_file(
     files.push((path, language));
 }
 
-/// Check if a file path is in a directory that typically contains
-/// test fixtures, vendored code, or generated assets.
-fn is_noise_path(path: &Path) -> bool {
-    let path_str = path.to_string_lossy();
-    let noise_dirs = [
-        "/vendor/",
-        "/node_modules/",
-        "/__fixtures__/",
-        "/__mocks__/",
-        "/__tests__/",
-        "/__snapshots__/",
-        "/dist/",
-        "/build/",
-        "/.next/",
-        "/coverage/",
-        "/.cache/",
-        "/spec/",
-        "/stubs/",
-        "/generated/",
-        "/gen/",
-    ];
-    for dir in &noise_dirs {
-        if path_str.contains(dir) {
+/// Directory names whose contents are treated as test fixtures, vendored
+/// code or generated assets.
+const NOISE_DIRS: &[&str] = &[
+    "vendor",
+    "node_modules",
+    "__fixtures__",
+    "__mocks__",
+    "__tests__",
+    "__snapshots__",
+    "dist",
+    "build",
+    ".next",
+    "coverage",
+    ".cache",
+    "spec",
+    "stubs",
+    "generated",
+    "gen",
+];
+
+/// Path of `path` below `scan_root`, so ancestors of the scan root (a CI
+/// checkout under `/.../build/`, a clone under `~/.cache/`) never count.
+/// Falls back to the canonical form of both, then to the path itself.
+fn path_below_scan_root(path: &Path, scan_root: &Path) -> PathBuf {
+    if let Ok(rel) = path.strip_prefix(scan_root) {
+        return rel.to_path_buf();
+    }
+    if let (Ok(p), Ok(r)) = (path.canonicalize(), scan_root.canonicalize()) {
+        if let Ok(rel) = p.strip_prefix(&r) {
+            return rel.to_path_buf();
+        }
+    }
+    path.to_path_buf()
+}
+
+/// Check if a file lives in a directory (below `scan_root`) that typically
+/// contains test fixtures, vendored code, or generated assets. Only the
+/// directories between the scan root and the file are considered.
+fn is_noise_path(path: &Path, scan_root: &Path) -> bool {
+    let relative = path_below_scan_root(path, scan_root);
+    if let Some(parent) = relative.parent() {
+        let in_noise_dir = parent.components().any(|component| match component {
+            std::path::Component::Normal(name) => {
+                let name = name.to_string_lossy();
+                NOISE_DIRS.contains(&name.as_ref())
+            }
+            _ => false,
+        });
+        if in_noise_dir {
             return true;
         }
     }
@@ -831,10 +857,7 @@ fn is_noise_path(path: &Path) -> bool {
         .file_name()
         .map(|n| n.to_string_lossy())
         .unwrap_or_default();
-    if name.contains(".min.") {
-        return true;
-    }
-    false
+    name.contains(".min.")
 }
 
 const MIN_SIZE_FOR_MINIFY_CHECK: usize = 2000;
@@ -1088,6 +1111,7 @@ fn scan_files(
     let start = Instant::now();
     let mut phase = Instant::now();
     let warnings = Mutex::new(Vec::new());
+    let supported_file_count = files.len();
     let secret_thresholds = registry.secret_thresholds();
 
     let mut taint_specs_by_lang: HashMap<Language, Vec<crate::rules::RegistryTaintSpec>> =
@@ -1132,7 +1156,7 @@ fn scan_files(
     // Build a per-language file index in a single pass over the file list.
     let mut files_by_lang: HashMap<Language, Vec<&(PathBuf, Language)>> = HashMap::new();
     for entry in &files {
-        if !is_noise_path(&entry.0) {
+        if !is_noise_path(&entry.0, scan_root) {
             files_by_lang.entry(entry.1).or_default().push(entry);
         }
     }
@@ -2564,7 +2588,7 @@ fn scan_files(
     let go_dir_index: HashMap<PathBuf, Vec<PathBuf>> = if has_go_cross_file {
         let mut index: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
         for (path, lang) in &files {
-            if matches!(lang, Language::Go) && !is_noise_path(path) {
+            if matches!(lang, Language::Go) && !is_noise_path(path, scan_root) {
                 if let Some(dir) = path.parent() {
                     let canonical = prepared_files
                         .get(path)
@@ -2579,13 +2603,25 @@ fn scan_files(
         HashMap::new()
     };
 
+    // Project-wide Java type and field index, so the flow checks can read a
+    // `static final` constant declared in another file of the scan.
+    let java_index: Option<std::sync::Arc<crate::rules::java_index::JavaProjectIndex>> =
+        if java_files.len() > 1 {
+            let paths: Vec<PathBuf> = java_files.iter().map(|(p, _)| p.clone()).collect();
+            let index = crate::rules::java_index::JavaProjectIndex::build(&paths, max_file_size);
+            timing_mark("java project index", &mut phase);
+            Some(std::sync::Arc::new(index))
+        } else {
+            None
+        };
+
     // Build a directory→files index for Java same-package resolution.
     // All Java files in the same directory are treated as the same package
     // (a proxy for the `package` declaration), mirroring the Go index above.
     let java_dir_index: HashMap<PathBuf, Vec<PathBuf>> = if has_java_cross_file {
         let mut index: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
         for (path, lang) in &files {
-            if matches!(lang, Language::Java) && !is_noise_path(path) {
+            if matches!(lang, Language::Java) && !is_noise_path(path, scan_root) {
                 if let Some(dir) = path.parent() {
                     let canonical = prepared_files
                         .get(path)
@@ -2606,7 +2642,7 @@ fn scan_files(
     let ruby_dir_index: HashMap<PathBuf, Vec<PathBuf>> = if has_ruby_cross_file {
         let mut index: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
         for (path, lang) in &files {
-            if matches!(lang, Language::Ruby) && !is_noise_path(path) {
+            if matches!(lang, Language::Ruby) && !is_noise_path(path, scan_root) {
                 if let Some(dir) = path.parent() {
                     let canonical = prepared_files
                         .get(path)
@@ -2628,7 +2664,7 @@ fn scan_files(
     let php_dir_index: HashMap<PathBuf, Vec<PathBuf>> = if has_php_cross_file {
         let mut index: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
         for (path, lang) in &files {
-            if matches!(lang, Language::Php) && !is_noise_path(path) {
+            if matches!(lang, Language::Php) && !is_noise_path(path, scan_root) {
                 if let Some(dir) = path.parent() {
                     let canonical = prepared_files
                         .get(path)
@@ -2649,7 +2685,7 @@ fn scan_files(
     let csharp_dir_index: HashMap<PathBuf, Vec<PathBuf>> = if has_csharp_cross_file {
         let mut index: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
         for (path, lang) in &files {
-            if matches!(lang, Language::CSharp) && !is_noise_path(path) {
+            if matches!(lang, Language::CSharp) && !is_noise_path(path, scan_root) {
                 if let Some(dir) = path.parent() {
                     let canonical = prepared_files
                         .get(path)
@@ -2670,7 +2706,7 @@ fn scan_files(
     let kotlin_dir_index: HashMap<PathBuf, Vec<PathBuf>> = if has_kotlin_cross_file {
         let mut index: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
         for (path, lang) in &files {
-            if matches!(lang, Language::Kotlin) && !is_noise_path(path) {
+            if matches!(lang, Language::Kotlin) && !is_noise_path(path, scan_root) {
                 if let Some(dir) = path.parent() {
                     let canonical = prepared_files
                         .get(path)
@@ -2691,7 +2727,7 @@ fn scan_files(
         .par_iter()
         .map(|(path, language)| {
             // Skip files in test/vendor/fixture directories
-            if is_noise_path(path) {
+            if is_noise_path(path, scan_root) {
                 return FileScanOutcome::skipped(ScanSkipReason::Noise);
             }
             let _budget = super::budget::FileBudgetGuard::start(file_budget);
@@ -3030,6 +3066,14 @@ fn scan_files(
 
             let mut file_findings = Vec::new();
 
+            // Java flow checks read constants of other files through the index.
+            let _java_index_guard = match (&java_index, language) {
+                (Some(index), Language::Java) => Some(
+                    crate::rules::java_flow::install_project_index(index.clone()),
+                ),
+                _ => None,
+            };
+
             // Dispatch every built-in taint engine through one table
             // (`TAINT_DISPATCH`) rather than a per-language block. For each
             // engine, collect the enabled rule ids whose `spec.engine`
@@ -3083,6 +3127,13 @@ fn scan_files(
             .then(a.line.cmp(&b.line))
             .then(a.column.cmp(&b.column))
     });
+    let mut warnings = warnings.into_inner().unwrap_or_default();
+    if supported_file_count > 0 && stats.noise_files == supported_file_count {
+        warnings.push(format!(
+            "warning: all {supported_file_count} supported file(s) under {} were skipped as noise paths (vendor, build, dist, spec, generated, test fixtures, .min files); nothing was scanned",
+            scan_root.display()
+        ));
+    }
     (
         ScanResult {
             findings: results,
@@ -3090,7 +3141,7 @@ fn scan_files(
             stats,
             duration: start.elapsed(),
         },
-        warnings.into_inner().unwrap_or_default(),
+        warnings,
     )
 }
 
@@ -3434,6 +3485,121 @@ mod tests {
         high_threshold
             .join()
             .unwrap_or_else(|_| panic!("high-threshold scan panicked"));
+    }
+
+    /// Writes `rel` (with parent dirs) under `base` and returns the full path.
+    fn write_fixture(base: &Path, rel: &str) -> PathBuf {
+        let path = base.join(rel);
+        std::fs::create_dir_all(path.parent().expect("fixture parent")).expect("mkdir");
+        std::fs::write(&path, "const value = 1;\n").expect("write fixture");
+        path
+    }
+
+    fn scan_counts(root: &str) -> (usize, usize, Vec<String>) {
+        let (result, notices) =
+            scan_directory_with_notices(root, &RuleRegistry::empty(), 1_048_576, None);
+        (
+            result.stats.files_scanned,
+            result.stats.noise_files,
+            notices,
+        )
+    }
+
+    #[test]
+    fn noise_named_ancestors_of_the_scan_root_are_scanned() {
+        for ancestor in [
+            "build",
+            ".cache",
+            "spec",
+            "dist",
+            "gen",
+            "vendor",
+            "generated",
+        ] {
+            let tmp = tempfile::tempdir().expect("tempdir");
+            let root = tmp.path().join(ancestor).join("app");
+            write_fixture(&root, "src/index.js");
+            let (scanned, noise, notices) = scan_counts(root.to_str().expect("utf8"));
+            assert_eq!((scanned, noise), (1, 0), "ancestor {ancestor}");
+            assert!(notices.is_empty(), "ancestor {ancestor}: {notices:?}");
+        }
+    }
+
+    #[test]
+    fn nested_noise_directories_inside_the_root_are_still_skipped() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path().join("build").join("app");
+        write_fixture(&root, "src/index.js");
+        write_fixture(&root, "build/out.js");
+        write_fixture(&root, "vendor/lib/x.js");
+        write_fixture(&root, "src/spec/a.js");
+        write_fixture(&root, "src/app.min.js");
+        let (scanned, noise, notices) = scan_counts(root.to_str().expect("utf8"));
+        assert_eq!((scanned, noise), (1, 4));
+        assert!(notices.is_empty(), "{notices:?}");
+    }
+
+    #[test]
+    fn relative_and_absolute_roots_give_the_same_result() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path().join(".cache").join("app");
+        write_fixture(&root, "src/index.js");
+        write_fixture(&root, "dist/bundle.js");
+        let absolute = scan_counts(root.to_str().expect("utf8"));
+        assert_eq!((absolute.0, absolute.1), (1, 1));
+
+        // Relative root, expressed against the current directory without
+        // changing it (tests run in parallel).
+        let cwd = std::env::current_dir().expect("cwd");
+        let mut relative = PathBuf::new();
+        for _ in cwd.components().skip(1) {
+            relative.push("..");
+        }
+        relative.push(root.strip_prefix("/").expect("absolute temp dir"));
+        let relative = scan_counts(relative.to_str().expect("utf8"));
+        assert_eq!((relative.0, relative.1), (absolute.0, absolute.1));
+    }
+
+    #[test]
+    fn single_file_target_under_noise_named_ancestor_is_scanned() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let file = write_fixture(&tmp.path().join("build").join("app"), "index.js");
+        let (scanned, noise, notices) = scan_counts(file.to_str().expect("utf8"));
+        assert_eq!((scanned, noise), (1, 0));
+        assert!(notices.is_empty(), "{notices:?}");
+    }
+
+    #[test]
+    fn explicit_paths_ignore_ancestors_of_the_root() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path().join("build").join("app");
+        let kept = write_fixture(&root, "src/index.js");
+        let skipped = write_fixture(&root, "vendor/x.js");
+        let (result, _) = scan_paths_with_root_with_notices(
+            &root,
+            &[kept, skipped],
+            &RuleRegistry::empty(),
+            1_048_576,
+            None,
+        );
+        assert_eq!(
+            (result.stats.files_scanned, result.stats.noise_files),
+            (1, 1)
+        );
+    }
+
+    #[test]
+    fn notice_is_printed_when_every_supported_file_is_noise() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path().join("app");
+        write_fixture(&root, "vendor/a.js");
+        write_fixture(&root, "dist/b.js");
+        let (scanned, noise, notices) = scan_counts(root.to_str().expect("utf8"));
+        assert_eq!((scanned, noise), (0, 2));
+        assert!(
+            notices.iter().any(|n| n.contains("skipped as noise paths")),
+            "{notices:?}"
+        );
     }
 
     #[test]

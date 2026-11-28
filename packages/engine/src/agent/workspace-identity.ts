@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { isAbsolute, relative, sep } from "node:path";
+import { UNTRUSTED_GIT_BASE_CONFIG } from "../verifier/untrusted-git.js";
 
 /** Parent-observed identity, inherited unchanged by source-review descendants. */
 export interface WorkspaceIdentity {
@@ -13,7 +14,7 @@ export interface WorkspaceIdentity {
 function git(cwd: string, args: string[]): string {
   // Probe the checkout at cwd, ignoring ambient repository/config overrides.
   const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith("GIT_")));
-  return execFileSync("git", args, {
+  return execFileSync("git", [...UNTRUSTED_GIT_BASE_CONFIG, ...args], {
     cwd, env, encoding: "utf8", timeout: 5_000, maxBuffer: 64 * 1024,
     stdio: ["ignore", "pipe", "ignore"],
   }).trim();

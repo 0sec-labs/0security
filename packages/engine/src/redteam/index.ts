@@ -1,0 +1,17 @@
+export { CANARY_PLACEHOLDER, materializePayload, materializeSuccess, newCanary, parseScenario, scenarioFromFinding, type Scenario } from "./scenario.js";
+export { createHoneypot, DEFAULT_TOOLS, defaultPayload, secretFor, serveLines, type Honeypot, type HoneypotOptions, type HoneypotTool, type Privilege, type RpcResponse, type TraceEvent } from "./honeypot.js";
+export { judge, parseTrace, type JudgeOptions, type RedteamVerdict } from "./judge.js";
+export { alertFor, createDecoy, DECOY_TOOLS, type DecoyAlert, type DecoyOptions } from "./decoy.js";
+export { frameworkTags, redteamFindings, type FrameworkTag, type RedteamFindingInput } from "./findings.js";
+export { BRAIN_TOKEN_ENV, BRAIN_URL_ENV, brainUrl, dryRun as brainDryRun, requestScenarios, type BrainDeps, type BrainOptions, type BrainResult } from "./brain/client.js";
+export { LIMITS as BRAIN_LIMITS, validateRequest as validateBrainRequest, validateResponse as validateBrainResponse, type BrainManifest, type BrainScenario, type ScenarioRequest, type ScenarioResponse } from "./brain/schema.js";
+export { STARTER_PACK, selectStarter, starterFor } from "./brain/starter-pack.js";
+export { createMockBrain, type MockBrain, type MockBrainOptions } from "./brain/mock-server.js";
+export { argMatches, evaluateOracle } from "./oracle.js";
+export type { ArgCondition, OracleContext, OracleResult, OracleSpec } from "./oracle-types.js";
+export * from "./kit/index.js";
+export * from "./catalog/index.js";
+export * from "./strategies/index.js";
+export * from "./attacker/index.js";
+export * from "./eval/index.js";
+export * from "./brain/next-move.js";

@@ -15,6 +15,8 @@ The rest of the repository can be used and run without infringing the Enterprise
 
 The `enterprise/` folder is source-available, not open source. Features already in the open core will not move into `enterprise/`.
 
+The features that have shipped free in a release are listed in [scripts/released-free-features.json](scripts/released-free-features.json). A check in CI (`scripts/check-enterprise-boundary.mjs`) fails the build if the code of any listed feature calls a license gate.
+
 - [LICENSE-MIT](LICENSE-MIT)
 - [LICENSE-APACHE](LICENSE-APACHE)
 - [crates/foxguard/LICENSE-MIT](crates/foxguard/LICENSE-MIT) and [crates/foxguard/LICENSE-APACHE](crates/foxguard/LICENSE-APACHE) (the imported Foxguard engine, same MIT OR Apache-2.0 terms, original copyright notice kept)

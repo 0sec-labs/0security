@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { z } from "zod";
+import { UNTRUSTED_GIT_BASE_CONFIG } from "../verifier/untrusted-git.js";
 
 const sha = z.string().regex(/^[a-f0-9]{40}$/);
 const path = z.string().min(1).max(500).refine(value => !value.startsWith("/") && !value.includes("\\") && !value.split("/").some(part => part === "." || part === "..") && !/[\x00-\x1f]/.test(value));
@@ -91,7 +92,7 @@ export function captureProjectSuggestions(
     for (const file of files) {
       if (checked.has(file)) continue;
       try {
-        const mode = execFileSync("git", ["--literal-pathspecs", "-C", checkoutPath, "ls-tree",
+        const mode = execFileSync("git", ["--literal-pathspecs", "-C", checkoutPath, ...UNTRUSTED_GIT_BASE_CONFIG, "ls-tree",
           "--format=%(objectmode) %(objecttype)", sourceRevision, "--", file],
         { encoding: "utf8", timeout: 5000, maxBuffer: 2048, stdio: ["ignore", "pipe", "ignore"] }).trim();
         checked.set(file, /^100(?:644|755) blob$/.test(mode));

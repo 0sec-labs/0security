@@ -13,7 +13,7 @@ We wrote this from the repository and the compose files. We have not applied the
 
 - One EC2 instance with a gp3 data volume mounted at `/data`.
 - An image built on the instance from a pinned tag of the repository. A build with no build secrets contains no telemetry keys.
-- `ZERO_ENTERPRISE=1` and `DO_NOT_TRACK=1`. 0 blocks every automatic outbound call, including telemetry and crash reports, except your model endpoint and the destinations you name. See [Data flow](/data-flow/).
+- `ZERO_NO_EGRESS=1` and `DO_NOT_TRACK=1`. 0 blocks every automatic outbound call, including telemetry and crash reports, except your model endpoint and the destinations you name. See [Data flow](/data-flow/).
 - Caddy for HTTPS, or an SSH tunnel with no public port.
 - OIDC sign-in, recorded in the audit log.
 
@@ -193,7 +193,7 @@ ZERO_DOMAIN=${domain}
 ZERO_PUBLIC_URL=https://${domain}
 ZERO_ALLOWED_HOSTS=${domain}
 ZERO_DATA_DIR=/data
-ZERO_ENTERPRISE=1
+ZERO_NO_EGRESS=1
 DO_NOT_TRACK=1
 COMPOSE_FILE=docker-compose.yml:docker-compose.data-disk.yml:docker-compose.reference.yml
 EOF
@@ -249,7 +249,7 @@ Open `http://127.0.0.1:48123` on your computer.
 Ask the running container for its environment and look at the analytics log. The log records every analytics payload that leaves, so it stays empty.
 
 ```bash
-docker compose exec zero printenv ZERO_ENTERPRISE
+docker compose exec zero printenv ZERO_NO_EGRESS
 docker compose exec zero sh -c 'ls -l /data/.0/analytics-sent.log 2>/dev/null || echo no analytics log'
 ```
 

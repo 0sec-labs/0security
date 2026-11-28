@@ -12,6 +12,15 @@ on the GitHub Release tag.
 
 ## [Unreleased]
 
+### Changed
+
+- New page "Triage findings from any scanner": `findings import` plus `findings verify` as a triage layer over any scanner, with the measured OWASP Benchmark and Vul4J results and their limits.
+- The models page now says which credentials are meant for production and shared use (API keys, Bedrock through the AWS credential chain, an OpenAI-compatible gateway, Azure OpenAI with Entra ID), that consumer or per-seat subscription logins are for individual local use and may be restricted by the provider's terms, and links each provider's own terms.
+- `0security scan --concurrency` accepts up to 8 batches (it stopped at 3), and `ZERO_SCAN_MAX_CONCURRENCY` raises the limit to 16. `--passes` keeps 3. A rate limit (429) on one request now holds back every request of the same provider in the process for the wait the provider asked for, and a batch that still fails on a rate limit pauses all workers before the next batch starts. See [Running batches in parallel](/findings/#running-batches-in-parallel).
+- `0 scan --skill seedless-depth-review` now reviews a large folder in batches with the batch coverage report, like a plain scan (before, any skill other than `scan` forced one thread and dropped both). Every other skill still keeps one thread; when that skips batching on a folder that would have been split, the report carries a warning and `--batches on` runs the skill per batch.
+- The scan report lists the helper threads the scan started with `spawn_agent`: `children` (count, status, turns, tool calls, tokens, findings, and per helper its scope and result), `coverage.children` and a per-batch count, and a "Helper threads" section in the Markdown report. The JSON report has a `tokens` total, which already included helper threads.
+- The `scan` skill tells a thread to load the new `code-index` skill when it reviews routes or handlers. The default tool list is unchanged (seven tools); the four index tools appear only after `load_skill`. The scan prompt and the `finding` tool now ask for `poc_steps` on high and critical findings when a safe, shell-reproducible check exists, so `findings reproduce` and executed PoC have steps to run.
+
 ## [0.46.0] - 2026-11-26
 
 ### Added
@@ -40,6 +49,17 @@ on the GitHub Release tag.
 - The findings guide now describes the finding page's code location, recorded fix, diff, pull request, code-host CI and Re-verify sections.
 - The finding page shows the code location (with a copyable `path:line`) and the fix that `0security findings fix` recorded: branch, pull request link, draft or ready, local checks, and the diff when the branch is on this machine.
 - Spend limits for Sentinels and triggers, and usage by Sentinel. Code index tools give the agent callers, callees, routes and a trace to a sink. A Jira export, fix explanations and a threat map were added, and Jira leaves info-level findings out by default.
+- `0security redteam` tests whether an AI agent that holds tools obeys poisoned text. `honeypot` serves a fake MCP server over stdio that returns a poisoned instruction and a fake secret and records every tool call. `judge` decides from the recorded calls alone whether the agent obeyed, with no model asked for an opinion, and a hit can be written as a SARIF or Markdown finding. `run` starts your agent several times and exits 0 clear, 1 obeyed or 2 inconclusive; it refuses without `--unsafe-no-isolation` because it has no isolation yet. `honeypot --decoy --alert-url` serves decoy tools that nothing legitimate calls, so any call is an alert. `generate` can ask a hosted scenario generator for scenarios, sends only the shape of the agent, is off unless a URL is set, and falls back to an open starter set offline. The new `agent-toxic-flow` skill reads an agent's source and lists paths where attacker-controlled text reaches a privileged tool, and the GitHub Action has `redteam` and `agent-config` modes.
+- `findings export --format defectdojo` writes a file DefectDojo's Generic Findings Import can read. The docs say how to load it, and that Dependency-Track takes the CycloneDX file from `sbom generate`.
+- `findings fix` writes an advisory note, in text and as `advisory` in JSON, when a Java dependency finding cannot be changed. No pull request opens.
+- `sbom generate --resolve` marks packages that appear only on the Gradle test classpath as excluded.
+- `findings burndown` uses the `fix` workflow defaults for the per-fix budget and model.
+- Amazon Bedrock model ids show and enforce an on-demand rate for Claude and Nova models.
+- Extension sandbox blocks can name the programs a script or MCP server may start (`programs`). MCP servers re-check their files against the approved hash before starting, and a host list for `network` is refused because it cannot be enforced.
+- `foxguard graph` maps Spring Security URL rules and `web.xml` constraints onto routes, resolves receiver types through call chains and generics, reads Kotlin and Ktor, keys taint summaries by method and arity, and ranks candidates before dropping an ambiguous call. On one 15,457-file Java tree the calls dropped for ambiguity fell from 144,747 to 16,281.
+- SARIF: an offline consumer check (`scripts/check-sarif.mjs`) reports spec errors and viewer or code scanning problems in a SARIF file.
+- Benchmarks: a committed per-case reference-fix table for all fix cases, a pattern rescan for cases the free scanner does not flag, validation and scoring of hand-labelled triage sets without a model, and scan-level OWASP Benchmark scoring with a Vul4J case converter.
+- Enterprise preview: server mode can run several replicas on one shared PostgreSQL database. It adds a durable job queue, one elected leader for the Sentinel scheduler through an advisory lock, a `/readyz` that returns 503 when the database does not answer (`/healthz` is unchanged), a drain that gives up the scheduler role and returns unfinished jobs to the queue, and a Helm chart option (`highAvailability.enabled`) and compose file. The new docs page "Replicas and a shared database" says what is shared and what is not. Findings, accounts, the audit log, Sentinels and Thread transcripts stay on each replica's own volume, so it is not for production availability yet.
 
 ### Changed
 
@@ -60,6 +80,8 @@ on the GitHub Release tag.
 ### Fixed
 
 - Gradle version catalog dependency bumps are correct, pinned Hugging Face SBOM metadata and TOML values with quoted comments are kept, host-only IPv6 scope entries match, SARIF rule descriptor indices resolve, a leading UTF-8 BOM in SARIF and Nuclei JSONL import is ignored, and findings with rejected suppressions are kept.
+- `sentinels bitbucket` and its `review`, `watch` and `doctor` commands now show in `--help`. They worked before but were hidden from the listing. (@Vivkzz)
+- SARIF: the offline checker is linear on large logs and escapes bidirectional-text characters in its output.
 
 ### Security
 
@@ -70,7 +92,8 @@ on the GitHub Release tag.
 - HTML report links reject unsafe URL schemes, `mcp_server_start` approval prompts are cleaned of control and bidi characters, and threat-interview scope rejects glob comma and metacharacter injection.
 - A scanned folder's `.git/config` can no longer run commands on the host, and pre-pass scanners run in an empty folder so they cannot load config from where 0 was started.
 - A webhook check trigger runs only for a commit GitHub confirms is on the watched branch.
-- The console control token is delivered in the launch URL fragment, not in page HTML. The code index no longer hangs on hostile files and labels repository text as untrusted. The executed PoC never pulls its image and keeps credentials out of its sandbox.
+- The code index no longer hangs on hostile files and labels repository text as untrusted. The executed PoC never pulls its image and keeps credentials out of its sandbox.
+- Fixes and threat models no longer run a repository's own git hooks, fsmonitor command, filter drivers or ssh command. The same protection now covers the Bitbucket review runner and the other places 0 reads a repository with git.
 
 ## [0.45.0] - 2026-11-24
 

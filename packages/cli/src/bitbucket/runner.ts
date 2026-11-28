@@ -12,7 +12,7 @@ import { mkdtempSync, readFileSync, rmdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { assertEgressAllowed, enterpriseMode } from "@0/engine";
+import { UNTRUSTED_GIT_BASE_CONFIG, assertEgressAllowed, enterpriseMode, untrustedGitActionConfig } from "@0/engine";
 import { isSafeGitRef } from "@0/engine/shared";
 import { assertBitbucketDestination, type PullRequest } from "./client.js";
 import type { ReviewRunner, ScanResult } from "./review.js";
@@ -64,7 +64,7 @@ export function gitScanRunner(options: RunnerOptions): ReviewRunner {
   const hidden = [...SECRET_VARIABLES, ...(options.secretVariables ?? [])];
   const cleanEnv = () => Object.fromEntries(Object.entries(process.env).filter(([name]) => !hidden.includes(name)));
   const git = async (args: string[], timeoutMs = 120_000) => {
-    const result = await exec("git", ["-C", options.checkout, ...args], { env: cleanEnv(), timeoutMs });
+    const result = await exec("git", ["-C", options.checkout, ...untrustedGitActionConfig(options.checkout), ...args], { env: cleanEnv(), timeoutMs });
     if (result.code !== 0) throw new Error(`git ${args[0]} failed (exit ${result.code}).`);
     return result.stdout;
   };
@@ -75,7 +75,7 @@ export function gitScanRunner(options: RunnerOptions): ReviewRunner {
       if (enterpriseMode()) {
         // get-url expands insteadOf, but fetch would expand it again. Reject rewrites rather than trusting a
         // second expansion, helper transport, remote helper or a checkout-controlled alternate destination.
-        const rewrites = await exec("git", ["-C", options.checkout, "config", "--get-regexp", "^url\\..*\\.(insteadof|pushinsteadof)$"], { env: cleanEnv(), timeoutMs: 10_000 });
+        const rewrites = await exec("git", ["-C", options.checkout, ...UNTRUSTED_GIT_BASE_CONFIG, "config", "--get-regexp", "^url\\..*\\.(insteadof|pushinsteadof)$"], { env: cleanEnv(), timeoutMs: 10_000 });
         if (rewrites.code !== 1 || rewrites.stdout.trim()) throw new Error("Restricted-egress Bitbucket refuses git URL rewrites; use the approved HTTPS origin directly.");
         const remote = (await git(["remote", "get-url", "origin"])).trim();
         assertBitbucketDestination(remote);

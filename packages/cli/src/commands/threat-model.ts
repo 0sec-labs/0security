@@ -19,7 +19,7 @@ import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import { Command } from "commander";
-import { buildInventory, untrustedGitConfig } from "@0/engine";
+import { buildInventory, untrustedGitActionConfig, untrustedGitConfig } from "@0/engine";
 import { parseScope, THREAT_MODEL_PATH, threatModelPrompt } from "@0/engine/shared";
 import { consoleTransportOptions, type ConsoleClient, type ConsoleTransportOptions } from "../console-client.js";
 import { connect, DEFAULT_SCAN_MODEL, scanModelField, defaultScanDeps, registerScanCommand, waitForThread, type ScanDeps } from "./scan.js";
@@ -89,7 +89,7 @@ async function folderStatus(deps: Pick<ThreatModelDeps, "git">, folder: string):
 export const defaultThreatModelDeps: ThreatModelDeps = {
   open: defaultScanDeps.open, err: defaultScanDeps.err, sleep: defaultScanDeps.sleep, startConsole: defaultScanDeps.startConsole,
   out: text => process.stdout.write(`${text}\n`),
-  async git(cwd, args) { return (await exec("git", ["-C", cwd, ...args], { maxBuffer: 32 * 1024 * 1024 })).stdout; },
+  async git(cwd, args) { return (await exec("git", ["-C", cwd, ...untrustedGitActionConfig(cwd), ...args], { maxBuffer: 32 * 1024 * 1024 })).stdout; },
   async gh(cwd, args) { return (await exec("gh", args, { cwd, maxBuffer: 32 * 1024 * 1024 })).stdout; },
   makeTemp: () => mkdtempSync(join(tmpdir(), "0-threat-model-")),
   removeTemp: path => rmSync(path, { recursive: true, force: true }),

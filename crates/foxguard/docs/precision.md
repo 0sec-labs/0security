@@ -263,6 +263,16 @@ context to confirm. They are where most known false positives live.
 - `py/no-weak-crypto`, and `*/no-weak-crypto` family — flag `md5`, `sha1`,
   `DES`, `RC4`. False positive on legitimate non-security uses (content
   addressing, cache keys, Git-compatible hashing).
+  Java is the exception: `java/weak-hash` (CWE-328) and `java/no-weak-crypto`
+  (CWE-327) resolve a constant algorithm name (literal, `static final`
+  constant, single-assignment local, `+` concatenation) and report only when
+  it is broken. A name that is not a constant is not reported, and neither is
+  one read from configuration such as `props.getProperty("alg", "SHA-256")`:
+  the literal there is a fallback, not the algorithm in use.
+- `hygiene/java-weak-random` (CWE-330, low) — `new java.util.Random()` and
+  `Math.random()` outside test sources. Hygiene, not a vulnerability claim:
+  it is only a problem where the value guards something. Filter the
+  `hygiene/` namespace to drop it.
 
 Rationale: these rules answer "is a dangerous primitive used with
 non-constant input?" Without flow analysis we cannot answer the stronger
@@ -364,6 +374,126 @@ tuned for. Every item here is verifiable in the code or the git log.
   lexical scope. Dynamic authorities, mutable bindings, shadowing, and arbitrary
   method calls remain reported. This does not establish redirect safety or
   runtime authorization. See `tests/js_ssrf_precision.rs`.
+
+- **Java flow veto: constants and helpers.** The Java sink rules ask a small
+  flow-sensitive interpreter (`src/rules/java_flow.rs`) whether every sink
+  argument is provably built from constants; if so the finding is dropped.
+  Two rules decide what counts as a constant:
+  - An UPPER_SNAKE identifier is a constant only when it resolves to a
+    `static final` field (or an interface field, enum constant or by-name static
+    import) of an enclosing class in the same file, with a safe initialiser.
+    Method parameters, lambda, catch and loop variables, locals, and any name
+    declared in the enclosing method shadow it, so
+    `void run(@RequestParam String USER_INPUT)` is request data. A constant
+    declared in another file (including an inherited one) is unknown, not safe.
+  - `Helper.method(args)` with only safe arguments is read from the helper's
+    body when `Helper` is declared in the scanned file (a body that reads a
+    `ThreadLocal`, a static field, `RequestContextHolder` or any source is
+    unknown). Calls on request-context holders (`RequestContextHolder`,
+    `SecurityContextHolder`, `LocaleContextHolder`, `MDC`, ...) and accessors of
+    per-request state (`getAttribute`, `getSession`, `getAuthentication`, ...)
+    are never trusted.
+
+  **Cross-file helpers are unknown (sound default).** A call to a project
+  helper whose class is not declared in the scanned file is never assumed safe
+  just because its arguments are safe: its body is not available, so it may
+  ignore its arguments and read request, thread or static state
+  (`Helper.currentInput()` with `Helper` in another file is reported). Only
+  JDK and well-known library types (`java.*`, `javax.*`, `org.apache.*`,
+  `org.springframework.*`, and similar) are taken as functions of their
+  arguments.
+
+  **What this costs.** Extra false alarms on code that routes constants through
+  helper factories declared in other files. On the shared Java benchmark scorer
+  true positives are unchanged (1319) and false positives rise from 66 to 164
+  (full score 0.882 to 0.808; cmdi 0.689 to 0.321, xss 0.900 to 0.804,
+  pathtraver 0.776 to 0.687, sqli 0.938 to 0.860, ldapi 0.889 to 0.858, xpathi
+  0.933 to 0.883), because that benchmark's own helper classes are separate
+  files. The extra alarms are an intended hand-off: the verification step that
+  follows a scan is the place to prune them, since a suppressed real finding
+  cannot be recovered later.
+
+  **The old behaviour still exists.** `TRUST_UNRESOLVED_PROJECT_HELPERS` in
+  `src/rules/java_flow.rs` is `false`; setting it to `true` restores the
+  assumption and the lost precision, at the risk of hiding a real finding
+  behind a state-reading helper. It is a build-time constant, not a user-facing
+  option. A per-method "safe when its arguments are safe" summary resolved
+  across files would remove most of the cost for whole-project scans and is the
+  intended follow-up. See `tests/fixtures/java_cross_file_helper/`.
+
+- **Java qualified constants and argument injection.** `Type.NAME` is a
+  constant only when `Type` resolves to a class whose declaration the scan can
+  read: one declared in the scanned file with a `static final` field of that
+  name and a safe initialiser, one of the project's other files (see the next
+  paragraph), or a JDK or well-known library type (`File.separator`,
+  `StandardCharsets.UTF_8`, `Integer.MAX_VALUE`, `TimeUnit.SECONDS`). Anything
+  else is unknown, because that class may declare it as a public static that
+  request data is assigned to (`exec(OtherState.USER_COMMAND)` is reported).
+  Before the cross-file reading below, this cost false positives only on the
+  shared Java benchmark scorer (full score 0.808 to 0.762, FP 164 to 225, TP
+  unchanged), the benchmark's helper classes being separate files. A fixed
+  non-shell program (`exec(new String[] {"ls", arg})`) no longer suppresses the
+  command rule, because the argument can still be read as an option (`find
+  -exec`, `tar --checkpoint-action`, `git -c`, `curl -o`). It is reported as
+  `java/taint-argument-injection` (CWE-88, medium); the benchmark has no such
+  flows, so the measured cost is zero.
+
+- **Java constants declared in other files.** The scanner indexes the types and
+  fields of every scanned Java file (`src/rules/java_index.rs`) and the flow
+  interpreter reads `Type.NAME`, a name imported with `import static` and a
+  name inherited from a scanned supertype from it. A field is a constant only
+  when all of these hold: the class resolves to exactly one scanned class from
+  the reading file (a single-type import, the same package, one wildcard import
+  that provides it, or a qualified name; a type declared in the reading file
+  wins; a name provided by two wildcard imports, a name that resolves to no
+  scanned class, and a name that an unreadable file may also declare are
+  unknown); the field is `static final`, an interface field or an enum constant
+  of an immutable value type (a string, a primitive or its box, `File`, `Path`;
+  arrays, collections and builders stay unknown); its name is not assigned,
+  incremented or compound-assigned anywhere in the scanned project (the check
+  is by simple name, so it errs toward unknown); exactly one declaration is
+  found through the supertypes; and its initialiser is safe when read in the
+  declaring file (with that file's imports), within a nesting depth of four and
+  with cycle detection. A non-final field, a blank final set in an initialiser
+  block, an initialiser that calls a project helper or reads the environment,
+  and a constant built from one of those are unknown. The initialiser uses the
+  same evaluator as same-file constants, so the trusted-JDK-call assumption of
+  the audit table below applies: `System.getProperty("user.dir") +
+  File.separator` is a constant. A scan that sees only some of the project's
+  files (a diff scan) resolves only what it sees; the rest stays unknown. On
+  the shared benchmark scorer, with the helper classes scanned alongside the
+  tests, path traversal goes from 0.235 to 0.709 (FP 88 to 24, TP unchanged)
+  and the full score from 0.762 to 0.811. The remaining false alarms there are
+  flows through reflection-built helper objects and a `getFD()` chain, not
+  constants. See `tests/fixtures/java_cross_file_constants_safe/` and
+  `..._vulnerable/`.
+
+### Java flow veto: suppression audit
+
+Every place the Java rules may drop a sink or treat a value as safe, with the
+assumption it rests on and a concrete flow it would miss.
+
+| Heuristic | Sound? | Assumption kept / what is missed |
+|---|---|---|
+| UPPER_SNAKE names | Yes (fixed) | Only a `static final` field of an enclosing class, interface field, enum constant, name inherited from a scanned supertype, or by-name static import; parameters and any declared name shadow it. A static import of a scanned class is read from that class; one of a class outside the scan is assumed to be a library constant. Missed: a name statically imported from an unscanned class that a project module fills with request data. |
+| `Type.NAME` / library fields | Yes (fixed) | Library types are assumed to hold no request data in static fields. Missed: a library singleton someone mutated at startup from request data. |
+| `Type.NAME` of a class in another scanned file | Assumption | Constant when the class is unambiguous, the field is `static final` (or interface field or enum constant) of an immutable value type, the name is never assigned in the scan and the initialiser is safe (see above). Assumption: no reflection, no other language and no unscanned code writes the field, and the initialiser's trusted JDK calls return fixed values. Missed: `public static final String DIR = System.getProperty("app.dir")` where startup code sets `app.dir` from request data; an unscanned file that declares a same-named class in the same package. |
+| Same-file static helper body | Yes | The body is interpreted with the caller's argument values; unknown calls inside stay unknown. |
+| Unqualified / `this.` helper | Yes (fixed) | Resolved only to a private, static or final method (or one in a final class) of the innermost enclosing class that declares it; an overridable method may be replaced by a subclass in another file and is unknown. |
+| Helper in another file | Yes (default) | Unknown; extra alarms only. `TRUST_UNRESOLVED_PROJECT_HELPERS = true` restores the old assumption: missed `exec(Helper.currentInput())`. |
+| JDK / library static call with safe arguments | Assumption | Result depends only on the arguments. Missed: `System.getProperty("x")` where the property was set from request data; `Files.readString` style reads are listed as external input and stay unknown. |
+| External-input and request-context lists | Partly | A denylist of method names (`getenv`, `readLine`, `lines`, `getAttribute`, `getSession`, ...). A reader not on the list, called on a value proven safe, is treated as safe. Missed: `new Foo("const").fetch()` is already unknown, but `Library.fetch("const")` of an unlisted name is trusted. |
+| Request-context holders | Yes | `RequestContextHolder`, `SecurityContextHolder`, `LocaleContextHolder`, `MDC` and similar are never trusted. A holder not on the list is a library call (see above). |
+| Constant folding | Yes (fixed) | Strings are not compared with `==` (reference semantics) and ints that leave the 32-bit range are not folded. Missed: none known. |
+| Clean reassignment (taint engine) | Yes (fixed) | Hides taint only from statements after a straight-line reassignment: not before it, not when the assignment sits under a branch, loop, `try`, handler, ternary or short-circuit operand, and not across a loop back edge. |
+| Clean reassignment (flow interpreter) | Yes (fixed) | Branches of `?:`, `&&` and `||` run on copies and are joined. Fields are not tracked at all: a call between the write and the read may change them. |
+| Collections (`add`/`put`/`get` by constant index) | Yes | A collection handed to another call, aliased, or modified by an unmodelled method stops being tracked. Taint added through `add`/`put`/`append` is propagated. |
+| Fixed program at argument 0 | Yes (fixed) | Reported as argument injection instead of suppressed. A program on the shell-like list (`sh`, `env`, `python`, `ssh`, ...) stays command injection. Not covered: a program that is not a literal. |
+| `arg_indices` (SQL text, LDAP filter, XPath text only) | Assumption | Bound values are data. Missed: a driver or API where a later argument is also interpreted as query text (for example a `PreparedStatementCreator`, or a custom `search` overload). |
+| Wrapped `new File(..)` inside another path sink | Yes | The outer constructor reports it; the outer is only a sink for the same types. |
+| HTML encoders (XSS rule only) | Assumption | Any call named `escapeHtml*`, `encodeForHTML`, ... is an HTML sanitiser whatever its receiver. Missed: HTML-escaped data placed in a JavaScript string, an unquoted attribute or a `javascript:` URL. |
+| Typed receiver recognition | Recall gap | Sink receivers are matched by declared type or name hint in the enclosing scopes. Missed: a `Runtime` held in an inherited field whose name does not contain `runtime`. This lowers recall, it does not suppress. |
+| Test-path skips | n/a | This change adds none. |
 
 ## Section 4: How to report a false positive
 

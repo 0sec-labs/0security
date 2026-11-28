@@ -1884,6 +1884,30 @@ describe("LlmApiRuntime 429 backoff + retry", () => {
     expect(result.error).toBeUndefined();
   });
 
+  it("holds back another request of the same provider while one is backing off a 429", async () => {
+    const stamps: number[] = [];
+    const first = rateLimited();
+    first.headers.set("retry-after-ms", "400");
+    const responses = [first, okChat("a"), okChat("b")];
+    const fetchMock = vi.fn(async () => { stamps.push(Date.now()); return responses.shift()!; });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const a = mkRuntime();
+    const b = mkRuntime();
+    const started = Date.now();
+    const runA = a.executeNative("sys", userMsg, []);
+    // A's first request has been answered with a 429 by now; B is a separate session of the same process.
+    await new Promise(resolve => setTimeout(resolve, 50));
+    const runB = b.executeNative("sys", userMsg, []);
+    const results = await Promise.all([runA, runB]);
+
+    expect(results.map(result => result.error)).toEqual([undefined, undefined]);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    // B did not send its first request into the limit A had just hit: it waited for the 400 ms A was told to wait.
+    expect(stamps[1]! - started).toBeGreaterThanOrEqual(350);
+    expect(stamps[2]! - started).toBeGreaterThanOrEqual(350);
+  });
+
   it("honors a Retry-After header and retries", async () => {
     const responses = [rateLimited("0"), rateLimited("0"), okChat("ok")];
     const fetchMock = vi.fn(async () => responses.shift()!);

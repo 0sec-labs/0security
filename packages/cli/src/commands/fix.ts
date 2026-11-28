@@ -13,9 +13,10 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { Option, type Command } from "commander";
-import { assertEgressAllowed, bumpJavaDependency, parseDependencyFinding } from "@0/engine";
+import { assertEgressAllowed, bumpJavaDependency, parseDependencyFinding, untrustedGitActionConfig } from "@0/engine";
 import { fixPrompt, type FixPolicy, type FixPromptFinding, type RootCause } from "@0/engine/shared";
-import { loadFixPolicyFile, type FixPolicyOptions, type LoadedFixPolicy } from "./fix-policy.js";
+import { loadPolicyBundle } from "../policy-bundle/index.js";
+import { loadFixPolicyFile, parseFixPolicyDocument, type FixPolicyOptions, type LoadedFixPolicy } from "./fix-policy.js";
 import { osecDB, resolveOsecDbPath } from "@0/engine/storage";
 import { consoleTransportOptions, type ConsoleClient, type ConsoleTransportOptions } from "../console-client.js";
 import { VariantBudget, defaultVariantStore, DEFAULT_VARIANT_BUDGET_USD, huntVariants, rescanSummary, rescanVariants, type VariantParent, type VariantStore } from "./variants.js";
@@ -76,7 +77,7 @@ function resolveRow(rows: Array<Record<string, unknown>>, id: string): Record<st
 const defaults: FixDeps = {
   open: defaultScanDeps.open, err: defaultScanDeps.err, sleep: defaultScanDeps.sleep, startConsole: defaultScanDeps.startConsole,
   out: text => process.stdout.write(`${text}\n`),
-  async git(cwd, args) { return (await exec("git", ["-C", cwd, ...args], { maxBuffer: 32 * 1024 * 1024 })).stdout; },
+  async git(cwd, args) { return (await exec("git", ["-C", cwd, ...untrustedGitActionConfig(cwd), ...args], { maxBuffer: 32 * 1024 * 1024 })).stdout; },
   async gh(cwd, args, input) {
     assertEgressAllowed("GitHub (gh)");
     const running = exec("gh", args, { cwd, maxBuffer: 32 * 1024 * 1024 });
@@ -187,7 +188,7 @@ export function pullRequestBody(finding: FindingToFix, summary: string | undefin
 
 export interface FixOptions extends ConsoleTransportOptions {
   host?: string; bitbucketUrl?: string;
-  repo?: string; base?: string; test?: string[]; ready?: boolean; budget: string; model?: string; timeout: string; pr: boolean; format?: string; policy?: string; repoPolicy?: boolean; sandbox?: string; sandboxImage?: string; sandboxNetwork?: boolean; variants?: boolean; variantBudget?: string; sandboxSetup?: string[]; sandboxProfile?: string; sandboxMavenSettings?: string; ticket?: string;
+  repo?: string; base?: string; test?: string[]; ready?: boolean; budget: string; model?: string; timeout: string; pr: boolean; format?: string; policy?: string; policyBundle?: string; policyBundleKey?: string[]; policyBundleKeyFile?: string[]; repoPolicy?: boolean; sandbox?: string; sandboxImage?: string; sandboxNetwork?: boolean; variants?: boolean; variantBudget?: string; sandboxSetup?: string[]; sandboxProfile?: string; sandboxMavenSettings?: string; ticket?: string;
 }
 
 export interface FixOutcome {
@@ -281,7 +282,11 @@ async function runFixFlow(id: string, options: FixOptions, deps: FixDeps): Promi
     const host = options.pr ? await selectFixHost({ host: options.host, bitbucketUrl: options.bitbucketUrl, run: (args, input) => deps.gh(tree || repo, args, input), git: args => deps.git(tree || repo, args) }) : undefined;
     const base = await defaultBase(deps, repo, options.base);
     // The policy is read before anything is created: a bad pull request setting stops the run first.
-    const loaded = deps.loadPolicy(repo, options);
+    if (options.policyBundle && options.policy) throw new UsageError("Pass either --policy or --policy-bundle, not both.");
+    const bundle = await loadPolicyBundle({ ...options, scanRoots: [repo, ...(options.repo ? [resolve(options.repo)] : [])] });
+    const loaded: LoadedFixPolicy | undefined = bundle
+      ? { ...parseFixPolicyDocument(bundle.policyText, "the policy bundle"), source: `signed policy bundle ${bundle.source} (version ${bundle.version})`, fromRepo: false }
+      : deps.loadPolicy(repo, options);
     const conventions: PullRequestConventions | undefined = loaded && !loaded.fromRepo ? loaded.conventions : undefined;
     const ticket = parseTicket(options.ticket);
     if (needsTicket(conventions) && !ticket) throw new UsageError("The pull request settings in your policy use {ticket}. Pass --ticket with a key such as SEC-123.");
@@ -572,6 +577,9 @@ export function registerFixCommand(program: Command, deps: FixDeps = defaults): 
     .option("--sandbox-network", "Give the sandbox network access (to download dependencies). Off by default")
     .option("--sandbox-setup <command>", "With --sandbox docker: run this once with the network on to download dependencies (for example mvn -q test), then run the --test checks with the network off; repeat for several", collect)
     .option("--policy <file>", "Policy file (.json or .yaml) of approved libraries and fix rules; any path you name, relative to the current directory. Default: ~/.0/fix-policy.json|yaml|yml")
+    .option("--policy-bundle <file|https-url>", "Signed policy bundle to use instead of --policy; refused unless its Ed25519 signature matches a --policy-bundle-key or --policy-bundle-key-file and its version is newer than the last one accepted")
+    .option("--policy-bundle-key <key>", "Ed25519 public key as inline text (PEM, base64 or hex; never a path) allowed to sign policy bundles; repeat for several. Also ZERO_POLICY_BUNDLE_KEY", collect)
+    .option("--policy-bundle-key-file <path>", "File holding an Ed25519 public key allowed to sign policy bundles: an absolute path, not a symlink, outside the current folder and every repository being fixed (--repo); repeat for several. Also ZERO_POLICY_BUNDLE_KEY_FILE", collect)
     .option("--ticket <key>", "Ticket key such as SEC-123 for the {ticket} placeholder in your policy's pull request settings")
     .option("--repo-policy", "Also read fix-policy.* or .zero/fix-policy.* from the repository being fixed (untrusted content; off by default)")
     .option("--no-variants", "Do not rescan the recorded variants or hunt for the same bug at other sites after the fix")

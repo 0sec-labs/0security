@@ -38,6 +38,17 @@ spec:
         - protocol: TCP
           port: 53
     {{- end }}
+    {{- if and .Values.highAvailability.enabled .Values.highAvailability.databaseCIDRs }}
+    # The shared PostgreSQL database.
+    - to:
+        {{- range .Values.highAvailability.databaseCIDRs }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.highAvailability.databasePort }}
+    {{- end }}
     {{- if and .Values.networkPolicy.egressCIDRs .Values.networkPolicy.egressPorts }}
     - to:
         {{- range .Values.networkPolicy.egressCIDRs }}

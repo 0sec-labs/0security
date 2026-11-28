@@ -27,10 +27,48 @@ privateNetworks.addSubnet("fc00::", 7, "ipv6");
 privateNetworks.addSubnet("fe80::", 10, "ipv6");
 const supportedContentEncodings = new Set(["identity", "gzip", "x-gzip", "deflate", "br"]);
 
+/** Expand an IPv6 literal (with optional dotted IPv4 tail) into eight 16-bit groups. */
+function ipv6Groups(address: string): number[] | undefined {
+  let text = address.split("%")[0]!.toLowerCase();
+  const dotted = /^(.*:)(\d+\.\d+\.\d+\.\d+)$/.exec(text);
+  if (dotted) {
+    const octets = dotted[2]!.split(".").map(Number);
+    if (octets.some(o => o > 255)) return undefined;
+    text = `${dotted[1]}${((octets[0]! << 8) | octets[1]!).toString(16)}:${((octets[2]! << 8) | octets[3]!).toString(16)}`;
+  }
+  const [head, tail, extra] = text.split("::");
+  if (extra !== undefined) return undefined;
+  const part = (v: string | undefined) => (v ? v.split(":") : []);
+  const left = part(head); const right = part(tail);
+  const fill = tail === undefined ? 0 : 8 - left.length - right.length;
+  if (fill < 0 || (tail === undefined && left.length !== 8)) return undefined;
+  const groups = [...left, ...Array<string>(fill).fill("0"), ...right].map(g => parseInt(g, 16));
+  return groups.length === 8 && groups.every(g => Number.isInteger(g) && g >= 0 && g <= 0xffff) ? groups : undefined;
+}
+
+/** The IPv4 address an IPv6 literal carries (mapped, compatible, NAT64 or 6to4), if any. */
+function embeddedIpv4(groups: number[]): string | undefined {
+  const v4 = (hi: number, lo: number) => `${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`;
+  const [a, b, c, d, e, f, g, h] = groups as [number, number, number, number, number, number, number, number];
+  if (a === 0 && b === 0 && c === 0 && d === 0 && e === 0 && (f === 0xffff || f === 0)) return v4(g, h);
+  if (a === 0x64 && b === 0xff9b && c === 0 && d === 0 && e === 0 && f === 0) return v4(g, h);
+  if (a === 0x2002) return v4(b, c);
+  return undefined;
+}
+
 export function isPrivateAddress(hostname: string): boolean {
   const address = hostname.startsWith("[") && hostname.endsWith("]") ? hostname.slice(1, -1) : hostname;
   const family = isIP(address);
-  return family !== 0 && privateNetworks.check(address, family === 4 ? "ipv4" : "ipv6");
+  if (family === 0) return false;
+  if (privateNetworks.check(address, family === 4 ? "ipv4" : "ipv6")) return true;
+  if (family === 6) {
+    const groups = ipv6Groups(address);
+    // The local-use NAT64 range 64:ff9b:1::/48 is internal by definition.
+    if (groups && groups[0] === 0x64 && groups[1] === 0xff9b && groups[2] === 1) return true;
+    const inner = groups && embeddedIpv4(groups);
+    if (inner && privateNetworks.check(inner, "ipv4")) return true;
+  }
+  return false;
 }
 
 function normalizeHostname(hostname: string): string {

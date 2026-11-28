@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 
-import { ALLOWED_BRIDGES, checkEnterpriseBoundary, moduleSpecifiers, xmldomLines } from "./check-enterprise-boundary.mjs";
+import { ALLOWED_BRIDGES, FREE_FEATURES_FILE, checkEnterpriseBoundary, checkFreeFeatures, gateNames, moduleSpecifiers, xmldomLines } from "./check-enterprise-boundary.mjs";
 
 const HEADER = "// Licensed under the 0security Enterprise License. See enterprise/LICENSE.\n";
 
@@ -32,7 +32,7 @@ test("a clean layout passes", () => {
 });
 
 test("the shipped allow list names only existing bridge files", () => {
-  assert.deepEqual(ALLOWED_BRIDGES, ["packages/cli/src/enterprise-bridge.ts", "packages/cli/vitest.setup.ts", "packages/cli/src/enterprise-bridge.test.ts", "packages/cli/src/findings-server-bridge.ts", "packages/cli/src/ha-bridge.ts"]);
+  assert.deepEqual(ALLOWED_BRIDGES, ["packages/cli/src/enterprise-bridge.ts", "packages/cli/vitest.setup.ts", "packages/cli/src/enterprise-bridge.test.ts", "packages/cli/src/findings-server-bridge.ts", "packages/cli/src/ha-bridge.ts", "packages/cli/src/commands/__tests__/redteam-generate.test.ts"]);
 });
 
 test("moduleSpecifiers finds static, dynamic and require forms", () => {
@@ -130,4 +130,71 @@ test("two xmldom lines in the lockfile fail, so the SAML guard and verifier cann
   const errors = checkEnterpriseBoundary(fixture({ "pnpm-lock.yaml": lockWith("0.8.15", "0.9.12") }), []);
   assert.equal(errors.length, 1);
   assert.match(errors[0], /@xmldom\/xmldom resolves to more than one line \(0\.8, 0\.9\)/);
+});
+
+const BRIDGE = "packages/cli/src/bridge.ts";
+const bridgeSrc = 'import { hasFeature } from "@0/enterprise";\nexport function signRefusal() {\n  return hasFeature("x") ? null : "no";\n}\nexport function plain() {\n  return 1;\n}\n';
+const freeList = (extra = {}) => JSON.stringify({ features: [{ id: "demo", paths: ["packages/cli/src/free.ts", "packages/cli/src/freedir"], ...extra }] });
+const guarded = (files, extra) => fixture({ [BRIDGE]: bridgeSrc, [FREE_FEATURES_FILE]: freeList(extra), "packages/cli/src/free.ts": "export const ok = 1;\n", "packages/cli/src/freedir/a.ts": "export const a = 1;\n", ...files });
+
+test("gateNames finds bridge wrappers that call a base gate, not plain functions", () => {
+  const names = gateNames(guarded({}), [BRIDGE]);
+  assert.ok(names.has("signRefusal") && names.has("hasFeature") && names.has("requireFeature"));
+  assert.ok(!names.has("plain"));
+});
+
+test("an ungated free feature passes", () => {
+  assert.deepEqual(checkEnterpriseBoundary(guarded({}), [BRIDGE]), []);
+});
+
+test("a free feature that calls hasFeature or requireFeature fails", () => {
+  for (const call of ['hasFeature("rbac")', 'requireFeature("saml")', 'assertFeature("ha")', 'featureMode("ha")']) {
+    const errors = checkEnterpriseBoundary(guarded({ "packages/cli/src/free.ts": `import { x } from "./bridge.js";\nexport const ok = ${call};\n` }), [BRIDGE]);
+    assert.equal(errors.length, 1, call);
+    assert.match(errors[0], /packages\/cli\/src\/free\.ts: calls the license gate \w+, but demo is a released free feature/);
+  }
+});
+
+test("a gate called inside a listed directory fails, through a bridge wrapper too", () => {
+  const errors = checkEnterpriseBoundary(guarded({ "packages/cli/src/freedir/deep/b.ts": "export const b = signRefusal();\n" }), [BRIDGE]);
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /freedir\/deep\/b\.ts: calls the license gate signRefusal/);
+});
+
+test("comments and test files may mention a gate", () => {
+  const files = { "packages/cli/src/free.ts": '// never call hasFeature here\n/* requireFeature */\nexport const ok = 1;\n', "packages/cli/src/freedir/a.test.ts": 'hasFeature("x");\n' };
+  assert.deepEqual(checkEnterpriseBoundary(guarded(files), [BRIDGE]), []);
+});
+
+test("allowedGates exempts only the named gates", () => {
+  const files = { "packages/cli/src/free.ts": "signRefusal(); hasFeature('x');\n" };
+  const errors = checkEnterpriseBoundary(guarded(files, { allowedGates: ["signRefusal"] }), [BRIDGE]);
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /hasFeature/);
+});
+
+test("a listed path that no longer exists fails", () => {
+  const errors = checkEnterpriseBoundary(guarded({}, { paths: ["packages/cli/src/gone.ts"] }), [BRIDGE]);
+  assert.match(errors[0], /gone\.ts, which does not exist/);
+});
+
+test("a malformed list fails", () => {
+  assert.match(checkFreeFeatures(guarded({ [FREE_FEATURES_FILE]: "{" }))[0], /not valid JSON/);
+  assert.match(checkFreeFeatures(guarded({ [FREE_FEATURES_FILE]: '{"features":[]}' }))[0], /non-empty/);
+  assert.match(checkFreeFeatures(guarded({ [FREE_FEATURES_FILE]: '{"features":[{"id":"x"}]}' }))[0], /paths/);
+});
+
+test("the real list exists, is non-trivial and lists only existing, ungated files", async () => {
+  const { join: j } = await import("node:path");
+  const root = j(import.meta.dirname, "..");
+  const list = JSON.parse((await import("node:fs")).readFileSync(j(root, FREE_FEATURES_FILE), "utf8"));
+  assert.ok(list.features.length >= 10);
+  assert.deepEqual(checkFreeFeatures(root), []);
+  assert.ok(gateNames(root).has("evidenceSigningRefusal"));
+});
+
+test("the real list never mentions prices or plans", async () => {
+  const { join: j } = await import("node:path");
+  const text = (await import("node:fs")).readFileSync(j(import.meta.dirname, "..", FREE_FEATURES_FILE), "utf8");
+  assert.doesNotMatch(text, /\b(price|pricing|plans?|tier|subscription|paid|enterprise)\b/i);
 });

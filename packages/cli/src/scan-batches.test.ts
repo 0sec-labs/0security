@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { batchBudget, isRetryable, MIN_BATCH_BUDGET_USD, retryDelayMs, runBatches, type BatchOutcome, type LedgerPort } from "./scan-batches.js";
+import { batchBudget, BATCH_CONCURRENCY_CEILING, DEFAULT_MAX_BATCH_CONCURRENCY, isRetryable, maxBatchConcurrency, MIN_BATCH_BUDGET_USD, retryDelayMs, runBatches, type BatchOutcome, type LedgerPort } from "./scan-batches.js";
 
 const batches = (count: number) => Array.from({ length: count }, (_, index) => ({ index, units: [{ id: `u${index}`, kind: "http-route" as const, path: `f${index}.js`, startLine: 1 }] }));
 const ok = (cost = 0.1): BatchOutcome => ({ threadId: "t", reviewed: true, costUsd: cost, budgetExhausted: false, timedOut: false, failed: false });
@@ -164,5 +164,48 @@ describe("retrying a failed batch", () => {
     expect(result.stopped).toBeUndefined();
     expect(result.timedOut).toBe(false);
     expect(result.failures[0]).toMatchObject({ batch: 1, cause: "batch_timeout" });
+  });
+});
+
+describe("maxBatchConcurrency", () => {
+  it("defaults, accepts a whole number up to the ceiling, and ignores anything else", () => {
+    expect(maxBatchConcurrency({})).toBe(DEFAULT_MAX_BATCH_CONCURRENCY);
+    expect(maxBatchConcurrency({ ZERO_SCAN_MAX_CONCURRENCY: "16" })).toBe(16);
+    expect(maxBatchConcurrency({ ZERO_SCAN_MAX_CONCURRENCY: " 2 " })).toBe(2);
+    for (const bad of ["0", "17", "-1", "3.5", "many", "", "1e1", String(BATCH_CONCURRENCY_CEILING + 1)]) expect(maxBatchConcurrency({ ZERO_SCAN_MAX_CONCURRENCY: bad })).toBe(DEFAULT_MAX_BATCH_CONCURRENCY);
+  });
+});
+
+describe("a rate limit slows every batch, not only the one that hit it", () => {
+  const limited = (): BatchOutcome => ({ threadId: "t", reviewed: false, costUsd: 0.01, budgetExhausted: false, timedOut: false, failed: true, error: "429", failure: { cause: "provider_rate_limit", transient: true, message: "The model provider rate limit was hit" } });
+
+  it("holds the other workers' next batch until the pause is over", async () => {
+    const { port } = ledger();
+    let clock = 0;
+    const sleeps: number[] = [];
+    const startedAt: Array<[number, number]> = [];
+    let first = true;
+    const log: string[] = [];
+    await runBatches({
+      batches: batches(6), ledger: port, scanId: "s", budgetUsd: 10, deadline: Infinity, concurrency: 3, retries: 1, now: () => clock, random: () => 1, log: text => log.push(text),
+      sleep: async ms => { sleeps.push(ms); clock += ms; },
+      run: async batch => { startedAt.push([batch.index, clock]); if (batch.index === 0 && first) { first = false; return limited(); } await Promise.resolve(); return ok(0.01); },
+    });
+    // The first attempt of batch 0 is rate limited: retry delay 2000 ms. Every worker waits that long before it starts another batch.
+    expect(sleeps).toContain(2000);
+    const afterLimit = startedAt.filter(([index]) => index >= 3);
+    expect(afterLimit.length).toBeGreaterThan(0);
+    for (const [, at] of afterLimit) expect(at).toBeGreaterThanOrEqual(2000);
+    expect(log.some(line => /rate limit was hit; no batch starts for 2s/.test(line))).toBe(true);
+  });
+
+  it("does not pause for other transient failures", async () => {
+    const { port } = ledger();
+    const sleeps: number[] = [];
+    const reset: BatchOutcome = { ...limited(), failure: { cause: "provider_connection", transient: true, message: "dropped" } };
+    let first = true;
+    await runBatches({ batches: batches(4), ledger: port, scanId: "s", budgetUsd: 10, deadline: Infinity, concurrency: 3, retries: 1, now: () => 0, random: () => 1, sleep: async ms => { sleeps.push(ms); }, run: async batch => { if (batch.index === 0 && first) { first = false; return reset; } return ok(0.01); } });
+    // Only the retrying batch sleeps (its own backoff); nobody else is held.
+    expect(sleeps).toEqual([2000]);
   });
 });

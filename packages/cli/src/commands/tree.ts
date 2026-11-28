@@ -54,12 +54,16 @@ import { registerThreatModelCommand } from "./threat-model.js";
 import { registerSbomCommand } from "./sbom.js";
 import { registerEvidenceCommand } from "./evidence.js";
 import { registerProbeCommand } from "./probe.js";
+import { registerRedteamCommand } from "./redteam.js";
+import { registerEvalCommand } from "./eval.js";
 
 export function registerCommandTree(program: Command): void {
   registerScanCommand(program);
   registerThreatModelCommand(program);
   registerSbomCommand(program);
   registerProbeCommand(program);
+  registerRedteamCommand(program);
+  registerEvalCommand(program);
   // Evidence.
   registerReportsCommand(program);
   registerFindingsCommand(program);

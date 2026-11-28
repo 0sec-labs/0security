@@ -5,7 +5,7 @@ import { EntryLogo } from "@/components/console-control/entry-logo";
 import { LogoTile } from "@/ui/components/logo-tile";
 import { Tooltip } from "@/components/ui/tooltip";
 import { BrandGlyph } from "@/components/brand-glyph";
-import { BadgeCheck, BookOpen, Binary, Blocks, Boxes, Braces, Bot, BotMessageSquare, BrainCircuit, Bug, Cloud, Cpu, Database, Eye, Files, FileSearch, FileText, FolderTree, Globe, GitCompareArrows, Hammer, KeyRound, Layers, ListChecks, Lock, Map as MapIcon, MessageSquareWarning, Network, Package, Plug, Radar, Route, ScanSearch, ShieldAlert, Siren, Sparkles, Terminal, Timer, UserCheck, Waypoints, Workflow, Wrench, type LucideIcon } from "lucide-react";
+import { BadgeCheck, BookOpen, Binary, Blocks, Boxes, Braces, Bot, BotMessageSquare, BrainCircuit, Bug, Cloud, Cpu, Database, Eye, Files, FileSearch, FileText, FolderTree, Globe, GitBranch, GitCompareArrows, Hammer, KeyRound, Layers, ListChecks, Lock, Map as MapIcon, MessageSquareWarning, Network, Package, Plug, Radar, Route, ScanSearch, ShieldAlert, Siren, Sparkles, Terminal, Timer, UserCheck, Waypoints, Workflow, Wrench, type LucideIcon } from "lucide-react";
 import type { SkillTile } from "@/lib/installed-skills";
 import type { SkillIconName } from "@/lib/skill-icons";
 import { safeLogo } from "@/components/console-control/connections-model";
@@ -33,7 +33,7 @@ export function Tile({ logo, avatar, icon, name, verified, verifiedLabel, verifi
 export const SkillMarkIcon = ({ className }: { className?: string }) => <BrandGlyph className={className} />;
 
 /** Static imports, so the bundle carries only these glyphs. Every `SkillIconName` needs an entry (the type enforces it). */
-export const SKILL_ICONS: Record<SkillIconName, LucideIcon> = { BadgeCheck, BookOpen, Binary, Blocks, Boxes, Braces, Bot, BotMessageSquare, BrainCircuit, Bug, Cloud, Cpu, Database, Eye, Files, FileSearch, FileText, FolderTree, Globe, GitCompareArrows, Hammer, KeyRound, Layers, ListChecks, Lock, Map: MapIcon, MessageSquareWarning, Network, Package, Plug, Radar, Route, ScanSearch, ShieldAlert, Siren, Sparkles, Terminal, Timer, UserCheck, Waypoints, Workflow, Wrench };
+export const SKILL_ICONS: Record<SkillIconName, LucideIcon> = { BadgeCheck, BookOpen, Binary, Blocks, Boxes, Braces, Bot, BotMessageSquare, BrainCircuit, Bug, Cloud, Cpu, Database, Eye, Files, FileSearch, FileText, FolderTree, Globe, GitBranch, GitCompareArrows, Hammer, KeyRound, Layers, ListChecks, Lock, Map: MapIcon, MessageSquareWarning, Network, Package, Plug, Radar, Route, ScanSearch, ShieldAlert, Siren, Sparkles, Terminal, Timer, UserCheck, Waypoints, Workflow, Wrench };
 
 /** The one place that decides how an installed skill looks: topic icon (built-in, or yours when its name matches one), extension = puzzle, GitHub = publisher avatar, otherwise initials. */
 export function InstalledTile({ tile, publisher }: { tile: SkillTile; publisher?: { name: string; avatar: string } }) {

@@ -340,7 +340,9 @@ export function checkBomLicenses(bom: unknown, policy: LicensePolicy, options: {
 function ruleSuffix(component: ComponentVerdict): string {
   if (component.verdict === "unknown") return "unknown";
   const cause = component.causes[0] ?? "unknown";
-  return cause.split(/\s+WITH\s+/)[0]!.replace(/\+$/, "") || "unknown";
+  // The part before the first ` WITH `: `split(/\s+WITH\s+/)` gives the same, in quadratic time on a long run of spaces.
+  const withAt = cause.search(/\sWITH\s/);
+  return (withAt === -1 ? cause : cause.slice(0, withAt).trimEnd()).replace(/\+$/, "") || "unknown";
 }
 
 /** SARIF 2.1.0: one result per violating component (and per unknown component when unknown is `warn`), rule id `license/<spdx-id>`. */

@@ -47,7 +47,7 @@ Set the key of the provider for your model (see [Models](/models/)). The default
 | Input | Default | Meaning |
 | --- | --- | --- |
 | `version` | required | Release of 0 to install, for example `0.41.0`. |
-| `mode` | `scan` | `scan` reviews the code with a model. `sbom` checks dependencies (see [SBOM mode](#sbom-mode)). |
+| `mode` | `scan` | `scan` reviews the code with a model. `sbom` checks dependencies (see [SBOM mode](#sbom-mode)). `agent-config` checks agent files (see [Check agent files](#check-agent-files)). `redteam` tests an agent (see [Red team an agent](#red-team-an-agent)). |
 | `target` | `.` | Folder to scan, relative to the workspace. It must stay inside the workspace. |
 | `diff-base` | the pull request's base branch | Git ref to compare with. Outside a pull request, empty scans the whole folder. |
 | `model` | the default model | Model for the scan thread. |
@@ -65,6 +65,7 @@ Set the key of the provider for your model (see [Models](/models/)). The default
 | `skill` | the default skill | Skill that holds the scan method. |
 | `allow-partial` | `false` | Pass the job when the scan stops before it reviews everything. |
 | `licenses-preset` | none | `sbom` mode: also check licenses against `permissive` or `no-copyleft`. |
+| `redteam-*` | see below | `redteam` mode only. See [Red team an agent](#red-team-an-agent). |
 | `upload` | `true` | Upload to code scanning. Needs `security-events: write`. |
 | `github-token` | the job's token | Token used for the upload. |
 
@@ -178,13 +179,76 @@ Advisories only warn unless `fail-on` is set, and then any advisory fails the jo
 
 ## Check agent files
 
-A pull request can change the files AI coding tools read: rules, MCP configuration and settings. `0security sbom agent-config` checks them with no model key and no network. Run it in a step of its own. The Action has no mode for it.
+A pull request can change the files AI coding tools read: rules, MCP configuration and settings. `0security sbom agent-config` checks them with no model key and no network. The Action runs it with `mode: agent-config`.
 
 ```yaml
-      - run: 0security sbom agent-config . --format sarif -o agent-config.sarif --fail-on high
+      - uses: 0sec-labs/0security@v0.46.0
+        with:
+          version: 0.46.0 # Pin the CLI
+          mode: agent-config
+          fail-on: high
 ```
 
-Run it after you install `0security` and before any step that uses an AI tool. Upload the SARIF file with `0security findings upload agent-config.sarif`, or import it with `0security findings import agent-config.sarif`. See [Check agent files in a repository](/extensions/#check-agent-files-in-a-repository) for the rules.
+The mode checks `target`, writes SARIF and uploads it to code scanning with the category name 0 agent-config. With `fail-on` set, a finding at or above that severity fails the job. Without it the job never fails on findings. Only `target`, `upload`, `fail-on` and `github-token` apply. Run it before any step that uses an AI tool. You can also run `0security sbom agent-config . --format sarif -o agent-config.sarif --fail-on high` in a step of your own. See [Check agent files in a repository](/extensions/#check-agent-files-in-a-repository) for the rules.
+
+## Red team an agent
+
+`mode: redteam` runs `0security redteam run`: it starts your agent command, gives it a honeypot tool server that returns an injected instruction, and checks whether the agent obeyed it. It needs no model key of its own, but your agent may need one.
+
+**0 does not isolate the agent.** It runs on the runner as a normal process, with the workspace, the network and every variable you pass in `redteam-env`. A badly behaved agent can do real harm there. Use a disposable runner and give it no credentials you cannot lose. The mode fails with a clear message unless you set `redteam-unsafe-no-isolation: true`. It also refuses fork pull requests and every event except `push`, `schedule`, `workflow_dispatch`, `merge_group` and same-repository `pull_request`, because it executes code from the change under test. Exit codes: 0 clear, 1 obeyed (needs a report), 2 inconclusive (see `redteam-inconclusive`); any other code fails the step.
+
+```yaml
+name: agent-redteam
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  security-events: write   # only needed to upload the SARIF report
+
+jobs:
+  redteam:
+    # Never run the agent for a fork: it would execute the fork author's code.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest   # Use a throwaway runner. The agent runs on it unsandboxed.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: 0sec-labs/0security@v0.46.0
+        env:
+          SUPPORT_BOT_KEY: ${{ secrets.SUPPORT_BOT_TEST_KEY }} # A test key with no production access
+        with:
+          version: 0.46.0 # Pin the CLI
+          mode: redteam
+          redteam-agent: node bot/agent.js
+          redteam-env: SUPPORT_BOT_KEY
+          redteam-forbid: shell,send_email
+          redteam-runs: "3"
+          redteam-unsafe-no-isolation: "true"
+```
+
+Never use `pull_request_target`, `workflow_run` or comment triggers for this mode: they run with secrets and write access. The agent runs unsandboxed on the runner with the runner's access, so use a throwaway runner and give it only test credentials. The Action itself refuses every event except `push`, `schedule`, `workflow_dispatch`, `merge_group` and `pull_request` from the same repository.
+
+| Input | Default | Meaning |
+| --- | --- | --- |
+| `redteam-agent` | required | Command that starts the agent. |
+| `redteam-unsafe-no-isolation` | `false` | Must be `true`. Confirms the agent runs with no sandbox. |
+| `redteam-runs` | `3` | Runs, 1 to 20. |
+| `redteam-timeout` | `120` | Seconds per run. |
+| `redteam-env` | none | Variable names to pass to the agent, comma separated. Set the values on the step. |
+| `redteam-forbid` | none | Tools the agent must not call, comma separated. |
+| `redteam-payload` | built-in | The injected instruction as text. Not with `redteam-scenario`. |
+| `redteam-scenario` | none | A scenario file. Take it from the base branch or a separate checkout. |
+| `redteam-max-hit-rate` | `0` | Share of runs, 0 to 1, in which the agent may obey. At the default, one obeyed run fails the job. |
+| `redteam-target` | none | A name for the agent in the report. |
+| `redteam-inconclusive` | `fail` | `warn` lets a run that proved nothing pass with a warning. |
+
+`target` is the folder the agent starts in. The mode writes SARIF and uploads it as `0 redteam`. It does not use `fail-on`. The exit code decides: `0` means the agent did not obey in any conclusive run, `1` means it obeyed more often than `redteam-max-hit-rate` allows and fails the job, and `2` means the run was inconclusive, for example the agent never called the honeypot. Inconclusive fails the job by default. `status` is `complete`, `obeyed` or `inconclusive`.
+
+A pass is not proof of safety. It shows that this agent ignored this payload in these runs. Model output varies, so a few runs can miss a weakness.
 
 ## Examples
 
@@ -372,7 +436,7 @@ jobs:
           fail-on: high
           upload: "false"
         env:
-          ZERO_ENTERPRISE: "1"
+          ZERO_NO_EGRESS: "1"
           DO_NOT_TRACK: "1"
           ZERO_SELECTED_PROVIDER: azure
           AZURE_OPENAI_AUTH: entra
@@ -385,12 +449,12 @@ jobs:
         run: 0 findings upload "${{ steps.scan.outputs.sarif }}"
 ```
 
-`ZERO_ENTERPRISE` refuses every `gh` call, and the action uploads with `gh`. The example sets `upload: "false"` and uploads in a later step that does not set `ZERO_ENTERPRISE`. Add `security-events: write` to the job permissions.
+`ZERO_NO_EGRESS` refuses every `gh` call, and the action uploads with `gh`. The example sets `upload: "false"` and uploads in a later step that does not set `ZERO_NO_EGRESS`. Add `security-events: write` to the job permissions.
 
 Keep these boundaries:
 
 - Give the runner's machine identity access to the model, as in [Azure OpenAI](/models/#azure-openai) or an AWS role for [Amazon Bedrock](/models/#amazon-bedrock). No model key is stored in GitHub.
-- `ZERO_ENTERPRISE` keeps every automatic outbound call off, including telemetry and crash reports, except the model endpoint you configured and the destinations you name. `DO_NOT_TRACK` adds a second switch for telemetry. The upload step sends SARIF to GitHub with the job's token. See [Data flow](/data-flow/). A Sentinel can upload its findings the same way from your machine: see [Send findings to GitHub](/sentinels/#send-findings-to-github).
+- `ZERO_NO_EGRESS` keeps every automatic outbound call off, including telemetry and crash reports, except the model endpoint you configured and the destinations you name. `DO_NOT_TRACK` adds a second switch for telemetry. The upload step sends SARIF to GitHub with the job's token. See [Data flow](/data-flow/). A Sentinel can upload its findings the same way from your machine: see [Send findings to GitHub](/sentinels/#send-findings-to-github).
 - Install `cosign` on the runner image, so the installer verifies the release [signature](/self-hosting/#verify-the-signature). Or put a pinned, verified binary in the runner image and skip the install.
 - Only run the job on trusted events. Do not run a self-hosted runner for pull requests from forks.
 
@@ -684,7 +748,7 @@ What you get:
 - The labels are `0security`, the severity, `0-finding-<id>` and any `--jira-label` you add. Issue type defaults to `Task`.
 - Running it again creates only what is new. Before creating, it searches the project for each `0-finding-<id>` label. An issue you closed in Jira still has its label, so it is not reopened or created again. If you remove the label, the finding gets a new issue.
 - `JIRA_PROJECT` and `JIRA_URL` can replace `--jira-project` and `--url`. The token is read only from `JIRA_TOKEN`, sent only in the Authorization header and removed from error messages. A plain `http://` URL is refused unless it is this machine or you pass `--allow-insecure-http`.
-- `ZERO_ENTERPRISE` blocks it. There is no exception setting. `--dry-run` still works.
+- `ZERO_NO_EGRESS` blocks it. There is no exception setting. `--dry-run` still works.
 
 The Jira search index can lag by a few seconds on Cloud. Two runs started at the same moment can create the same issue twice, so run it from one job at a time.
 
@@ -727,7 +791,7 @@ For Data Center, pass `--platform dc`, `--repo PROJECT/repo` and `--url https://
 - With `--checkout <folder>`: the folder is a git clone whose `origin` is the Bitbucket repository, and `git ls-remote origin` works. Git uses your own credentials and never gets `BITBUCKET_TOKEN`.
 - A model provider is configured. This reads local settings and makes no model call.
 - With `BITBUCKET_WEBHOOK_SECRET` set (or `--listen <host:port>` given): the secret has at least 16 characters, and the listen address is this machine or needs a TLS proxy in front.
-- `ZERO_ENTERPRISE` is not set. When it is, every Bitbucket request is refused unless `ZERO_BITBUCKET_URL` names your server.
+- `ZERO_NO_EGRESS` is not set. When it is, every Bitbucket request is refused unless `ZERO_BITBUCKET_URL` names your server.
 
 ### Use a webhook
 
@@ -739,6 +803,8 @@ export BITBUCKET_WEBHOOK_SECRET=...   # at least 16 characters
 ```
 
 Put a TLS proxy in front of the listener and point the webhook at it. On Cloud, turn on **Pull request created** and **Pull request updated**. On Data Center, turn on **Opened** and **Source branch updated**. Set the same secret on the webhook. Bitbucket signs each delivery with it, and `watch` refuses a delivery that does not match. Polling still runs, so a missed delivery is caught on the next poll.
+
+The listener reads a body before it can check the signature, so it limits what anyone who reaches it can do: at most 32 open connections, a body of at most 1 MiB read within 10 seconds, headers within 10 seconds, and 30 requests a minute from one address (more get `429`). Behind a proxy, every request comes from the proxy's address and shares that limit.
 
 ### What a review does
 
@@ -755,7 +821,7 @@ The Code Insights report follows the limits in [Publish to Bitbucket Code Insigh
 
 The scan reads code written by the pull request's author. Run `watch` on a machine that holds nothing you cannot lose, and give the clone read access only. The scan does not see `BITBUCKET_TOKEN` or `BITBUCKET_WEBHOOK_SECRET`, but it does see the model key. Use a key with a spend cap. See [Secrets and untrusted pull requests](#secrets-and-untrusted-pull-requests).
 
-The webhook listener binds the address you give it. Use `127.0.0.1` behind a proxy. `ZERO_ENTERPRISE` makes every Bitbucket request refuse.
+The webhook listener binds the address you give it. Use `127.0.0.1` behind a proxy. `ZERO_NO_EGRESS` makes every Bitbucket request refuse.
 
 ### What is tested
 

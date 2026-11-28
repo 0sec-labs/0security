@@ -1430,6 +1430,39 @@ export interface ScanFileCoverage {
   rounds: { allowed: number; used: number };
 }
 
+/** One helper thread a scan thread started with spawn_agent: what it was asked, how it ended and what it cost. Text is clipped data, never instructions. */
+export interface ScanChildThread {
+  id: string;
+  name?: string;
+  /** The thread that started it: the scan thread or another helper. */
+  parentId?: string;
+  status: string;
+  /** What the helper was asked to review (the task text, clipped). */
+  scope: string;
+  turns?: number;
+  toolCalls?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  findings?: number;
+  /** Its closing summary, or the error it ended with (clipped). */
+  result?: string;
+}
+
+/** The helper threads of a scan, so a reader can tell what the scan thread delegated. Their tokens are already inside the scan's own token total. */
+export interface ScanChildren {
+  count: number;
+  byStatus: Record<string, number>;
+  turns: number;
+  toolCalls: number;
+  /** Absent when no helper reported usage. */
+  inputTokens?: number;
+  outputTokens?: number;
+  findings: number;
+  items: ScanChildThread[];
+  /** Helpers left out of `items` (the list is capped). */
+  omitted?: number;
+}
+
 export interface ScanCoverage extends Partial<ScanFileCoverage> {
   scanId: string;
   complete: boolean;
@@ -1442,7 +1475,9 @@ export interface ScanCoverage extends Partial<ScanFileCoverage> {
   notReached: Record<string, number>;
   batches: { total: number; reviewed: number; pending: number };
   /** Current invocation only, including retries. Costs stay null when any attempted thread did not report cost. */
-  batchRuns?: Array<{ batch: number; module?: string; owners?: string[]; attempts: number; durationMs: number; costUsd: number | null; threadIds: string[]; reviewedUnits: number; totalUnits: number }>;
+  batchRuns?: Array<{ batch: number; module?: string; owners?: string[]; attempts: number; durationMs: number; costUsd: number | null; threadIds: string[]; reviewedUnits: number; totalUnits: number; /** Helper threads this batch's thread started (spawn_agent). */ children?: number }>;
+  /** Totals of the helper threads of every batch, so delegated work is part of the coverage; the list is in the report's `children`. */
+  children?: Omit<ScanChildren, "items" | "omitted">;
 
   /** The first units not reached (at most 100). */
   pendingUnits: Array<{ kind: string; path: string; startLine?: number; name?: string; reason?: string }>;
@@ -1487,6 +1522,8 @@ export interface ScanReport extends ScanPlanExecution {
   coverage?: ScanCoverage;
   /** Present when the scan ran as one thread: which source files it opened. */
   fileCoverage?: ScanFileCoverage;
+  /** Present when the scan thread started helper threads with spawn_agent. */
+  children?: ScanChildren;
   /** Present when a tier map applied to the scan. */
   tier?: ScanTierInfo;
   /** Present when the scan ran with `--known`. */

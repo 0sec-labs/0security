@@ -1,0 +1,95 @@
+# The 0 web console as two replicas on one shared PostgreSQL database. PREVIEW. Needs the enterprise license feature ha.
+#
+#   mkdir -p secrets
+#   printf '%s' 'postgres://user:password@db.example.com:5432/zero?sslmode=verify-full' > secrets/database-url
+#   cp your-license-file secrets/license
+#   chmod 600 secrets/*            # the container user is uid 1000: chown 1000 secrets/*
+#   docker compose -f docker-compose.ha.yml up -d
+#
+# The database is yours: a managed PostgreSQL 16 or newer with TLS, backups and its own failover. This file does
+# not start one. The replicas share the scheduler role, the job queue and readiness. Findings, accounts and audit
+# data stay on each replica's own volume. See docs/src/content/docs/high-availability.md.
+name: zero-ha
+
+x-replica: &replica
+  image: ghcr.io/0sec-labs/0security:${ZERO_IMAGE_TAG:-latest}
+  command: ["--host", "0.0.0.0", "--server-mode"]
+  restart: unless-stopped
+  # ZERO_ACCESS_TOKEN must be the same on both replicas. Put it in .env.
+  env_file: .env
+  environment: &replica-env
+    ZERO_ALLOWED_HOSTS: ${ZERO_ALLOWED_HOSTS:-localhost,127.0.0.1}
+    ZERO_TRUSTED_PROXY: ${ZERO_TRUSTED_PROXY:-172.31.0.0/24}
+    ZERO_PUBLIC_URL: ${ZERO_PUBLIC_URL:-}
+    ZERO_HA_DATABASE_URL_FILE: /run/secrets/database-url
+    ZERO_LICENSE_FILE: /run/secrets/license
+  secrets:
+    - database-url
+    - license
+  healthcheck:
+    test: ["CMD", "curl", "-fsS", "http://127.0.0.1:48123/readyz"]
+    interval: 10s
+    timeout: 5s
+    start_period: 60s
+    retries: 3
+  # The drain deadline is 20 seconds. The margin covers the final steps.
+  stop_grace_period: 40s
+  security_opt:
+    - no-new-privileges:true
+
+services:
+  zero1:
+    <<: *replica
+    volumes:
+      - zero1-data:/data
+    networks:
+      zero-net:
+        ipv4_address: 172.31.0.10
+
+  zero2:
+    <<: *replica
+    volumes:
+      - zero2-data:/data
+    networks:
+      zero-net:
+        ipv4_address: 172.31.0.11
+
+  # TLS termination and load balancing. It sends a request only to a replica whose /readyz answers 200.
+  proxy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      zero1:
+        condition: service_healthy
+      zero2:
+        condition: service_healthy
+    environment:
+      ZERO_DOMAIN: ${ZERO_DOMAIN:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile.ha:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      zero-net:
+        ipv4_address: 172.31.0.2
+
+secrets:
+  database-url:
+    file: ./secrets/database-url
+  license:
+    file: ./secrets/license
+
+volumes:
+  zero1-data:
+  zero2-data:
+  caddy-data:
+  caddy-config:
+
+networks:
+  zero-net:
+    ipam:
+      config:
+        - subnet: 172.31.0.0/24

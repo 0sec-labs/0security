@@ -1,6 +1,6 @@
 # High availability for server mode
 
-Tracking issue: #476 (R61). Status: design, with phase 1 and the job queue built. The delivery steps that followed phase 1 are listed under "Delivery steps after phase 1".
+Tracking issue: #476 (R61). Status: design, with phase 1 built and the coordination steps shipped as a preview. The steps that followed phase 1 are listed under "Delivery steps after phase 1". The user page is [Replicas and a shared database](/high-availability/).
 
 Server mode runs as one process on one SQLite file. This page lists the state that blocks a second replica, picks the storage approach, and splits the work into phases that each ship alone.
 
@@ -169,7 +169,7 @@ Each phase ships alone and keeps single-node SQLite working. Effort is one engin
 
 Total: about 5 to 7 engineer-months. Phases 2 and 5 first give the best return: a team can then survive a replica restart without everyone signing in again.
 
-Do not claim HA in the docs before phase 7. Until then, `server-mode.md` keeps saying one replica.
+Do not claim HA in the docs before the storage phases are done. Until then, `server-mode.md` keeps saying one replica, and the shared database page says preview.
 
 ## Risks
 
@@ -229,3 +229,31 @@ The remaining work shipped as small steps in this order: durable job queue, lead
 - In server mode `/readyz` returns 503 when this replica's own database or the shared database is unhealthy. `/healthz` stays a liveness check and does not look at the database, so an outage does not make the platform restart every replica.
 - The first failure is reported once on stderr, not on every check.
 - Tests: a fake pool for failure, recovery and hangs; real PostgreSQL for a dropped schema.
+
+### Graceful drain as built
+
+On SIGTERM a replica with a shared database runs these steps at once, inside the `--shutdown-timeout` deadline:
+
+1. `/readyz` returns 503, so the load balancer stops sending new requests.
+2. The replica resigns the scheduler role. Another replica takes it on its next round, within about 5 seconds. This replica starts no more Sentinel triggers.
+3. Job workers stop claiming. Running jobs get the rest of the deadline. A job still running at the deadline is aborted and returned to the queue without using an attempt, so another replica runs it from the start.
+4. After requests and services finish, the connection pool closes.
+
+A process that is killed instead, or exits after the failsafe, leaves its jobs with a lease that lapses. The next reaper returns them with the attempt counted.
+
+The platform should wait before it sends SIGTERM, so the load balancer sees the 503 first. The Helm chart does this with a preStop delay.
+
+Tests: a fake pool for resignation and repeated calls; real PostgreSQL for a drain that finishes one job, returns another and hands the scheduler role to a second replica. The shutdown order in the server itself has no test of its own.
+
+### Helm and compose as built
+
+- The chart keeps one replica by default and renders the same manifests as before. `highAvailability.enabled` raises the replica count (2 to 20), keeps one volume per replica, adds a PodDisruptionBudget (`maxUnavailable: 1`), a topology spread over nodes, a `preStop` delay, and an egress rule to the database.
+- The database URL and the license come from Secrets you create, mounted as files. The chart renders neither value.
+- The chart refuses an install that cannot work: no database Secret, no license Secret, no shared sign-in (each replica would make its own access token), a grace period shorter than the delay plus the drain, or no database CIDR while the network policy is on.
+- `deploy/compose/docker-compose.ha.yml` runs two replicas behind Caddy with `/readyz` health checks and cookie stickiness. It does not start a database, because a database on the compose network is on another machine and needs TLS.
+- `replicaCount` stays refused. A replica count above 1 without a shared database still corrupts SQLite.
+- Tests: `helm lint` and `helm template` cases in `scripts/helm-chart.test.mjs` and `docker compose config` in CI. Nothing was installed on a cluster, and the compose file was not run, because Docker is not available here.
+
+### Docs as built
+
+The page `high-availability.md` says what the replicas share (scheduler role, job queue, readiness) and what stays on each replica (findings, accounts, audit, Sentinels). It covers setup, rolling upgrades, drain, backup, database outage and troubleshooting. `server-mode.md` keeps its single-node claims and links to the preview.

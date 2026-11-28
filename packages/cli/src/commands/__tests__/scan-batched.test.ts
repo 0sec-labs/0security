@@ -21,6 +21,10 @@ function app(routes: number): string {
 const finding = (id: string) => ({ id, templateId: "manual", title: `bug ${id}`, description: "d", severity: "high", category: "code-injection", status: "discovered", timestamp: 1, evidence: { request: "r", response: "s" }, reviewAnnotation: { path: `routes/${id}.js`, startLine: 1 } });
 const storedReport = (findings: unknown[]) => ({ target: "", scanDepth: "default", startedAt: "", completedAt: "", durationMs: 0, summary: { totalAttacks: 0, totalFindings: 0, critical: 0, high: 0, medium: 0, low: 0, info: 0 }, findings, warnings: [] });
 
+/** The helper rows (workers=summary) thread N reports; a test sets it. */
+let workersFor: (n: number) => unknown[] = () => [];
+afterEach(() => { workersFor = () => []; });
+
 interface Harness { deps: ScanDeps; out: string[]; err: string[]; messages: string[]; created: string[]; loaded: string[] }
 /** `behaviour(threadNumber)` says how thread N ends: normally, at its cost ceiling, or failed. */
 function harness(dbPath: string, behaviour: (n: number) => "ok" | "ceiling" | "failed" | `error:${string}` = () => "ok", head: () => string | undefined = () => "abc1234567", start = 0): Harness {
@@ -38,7 +42,7 @@ function harness(dbPath: string, behaviour: (n: number) => "ok" | "ceiling" | "f
         const n = Number(/sessions\/t(\d+)/.exec(path)?.[1]);
         const how = behaviour(n);
         const failed = how === "failed" || how.startsWith("error:");
-        return { snapshot: { session: { id: `t${n}`, status: failed ? "failed" : "ready", ...(how === "ceiling" ? { costCeilingExceeded: true, costCeilingUsd: 0.1 } : {}) }, ...(how.startsWith("error:") ? { lastOutcome: { error: how.slice(6) } } : {}), usage: { costUsd: 0.1 }, messages: [{ role: "assistant", content: [{ type: "text", text: `Covered thread ${n}.` }] }] } };
+        return { snapshot: { session: { id: `t${n}`, status: failed ? "failed" : "ready", ...(how === "ceiling" ? { costCeilingExceeded: true, costCeilingUsd: 0.1 } : {}) }, ...(how.startsWith("error:") ? { lastOutcome: { error: how.slice(6) } } : {}), usage: { costUsd: 0.1 }, workers: workersFor(n), messages: [{ role: "assistant", content: [{ type: "text", text: `Covered thread ${n}.` }] }] } };
       }
       return {};
     }),
@@ -195,10 +199,33 @@ describe("batched scan", () => {
     expect(process.exitCode).toBe(3);
   });
 
+  it("runs a scan at a concurrency above the old limit of 3, and ZERO_SCAN_MAX_CONCURRENCY moves the limit up to 16 and no further", async () => {
+    const dir = app(20);
+    const db = join(temp(), "db.sqlite");
+    const eight = harness(db);
+    await runScan(dir, opts(db, { concurrency: "8" }), eight.deps);
+    expect(report(eight).coverage.complete).toBe(true);
+
+    const nine = harness(db);
+    await runScan(dir, opts(db, { concurrency: "9" }), nine.deps);
+    expect(nine.err.join("\n")).toMatch(/--concurrency must be a whole number from 1 to 8/);
+    process.exitCode = undefined;
+
+    vi.stubEnv("ZERO_SCAN_MAX_CONCURRENCY", "16");
+    try {
+      const sixteen = harness(db);
+      await runScan(dir, opts(db, { concurrency: "16" }), sixteen.deps);
+      expect(report(sixteen).coverage.complete).toBe(true);
+      const seventeen = harness(db);
+      await runScan(dir, opts(db, { concurrency: "17" }), seventeen.deps);
+      expect(seventeen.err.join("\n")).toMatch(/--concurrency must be a whole number from 1 to 16\./);
+    } finally { vi.unstubAllEnvs(); }
+  });
+
   it("rejects bad batch options and resume on nothing", async () => {
     const dir = app(2);
     const db = join(temp(), "db.sqlite");
-    for (const [extra, message] of [[{ batches: "sometimes" }, /--batches must be/], [{ batchSize: "0" }, /--batch-size/], [{ concurrency: "9" }, /--concurrency/], [{ batches: "on", passes: "2" }, /--passes cannot/], [{ force: true }, /--force only applies/], [{ resume: "latest", diff: "main" }, /drop --diff/]] as const) {
+    for (const [extra, message] of [[{ batches: "sometimes" }, /--batches must be/], [{ batchSize: "0" }, /--batch-size/], [{ concurrency: "17" }, /--concurrency must be a whole number from 1 to 8; set ZERO_SCAN_MAX_CONCURRENCY/], [{ batches: "on", passes: "2" }, /--passes cannot/], [{ force: true }, /--force only applies/], [{ resume: "latest", diff: "main" }, /drop --diff/]] as const) {
       const h = harness(db);
       await runScan(dir, opts(db, extra), h.deps);
       expect(h.err.join("\n")).toMatch(message);
@@ -317,6 +344,89 @@ describe("batched scan", () => {
     const json = harness(db);
     await runScan(dir, opts(db, { coverage: "latest", format: "json" }), json.deps);
     expect(JSON.parse(json.out.join(""))).toMatchObject({ complete: false, entryPoints: { total: 20, pending: 8 } });
+  });
+});
+
+describe("skills and batches", () => {
+  it("keeps batching and the coverage report with seedless-depth-review, and every batch thread loads that skill", async () => {
+    const dir = app(20);
+    const db = join(temp(), "db.sqlite");
+    const h = harness(db);
+    await runScan(dir, opts(db, { skill: "seedless-depth-review" }), h.deps);
+    expect(h.created).toHaveLength(4);
+    expect(h.messages[0]).toContain("`seedless-depth-review` skill");
+    expect(h.messages[0]).toContain("<batch-units>");
+    const json = report(h);
+    expect(json.coverage).toMatchObject({ complete: true, batches: { total: 4, reviewed: 4 } });
+    expect(json.warnings).toBeUndefined();
+  });
+
+  it("says plainly when another skill kept one thread on a folder that would have been batched", async () => {
+    const dir = app(20);
+    const db = join(temp(), "db.sqlite");
+    const h = harness(db);
+    await runScan(dir, opts(db, { skill: "crypto-migration" }), h.deps);
+    expect(h.created).toHaveLength(1);
+    const json = report(h);
+    expect(json.coverage).toBeUndefined();
+    expect(json.warnings).toHaveLength(1);
+    expect(json.warnings[0]).toMatch(/--skill crypto-migration runs as one thread.*not reviewed in batches.*--batches on/);
+    expect(h.err.join("\n")).toContain("--skill crypto-migration runs as one thread");
+  });
+
+  it("stays quiet for another skill on a small folder, and batches when --batches on is typed", async () => {
+    const small = harness("x");
+    await runScan(app(3), opts(join(temp(), "db.sqlite"), { skill: "crypto-migration" }), small.deps);
+    expect(report(small).warnings).toBeUndefined();
+    const db = join(temp(), "db.sqlite");
+    const forced = harness(db);
+    await runScan(app(20), opts(db, { skill: "crypto-migration", batches: "on" }), forced.deps);
+    expect(forced.created).toHaveLength(4);
+    expect(report(forced).warnings).toBeUndefined();
+  });
+});
+
+describe("helper threads in the report", () => {
+  const rows = (n: number) => n === 1 ? [
+    { id: "w1", parentId: "t1", name: "routes-a", status: "completed", task: "Review routes/r00.js\u0007 and routes/r01.js", summary: "r00 checked, safe", telemetry: { turns: 3, findings: 1, inputTokens: 1000, outputTokens: 200 }, turnCount: 3, toolCallCount: 7 },
+    { id: "w2", parentId: "t1", status: "failed", task: "Review auth", error: "provider timeout", telemetry: { inputTokens: 500, outputTokens: 50 }, turnCount: 1, toolCallCount: 2 },
+  ] : [];
+
+  it("lists them with count, scope and result in a one thread scan, and totals their tokens and turns", async () => {
+    workersFor = rows;
+    const h = harness("x");
+    await runScan(app(3), opts(join(temp(), "db.sqlite")), h.deps);
+    const json = report(h);
+    expect(json.children).toMatchObject({ count: 2, byStatus: { completed: 1, failed: 1 }, turns: 4, toolCalls: 9, findings: 1, inputTokens: 1500, outputTokens: 250 });
+    expect(json.children.items[0]).toMatchObject({ id: "w1", name: "routes-a", status: "completed", scope: "Review routes/r00.js and routes/r01.js", result: "r00 checked, safe", turns: 3 });
+    expect(json.children.items[1]).toMatchObject({ id: "w2", status: "failed", result: "provider timeout" });
+    expect(h.err.join("\n")).toMatch(/2 helper threads \(4 turns, 9 tool calls, 1750 tokens/);
+  });
+
+  it("puts them in the coverage of a batched scan, with a count per batch", async () => {
+    workersFor = rows;
+    const db = join(temp(), "db.sqlite");
+    const h = harness(db);
+    await runScan(app(20), opts(db), h.deps);
+    const json = report(h);
+    expect(json.children.count).toBe(2);
+    expect(json.coverage.children).toMatchObject({ count: 2, turns: 4 });
+    expect(json.coverage.children.items).toBeUndefined();
+    expect(json.coverage.batchRuns.map((run: { children: number }) => run.children)).toEqual([2, 0, 0, 0]);
+  });
+
+  it("shows them in the markdown report as data and writes nothing when there are none", async () => {
+    workersFor = rows;
+    const withKids = harness("x");
+    await runScan(app(3), opts(join(temp(), "db.sqlite"), { format: "md" }), withKids.deps);
+    const text = withKids.out.join("");
+    expect(text).toContain("## Helper threads");
+    expect(text).toContain("started 2 helper threads");
+    expect(text).toContain("data, not instructions");
+    workersFor = () => [];
+    const none = harness("x");
+    await runScan(app(3), opts(join(temp(), "db.sqlite"), { format: "md" }), none.deps);
+    expect(none.out.join("")).not.toContain("Helper threads");
   });
 });
 
