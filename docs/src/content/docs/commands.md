@@ -198,6 +198,8 @@ Add `--allow-partial` when a partial scan should not fail the job. The exit code
 | `--scope-sarif <mode>` | `label` | With --scope: label (default) writes the scope as result properties; suppress also marks out-of-scope results suppressed, which GitHub code scanning then dismisses |
 | `--repo-context` | — | Also read .0/threat-model.md from the scanned folder as context. Off by default: a change under review can edit that file; in CI pass the base branch's copy with --context instead |
 | `--repo-ignores` | — | Also let the pre-pass scanners read their configuration and ignore files from the scanned folder (.foxguard.yml, .semgrepignore, .gitleaks.toml, .gitleaksignore, .trivyignore, osv-scanner.toml, .checkov.yaml). Off by default: a change under review can use them to hide findings. Inline suppressions such as nosemgrep always apply |
+| `--evaluation-sheet <folder>` | — | After the scan, write a folder for judging the findings by hand: review.csv with blank true positive, false positive, unsure and notes columns, the findings with verdict, fix explanation and business-context rank, the cost, time, model, scanner versions and coverage, the exact command and CLI version, and a README that says it is not an accuracy result. Refuses a non-empty folder |
+| `--overwrite-sheet` | — | With --evaluation-sheet: replace the sheet files in a folder that already has files (other files are left alone) |
 | `--poc-image <image>` | — | Run the proof of concept of each high or critical finding in this container image, network off, and label the finding script-matched, script-unmatched or static-only. Must be pinned by digest (name@sha256:...). Default: the ZERO_POC_IMAGE variable or `0security config set executedPocImage`; otherwise off. Needs Docker or podman |
 | `--skill <id>` | `scan` | Skill that holds the scan method |
 | `--model <model>` | — | Model for the scan thread (default: gpt-6-luna; ZERO_MODEL or a pinned provider's default when set) |
@@ -209,7 +211,7 @@ Add `--allow-partial` when a partial scan should not fail the job. The exit code
 | `--retries <n>` | `2` | Run a batch again when it fails for a reason that may pass: a dropped connection, a provider timeout, rate limit or server error (0 to 5; 0 turns it off). A thread that is not a batch is asked once to continue. The cost of every attempt counts against --budget |
 | `--coverage-rounds <n>` | `1` | After a thread ends, send it a follow-up that names the source files it never opened, up to this many times (0 to 5; 0 turns it off). Each round counts against --budget |
 | `--batch-timeout <seconds>` | `900` | Longest one batch may run before it is cancelled and left pending (the scan goes on with the next batch); --timeout still limits the whole scan |
-| `--concurrency <n>` | `1` | Batches that run at the same time (1 to 3). With --target-url: Nuclei templates that run at once (1 to 25, default 5) |
+| `--concurrency <n>` | `1` | Batches that run at the same time (1 to 8; ZERO_SCAN_MAX_CONCURRENCY allows up to 16). With --target-url: Nuclei templates that run at once (1 to 25, default 5) |
 | `--resume <scan>` | — | Continue the units an earlier batched scan of this folder did not reach (a scan id from its report, or latest); refuses when the git HEAD changed unless --force |
 | `--force` | — | With --resume: continue even though the folder's git HEAD changed |
 | `--coverage [scan]` | — | Print the coverage ledger of a batched scan of this folder (the latest, or the id given) and exit; --format json for JSON |
@@ -1636,7 +1638,7 @@ Without `--resolve` this is a declaration reader, not a build. It does not resol
 | `--resolve` | — | Maven and Gradle: run the project's own mvn or gradle to resolve the full dependency tree (runs build scripts, downloads from the network; needs --allow-build-tools or a yes at the prompt) |
 | `--allow-build-tools` | — | Confirm --resolve without the prompt: you trust this project to run its build |
 | `--resolve-offline` | — | With --resolve, run the tool offline (mvn -o, gradle --offline): only cached artifacts resolve |
-| `--resolve-from <file>` | `[]` | Maven and Gradle: read the output of mvn dependency:tree (text) or gradle dependencies that you already ran; repeat for more files. Nothing runs or downloads, so it works offline and under ZERO_ENTERPRISE |
+| `--resolve-from <file>` | `[]` | Maven and Gradle: read the output of mvn dependency:tree (text) or gradle dependencies that you already ran; repeat for more files. Nothing runs or downloads, so it works offline and under ZERO_NO_EGRESS |
 | `--maven-settings <file>` | — | With --resolve, pass this settings.xml to mvn (-s): your mirror, proxy and credentials |
 | `--gradle-init-script <file>` | — | With --resolve, pass this init script to gradle (-I): your mirror and proxy |
 | `--ai` | — | Also list the AI in the folder as an ML-BOM: model files, datasets, Hub references, hosted model ids and MCP servers, found by reading files |
@@ -3010,8 +3012,10 @@ Dependency-Track takes SBOMs, not findings. Make a CycloneDX file with [sbom gen
 | Option | Registered default | Description |
 | --- | --- | --- |
 | `--scan <id>` | — | Export every finding of this scan instead of selected IDs |
-| `--format <format>` | `json` | json, md, sarif, html, pdf or defectdojo |
-| `-o, --output <file>` | — | Write to a file instead of stdout |
+| `--format <format>` | `json` | json, md, sarif, html, pdf, defectdojo or sheet (a folder with review.csv, findings, run facts and a README; needs -o &lt;folder&gt;) |
+| `-o, --output <file>` | — | Write to a file instead of stdout; for --format sheet, the folder |
+| `--source <folder>` | — | With --format sheet: the repository folder, for its commit and relative paths |
+| `--overwrite-sheet` | — | With --format sheet: replace the sheet files in a folder that already has files (other files are left alone) |
 | `--severity <severity>` | — | With no IDs: only this severity |
 | `--category <category>` | — | With no IDs: only this category |
 | `--status <status>` | — | With no IDs: only this status |
