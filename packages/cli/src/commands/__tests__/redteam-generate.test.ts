@@ -1,8 +1,20 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { generateKeyPairSync, sign } from "node:crypto";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createMockBrain, type MockBrain } from "@0/engine";
 import { Command } from "commander";
-import { printable, registerRedteamGenerateCommand, runGenerate, type GenerateDeps } from "../redteam-generate.js";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
+import { makeTestLicense as makeLicense, testPublicKeys } from "../../web/__fixtures__/test-license.js";
+import { brainEnv, printable, registerRedteamGenerateCommand, runGenerate, type GenerateDeps } from "../redteam-generate.js";
 import { UsageError } from "../output.js";
+
+// The shared setup mock drops the options argument of loadLicense, so the audience is never checked there.
+// This file's mock passes it through (still trusting the throwaway test keys) so the audience rule is exercised.
+vi.mock("@0/enterprise", async importOriginal => {
+  const real = await importOriginal<typeof import("@0/enterprise")>();
+  const { testPublicKeys } = await import("../../web/__fixtures__/test-license.js");
+  return { ...real, loadLicense: (env?: Parameters<typeof real.loadLicense>[0], now?: Date, keys?: Parameters<typeof real.loadLicense>[2], options?: Parameters<typeof real.loadLicense>[3]) => real.loadLicense(env, now, keys ?? { ...real.PRODUCTION_PUBLIC_KEYS, ...testPublicKeys }, options) };
+});
 
 const manifest = JSON.stringify({ tools: [{ name: "send_email", privilege: "network-out", gate: "none" }], sources: [{ kind: "email" }] });
 const harness = (env: NodeJS.ProcessEnv = {}, files: Record<string, string> = { "/m.json": manifest }) => {
@@ -132,5 +144,107 @@ describe("0 redteam generate", () => {
     await runGenerate({ manifest: "/w.json", url, area: "Payment", dryRun: false }, h.deps);
     expect(h.err.join("\n")).toContain("only filter the open catalog");
     expect(Object.keys((mock.requests[0]!.body as Record<string, unknown>)).sort()).toEqual(["manifest", "task", "v"]);
+  });
+});
+
+const makeTestLicense = (features: string[]) => { const lic = makeLicense(features); Object.assign(testPublicKeys, lic.publicKeys); return lic; };
+
+describe("0 redteam generate with a license token", () => {
+  let mock: MockBrain | undefined;
+  afterEach(async () => { await mock?.close(); mock = undefined; for (const k of Object.keys(testPublicKeys)) delete testPublicKeys[k]; });
+
+  it("sends the license token as the bearer to the configured brain only, and never prints it", async () => {
+    const lic = makeTestLicense(["ha"]);
+    mock = createMockBrain({ token: lic.token }); const url = await mock.start();
+    const h = harness({ ...lic.env, ZERO_BRAIN_URL: url });
+    expect(await runGenerate({ manifest: "/m.json", format: "json", canary: "C-1" }, h.deps)).toBe(0);
+    expect(JSON.parse(h.out.join("")).source).toBe("remote");
+    expect(mock.requests[0]?.authorization).toBe(`Bearer ${lic.token}`);
+    expect(h.fetched).toEqual([url]);
+    expect([...h.out, ...h.err].join("\n")).not.toContain(lic.token);
+  });
+  it("keeps an explicit ZERO_BRAIN_TOKEN over the license", async () => {
+    const lic = makeTestLicense(["ha"]);
+    mock = createMockBrain({ token: "explicit" }); const url = await mock.start();
+    const h = harness({ ...lic.env, ZERO_BRAIN_URL: url, ZERO_BRAIN_TOKEN: "explicit" });
+    await runGenerate({ manifest: "/m.json" }, h.deps);
+    expect(mock.requests[0]?.authorization).toBe("Bearer explicit");
+  });
+  it("never sends the license when no brain URL is set", async () => {
+    const lic = makeTestLicense(["ha"]);
+    const h = harness({ ...lic.env });
+    await runGenerate({ manifest: "/m.json" }, h.deps);
+    expect(h.fetched).toHaveLength(0);
+  });
+  it("falls back to the open catalog with no license and no token", async () => {
+    mock = createMockBrain({ token: "needed" }); const url = await mock.start();
+    const h = harness({ ZERO_BRAIN_URL: url });
+    await runGenerate({ manifest: "/m.json" }, h.deps);
+    expect(h.out.join("")).toContain("source: open-catalog");
+    expect(brainEnv({ ZERO_BRAIN_URL: url })["ZERO_BRAIN_TOKEN"]).toBeUndefined();
+  });
+  it("falls back when the brain refuses the call, without echoing the token", async () => {
+    const lic = makeTestLicense(["ha"]);
+    mock = createMockBrain({ token: "other" }); const url = await mock.start();
+    const h = harness({ ...lic.env, ZERO_BRAIN_URL: url });
+    await runGenerate({ manifest: "/m.json" }, h.deps);
+    expect(h.out.join("")).toContain("source: open-catalog");
+    expect([...h.out, ...h.err].join("\n")).not.toContain(lic.token);
+  });
+  it("does not follow a redirect to another host, so the token never reaches it", async () => {
+    const lic = makeTestLicense(["ha"]);
+    const other = createMockBrain({ token: lic.token }); const otherUrl = await other.start();
+    const redirector = createServer((_req, res) => { res.writeHead(307, { location: otherUrl }); res.end(); });
+    await new Promise<void>(r => redirector.listen(0, "127.0.0.1", () => r()));
+    const url = `http://127.0.0.1:${(redirector.address() as AddressInfo).port}/v1/scenarios`;
+    try {
+      const h = harness({ ...lic.env, ZERO_BRAIN_URL: url });
+      await runGenerate({ manifest: "/m.json" }, h.deps);
+      expect(h.out.join("")).toContain("source: open-catalog");
+      expect(other.requests).toHaveLength(0);
+      expect([...h.out, ...h.err].join("\n")).not.toContain(lic.token);
+    } finally { redirector.close(); await other.close(); }
+  });
+  it("does not send a license when ZERO_ENTERPRISE or offline blocks the brain", async () => {
+    const lic = makeTestLicense(["ha"]);
+    mock = createMockBrain(); const url = await mock.start();
+    await runGenerate({ manifest: "/m.json" }, harness({ ...lic.env, ZERO_BRAIN_URL: url, ZERO_ENTERPRISE: "1" }).deps);
+    await runGenerate({ manifest: "/m.json", offline: true }, harness({ ...lic.env, ZERO_BRAIN_URL: url }).deps);
+    expect(mock.requests).toHaveLength(0);
+  });
+});
+
+describe("license audience for the hosted brain", () => {
+  let mock: MockBrain | undefined;
+  afterEach(async () => { await mock?.close(); mock = undefined; for (const k of Object.keys(testPublicKeys)) delete testPublicKeys[k]; });
+  const v2 = (aud: string[]) => {
+    const { publicKey, privateKey } = generateKeyPairSync("ed25519");
+    const kid = `a${Math.random().toString(36).slice(2, 8)}`;
+    const day = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString().replace(/\.\d+Z$/, "Z");
+    const payload = Buffer.from(JSON.stringify({ v: 2, id: "lic_aud", customer: "test", plan: "test", seats: 1, aud, entitlements: { ha: {} }, issuedAt: day(-2), nbf: day(-2), expires: day(30), kid, rid: "lic_aud" }));
+    testPublicKeys[kid] = publicKey.export({ format: "der", type: "spki" }).toString("base64");
+    return `${payload.toString("base64url")}.${sign(null, payload, privateKey).toString("base64url")}`;
+  };
+  const run = async (token: string) => {
+    mock = createMockBrain(); const url = await mock.start();
+    const h = harness({ ZERO_LICENSE: token, ZERO_BRAIN_URL: url });
+    await runGenerate({ manifest: "/m.json" }, h.deps);
+    return { auth: mock.requests[0]?.authorization, text: [...h.out, ...h.err].join("\n") };
+  };
+  it("sends a v2 token whose audience includes brain", async () => {
+    const token = v2(["cli", "brain"]);
+    const r = await run(token);
+    expect(r.auth).toBe(`Bearer ${token}`);
+    expect(r.text).not.toContain(token);
+  });
+  it("does not send a v2 token whose audience omits brain", async () => {
+    const token = v2(["cli", "hub"]);
+    const r = await run(token);
+    expect(r.auth).toBeUndefined();
+    expect(r.text).not.toContain(token);
+  });
+  it("sends a v1 token, which carries no audience", async () => {
+    const lic = makeTestLicense(["ha"]);
+    expect((await run(lic.token)).auth).toBe(`Bearer ${lic.token}`);
   });
 });
