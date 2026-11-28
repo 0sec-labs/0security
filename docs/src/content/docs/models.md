@@ -352,7 +352,20 @@ env ZERO_LLM_FALLBACK=deepseek:deepseek-flash,azure:gpt-5-deployment \
   0 -p "Review ./authorized-repo"
 ```
 
-Each entry is `<provider>:<model>`. Entries are comma-separated and tried in order. 0 skips entries without credentials, or for Azure without an endpoint. Failover changes who receives your context and who bills you. A cyber access program request disables failover.
+Each entry is `<provider>:<model>`. Entries are comma-separated and tried in order. 0 skips entries without credentials, or for Azure without an endpoint. Failover changes who receives your context and who bills you. A cyber access program request disables failover. A provider refusal never triggers failover; see [When a model refuses security work](#when-a-model-refuses-security-work).
+
+## When a model refuses security work
+
+Some providers restrict security tooling by model. A provider policy or safety block can stop a scan before the model reads any code. For example, a Codex route answers `cyber_policy`, and the OpenAI API answers that the request was flagged for possible cybersecurity risk. Bedrock guardrails, Azure content filters and an Anthropic `refusal` stop are recognised the same way. A refusal is different from a rate limit, a quota or a bad key: sending the same request again is refused again.
+
+0 reports it as a refusal and not as an empty result:
+
+- The error names the provider, the model and the signal, then repeats what the provider said.
+- 0 does not retry it. 0 also does not move to another model on its own, not even one listed in `ZERO_LLM_FALLBACK`, because a different model would run your scan without you knowing.
+- In a batched scan, the batches the provider refused stay pending with the reason `refused by the model provider`. The coverage statement lists them as not reviewed and says that no findings from them means they did not run, not that the code is clean. The JSON `failure.cause` is `provider_refusal` and `coverage.refusedBatches` counts them.
+- The exit code is 1, with or without `--allow-partial`, so a CI job cannot take a refused scan for a clean one. `findings verify` and `findings fix` show the same message.
+
+To continue, choose another model or provider whose policy permits the work, then run the scan again. `--resume` continues the same scan with the model you now select. 0 cannot promise that any provider will allow a given scan; check the provider's own terms and access programs.
 
 ## Advanced settings
 

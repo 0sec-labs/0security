@@ -162,7 +162,7 @@ The scan uses the running console, or the engine named by `--engine-url` or `--c
 Exit codes:
 
 - 0: done
-- 1: a finding at or above `--fail-on`, or the scan failed
+- 1: a finding at or above `--fail-on`, or the scan failed. A batch the model provider refused (a policy or safety block) also exits 1, even with `--allow-partial`, because it will be refused again. See [When a model refuses security work](/models/#when-a-model-refuses-security-work)
 - 2: usage error
 - 3: not finished. The scan stopped at the budget or the time limit, or entry points were not reached, so the report is partial. This is not a failure. Findings so far are kept, and `--resume` continues the scan
 
@@ -238,7 +238,7 @@ A scan without batches has no batch to run again. When its thread fails for one 
 
 `--timeout` limits the whole scan. `--batch-timeout <seconds>` (default 900) limits one batch. A batch that passes it is cancelled and stays pending with the reason `timeout`, and the scan goes on with the next batch. A scan that passes `--timeout` stops and reports what it reviewed as partial.
 
-When a scan fails or stops early, the error says why, in plain words. The JSON report has the same text in `failure`, with a `cause` such as `provider_connection`, `provider_timeout`, `provider_rate_limit`, `provider_server`, `provider_auth`, `provider_invalid_request`, `no_model`, `budget`, `timeout`, `batch_timeout` or `console_lost`. SARIF has it in the run properties. Keys and tokens are removed from the text.
+When a scan fails or stops early, the error says why, in plain words. The JSON report has the same text in `failure`, with a `cause` such as `provider_connection`, `provider_timeout`, `provider_rate_limit`, `provider_server`, `provider_auth`, `provider_invalid_request`, `provider_refusal`, `no_model`, `budget`, `timeout`, `batch_timeout` or `console_lost`. SARIF has it in the run properties. Keys and tokens are removed from the text.
 
 #### Files the model did not open
 

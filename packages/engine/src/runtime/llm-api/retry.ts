@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { type NativeRuntimeResult, type RetryNotice } from "../types.js";
+import { classifyProviderRefusal, type ProviderRefusal } from "../../shared/provider-refusal.js";
 import { LLM_429_MAX_RETRIES, LLM_MAX_RETRIES, LLM_STREAM_MAX_ATTEMPTS, resolveLimit } from "../../shared/limits.js";
 
 /** HTTP statuses worth retrying: rate-limit (429) + transient 5xx. */
@@ -99,6 +100,8 @@ export function shouldRetryNativeStream(result: NativeRuntimeResult): boolean {
   if (result.cancelled) return false;
   const error = result.error ?? "";
   if (/automatic replay (?:is )?disabled|outcome.{0,30}unknown/i.test(error)) return false;
+  // A refusal is terminal: the same content is refused again.
+  if (classifyProviderRefusal(error)) return false;
   if (!TRANSIENT_STREAM_ERROR_PATTERNS.some((pattern) => error.includes(pattern))) return false;
   // Defensive: a partial stream that still yielded tool calls is usable work —
   // never repeat it. (The transient returns carry no tool_use today, but this
@@ -107,45 +110,34 @@ export function shouldRetryNativeStream(result: NativeRuntimeResult): boolean {
   return true;
 }
 
-// ── Provider policy-refusal failover ────────────────────────────────────
+// ── Provider refusal ────────────────────────────────────────────────────
 //
-// A provider-side safety classifier can reject a research request outright:
+// A provider-side safety classifier can reject a security-research request:
 // OpenAI's Responses wire answers HTTP 200, streams, then terminates with
-// `response.failed` and an error code like `cyber_policy` once accumulated
-// attack evidence trips it. The refusal is terminal for THAT provider — the
-// same content resubmitted to the same classifier refuses again — so the only
-// recovery is a DIFFERENT provider. When ZERO_LLM_FALLBACK is configured,
-// {@link LlmApiRuntime.executeNative} fails over and re-issues the request on
-// the next entry; without a fallback chain the refusal stays terminal and the
-// result is unchanged from the previous behaviour.
-//
-// Only Responses-wire terminal rejections count. `response.incomplete`
-// (content_filter) has already yielded partial output through the stream
-// callbacks, so replaying it wholesale would duplicate content — those keep
-// the existing observation-checkpoint handling.
+// `response.failed` and an error code like `cyber_policy`; the OpenAI API can
+// answer 400 "flagged for possible cybersecurity risk". The refusal is terminal
+// for THAT model: the same content is refused again, so it is never retried, and
+// it never fails over to another model on its own (a weaker model would run the
+// scan unannounced). The result carries an error naming provider, model and
+// signal; the scan layer reports the work as not reviewed. The signal table is
+// shared/provider-refusal.ts.
 
 /** Marker `consumeResponsesStream` prefixes the embedded failure envelope with. */
 export const RESPONSES_TERMINAL_FAILURE_MARKER = "Responses terminal failure ";
 
 /**
- * Pure decision: did this native result terminate because the provider's
- * content policy refused the request? True ONLY for a Responses-wire terminal
- * failure whose error code names a policy classifier (`*_policy`, e.g.
- * `cyber_policy`). Quota, auth, rate-limit, transport and empty-stream
- * failures are different classes with their own recovery paths and return
- * false here.
+ * The refusal a native result ended with, or undefined. Quota, auth, rate-limit,
+ * transport and empty-stream failures are different classes and return undefined,
+ * as does a success or an operator cancellation.
  */
+export function providerRefusalOf(result: NativeRuntimeResult): ProviderRefusal | undefined {
+  if (result.stopReason !== "error" || result.cancelled) return undefined;
+  return classifyProviderRefusal(result.error);
+}
+
+/** Did this native result end because the provider refused the request? */
 export function isPolicyRefusalResult(result: NativeRuntimeResult): boolean {
-  if (result.stopReason !== "error" || result.cancelled) return false;
-  const error = result.error ?? "";
-  const at = error.indexOf(RESPONSES_TERMINAL_FAILURE_MARKER);
-  if (at < 0) return false;
-  try {
-    const failure = JSON.parse(error.slice(at + RESPONSES_TERMINAL_FAILURE_MARKER.length)) as { code?: unknown };
-    return typeof failure.code === "string" && failure.code.length > 0 && /_policy$/.test(failure.code);
-  } catch {
-    return false;
-  }
+  return providerRefusalOf(result) !== undefined;
 }
 
 /** Sum two optional usage readings into one honest total (all fields optional). */

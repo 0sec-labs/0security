@@ -12,6 +12,7 @@ import { Option, type Command } from "commander";
 import { attackerImpactSentence, firstCitation, MAX_VERIFY_FINDINGS_PER_PROMPT, parseVerdicts, verifyPrompt, type RootCause, type VerifyPromptFinding } from "@0/engine/shared";
 import { listOsecRunDatabasePaths, osecDB, resolveOsecDbPath, type FindingModelVerification, type ModelVerdict } from "@0/engine/storage";
 import { consoleTransportOptions, type ConsoleClient, type ConsoleTransportOptions } from "../console-client.js";
+import { threadErrorText } from "../scan-failure.js";
 import { resolveFindingId, shortFindingId } from "../finding-id.js";
 import { connect, DEFAULT_SCAN_MODEL, scanModelField, scanModelLabel, defaultScanDeps, waitForThread, type ScanDeps } from "./scan.js";
 import { finishWithError, UsageError } from "./output.js";
@@ -344,7 +345,7 @@ async function runVerifyFlow(ids: string[], options: VerifyOptions, deps: Verify
       if (failure || !thread.reply) {
         // The thread itself did not run to an answer: nothing is stored, so the next run tries again.
         failed = true;
-        for (const c of group) items.set(c.id, { ...base(c), result: "failed", reason: failure ?? thread.error ?? "the thread returned no answer", ...(thread.id ? { threadId: thread.id } : {}) });
+        for (const c of group) items.set(c.id, { ...base(c), result: "failed", reason: failure ?? threadErrorText(thread.error) ?? "the thread returned no answer", ...(thread.id ? { threadId: thread.id } : {}) });
       } else {
         const parsed = parseVerdicts(thread.reply, group.map(c => c.id));
         for (const c of group) {

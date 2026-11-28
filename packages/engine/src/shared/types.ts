@@ -1485,6 +1485,8 @@ export interface ScanCoverage extends Partial<ScanFileCoverage> {
   stoppedBy?: string;
   /** Batches that were run again after a transient failure: how many retries were allowed and used, and for which causes. */
   retries?: { allowed: number; total: number; batches: Array<{ batch: number; attempts: number; causes: string[]; recovered: boolean }> };
+  /** Batches the model provider refused (a policy or safety block). They were not reviewed; no findings from them does not mean the code is clean. */
+  refusedBatches?: number;
   /** Batches that were not reviewed because they failed or timed out, with the cause. */
   failures?: Array<{ batch: number; cause: string; message: string }>;
   /** The command that continues a scan that ended with units pending. */

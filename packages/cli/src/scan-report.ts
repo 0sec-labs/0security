@@ -326,6 +326,8 @@ export function scanJson(outcome: ScanOutcome, stored: readonly Finding[]): Reco
  */
 export function scanExitCode(outcome: ScanOutcome, findings: readonly Finding[], failOn: ScanSeverity | undefined): number {
   if (outcome.failed) return 1;
+  // A refused batch will be refused again, so it is a failure, not a "not finished" stop that --resume or --allow-partial can clear.
+  if ((outcome.coverage?.refusedBatches ?? 0) > 0) return 1;
   if (outcome.tier?.skipped) return outcome.failOnSkip ? 1 : 0;
   // With --only-new, a finding that was already known does not fail the run.
   findings = markKnown(outcome, findings.map(finding => reportFinding(finding, outcome.roots ?? []))).findings;

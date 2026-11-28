@@ -63,6 +63,12 @@ describe("toScanReport", () => {
 
 describe("scanExitCode", () => {
   const findings = [stored()];
+  it("is 1 when the provider refused a batch, even with --allow-partial and no findings", () => {
+    const coverage = { complete: false, refusedBatches: 1 } as ScanOutcome["coverage"];
+    expect(scanExitCode({ ...outcome, coverage }, [], undefined)).toBe(1);
+    expect(scanExitCode({ ...outcome, coverage, allowPartial: true }, [], undefined)).toBe(1);
+    expect(scanExitCode({ ...outcome, coverage: { complete: false } as ScanOutcome["coverage"] }, [], undefined)).toBe(3);
+  });
   it("is 0 without a threshold", () => expect(scanExitCode(outcome, findings, undefined)).toBe(0));
   it("is 1 when a finding reaches the threshold", () => expect(scanExitCode(outcome, findings, "high")).toBe(1));
   it("is 0 when findings are below the threshold", () => expect(scanExitCode(outcome, findings, "critical")).toBe(0));

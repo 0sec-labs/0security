@@ -726,7 +726,8 @@ async function runBatchedScan(ctx: PassContext, setup: BatchedSetup, before: Set
   const children = summarizeChildren([...ran.values()].map(pass => pass.children));
   // Files of a thread that finished and were never opened: their units are pending ("not opened"), and the sentence says so.
   const neverOpened = coverageRounds(options) > 0 ? new Set([...ran.values()].filter(pass => !pass.done.failed && !pass.budgetExhausted && !pass.timedOut && !pass.batchTimedOut).flatMap(pass => pass.files.unopened)).size : 0;
-  const statement = `${coverageSentence(summary)}${neverOpened ? `; ${neverOpened} file${neverOpened === 1 ? "" : "s"} never opened` : ""}`;
+  const refusedBatches = run.failures.filter(item => item.cause === "provider_refusal").length;
+  const statement = `${coverageSentence(summary)}${neverOpened ? `; ${neverOpened} file${neverOpened === 1 ? "" : "s"} never opened` : ""}${refusedBatches ? `; ${refusedBatches} batch${refusedBatches === 1 ? "" : "es"} refused by the model provider and not reviewed. No findings from a refused batch means it did not run, not that the code is clean` : ""}`;
   const failures = run.failures.length ? run.failures.map(item => item.message) : run.outcomes.filter(item => !item.outcome.reviewed && item.outcome.failed).map(item => item.outcome.error ?? "no reason given");
   const hint: ResumeHint | undefined = resumeHint(resolved.label, summary, { budgetHit: run.budgetHit, budgetUsd: budget, timedOut: run.timedOut, timeoutSeconds: Number(options.timeout), failures });
   const coverage = { ...coverageReport(summary, statement, units, { retried: run.retried, failures: run.failures, retriesAllowed: retryCount(options), ...(fileCoverage ? { files: fileCoverage } : {}) }), ...(hint ? { resume: hint.command, stoppedBy: hint.stoppedBy } : {}),
@@ -1129,7 +1130,7 @@ export function registerScanCommand(program: Command, deps: ScanDeps = defaultSc
     .option("--known <sarif>", "SARIF from other tools: the scan is told what is already known and looks for what they missed; findings are labelled new or already-known (confirmedIndependently when the scan analysed it itself). Repeat for several", (value: string, previous: string[] = []) => [...previous, value])
     .option("--only-new", "With --known: leave findings that match a known item out of the report")
     .option("--timeout <seconds>", "Maximum seconds for the whole scan; what it reviewed so far is reported as partial", String(DEFAULT_TIMEOUT_SECONDS)))
-    .addHelpText("after", "\nExit codes: 0 done, 1 findings at or above --fail-on or the scan failed, 2 usage error, 3 stopped before it reviewed everything (budget, time limit, or entry points not reached): not finished, not failed; --allow-partial exits 0 or 1 instead.\nThe scan is a thread: follow it with `0security threads list`.")
+    .addHelpText("after", "\nExit codes: 0 done, 1 findings at or above --fail-on, the scan failed or the model provider refused a batch (policy or safety block), 2 usage error, 3 stopped before it reviewed everything (budget, time limit, or entry points not reached): not finished, not failed; --allow-partial exits 0 or 1 instead.\nThe scan is a thread: follow it with `0security threads list`.")
     .action(async (target: string, options: ScanOptions, command: Command) => {
       // Precedence: a flag you typed (or set in the environment) > the tier map > the operator's workflow defaults > the built-in default.
       // Workflow defaults fill budget and model here; runScan lets a tier replace them unless the flag was typed.

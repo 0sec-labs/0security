@@ -13,7 +13,8 @@ import { resolveWorkbenchProviderProxy } from "../workbench-provider-proxy.js";
 import { completionTokenLimit, isWireBlockArray, parseResponsesFunctionCall, readChatUsage, readGoogleUsage, readResponsesCachedTokens, readResponsesUsage, safeParseJson } from "./usage-parsing.js";
 import { appendNativeTrace, logProviderStartup } from "./startup-log.js";
 import { modelFetch } from "./transport.js";
-import { OperatorAbortError, QuotaExhaustedError, classifyTransportFailure, composeCallAbort, delayWithAbort, isPolicyRefusalResult, isRetryableHttpStatus, llm429MaxRetries, llm429MaxRetryWaitMs, llmMaxRetries, llmMaxRetryWaitMs, llmStreamEventIdleTimeoutMs, llmStreamIdleTimeoutMs, llmStreamMaxAttempts, mergeRuntimeUsage, noteRateLimitCooldown, parseRetryAfterMs, parseUsageLimitReached, retryAfterMsFromHeaders, retryBackoffMs, retryNoticeFor, notifyRetry, withRetryListener, shouldRetryNativeStream, sleepWithAbort, streamRetryBackoffMs, waitForRateLimitCooldown, type CallAbort, unknownTransportOutcome } from "./retry.js";
+import { providerRefusalMessage } from "../../shared/provider-refusal.js";
+import { OperatorAbortError, QuotaExhaustedError, classifyTransportFailure, composeCallAbort, delayWithAbort, providerRefusalOf, isRetryableHttpStatus, llm429MaxRetries, llm429MaxRetryWaitMs, llmMaxRetries, llmMaxRetryWaitMs, llmStreamEventIdleTimeoutMs, llmStreamIdleTimeoutMs, llmStreamMaxAttempts, noteRateLimitCooldown, parseRetryAfterMs, parseUsageLimitReached, retryAfterMsFromHeaders, retryBackoffMs, retryNoticeFor, notifyRetry, withRetryListener, shouldRetryNativeStream, sleepWithAbort, streamRetryBackoffMs, waitForRateLimitCooldown, type CallAbort, unknownTransportOutcome } from "./retry.js";
 import { CODEX_API_ENDPOINT, CODEX_PROTOCOL_HEADERS, FREE_OPENROUTER_MODEL, PROCESS_SESSION_ID, defaultReasoningEffort, normalizeModelForProvider, openAICompatibleWireApi, opencodeWireApiForModel, type ApiProvider, type WireApi, zaiThinkingBudget } from "./provider-config.js";
 import { getFallbackChain, resolveFailoverProvider, type ApiProviderConnection, type FallbackEntry } from "./fallback.js";
 import { readChatGptCodexAuthFile, readChatGptCodexEnv, refreshChatGptCodexAuthState, resolveChatGptCodexAuthState, type ChatGptCodexAuthState } from "./codex-auth.js";
@@ -1245,7 +1246,7 @@ export class LlmApiRuntime implements Runtime, NativeRuntime {
    * exhausted.
    */
   private _tryFailover(
-    reason: "plan quota exhausted" | "429 retry budget exhausted" | "provider policy refusal",
+    reason: "plan quota exhausted" | "429 retry budget exhausted",
   ): boolean {
     if (this.config.cyberAccessProgram !== undefined) return false;
     while (this.fallbackIndex < this.fallbackChain.length) {
@@ -1830,25 +1831,20 @@ export class LlmApiRuntime implements Runtime, NativeRuntime {
     const maxAttempts = llmStreamMaxAttempts();
     let result!: NativeRuntimeResult;
     let attempt = 0;
-    // Usage reported by refused attempts, carried onto the final result so a
-    // failover hand-off never silently drops tokens the provider says it
-    // consumed while evaluating the refused request.
-    let refusedUsage: NativeRuntimeResult["usage"];
-    const withRefusedUsage = (outcome: NativeRuntimeResult): NativeRuntimeResult => refusedUsage
-      ? { ...outcome, usage: mergeRuntimeUsage(outcome.usage, refusedUsage) }
-      : outcome;
     for (;;) {
       result = await this.executeNativeAttempt(system, messages, tools, callbacks, signal);
-      if (isLocalAdmissionFailure(result.error)) return withRefusedUsage(result);
-      if (this.env["ZERO_REQUIRE_RETRY_SAFE_RECEIPT"] === "1" && (result.stopReason === "error" || result.error)) {
-        return withRefusedUsage({ ...result, error: `${result.error ?? "Incomplete gateway response"}. Request outcome may be unknown. Automatic replay is disabled` });
+      if (isLocalAdmissionFailure(result.error)) return result;
+      // A provider refusal is terminal: no retry, and no failover to another model. A weaker model would run the
+      // scan without the operator knowing. The error names who refused so the scan can report the work as not reviewed.
+      const refusal = signal?.aborted ? undefined : providerRefusalOf(result);
+      if (refusal) {
+        const model = this.model;
+        const provider = this.providerLabel;
+        diag.warn("provider_refusal", `${provider} (${model}) refused the request: ${refusal.signal}`, { provider, model, signal: refusal.id });
+        return { ...result, error: providerRefusalMessage({ provider, model }, refusal, result.error ?? ""), refusal: { provider, model, signal: refusal.id, source: refusal.source } };
       }
-      if (isPolicyRefusalResult(result) && !signal?.aborted) {
-        if (result.usage) refusedUsage = mergeRuntimeUsage(refusedUsage, result.usage);
-        if (this._tryFailover("provider policy refusal")) continue;
-        // Chain exhausted: return the refusal immediately with every refused
-        // leg's usage merged (this result's usage is already included).
-        return refusedUsage ? { ...result, usage: refusedUsage } : result;
+      if (this.env["ZERO_REQUIRE_RETRY_SAFE_RECEIPT"] === "1" && (result.stopReason === "error" || result.error)) {
+        return { ...result, error: `${result.error ?? "Incomplete gateway response"}. Request outcome may be unknown. Automatic replay is disabled` };
       }
       attempt++;
       if (attempt >= maxAttempts || !shouldRetryNativeStream(result) || signal?.aborted) break;
@@ -1868,9 +1864,9 @@ export class LlmApiRuntime implements Runtime, NativeRuntime {
     // the message say it retried, so the operator (and the logs) can tell a
     // persistent empty stream from a one-off blip.
     if (attempt >= maxAttempts && maxAttempts > 1 && shouldRetryNativeStream(result)) {
-      return withRefusedUsage({ ...result, error: `${result.error} (retried ${maxAttempts} times)` });
+      return { ...result, error: `${result.error} (retried ${maxAttempts} times)` };
     }
-    return withRefusedUsage(result);
+    return result;
   }
 
   private async executeNativeAttempt(

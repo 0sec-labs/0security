@@ -39,6 +39,9 @@ export function maxBatchConcurrency(env: Record<string, string | undefined> = pr
   return value >= 1 && value <= BATCH_CONCURRENCY_CEILING ? value : DEFAULT_MAX_BATCH_CONCURRENCY;
 }
 
+/** The ledger reason of units whose batch the model provider refused. */
+export const REFUSED_REASON = "refused by the model provider";
+
 export type StopReason = "budget" | "time limit" | "thread failed" | "timeout";
 
 export interface BatchOutcome {
@@ -207,7 +210,9 @@ export async function runBatches(input: RunBatchesInput): Promise<RunBatchesResu
         consecutiveFailures = 0;
       } else {
         const reason: StopReason = outcome.budgetExhausted ? "budget" : outcome.timedOut ? "time limit" : outcome.batchTimedOut ? "timeout" : "thread failed";
-        input.ledger.mark(input.scanId, ids, { status: "pending", reason, ...(threadId ? { threadId } : {}) });
+        // A refusal is not a failure to try again or to resume with the same model: the units say so, and the report lists them as not reviewed.
+        const refused = outcome.failure?.cause === "provider_refusal";
+        input.ledger.mark(input.scanId, ids, { status: "pending", reason: refused ? REFUSED_REASON : reason, ...(threadId ? { threadId } : {}) });
         if (outcome.budgetExhausted) budgetHit = true;
         if (outcome.timedOut) { timedOut = true; stopped = "time limit"; }
         else if ((outcome.failed || outcome.batchTimedOut) && !outcome.budgetExhausted) {
@@ -247,6 +252,7 @@ export function coverageReport(summary: CoverageSummary, statement: string, unit
     batches: { total: batches.total, reviewed: batches.reviewed, pending: batches.total - batches.reviewed },
     ...(run ? { retries: { allowed: run.retriesAllowed, total: run.retried.reduce((sum, item) => sum + item.attempts - 1, 0), batches: run.retried.map(item => ({ batch: item.batch, attempts: item.attempts, causes: [...item.causes], recovered: item.recovered })) } } : {}),
     ...(run?.files ? run.files : {}),
+    ...(run?.failures.some(item => item.cause === "provider_refusal") ? { refusedBatches: run.failures.filter(item => item.cause === "provider_refusal").length } : {}),
     ...(run?.failures.length ? { failures: run.failures.map(item => ({ batch: item.batch, cause: item.cause, message: item.message })) } : {}),
     pendingUnits: pending.slice(0, 100).map(unit => ({ kind: unit.kind, path: unit.path, ...(unit.startLine !== undefined ? { startLine: unit.startLine } : {}), ...(unit.name ? { name: unit.name } : {}), ...(unit.reason ? { reason: unit.reason } : {}) })),
   };

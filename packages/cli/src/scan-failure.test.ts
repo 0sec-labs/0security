@@ -16,6 +16,8 @@ describe("causeOf", () => {
     ["OpenAI API error 429: You exceeded your current quota (insufficient_quota)", "provider_quota", false],
     ["OpenAI API error 400: Invalid request: unsupported parameter", "provider_invalid_request", false],
     ["This model's maximum context length is 128000 tokens", "provider_invalid_request", false],
+    ["Provider refusal: chatgpt-codex, model gpt-6.1-sol declined the request (error code cyber_policy on a failed response). cyber_policy: request refused", "provider_refusal", false],
+    ["OpenAI API error: 400 This request has been flagged for possible cybersecurity risk.", "provider_refusal", false],
     ["Stopped at the $0.5 cost ceiling.", "budget", false],
     ["Thread cancelled by the operator", "cancelled", false],
     ["Lost contact with the console while scanning: Backend response exceeds the transport limit.", "console_lost", false],
@@ -59,5 +61,17 @@ describe("scrubFailureText", () => {
 
   it("leaves nothing a pull request comment would act on", () => {
     expect(scrubFailureText("ping @someone, see #123 <img src=x>")).not.toMatch(/@\w|#\d|[<>]/);
+  });
+});
+
+describe("a provider refusal", () => {
+  const text = "Provider refusal: openai, model gpt-6.1-sol declined the request (request flagged for possible cybersecurity risk). OpenAI API error: 400 flagged for possible cybersecurity risk";
+  it("says which model refused and that nothing was reviewed, so no findings is not a clean result", () => {
+    const failure = classifyFailure(text);
+    expect(failure.cause).toBe("provider_refusal");
+    expect(failure.transient).toBe(false);
+    expect(failure.message).toContain("gpt-6.1-sol");
+    expect(failure.message).toContain("no findings does not mean the code is clean");
+    expect(failure.message).toContain("another model or provider");
   });
 });

@@ -14,6 +14,7 @@ export type FailureCause =
   | "provider_auth"
   | "provider_quota"
   | "provider_invalid_request"
+  | "provider_refusal"
   | "no_model"
   | "budget"
   | "timeout"
@@ -31,6 +32,8 @@ export interface ScanFailure {
   /** A short sentence with secrets removed. */
   message: string;
 }
+
+import { PROVIDER_REFUSAL_ADVICE, classifyProviderRefusal } from "@0/engine/shared";
 
 const MAX_MESSAGE = 240;
 
@@ -76,6 +79,7 @@ const LABEL: Record<FailureCause, string> = {
   provider_auth: "The model provider refused the credentials",
   provider_quota: "The model provider account has no quota left",
   provider_invalid_request: "The model provider rejected the request",
+  provider_refusal: "The model provider refused the request (a policy or safety block, not an outage)",
   no_model: "No model is configured",
   budget: "The scan reached its budget",
   timeout: "The scan reached its time limit",
@@ -97,6 +101,8 @@ export function causeOf(raw: string | undefined): FailureCause {
   if (/lost contact with the console|backend response exceeds/i.test(text)) return "console_lost";
   if (/console (this scan starts for itself )?stopped|console exited|could not start a console/i.test(text)) return "console_crashed";
   if (/changed \d+ files? in the target/i.test(text)) return "target_changed";
+  // A refusal comes first: its text can mention policy, access or safety, and it must never read as quota, auth or a bad request.
+  if (classifyProviderRefusal(text)) return "provider_refusal";
   if (/quota|insufficient_quota|billing|usage_limit|credit balance|out of credits/i.test(text)) return "provider_quota";
   if (/(?:error|http|status)\s*(?:code\s*)?(?:401|403)\b|\b(?:401|403)\b.*(?:unauthori[sz]ed|forbidden)|unauthori[sz]ed|invalid[_ ]api[_ ]key|incorrect api key|authentication|invalid[_ ]credentials|forbidden|\blog ?in\b|reconnect the local model source|credentials/i.test(text)) return "provider_auth";
   if (/no model|model[^.]*(?:not configured|is not set)|no provider|choose a model|pick a model|no api key|no credentials? (?:found|configured)/i.test(text)) return "no_model";
@@ -112,6 +118,14 @@ export function causeOf(raw: string | undefined): FailureCause {
 export function classifyFailure(raw: string | undefined, override?: FailureCause): ScanFailure {
   const cause = override ?? causeOf(raw);
   const detail = shorten(scrubFailureText(plain(raw ?? "")));
+  // A refusal reviewed nothing: the advice is part of the message so no report, stderr line or JSON field can lose it.
+  if (cause === "provider_refusal") return { cause, transient: false, message: `${LABEL[cause]}: ${shorten(detail.replace(/^Provider refusal:\s*/i, ""), 200)}. ${PROVIDER_REFUSAL_ADVICE}` };
   const message = detail && cause !== "budget" && cause !== "cancelled" ? `${LABEL[cause]}: ${detail}` : LABEL[cause];
   return { cause, transient: TRANSIENT.has(cause), message: shorten(message, MAX_MESSAGE + 60) };
+}
+
+/** For `findings verify` and `findings fix`: the full refusal message when this thread error is a provider refusal, else the error as it is. */
+export function threadErrorText(error: string | undefined): string | undefined {
+  const failure = error ? classifyFailure(error) : undefined;
+  return failure?.cause === "provider_refusal" ? failure.message : error;
 }

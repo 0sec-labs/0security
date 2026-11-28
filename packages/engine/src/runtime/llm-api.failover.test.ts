@@ -101,7 +101,7 @@ function expectToolUse(result: NativeRuntimeResult) {
   expect(result.content).toEqual([{ type: "tool_use", id: "call_fixture", name: "inspect", input: { path: "README.md" } }]);
 }
 
-describe("executeNative policy-refusal failover", () => {
+describe("executeNative provider refusal (terminal, no failover)", () => {
   let fetchMock: ReturnType<typeof vi.fn<typeof fetch>>;
   beforeEach(() => {
     vi.stubEnv("ZERO_LLM_STREAM_MAX_ATTEMPTS", "1");
@@ -121,93 +121,37 @@ describe("executeNative policy-refusal failover", () => {
     return fetchMock.mock.calls.map(([input]) => String(input instanceof Request ? input.url : input));
   }
 
-  it("fails over to the next provider and completes the tool call, carrying refused usage", async () => {
+  it("does not fail over to the configured fallback: a refusal is terminal and names the model", async () => {
     fetchMock.mockResolvedValueOnce(new Response(primaryRefusal, { headers: { "content-type": "text/event-stream" } }));
-    fetchMock.mockResolvedValueOnce(new Response(fallbackCompletion, { headers: { "content-type": "text/event-stream" } }));
-
     const runtime = new LlmApiRuntime({ type: "api", timeout: 1000, ...failoverConfig });
     const result = await runtime.executeNative("Inspect the synthetic workspace.", structuredClone(messages), []);
 
-    expect(urlsCalled()).toEqual([
-      expect.stringContaining("api.openai.com"),
-      expect.stringContaining("api.deepseek.com"),
-    ]);
-    expectToolUse(result);
-    // Refused primary tokens (21/4) must not vanish: final usage sums both legs.
-    expect(result.usage).toEqual({ inputTokens: 26, outputTokens: 6 });
-  });
-
-  it("keeps the refusal terminal and usage unchanged when no fallback chain is configured", async () => {
-    fetchMock.mockResolvedValueOnce(new Response(primaryRefusal, { headers: { "content-type": "text/event-stream" } }));
-    const { env: _, ...noFallback } = failoverConfig;
-    const runtime = new LlmApiRuntime({
-      type: "api",
-      timeout: 1000,
-      ...noFallback,
-      env: { OPENAI_API_KEY: "fixture-primary", OPENAI_WIRE_API: "responses", ZERO_LLM_STREAM_MAX_ATTEMPTS: "1", ZERO_SUPPRESS_PROVIDER_STARTUP_LOG: "1" },
-    });
-    const result = await runtime.executeNative("Inspect the synthetic workspace.", structuredClone(messages), []);
-
-    expect(fetchMock).toHaveBeenCalledOnce();
+    // Only the primary is called: the deepseek fallback would be a different model running the scan unannounced.
+    expect(urlsCalled()).toEqual([expect.stringContaining("api.openai.com")]);
     expect(result.stopReason).toBe("error");
+    expect(result.error).toMatch(/^Provider refusal: .*gpt-fixture/);
     expect(result.error).toContain("cyber_policy");
-    expect(result.error).toContain("Responses terminal failure");
+    expect(result.refusal).toMatchObject({ model: "gpt-fixture", signal: "openai_cyber_policy" });
     expect(result.usage).toEqual({ inputTokens: 21, outputTokens: 4 });
   });
 
-  it("skips chain entries whose credentials are absent and keeps the refusal terminal", async () => {
-    fetchMock.mockResolvedValueOnce(new Response(primaryRefusal, { headers: { "content-type": "text/event-stream" } }));
-    const { env: _, ...withChain } = failoverConfig;
-    const runtime = new LlmApiRuntime({
-      type: "api",
-      timeout: 1000,
-      ...withChain,
-      // Chain names deepseek but DEEPSEEK_API_KEY is blanked (config env
-      // overrides the ambient shell) → entry must be skipped.
-      env: { OPENAI_API_KEY: "fixture-primary", OPENAI_WIRE_API: "responses", DEEPSEEK_API_KEY: "", ZERO_LLM_FALLBACK: "deepseek:deepseek-v4-flash", ZERO_LLM_STREAM_MAX_ATTEMPTS: "1", ZERO_SUPPRESS_PROVIDER_STARTUP_LOG: "1" },
-    });
+  it("does not retry a refusal even when empty-stream retries are allowed", async () => {
+    vi.stubEnv("ZERO_LLM_STREAM_MAX_ATTEMPTS", "3");
+    fetchMock.mockResolvedValue(new Response(primaryRefusal, { headers: { "content-type": "text/event-stream" } }));
+    const runtime = new LlmApiRuntime({ type: "api", timeout: 1000, ...failoverConfig, env: { ...failoverConfig.env, ZERO_LLM_STREAM_MAX_ATTEMPTS: "3" } });
     const result = await runtime.executeNative("Inspect the synthetic workspace.", structuredClone(messages), []);
-
     expect(fetchMock).toHaveBeenCalledOnce();
-    expect(result.stopReason).toBe("error");
-    expect(result.error).toContain("cyber_policy");
+    expect(result.refusal).toBeDefined();
   });
 
-  it("merges usage from every refused leg and surfaces the last refusal when the chain exhausts", async () => {
-    // Primary refuses, fallback also refuses (second refusal, different usage).
-    fetchMock.mockResolvedValueOnce(new Response(primaryRefusal, { headers: { "content-type": "text/event-stream" } }));
-    fetchMock.mockResolvedValueOnce(new Response(sse([
-      {
-        type: "response.failed",
-        response: {
-          status: "failed",
-          usage: { input_tokens: 7, output_tokens: 1 },
-          error: { code: "cyber_policy", type: "refusal", message: "policy block" },
-        },
-      },
-    ]), { headers: { "content-type": "text/event-stream" } }));
-
-    const runtime = new LlmApiRuntime({ type: "api", timeout: 1000, ...failoverConfig });
+  it("recognises the OpenAI API 400 'flagged for possible cybersecurity risk' as a refusal", async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: "This request has been flagged for possible cybersecurity risk. If you are doing legitimate security work, apply for trusted access.", type: "invalid_request_error", code: "invalid_prompt" } }), { status: 400, headers: { "content-type": "application/json" } }));
+    const runtime = new LlmApiRuntime({ type: "api", timeout: 1000, ...failoverConfig, env: { ...failoverConfig.env, OPENAI_WIRE_API: "chat_completions" } });
     const result = await runtime.executeNative("Inspect the synthetic workspace.", structuredClone(messages), []);
-
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(urlsCalled()).toHaveLength(1);
     expect(result.stopReason).toBe("error");
-    expect(result.error).toContain("cyber_policy");
-    expect(result.usage).toEqual({ inputTokens: 28, outputTokens: 5 });
-  });
-
-  it("preserves refused usage when the fallback exhausts its empty-stream retries", async () => {
-    vi.stubEnv("ZERO_LLM_STREAM_MAX_ATTEMPTS", "2");
-    fetchMock.mockResolvedValueOnce(new Response(primaryRefusal, { headers: { "content-type": "text/event-stream" } }));
-    for (let attempt = 0; attempt < 2; attempt++) {
-      fetchMock.mockResolvedValueOnce(new Response("data: [DONE]\n\n", { headers: { "content-type": "text/event-stream" } }));
-    }
-    const runtime = new LlmApiRuntime({ type: "api", timeout: 1000, ...failoverConfig });
-    const result = await runtime.executeNative("Inspect the synthetic workspace.", structuredClone(messages), []);
-    expect(fetchMock).toHaveBeenCalledTimes(3);
-    expect(result.stopReason).toBe("error");
-    expect(result.error).toContain("retried 2 times");
-    expect(result.usage).toEqual({ inputTokens: 21, outputTokens: 4 });
+    expect(result.refusal?.signal).toBe("openai_flagged_cybersecurity");
+    expect(result.error).toContain("Provider refusal");
   });
 
   it("does not fail over on a non-policy terminal failure", async () => {

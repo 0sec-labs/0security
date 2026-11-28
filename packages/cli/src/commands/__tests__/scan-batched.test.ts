@@ -491,6 +491,25 @@ describe("batched scan failures", () => {
     expect(report(ceiling).coverage.retries.total).toBe(0);
   });
 
+  it("reports a refused batch as not reviewed, never retries it, and exits 1 even with --allow-partial", async () => {
+    const dir = app(20);
+    const refusal = "error:Provider refusal: chatgpt-codex, model gpt-6.1-sol declined the request (error code cyber_policy on a failed response). cyber_policy: request refused";
+    const h = harness("x", n => (n === 2 ? refusal : "ok"));
+    await runScan(dir, opts(join(temp(), "db.sqlite"), { allowPartial: true }), h.deps);
+    expect(h.created).toHaveLength(4);
+    const json = report(h);
+    expect(json.failure.cause).toBe("provider_refusal");
+    expect(json.failure.message).toContain("gpt-6.1-sol");
+    expect(json.coverage.retries.total).toBe(0);
+    expect(json.coverage.refusedBatches).toBe(1);
+    expect(json.coverage.complete).toBe(false);
+    expect(json.coverage.statement).toContain("refused by the model provider and not reviewed");
+    expect(json.coverage.statement).toContain("not that the code is clean");
+    expect(json.coverage.pendingUnits[0].reason).toBe("refused by the model provider");
+    expect(process.exitCode).toBe(1);
+    process.exitCode = undefined;
+  });
+
   it("rejects a bad --retries or --batch-timeout", async () => {
     for (const extra of [{ retries: "-1" }, { retries: "9" }, { retries: "1.5" }, { batchTimeout: "0" }, { batchTimeout: "soon" }]) {
       const h = harness("x");

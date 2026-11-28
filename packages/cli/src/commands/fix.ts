@@ -21,6 +21,7 @@ import { osecDB, resolveOsecDbPath } from "@0/engine/storage";
 import { consoleTransportOptions, type ConsoleClient, type ConsoleTransportOptions } from "../console-client.js";
 import { VariantBudget, defaultVariantStore, DEFAULT_VARIANT_BUDGET_USD, huntVariants, rescanSummary, rescanVariants, type VariantParent, type VariantStore } from "./variants.js";
 import { connect, DEFAULT_SCAN_MODEL, scanModelField, scanModelLabel, defaultScanDeps, waitForThread, type ScanDeps } from "./scan.js";
+import { threadErrorText } from "../scan-failure.js";
 import { resolveFindingId, shortFindingId } from "../finding-id.js";
 import type { Host } from "../host/index.js";
 import { selectFixHost } from "../host/fix-host.js";
@@ -328,7 +329,7 @@ async function runFixFlow(id: string, options: FixOptions, deps: FixDeps): Promi
     const status = (await deps.git(tree, ["status", "--porcelain", "--untracked-files=all"])).trim();
     const common = { ...outcomeBase, ...(thread.id ? { threadId: thread.id } : {}), ...(thread.costUsd !== undefined ? { costUsd: thread.costUsd } : {}), ...(thread.tokens !== undefined ? { tokens: thread.tokens } : {}), ...(thread.budgetExhausted ? { budgetExhausted: true } : {}), ...(thread.timedOut ? { timedOut: true } : {}), ...(thread.reply ? { summary: thread.reply } : {}) };
     if (!status) {
-      deps.err(thread.error ?? "The thread made no change; no pull request was opened.");
+      deps.err(threadErrorText(thread.error) ?? "The thread made no change; no pull request was opened.");
       const advisory = thread.failed || thread.timedOut || thread.budgetExhausted || !isJavaDependencyFinding(finding) ? undefined : javaAdvisoryNote(finding, direct.applied ? "" : direct.reason);
       const unchanged: FixOutcome = { ...common, changed: false, committed: false, checks: [], verified: false, ...(advisory ? { advisory } : {}) };
       await remember(unchanged);

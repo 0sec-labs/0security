@@ -98,6 +98,17 @@ describe("retrying a failed batch", () => {
     expect(retryDelayMs(10, () => 1)).toBe(30_000);
   });
 
+  it("never retries a provider refusal and lists its units as refused, not as a stop reason", async () => {
+    const { port, marks } = ledger();
+    const refusal: BatchOutcome = { ...permanent(), failure: { cause: "provider_refusal", transient: false, message: "The model provider refused the request" } };
+    let calls = 0;
+    const result = await runBatches({ ...common, batches: batches(1), ledger: port, budgetUsd: 10, retries: 3, run: async () => { calls++; return refusal; } });
+    expect(isRetryable(refusal)).toBe(false);
+    expect(calls).toBe(1);
+    expect(marks).toEqual([[expect.any(Array), "pending", "refused by the model provider"]]);
+    expect(result.failures).toEqual([{ batch: 1, cause: "provider_refusal", message: "The model provider refused the request" }]);
+  });
+
   it("only retries a failure that is transient", () => {
     expect(isRetryable(transient())).toBe(true);
     expect(isRetryable(permanent())).toBe(false);

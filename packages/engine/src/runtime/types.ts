@@ -223,6 +223,8 @@ export interface NativeRuntimeResult {
   usageByModel?: ModelTokenUsage[];
   durationMs: number;
   error?: string;
+  /** Set when the provider refused the request (policy or safety block): terminal, never retried, never failed over. */
+  refusal?: { provider: string; model: string; signal: string; source: string };
   /** Timeout classification for adapters; operator cancellation never sets this. */
   timedOut?: boolean;
   /**
