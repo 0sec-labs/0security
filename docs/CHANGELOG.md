@@ -12,6 +12,10 @@ on the GitHub Release tag.
 
 ## [Unreleased]
 
+### Documentation
+
+- Findings guide: a "Scan, then verify" section explains `findings import` plus `findings verify` as a triage layer over any scanner, with the OWASP Benchmark results reported in #775 and their limits.
+
 ### Changed
 
 - The models page now says which credentials are meant for production and shared use (API keys, Bedrock through the AWS credential chain, an OpenAI-compatible gateway, Azure OpenAI with Entra ID), that consumer or per-seat subscription logins are for individual local use and may be restricted by the provider's terms, and links each provider's own terms.

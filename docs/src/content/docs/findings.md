@@ -611,6 +611,35 @@ With `--apply`, critical and high findings are never suppressed: a person decide
 
 A re-run skips findings that already have a verdict. Add `--force` to check them again. The model can be wrong in both directions, so read the reasoning in `0security findings show` before you rely on a verdict. See [findings verify](/commands/#findings-verify) for budgets and stop rules.
 
+## Scan, then verify
+
+You can use `0security findings verify` as a triage layer on top of any scanner. Take the leads from a scanner, let a fresh thread re-check each one against the code, and keep the ones it calls true-positive or uncertain.
+
+```bash
+0security findings import ./codeql.sarif --tool CodeQL
+0security findings verify --tool CodeQL --folder ~/code/app
+```
+
+The leads can come from `0security scan`, from a SARIF 2.1.0 file of CodeQL, Semgrep, SonarQube or another scanner through [`findings import`](#import-findings-from-another-scanner), or from GitHub alerts with `findings import --github`. `--tool` limits the run to one scanner's findings, and `--budget` caps the spend. Read the verdicts in `0security findings list` and `0security findings show`. Verdicts are advice: no status changes unless you add `--apply`, and even then critical and high findings are never suppressed (see [Check findings for false positives](#check-findings-for-false-positives)). Drop what is called false-positive after you have read its reasoning. Keep true-positive and uncertain.
+
+### What was measured
+
+The measurements below are from issue #775 and were not re-run for this page. The benchmark logs in `docs/design/benchmark.md` record a smaller, earlier run (66 OWASP Benchmark cases, 15 real findings verified: none called false-positive, 11 true-positive, 3 uncertain; 2 noise findings, both uncertain), and that run is too small to show a precision gain.
+
+Reported in #775, on the OWASP Benchmark for Java:
+
+- CodeQL leads: 0.592 before verification, 0.822 after. After comments and literal cues were removed from the test files, about 0.75 to 0.77.
+- Leads from the scanner shipped with 0security: 0.763 before, 0.862 after; 0.836 with the cues removed.
+- SonarQube Community leads gained precision but no recall (recall 0.37).
+- Cost: roughly a tenth of a cent per verified finding. Speed: about 10 findings a minute at concurrency 2, on a loaded machine.
+
+### Limits
+
+- The OWASP Benchmark is synthetic. Its test cases are small programs written to exercise one weakness each, and the scores say little about how a real codebase will behave.
+- Verification only re-checks leads. It cannot add a bug the scanner missed, so recall can only stay the same or fall.
+- A few real findings are wrongly dropped. The verifier can also be wrong the other way and confirm a lead that is not a bug. That is why uncertain stays in the list, and why a person, or a stricter rule such as the `--apply` requirement for a cited control, decides the rest.
+- Cost and speed depend on the model, the code and the load on the machine.
+
 ## Fix a finding
 
 0 fixes a finding in a separate git work tree, so your checkout is never touched. It runs your checks, commits on a branch named `0/fix-<id>` and opens a pull request. The pull request is a draft when a check fails or when you gave no `--test`. A draft means the change is not verified. Add `--ready` to open it ready for review without checks. The command exits 0 when a change was committed and no check failed, so with no `--test` exit code 0 does not mean the change was checked.
