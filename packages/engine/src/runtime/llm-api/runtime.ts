@@ -13,7 +13,7 @@ import { resolveWorkbenchProviderProxy } from "../workbench-provider-proxy.js";
 import { completionTokenLimit, isWireBlockArray, parseResponsesFunctionCall, readChatUsage, readGoogleUsage, readResponsesCachedTokens, readResponsesUsage, safeParseJson } from "./usage-parsing.js";
 import { appendNativeTrace, logProviderStartup } from "./startup-log.js";
 import { modelFetch } from "./transport.js";
-import { OperatorAbortError, QuotaExhaustedError, classifyTransportFailure, composeCallAbort, delayWithAbort, isPolicyRefusalResult, isRetryableHttpStatus, llm429MaxRetries, llm429MaxRetryWaitMs, llmMaxRetries, llmMaxRetryWaitMs, llmStreamEventIdleTimeoutMs, llmStreamIdleTimeoutMs, llmStreamMaxAttempts, mergeRuntimeUsage, parseRetryAfterMs, parseUsageLimitReached, retryAfterMsFromHeaders, retryBackoffMs, retryNoticeFor, notifyRetry, withRetryListener, shouldRetryNativeStream, sleepWithAbort, streamRetryBackoffMs, type CallAbort, unknownTransportOutcome } from "./retry.js";
+import { OperatorAbortError, QuotaExhaustedError, classifyTransportFailure, composeCallAbort, delayWithAbort, isPolicyRefusalResult, isRetryableHttpStatus, llm429MaxRetries, llm429MaxRetryWaitMs, llmMaxRetries, llmMaxRetryWaitMs, llmStreamEventIdleTimeoutMs, llmStreamIdleTimeoutMs, llmStreamMaxAttempts, mergeRuntimeUsage, noteRateLimitCooldown, parseRetryAfterMs, parseUsageLimitReached, retryAfterMsFromHeaders, retryBackoffMs, retryNoticeFor, notifyRetry, withRetryListener, shouldRetryNativeStream, sleepWithAbort, streamRetryBackoffMs, waitForRateLimitCooldown, type CallAbort, unknownTransportOutcome } from "./retry.js";
 import { CODEX_API_ENDPOINT, CODEX_PROTOCOL_HEADERS, FREE_OPENROUTER_MODEL, PROCESS_SESSION_ID, defaultReasoningEffort, normalizeModelForProvider, openAICompatibleWireApi, opencodeWireApiForModel, type ApiProvider, type WireApi, zaiThinkingBudget } from "./provider-config.js";
 import { getFallbackChain, resolveFailoverProvider, type ApiProviderConnection, type FallbackEntry } from "./fallback.js";
 import { readChatGptCodexAuthFile, readChatGptCodexEnv, refreshChatGptCodexAuthState, resolveChatGptCodexAuthState, type ChatGptCodexAuthState } from "./codex-auth.js";
@@ -1340,6 +1340,9 @@ export class LlmApiRuntime implements Runtime, NativeRuntime {
       // refresh never gets a request issued for it. `abort` is undefined for
       // every caller that passes no operator signal, making this a no-op.
       abort?.throwIfCancelled();
+      // A 429 any request of this process got holds every other request back too: they share one quota.
+      await waitForRateLimitCooldown(this.providerLabel, signal);
+      abort?.throwIfCancelled();
       if (this.siwcConnection) {
         this.siwcModels ??= listSiwcModels(this.siwcConnection, fetch, signal).then(models => new Set(models.map(model => model.slug)));
         try {
@@ -1505,6 +1508,7 @@ export class LlmApiRuntime implements Runtime, NativeRuntime {
           // best-effort — a mocked/streamed body may not expose text()
         }
       }
+      if (is429) noteRateLimitCooldown(this.providerLabel, delay);
       notifyRetry(retryNoticeFor(res.status, delay, attempt + 1, maxRetries));
       appendNativeTrace({
         kind: "retry",
