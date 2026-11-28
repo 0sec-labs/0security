@@ -43,6 +43,7 @@ export const ALLOWED_BRIDGES = [
   "packages/cli/src/enterprise-bridge.test.ts", // checks the real module trusts only its compiled-in keys
   "packages/cli/src/findings-server-bridge.ts", // the shared findings server: ingest, write keys, org dashboard
   "packages/cli/src/ha-bridge.ts", // high availability: the shared database for server replicas
+  "packages/cli/src/commands/__tests__/redteam-generate.test.ts", // test only: mocks the license loader to check the brain audience rule with throwaway keys
 ];
 
 /** The only environment variables the license code reads, plus the unrelated no-egress switch. */
