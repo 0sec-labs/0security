@@ -1,3 +1,4 @@
+import { enterpriseMode } from "../policy/enterprise.js";
 import { hasKnownPricing, modelNormalizationStages, normalizeModel, registerModelPricing, type ModelRates } from "./pricing.js";
 
 /**
@@ -96,7 +97,8 @@ async function fetchCatalog(impl: PricingDiscoveryFetch): Promise<Map<string, Mo
  * add a shared -> telemetry edge to the engine directory cycle. Keep in sync.
  */
 function networkOptedOut(env: NodeJS.ProcessEnv = process.env): boolean {
-  return ["ZERO_OFFLINE", "DO_NOT_TRACK", "ZERO_NO_EGRESS", "ZERO_ENTERPRISE"].some(name => {
+  if (enterpriseMode(env)) return true;
+  return ["ZERO_OFFLINE", "DO_NOT_TRACK"].some(name => {
     const v = env[name]?.trim().toLowerCase();
     return v !== undefined && v !== "" && v !== "0" && v !== "false" && v !== "no";
   });
@@ -109,10 +111,10 @@ export async function discoverAndRegisterPricing(model: string, fetchImpl?: Pric
   try {
     if (!model || hasKnownPricing(model)) return;
     // The public OpenRouter catalog is a third-party lookup. With an opt-out
-    // set (ZERO_OFFLINE, DO_NOT_TRACK) nothing may leave
-    // for it, so an enterprise gateway sees the only outbound model traffic.
-    // An injected fetch is a caller's own transport and is not gated.
-    if (!isFetch(fetchImpl) && !configuredFetch && networkOptedOut()) return;
+    // set (ZERO_NO_EGRESS, ZERO_ENTERPRISE, ZERO_OFFLINE, DO_NOT_TRACK) nothing may
+    // leave for it, so an enterprise gateway sees the only outbound model traffic.
+    // The guard sits before the fetch whoever supplies it (injected or configured).
+    if (networkOptedOut()) return;
     const impl = isFetch(fetchImpl) ? fetchImpl : configuredFetch ?? globalThis.fetch;
     const catalog = await loadCatalog(impl);
     let rates: ModelRates | undefined;

@@ -96,4 +96,27 @@ describe("OpenRouter pricing discovery", () => {
     await discoverAndRegisterPricing("openrouter/acme-labs/novel-93");
     expect(getRates("openrouter/acme-labs/novel-93")).toEqual(CONVERTED_RATES());
   });
+  describe.each(["ZERO_NO_EGRESS", "ZERO_ENTERPRISE", "DO_NOT_TRACK", "ZERO_OFFLINE"])("with %s set", name => {
+    afterEach(() => vi.unstubAllEnvs());
+
+    it("never calls an injected or configured fetch", async () => {
+      vi.stubEnv(name, "1");
+      const injected = catalogFetch("acme-labs/novel-81");
+      await discoverAndRegisterPricing("openrouter/acme-labs/novel-81", injected);
+      const configured = catalogFetch("acme-labs/novel-82");
+      setPricingDiscoveryFetch(configured);
+      await discoverAndRegisterPricing("openrouter/acme-labs/novel-82");
+      expect(injected).not.toHaveBeenCalled();
+      expect(configured).not.toHaveBeenCalled();
+      expect(hasKnownPricing("openrouter/acme-labs/novel-81")).toBe(false);
+    });
+
+    it("still fetches when the switch is explicitly off", async () => {
+      for (const other of ["ZERO_NO_EGRESS", "ZERO_ENTERPRISE", "DO_NOT_TRACK", "ZERO_OFFLINE"]) vi.stubEnv(other, "");
+      vi.stubEnv(name, "0");
+      const injected = catalogFetch(`acme-labs/novel-83-${name.toLowerCase()}`);
+      await discoverAndRegisterPricing(`openrouter/acme-labs/novel-83-${name.toLowerCase()}`, injected);
+      expect(injected).toHaveBeenCalledTimes(1);
+    });
+  });
 });
