@@ -155,3 +155,162 @@ fn weak_random_skips_test_sources_seeded_and_foreign_random() {
         assert_eq!(count(&f, "hygiene/java-weak-random"), 0, "{name}: {f:?}");
     }
 }
+
+fn lines(findings: &std::collections::BTreeMap<String, Vec<u64>>, rule: &str) -> Vec<u64> {
+    let mut v = findings.get(rule).cloned().unwrap_or_default();
+    v.sort_unstable();
+    v
+}
+
+#[test]
+fn injection_rules_flag_every_vulnerable_sink() {
+    let f = scan("vulnerable_java_injection.java");
+    assert_eq!(count(&f, "java/taint-path-traversal"), 12, "{f:?}");
+    assert_eq!(count(&f, "java/taint-command-injection"), 5, "{f:?}");
+    assert_eq!(count(&f, "java/taint-sql-injection"), 7, "{f:?}");
+    assert_eq!(count(&f, "java/taint-ldap-injection"), 2, "{f:?}");
+    assert_eq!(count(&f, "java/taint-xpath-injection"), 2, "{f:?}");
+    assert_eq!(count(&f, "java/taint-argument-injection"), 3, "{f:?}");
+}
+
+#[test]
+fn injection_rules_ignore_constants_parameters_and_shell_free_commands() {
+    let f = scan("safe_java_injection.java");
+    for rule in [
+        "java/taint-path-traversal",
+        "java/taint-command-injection",
+        "java/taint-sql-injection",
+        "java/taint-ldap-injection",
+        "java/taint-xpath-injection",
+        "java/taint-argument-injection",
+    ] {
+        assert_eq!(lines(&f, rule), Vec::<u64>::new(), "{rule}: {f:?}");
+    }
+}
+
+#[test]
+fn upper_snake_parameters_are_request_data_but_static_final_constants_are_not() {
+    let f = scan("vulnerable_java_upper_snake.java");
+    // Spring handler, loop variable, helper parameter and shadowed constant.
+    assert_eq!(
+        lines(&f, "java/no-command-injection"),
+        vec![17, 24, 29, 34],
+        "{f:?}"
+    );
+    assert_eq!(
+        lines(&f, "java/taint-command-injection"),
+        vec![17, 24, 34],
+        "{f:?}"
+    );
+    let f = scan("safe_java_upper_snake.java");
+    assert_eq!(
+        lines(&f, "java/no-command-injection"),
+        Vec::<u64>::new(),
+        "{f:?}"
+    );
+    assert_eq!(
+        lines(&f, "java/taint-command-injection"),
+        Vec::<u64>::new(),
+        "{f:?}"
+    );
+}
+
+#[test]
+fn project_helper_in_another_file_is_not_assumed_safe_but_same_file_helper_is_read() {
+    let output = Command::new(env!("CARGO_BIN_EXE_foxguard"))
+        .args(["--config", "/dev/null", "-f", "json"])
+        .arg(fixture("java_cross_file_helper"))
+        .output()
+        .expect("failed to execute foxguard");
+    let report: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("scan output should be JSON");
+    let hits: Vec<(String, u64)> = report["findings"]
+        .as_array()
+        .expect("findings array")
+        .iter()
+        .filter(|f| f["rule_id"] == "java/no-command-injection")
+        .map(|f| {
+            (
+                f["file"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or_default()
+                    .to_string(),
+                f["line"].as_u64().unwrap_or(0),
+            )
+        })
+        .collect();
+    assert_eq!(
+        hits,
+        vec![
+            ("CrossFileHandler.java".to_string(), 5),
+            ("CrossFileHandler.java".to_string(), 9),
+            ("CrossFileHandler.java".to_string(), 13),
+        ],
+        "{report}"
+    );
+    let f = scan("safe_java_same_file_helper.java");
+    assert_eq!(
+        lines(&f, "java/no-command-injection"),
+        Vec::<u64>::new(),
+        "{f:?}"
+    );
+}
+
+fn project_hits(dir: &str, rule: &str) -> Vec<(String, u64)> {
+    let output = Command::new(env!("CARGO_BIN_EXE_foxguard"))
+        .args(["--config", "/dev/null", "-f", "json"])
+        .arg(fixture(dir))
+        .output()
+        .expect("failed to execute foxguard");
+    let report: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("scan output should be JSON");
+    let mut hits: Vec<(String, u64)> = report["findings"]
+        .as_array()
+        .expect("findings array")
+        .iter()
+        .filter(|f| f["rule_id"] == rule)
+        .map(|f| {
+            (
+                f["file"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or_default()
+                    .to_string(),
+                f["line"].as_u64().unwrap_or(0),
+            )
+        })
+        .collect();
+    hits.sort();
+    hits
+}
+
+#[test]
+fn constants_declared_in_other_files_are_read_but_only_when_provably_fixed() {
+    // A `static final` String with a safe initialiser, an enum constant and an
+    // interface constant, all declared in other files, no longer make a path
+    // look unknown.
+    assert_eq!(
+        project_hits(
+            "java_cross_file_constants_safe",
+            "java/taint-path-traversal"
+        ),
+        Vec::<(String, u64)>::new()
+    );
+    // A non-final field that another class assigns request data to, a final
+    // read from the environment, a blank final set in an initialiser, a
+    // constant built from one of those, a class name defined in two packages
+    // and a class that is not in the scan all stay unknown.
+    let lines: Vec<u64> = project_hits(
+        "java_cross_file_constants_vulnerable",
+        "java/taint-path-traversal",
+    )
+    .into_iter()
+    .map(|(_, line)| line)
+    .collect();
+    assert_eq!(lines, vec![23, 24, 25, 26, 27, 28]);
+}

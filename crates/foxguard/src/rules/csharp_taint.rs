@@ -1270,6 +1270,9 @@ fn classify_source_expr(node: Node<'_>, source: &str, spec: &TaintSpec) -> Optio
                 // Java-only typed-assignment sink; a sink-only matcher, never a
                 // source, and the C# engine does not match it (no-op).
             }
+            NodeMatcher::TypedReceiverCall { .. } | NodeMatcher::TypedConstructorSink { .. } => {
+                // Java-only typed sinks; the C# engine does not match them (no-op).
+            }
             NodeMatcher::LiteralString { .. } => {
                 // Ellipsis-string source `"..."`; no C# registry rule uses this
                 // source shape, so the C# engine carries it but does not seed
@@ -1424,6 +1427,8 @@ fn matcher_matches_call(matcher: &NodeMatcher, node: Node<'_>, source: &str) -> 
         | NodeMatcher::ReturnValue { .. }
         | NodeMatcher::TypedName { .. }
         | NodeMatcher::TypedAssignTarget { .. }
+        | NodeMatcher::TypedReceiverCall { .. }
+        | NodeMatcher::TypedConstructorSink { .. }
         | NodeMatcher::LooseEquality { .. }
         // PHP-only tainted class-name / subscript-key sinks — not call matchers.
         | NodeMatcher::TaintedCallee { .. }

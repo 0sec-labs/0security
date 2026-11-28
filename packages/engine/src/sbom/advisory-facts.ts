@@ -53,7 +53,8 @@ export function severityOf(record: Record<string, unknown>): { severity: Advisor
 /** A tolerant version order for npm, Cargo, PyPI, Go, Ruby, NuGet, Composer and Maven versions. Pre-release suffixes sort before the release. */
 export function compareVersions(a: string, b: string): number {
   const parse = (value: string) => {
-    const match = /^v?(?:\d+:)?(\d+(?:[._]\d+)*)(.*)$/i.exec(value.trim());
+    // `s`: without it a newline stops `(.*)$`, and the digits before it are retried in quadratic time.
+    const match = /^v?(?:\d+:)?(\d+(?:[._]\d+)*)(.*)$/is.exec(value.trim());
     if (!match) return { nums: [] as number[], rest: value.trim().toLowerCase(), pre: false };
     const rest = match[2]!.replace(/^\+.*$/, "").toLowerCase();
     return { nums: match[1]!.split(/[._]/).map(Number), rest, pre: /^[-._]?(a|b|c|rc|alpha|beta|pre|preview|dev|snapshot|m\d)/.test(rest) };
@@ -68,7 +69,7 @@ export function compareVersions(a: string, b: string): number {
 }
 
 const norm = (value: string): string => { try { return decodeURIComponent(value).toLowerCase().replace(/[._]+/g, "-"); } catch { return value.toLowerCase(); } };
-const baseOf = (purl: string): string => norm(purl.replace(/[?#].*$/, "").replace(/@[^@/]*$/, ""));
+const baseOf = (purl: string): string => norm(purl.replace(/[?#].*$/s, "").replace(/@[^@/]*$/, ""));
 
 /** The installed version in a package URL, or undefined. */
 export function purlVersion(purl: string): string | undefined {

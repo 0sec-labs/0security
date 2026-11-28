@@ -1,10 +1,10 @@
 import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
-import type { AddressInfo } from "node:net";
-import { afterEach, describe, expect, it } from "vitest";
+import { connect, type AddressInfo, type Socket } from "node:net";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { BitbucketClient, type PullRequest } from "../client.js";
 import { parseDiff } from "../diff.js";
-import { MAX_WEBHOOK_BODY, createWebhookServer, pollOnce, ReviewQueue } from "../watch.js";
+import { MAX_WEBHOOK_BODY, MAX_WEBHOOK_CONNECTIONS, createWebhookServer, pollOnce, ReviewQueue } from "../watch.js";
 import { cloudPr, startFakeBitbucket, type FakeBitbucket } from "./fake-bitbucket.js";
 
 const pr = (id: number, over: Partial<PullRequest> = {}): PullRequest => ({ platform: "bitbucket-cloud", owner: "workspace", repo: "repo", id, title: "t", draft: false, fork: false, open: true, headSha: "a".repeat(40), headBranch: "b", baseBranch: "main", ...over });
@@ -125,5 +125,56 @@ describe("webhook server", () => {
     await queue.idle();
     expect(queued).toEqual([]);
     expect(logs.join("\n")).toContain("signature did not match");
+  });
+
+  it("caps open connections and sets short timeouts, then still takes a signed delivery", async () => {
+    const { queued, queue, post } = await start("bitbucket-cloud", { owner: "workspace", repo: "repo" });
+    expect(server!.headersTimeout).toBeLessThanOrEqual(10_000);
+    expect(server!.requestTimeout).toBeGreaterThan(0);
+    expect(server!.requestTimeout).toBeLessThanOrEqual(15_000);
+    expect(MAX_WEBHOOK_CONNECTIONS * MAX_WEBHOOK_BODY).toBeLessThanOrEqual(64 * 1024 * 1024);
+    const port = (server!.address() as AddressInfo).port;
+    const open = () => new Promise<Socket>(done => { const socket = connect(port, "127.0.0.1", () => done(socket)); socket.on("error", () => undefined); });
+    const held: Socket[] = [];
+    for (let i = 0; i < MAX_WEBHOOK_CONNECTIONS; i++) held.push(await open());
+    const extra = await open();
+    const outcome = await Promise.race([new Promise(done => extra.once("close", () => done("closed"))), new Promise(done => setTimeout(() => done("still open"), 2_000))]);
+    expect(outcome).toBe("closed");
+    expect(held.some(socket => socket.destroyed)).toBe(false);
+    for (const socket of held) socket.destroy();
+    extra.destroy();
+    await new Promise(done => setTimeout(done, 100));
+    const body = sample("cloud-pullrequest-created.json");
+    expect((await post(body, { "X-Event-Key": "pullrequest:created", "X-Hub-Signature": sign(body) })).status).toBe(202);
+    await queue.idle();
+    expect(queued.map(item => item.id)).toEqual([1]);
+  });
+
+  it("cuts off an unsigned body that does not arrive within 10 seconds", async () => {
+    await start("bitbucket-cloud", { owner: "workspace", repo: "repo" });
+    const port = (server!.address() as AddressInfo).port;
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let answer: string;
+    try {
+      const socket = connect(port, "127.0.0.1");
+      socket.on("error", () => undefined);
+      const received = new Promise<string>(done => { let text = ""; socket.on("data", chunk => { text += chunk.toString(); }); socket.once("close", () => done(text)); });
+      const handled = new Promise<void>(done => server!.once("request", () => done()));
+      socket.write(`POST / HTTP/1.1\r\nHost: x\r\nContent-Length: ${MAX_WEBHOOK_BODY}\r\n\r\n${"a".repeat(1024)}`);
+      await handled;
+      await vi.advanceTimersByTimeAsync(10_001);
+      vi.useRealTimers();
+      answer = await Promise.race([received, new Promise<string>(done => setTimeout(() => { socket.destroy(); done("still open"); }, 2_000))]);
+    } finally { vi.useRealTimers(); }
+    expect(answer).toMatch(/^HTTP\/1\.1 408 /);
+  });
+
+  it("answers 429 to an address that keeps sending, before reading the body", async () => {
+    const { post } = await start("bitbucket-cloud", { owner: "workspace", repo: "repo" });
+    const body = sample("cloud-pullrequest-created.json");
+    for (let i = 0; i < 30; i++) expect((await post(body, { "X-Event-Key": "pullrequest:created", "X-Hub-Signature": sign(body, "wrong secret value here") })).status).toBe(401);
+    const limited = await post(body, { "X-Event-Key": "pullrequest:created", "X-Hub-Signature": sign(body) });
+    expect(limited.status).toBe(429);
+    expect(limited.headers.get("retry-after")).toBe("60");
   });
 });

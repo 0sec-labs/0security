@@ -1755,6 +1755,8 @@ fn match_source(
             | NodeMatcher::TypedName { .. }
             // Java-only typed-assignment sink; no-op in source position here.
             | NodeMatcher::TypedAssignTarget { .. }
+            | NodeMatcher::TypedReceiverCall { .. }
+            | NodeMatcher::TypedConstructorSink { .. }
             // PHP-only loose-equality comparison sink; no-op in the Python engine.
             | NodeMatcher::LooseEquality { .. }
             // PHP-only tainted class-name / subscript-key sinks; no-op in the
