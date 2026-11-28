@@ -219,9 +219,8 @@ describe("Skill Registry", () => {
       );
 
       const reviewSkills = listSkillSummaries({ role: "review" }, registry);
-      expect(reviewSkills.length).toBe(33);
       const reviewIds = reviewSkills.map((s) => s.id).sort();
-      expect(reviewIds).toEqual([
+      const expectedReviewIds = [
         "advisory-disclosure",
         "agent-toxic-flow",
         "artifact-scan",
@@ -257,7 +256,10 @@ describe("Skill Registry", () => {
         "variant-hunting",
         "verify-finding",
         "workflow-hardening",
-      ]);
+      ];
+      // One list is the source of truth; the count follows it.
+      expect(reviewSkills.length).toBe(expectedReviewIds.length);
+      expect(reviewIds).toEqual(expectedReviewIds);
     });
 
     it("combines tag and role filters", () => {
