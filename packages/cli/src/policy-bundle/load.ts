@@ -1,6 +1,6 @@
 import { existsSync, lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
-import { assertEgressAllowed, fetchScoped } from "@0/engine";
+import { assertEgressAllowed, fetchScoped, isPrivateAddress } from "@0/engine";
 import { acceptPolicyBundle } from "./state.js";
 import { MAX_BUNDLE_BYTES, PolicyBundleError, parseTrustedKey, verifyPolicyBundle, type TrustedKey } from "./verify.js";
 
@@ -52,12 +52,19 @@ export function configuredKeys(inline: readonly string[] | undefined, files: rea
 /** A fixed public base: the destination the user gave must never become the trusted local origin, so loopback and private addresses stay blocked. */
 const PUBLIC_BASE = "https://policy-bundle.example.com";
 
+/** Refuse local names and private, loopback, link-local and translated addresses. The URL parser has already turned decimal, hex and octal hosts into dotted form; the engine helper handles mapped, compatible, NAT64 and 6to4 forms. */
+export function assertPublicBundleUrl(url: URL): void {
+  const host = url.hostname.toLowerCase().replace(/\.+$/, "");
+  if (host === "localhost" || host.endsWith(".localhost") || isPrivateAddress(host)) throw new PolicyBundleError(`Policy bundle URL points at a local or private address: ${url.hostname}`);
+}
+
 async function readSource(source: string, env: NodeJS.ProcessEnv): Promise<string> {
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(source)) {
     let url: URL;
     try { url = new URL(source); } catch { throw new PolicyBundleError("Policy bundle URL is not valid."); }
     if (url.protocol !== "https:") throw new PolicyBundleError("Policy bundle URLs must use https.");
     assertEgressAllowed(url.host, env);
+    assertPublicBundleUrl(url);
     try {
       const res = await fetchScoped(url.href, { method: "GET", headers: { accept: "application/json" } }, { baseUrl: PUBLIC_BASE, allowPublicNetwork: true, maxResponseBytes: MAX_BUNDLE_BYTES, timeoutMs: 15_000, maxRedirects: 0, validateUrl: u => { if (!u.startsWith("https://")) throw new Error("https only"); } });
       if (!res.ok) throw new PolicyBundleError(`Policy bundle fetch failed with HTTP ${res.status}.`);

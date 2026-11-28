@@ -1,9 +1,10 @@
 import { generateKeyPairSync, sign, type KeyObject } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, utimesSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { assertPublicBundleUrl } from "./load.js";
 import { acceptPolicyBundle, configuredKeys, loadPolicyBundle, parseTrustedKey, policyBundleStatePath, verifyPolicyBundle, BUNDLE_FORMAT, signedBytes } from "./index.js";
 
 const pair = () => generateKeyPairSync("ed25519");
@@ -181,5 +182,45 @@ describe("bundle fetch destination", () => {
       await expect(loadPolicyBundle({ policyBundle: url, policyBundleKey: [key] }, tmpdir(), {})).rejects.toThrow(/blocked|Local|internal/i);
     }
     await expect(loadPolicyBundle({ policyBundle: "http://127.0.0.1/b.json", policyBundleKey: [key] }, tmpdir(), {})).rejects.toThrow(/https/);
+  });
+});
+
+describe("bundle URL guard spellings", () => {
+  const refused = [
+    "https://127.0.0.1/b", "https://localhost/b", "https://sub.localhost/b", "https://[::1]/b", "https://10.0.0.5/b", "https://192.168.1.1/b", "https://169.254.169.254/b",
+    "https://[::ffff:127.0.0.1]/b", "https://[::ffff:7f00:1]/b", "https://[::ffff:10.0.0.5]/b", "https://[::127.0.0.1]/b", "https://[::7f00:1]/b",
+    "https://[64:ff9b::7f00:1]/b", "https://[2002:7f00:1::]/b", "https://[2002:a00:5::1]/b", "https://2130706433/b", "https://0x7f000001/b", "https://0177.0.0.1/b", "https://127.1/b", "https://[fd00::1]/b",
+  ];
+  for (const u of refused) it(`refuses ${u}`, () => { expect(() => assertPublicBundleUrl(new URL(u))).toThrow(/private|local|internal/i); });
+  it("accepts a public https host", () => { expect(() => assertPublicBundleUrl(new URL("https://policy.example.com/b.json"))).not.toThrow(); expect(() => assertPublicBundleUrl(new URL("https://8.8.8.8/b"))).not.toThrow(); });
+});
+
+describe("stale lock recovery", () => {
+  let dir: string;
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), "pbl-")); });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+  it("many parallel processes with an artificially stale lock end at the highest version", async () => {
+    const { spawn } = await import("node:child_process");
+    for (let round = 0; round < 3; round++) {
+      const home = mkdtempSync(join(dir, "h-"));
+      acceptPolicyBundle({ keyId: "k1", version: 1, digest: "d1", policyText: "{}" }, home);
+      const lock = `${policyBundleStatePath(home)}.lock`;
+      writeFileSync(lock, "");
+      const old = new Date(Date.now() - 120_000); utimesSync(lock, old, old);
+      const script = fileURLToPath(new URL("./state.ts", import.meta.url));
+      const versions = [9, 4, 7, 2, 8, 3, 6, 5, 10, 1, 4, 9];
+      await Promise.all(versions.map(v => new Promise<void>(res => {
+        const c = spawn(process.execPath, ["--import", "tsx", "-e", `import("${script}").then(m => { try { m.acceptPolicyBundle({ keyId: "k1", version: ${v}, digest: "d${v}", policyText: "{}" }, ${JSON.stringify(home)}); } catch {} })`], { stdio: "ignore", cwd: process.cwd() });
+        c.on("exit", () => res());
+      })));
+      expect(JSON.parse(readFileSync(policyBundleStatePath(home), "utf8")).k1.version).toBe(10);
+    }
+  }, 120_000);
+  it("never lowers the floor even if the lock is bypassed", () => {
+    const home = mkdtempSync(join(dir, "h-"));
+    acceptPolicyBundle({ keyId: "k1", version: 8, digest: "d8", policyText: "{}" }, home);
+    // Simulate a racer that read before 8 landed: force-write through the same path with a stale in-memory view.
+    expect(() => acceptPolicyBundle({ keyId: "k1", version: 3, digest: "d3", policyText: "{}" }, home)).toThrow(/replay/);
+    expect(JSON.parse(readFileSync(policyBundleStatePath(home), "utf8")).k1.version).toBe(8);
   });
 });
