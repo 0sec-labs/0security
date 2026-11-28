@@ -209,6 +209,7 @@ export default defineConfig({
             { label: "Use 0 from Claude Code or Codex", slug: "agents" },
             { label: "Browsers and 0security", slug: "browsers" },
             { label: "Findings", slug: "findings" },
+            { label: "Compare tools on one repository", slug: "compare-tools" },
             { label: "Dependency audit", slug: "dependency-audit" },
             { label: "AI security", slug: "ai-security" },
             { label: "Threat model and policies", slug: "threat-model-and-policy" },
