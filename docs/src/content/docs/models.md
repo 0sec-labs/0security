@@ -46,6 +46,26 @@ Check what 0 found:
 
 It prints the CLI version, runtime and Node.js check, then the status of each API provider: `configured`, `bad` (found but unusable, with the reason) or `missing`. It also lists any `claude`, `codex` and `gemini` CLIs on your `PATH`. A provider marked configured has a key, but 0 does not test it until the first request.
 
+## Which credentials to use
+
+For production and shared use, such as a team, CI or a service, use credentials issued for that purpose:
+
+- A provider API key, such as `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`.
+- Amazon Bedrock through the AWS credential chain ([details](#amazon-bedrock)).
+- An OpenAI-compatible gateway such as LiteLLM ([details](#enterprise-gateway-bedrock-through-litellm)).
+- Azure OpenAI with Entra ID ([details](#azure-openai-with-entra-id)).
+
+Consumer or per-seat subscription logins are for individual local use only. This includes `codex login` and the other sign-in flows that use a personal or per-seat plan, such as [ChatGPT Codex](#chatgpt-codex). A provider's terms may restrict that use. Do not put such a login on a shared machine, in CI or behind a service. A company subscription does not replace API credentials.
+
+Read the provider's own terms for what your account allows:
+
+- Anthropic: [legal terms and policies](https://www.anthropic.com/legal)
+- OpenAI: [policies](https://openai.com/policies)
+- Amazon Bedrock: [AWS Service Terms](https://aws.amazon.com/service-terms/)
+- Azure OpenAI: [Microsoft legal terms](https://azure.microsoft.com/support/legal/)
+
+For a gateway, read the terms of the provider behind it. This page does not interpret any of these terms.
+
 ## Choose a model
 
 In the browser, the model picker in a thread changes that thread's model while it is idle. **Settings → Models → Default model** sets the default for new threads.
