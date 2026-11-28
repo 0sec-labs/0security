@@ -279,6 +279,51 @@ describe("rescan of variants after a fix", () => {
     withDb(db => expect(db.listVariantsOf(parentId).every(v => v.status === "discovered")).toBe(true));
   });
 
+  describe("the repeat of a batch that held no verdict", () => {
+    /** A model that never answers with a verdict, and reports what each session was allowed to spend. */
+    function silentModel(usage: Record<string, unknown>) {
+      const ceilings: number[] = [];
+      const replies = new Map<string, string>();
+      let threads = 0;
+      const client = { request: async (method: string, path: string, body?: { text?: string; costCeilingUsd?: number }) => {
+        const id = path.split("/")[4]!;
+        if (method === "POST" && path.endsWith("/sessions")) { threads++; ceilings.push(Number(body!.costCeilingUsd)); return { session: { id: `t${threads}` } }; }
+        if (method === "PATCH") return {};
+        if (method === "POST" && path.endsWith("/messages")) { replies.set(id, "I could not decide."); return {}; }
+        if (method === "GET") return { snapshot: { session: { status: "ready" }, messages: [{ role: "assistant", content: [{ type: "text", text: replies.get(id) ?? "" }] }], lastOutcome: {}, usage } };
+        return {};
+      } };
+      return { client, ceilings };
+    }
+    const oneCandidate = { candidates: [{ id: "c1", file: "src/orders.ts", line: 2, why: "builds a query from id" }], total: 1, omitted: 0, engine: "stub", strategy: "stub", notes: [] };
+    async function hunt(model: ReturnType<typeof silentModel>) {
+      // A stored root cause means no derive thread, so every session below is a batch attempt.
+      await runVerify([parentId], { ...verifyOptions(), variants: false }, verifyDeps(modelClient()));
+      const deps = { ...variantDeps(modelClient()), open: async () => model.client as never, candidates: async () => oneCandidate };
+      await runVariants(parentId, variantsOptions({ budget: "1" }), deps);
+    }
+
+    it("gets only what the first attempt left of the batch's share, so the hunt cannot pass --budget", async () => {
+      const model = silentModel({ costUsd: 0.6 });
+      await hunt(model);
+      expect(model.ceilings).toHaveLength(2);
+      expect(model.ceilings[0]).toBeCloseTo(1);
+      expect(model.ceilings[1]).toBeCloseTo(0.4);
+    });
+
+    it("does not run again when the first attempt reported no cost", async () => {
+      const model = silentModel({ costUnavailable: true });
+      await hunt(model);
+      expect(model.ceilings).toEqual([1]);
+    });
+
+    it("does not run again when the first attempt used the whole share", async () => {
+      const model = silentModel({ costUsd: 1 });
+      await hunt(model);
+      expect(model.ceilings).toEqual([1]);
+    });
+  });
+
   it("refuses to hunt from a finding that is itself a variant", async () => {
     const model = modelClient();
     await runVerify([parentId], verifyOptions(), verifyDeps(model));

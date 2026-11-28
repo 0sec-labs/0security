@@ -24,6 +24,10 @@ on the GitHub Release tag.
 - The `scan` skill tells a thread to load the new `code-index` skill when it reviews routes or handlers. The default tool list is unchanged (seven tools); the four index tools appear only after `load_skill`. The scan prompt and the `finding` tool now ask for `poc_steps` on high and critical findings when a safe, shell-reproducible check exists, so `findings reproduce` and executed PoC have steps to run.
 - The variant hunt (`findings variants`, and the hunt behind `findings verify` and `findings fix`) now builds its list of sites in code before the model runs. From the recorded root cause it lists every handler, job, resolver and helper in the tree that reaches the same sink without the root cause's guard, plus the sibling APIs and operations, ranked and capped at 60 with the number left out. The model gets a numbered checklist of paths, lines, routes and reasons (no file content) and must give a verdict for each one: variant, guarded with the guard cited, not reachable, or unsure. Variants it confirms are stored as unverified findings with their checklist id. A seed with no stored root cause first gets a short thread that only states it. No new tools.
 
+### Fixed
+
+- A variant hunt that gets no verdict from a batch repeats it with only what the first attempt left of that batch's share of `--budget`, and does not repeat when the first attempt reports no cost. It could spend up to twice the batch's share before.
+
 ## [0.46.0] - 2026-11-26
 
 ### Added

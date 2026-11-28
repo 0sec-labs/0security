@@ -171,13 +171,19 @@ export async function huntVariants(client: ConsoleClient, deps: Pick<VariantDeps
   const judge = async (batch: PromptCandidate[], index: number): Promise<BatchResult> => {
     const candidates = batch.length && source ? { candidates: { items: batch, total: index === 0 ? source.total : batch.length, omitted: index === 0 ? source.omitted : 0 } } : {};
     let result: BatchResult = {};
+    // The repeat is part of the batch's share of the cap, not a second share: it gets what the first attempt left.
+    let remaining = Number(batchOptions.budget);
     // One repeat for a batch whose answer holds no verdict at all.
     for (let attempt = 0; attempt < (batch.length ? 2 : 1); attempt++) {
       try {
-        const thread = await runPromptThread(client, deps, folder, `Variants${batches.length > 1 ? ` ${index + 1}/${batches.length}` : ""}: ${parent.title}`, variantHuntPrompt(seed, { ...promptOptions, ...candidates }), batchOptions);
+        const thread = await runPromptThread(client, deps, folder, `Variants${batches.length > 1 ? ` ${index + 1}/${batches.length}` : ""}: ${parent.title}`, variantHuntPrompt(seed, { ...promptOptions, ...candidates }), { ...batchOptions, budget: String(remaining) });
         add(thread);
         result = { thread, ...(thread.reply ? { report: parseVariantReport(thread.reply, batch) } : { error: thread.error ?? "the thread returned no answer" }) };
         if (!batch.length || result.report?.dispositions.length || result.report?.variants.length) break;
+        // No cost receipt, or nothing left of the share: stop paying, as VariantBudget does.
+        if (thread.costUsd === undefined) break;
+        remaining -= thread.costUsd;
+        if (!(remaining > 0)) break;
       } catch (error) { result = { error: error instanceof Error ? error.message.split("\n")[0]! : String(error) }; }
     }
     return result;
