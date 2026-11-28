@@ -14,6 +14,7 @@ on the GitHub Release tag.
 
 ### Changed
 
+- `0security config doctor --help` now shows `config doctor` in its usage line (it showed `doctor`), and the cra-evidence page explains how to check a CycloneDX SBOM made by another tool.
 - New page "Triage findings from any scanner": `findings import` plus `findings verify` as a triage layer over any scanner, with the measured OWASP Benchmark and Vul4J results and their limits.
 - The models page now says which credentials are meant for production and shared use (API keys, Bedrock through the AWS credential chain, an OpenAI-compatible gateway, Azure OpenAI with Entra ID), that consumer or per-seat subscription logins are for individual local use and may be restricted by the provider's terms, and links each provider's own terms.
 - `0security scan --concurrency` accepts up to 8 batches (it stopped at 3), and `ZERO_SCAN_MAX_CONCURRENCY` raises the limit to 16. `--passes` keeps 3. A rate limit (429) on one request now holds back every request of the same provider in the process for the wait the provider asked for, and a batch that still fails on a rate limit pauses all workers before the next batch starts. See [Running batches in parallel](/findings/#running-batches-in-parallel).

@@ -30,6 +30,22 @@ To sign the folder with your key, see [Sign an evidence folder](/ci/#sign-an-evi
 
 The Regulation does not require a signature or an audit log. The last two rows help you show that your own records were not altered. Signing and retention of audit records are paid features. Verifying is free.
 
+## Bring your own CycloneDX SBOM
+
+`0security sbom generate` reads lockfiles. For a product it cannot read, such as a container image or an ecosystem it does not support, make the SBOM with another generator (for example syft, cdxgen or trivy) and check it with 0:
+
+```bash
+0security sbom check other-tool.cdx.json --format json -o advisories-other-tool.json
+```
+
+What the command does with that file:
+
+- It reads JSON only. It does not check `bomFormat` or `specVersion`, so a CycloneDX JSON file of any version is accepted if it has a `components` array. CycloneDX XML and SPDX files are not read.
+- It uses only each component's `purl`. A component with no `pkg:` purl, or a purl without the version in it, is skipped without a message. If no component has a purl, the command stops with an error. It looks up at most 20,000 components.
+- It looks the purls up in OSV, as for a generated SBOM. The `resolved` count at the end of the output is the number of purls it looked up, so compare it with what you expect.
+
+`findings evidence` writes `sbom.cdx.json` from your lockfiles and does not take an external SBOM. Keep the other tool's file and the `sbom check` output next to the evidence folder yourself. They are not covered by the folder's manifest or signature. See [Check an SBOM from another tool](/dependency-audit/#check-an-sbom-from-another-tool).
+
 ## What it does not show
 
 - That the code has no other weaknesses. The files hold what the scans found and nothing else.

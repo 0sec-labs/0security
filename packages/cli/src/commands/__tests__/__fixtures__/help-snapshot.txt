@@ -520,7 +520,7 @@ Options:
   -h, --help       display help for command
 
 ### 0security doctor (hidden)
-Usage: 0security doctor [options] [command]
+Usage: 0security config doctor [options] [command]
 
 Check local runtime prerequisites and suggest the next command
 
@@ -534,7 +534,7 @@ Commands:
   workbench          Set up and inspect the sandboxed execution workbench (no Docker)
 
 ### 0security doctor upgrade
-Usage: 0security doctor upgrade [options]
+Usage: 0security config doctor upgrade [options]
 
 Fetch and install the latest 0 binary (re-runs install.sh)
 
@@ -545,7 +545,7 @@ Options:
   -h, --help            display help for command
 
 ### 0security doctor workbench
-Usage: 0security doctor workbench [options] [command]
+Usage: 0security config doctor workbench [options] [command]
 
 Set up and inspect the sandboxed execution workbench (no Docker)
 
@@ -565,7 +565,7 @@ Commands:
   help [command]       display help for command
 
 ### 0security doctor workbench configure
-Usage: 0security doctor workbench configure [options]
+Usage: 0security config doctor workbench configure [options]
 
 Change saved integration grants or return workspace selection to the invocation directory
 
@@ -581,13 +581,13 @@ Options:
   -h, --help                           display help for command
 
 ### 0security doctor workbench console-agent (hidden)
-Usage: 0security doctor workbench console-agent [options]
+Usage: 0security config doctor workbench console-agent [options]
 
 Options:
   -h, --help  display help for command
 
 ### 0security doctor workbench disable
-Usage: 0security doctor workbench disable [options]
+Usage: 0security config doctor workbench disable [options]
 
 Explicitly select host-local execution; retain the approved VM image and guest state
 
@@ -595,7 +595,7 @@ Options:
   -h, --help  display help for command
 
 ### 0security doctor workbench providers
-Usage: 0security doctor workbench providers [options]
+Usage: 0security config doctor workbench providers [options]
 
 List explicit provider grant IDs; credentials are never displayed
 
@@ -603,13 +603,13 @@ Options:
   -h, --help  display help for command
 
 ### 0security doctor workbench run-agent (hidden)
-Usage: 0security doctor workbench run-agent [options]
+Usage: 0security config doctor workbench run-agent [options]
 
 Options:
   -h, --help  display help for command
 
 ### 0security doctor workbench setup
-Usage: 0security doctor workbench setup [options]
+Usage: 0security config doctor workbench setup [options]
 
 Verify/provision the signed native runtime, approve a local image, and select SmolVM execution
 
@@ -631,7 +631,7 @@ Options:
   -h, --help                           display help for command
 
 ### 0security doctor workbench status
-Usage: 0security doctor workbench status [options]
+Usage: 0security config doctor workbench status [options]
 
 Inspect configuration, provisioned runtime, image approval and retained admission; never downloads
 

@@ -74,4 +74,11 @@ describe("help snapshot", () => {
       expect(helpSnapshot(pick(program))).toBe(helpSnapshot(pick(real)));
     }
   });
+
+  it("doctor help is named as it is reached: config doctor", () => {
+    const program = eagerProgram();
+    const doctor = program.commands.find((c) => c.name() === "doctor")!;
+    expect(doctor.helpInformation()).toMatch(/^Usage: 0security config doctor /);
+    expect(doctor.commands.find((c) => c.name() === "upgrade")!.helpInformation()).toMatch(/^Usage: 0security config doctor upgrade /);
+  });
 });

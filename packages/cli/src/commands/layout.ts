@@ -218,11 +218,26 @@ function setHidden(command: Command, hidden: boolean): void {
   (command as unknown as { _hidden: boolean })._hidden = hidden;
 }
 
+/** `doctor` is registered at the top but reached as `config doctor` (see `rewriteNewForms`), so its help, and that of `upgrade` and `workbench` under it, says so in the usage line. */
+function nameAsConfigDoctor(doctor: Command): void {
+  const rename = (node: Command): void => {
+    node.configureHelp({ commandUsage: (cmd: Command) => {
+      const names: string[] = [];
+      for (let at: Command | null = cmd; at; at = at.parent) names.unshift(at.name());
+      names.splice(1, 0, "config");
+      return `${names.join(" ")} ${cmd.usage()}`.trim();
+    } });
+    for (const child of node.commands) rename(child);
+  };
+  rename(doctor);
+}
+
 /** Make `top` the 0.35 surface: its description, only the listed subcommands visible, and the new-grammar help. Everything old stays registered but hidden. */
 export function applyNewSurface(top: Command): void {
   const visible = VISIBLE_SUBCOMMANDS[top.name()];
   const description = GROUP_DESCRIPTIONS[top.name()];
   if (!visible || !description) {
+    if (top.name() === "doctor") nameAsConfigDoctor(top);
     if (TOP_LEVEL_COMMANDS.some((entry) => entry.name === top.name() && entry.hidden)) setHidden(top, true);
     // A visible command with no subcommands (`scan`) still prints its examples.
     else if (EXAMPLES[top.name()]) top.addHelpText("after", `\n${examplesBlock(EXAMPLES[top.name()]!)}`);
