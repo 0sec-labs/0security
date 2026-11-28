@@ -141,6 +141,31 @@ describe("gitignore", () => {
     expect(isIgnored(rules, "x/top.txt", false)).toBe(false);
     expect(isIgnored(rules, "docs/a/b/c.tmp", false)).toBe(true);
   });
+  it("matches classes, ? and **/ the way git does", () => {
+    const rules = parseGitignore("[ab].txt\nfile?.js\n**/cache\nlogs/**\n[!x]y\n");
+    expect(isIgnored(rules, "a.txt", false)).toBe(true);
+    expect(isIgnored(rules, "c.txt", false)).toBe(false);
+    expect(isIgnored(rules, "file1.js", false)).toBe(true);
+    expect(isIgnored(rules, "file/.js", false)).toBe(false);
+    expect(isIgnored(rules, "cache", true)).toBe(true);
+    expect(isIgnored(rules, "a/b/cache", true)).toBe(true);
+    expect(isIgnored(rules, "logs/a/b.txt", false)).toBe(true);
+    expect(isIgnored(rules, "ay", false)).toBe(true);
+    expect(isIgnored(rules, "xy", false)).toBe(false);
+  });
+  it("keeps a space a backslash escapes and drops other trailing whitespace", () => {
+    expect(isIgnored(parseGitignore("a.txt \t\n"), "a.txt", false)).toBe(true);
+    expect(isIgnored(parseGitignore("a\\  \n"), "a\\ ", false)).toBe(true);
+    expect(isIgnored(parseGitignore("a\\  \n"), "a\\", false)).toBe(false);
+  });
+  it("matches a hostile pattern in linear time instead of backtracking", () => {
+    // A backtracking regex for `*a*a*a*a*a*a*a*a*a*a*a*ab` takes far longer than this test runs on a long name of `a`s.
+    const rules = parseGitignore(`${"*a".repeat(12)}b\n${"**a".repeat(12)}b\n${"**/a".repeat(12)}b\nx${" ".repeat(64 * 1024)}!\n`);
+    const started = Date.now();
+    expect(isIgnored(rules, "a".repeat(255), false)).toBe(false);
+    expect(isIgnored(rules, `${"a".repeat(50)}/`.repeat(80), false)).toBe(false);
+    expect(Date.now() - started).toBeLessThan(2000);
+  });
 });
 
 describe("planBatches", () => {
