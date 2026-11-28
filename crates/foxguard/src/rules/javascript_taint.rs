@@ -2086,6 +2086,8 @@ fn match_source(
             | NodeMatcher::TypedName { .. }
             // Java-only typed-assignment sink; no-op in source position here.
             | NodeMatcher::TypedAssignTarget { .. }
+            | NodeMatcher::TypedReceiverCall { .. }
+            | NodeMatcher::TypedConstructorSink { .. }
             // PHP-only loose-equality comparison sink; a sink-only matcher the
             // JS engine does not match (no-op).
             | NodeMatcher::LooseEquality { .. }

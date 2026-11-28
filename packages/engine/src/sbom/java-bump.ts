@@ -146,10 +146,11 @@ function bumpGradle(folder: string, request: BumpRequest): BumpResult {
       const ref = /version\.ref\s*=\s*"([^"]+)"/.exec(body)?.[1];
       let target: { was: string; index: number; where: string } | undefined;
       if (ref) {
-        const section = /^\s*\[versions\]\s*$/m.exec(text);
+        // `[ \t]` rather than `\s`: with `m`, `^\s*` runs across every blank line that follows, quadratic on a file of newlines.
+        const section = /^[ \t]*\[versions\][ \t]*$/m.exec(text);
         if (section) {
           const start = section.index + section[0].length;
-          const next = text.slice(start).search(/^\s*\[/m);
+          const next = text.slice(start).search(/^[ \t]*\[/m);
           const end = next === -1 ? text.length : start + next;
           const block = text.slice(start, end);
           const match = new RegExp(`^(${escape(ref)}\\s*=\\s*")([^"]+)(")`, "m").exec(block);
