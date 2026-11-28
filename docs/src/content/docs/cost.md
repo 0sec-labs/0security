@@ -73,6 +73,8 @@ These are single runs with the model `gpt-6-luna`, priced from token usage. They
 
 The full audits cost between $0.006 and $0.051 per 1,000 lines. Cost follows how many findings the model investigates, so a code base with fewer issues costs less per line.
 
+Concurrency changes the time, not the cost. Three more runs of the same audit (2026-11-27, one each) took 30 minutes and did not finish at concurrency 3, 30 minutes with 4 batches failed on provider rate limits at concurrency 6, and 11.5 minutes at concurrency 8, for $1.49, $1.51 and $1.09. The machine was busier during the first run, so these do not prove that 8 is 2.6 times faster than 3. See [Running batches in parallel](/findings/#running-batches-in-parallel).
+
 The WebGoat audit hit a 1,800-second timeout after 58 batches and $1.64. `--resume` finished the rest in 224 seconds for $0.15. All 327 entry points and 149 groups of other files were opened.
 
 ## What the numbers do not tell you
