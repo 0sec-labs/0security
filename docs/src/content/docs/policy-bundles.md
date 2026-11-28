@@ -8,13 +8,13 @@ A policy bundle is your fix policy (the same file `--policy` takes) wrapped in a
 Verification is offline and uses Ed25519. It only checks and applies. It does not schedule fetches and it adds no policy language: the verified text goes through the same parser as `--policy`, so approved libraries, rules and pull request settings behave the same.
 
 ```bash
-0security findings fix <id> --policy-bundle ./policy.bundle.json --policy-bundle-key ./policy-signer.pub
-0security findings fix <id> --policy-bundle https://example.com/policy.bundle.json --policy-bundle-key ./policy-signer.pub
+0security findings fix <id> --policy-bundle ./policy.bundle.json --policy-bundle-key-file /etc/0/policy-signer.pub
+0security findings fix <id> --policy-bundle https://example.com/policy.bundle.json --policy-bundle-key-file /etc/0/policy-signer.pub
 ```
 
 ## Keys
 
-You choose which keys to trust. `--policy-bundle-key` takes an Ed25519 public key as PEM, as 32 raw bytes in base64 or hex, or a file that holds one. Repeat it for several keys, or set `ZERO_POLICY_BUNDLE_KEY` (comma separated). With no key configured a bundle is always refused.
+You choose which keys to trust, through two separate options that never fall back to each other. `--policy-bundle-key` takes the key itself as inline text: PEM, or 32 raw bytes in base64 or hex. It is never opened as a path, so a bad value is an error and a file in the repository with the same name changes nothing. `--policy-bundle-key-file` takes a file holding one key. The path must be absolute, must not be a symlink, and must be outside the git working tree (or the current folder) being scanned, because a repository could otherwise plant its own key. Repeat either option for several keys, or set `ZERO_POLICY_BUNDLE_KEY` (inline, comma separated) or `ZERO_POLICY_BUNDLE_KEY_FILE` (paths, comma separated). With no key configured a bundle is always refused.
 
 ## Format
 

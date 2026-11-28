@@ -1,17 +1,53 @@
-import { existsSync, readFileSync, statSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { assertEgressAllowed, fetchScoped } from "@0/engine";
 import { acceptPolicyBundle } from "./state.js";
 import { MAX_BUNDLE_BYTES, PolicyBundleError, parseTrustedKey, verifyPolicyBundle, type TrustedKey } from "./verify.js";
 
-export interface PolicyBundleOptions { policyBundle?: string; policyBundleKey?: string[] }
+export interface PolicyBundleOptions { policyBundle?: string; policyBundleKey?: string[]; policyBundleKeyFile?: string[] }
 export interface LoadedBundle { policyText: string; version: number; keyId: string; source: string }
 
-/** Each configured key is a file holding a key, or the key text itself. ZERO_POLICY_BUNDLE_KEY holds the same, separated by commas. */
-export function configuredKeys(values: readonly string[] | undefined, env: NodeJS.ProcessEnv = process.env): TrustedKey[] {
-  const all = [...(values ?? []), ...(env.ZERO_POLICY_BUNDLE_KEY?.split(",") ?? [])].map(v => v.trim()).filter(Boolean);
-  return all.map(v => parseTrustedKey(existsSync(resolve(v)) && statSync(resolve(v)).isFile() ? readFileSync(resolve(v), "utf8") : v));
+const MAX_KEY_BYTES = 16 * 1024;
+
+/** The git working tree (or, without one, the folder) the run is started in. A key file inside it could be planted by the repository being scanned. */
+function workingTreeRoot(cwd: string): string {
+  let dir = resolve(cwd);
+  for (;;) {
+    if (existsSync(join(dir, ".git"))) return dir;
+    const parent = dirname(dir);
+    if (parent === dir) return resolve(cwd);
+    dir = parent;
+  }
 }
+const inside = (child: string, root: string): boolean => { const r = relative(root, child); return r === "" || (!r.startsWith("..") && !isAbsolute(r)); };
+
+function readKeyFile(file: string, cwd: string): string {
+  if (!isAbsolute(file)) throw new PolicyBundleError(`Policy bundle key file must be an absolute path: ${file}`);
+  let info;
+  try { info = lstatSync(file); } catch { throw new PolicyBundleError(`Policy bundle key file not found: ${file}`); }
+  if (info.isSymbolicLink()) throw new PolicyBundleError(`Policy bundle key file must not be a symlink: ${file}`);
+  if (!info.isFile() || info.size > MAX_KEY_BYTES) throw new PolicyBundleError(`Policy bundle key file is not a small regular file: ${file}`);
+  const real = realpathSync(file);
+  for (const root of new Set([resolve(cwd), workingTreeRoot(cwd), existsSync(cwd) ? realpathSync(cwd) : resolve(cwd)])) {
+    if (inside(real, root) || inside(resolve(file), root)) throw new PolicyBundleError(`Policy bundle key file must be outside the working tree being scanned (${root}): ${file}`);
+  }
+  return readFileSync(file, "utf8");
+}
+
+/**
+ * Trusted keys come from two separate sources that never fall back to each other.
+ * Inline key text (--policy-bundle-key, ZERO_POLICY_BUNDLE_KEY, comma separated) is only ever parsed as a key, never opened as a path.
+ * Key files (--policy-bundle-key-file, ZERO_POLICY_BUNDLE_KEY_FILE) must be absolute, not symlinks, and outside the working tree.
+ */
+export function configuredKeys(inline: readonly string[] | undefined, files: readonly string[] | undefined, env: NodeJS.ProcessEnv = process.env, cwd: string = process.cwd()): TrustedKey[] {
+  const clean = (list: readonly string[]) => list.map(v => v.trim()).filter(Boolean);
+  const texts = clean([...(inline ?? []), ...(env.ZERO_POLICY_BUNDLE_KEY?.split(",") ?? [])]);
+  const paths = clean([...(files ?? []), ...(env.ZERO_POLICY_BUNDLE_KEY_FILE?.split(",") ?? [])]);
+  return [...texts.map(parseTrustedKey), ...paths.map(p => parseTrustedKey(readKeyFile(p, cwd)))];
+}
+
+/** A fixed public base: the destination the user gave must never become the trusted local origin, so loopback and private addresses stay blocked. */
+const PUBLIC_BASE = "https://policy-bundle.example.com";
 
 async function readSource(source: string, env: NodeJS.ProcessEnv): Promise<string> {
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(source)) {
@@ -20,7 +56,7 @@ async function readSource(source: string, env: NodeJS.ProcessEnv): Promise<strin
     if (url.protocol !== "https:") throw new PolicyBundleError("Policy bundle URLs must use https.");
     assertEgressAllowed(url.host, env);
     try {
-      const res = await fetchScoped(url.href, { method: "GET", headers: { accept: "application/json" } }, { baseUrl: url.origin, allowPublicNetwork: true, maxResponseBytes: MAX_BUNDLE_BYTES, timeoutMs: 15_000, maxRedirects: 0, validateUrl: u => { if (!u.startsWith("https://")) throw new Error("https only"); } });
+      const res = await fetchScoped(url.href, { method: "GET", headers: { accept: "application/json" } }, { baseUrl: PUBLIC_BASE, allowPublicNetwork: true, maxResponseBytes: MAX_BUNDLE_BYTES, timeoutMs: 15_000, maxRedirects: 0, validateUrl: u => { if (!u.startsWith("https://")) throw new Error("https only"); } });
       if (!res.ok) throw new PolicyBundleError(`Policy bundle fetch failed with HTTP ${res.status}.`);
       return await res.text();
     } catch (error) {
@@ -37,7 +73,7 @@ async function readSource(source: string, env: NodeJS.ProcessEnv): Promise<strin
 /** Fetch, verify against the configured keys, check the version floor, and return the policy text. Nothing is recorded or used on failure. */
 export async function loadPolicyBundle(options: PolicyBundleOptions, home?: string, env: NodeJS.ProcessEnv = process.env): Promise<LoadedBundle | undefined> {
   if (!options.policyBundle) return undefined;
-  const keys = configuredKeys(options.policyBundleKey, env);
+  const keys = configuredKeys(options.policyBundleKey, options.policyBundleKeyFile, env);
   const verified = verifyPolicyBundle(await readSource(options.policyBundle, env), keys);
   acceptPolicyBundle(verified, home);
   return { policyText: verified.policyText, version: verified.version, keyId: verified.keyId, source: options.policyBundle };

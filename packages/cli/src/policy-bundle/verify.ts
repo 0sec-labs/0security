@@ -42,7 +42,7 @@ export function signedBytes(version: number, policy: Buffer): Buffer {
 const B64 = /^[A-Za-z0-9+/]+={0,2}$/;
 
 export function verifyPolicyBundle(content: string, keys: readonly TrustedKey[]): VerifiedBundle {
-  if (!keys.length) throw new PolicyBundleError("No policy bundle key is configured; pass --policy-bundle-key or set ZERO_POLICY_BUNDLE_KEY.");
+  if (!keys.length) throw new PolicyBundleError("No policy bundle key is configured; pass --policy-bundle-key or --policy-bundle-key-file, or set ZERO_POLICY_BUNDLE_KEY or ZERO_POLICY_BUNDLE_KEY_FILE.");
   if (Buffer.byteLength(content) > MAX_BUNDLE_BYTES) throw new PolicyBundleError("Policy bundle is too large.");
   let raw: unknown;
   try { raw = JSON.parse(content); } catch { throw new PolicyBundleError("Policy bundle is not valid JSON."); }

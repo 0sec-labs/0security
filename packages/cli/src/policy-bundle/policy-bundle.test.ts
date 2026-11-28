@@ -1,9 +1,10 @@
 import { generateKeyPairSync, sign, type KeyObject } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { loadPolicyBundle, parseTrustedKey, policyBundleStatePath, verifyPolicyBundle, BUNDLE_FORMAT, signedBytes } from "./index.js";
+import { acceptPolicyBundle, configuredKeys, loadPolicyBundle, parseTrustedKey, policyBundleStatePath, verifyPolicyBundle, BUNDLE_FORMAT, signedBytes } from "./index.js";
 
 const pair = () => generateKeyPairSync("ed25519");
 const pem = (k: KeyObject) => k.export({ format: "pem", type: "spki" }).toString();
@@ -72,10 +73,93 @@ describe("loadPolicyBundle", () => {
   it("reads keys from a file or the environment, and refuses http and enterprise mode", async () => {
     const keyFile = write("k.pem", pem(a.publicKey));
     const f = write("f.json", bundle(a.privateKey, 1));
-    expect((await loadPolicyBundle({ policyBundle: f, policyBundleKey: [keyFile] }, dir, {}))?.version).toBe(1);
-    expect((await loadPolicyBundle({ policyBundle: f }, dir, { ZERO_POLICY_BUNDLE_KEY: keyFile }))?.version).toBe(1);
-    await expect(loadPolicyBundle({ policyBundle: "http://example.com/b.json", policyBundleKey: [keyFile] }, dir, {})).rejects.toThrow(/https/);
-    await expect(loadPolicyBundle({ policyBundle: "https://example.com/b.json", policyBundleKey: [keyFile] }, dir, { ZERO_ENTERPRISE: "1" })).rejects.toThrow();
-    await expect(loadPolicyBundle({ policyBundle: join(dir, "missing.json"), policyBundleKey: [keyFile] }, dir, {})).rejects.toThrow(/not found/);
+    expect((await loadPolicyBundle({ policyBundle: f, policyBundleKeyFile: [keyFile] }, dir, {}))?.version).toBe(1);
+    expect((await loadPolicyBundle({ policyBundle: f }, dir, { ZERO_POLICY_BUNDLE_KEY_FILE: keyFile }))?.version).toBe(1);
+    expect((await loadPolicyBundle({ policyBundle: f }, dir, { ZERO_POLICY_BUNDLE_KEY: pem(a.publicKey) }))?.version).toBe(1);
+    await expect(loadPolicyBundle({ policyBundle: "http://example.com/b.json", policyBundleKeyFile: [keyFile] }, dir, {})).rejects.toThrow(/https/);
+    await expect(loadPolicyBundle({ policyBundle: "https://example.com/b.json", policyBundleKeyFile: [keyFile] }, dir, { ZERO_ENTERPRISE: "1" })).rejects.toThrow();
+    await expect(loadPolicyBundle({ policyBundle: join(dir, "missing.json"), policyBundleKeyFile: [keyFile] }, dir, {})).rejects.toThrow(/not found/);
+  });
+});
+
+describe("key sources", () => {
+  let dir: string;
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), "pbk-")); });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+  const a = pair(); const evil = pair();
+  const raw = (k: KeyObject) => (k.export({ format: "der", type: "spki" }) as Buffer).subarray(-32).toString("hex");
+
+  it("never reads a file named like the inline key", () => {
+    const repo = join(dir, "repo"); mkdirSync(repo);
+    const text = raw(a.publicKey);
+    writeFileSync(join(repo, text), pem(evil.publicKey));
+    const keys = configuredKeys([text], [], {}, repo);
+    expect(keys).toHaveLength(1);
+    expect(keys[0].id).toBe(parseTrustedKey(text).id);
+    expect(keys[0].id).not.toBe(parseTrustedKey(pem(evil.publicKey)).id);
+  });
+  it("errors on an invalid inline key instead of trying it as a path", () => {
+    const file = join(dir, "k.pem"); writeFileSync(file, pem(a.publicKey));
+    expect(() => configuredKeys([file], [], {}, dir)).toThrow(/valid Ed25519/);
+    expect(() => configuredKeys([], [], { ZERO_POLICY_BUNDLE_KEY: file }, dir)).toThrow(/valid Ed25519/);
+  });
+  it("key files must be absolute, plain files outside the working tree", () => {
+    const repo = join(dir, "repo"); mkdirSync(join(repo, ".git"), { recursive: true });
+    const outside = join(dir, "outside.pem"); writeFileSync(outside, pem(a.publicKey));
+    const inside = join(repo, "k.pem"); writeFileSync(inside, pem(a.publicKey));
+    expect(configuredKeys([], [outside], {}, repo)).toHaveLength(1);
+    expect(() => configuredKeys([], ["outside.pem"], {}, dir)).toThrow(/absolute/);
+    expect(() => configuredKeys([], [inside], {}, repo)).toThrow(/working tree/);
+    expect(() => configuredKeys([], [inside], {}, join(repo, "sub"))).toThrow(/working tree/);
+    const link = join(dir, "link.pem"); symlinkSync(outside, link);
+    expect(() => configuredKeys([], [link], {}, repo)).toThrow(/symlink/);
+    expect(() => configuredKeys([], [join(dir, "nope.pem")], {}, repo)).toThrow(/not found/);
+    expect(() => configuredKeys([], [], { ZERO_POLICY_BUNDLE_KEY_FILE: inside }, repo)).toThrow(/working tree/);
+  });
+  it("a key file's content is never treated as a path and a path is never treated as key text", () => {
+    const f = join(dir, "bad.pem"); writeFileSync(f, "not a key");
+    expect(() => configuredKeys([], [f], {}, join(tmpdir(), "elsewhere"))).toThrow(/valid Ed25519/);
+  });
+});
+
+describe("replay floor under concurrency", () => {
+  let dir: string;
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), "pbr-")); });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+  const verified = (version: number) => ({ keyId: "k1", version, digest: `d${version}`, policyText: "{}" });
+  it("ends at the highest version whatever the order", async () => {
+    for (const order of [[5, 3], [3, 5]]) {
+      const home = mkdtempSync(join(dir, "h-"));
+      await Promise.allSettled(order.map(v => Promise.resolve().then(() => acceptPolicyBundle(verified(v), home))));
+      expect(JSON.parse(readFileSync(policyBundleStatePath(home), "utf8")).k1.version).toBe(5);
+    }
+  });
+  it("never lowers a version that appeared on disk after the read", () => {
+    const home = mkdtempSync(join(dir, "h-"));
+    acceptPolicyBundle(verified(2), home);
+    acceptPolicyBundle(verified(5), home);
+    expect(() => acceptPolicyBundle(verified(3), home)).toThrow(/replay/);
+    expect(JSON.parse(readFileSync(policyBundleStatePath(home), "utf8")).k1.version).toBe(5);
+  });
+  it("is safe across real processes", async () => {
+    const { spawn } = await import("node:child_process");
+    const home = mkdtempSync(join(dir, "h-"));
+    const script = fileURLToPath(new URL("./state.ts", import.meta.url));
+    const run = (v: number) => new Promise<void>(res => {
+      const c = spawn(process.execPath, ["--import", "tsx", "-e", `import("${script}").then(m => { try { m.acceptPolicyBundle({ keyId: "k1", version: ${v}, digest: "d${v}", policyText: "{}" }, ${JSON.stringify(home)}); } catch {} })`], { stdio: "ignore", cwd: process.cwd() });
+      c.on("exit", () => res());
+    });
+    await Promise.all([run(5), run(3), run(4), run(1)]);
+    expect(JSON.parse(readFileSync(policyBundleStatePath(home), "utf8")).k1.version).toBe(5);
+  }, 60_000);
+});
+
+describe("bundle fetch destination", () => {
+  const key = pem(pair().publicKey);
+  it("refuses loopback, private and http addresses even when the user gave that URL", async () => {
+    for (const url of ["https://127.0.0.1/b.json", "https://localhost/b.json", "https://[::1]/b.json", "https://10.0.0.5/b.json", "https://169.254.169.254/b.json"]) {
+      await expect(loadPolicyBundle({ policyBundle: url, policyBundleKey: [key] }, tmpdir(), {})).rejects.toThrow(/blocked|Local|internal/i);
+    }
+    await expect(loadPolicyBundle({ policyBundle: "http://127.0.0.1/b.json", policyBundleKey: [key] }, tmpdir(), {})).rejects.toThrow(/https/);
   });
 });
