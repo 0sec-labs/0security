@@ -11,20 +11,15 @@ pub const PR_SECURITY_POLICY_V2: &str = "v2";
 /// Lines a pull request touched, keyed by the finding-relative file path.
 pub type ChangedLines = HashMap<String, HashSet<usize>>;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum, Default)]
 pub enum PrSecurityPolicyVersion {
     #[serde(rename = "v1")]
     #[value(name = "v1")]
+    #[default]
     V1,
     #[serde(rename = "v2")]
     #[value(name = "v2")]
     V2,
-}
-
-impl Default for PrSecurityPolicyVersion {
-    fn default() -> Self {
-        Self::V1
-    }
 }
 
 impl std::fmt::Display for PrSecurityPolicyVersion {
@@ -43,21 +38,16 @@ impl std::fmt::Display for PrSecurityPolicyVersion {
 /// [`PrSecurityPolicyScope::Diff`], which judges a pull request by the lines
 /// it actually changed, so a pre-existing finding elsewhere in the tree no
 /// longer blocks an unrelated change. V1's meaning is unchanged.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum, Default)]
 pub enum PrSecurityPolicyScope {
     #[serde(rename = "repository")]
     #[value(name = "repository")]
+    #[default]
     Repository,
     /// Only findings on lines this pull request changed. Requires v2.
     #[serde(rename = "diff")]
     #[value(name = "diff")]
     Diff,
-}
-
-impl Default for PrSecurityPolicyScope {
-    fn default() -> Self {
-        Self::Repository
-    }
 }
 
 impl std::fmt::Display for PrSecurityPolicyScope {
@@ -69,7 +59,7 @@ impl std::fmt::Display for PrSecurityPolicyScope {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum, Default)]
 pub enum PrBlockingThreshold {
     #[serde(rename = "none")]
     #[value(name = "none")]
@@ -82,6 +72,7 @@ pub enum PrBlockingThreshold {
     Medium,
     #[serde(rename = "high")]
     #[value(name = "high")]
+    #[default]
     High,
     #[serde(rename = "critical")]
     #[value(name = "critical")]
@@ -97,12 +88,6 @@ impl PrBlockingThreshold {
             Self::High => Some(Severity::High),
             Self::Critical => Some(Severity::Critical),
         }
-    }
-}
-
-impl Default for PrBlockingThreshold {
-    fn default() -> Self {
-        Self::High
     }
 }
 

@@ -2420,14 +2420,13 @@ pub(crate) fn is_plausible_yaml_load(node: Node<'_>, source: &str) -> bool {
                     }
                 }
             }
-            "formal_parameter" => {
+            "formal_parameter"
                 if n.child_by_field_name("type")
                     .is_some_and(|t| node_text(t, source).trim_end().ends_with("Yaml"))
                     && n.child_by_field_name("name")
-                        .is_some_and(|name| node_text(name, source) == receiver)
-                {
-                    return true;
-                }
+                        .is_some_and(|name| node_text(name, source) == receiver) =>
+            {
+                return true;
             }
             _ => {}
         }
