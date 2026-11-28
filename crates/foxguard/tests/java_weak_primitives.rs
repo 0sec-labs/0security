@@ -108,6 +108,14 @@ fn cookie_without_secure_flag_is_flagged() {
     assert_eq!(count(&f, "java/cookie-missing-secure"), 4, "{f:?}");
 }
 
+/// Issue #782: a setSecure call that does not run on every path to
+/// addCookie must not suppress the finding. One finding per method.
+#[test]
+fn cookie_secure_set_only_conditionally_is_still_flagged() {
+    let f = scan("vulnerable_java_cookie_conditional.java");
+    assert_eq!(count(&f, "java/cookie-missing-secure"), 14, "{f:?}");
+}
+
 #[test]
 fn cookie_with_secure_flag_or_unseen_owner_is_not_flagged() {
     for name in ["safe_java_cookie.java", "safe_java_cookie_foreign.java"] {

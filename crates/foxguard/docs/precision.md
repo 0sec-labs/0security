@@ -493,6 +493,8 @@ assumption it rests on and a concrete flow it would miss.
 | Wrapped `new File(..)` inside another path sink | Yes | The outer constructor reports it; the outer is only a sink for the same types. |
 | HTML encoders (XSS rule only) | Assumption | Any call named `escapeHtml*`, `encodeForHTML`, ... is an HTML sanitiser whatever its receiver. Missed: HTML-escaped data placed in a JavaScript string, an unquoted attribute or a `javascript:` URL. |
 | Typed receiver recognition | Recall gap | Sink receivers are matched by declared type or name hint in the enclosing scopes. Missed: a `Runtime` held in an inherited field whose name does not contain `runtime`. This lowers recall, it does not suppress. |
+| `setSecure` guard (`java/cookie-missing-secure`) | Yes (fixed) | `setSecure(true)` or `setSecure(<expr>)` suppresses only when it precedes the `addCookie` sink and sits in no `if`, loop, `switch`, ternary, `try`/`catch`/`finally`, lambda, anonymous class or `&&`/`||` operand that the sink is not also in, on the same branch; every sink needs such a guard. Unsafe twins: `tests/fixtures/vulnerable_java_cookie_conditional.java`. Not covered: a cookie passed to a helper or returned is assumed hardened there (escape); a `setSecure(true)` behind an early `return` or `throw` is still read as straight-line. |
+| `java/no-xxe` hardening check | Recall gap | Any `setFeature(`, `setProperty(` or `setAttribute(` anywhere in the file silences every factory in it, including one on another factory or inside a branch. Missed: a factory hardened on one path only, or a different factory hardened. Not fixed here; needs per-factory dataflow. |
 | Test-path skips | n/a | This change adds none. |
 
 ## Section 4: How to report a false positive

@@ -640,7 +640,7 @@ impl Rule for CookieMissingSecure {
             };
             let scope = enclosing_scope(node);
             let usage = CookieUsage::collect(scope, src, var);
-            if usage.secure_true || usage.secure_dynamic || usage.escapes || usage.expires_now {
+            if usage.secure_covers_every_sink() || usage.escapes || usage.expires_now {
                 return;
             }
             if let Some(&explicit) = usage.secure_false.first() {
@@ -669,18 +669,81 @@ impl Rule for CookieMissingSecure {
 
 #[derive(Default)]
 struct CookieUsage<'a> {
-    secure_true: bool,
-    /// `setSecure(<expression>)`, e.g. `request.isSecure()`.
-    secure_dynamic: bool,
+    /// `setSecure(true)` and `setSecure(<expression>)` (e.g.
+    /// `request.isSecure()`) calls. They suppress a finding only when they
+    /// dominate every `addCookie` sink; see `dominates`.
+    secure_guards: Vec<Node<'a>>,
+    sinks: Vec<Node<'a>>,
     secure_false: Vec<Node<'a>>,
     added: bool,
+    /// Conditional path of every guard and sink, by node id.
+    paths: std::collections::HashMap<usize, Vec<(usize, usize)>>,
     /// The cookie is handed to code we cannot see (helper call, return).
     escapes: bool,
     /// `setMaxAge(0)`: the cookie only asks the browser to drop a cookie.
     expires_now: bool,
 }
 
+/// Constructs under which a statement may not run, or may run a different
+/// number of times, than its surroundings.
+fn is_conditional_construct(n: Node, src: &str) -> bool {
+    match n.kind() {
+        "if_statement"
+        | "for_statement"
+        | "enhanced_for_statement"
+        | "while_statement"
+        | "do_statement"
+        | "switch_expression"
+        | "switch_block_statement_group"
+        | "switch_rule"
+        | "ternary_expression"
+        | "try_statement"
+        | "try_with_resources_statement"
+        | "catch_clause"
+        | "finally_clause"
+        | "lambda_expression"
+        | "class_body" => true,
+        "binary_expression" => n
+            .child_by_field_name("operator")
+            .is_some_and(|o| matches!(text(o, src), "&&" | "||")),
+        _ => false,
+    }
+}
+
+/// The conditional constructs around `node` below `scope`, each with the
+/// child of it that contains `node` (so two branches of one `if` differ).
+fn conditional_path<'a>(node: Node<'a>, scope: Node<'a>, src: &str) -> Vec<(usize, usize)> {
+    let mut out = Vec::new();
+    let mut child = node;
+    while let Some(parent) = child.parent() {
+        if parent.id() == scope.id() {
+            break;
+        }
+        if is_conditional_construct(parent, src) {
+            out.push((parent.id(), child.id()));
+        }
+        child = parent;
+    }
+    out
+}
+
 impl<'a> CookieUsage<'a> {
+    /// True when every `addCookie` sink is preceded by a `setSecure` guard
+    /// that runs on every path to it: the guard sits in no conditional
+    /// construct the sink is not also in, on the same branch.
+    fn secure_covers_every_sink(&self) -> bool {
+        if self.sinks.is_empty() {
+            return !self.secure_guards.is_empty();
+        }
+        self.sinks.iter().all(|sink| {
+            let sink_path = &self.paths[&sink.id()];
+            self.secure_guards.iter().any(|g| {
+                g.end_byte() <= sink.start_byte()
+                    && self.paths[&g.id()].iter().all(|c| sink_path.contains(c))
+            })
+        })
+    }
+
     fn collect(scope: Node<'a>, src: &str, var: &str) -> CookieUsage<'a> {
         let mut u = CookieUsage::default();
         walk(scope, &mut |n| match n.kind() {
@@ -689,9 +752,8 @@ impl<'a> CookieUsage<'a> {
                 let obj = n.child_by_field_name("object").map(|x| text(x, src));
                 if name == Some("setSecure") && obj == Some(var) {
                     match args_of(n).first().map(|a| text(*a, src)) {
-                        Some("true") => u.secure_true = true,
                         Some("false") => u.secure_false.push(n),
-                        _ => u.secure_dynamic = true,
+                        _ => u.secure_guards.push(n),
                     }
                 }
                 if name == Some("setMaxAge")
@@ -706,6 +768,7 @@ impl<'a> CookieUsage<'a> {
                 if passes_var {
                     if name == Some("addCookie") {
                         u.added = true;
+                        u.sinks.push(n);
                     } else {
                         u.escapes = true;
                     }
@@ -720,6 +783,9 @@ impl<'a> CookieUsage<'a> {
             }
             _ => {}
         });
+        for n in u.secure_guards.iter().chain(u.sinks.iter()) {
+            u.paths.insert(n.id(), conditional_path(*n, scope, src));
+        }
         // `return cookie;`
         walk(scope, &mut |n| {
             if n.kind() == "return_statement"

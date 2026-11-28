@@ -42,3 +42,28 @@ class SafeCookies {
         response.addCookie(new Cookie("token", ""));
     }
 }
+
+class SafeGuardedCookies {
+    // Guard and sink sit in the same branch, so the guard dominates the sink.
+    void sameBranch(HttpServletResponse response, boolean flag) {
+        if (flag) {
+            Cookie c = new Cookie("session", "abc");
+            c.setSecure(true);
+            response.addCookie(c);
+        }
+    }
+
+    // The guard is on the straight-line path before sinks that are conditional.
+    void guardBeforeConditionalSink(HttpServletResponse response, boolean flag) {
+        Cookie c = new Cookie("session", "abc");
+        c.setSecure(true);
+        if (flag) {
+            response.addCookie(c);
+        }
+        try {
+            response.addCookie(c);
+        } finally {
+            response.addCookie(c);
+        }
+    }
+}

@@ -27,6 +27,7 @@ on the GitHub Release tag.
 
 ### Fixed
 
+- `java/cookie-missing-secure` no longer treats a `setSecure(true)` (or `setSecure(<expression>)`) as covering `addCookie` when it sits inside an `if`, loop, `switch`, ternary, `try`/`catch`, lambda, anonymous class or `&&`/`||` operand, or comes after the `addCookie` call. Only a guard that runs on every path to each `addCookie` suppresses the finding (#782).
 - A variant hunt that gets no verdict from a batch repeats it with only what the first attempt left of that batch's share of `--budget`, and does not repeat when the first attempt reports no cost. It could spend up to twice the batch's share before.
 
 ## [0.46.0] - 2026-11-26
