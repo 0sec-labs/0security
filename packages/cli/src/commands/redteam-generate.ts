@@ -12,7 +12,20 @@ import { resolve } from "node:path";
 import type { Command } from "commander";
 import { applyChecked, brainDryRun, CATALOG_BY_ID, materializePayload, materializeSuccess, newCanary, requestScenarios, strategyById, type BrainScenario, type Difficulty } from "@0/engine";
 import { UsageError } from "./output.js";
+import { brainLicenseToken } from "../enterprise-bridge.js";
 import type { RedteamDeps } from "./redteam.js";
+
+/**
+ * The environment for the brain call. With a brain URL set and no ZERO_BRAIN_TOKEN, a verified license token
+ * becomes the bearer. The engine sends the bearer to that one URL only, refuses redirects and scrubs it from
+ * errors; nothing here prints it. No token or no license means the environment is returned unchanged.
+ */
+export function brainEnv(env: NodeJS.ProcessEnv, urlOption?: string): NodeJS.ProcessEnv {
+  if (env["ZERO_BRAIN_TOKEN"]?.trim()) return env;
+  if (!(urlOption?.trim() || env["ZERO_BRAIN_URL"]?.trim())) return env;
+  const token = brainLicenseToken(env);
+  return token ? { ...env, ZERO_BRAIN_TOKEN: token } : env;
+}
 
 export type GenerateDeps = Pick<RedteamDeps, "out" | "err" | "readText" | "env" | "fetch">;
 export interface GenerateCliOptions { manifest?: string; framework?: string; count?: string | number; url?: string; dryRun?: boolean; offline?: boolean; canary?: string; format?: string; generator?: string; area?: string; difficulty?: string; strategy?: string; listGenerators?: boolean }
@@ -72,7 +85,7 @@ export async function runGenerate(options: GenerateCliOptions, deps: GenerateDep
   try { preview = brainDryRun(request); } catch (error) { throw new UsageError(error instanceof Error ? error.message : String(error)); }
   if (options.dryRun) { deps.out(`${preview}\n`); deps.err("dry run: nothing was sent."); return 0; }
   const canary = options.canary ?? newCanary();
-  const result = await requestScenarios(request, { seed: canary, ...(filtered ? { filter } : {}), ...(options.url ? { url: options.url } : {}), ...(options.offline ? { offline: true } : {}) }, deps);
+  const result = await requestScenarios(request, { seed: canary, ...(filtered ? { filter } : {}), ...(options.url ? { url: options.url } : {}), ...(options.offline ? { offline: true } : {}) }, { env: brainEnv(deps.env, options.url), fetch: deps.fetch });
   const scenarios = result.scenarios.map(scenario => {
     const done = materialize(scenario, canary);
     if (!strategy) return done;
