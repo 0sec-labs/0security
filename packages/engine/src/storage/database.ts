@@ -29,6 +29,7 @@ import {
   backupCorruptDatabase,
   assertDatabaseEngineCompatibility,
   ensureDatabaseHealthy,
+  explainDatabaseOpenError,
 } from "./database-lifecycle.js";
 import { SCHEMA_TABLES_SQL, SCHEMA_INDEXES_SQL, migrateLegacySchema } from "./schema-migrations.js";
 import type {
@@ -113,7 +114,7 @@ export class osecDB {
       try { this.sqlite?.close(); } catch { /* Preserve the original error. */ }
       // Ordinary open must never remove locks, rewrite storage, or recreate a
       // corrupt database. Explicit operator repair/reset remain separate APIs.
-      throw error;
+      throw explainDatabaseOpenError(path, error);
     }
   }
 

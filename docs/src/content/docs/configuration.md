@@ -87,6 +87,20 @@ Set the database file with `--db-path` or `ZERO_DB_PATH`. `--db-path` wins. Movi
 
 A running console is tied to one folder and owns its database. If you run `0security skills list` or `0security threads list` from another folder, it stops with `This console is for <folder>. Run the command there, or add --db-path <path>.`
 
+### Sharing one `HOME`
+
+One console owns a database. A second `0security --headless` on the same database stops with `A local engine already owns this database`. A scan with no console running starts one for itself and attaches to the one that is already running. Scans that attach to another scan's console depend on that console, so they end when its owner stops it.
+
+The database is a SQLite file in rollback-journal mode. The npm package serializes processes with a `0.db.lock` directory, so a process that finds the file busy waits up to 5 seconds and then fails with `database is locked`. Processes that open the file at the same moment do not corrupt it. Several processes writing in a loop can run out of that wait.
+
+These break the file. Do none of them:
+
+- Copy `0.db` or a whole `HOME` while a console or scan is running. Copy it after the process exits.
+- Delete `0.db-journal` after a crash. A killed process leaves `0.db.lock` and `0.db-journal`. Remove only the `0.db.lock` directory, and only when no 0 process runs. The next open uses the journal to undo the interrupted write.
+- Open the same file from two builds at once, such as the npm package and the standalone binary, or from another SQLite program. They use different locks and do not exclude each other.
+
+For parallel runs and benchmarks, give each process its own `HOME` or `--db-path`. If the file is damaged, 0 stops with a message that names it and changes nothing. To start empty, move `0.db`, `0.db-journal` and `0.db.lock` aside together. The scan history in that file is lost.
+
 Thread transcripts hold target hostnames, findings and raw request and response bodies, including any cookies or tokens a tool echoed. 0 does not scrub or encrypt them. File permissions (`0600` files, `0700` directory) are the only protection.
 
 ## Set a budget and model per workflow
