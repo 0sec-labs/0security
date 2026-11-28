@@ -1,0 +1,286 @@
+{
+  "description": "License token vectors. A checker passes when, for every case, verifying `token` at `now` (default defaultNow) against `keys`, with `audience` when present, yields every field listed in `expect` (deep equality per field). `known` is the entitlement list the checker is built with; any other name must land in unknownFeatures and be otherwise ignored. Regenerate with node enterprise/test-vectors/generate.mjs; the key is a public test seed and signs nothing real.",
+  "defaultNow": "2027-01-15T12:00:00Z",
+  "keys": {
+    "t1": "MCowBQYDK2VwAyEA6kpsY+KcUgq+9VB7Ey7F+ZVHdq6+vnuSQh7qaRRG0iw="
+  },
+  "known": [
+    "findings-server",
+    "rbac",
+    "scim",
+    "saml",
+    "evidence-signing",
+    "audit-chain",
+    "retention",
+    "ha"
+  ],
+  "cases": [
+    {
+      "name": "v1 valid",
+      "token": "eyJ2IjoxLCJpZCI6ImxpY192MSIsImN1c3RvbWVyIjoiVmVjdG9yIEN1c3RvbWVyIiwic2VhdHMiOjI1LCJmZWF0dXJlcyI6WyJmaW5kaW5ncy1zZXJ2ZXIiLCJyYmFjIl0sImlzc3VlZEF0IjoiMjAyNi0xMi0wMVQwMDowMDowMFoiLCJleHBpcmVzIjoiMjAyNy0xMi0wMVQwMDowMDowMFoiLCJraWQiOiJ0MSJ9.7jUH0czB3-YTEr4hvFpWXdue3Afqn1G25EUbtwBveFJ60-OoCbdBjmnt-w6JcYEVrItw8Z6rGjhE4zu8gr7HCw",
+      "expect": {
+        "ok": true,
+        "state": "valid",
+        "reason": null,
+        "features": [
+          "findings-server",
+          "rbac"
+        ],
+        "unknownFeatures": [],
+        "entitlements": {
+          "findings-server": {},
+          "rbac": {}
+        },
+        "expires": "2027-12-01T00:00:00Z"
+      },
+      "now": "2027-01-15T12:00:00Z"
+    },
+    {
+      "name": "v1 audience is not checked",
+      "audience": "brain",
+      "token": "eyJ2IjoxLCJpZCI6ImxpY192MSIsImN1c3RvbWVyIjoiVmVjdG9yIEN1c3RvbWVyIiwic2VhdHMiOjI1LCJmZWF0dXJlcyI6WyJmaW5kaW5ncy1zZXJ2ZXIiLCJyYmFjIl0sImlzc3VlZEF0IjoiMjAyNi0xMi0wMVQwMDowMDowMFoiLCJleHBpcmVzIjoiMjAyNy0xMi0wMVQwMDowMDowMFoiLCJraWQiOiJ0MSJ9.7jUH0czB3-YTEr4hvFpWXdue3Afqn1G25EUbtwBveFJ60-OoCbdBjmnt-w6JcYEVrItw8Z6rGjhE4zu8gr7HCw",
+      "expect": {
+        "ok": true,
+        "state": "valid",
+        "reason": null,
+        "features": [
+          "findings-server",
+          "rbac"
+        ]
+      },
+      "now": "2027-01-15T12:00:00Z"
+    },
+    {
+      "name": "v1 expired within grace",
+      "now": "2027-12-10T00:00:00Z",
+      "token": "eyJ2IjoxLCJpZCI6ImxpY192MSIsImN1c3RvbWVyIjoiVmVjdG9yIEN1c3RvbWVyIiwic2VhdHMiOjI1LCJmZWF0dXJlcyI6WyJmaW5kaW5ncy1zZXJ2ZXIiLCJyYmFjIl0sImlzc3VlZEF0IjoiMjAyNi0xMi0wMVQwMDowMDowMFoiLCJleHBpcmVzIjoiMjAyNy0xMi0wMVQwMDowMDowMFoiLCJraWQiOiJ0MSJ9.7jUH0czB3-YTEr4hvFpWXdue3Afqn1G25EUbtwBveFJ60-OoCbdBjmnt-w6JcYEVrItw8Z6rGjhE4zu8gr7HCw",
+      "expect": {
+        "ok": true,
+        "state": "grace",
+        "reason": null,
+        "features": [
+          "findings-server",
+          "rbac"
+        ],
+        "graceEndsAt": "2027-12-31T00:00:00.000Z"
+      }
+    },
+    {
+      "name": "v1 expired past grace",
+      "now": "2028-02-01T00:00:00Z",
+      "token": "eyJ2IjoxLCJpZCI6ImxpY192MSIsImN1c3RvbWVyIjoiVmVjdG9yIEN1c3RvbWVyIiwic2VhdHMiOjI1LCJmZWF0dXJlcyI6WyJmaW5kaW5ncy1zZXJ2ZXIiLCJyYmFjIl0sImlzc3VlZEF0IjoiMjAyNi0xMi0wMVQwMDowMDowMFoiLCJleHBpcmVzIjoiMjAyNy0xMi0wMVQwMDowMDowMFoiLCJraWQiOiJ0MSJ9.7jUH0czB3-YTEr4hvFpWXdue3Afqn1G25EUbtwBveFJ60-OoCbdBjmnt-w6JcYEVrItw8Z6rGjhE4zu8gr7HCw",
+      "expect": {
+        "ok": false,
+        "state": "expired",
+        "reason": null,
+        "features": [
+          "findings-server",
+          "rbac"
+        ]
+      }
+    },
+    {
+      "name": "v1 unknown feature ignored",
+      "token": "eyJ2IjoxLCJpZCI6ImxpY192MSIsImN1c3RvbWVyIjoiVmVjdG9yIEN1c3RvbWVyIiwic2VhdHMiOjI1LCJmZWF0dXJlcyI6WyJyYmFjIiwiZnV0dXJlLXRoaW5nIl0sImlzc3VlZEF0IjoiMjAyNi0xMi0wMVQwMDowMDowMFoiLCJleHBpcmVzIjoiMjAyNy0xMi0wMVQwMDowMDowMFoiLCJraWQiOiJ0MSJ9.B_M4Um_W_MlUqY96vKEXn6eFP31Pfow5IB9X0pIANiMtRRpWHv4JmTef3iHjfoYSJP_FzmIaF61pBpzZgcLaAA",
+      "expect": {
+        "ok": true,
+        "state": "valid",
+        "features": [
+          "rbac"
+        ],
+        "unknownFeatures": [
+          "future-thing"
+        ]
+      },
+      "now": "2027-01-15T12:00:00Z"
+    },
+    {
+      "name": "v2 valid",
+      "audience": "cli",
+      "token": "eyJ2IjoyLCJpZCI6ImxpY192MiIsImN1c3RvbWVyIjoiVmVjdG9yIEN1c3RvbWVyIiwicGxhbiI6InRlYW0iLCJzZWF0cyI6MjUsImF1ZCI6WyJjbGkiLCJodWIiXSwiZW50aXRsZW1lbnRzIjp7ImZpbmRpbmdzLXNlcnZlciI6e30sInNhbWwiOnt9LCJoYSI6eyJub2RlcyI6M319LCJpc3N1ZWRBdCI6IjIwMjYtMTItMDFUMDA6MDA6MDBaIiwibmJmIjoiMjAyNi0xMi0wMVQwMDowMDowMFoiLCJleHBpcmVzIjoiMjAyNy0xMi0wMVQwMDowMDowMFoiLCJraWQiOiJ0MSIsInJpZCI6InJpZF92MiJ9.Bq2371GlpEOuCviiaPtjdF0w12nmzVpxEov-JUo3L2aigIgi-Y0V74PYyGDwXSDnXVK7SPp2P9ctTphATzrzDA",
+      "expect": {
+        "ok": true,
+        "state": "valid",
+        "reason": null,
+        "features": [
+          "findings-server",
+          "saml",
+          "ha"
+        ],
+        "unknownFeatures": [],
+        "entitlements": {
+          "findings-server": {},
+          "saml": {},
+          "ha": {
+            "nodes": 3
+          }
+        },
+        "expires": "2027-12-01T00:00:00Z",
+        "plan": "team",
+        "rid": "rid_v2"
+      },
+      "now": "2027-01-15T12:00:00Z"
+    },
+    {
+      "name": "v2 valid without an asking component",
+      "token": "eyJ2IjoyLCJpZCI6ImxpY192MiIsImN1c3RvbWVyIjoiVmVjdG9yIEN1c3RvbWVyIiwicGxhbiI6InRlYW0iLCJzZWF0cyI6MjUsImF1ZCI6WyJjbGkiLCJodWIiXSwiZW50aXRsZW1lbnRzIjp7ImZpbmRpbmdzLXNlcnZlciI6e30sInNhbWwiOnt9LCJoYSI6eyJub2RlcyI6M319LCJpc3N1ZWRBdCI6IjIwMjYtMTItMDFUMDA6MDA6MDBaIiwibmJmIjoiMjAyNi0xMi0wMVQwMDowMDowMFoiLCJleHBpcmVzIjoiMjAyNy0xMi0wMVQwMDowMDowMFoiLCJraWQiOiJ0MSIsInJpZCI6InJpZF92MiJ9.Bq2371GlpEOuCviiaPtjdF0w12nmzVpxEov-JUo3L2aigIgi-Y0V74PYyGDwXSDnXVK7SPp2P9ctTphATzrzDA",
+      "expect": {
+        "ok": true,
+        "state": "valid",
+        "reason": null
+      },
+      "now": "2027-01-15T12:00:00Z"
+    },
+    {
+      "name": "v2 rid defaults to id",
+      "token": "eyJ2IjoyLCJpZCI6ImxpY192MiIsImN1c3RvbWVyIjoiVmVjdG9yIEN1c3RvbWVyIiwicGxhbiI6InRlYW0iLCJzZWF0cyI6MjUsImF1ZCI6WyJjbGkiLCJodWIiXSwiZW50aXRsZW1lbnRzIjp7ImZpbmRpbmdzLXNlcnZlciI6e30sInNhbWwiOnt9LCJoYSI6eyJub2RlcyI6M319LCJpc3N1ZWRBdCI6IjIwMjYtMTItMDFUMDA6MDA6MDBaIiwibmJmIjoiMjAyNi0xMi0wMVQwMDowMDowMFoiLCJleHBpcmVzIjoiMjAyNy0xMi0wMVQwMDowMDowMFoiLCJraWQiOiJ0MSJ9.VIq4Mkrcr-iE0sP2IlHFFuIVXX9BJu77GuoDp9mZCmtlRxd7eEKpfgFYuFAcFcEfUD9tiMV-8JsT4WhxngSUBA",
+      "expect": {
+        "ok": true,
+        "state": "valid",
+        "rid": "lic_v2"
+      },
+      "now": "2027-01-15T12:00:00Z"
+    },
+    {
+      "name": "v2 expired within grace",
+      "now": "2027-12-10T00:00:00Z",
+      "audience": "hub",
+      "token": "eyJ2IjoyLCJpZCI6ImxpY192MiIsImN1c3RvbWVyIjoiVmVjdG9yIEN1c3RvbWVyIiwicGxhbiI6InRlYW0iLCJzZWF0cyI6MjUsImF1ZCI6WyJjbGkiLCJodWIiXSwiZW50aXRsZW1lbnRzIjp7ImZpbmRpbmdzLXNlcnZlciI6e30sInNhbWwiOnt9LCJoYSI6eyJub2RlcyI6M319LCJpc3N1ZWRBdCI6IjIwMjYtMTItMDFUMDA6MDA6MDBaIiwibmJmIjoiMjAyNi0xMi0wMVQwMDowMDowMFoiLCJleHBpcmVzIjoiMjAyNy0xMi0wMVQwMDowMDowMFoiLCJraWQiOiJ0MSIsInJpZCI6InJpZF92MiJ9.Bq2371GlpEOuCviiaPtjdF0w12nmzVpxEov-JUo3L2aigIgi-Y0V74PYyGDwXSDnXVK7SPp2P9ctTphATzrzDA",
+      "expect": {
+        "ok": true,
+        "state": "grace",
+        "reason": null,
+        "features": [
+          "findings-server",
+          "saml",
+          "ha"
+        ],
+        "graceEndsAt": "2027-12-31T00:00:00.000Z"
+      }
+    },
+    {
+      "name": "v2 expired past grace",
+      "now": "2028-02-01T00:00:00Z",
+      "audience": "hub",
+      "token": "eyJ2IjoyLCJpZCI6ImxpY192MiIsImN1c3RvbWVyIjoiVmVjdG9yIEN1c3RvbWVyIiwicGxhbiI6InRlYW0iLCJzZWF0cyI6MjUsImF1ZCI6WyJjbGkiLCJodWIiXSwiZW50aXRsZW1lbnRzIjp7ImZpbmRpbmdzLXNlcnZlciI6e30sInNhbWwiOnt9LCJoYSI6eyJub2RlcyI6M319LCJpc3N1ZWRBdCI6IjIwMjYtMTItMDFUMDA6MDA6MDBaIiwibmJmIjoiMjAyNi0xMi0wMVQwMDowMDowMFoiLCJleHBpcmVzIjoiMjAyNy0xMi0wMVQwMDowMDowMFoiLCJraWQiOiJ0MSIsInJpZCI6InJpZF92MiJ9.Bq2371GlpEOuCviiaPtjdF0w12nmzVpxEov-JUo3L2aigIgi-Y0V74PYyGDwXSDnXVK7SPp2P9ctTphATzrzDA",
+      "expect": {
+        "ok": false,
+        "state": "expired",
+        "reason": null
+      }
+    },
+    {
+      "name": "v2 bad signature",
+      "token": "eyJ2IjoyLCJpZCI6ImxpY192MiIsImN1c3RvbWVyIjoiVmVjdG9yIEN1c3RvbWVyIiwicGxhbiI6InRlYW0iLCJzZWF0cyI6MjUsImF1ZCI6WyJjbGkiLCJodWIiXSwiZW50aXRsZW1lbnRzIjp7ImZpbmRpbmdzLXNlcnZlciI6e30sInNhbWwiOnt9LCJoYSI6eyJub2RlcyI6M319LCJpc3N1ZWRBdCI6IjIwMjYtMTItMDFUMDA6MDA6MDBaIiwibmJmIjoiMjAyNi0xMi0wMVQwMDowMDowMFoiLCJleHBpcmVzIjoiMjAyNy0xMi0wMVQwMDowMDowMFoiLCJraWQiOiJ0MSIsInJpZCI6InJpZF92MiJ9.B62371GlpEOuCviiaPtjdF0w12nmzVpxEov-JUo3L2aigIgi-Y0V74PYyGDwXSDnXVK7SPp2P9ctTphATzrzDA",
+      "expect": {
+        "ok": false,
+        "state": "invalid",
+        "reason": "bad-signature",
+        "features": []
+      },
+      "now": "2027-01-15T12:00:00Z"
+    },
+    {
+      "name": "v2 signed by another key",
+      "token": "eyJ2IjoyLCJpZCI6ImxpY192MiIsImN1c3RvbWVyIjoiVmVjdG9yIEN1c3RvbWVyIiwicGxhbiI6InRlYW0iLCJzZWF0cyI6MjUsImF1ZCI6WyJjbGkiLCJodWIiXSwiZW50aXRsZW1lbnRzIjp7ImZpbmRpbmdzLXNlcnZlciI6e30sInNhbWwiOnt9LCJoYSI6eyJub2RlcyI6M319LCJpc3N1ZWRBdCI6IjIwMjYtMTItMDFUMDA6MDA6MDBaIiwibmJmIjoiMjAyNi0xMi0wMVQwMDowMDowMFoiLCJleHBpcmVzIjoiMjAyNy0xMi0wMVQwMDowMDowMFoiLCJraWQiOiJ0MSIsInJpZCI6InJpZF92MiJ9.rHIMZwItVTqP44D2zF_GXR-u4QBXFaEHlrcBsNUZz6E71kn7rL0DgwRDapVREnlo2GZeLVdU3q8XeqWwMgspCw",
+      "expect": {
+        "ok": false,
+        "state": "invalid",
+        "reason": "bad-signature"
+      },
+      "now": "2027-01-15T12:00:00Z"
+    },
+    {
+      "name": "v2 wrong kid",
+      "token": "eyJ2IjoyLCJpZCI6ImxpY192MiIsImN1c3RvbWVyIjoiVmVjdG9yIEN1c3RvbWVyIiwicGxhbiI6InRlYW0iLCJzZWF0cyI6MjUsImF1ZCI6WyJjbGkiLCJodWIiXSwiZW50aXRsZW1lbnRzIjp7ImZpbmRpbmdzLXNlcnZlciI6e30sInNhbWwiOnt9LCJoYSI6eyJub2RlcyI6M319LCJpc3N1ZWRBdCI6IjIwMjYtMTItMDFUMDA6MDA6MDBaIiwibmJmIjoiMjAyNi0xMi0wMVQwMDowMDowMFoiLCJleHBpcmVzIjoiMjAyNy0xMi0wMVQwMDowMDowMFoiLCJraWQiOiJub3BlIiwicmlkIjoicmlkX3YyIn0.NMJ4UWXFROcMgqWPpTdVmWxUk4Jac3-GfCREeWPIb5BXu45EXYnw4TEzZXk7yNC7hKgE6PHo_PNVM050AVvADA",
+      "expect": {
+        "ok": false,
+        "state": "invalid",
+        "reason": "unknown-key",
+        "features": []
+      },
+      "now": "2027-01-15T12:00:00Z"
+    },
+    {
+      "name": "v2 unknown entitlement ignored",
+      "token": "eyJ2IjoyLCJpZCI6ImxpY192MiIsImN1c3RvbWVyIjoiVmVjdG9yIEN1c3RvbWVyIiwicGxhbiI6InRlYW0iLCJzZWF0cyI6MjUsImF1ZCI6WyJjbGkiLCJodWIiXSwiZW50aXRsZW1lbnRzIjp7InNhbWwiOnt9LCJmdXR1cmUtdGhpbmciOnsid2lkZ2V0cyI6NX0sImJiLW1hbmFnZWQiOnsicmVwb3MiOjIwMH19LCJpc3N1ZWRBdCI6IjIwMjYtMTItMDFUMDA6MDA6MDBaIiwibmJmIjoiMjAyNi0xMi0wMVQwMDowMDowMFoiLCJleHBpcmVzIjoiMjAyNy0xMi0wMVQwMDowMDowMFoiLCJraWQiOiJ0MSIsInJpZCI6InJpZF92MiJ9.pP-kSVWsx9K2OXVUm8ze7o01o_0_q5DjNolhcezijuERUKC6-8PVFOL1Co57ZYkufL68Q0uzN6O_247iP6j_BQ",
+      "expect": {
+        "ok": true,
+        "state": "valid",
+        "features": [
+          "saml"
+        ],
+        "unknownFeatures": [
+          "future-thing",
+          "bb-managed"
+        ],
+        "entitlements": {
+          "saml": {}
+        }
+      },
+      "now": "2027-01-15T12:00:00Z"
+    },
+    {
+      "name": "v2 audience mismatch",
+      "audience": "brain",
+      "token": "eyJ2IjoyLCJpZCI6ImxpY192MiIsImN1c3RvbWVyIjoiVmVjdG9yIEN1c3RvbWVyIiwicGxhbiI6InRlYW0iLCJzZWF0cyI6MjUsImF1ZCI6WyJjbGkiLCJodWIiXSwiZW50aXRsZW1lbnRzIjp7ImZpbmRpbmdzLXNlcnZlciI6e30sInNhbWwiOnt9LCJoYSI6eyJub2RlcyI6M319LCJpc3N1ZWRBdCI6IjIwMjYtMTItMDFUMDA6MDA6MDBaIiwibmJmIjoiMjAyNi0xMi0wMVQwMDowMDowMFoiLCJleHBpcmVzIjoiMjAyNy0xMi0wMVQwMDowMDowMFoiLCJraWQiOiJ0MSIsInJpZCI6InJpZF92MiJ9.Bq2371GlpEOuCviiaPtjdF0w12nmzVpxEov-JUo3L2aigIgi-Y0V74PYyGDwXSDnXVK7SPp2P9ctTphATzrzDA",
+      "expect": {
+        "ok": false,
+        "state": "invalid",
+        "reason": "audience-mismatch",
+        "features": []
+      },
+      "now": "2027-01-15T12:00:00Z"
+    },
+    {
+      "name": "v2 nbf in the future",
+      "token": "eyJ2IjoyLCJpZCI6ImxpY192MiIsImN1c3RvbWVyIjoiVmVjdG9yIEN1c3RvbWVyIiwicGxhbiI6InRlYW0iLCJzZWF0cyI6MjUsImF1ZCI6WyJjbGkiLCJodWIiXSwiZW50aXRsZW1lbnRzIjp7ImZpbmRpbmdzLXNlcnZlciI6e30sInNhbWwiOnt9LCJoYSI6eyJub2RlcyI6M319LCJpc3N1ZWRBdCI6IjIwMjYtMTItMDFUMDA6MDA6MDBaIiwibmJmIjoiMjAyNy0wMS0yNVQxMjowMDowMFoiLCJleHBpcmVzIjoiMjAyNy0xMi0wMVQwMDowMDowMFoiLCJraWQiOiJ0MSIsInJpZCI6InJpZF92MiJ9.VELAqEqQ0osgEh6QNQWV9ByYFjT4t_aHjWypLbVTUtC4x-_nSIvNzXvgqLD0lNJMi2N6Df0mcTG0UMKZc7VdDw",
+      "expect": {
+        "ok": false,
+        "state": "invalid",
+        "reason": "not-yet-valid",
+        "features": []
+      },
+      "now": "2027-01-15T12:00:00Z"
+    },
+    {
+      "name": "v2 nbf reached",
+      "now": "2027-01-25T12:00:00Z",
+      "token": "eyJ2IjoyLCJpZCI6ImxpY192MiIsImN1c3RvbWVyIjoiVmVjdG9yIEN1c3RvbWVyIiwicGxhbiI6InRlYW0iLCJzZWF0cyI6MjUsImF1ZCI6WyJjbGkiLCJodWIiXSwiZW50aXRsZW1lbnRzIjp7ImZpbmRpbmdzLXNlcnZlciI6e30sInNhbWwiOnt9LCJoYSI6eyJub2RlcyI6M319LCJpc3N1ZWRBdCI6IjIwMjYtMTItMDFUMDA6MDA6MDBaIiwibmJmIjoiMjAyNy0wMS0yNVQxMjowMDowMFoiLCJleHBpcmVzIjoiMjAyOC0wMi0xOVQxMjowMDowMFoiLCJraWQiOiJ0MSIsInJpZCI6InJpZF92MiJ9.TL8Wlk7djQDvlEqrBlM9YDyirX1LiSqPhALThe76J6xkr4zu9l0TDPHOt2QqS04YIjXZPOfSnlEkqn9KfRILCQ",
+      "expect": {
+        "ok": true,
+        "state": "valid"
+      }
+    },
+    {
+      "name": "v2 negative limit is malformed",
+      "token": "eyJ2IjoyLCJpZCI6ImxpY192MiIsImN1c3RvbWVyIjoiVmVjdG9yIEN1c3RvbWVyIiwicGxhbiI6InRlYW0iLCJzZWF0cyI6MjUsImF1ZCI6WyJjbGkiLCJodWIiXSwiZW50aXRsZW1lbnRzIjp7InNhbWwiOnsicmVwb3MiOi0xfX0sImlzc3VlZEF0IjoiMjAyNi0xMi0wMVQwMDowMDowMFoiLCJuYmYiOiIyMDI2LTEyLTAxVDAwOjAwOjAwWiIsImV4cGlyZXMiOiIyMDI3LTEyLTAxVDAwOjAwOjAwWiIsImtpZCI6InQxIiwicmlkIjoicmlkX3YyIn0.nkD-j7v42R-Fr49Pbnbg_7mjLY39Sv1UQYo2hYziC7Keo7L7ISVG0DJcq9s4ZmVvB0E0WnkhfQ-mXPRopOndBQ",
+      "expect": {
+        "ok": false,
+        "state": "invalid",
+        "reason": "malformed"
+      },
+      "now": "2027-01-15T12:00:00Z"
+    },
+    {
+      "name": "v2 empty audience is malformed",
+      "token": "eyJ2IjoyLCJpZCI6ImxpY192MiIsImN1c3RvbWVyIjoiVmVjdG9yIEN1c3RvbWVyIiwicGxhbiI6InRlYW0iLCJzZWF0cyI6MjUsImF1ZCI6W10sImVudGl0bGVtZW50cyI6eyJmaW5kaW5ncy1zZXJ2ZXIiOnt9LCJzYW1sIjp7fSwiaGEiOnsibm9kZXMiOjN9fSwiaXNzdWVkQXQiOiIyMDI2LTEyLTAxVDAwOjAwOjAwWiIsIm5iZiI6IjIwMjYtMTItMDFUMDA6MDA6MDBaIiwiZXhwaXJlcyI6IjIwMjctMTItMDFUMDA6MDA6MDBaIiwia2lkIjoidDEiLCJyaWQiOiJyaWRfdjIifQ.9bIG0z2nnSI21DGfbZf0k3PWYAzGsivYtjKy7PvkGWcDlJKLNsIRNTZvBgT1cIguS07rIBlVLl35X82o-Q-WAQ",
+      "expect": {
+        "ok": false,
+        "state": "invalid",
+        "reason": "malformed"
+      },
+      "now": "2027-01-15T12:00:00Z"
+    },
+    {
+      "name": "unsupported version",
+      "token": "eyJ2IjozLCJpZCI6ImxpY192MiIsImN1c3RvbWVyIjoiVmVjdG9yIEN1c3RvbWVyIiwicGxhbiI6InRlYW0iLCJzZWF0cyI6MjUsImF1ZCI6WyJjbGkiLCJodWIiXSwiZW50aXRsZW1lbnRzIjp7ImZpbmRpbmdzLXNlcnZlciI6e30sInNhbWwiOnt9LCJoYSI6eyJub2RlcyI6M319LCJpc3N1ZWRBdCI6IjIwMjYtMTItMDFUMDA6MDA6MDBaIiwibmJmIjoiMjAyNi0xMi0wMVQwMDowMDowMFoiLCJleHBpcmVzIjoiMjAyNy0xMi0wMVQwMDowMDowMFoiLCJraWQiOiJ0MSIsInJpZCI6InJpZF92MiJ9.yo7AeGZfa-rz1IQZ70cvVxsc45OWJbuaKwQJbXAetJTKcD4dtOC6Pp-01eF_LjvCETRwgJd6BWaNVWq9vnh9AQ",
+      "expect": {
+        "ok": false,
+        "state": "invalid",
+        "reason": "unsupported-version"
+      },
+      "now": "2027-01-15T12:00:00Z"
+    }
+  ]
+}
