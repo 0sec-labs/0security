@@ -204,6 +204,7 @@ export default defineConfig({
             { label: "What 0 can do", slug: "features" },
             { label: "Threads", slug: "threads" },
             { label: "Sentinels", slug: "sentinels" },
+            { label: "Policy bundles", slug: "policy-bundles" },
             { label: "Skills", slug: "skills" },
             { label: "Extensions", slug: "extensions" },
             { label: "Use 0 from Claude Code or Codex", slug: "agents" },

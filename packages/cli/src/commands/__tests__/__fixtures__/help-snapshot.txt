@@ -959,54 +959,66 @@ Usage: 0security findings fix [options] <finding>
 Fix one finding in an isolated git work tree and open a pull request for review
 
 Options:
-  --host <host>                    Code host: github, bitbucket-cloud or bitbucket-dc (inferred from
-                                   origin)
-  --bitbucket-url <url>            Bitbucket Data Center HTTPS base URL, including any context path
-                                   (or BITBUCKET_URL)
-  --repo <dir>                     Git repository the finding is in (default: the current directory)
-  --base <branch>                  Branch to start from and open the pull request against (default:
-                                   the remote's default branch)
-  --test <command>                 Check to run after the change; repeat for several. A failing
-                                   check makes the pull request a draft
-  --ready                          Open the pull request ready for review even when no --test ran.
-                                   Without it, a pull request with no checks is a draft
-  --sandbox <mode>                 Run the --test commands in a container instead of on this machine
-                                   (docker) (choices: "docker")
-  --sandbox-profile <profile>      Use the pinned Maven/JDK 21 verifier: online dependency setup
-                                   then offline verify (java)
-  --sandbox-maven-settings <file>  Owner-only short-lived Maven credentials outside the repository;
-                                   read-only mount for online setup only; setup output withheld
-  --sandbox-image <image>          Image for --sandbox docker, for example
-                                   maven:3-eclipse-temurin-21. It must hold the tools and
-                                   dependencies the tests need
-  --sandbox-network                Give the sandbox network access (to download dependencies). Off
-                                   by default
-  --sandbox-setup <command>        With --sandbox docker: run this once with the network on to
-                                   download dependencies (for example mvn -q test), then run the
-                                   --test checks with the network off; repeat for several
-  --policy <file>                  Policy file (.json or .yaml) of approved libraries and fix rules;
-                                   any path you name, relative to the current directory. Default:
-                                   ~/.0/fix-policy.json|yaml|yml
-  --ticket <key>                   Ticket key such as SEC-123 for the {ticket} placeholder in your
-                                   policy's pull request settings
-  --repo-policy                    Also read fix-policy.* or .zero/fix-policy.* from the repository
-                                   being fixed (untrusted content; off by default)
-  --no-variants                    Do not rescan the recorded variants or hunt for the same bug at
-                                   other sites after the fix
-  --variant-budget <usd>           Spend cap for each variant thread, in USD (default: "1")
-  --no-pr                          Commit on the fix branch but do not push or open a pull request
-  --budget <usd>                   Stop when the estimated spend reaches this many USD (default:
-                                   "3")
-  --model <model>                  Model for the fix thread (default: gpt-6-luna; ZERO_MODEL or a
-                                   pinned provider's default when set)
-  --timeout <seconds>              Maximum seconds to wait for the fix (default: "1800")
-  --format <format>                Output: text or json (choices: "text", "json")
-  --engine-url <url>               Attach directly to a running trusted engine
-  --engine-token-env <name>        Environment variable holding the attached engine token
-  --computer <id>                  Use a registered remote computer
-  --computers-config <path>        Operator computer connection registry JSON file
-  --db-path <path>                 Control database of the local engine to attach to
-  -h, --help                       display help for command
+  --host <host>                     Code host: github, bitbucket-cloud or bitbucket-dc (inferred
+                                    from origin)
+  --bitbucket-url <url>             Bitbucket Data Center HTTPS base URL, including any context path
+                                    (or BITBUCKET_URL)
+  --repo <dir>                      Git repository the finding is in (default: the current
+                                    directory)
+  --base <branch>                   Branch to start from and open the pull request against (default:
+                                    the remote's default branch)
+  --test <command>                  Check to run after the change; repeat for several. A failing
+                                    check makes the pull request a draft
+  --ready                           Open the pull request ready for review even when no --test ran.
+                                    Without it, a pull request with no checks is a draft
+  --sandbox <mode>                  Run the --test commands in a container instead of on this
+                                    machine (docker) (choices: "docker")
+  --sandbox-profile <profile>       Use the pinned Maven/JDK 21 verifier: online dependency setup
+                                    then offline verify (java)
+  --sandbox-maven-settings <file>   Owner-only short-lived Maven credentials outside the repository;
+                                    read-only mount for online setup only; setup output withheld
+  --sandbox-image <image>           Image for --sandbox docker, for example
+                                    maven:3-eclipse-temurin-21. It must hold the tools and
+                                    dependencies the tests need
+  --sandbox-network                 Give the sandbox network access (to download dependencies). Off
+                                    by default
+  --sandbox-setup <command>         With --sandbox docker: run this once with the network on to
+                                    download dependencies (for example mvn -q test), then run the
+                                    --test checks with the network off; repeat for several
+  --policy <file>                   Policy file (.json or .yaml) of approved libraries and fix
+                                    rules; any path you name, relative to the current directory.
+                                    Default: ~/.0/fix-policy.json|yaml|yml
+  --policy-bundle <file|https-url>  Signed policy bundle to use instead of --policy; refused unless
+                                    its Ed25519 signature matches a --policy-bundle-key or
+                                    --policy-bundle-key-file and its version is newer than the last
+                                    one accepted
+  --policy-bundle-key <key>         Ed25519 public key as inline text (PEM, base64 or hex; never a
+                                    path) allowed to sign policy bundles; repeat for several. Also
+                                    ZERO_POLICY_BUNDLE_KEY
+  --policy-bundle-key-file <path>   File holding an Ed25519 public key allowed to sign policy
+                                    bundles: an absolute path, not a symlink, outside the current
+                                    folder and every repository being fixed (--repo); repeat for
+                                    several. Also ZERO_POLICY_BUNDLE_KEY_FILE
+  --ticket <key>                    Ticket key such as SEC-123 for the {ticket} placeholder in your
+                                    policy's pull request settings
+  --repo-policy                     Also read fix-policy.* or .zero/fix-policy.* from the repository
+                                    being fixed (untrusted content; off by default)
+  --no-variants                     Do not rescan the recorded variants or hunt for the same bug at
+                                    other sites after the fix
+  --variant-budget <usd>            Spend cap for each variant thread, in USD (default: "1")
+  --no-pr                           Commit on the fix branch but do not push or open a pull request
+  --budget <usd>                    Stop when the estimated spend reaches this many USD (default:
+                                    "3")
+  --model <model>                   Model for the fix thread (default: gpt-6-luna; ZERO_MODEL or a
+                                    pinned provider's default when set)
+  --timeout <seconds>               Maximum seconds to wait for the fix (default: "1800")
+  --format <format>                 Output: text or json (choices: "text", "json")
+  --engine-url <url>                Attach directly to a running trusted engine
+  --engine-token-env <name>         Environment variable holding the attached engine token
+  --computer <id>                   Use a registered remote computer
+  --computers-config <path>         Operator computer connection registry JSON file
+  --db-path <path>                  Control database of the local engine to attach to
+  -h, --help                        display help for command
 
 ### 0security findings import
 Usage: 0security findings import [options] [file]

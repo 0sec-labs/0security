@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
 import { gzipSync } from "node:zlib";
-import { fetchScoped, isAllowedLocalOrigin } from "./http.js";
+import { fetchScoped, isAllowedLocalOrigin, isPrivateAddress } from "./http.js";
 
 const dns = vi.hoisted(() => ({ lookup: vi.fn() }));
 vi.mock("node:dns/promises", () => dns);
@@ -209,5 +209,23 @@ describe("pinned HTTP physical network boundary", () => {
       beforeRequest: async () => { authorized = false; },
     })).rejects.toThrow(/authority revoked/);
     expect(hits).toEqual([]);
+  });
+});
+
+describe("isPrivateAddress spellings", () => {
+  const refused = [
+    "127.0.0.1", "0.0.0.0", "10.0.0.5", "172.16.0.1", "192.168.1.1", "169.254.169.254", "100.64.0.1",
+    "::1", "::", "[::1]", "fd00::1", "fe80::1",
+    "::ffff:127.0.0.1", "::ffff:7f00:1", "::ffff:10.0.0.5", "::ffff:a00:5", "::ffff:a9fe:a9fe", "0:0:0:0:0:ffff:c0a8:1",
+    "::127.0.0.1", "::7f00:1", "::10.0.0.5", "::a9fe:a9fe",
+    "64:ff9b::7f00:1", "64:ff9b::10.0.0.5", "64:ff9b::a9fe:a9fe",
+    "2002:7f00:1::", "2002:a00:5::1", "2002:a9fe:a9fe::", "2002:c0a8:101::1",
+  ];
+  for (const spelling of refused) it(`refuses ${spelling}`, () => { expect(isPrivateAddress(spelling)).toBe(true); });
+  it("refuses decimal, hex and octal integer hosts once the URL parser has normalised them", () => {
+    for (const url of ["https://2130706433/", "https://0x7f000001/", "https://0177.0.0.1/", "https://127.1/", "https://[::ffff:127.0.0.1]/", "https://[::127.0.0.1]/"]) expect(isPrivateAddress(new URL(url).hostname)).toBe(true);
+  });
+  it("allows public addresses, including mapped and translated public ones", () => {
+    for (const ok of ["8.8.8.8", "93.184.216.34", "2606:4700::1111", "::ffff:8.8.8.8", "64:ff9b::808:808", "2002:808:808::"]) expect(isPrivateAddress(ok)).toBe(false);
   });
 });
