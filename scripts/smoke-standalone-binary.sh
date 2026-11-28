@@ -5,6 +5,8 @@
 # runner) and `scripts/ci-local.sh --only standalone-smoke` (one platform, in
 # minutes, long before a tag exists).
 set -euo pipefail
+# Smoke runs are fresh installs by design; they must never count as users.
+export DO_NOT_TRACK=1
 BIN="$(cd "$(dirname "${1:?usage: smoke-standalone-binary.sh <binary>}")" && pwd)/$(basename "$1")"
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"

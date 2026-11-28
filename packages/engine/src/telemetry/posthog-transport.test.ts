@@ -311,6 +311,26 @@ describe("lifecycle events (PostHog only)", () => {
     expect(existsSync(join(home, ".0", ANALYTICS_LAST_VERSION_FILENAME))).toBe(false);
   });
 
+  it("labels every event with ci from the CI variable, and sends it either way", async () => {
+    const saved = process.env["CI"];
+    try {
+      for (const [value, expected] of [["1", true], ["true", true], ["0", false], ["false", false], [undefined, false]] as const) {
+        posts.length = 0;
+        analyticsPipeline.__resetForTests();
+        analyticsPipeline.configure({ homeDir: home, fetchImpl: fakeFetch(), knownCommandNames: ["scan"] });
+        if (value === undefined) delete process.env["CI"]; else process.env["CI"] = value;
+        analyticsPipeline.setLevel("usage");
+        analyticsPipeline.recordStartup({ command: "scan" });
+        await analyticsPipeline.flushNow();
+        const events = allEvents();
+        expect(events.length).toBeGreaterThan(0);
+        for (const event of events) expect(event.properties.ci).toBe(expected);
+      }
+    } finally {
+      if (saved === undefined) delete process.env["CI"]; else process.env["CI"] = saved;
+    }
+  });
+
   it("a fresh install sends first_run then command_invoked, each with only its allowlisted properties", async () => {
     analyticsPipeline.configure({ knownCommandNames: ["scan", "scan web"] });
     analyticsPipeline.setLevel("usage");

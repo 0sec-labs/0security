@@ -157,7 +157,10 @@ jobs:
           ZERO_RELEASE_SENTRY_DSN: ${{ secrets.ZERO_RELEASE_SENTRY_DSN }}
           # Release-only public PostHog ingestion key; same rules (unset = no analytics,
           # malformed fails scripts/built-in-posthog-key.mjs before compiling).
-          ZERO_RELEASE_POSTHOG_KEY: ${{ secrets.ZERO_RELEASE_POSTHOG_KEY }}
+          # Embedded only for a real release (a tag push, or a non-dry-run dispatch). Dry runs and
+          # the nightly build run the smoke tests on four runners; with the key they sent a fresh
+          # install, first run and scan to the production project every time.
+          ZERO_RELEASE_POSTHOG_KEY: ${{ ((github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) || (github.event_name == 'workflow_dispatch' && !inputs.dry_run)) && secrets.ZERO_RELEASE_POSTHOG_KEY || '' }}
         run: bash scripts/bun-compile.sh "" "dist-bin/${{ matrix.asset }}"
       - name: Build Foxguard from crates/foxguard
         # The default scanner ships beside `0` as foxguard-<platform>, built from
