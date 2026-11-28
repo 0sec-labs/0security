@@ -215,6 +215,7 @@ export default defineConfig({
             { label: "Pull request checks", slug: "ci" },
             { label: "Plan the cost of a large estate", slug: "cost" },
             { label: "Use Nuclei, ZAP or Strix", slug: "use-dynamic-scanners" },
+            { label: "Triage findings from any scanner", slug: "triage-any-scanner" },
             { label: "Evidence for the Cyber Resilience Act", slug: "cra-evidence" },
           ],
         },
