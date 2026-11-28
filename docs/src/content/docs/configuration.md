@@ -270,6 +270,7 @@ Every event also carries these common fields:
 | --- | --- |
 | `version`, `channel` | 0security version and release channel (`beta` or `dev`). |
 | `surface` | `web` for the console, otherwise `cli`. |
+| `ci` | `true` when the `CI` environment variable is set, so use inside CI can be told apart from use at a terminal. It does not change whether anything is sent. |
 | `os`, `arch`, `runtime` | Operating system, CPU architecture, and `node` or `bun`. |
 | `$lib`, `$geoip_disable`, `$process_person_profile`, `$ip` | Fixed values (`0security`, `true`, `false`, `null`) that turn off IP lookup and person profiles. |
 

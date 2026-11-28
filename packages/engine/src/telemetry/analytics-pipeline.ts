@@ -68,19 +68,29 @@ const MAX_POSTHOG_EVENTS_PER_BATCH = 50;
 const MAX_POSTHOG_LABELS = 64;
 
 /**
+ * True when the process runs under CI (`CI` set and not explicitly falsy). It is only a
+ * boolean label on each event, so real use inside CI (the GitHub Action, pipelines) can be
+ * told apart from people at a terminal. It never changes whether anything is sent.
+ */
+function runsInCi(env: NodeJS.ProcessEnv = process.env): boolean {
+  const value = env["CI"]?.trim().toLowerCase();
+  return value !== undefined && value !== "" && value !== "0" && value !== "false" && value !== "no";
+}
+
+/**
  * The COMPLETE set of properties a PostHog usage event may carry. Anything not
  * listed here cannot be sent; adding a field is a deliberate, reviewed change.
  */
 export const POSTHOG_PROPERTY_KEYS = [
   "tool_counts", "error_counts", "finding_severity_counts", "finding_class_counts",
   "turn_count", "duration_ms", "cost_usd",
-  "version", "surface", "os", "arch", "runtime", "channel",
+  "version", "surface", "os", "arch", "runtime", "channel", "ci",
   "$lib", "$geoip_disable", "$process_person_profile", "$ip",
 ] as const;
 
 /** Common properties every PostHog event carries (usage and lifecycle alike). */
 const POSTHOG_COMMON_KEYS = [
-  "version", "surface", "os", "arch", "runtime", "channel",
+  "version", "surface", "os", "arch", "runtime", "channel", "ci",
   "$lib", "$geoip_disable", "$process_person_profile", "$ip",
 ] as const;
 
@@ -885,6 +895,7 @@ class AnalyticsPipeline {
       arch: finiteArch(),
       runtime: runtime === "node" || runtime === "bun" ? runtime : "other",
       channel: this.releaseChannel,
+      ci: runsInCi(),
       $lib: "0security",
       $geoip_disable: true,
       $process_person_profile: false,
@@ -915,6 +926,7 @@ class AnalyticsPipeline {
       arch: finiteArch(),
       runtime: runtime === "node" || runtime === "bun" ? runtime : "other",
       channel: this.releaseChannel,
+      ci: runsInCi(),
       $lib: "0security",
       $geoip_disable: true,
       $process_person_profile: false,
