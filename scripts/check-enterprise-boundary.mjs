@@ -16,6 +16,10 @@
 //      responses with the same XML parser that @node-saml/node-saml and xml-crypto verify signatures
 //      with. Two parser versions would let the guard and the verifier read one text as two documents,
 //      which is how signature-wrapping bypasses work. Move all of them together or none.
+//   7. Released free features stay ungated. scripts/released-free-features.json lists features that shipped free
+//      and the files that implement them. None of those files may call a license gate (requireFeature,
+//      hasFeature, assertFeature, featureMode or a bridge wrapper such as evidenceSigningRefusal). Wrappers are
+//      found by scanning the bridge files, so a new one is covered without editing this script.
 //
 // npm decision: enterprise/ is not published to npm. 0 ships as release binaries, install.sh and the
 // container image; enterprise/ is compiled into those. Every manifest is private and `files` is
@@ -43,6 +47,11 @@ export const ALLOWED_BRIDGES = [
 
 /** The only environment variables the license code reads, plus the unrelated no-egress switch. */
 export const ALLOWED_LICENSE_ENV = new Set(["ZERO_LICENSE", "ZERO_LICENSE_FILE", "ZERO_NO_EGRESS", "ZERO_ENTERPRISE"]);
+
+export const FREE_FEATURES_FILE = "scripts/released-free-features.json";
+
+/** The functions in enterprise/src/license.ts that decide whether a licensed feature is on. */
+export const BASE_GATES = ["requireFeature", "hasFeature", "assertFeature", "featureMode", "licenseHasFeature", "licenseFeatureMode"];
 
 const SKIP_DIRS = new Set(["node_modules", "dist", "dist-bin", ".git", ".astro", ".claude", ".worktrees", ".cache", "vendor"]);
 const CODE_EXT = /\.(?:[cm]?[jt]sx?)$/;
@@ -79,6 +88,67 @@ export function xmldomLines(lockText) {
   const lines = new Set();
   for (const m of lockText.matchAll(/@xmldom\/xmldom'?(?:@|: )(\d+)\.(\d+)\.\d+/g)) lines.add(`${m[1]}.${m[2]}`);
   return [...lines].sort();
+}
+
+const stripComments = (text) => text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`\\])\/\/.*$/gm, "$1");
+const isTestFile = (rel) => /\.test\.[cm]?[jt]sx?$/.test(rel) || rel.includes("__tests__/") || rel.includes("__fixtures__/");
+
+/** Every license gate name: the base functions plus each function a bridge exports whose body calls one. */
+export function gateNames(root, bridges = ALLOWED_BRIDGES) {
+  const names = new Set(BASE_GATES);
+  for (const bridge of bridges) {
+    const file = join(root, bridge);
+    if (!existsSync(file) || isTestFile(bridge) || /vitest\.setup/.test(bridge)) continue;
+    const text = stripComments(readFileSync(file, "utf8"));
+    for (const part of text.split(/^(?=export (?:async )?function )/m)) {
+      const m = /^export (?:async )?function (\w+)/.exec(part);
+      if (!m) continue;
+      const end = part.search(/^}/m);
+      const body = end < 0 ? part : part.slice(0, end + 1);
+      if (BASE_GATES.some((g) => new RegExp(`\\b${g}\\b`).test(body))) names.add(m[1]);
+    }
+  }
+  return names;
+}
+
+/** Errors for files of released free features that call a license gate. */
+export function checkFreeFeatures(root, listPath = join(root, FREE_FEATURES_FILE), bridges = ALLOWED_BRIDGES) {
+  const errors = [];
+  if (!existsSync(listPath)) return [`${FREE_FEATURES_FILE} is missing. It lists the released free features and must exist.`];
+  let list;
+  try {
+    list = JSON.parse(readFileSync(listPath, "utf8"));
+  } catch (err) {
+    return [`${FREE_FEATURES_FILE}: not valid JSON (${err.message}).`];
+  }
+  if (!Array.isArray(list.features) || list.features.length === 0) return [`${FREE_FEATURES_FILE}: "features" must be a non-empty array.`];
+  const gates = gateNames(root, bridges);
+  for (const feature of list.features) {
+    const id = feature?.id ?? "(no id)";
+    if (typeof feature?.id !== "string" || !Array.isArray(feature.paths) || feature.paths.length === 0) {
+      errors.push(`${FREE_FEATURES_FILE}: feature ${id} needs an id and a non-empty paths array.`);
+      continue;
+    }
+    const allowed = new Set(feature.allowedGates ?? []);
+    for (const rel of feature.paths) {
+      const target = join(root, rel);
+      if (!existsSync(target)) {
+        errors.push(`${FREE_FEATURES_FILE}: ${id} lists ${rel}, which does not exist. Fix the path; do not drop the feature from the list.`);
+        continue;
+      }
+      const files = statSync(target).isDirectory() ? [...walk(target)] : [target];
+      for (const file of files) {
+        const fileRel = toPosix(relative(root, file));
+        if (!CODE_EXT.test(fileRel) || isTestFile(fileRel)) continue;
+        const text = stripComments(readFileSync(file, "utf8"));
+        for (const gate of gates) {
+          if (allowed.has(gate) || !new RegExp(`\\b${gate}\\b`).test(text)) continue;
+          errors.push(`${fileRel}: calls the license gate ${gate}, but ${id} is a released free feature (${FREE_FEATURES_FILE}). Released free features must stay ungated; put the new paid behaviour in a separate module.`);
+        }
+      }
+    }
+  }
+  return errors;
 }
 
 export function checkEnterpriseBoundary(root, allowedBridges = ALLOWED_BRIDGES) {
@@ -188,12 +258,15 @@ export function checkEnterpriseBoundary(root, allowedBridges = ALLOWED_BRIDGES) 
       errors.push(`pnpm-lock.yaml: @xmldom/xmldom resolves to more than one line (${lines.join(", ")}). The SAML guard in enterprise/src/saml/ and the signature library (@node-saml/node-saml, xml-crypto) must parse with the same copy. Keep one version; do not add an override that splits them.`);
     }
   }
+  // 7. Released free features stay ungated (only when the list exists; the command line below requires it).
+  if (existsSync(join(root, FREE_FEATURES_FILE))) errors.push(...checkFreeFeatures(root, join(root, FREE_FEATURES_FILE), allowedBridges));
   return errors;
 }
 
 if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href) {
   const root = resolve(process.argv[2] ?? join(import.meta.dirname, ".."));
   const errors = checkEnterpriseBoundary(root);
+  if (!existsSync(join(root, FREE_FEATURES_FILE))) errors.push(`${FREE_FEATURES_FILE} is missing. It lists the released free features and must exist.`);
   if (errors.length) {
     for (const e of errors) console.error(`check-enterprise-boundary: ${e}`);
     process.exit(1);
