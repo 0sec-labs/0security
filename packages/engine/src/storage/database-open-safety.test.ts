@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { osecDB } from "./database.js";
@@ -49,6 +49,46 @@ describe("ordinary database open preserves existing storage", () => {
       expect(() => new osecDB(path)).toThrow();
       expect(readFileSync(path)).toEqual(bytes);
       expect(readdirSync(dir)).toEqual(["test.db"]);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it("names the stale lock of a killed process and says to keep the journal", () => {
+    const dir = mkdtempSync(join(tmpdir(), "0-stale-lock-"));
+    const path = join(dir, "test.db");
+    try {
+      createShimmedDatabase(path).close();
+      // What a kill -9 during a write leaves: the lock directory of the VFS and a journal.
+      mkdirSync(`${path}.lock`);
+      writeFileSync(`${path}-journal`, "interrupted write");
+      let message = "";
+      try { new osecDB(path); } catch (error) { message = (error as Error).message; }
+      expect(message).toMatch(/database is locked/);
+      expect(message).toContain(`${path}.lock`);
+      expect(message).toMatch(/keep .*-journal/);
+      expect(message).toMatch(/own HOME/);
+      expect(existsSync(`${path}.lock`)).toBe(true);
+      expect(readFileSync(`${path}-journal`, "utf8")).toBe("interrupted write");
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it("explains a damaged database and leaves it in place", () => {
+    const dir = mkdtempSync(join(tmpdir(), "0-damaged-hint-"));
+    const path = join(dir, "test.db");
+    try {
+      const writer = createShimmedDatabase(path);
+      writer.exec("CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)");
+      writer.transaction(() => { for (let i = 0; i < 400; i++) writer.prepare("INSERT INTO t (v) VALUES (?)").run("x".repeat(500)); })();
+      writer.close();
+      // A copy taken while another process was writing: pages from two moments.
+      const bytes = readFileSync(path);
+      bytes.fill(0xff, 4096 * 5, 4096 * 6);
+      writeFileSync(path, bytes);
+      let message = "";
+      try { new osecDB(path); } catch (error) { message = (error as Error).message; }
+      expect(message).toContain(path);
+      expect(message).toMatch(/copied while a 0 process was using it/);
+      expect(message).toMatch(/move .* aside together/);
+      expect(readFileSync(path)).toEqual(bytes);
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 });
