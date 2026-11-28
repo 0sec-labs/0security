@@ -22,7 +22,7 @@ Open these destinations from the machine:
 - Your model endpoint. For Amazon Bedrock that is the regional `bedrock-runtime` endpoint and the AWS credential endpoints for your credential source.
 - Your Bitbucket or GitHub host, if you connect one.
 
-Set `ZERO_ENTERPRISE=1` and `DO_NOT_TRACK=1` to stop every other automatic call. That setting also refuses every `gh` call and Bitbucket Cloud. See [Data flow](/data-flow/) for the full list.
+Set `ZERO_ENTERPRISE=1` and `DO_NOT_TRACK=1` to stop every other automatic call. That setting also refuses every `gh` call and Bitbucket Cloud. Bitbucket Data Center works only when `ZERO_BITBUCKET_URL` names your server. So if you use GitHub or Bitbucket Cloud, leave `ZERO_ENTERPRISE` off, keep `DO_NOT_TRACK=1`, and limit the traffic to the list above in your firewall or proxy. See [Data flow](/data-flow/) for the full list.
 
 ## Start with Docker
 
@@ -46,6 +46,7 @@ kubectl -n zero create secret generic zero-secrets \
   --from-literal=ZERO_ACCESS_TOKEN="$(openssl rand -base64 32)"
 helm install zero deploy/helm/zero -n zero \
   --set secrets.existingSecret=zero-secrets \
+  --set persistence.size=50Gi \
   --set model.provider=bedrock \
   --set model.name=eu.anthropic.claude-sonnet-4-5-20250929-v1:0 \
   --set model.awsRegion=eu-central-1
@@ -53,7 +54,7 @@ helm test zero -n zero
 kubectl port-forward svc/zero-zero 48123:80 -n zero
 ```
 
-The chart sets `ZERO_ENTERPRISE` by default. Set `enterprise: false` if you use pull request reviews on GitHub. For ingress, TLS and the other values, see [Run on Kubernetes with Helm](/self-hosting/#run-on-kubernetes-with-helm).
+The chart's default volume is 20Gi, which is below the 30 GB minimum, so the command sets `persistence.size`. The chart sets `ZERO_ENTERPRISE` by default. Set `enterprise: false` if you use pull request reviews on GitHub. For ingress, TLS and the other values, see [Run on Kubernetes with Helm](/self-hosting/#run-on-kubernetes-with-helm).
 
 ## Connect Amazon Bedrock
 
@@ -86,7 +87,9 @@ This takes about five minutes. It checks the model connection before you scan an
 
 `doctor` checks the machine and the engine. The prompt makes one model request. If it answers, the provider, credentials and model work. If it fails with an access error, check the model ID, the region and the IAM resources first.
 
-In Docker, put `docker compose exec zero` in front of each command.
+In Docker, put `docker compose exec zero` in front of each command. To see which provider and model 0 picked, add `ZERO_RUNTIME_TRACE=1`. It prints them on stderr. If it names another provider than Bedrock, fix that before you go on. Pass `--model` with an exact model ID on `scan`, `findings verify` and `findings fix` when you pin Bedrock, and see [Amazon Bedrock](/models/#amazon-bedrock) for how 0 picks the model.
+
+Amazon Bedrock prices are unknown to 0 for models other than Anthropic Claude and Amazon Nova. The cost limit works from known prices, so do not rely on `--budget` alone to bound Bedrock spend. Also set `--timeout` and `--concurrency`, and an AWS budget alarm.
 
 ## Connect Bitbucket and GitHub
 
@@ -96,6 +99,8 @@ For Bitbucket, create a token that can read pull requests, write comments and wr
 export BITBUCKET_TOKEN=...
 0security sentinels bitbucket doctor --platform dc --repo PROJECT/repo --url https://bitbucket.example.com --checkout ~/code/repo
 ```
+
+0 sends the Bitbucket token as a bearer token. App passwords and email-and-token basic authentication do not work. The pull request is fetched with git, not with the token. Git uses the machine's own credentials, and `BITBUCKET_TOKEN` never reaches it. In a container, mount a clone whose `origin` is the Bitbucket repository, read-only, and give git credentials yourself. `sentinels bitbucket doctor` checks this with `--checkout`.
 
 For GitHub, the token or `gh` login needs the access each feature uses:
 
@@ -140,6 +145,7 @@ In one earlier run with the model `gpt-6-luna` on OpenAI, this audit cost about 
 ## Limits
 
 - Real Amazon Bedrock calls are not qualified. The Bedrock path is tested against a local stand-in and with unit tests, not against the AWS service.
+- The stock image has no Docker, JDK or Maven. `findings fix --sandbox docker` and `sbom generate --resolve` need them. Run those on a host that has them. See [Server mode and Docker](/server-mode/).
 - Bitbucket, Jenkins and Azure Pipelines integrations are tested with stand-in programs, not on live instances.
 - The Terraform and Helm files have not been applied to a real AWS account or cluster.
 - 0 runs on one node with one volume. It has no high availability.
