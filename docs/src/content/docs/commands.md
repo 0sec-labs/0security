@@ -211,7 +211,7 @@ Add `--allow-partial` when a partial scan should not fail the job. The exit code
 | `--retries <n>` | `2` | Run a batch again when it fails for a reason that may pass: a dropped connection, a provider timeout, rate limit or server error (0 to 5; 0 turns it off). A thread that is not a batch is asked once to continue. The cost of every attempt counts against --budget |
 | `--coverage-rounds <n>` | `1` | After a thread ends, send it a follow-up that names the source files it never opened, up to this many times (0 to 5; 0 turns it off). Each round counts against --budget |
 | `--batch-timeout <seconds>` | `900` | Longest one batch may run before it is cancelled and left pending (the scan goes on with the next batch); --timeout still limits the whole scan |
-| `--concurrency <n>` | `1` | Batches that run at the same time (1 to 3). With --target-url: Nuclei templates that run at once (1 to 25, default 5) |
+| `--concurrency <n>` | `1` | Batches that run at the same time (1 to 8; ZERO_SCAN_MAX_CONCURRENCY allows up to 16). With --target-url: Nuclei templates that run at once (1 to 25, default 5) |
 | `--resume <scan>` | — | Continue the units an earlier batched scan of this folder did not reach (a scan id from its report, or latest); refuses when the git HEAD changed unless --force |
 | `--force` | — | With --resume: continue even though the folder's git HEAD changed |
 | `--coverage [scan]` | — | Print the coverage ledger of a batched scan of this folder (the latest, or the id given) and exit; --format json for JSON |

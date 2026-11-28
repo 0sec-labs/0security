@@ -27,6 +27,7 @@ import {
   isRetryableHttpStatus,
   llm429MaxRetries,
   llm429MaxRetryWaitMs,
+  noteRateLimitCooldown,
   notifyRetry,
   retryNoticeFor,
   llmMaxRetries,
@@ -37,6 +38,7 @@ import {
   retryBackoffMs,
   sleepWithAbort,
   unknownTransportOutcome,
+  waitForRateLimitCooldown,
 } from "../llm-api/retry.js";
 import {
   LOCAL_ADMISSION_UNAVAILABLE,
@@ -131,6 +133,9 @@ export function createPolicyFetch(options: PolicyFetchOptions): typeof fetch {
     let waitedOtherMs = 0;
     for (let attempt = 0; ; attempt++) {
       if (options.operatorAborted()) throw new DOMException("cancelled by operator", "AbortError");
+      // A 429 any request of this process got holds every other request back too: they share one quota.
+      await waitForRateLimitCooldown(label, options.signal);
+      if (options.operatorAborted()) throw new DOMException("cancelled by operator", "AbortError");
 
       if (env["ZERO_REQUIRE_REQUEST_ADMISSION"] === "1" && typeof init?.body === "string") {
         let model = "";
@@ -197,6 +202,7 @@ export function createPolicyFetch(options: PolicyFetchOptions): typeof fetch {
       if (!is429) { try { await res.text(); } catch { /* best-effort drain */ } }
       diag.warn("http_retry", `${label} HTTP ${res.status} — backoff ${delay}ms (retry ${attempt + 1}/${maxRetries})`, { provider: label, status: res.status, delay_ms: delay, attempt: attempt + 1, max_retries: maxRetries });
       if (is429) waited429Ms += delay; else waitedOtherMs += delay;
+      if (is429) noteRateLimitCooldown(label, delay);
       notifyRetry(retryNoticeFor(res.status, delay, attempt + 1, maxRetries));
       await sleepWithAbort(delay, options.signal);
     }

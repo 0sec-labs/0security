@@ -17,6 +17,7 @@ const shared = {
   // Their default deadline must tolerate shared-runner disk contention;
   // tests of actual runtime deadlines retain their explicit timeouts.
   testTimeout: 30_000,
+  setupFiles: ["./vitest.setup.ts"],
 };
 
 export default defineConfig({

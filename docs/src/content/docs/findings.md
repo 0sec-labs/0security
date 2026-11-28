@@ -313,7 +313,7 @@ To make a scan weigh business logic and authorization, give it a reviewed threat
 | `--skill <id>` | Skill that holds the scan method (default `scan`). |
 | `--batches <mode>` | `auto` (default) reviews a large folder in batches, `on` always does, `off` keeps one thread. See [Large repositories](#large-repositories). |
 | `--batch-size <n>` | Entry points one batch reviews (default 8). |
-| `--concurrency <n>` | Batches that run at the same time, up to 3 (default 1). |
+| `--concurrency <n>` | Batches that run at the same time (default 1, up to 8; `ZERO_SCAN_MAX_CONCURRENCY` raises the limit to 16). See [Running batches in parallel](#running-batches-in-parallel). |
 | `--resume <scan>` | Continue the entry points an earlier scan did not reach. |
 | `--coverage [scan]` | Print what an earlier scan reviewed and exit. |
 | `--allow-partial` | Exit by the findings alone when the scan stops before it reviews everything. The report still says it is partial. |
@@ -335,6 +335,16 @@ One thread cannot review every entry point of a big repository, and it cannot te
 4. A batch counts as reviewed only when its thread finished normally. A batch that stopped at its budget, hit a time limit or failed stays pending.
 5. A batch that fails because the connection dropped or the provider timed out, was rate limited or returned a server error runs again, up to 2 times (`--retries`). The failed attempt's findings are kept and its cost counts against the budget. A batch that runs past 900 seconds (`--batch-timeout`) is cancelled and stays pending with the reason `timeout`. The next batch still runs.
 6. A batch counts as reviewed for the units whose files its thread opened. If the thread skipped files, 0 asks it in the same thread to open them once (`--coverage-rounds`). A unit whose files stay unopened stays pending with the reason `not opened`, and `--resume` runs it again.
+
+### Running batches in parallel
+
+`--concurrency <n>` runs several batches at once. The default is 1. It accepts up to 8, and `ZERO_SCAN_MAX_CONCURRENCY` raises the limit to 16. `--passes` keeps its own limit of 3.
+
+More batches finish a large audit sooner only while the model provider keeps answering. Each batch is a thread that can start helpers of its own, so the provider sees more requests than the number you typed. In one measured audit of a 35,000-line Java project, concurrency 8 took 11.5 minutes and concurrency 3 took 30 minutes and did not finish, but the machine was busier during the second run, and at concurrency 6 the provider answered with rate limits and 4 batches stayed pending. Treat the numbers as a range, not a promise.
+
+When the provider turns a request away with a rate limit, every request of the scan waits for the time it asked for, and a batch that still fails for that reason pauses all workers before the next batch starts. A batch that runs out of retries stays pending; `--resume` runs it again. The budget is shared the same way as with one batch at a time, but a running thread can pass its share by one more turn, so with many batches the total can pass `--budget` by a little. Use a spending limit at the provider for a hard cap.
+
+One scan runs in one process. To split an audit across machines today, scan one folder per machine and read the reports together. Two processes must not `--resume` the same scan: both would run the same batches, and they write one database file. The [design note](https://github.com/0sec-labs/0security/blob/main/docs/design/scan-concurrency.md) describes a shared mode.
 
 ### Large Java projects
 

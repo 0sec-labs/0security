@@ -210,6 +210,12 @@ Values are positive integers. Restart the computer after you change them. Provid
 
 Three of these limits are also settings: `subagentConcurrency` (1-128, default 32), `subagentMaxDepth` (1-16, default 8) and `subagentFanOut` (1-4096, default 1024). The `ZERO_SUBAGENT_*` variables win over them. A project can only lower them.
 
+### Scan batches
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `ZERO_SCAN_MAX_CONCURRENCY` | `8` | The most batches `0security scan --concurrency` accepts, from 1 to 16. A value outside that range is ignored. |
+
 ### Feature gates
 
 | Variable | Effect |

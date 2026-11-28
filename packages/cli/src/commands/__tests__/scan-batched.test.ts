@@ -199,10 +199,33 @@ describe("batched scan", () => {
     expect(process.exitCode).toBe(3);
   });
 
+  it("runs a scan at a concurrency above the old limit of 3, and ZERO_SCAN_MAX_CONCURRENCY moves the limit up to 16 and no further", async () => {
+    const dir = app(20);
+    const db = join(temp(), "db.sqlite");
+    const eight = harness(db);
+    await runScan(dir, opts(db, { concurrency: "8" }), eight.deps);
+    expect(report(eight).coverage.complete).toBe(true);
+
+    const nine = harness(db);
+    await runScan(dir, opts(db, { concurrency: "9" }), nine.deps);
+    expect(nine.err.join("\n")).toMatch(/--concurrency must be a whole number from 1 to 8/);
+    process.exitCode = undefined;
+
+    vi.stubEnv("ZERO_SCAN_MAX_CONCURRENCY", "16");
+    try {
+      const sixteen = harness(db);
+      await runScan(dir, opts(db, { concurrency: "16" }), sixteen.deps);
+      expect(report(sixteen).coverage.complete).toBe(true);
+      const seventeen = harness(db);
+      await runScan(dir, opts(db, { concurrency: "17" }), seventeen.deps);
+      expect(seventeen.err.join("\n")).toMatch(/--concurrency must be a whole number from 1 to 16\./);
+    } finally { vi.unstubAllEnvs(); }
+  });
+
   it("rejects bad batch options and resume on nothing", async () => {
     const dir = app(2);
     const db = join(temp(), "db.sqlite");
-    for (const [extra, message] of [[{ batches: "sometimes" }, /--batches must be/], [{ batchSize: "0" }, /--batch-size/], [{ concurrency: "9" }, /--concurrency/], [{ batches: "on", passes: "2" }, /--passes cannot/], [{ force: true }, /--force only applies/], [{ resume: "latest", diff: "main" }, /drop --diff/]] as const) {
+    for (const [extra, message] of [[{ batches: "sometimes" }, /--batches must be/], [{ batchSize: "0" }, /--batch-size/], [{ concurrency: "17" }, /--concurrency must be a whole number from 1 to 8; set ZERO_SCAN_MAX_CONCURRENCY/], [{ batches: "on", passes: "2" }, /--passes cannot/], [{ force: true }, /--force only applies/], [{ resume: "latest", diff: "main" }, /drop --diff/]] as const) {
       const h = harness(db);
       await runScan(dir, opts(db, extra), h.deps);
       expect(h.err.join("\n")).toMatch(message);

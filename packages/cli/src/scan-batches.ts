@@ -22,6 +22,23 @@ export const DEFAULT_RETRIES = 2;
 const MAX_BACKOFF_MS = 30_000;
 const BASE_BACKOFF_MS = 2_000;
 
+/** The most batches `--concurrency` can ever ask for. `ZERO_SCAN_MAX_CONCURRENCY` can lower the limit but never pass this. */
+export const BATCH_CONCURRENCY_CEILING = 16;
+/** What `--concurrency` allows when `ZERO_SCAN_MAX_CONCURRENCY` is not set. */
+export const DEFAULT_MAX_BATCH_CONCURRENCY = 8;
+
+/**
+ * The most batches one scan may run at the same time: `ZERO_SCAN_MAX_CONCURRENCY` when it is a whole number from 1 up to
+ * the ceiling, else the default. A bad value is ignored, not trusted: the limit protects the model provider, the console
+ * and the machine, so a typo must not remove it.
+ */
+export function maxBatchConcurrency(env: Record<string, string | undefined> = process.env): number {
+  const raw = env["ZERO_SCAN_MAX_CONCURRENCY"]?.trim();
+  if (!raw || !/^\d+$/.test(raw)) return DEFAULT_MAX_BATCH_CONCURRENCY;
+  const value = Number(raw);
+  return value >= 1 && value <= BATCH_CONCURRENCY_CEILING ? value : DEFAULT_MAX_BATCH_CONCURRENCY;
+}
+
 export type StopReason = "budget" | "time limit" | "thread failed" | "timeout";
 
 export interface BatchOutcome {
@@ -117,9 +134,25 @@ export async function runBatches(input: RunBatchesInput): Promise<RunBatchesResu
   let consecutiveFailures = 0;
   let budgetHit = false;
   let timedOut = false;
+  // The provider's limit is shared by every batch: when one batch is turned away, none of them starts new work for a while.
+  let pausedUntil = 0;
+  let rateLimitStreak = 0;
+  const slowDown = (ms: number, label: string): void => {
+    const until = now() + ms;
+    if (until <= pausedUntil) return;
+    pausedUntil = until;
+    input.log?.(`${label}: the model provider rate limit was hit; no batch starts for ${Math.max(1, Math.round(ms / 1000))}s`);
+  };
+  const holdForRateLimit = async (): Promise<void> => {
+    const left = pausedUntil - now();
+    if (left > 0) await sleep(left);
+  };
 
   const worker = async (): Promise<void> => {
     while (queue.length && !stopped) {
+      await holdForRateLimit();
+      // Another worker may have taken the last batch, or stopped the scan, while this one waited.
+      if (stopped || !queue.length) return;
       if (now() > input.deadline) { stopped = "time limit"; timedOut = true; return; }
       const available = input.budgetUsd - spent - reserved;
       if (available < MIN_BATCH_BUDGET_USD) {
@@ -135,6 +168,7 @@ export async function runBatches(input: RunBatchesInput): Promise<RunBatchesResu
       const causes: FailureCause[] = [];
       let attempts = 0;
       for (;;) {
+        await holdForRateLimit();
         const room = input.budgetUsd - spent - reserved;
         const share = batchBudget(room, queue.length + 1);
         reserved += share;
@@ -148,8 +182,14 @@ export async function runBatches(input: RunBatchesInput): Promise<RunBatchesResu
         if (outcome.threadId) input.ledger.addThread(input.scanId, outcome.threadId);
         if (outcome.costUsd !== undefined) input.ledger.addSpend(input.scanId, outcome.costUsd);
         if (outcome.failure && !outcome.reviewed) causes.push(outcome.failure.cause);
-        if (!isRetryable(outcome) || attempts > maxRetries) break;
-        const delay = retryDelayMs(attempts, random);
+        const rateLimited = !outcome.reviewed && outcome.failure?.cause === "provider_rate_limit";
+        rateLimitStreak = rateLimited ? rateLimitStreak + 1 : outcome.reviewed ? 0 : rateLimitStreak;
+        if (!isRetryable(outcome) || attempts > maxRetries) {
+          if (rateLimited) slowDown(retryDelayMs(rateLimitStreak, random), label);
+          break;
+        }
+        const delay = retryDelayMs(rateLimited ? rateLimitStreak : attempts, random);
+        if (rateLimited) slowDown(delay, label);
         if (now() + delay > input.deadline || input.budgetUsd - spent - reserved < MIN_BATCH_BUDGET_USD) break;
         input.log?.(`${label}: ${outcome.failure?.message ?? outcome.error ?? "failed"}; trying again in ${Math.max(1, Math.round(delay / 1000))}s (retry ${attempts} of ${maxRetries}, $${spent.toFixed(4)} spent so far)`);
         await sleep(delay);
