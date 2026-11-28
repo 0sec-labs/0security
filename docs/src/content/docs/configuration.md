@@ -292,7 +292,7 @@ PostHog discards IP addresses, and 0security disables GeoIP lookup. To get a new
 
 Lifecycle events are not sent for `--help`, `--version`, `help`, shell completion, or the `config`, `reports` and `workbench` commands. They are also not sent in CI (`CI` set) or with machine output (`--json`, `--format json`, `ZERO_LOG_FORMAT=json`), because the notice is not shown there. To send them anyway, run `0security config set analyticsLevel usage`.
 
-`DO_NOT_TRACK=1` stops every event. So does `ZERO_ENTERPRISE=1`.
+`DO_NOT_TRACK=1` stops every event. So does `ZERO_NO_EGRESS=1`.
 
 
 ### What is never collected
@@ -322,12 +322,12 @@ A report contains the error class (for example `TypeError`), the 0security versi
 
 ### Opt out of telemetry
 
-`DO_NOT_TRACK=1` is the switch. `ZERO_ENTERPRISE=1` also turns telemetry off. Both beat every saved setting.
+`DO_NOT_TRACK=1` is the switch. `ZERO_NO_EGRESS=1` also turns telemetry off. Both beat every saved setting.
 
 | How | Effect |
 | --- | --- |
 | `DO_NOT_TRACK=1` | Turns off usage metrics, lifecycle events and crash reports. Any value except empty, `0`, `false` or `no` counts. An organization can set it for every operator, and it overrides each person's settings. |
-| `ZERO_ENTERPRISE=1` | No-egress mode. It turns off telemetry, lifecycle events, crash reports, update checks, model catalog and price lookups, web search, remote extension sources and the other third-party calls. Project settings cannot change it. See [Data flow and no-egress mode](/data-flow/). |
+| `ZERO_NO_EGRESS=1` | No-egress mode. It turns off telemetry, lifecycle events, crash reports, update checks, model catalog and price lookups, web search, remote extension sources and the other third-party calls. Project settings cannot change it. `ZERO_ENTERPRISE=1` is an alias with the same effect. See [Data flow and no-egress mode](/data-flow/). |
 | `0security config set analyticsLevel off` | Turns off usage metrics and lifecycle events. |
 | `0security config set diagnosticReporting off` | Turns off crash reports. Use `ask` to review each one first. |
 | Browser app, Settings, Privacy | The same two switches. |

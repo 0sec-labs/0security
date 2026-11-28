@@ -143,7 +143,7 @@ export DO_NOT_TRACK=1
 - Leave `ZERO_LLM_FALLBACK` unset and do not export other provider keys, so no request can route elsewhere. See [Keep model traffic in one region](#keep-model-traffic-in-one-region).
 - To check the route without a scan, run `ZERO_RUNTIME_TRACE=1 0 -p "reply with ok"`. It prints the chosen provider and model on stderr.
 
-With `DO_NOT_TRACK=1`, 0 sends no usage counts, command names or crash reports. `ZERO_ENTERPRISE=1` does the same and blocks every other automatic call. It also skips the public price and model-catalog lookups, so prices for gateway models show as unknown. To stop the update check as well, set `ZERO_NO_UPDATE_CHECK=1`, or use `ZERO_OFFLINE=1`. With all of these off, model requests go only to `OPENAI_BASE_URL`.
+With `DO_NOT_TRACK=1`, 0 sends no usage counts, command names or crash reports. `ZERO_NO_EGRESS=1` does the same and blocks every other automatic call. It also skips the public price and model-catalog lookups, so prices for gateway models show as unknown. To stop the update check as well, set `ZERO_NO_UPDATE_CHECK=1`, or use `ZERO_OFFLINE=1`. With all of these off, model requests go only to `OPENAI_BASE_URL`.
 
 Some traffic stays under your control. The `web_search` tool is off unless you set `ZERO_FEATURE_WEB_SEARCH=1`. Scan targets are contacted because you point 0 at them. GitHub is contacted only when you scan a GitHub repository.
 
@@ -206,7 +206,7 @@ Set `AZURE_OPENAI_BASE_URL` to your Azure OpenAI endpoint. 0 sends the token onl
 
 Grant the identity the Cognitive Services OpenAI User role on the resource. 0 keeps the token in memory, refreshes it before it expires and sends it as a bearer token. It never writes the token to disk or a log.
 
-With `ZERO_ENTERPRISE` set, 0 refuses the public sign-in authority unless `AZURE_AUTHORITY_HOST` names yours. The metadata addresses are local to the host and stay allowed. The region probe is skipped because it needs a key.
+With `ZERO_NO_EGRESS` set, 0 refuses the public sign-in authority unless `AZURE_AUTHORITY_HOST` names yours. The metadata addresses are local to the host and stay allowed. The region probe is skipped because it needs a key.
 
 ### Amazon Bedrock
 

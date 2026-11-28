@@ -42,7 +42,7 @@ export const ALLOWED_BRIDGES = [
 ];
 
 /** The only environment variables the license code reads, plus the unrelated no-egress switch. */
-export const ALLOWED_LICENSE_ENV = new Set(["ZERO_LICENSE", "ZERO_LICENSE_FILE", "ZERO_ENTERPRISE"]);
+export const ALLOWED_LICENSE_ENV = new Set(["ZERO_LICENSE", "ZERO_LICENSE_FILE", "ZERO_NO_EGRESS", "ZERO_ENTERPRISE"]);
 
 const SKIP_DIRS = new Set(["node_modules", "dist", "dist-bin", ".git", ".astro", ".claude", ".worktrees", ".cache", "vendor"]);
 const CODE_EXT = /\.(?:[cm]?[jt]sx?)$/;

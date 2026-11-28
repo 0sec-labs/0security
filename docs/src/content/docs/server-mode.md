@@ -241,7 +241,7 @@ A syslog collector uses `ZERO_AUDIT_SINK_URL=syslog+tls://logs.example.com:6514`
 - A `syslog+tls://` URL receives RFC 5424 lines over TLS, one per line. The server checks the certificate against the system and Node.js trust store.
 - Plain `http://` and `syslog+tcp://` work only for this machine. UDP syslog is refused.
 - The server refuses to start when the setting is refused, so a feed you expect is never silently off.
-- `ZERO_ENTERPRISE` does not block the sink, because you name the destination. See [Data flow](/data-flow/).
+- `ZERO_NO_EGRESS` does not block the sink, because you name the destination. See [Data flow](/data-flow/).
 
 The sink sends events in batches every two seconds. It retries a failed batch five times with growing delays, then drops it. It never slows or fails the action it records. The server prints a status line when it drops events and when it stops, and the audit log API shows the same counters:
 
@@ -437,7 +437,7 @@ Groups are optional. With `groupAttribute` and `groupRoles`, a member's role is 
 
 The same browser that started the sign-in must finish it. The session cookie lasts eight hours, as with OIDC.
 
-Limits: the signature check relies on the open-source node-saml and xml-crypto libraries. It is tested with signed test responses and not yet against a real Okta or Entra ID tenant. Metadata is trusted as you supply it, and its own signature is not checked. Single logout, encrypted assertions and signed requests are not supported. Pending sign-ins and seen assertion IDs are kept in memory, so a restart forgets them. Anyone can start a sign-in, so one address may hold 20 pending sign-ins and the server 1000. Behind a reverse proxy every visitor shares the proxy's address, so the per-address limit then protects nothing; rate limit `/api/team/auth/saml/sso` at the proxy. A `metadataUrl` is refused under `ZERO_ENTERPRISE`; use `metadataFile`.
+Limits: the signature check relies on the open-source node-saml and xml-crypto libraries. It is tested with signed test responses and not yet against a real Okta or Entra ID tenant. Metadata is trusted as you supply it, and its own signature is not checked. Single logout, encrypted assertions and signed requests are not supported. Pending sign-ins and seen assertion IDs are kept in memory, so a restart forgets them. Anyone can start a sign-in, so one address may hold 20 pending sign-ins and the server 1000. Behind a reverse proxy every visitor shares the proxy's address, so the per-address limit then protects nothing; rate limit `/api/team/auth/saml/sso` at the proxy. A `metadataUrl` is refused under `ZERO_NO_EGRESS`; use `metadataFile`.
 ### Accounts
 
 Team accounts live in the server database, next to the audit log. A teammate you add in the browser is stored there and is still there after a restart.
@@ -603,7 +603,7 @@ See what your key unlocks:
 0security config get license
 ```
 
-When a key expires, paid features keep working for 30 days with a warning. After that, paid writes stop. You can still read, export and verify your data, and the server still starts. `ZERO_ENTERPRISE` is the separate no-egress switch and does not need a key.
+When a key expires, paid features keep working for 30 days with a warning. After that, paid writes stop. You can still read, export and verify your data, and the server still starts. `ZERO_NO_EGRESS` is the separate no-egress switch and does not need a key.
 
 ### Collect findings from many repositories
 

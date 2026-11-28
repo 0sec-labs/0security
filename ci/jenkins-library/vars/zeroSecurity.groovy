@@ -54,7 +54,7 @@ def call(Map config = [:]) {
         unstash stashName
         writeFile file: 'install.sh', text: libraryResource('0security/install.sh')
         writeFile file: '0-ci-publish.sh', text: libraryResource('0security/0-ci-publish.sh')
-        withEnv(["VERSION=${version}", "ZEROCI_REPO=${config.repo}", "ZEROCI_UPLOAD_TO=${config.platform ?: 'bitbucket-dc'}", "BITBUCKET_URL=${config.bitbucketUrl ?: ''}", "ZERO_BITBUCKET_URL=${config.allowedBitbucketUrl ?: ''}", "ZERO_ENTERPRISE=${config.enterprise ? '1' : ''}", 'OPENAI_API_KEY=', 'ANTHROPIC_API_KEY=', 'GOOGLE_API_KEY=', 'AWS_BEARER_TOKEN_BEDROCK=', 'DO_NOT_TRACK=1']) {
+        withEnv(["VERSION=${version}", "ZEROCI_REPO=${config.repo}", "ZEROCI_UPLOAD_TO=${config.platform ?: 'bitbucket-dc'}", "BITBUCKET_URL=${config.bitbucketUrl ?: ''}", "ZERO_BITBUCKET_URL=${config.allowedBitbucketUrl ?: ''}", "ZERO_NO_EGRESS=${config.enterprise ? '1' : ''}", "ZERO_ENTERPRISE=${config.enterprise ? '1' : ''}", 'OPENAI_API_KEY=', 'ANTHROPIC_API_KEY=', 'GOOGLE_API_KEY=', 'AWS_BEARER_TOKEN_BEDROCK=', 'DO_NOT_TRACK=1']) {
           withCredentials([string(credentialsId: config.bitbucketCredential, variable: 'BITBUCKET_TOKEN')]) {
             sh '''
               set -eu

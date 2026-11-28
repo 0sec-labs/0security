@@ -691,7 +691,7 @@ When a check passes, the pull request body reads "Verified in a sandbox: maven:3
 
 The model is told not to run builds or tests itself in this mode. It edits files, and the sandbox runs the checks.
 
-The image must hold the tools and the dependencies the tests need, because the container has no network. Build an image with your dependencies cached in a folder any user can read. Or pass `--sandbox-network` to let the container download dependencies. The network is then on, and the pull request says "network on". `ZERO_ENTERPRISE` refuses `--sandbox-network`.
+The image must hold the tools and the dependencies the tests need, because the container has no network. Build an image with your dependencies cached in a folder any user can read. Or pass `--sandbox-network` to let the container download dependencies. The network is then on, and the pull request says "network on". `ZERO_NO_EGRESS` refuses `--sandbox-network`.
 
 ### Download dependencies first
 
@@ -706,7 +706,7 @@ To keep the checks offline without building your own image, add a setup step. It
 
 The setup step runs the tests once, with the network on. That downloads the test runner Maven loads when the tests start, which `mvn dependency:go-offline` does not fetch. With `go-offline`, the offline check fails with "surefire-junit-platform ... has not been downloaded". Setup runs your build with the network on, so use it only on code you trust.
 
-Before the checks, 0 runs a canary in the same container settings. It passes only when the container has no network interface other than loopback. If setup or the canary fails, the checks do not run and the pull request is a draft. The cache folder is deleted when the run ends. `ZERO_ENTERPRISE` refuses `--sandbox-setup`, and you cannot combine it with `--sandbox-network`.
+Before the checks, 0 runs a canary in the same container settings. It passes only when the container has no network interface other than loopback. If setup or the canary fails, the checks do not run and the pull request is a draft. The cache folder is deleted when the run ends. `ZERO_NO_EGRESS` refuses `--sandbox-setup`, and you cannot combine it with `--sandbox-network`.
 
 Name the image by digest to pin it. A tag such as `maven:3-eclipse-temurin-21` can change. The pull request says whether the image is pinned. Get a digest with `docker buildx imagetools inspect <image>`. The Maven recipe was run with `maven@sha256:6fdc855a6ed81d288ca7ca37ac6ff5e9308b612485c0801d70b25a858c83d237` (Maven 3.9.11, Java 21.0.9, arm64, 833 MB).
 

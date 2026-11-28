@@ -1913,7 +1913,7 @@ Options:
   --resolve-from <file>           Maven and Gradle: read the output of mvn dependency:tree (text) or
                                   gradle dependencies that you already ran; repeat for more files.
                                   Nothing runs or downloads, so it works offline and under
-                                  ZERO_ENTERPRISE (default: [])
+                                  ZERO_NO_EGRESS (default: [])
   --maven-settings <file>         With --resolve, pass this settings.xml to mvn (-s): your mirror,
                                   proxy and credentials
   --gradle-init-script <file>     With --resolve, pass this init script to gradle (-I): your mirror

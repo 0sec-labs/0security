@@ -245,16 +245,18 @@ pub fn scan_dependency_vulnerabilities(
     })
 }
 
-/// True when the environment says nothing may leave the machine: `ZERO_ENTERPRISE` or `ZERO_OFFLINE` set to
+/// True when the environment says nothing may leave the machine: `ZERO_NO_EGRESS`, its alias `ZERO_ENTERPRISE`, or `ZERO_OFFLINE` set to
 /// anything but empty, `0`, `false` or `no`. The OSV lookup is the only network call in this crate, so it checks
 /// this before it sends package names and versions.
 fn network_forbidden(var: impl Fn(&str) -> Option<String>) -> bool {
-    ["ZERO_ENTERPRISE", "ZERO_OFFLINE"].iter().any(|name| {
-        var(name).is_some_and(|value| {
-            let value = value.trim().to_ascii_lowercase();
-            !(value.is_empty() || value == "0" || value == "false" || value == "no")
+    ["ZERO_NO_EGRESS", "ZERO_ENTERPRISE", "ZERO_OFFLINE"]
+        .iter()
+        .any(|name| {
+            var(name).is_some_and(|value| {
+                let value = value.trim().to_ascii_lowercase();
+                !(value.is_empty() || value == "0" || value == "false" || value == "no")
+            })
         })
-    })
 }
 
 fn vulnerability_source(
@@ -274,7 +276,7 @@ fn vulnerability_source(
     let blocked_by_env = network_forbidden(|name| std::env::var(name).ok());
     if blocked_by_env {
         notices.push(
-            "SCA: network lookups are off because ZERO_ENTERPRISE or ZERO_OFFLINE is set; OSV is not queried"
+            "SCA: network lookups are off because ZERO_NO_EGRESS, ZERO_ENTERPRISE or ZERO_OFFLINE is set; OSV is not queried"
                 .to_string(),
         );
     }
@@ -1335,6 +1337,8 @@ mod tests {
             }
         };
         assert!(network_forbidden(with(&[("ZERO_ENTERPRISE", "1")])));
+        assert!(network_forbidden(with(&[("ZERO_NO_EGRESS", "1")])));
+        assert!(!network_forbidden(with(&[("ZERO_NO_EGRESS", "0")])));
         assert!(network_forbidden(with(&[("ZERO_OFFLINE", "true")])));
         assert!(!network_forbidden(with(&[])));
         assert!(!network_forbidden(with(&[("ZERO_ENTERPRISE", "0")])));

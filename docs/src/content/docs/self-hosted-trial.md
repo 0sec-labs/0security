@@ -22,7 +22,7 @@ Open these destinations from the machine:
 - Your model endpoint. For Amazon Bedrock that is the regional `bedrock-runtime` endpoint and the AWS credential endpoints for your credential source.
 - Your Bitbucket or GitHub host, if you connect one.
 
-Set `ZERO_ENTERPRISE=1` and `DO_NOT_TRACK=1` to stop every other automatic call. That setting also refuses every `gh` call and Bitbucket Cloud. Bitbucket Data Center works only when `ZERO_BITBUCKET_URL` names your server. So if you use GitHub or Bitbucket Cloud, leave `ZERO_ENTERPRISE` off, keep `DO_NOT_TRACK=1`, and limit the traffic to the list above in your firewall or proxy. See [Data flow](/data-flow/) for the full list.
+Set `ZERO_NO_EGRESS=1` and `DO_NOT_TRACK=1` to stop every other automatic call. That setting also refuses every `gh` call and Bitbucket Cloud. Bitbucket Data Center works only when `ZERO_BITBUCKET_URL` names your server. So if you use GitHub or Bitbucket Cloud, leave `ZERO_NO_EGRESS` off, keep `DO_NOT_TRACK=1`, and limit the traffic to the list above in your firewall or proxy. See [Data flow](/data-flow/) for the full list.
 
 ## Start with Docker
 
@@ -54,7 +54,7 @@ helm test zero -n zero
 kubectl port-forward svc/zero-zero 48123:80 -n zero
 ```
 
-The chart's default volume is 20Gi, which is below the 30 GB minimum, so the command sets `persistence.size`. The chart sets `ZERO_ENTERPRISE` by default. Set `enterprise: false` if you use pull request reviews on GitHub. For ingress, TLS and the other values, see [Run on Kubernetes with Helm](/self-hosting/#run-on-kubernetes-with-helm).
+The chart's default volume is 20Gi, which is below the 30 GB minimum, so the command sets `persistence.size`. The chart sets `ZERO_NO_EGRESS` by default. Set `enterprise: false` if you use pull request reviews on GitHub. For ingress, TLS and the other values, see [Run on Kubernetes with Helm](/self-hosting/#run-on-kubernetes-with-helm).
 
 ## Connect Amazon Bedrock
 
