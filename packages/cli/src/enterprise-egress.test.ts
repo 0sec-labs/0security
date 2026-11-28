@@ -94,7 +94,7 @@ afterEach(async () => {
 
 describe("ZERO_ENTERPRISE, CLI call sites", () => {
   it("is a feedback and crash-report opt-out, with DO_NOT_TRACK", () => {
-    expect(FEEDBACK_OPT_OUT_ENV).toEqual(["DO_NOT_TRACK", "ZERO_ENTERPRISE"]);
+    expect(FEEDBACK_OPT_OUT_ENV).toEqual(["DO_NOT_TRACK", "ZERO_NO_EGRESS", "ZERO_ENTERPRISE"]);
   });
 
   it("update check: no lookup, no install, status stays empty", async () => {

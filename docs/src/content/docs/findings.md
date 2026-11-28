@@ -313,7 +313,7 @@ To make a scan weigh business logic and authorization, give it a reviewed threat
 | `--skill <id>` | Skill that holds the scan method (default `scan`). |
 | `--batches <mode>` | `auto` (default) reviews a large folder in batches, `on` always does, `off` keeps one thread. See [Large repositories](#large-repositories). |
 | `--batch-size <n>` | Entry points one batch reviews (default 8). |
-| `--concurrency <n>` | Batches that run at the same time, up to 3 (default 1). |
+| `--concurrency <n>` | Batches that run at the same time (default 1, up to 8; `ZERO_SCAN_MAX_CONCURRENCY` raises the limit to 16). See [Running batches in parallel](#running-batches-in-parallel). |
 | `--resume <scan>` | Continue the entry points an earlier scan did not reach. |
 | `--coverage [scan]` | Print what an earlier scan reviewed and exit. |
 | `--allow-partial` | Exit by the findings alone when the scan stops before it reviews everything. The report still says it is partial. |
@@ -335,6 +335,16 @@ One thread cannot review every entry point of a big repository, and it cannot te
 4. A batch counts as reviewed only when its thread finished normally. A batch that stopped at its budget, hit a time limit or failed stays pending.
 5. A batch that fails because the connection dropped or the provider timed out, was rate limited or returned a server error runs again, up to 2 times (`--retries`). The failed attempt's findings are kept and its cost counts against the budget. A batch that runs past 900 seconds (`--batch-timeout`) is cancelled and stays pending with the reason `timeout`. The next batch still runs.
 6. A batch counts as reviewed for the units whose files its thread opened. If the thread skipped files, 0 asks it in the same thread to open them once (`--coverage-rounds`). A unit whose files stay unopened stays pending with the reason `not opened`, and `--resume` runs it again.
+
+### Running batches in parallel
+
+`--concurrency <n>` runs several batches at once. The default is 1. It accepts up to 8, and `ZERO_SCAN_MAX_CONCURRENCY` raises the limit to 16. `--passes` keeps its own limit of 3.
+
+More batches finish a large audit sooner only while the model provider keeps answering. Each batch is a thread that can start helpers of its own, so the provider sees more requests than the number you typed. In one measured audit of a 35,000-line Java project, concurrency 8 took 11.5 minutes and concurrency 3 took 30 minutes and did not finish, but the machine was busier during the second run, and at concurrency 6 the provider answered with rate limits and 4 batches stayed pending. Treat the numbers as a range, not a promise.
+
+When the provider turns a request away with a rate limit, every request of the scan waits for the time it asked for, and a batch that still fails for that reason pauses all workers before the next batch starts. A batch that runs out of retries stays pending; `--resume` runs it again. The budget is shared the same way as with one batch at a time, but a running thread can pass its share by one more turn, so with many batches the total can pass `--budget` by a little. Use a spending limit at the provider for a hard cap.
+
+One scan runs in one process. To split an audit across machines today, scan one folder per machine and read the reports together. Two processes must not `--resume` the same scan: both would run the same batches, and they write one database file. The [design note](https://github.com/0sec-labs/0security/blob/main/docs/design/scan-concurrency.md) describes a shared mode.
 
 ### Large Java projects
 
@@ -611,6 +621,10 @@ With `--apply`, critical and high findings are never suppressed: a person decide
 
 A re-run skips findings that already have a verdict. Add `--force` to check them again. The model can be wrong in both directions, so read the reasoning in `0security findings show` before you rely on a verdict. See [findings verify](/commands/#findings-verify) for budgets and stop rules.
 
+## Scan, then verify
+
+`findings verify` works on leads from any scanner: the built-in scan, or SARIF from CodeQL, Semgrep and others through [`findings import`](#import-findings-from-another-scanner). Keep true-positive and uncertain. See [Triage findings from any scanner](/triage-any-scanner/) for the steps, the measured results and their limits.
+
 ## Fix a finding
 
 0 fixes a finding in a separate git work tree, so your checkout is never touched. It runs your checks, commits on a branch named `0/fix-<id>` and opens a pull request. The pull request is a draft when a check fails or when you gave no `--test`. A draft means the change is not verified. Add `--ready` to open it ready for review without checks. The command exits 0 when a change was committed and no check failed, so with no `--test` exit code 0 does not mean the change was checked.
@@ -687,7 +701,7 @@ When a check passes, the pull request body reads "Verified in a sandbox: maven:3
 
 The model is told not to run builds or tests itself in this mode. It edits files, and the sandbox runs the checks.
 
-The image must hold the tools and the dependencies the tests need, because the container has no network. Build an image with your dependencies cached in a folder any user can read. Or pass `--sandbox-network` to let the container download dependencies. The network is then on, and the pull request says "network on". `ZERO_ENTERPRISE` refuses `--sandbox-network`.
+The image must hold the tools and the dependencies the tests need, because the container has no network. Build an image with your dependencies cached in a folder any user can read. Or pass `--sandbox-network` to let the container download dependencies. The network is then on, and the pull request says "network on". `ZERO_NO_EGRESS` refuses `--sandbox-network`.
 
 ### Download dependencies first
 
@@ -702,7 +716,7 @@ To keep the checks offline without building your own image, add a setup step. It
 
 The setup step runs the tests once, with the network on. That downloads the test runner Maven loads when the tests start, which `mvn dependency:go-offline` does not fetch. With `go-offline`, the offline check fails with "surefire-junit-platform ... has not been downloaded". Setup runs your build with the network on, so use it only on code you trust.
 
-Before the checks, 0 runs a canary in the same container settings. It passes only when the container has no network interface other than loopback. If setup or the canary fails, the checks do not run and the pull request is a draft. The cache folder is deleted when the run ends. `ZERO_ENTERPRISE` refuses `--sandbox-setup`, and you cannot combine it with `--sandbox-network`.
+Before the checks, 0 runs a canary in the same container settings. It passes only when the container has no network interface other than loopback. If setup or the canary fails, the checks do not run and the pull request is a draft. The cache folder is deleted when the run ends. `ZERO_NO_EGRESS` refuses `--sandbox-setup`, and you cannot combine it with `--sandbox-network`.
 
 Name the image by digest to pin it. A tag such as `maven:3-eclipse-temurin-21` can change. The pull request says whether the image is pinned. Get a digest with `docker buildx imagetools inspect <image>`. The Maven recipe was run with `maven@sha256:6fdc855a6ed81d288ca7ca37ac6ff5e9308b612485c0801d70b25a858c83d237` (Maven 3.9.11, Java 21.0.9, arm64, 833 MB).
 
@@ -740,11 +754,37 @@ Export saved findings as JSON, Markdown or SARIF:
 0security findings list --format md -o report.md
 ```
 
-Without `-o` the report goes to stdout. `0security findings export` also writes HTML, PDF and a DefectDojo import file (`--format defectdojo`). The app exports the first five formats.
+Without `-o` the report goes to stdout. `0security findings export` also writes HTML, PDF and a DefectDojo import file (`--format defectdojo`), and a folder for judging findings by hand (`--format sheet`). The app exports the first five formats.
 
 A full report carries evidence, proof-of-concept steps and descriptions that can quote source code or secrets. Check it before you share it.
 
 To bring a report into the app, use `0security findings list --import ./report.json --db-path <db>`. Imported findings are marked discovered and unverified.
+
+## Judge findings by hand
+
+To judge a scan's findings yourself, or to compare tools, write an evaluation sheet. It is one folder:
+
+```bash
+0security scan ./repo --evaluation-sheet ./sheet                      # scan, then write the sheet
+0security findings export --scan <scan-id> --format sheet -o ./sheet --source ./repo   # later, from stored findings
+```
+
+| File | What it holds |
+| --- | --- |
+| `review.csv` | One row per finding: id, severity, location, title, category, verification verdict, fix explanation, business-context rank and the description. The columns `true positive`, `false positive`, `unsure` and `notes` are blank for the reviewer. |
+| `findings.json` | The same findings with every field, in the same order. |
+| `run.json` | The exact command, the CLI version, the repository commit, the model, the version of each pattern scanner that ran, the cost, the time, the scan status and the coverage statement. |
+| `README.md` | The same facts in words, and the rule below. |
+
+The sheet is for human judgement. It is not an accuracy result. It does not say how many findings are right or what the scan missed, and one reviewer on one small repository gives an opinion, not a measure of a tool.
+
+Rows are ordered by severity, then path, then line. A finding without a location comes last in its severity and says so. Each row has a short stable id made from what the finding is and where it is. The verdict column says what checked the finding (a reproduction, an executed script, a source check) or `not verified`. A matched script is not proof, because the model wrote it. The business-context rank is the position in the order you declared with `--business-context`; it never changes severity.
+
+Two reviewers can confirm they judged the same output by comparing the list hash, the SHA-256 of `findings.json`. It is in the README, in `run.json` and, shortened, in the last column of every CSV row.
+
+Spreadsheets run formulas, and a finding's title or description comes from a model reading code. Any cell that starts with `=`, `+`, `-`, `@`, a tab or a carriage return gets a leading apostrophe, so it opens as text. The CSV starts with a byte order mark so Excel reads unicode correctly.
+
+Building the sheet calls no model. `scan --evaluation-sheet` checks the folder before the scan starts and refuses a folder that already has files, so a refusal costs nothing. Add `--overwrite-sheet` to replace the four sheet files in such a folder; other files are left alone. The sheet folder must be outside the scanned folder. A sheet rebuilt with `findings export` cannot know the cost, model, scanner versions or coverage, because the findings database does not keep them. It writes `not recorded` for each. The sheet can quote the scanned code; treat it like the repository. For a worked comparison, see [Compare tools on one repository](/compare-tools/).
 
 ## Send findings to GitHub
 

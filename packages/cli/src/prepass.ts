@@ -32,6 +32,22 @@ function tail(error: unknown): string {
   return text.replace(/[^\x20-\x7e\n]/g, "").trim().split("\n").slice(-4).join(" | ").slice(0, 500);
 }
 
+/** The executable a scanner runs as: the path its environment variable names, the copy next to `0`, or its name on PATH. */
+function scannerBinary(spec: NonNullable<ReturnType<typeof scannerById>>, env: NodeJS.ProcessEnv): string | undefined {
+  return [spec.pathEnv ? env[spec.pathEnv] : undefined, join(homeStateDir(), "bin", spec.command), spec.command].filter((value): value is string => !!value).find(candidate => candidate === spec.command || existsSync(candidate));
+}
+
+/** The first line a scanner prints for `--version`, or undefined when it cannot be asked. No shell; five seconds at most. */
+export async function scannerVersion(id: string, env: NodeJS.ProcessEnv = process.env): Promise<string | undefined> {
+  const spec = scannerById(id);
+  const binary = spec ? scannerBinary(spec, env) : undefined;
+  if (!binary) return undefined;
+  try {
+    const { stdout, stderr } = await exec(binary, ["--version"], { env, timeout: 5000, maxBuffer: 64 * 1024, windowsHide: true });
+    return (stdout || stderr).split("\n").map(line => line.trim()).find(Boolean)?.slice(0, 200);
+  } catch { return undefined; }
+}
+
 export async function runPrePass(folder: string, scanners: string[], rules: string[] = [], io: PrePassIo = {}): Promise<PrePassLeads | undefined> {
   const env = io.env ?? process.env;
   const note = io.note ?? (() => undefined);
@@ -62,7 +78,7 @@ export async function runPrePass(folder: string, scanners: string[], rules: stri
     const lists = await Promise.all(scanners.map(async id => {
       const spec = scannerById(id);
       if (!spec) return undefined;
-      const binary = [spec.pathEnv ? env[spec.pathEnv] : undefined, join(homeStateDir(), "bin", spec.command), spec.command].filter((value): value is string => !!value).find(candidate => candidate === spec.command || existsSync(candidate));
+      const binary = scannerBinary(spec, env);
       const useRules = rules.length > 0 && scannerTakesRules(spec);
       const missing = () => {
         if (useRules) throw new Error(`--rules needs ${spec.id}, which is not installed.`);

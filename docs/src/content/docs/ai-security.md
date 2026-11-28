@@ -29,7 +29,7 @@ Pickle-based model files can run code when you load them. This command reads the
 0security sbom agent-config . --fail-on high
 ```
 
-AI coding tools read rules, MCP and settings files from the repository. This command reads them as text and flags hidden characters, unpinned MCP launchers, secrets, broad permissions, hooks and insecure remote servers. It calls no model and makes no network request, so it works with `ZERO_ENTERPRISE` set. The rule list is under [Check agent files in a repository](/extensions/#check-agent-files-in-a-repository).
+AI coding tools read rules, MCP and settings files from the repository. This command reads them as text and flags hidden characters, unpinned MCP launchers, secrets, broad permissions, hooks and insecure remote servers. It calls no model and makes no network request, so it works with `ZERO_NO_EGRESS` set. The rule list is under [Check agent files in a repository](/extensions/#check-agent-files-in-a-repository).
 
 To run it on every pull request, see [Check agent files](/ci/#check-agent-files).
 

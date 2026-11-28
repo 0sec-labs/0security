@@ -80,8 +80,8 @@ describe("0 sbom generate --resolve", () => {
     const no = deps({ env: env(fakeBin()), confirm: async () => false });
     await expect(runGenerateWith(project({ "pom.xml": pom }), { resolve: true }, no.deps)).rejects.toBeInstanceOf(UsageError);
   });
-  it("is refused under ZERO_ENTERPRISE, even with the consent flag", async () => {
-    const io = deps({ env: { ...env(fakeBin()), ZERO_ENTERPRISE: "1" } });
+  it.each(["ZERO_NO_EGRESS", "ZERO_ENTERPRISE"])("is refused under %s, even with the consent flag", async name => {
+    const io = deps({ env: { ...env(fakeBin()), [name]: "1" } });
     await expect(runGenerateWith(project({ "pom.xml": pom }), { resolve: true, allowBuildTools: true }, io.deps)).rejects.toThrow(/ZERO_ENTERPRISE/);
   });
   it("rejects flags that do not fit", async () => {

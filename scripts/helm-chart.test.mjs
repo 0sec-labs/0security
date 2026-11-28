@@ -26,6 +26,7 @@ test("the console is one replica with a retained volume and probes", { skip }, (
   assert.match(out.stdout, /healthz/);
   assert.match(out.stdout, /kind: NetworkPolicy/);
   assert.match(out.stdout, /runAsNonRoot: true/);
+  assert.match(out.stdout, /ZERO_NO_EGRESS/);
   assert.match(out.stdout, /ZERO_ENTERPRISE/);
 });
 

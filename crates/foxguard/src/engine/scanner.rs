@@ -2603,6 +2603,18 @@ fn scan_files(
         HashMap::new()
     };
 
+    // Project-wide Java type and field index, so the flow checks can read a
+    // `static final` constant declared in another file of the scan.
+    let java_index: Option<std::sync::Arc<crate::rules::java_index::JavaProjectIndex>> =
+        if java_files.len() > 1 {
+            let paths: Vec<PathBuf> = java_files.iter().map(|(p, _)| p.clone()).collect();
+            let index = crate::rules::java_index::JavaProjectIndex::build(&paths, max_file_size);
+            timing_mark("java project index", &mut phase);
+            Some(std::sync::Arc::new(index))
+        } else {
+            None
+        };
+
     // Build a directory→files index for Java same-package resolution.
     // All Java files in the same directory are treated as the same package
     // (a proxy for the `package` declaration), mirroring the Go index above.
@@ -3053,6 +3065,14 @@ fn scan_files(
             };
 
             let mut file_findings = Vec::new();
+
+            // Java flow checks read constants of other files through the index.
+            let _java_index_guard = match (&java_index, language) {
+                (Some(index), Language::Java) => Some(
+                    crate::rules::java_flow::install_project_index(index.clone()),
+                ),
+                _ => None,
+            };
 
             // Dispatch every built-in taint engine through one table
             // (`TAINT_DISPATCH`) rather than a per-language block. For each

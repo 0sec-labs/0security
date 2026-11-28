@@ -15,13 +15,14 @@ import type { Command } from "commander";
 import { UNTRUSTED_GIT_BASE_CONFIG, buildInventory, discoverAgentSkills, exportReport, getSkillById, isReportExportFormat, resolveAgentSkillName, untrustedGitConfig, type Batch } from "@0/engine";
 import { CoverageLedger, coverageSentence, listOsecRunDatabasePaths, osecDB, resolveOsecDbPath, summarizeCoverage } from "@0/engine/storage";
 import { consoleTransportOptions, openConsole, type ConsoleClient, type ConsoleTransportOptions } from "../console-client.js";
-import { homeStateDir, parseSarif, parseScannerList, scanPrompt, scannerArguments, scannerById, scannerTakesRules, SCANNERS, type KnownItem, type PrePassLeads, type BatchPromptInfo, type ScanChildren, type ScanChildThread, type ScanFileCoverage, type ScanReport } from "@0/engine/shared";
-import { runPrePass } from "../prepass.js";
+import { VERSION, homeStateDir, parseSarif, parseScannerList, scanPrompt, scannerArguments, scannerById, scannerTakesRules, SCANNERS, type KnownItem, type PrePassLeads, type BatchPromptInfo, type ScanChildren, type ScanChildThread, type ScanFileCoverage, type ScanReport } from "@0/engine/shared";
+import { runPrePass, scannerVersion } from "../prepass.js";
+import { buildSheet, checkSheetFolder, commandLineOf, sheetRunOf, writeSheet } from "../evaluation-sheet.js";
 import { runNucleiTarget, type NucleiTargetRun } from "../nuclei-target.js";
 import { checkRulesScanners, resolveRulePaths } from "../scan-rules.js";
 import { applyScope, markKnown, mergePasses, scanExitCode, scanJson, toScanReport, type ScanOutcome } from "../scan-report.js";
 import { followUpText, reviewDepth, reviewScopeFiles, shallowReviewWarning, toolCallText, unopenedFiles } from "../scan-review.js";
-import { coverageReport, DEFAULT_RETRIES, runBatches, type BatchOutcome, type RunBatchesResult } from "../scan-batches.js";
+import { BATCH_CONCURRENCY_CEILING, coverageReport, DEFAULT_MAX_BATCH_CONCURRENCY, DEFAULT_RETRIES, maxBatchConcurrency, runBatches, type BatchOutcome, type RunBatchesResult } from "../scan-batches.js";
 import { classifyFailure, type FailureCause, type ScanFailure } from "../scan-failure.js";
 import { coverageJson, coverageText, DEFAULT_BATCH_SIZE, keepsOneThread, moduleShardOf, ownersOfFile, planBatchedScan, unbatchedNote, type BatchedSetup } from "../scan-batched.js";
 import { childrenOf, childTotals, summarizeChildren } from "../scan-children.js";
@@ -87,7 +88,7 @@ const ROUND_MIN_SECONDS = 20;
 const POLL_WINDOW = 20;
 /** Consecutive failed status requests before the scan gives up on the console (about a minute with the backoff). */
 const MAX_FAILED_POLLS = 12;
-/** Passes that run at the same time: more only crowds the model provider and the console. */
+/** Passes (`--passes`) that run at the same time: each pass reads all of the code, so more only repeats the load. Batches have their own limit, see `maxBatchConcurrency`. */
 const MAX_PARALLEL_PASSES = 3;
 const MAX_PASSES = 5;
 /** What `--policy` and `--org-policy` run. */
@@ -132,6 +133,10 @@ export interface ScanDeps {
   openLedger?(dbPath?: string): CoverageLedger;
   /** The commit a folder is on, or undefined when it is not a git work tree. A resumed scan refuses a different one. */
   gitHead?(folder: string): Promise<string | undefined>;
+  /** What a pre-pass scanner reports for `--version`; the evaluation sheet records it. */
+  scannerVersion?(id: string): Promise<string | undefined>;
+  /** The command line to record in the evaluation sheet; default: this process's arguments. */
+  commandLine?(): string;
   /** `--target-url`: run Nuclei against the named target. Replaced in tests. */
   nucleiTarget?(options: Parameters<typeof runNucleiTarget>[0]): Promise<NucleiTargetRun>;
   /** Store a Nuclei result file in the findings database, so the findings sit in the same list as the rest. Throws when that cannot be done. */
@@ -243,6 +248,8 @@ interface ScanOptions extends ConsoleTransportOptions {
   targetUrl?: string; scopeFile?: string; acknowledgeHost?: string; rateLimit?: string; templates?: string;
   batches?: string; batchSize?: string; concurrency?: string; resume?: string; force?: boolean; coverage?: string | boolean; allowPartial?: boolean; plan?: boolean;
   pocImage?: string;
+  /** Write the evaluation sheet (a folder for judging the findings by hand) here after the scan; `overwriteSheet` replaces the sheet files of a non-empty folder. */
+  evaluationSheet?: string; overwriteSheet?: boolean;
   tiers?: string; failOnSkip?: boolean; known?: string[]; onlyNew?: boolean;
   retries?: string; batchTimeout?: string; coverageRounds?: string;
   /** The option names the person typed (budget, batches, skill). Tier settings never override these. When unset, an option that differs from its default counts as typed. */
@@ -314,6 +321,12 @@ function validate(target: string | undefined, options: ScanOptions): void {
     if (options.output) throw new UsageError("--plan prints to the terminal; drop -o.");
   }
   if (!target?.trim() && !options.plan) throw new UsageError("Supply a folder or a git URL to scan.");
+  if (options.overwriteSheet && !options.evaluationSheet) throw new UsageError("--overwrite-sheet needs --evaluation-sheet <folder>.");
+  if (options.evaluationSheet !== undefined) {
+    if (options.plan || options.coverage !== undefined) throw new UsageError("--evaluation-sheet records a scan; drop --plan and --coverage.");
+    // Before anything costs money: a folder that cannot be written fails now, not after the scan.
+    checkSheetFolder(options.evaluationSheet, Boolean(options.overwriteSheet));
+  }
   if (!/^[a-z0-9][a-z0-9._-]*(?:\/[a-z0-9][a-z0-9._-]*)*$/.test(options.skill) || options.skill.length > 128) throw new UsageError("--skill must be a skill id such as scan.");
   if (!(FORMATS as readonly string[]).includes(options.format)) throw new UsageError(`--format must be one of: ${FORMATS.join(", ")}.`);
   if (options.format === "pdf" && !options.output) throw new UsageError("PDF is binary; supply -o <file>.");
@@ -330,7 +343,8 @@ function validate(target: string | undefined, options: ScanOptions): void {
   const batchSize = Number(options.batchSize ?? DEFAULT_BATCH_SIZE);
   if (!Number.isInteger(batchSize) || batchSize < 1 || batchSize > MAX_BATCH_SIZE) throw new UsageError(`--batch-size must be a whole number from 1 to ${MAX_BATCH_SIZE}.`);
   const concurrency = Number(options.concurrency ?? 1);
-  if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > MAX_PARALLEL_PASSES) throw new UsageError(`--concurrency must be a whole number from 1 to ${MAX_PARALLEL_PASSES}.`);
+  const concurrencyLimit = maxBatchConcurrency();
+  if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > concurrencyLimit) throw new UsageError(`--concurrency must be a whole number from 1 to ${concurrencyLimit}${concurrencyLimit < BATCH_CONCURRENCY_CEILING ? `; set ZERO_SCAN_MAX_CONCURRENCY (up to ${BATCH_CONCURRENCY_CEILING}) to allow more` : ""}.`);
   if ((options.batches === "on" || options.resume !== undefined) && passes > 1) throw new UsageError("--passes cannot be combined with batches or --resume; run the scan again to get another pass.");
   if (options.onlyNew && !options.known?.length) throw new UsageError("--only-new needs --known <sarif>.");
   if (options.known?.length && (options.policy?.length || options.orgPolicy?.length)) throw new UsageError("--known is for scans; it cannot be combined with --policy or --org-policy.");
@@ -544,7 +558,7 @@ async function inPool<T>(count: number, limit: number, task: (index: number) => 
 }
 
 /** Format the report and write it to --output or standard output. */
-async function writeReport(outcome: ScanOutcome, merged: ReturnType<typeof mergePasses>, stored: ScanReport, name: string, options: ScanOptions, deps: Pick<ScanDeps, "out" | "interactive" | "err" | "writeBytes" | "metrics" | "saveScope" | "saveBusinessContext" | "scopeHint">): Promise<void> {
+async function writeReport(outcome: ScanOutcome, merged: ReturnType<typeof mergePasses>, stored: ScanReport, name: string, options: ScanOptions, deps: Pick<ScanDeps, "out" | "interactive" | "err" | "writeBytes" | "metrics" | "saveScope" | "saveBusinessContext" | "scopeHint" | "now" | "changedFiles" | "gitHead" | "scannerVersion" | "commandLine">): Promise<void> {
   // An empty-diff scan (thread "none") writes no line. A tier skip and a pre-pass-only run do: they are runs the operator chose.
   if (outcome.threadId !== "none" || outcome.tier?.skipped || outcome.tier?.prepassOnly) {
     const status = outcome.failed ? "failed" : outcome.tier?.skipped ? "skipped" : outcome.tier?.prepassOnly ? "prepass_only" : outcome.timedOut ? "timeout" : outcome.budgetExhausted ? "budget" : "ok";
@@ -578,6 +592,23 @@ async function writeReport(outcome: ScanOutcome, merged: ReturnType<typeof merge
   }
   const hint = deps.scopeHint?.(merged, outcome.scope?.entries ?? [], outcome.roots?.[0], options.format === "json" && !options.output);
   if (hint) deps.err(hint);
+  if (options.evaluationSheet !== undefined) await writeEvaluationSheet(outcome, merged, options, deps);
+}
+
+/** `--evaluation-sheet`: the folder for judging this scan's findings by hand. Built from the findings just stored; calls no model. */
+async function writeEvaluationSheet(outcome: ScanOutcome, merged: ReturnType<typeof mergePasses>, options: ScanOptions, deps: Pick<ScanDeps, "err" | "now" | "changedFiles" | "gitHead" | "scannerVersion" | "commandLine">): Promise<void> {
+  const root = outcome.roots?.[0];
+  const commit = root ? await (deps.gitHead ?? defaultScanDeps.gitHead!)(root) : undefined;
+  const changed = root && commit ? await deps.changedFiles(root) : undefined;
+  const versionOf = deps.scannerVersion ?? scannerVersion;
+  const scanners = outcome.prepassTools ? await Promise.all(outcome.prepassTools.map(async id => { const version = await versionOf(id); return { id, ...(version ? { version } : {}) }; })) : outcome.threadId === "none" ? undefined : [];
+  const run = sheetRunOf({
+    outcome, command: deps.commandLine?.() ?? commandLineOf(process.argv.slice(2)), cliVersion: VERSION, now: deps.now(), model: scanModelLabel(options),
+    ...(options.reasoning ? { reasoning: options.reasoning } : {}), ...(commit ? { commit } : {}), ...(changed ? { uncommittedChanges: changed.size > 0 } : {}), ...(scanners ? { scanners } : {}),
+  });
+  const sheet = buildSheet(applyBusinessContext(outcome, merged), run, outcome.roots ?? []);
+  const folder = writeSheet(options.evaluationSheet!, sheet, Boolean(options.overwriteSheet));
+  deps.err(`Wrote the evaluation sheet (${sheet.findings.length} finding${sheet.findings.length === 1 ? "" : "s"}, list hash ${sheet.findingsSha256.slice(0, 16)}) to ${folder}. It is for human judgement, not an accuracy result.`);
 }
 
 /** The thread has the same tools as any thread, so it could edit the code it reads. The message to show if it did, else undefined. */
@@ -801,7 +832,7 @@ async function runPrePassOnly(resolved: ResolvedTarget, options: ScanOptions, de
   const base = { target: resolved.reportTarget, roots: resolved.roots, threadId: "none", startedAt, completedAt: deps.now().toISOString(), budgetUsd: budget, budgetExhausted: false, ...(options.allowPartial ? { allowPartial: true } : {}) };
   // With no scanner at all nothing was reviewed: that is a failure, not a clean result.
   const outcome: ScanOutcome = prePass
-    ? { ...base, failed: false, summary: `Pre-pass only (${extras.tier?.name ?? "tier"}): ${prePass.tools.join(", ")} reported ${prePass.total} hit${prePass.total === 1 ? "" : "s"}. No model reviewed the code.`, ...extras }
+    ? { ...base, failed: false, prepassTools: prePass.tools, summary: `Pre-pass only (${extras.tier?.name ?? "tier"}): ${prePass.tools.join(", ")} reported ${prePass.total} hit${prePass.total === 1 ? "" : "s"}. No model reviewed the code.`, ...extras }
     : { ...base, failed: true, error: `Tier ${extras.tier?.name ?? ""} runs the pattern scanners only, but none could run. Install one (for example foxguard) or choose another tier.`, ...extras };
   const findings = prePass ? leadsToFindings(prePass.leads, deps.now()) : [];
   await writeReport(outcome, findings, { ...emptyStoredReport(startedAt), findings }, "0-scan-prepass", options, deps);
@@ -900,6 +931,12 @@ export async function runScan(target: string | undefined, options: ScanOptions, 
         if (tier.prepassOnly && options.prepass === "off") throw new UsageError(`tier ${tier.name} runs the pattern scanners only; drop --prepass off.`);
       }
     }
+    if (options.evaluationSheet !== undefined) {
+      // A sheet written into the scanned folder would change the code it describes.
+      const real = (path: string): string => { try { return realpathSync(path); } catch { return resolve(path); } };
+      const sheet = real(options.evaluationSheet), root = real(resolved.folder);
+      if (sheet === root || sheet.startsWith(`${root}/`) || sheet.startsWith(`${root}\\`)) throw new UsageError("Choose an evaluation sheet folder outside the scanned folder.");
+    }
     if (options.plan) { await printPlan(resolved, options, deps, tier); return; }
     if (options.coverage !== undefined) { await printCoverage(resolved, options, deps); return; }
     const known: KnownSet | undefined = options.known?.length ? loadKnown(options.known, resolved.roots) : undefined;
@@ -961,6 +998,7 @@ export async function runScan(target: string | undefined, options: ScanOptions, 
     ({ client, stop: stopConsole } = await connect(options, deps));
     // --budget is the total: each pass gets an equal share, so the cost stays predictable however many passes run.
     let prePass = options.prepass === "off" ? undefined : await runPrePassFor(deps, resolved.folder, options);
+    if (prePass) extras.prepassTools = prePass.tools;
     const customLeads = prePass?.leads.filter(lead => lead.ruleSource === "custom");
     if (prePass && scope) {
       const inScope = new Set(scope);
@@ -1067,6 +1105,8 @@ export function registerScanCommand(program: Command, deps: ScanDeps = defaultSc
     .option("--scope-sarif <mode>", "With --scope: label (default) writes the scope as result properties; suppress also marks out-of-scope results suppressed, which GitHub code scanning then dismisses", "label")
     .option("--repo-context", "Also read .0/threat-model.md from the scanned folder as context. Off by default: a change under review can edit that file; in CI pass the base branch's copy with --context instead")
     .option("--repo-ignores", "Also let the pre-pass scanners read their configuration and ignore files from the scanned folder (.foxguard.yml, .semgrepignore, .gitleaks.toml, .gitleaksignore, .trivyignore, osv-scanner.toml, .checkov.yaml). Off by default: a change under review can use them to hide findings. Inline suppressions such as nosemgrep always apply")
+    .option("--evaluation-sheet <folder>", "After the scan, write a folder for judging the findings by hand: review.csv with blank true positive, false positive, unsure and notes columns, the findings with verdict, fix explanation and business-context rank, the cost, time, model, scanner versions and coverage, the exact command and CLI version, and a README that says it is not an accuracy result. Refuses a non-empty folder")
+    .option("--overwrite-sheet", "With --evaluation-sheet: replace the sheet files in a folder that already has files (other files are left alone)")
     .option("--poc-image <image>", "Run the proof of concept of each high or critical finding in this container image, network off, and label the finding script-matched, script-unmatched or static-only. Must be pinned by digest (name@sha256:...). Default: the ZERO_POC_IMAGE variable or `0security config set executedPocImage`; otherwise off. Needs Docker or podman")
     .option("--skill <id>", "Skill that holds the scan method", "scan")
     .option("--model <model>", `Model for the scan thread (default: ${DEFAULT_SCAN_MODEL}; ZERO_MODEL or a pinned provider's default when set)`)
@@ -1078,7 +1118,7 @@ export function registerScanCommand(program: Command, deps: ScanDeps = defaultSc
     .option("--retries <n>", `Run a batch again when it fails for a reason that may pass: a dropped connection, a provider timeout, rate limit or server error (0 to ${MAX_RETRIES}; 0 turns it off). A thread that is not a batch is asked once to continue. The cost of every attempt counts against --budget`, String(DEFAULT_RETRIES))
     .option("--coverage-rounds <n>", `After a thread ends, send it a follow-up that names the source files it never opened, up to this many times (0 to ${MAX_COVERAGE_ROUNDS}; 0 turns it off). Each round counts against --budget`, String(DEFAULT_COVERAGE_ROUNDS))
     .option("--batch-timeout <seconds>", `Longest one batch may run before it is cancelled and left pending (the scan goes on with the next batch); --timeout still limits the whole scan`, String(DEFAULT_BATCH_TIMEOUT_SECONDS))
-    .option("--concurrency <n>", `Batches that run at the same time (1 to ${MAX_PARALLEL_PASSES}). With --target-url: Nuclei templates that run at once (1 to 25, default 5)`, "1")
+    .option("--concurrency <n>", `Batches that run at the same time (1 to ${DEFAULT_MAX_BATCH_CONCURRENCY}; ZERO_SCAN_MAX_CONCURRENCY allows up to ${BATCH_CONCURRENCY_CEILING}). With --target-url: Nuclei templates that run at once (1 to 25, default 5)`, "1")
     .option("--resume <scan>", "Continue the units an earlier batched scan of this folder did not reach (a scan id from its report, or latest); refuses when the git HEAD changed unless --force")
     .option("--force", "With --resume: continue even though the folder's git HEAD changed")
     .option("--coverage [scan]", "Print the coverage ledger of a batched scan of this folder (the latest, or the id given) and exit; --format json for JSON")

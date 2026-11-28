@@ -1,8 +1,8 @@
 // Licensed under the 0security Enterprise License. See enterprise/LICENSE.
 // All tests are offline. The signing key is generated in memory; no private key is stored anywhere.
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createPublicKey, generateKeyPairSync, sign, type KeyObject } from "node:crypto";
-import { mkdtempSync, readFileSync, readdirSync, unlinkSync, writeFileSync, rmdirSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, unlinkSync, writeFileSync, rmdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -22,7 +22,9 @@ import {
   loadLicense,
   requireFeature,
   verifyLicense,
-  type LicensePayload,
+  entitlementLimit,
+  type LicensePayloadV1,
+  type LicensePayloadV2,
 } from "./index.js";
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -33,7 +35,7 @@ const other = generateKeyPairSync("ed25519");
 const pub = (k: { publicKey: KeyObject }) => k.publicKey.export({ type: "spki", format: "der" }).toString("base64");
 const KEYS = { t1: pub(pair) };
 
-function payload(over: Partial<LicensePayload> = {}): LicensePayload {
+function payload(over: Partial<LicensePayloadV1> = {}): LicensePayloadV1 {
   return {
     v: 1,
     id: "lic_test",
@@ -128,7 +130,7 @@ describe("verifyLicense", () => {
     ]) {
       expect(verify(mint(bad)).reason).toBe("malformed");
     }
-    expect(verify(mint({ ...payload(), v: 2 })).reason).toBe("unsupported-version");
+    expect(verify(mint({ ...payload(), v: 3 })).reason).toBe("unsupported-version");
   });
 
   it("rejects an issuedAt in the future beyond the clock skew", () => {
@@ -259,6 +261,85 @@ describe("licenseStatus", () => {
   });
 });
 
+function payload2(over: Partial<LicensePayloadV2> = {}): LicensePayloadV2 {
+  return {
+    v: 2, id: "lic_t2", customer: "Test Customer", plan: "team", seats: 25, aud: ["cli", "hub"],
+    entitlements: { saml: {}, ha: { nodes: 3 }, "bb-managed": { repos: 200 } },
+    issuedAt: "2026-12-01T00:00:00Z", nbf: "2026-12-01T00:00:00Z", expires: "2027-12-01T00:00:00Z", kid: "t1", rid: "rid_t2", ...over,
+  };
+}
+
+describe("license v2", () => {
+  it("grants known entitlements with limits and ignores unknown ones", () => {
+    const v = verify(mint(payload2()));
+    expect(v).toMatchObject({ ok: true, state: "valid", features: ["saml", "ha"], unknownFeatures: ["bb-managed"] });
+    expect(v.entitlements).toEqual({ saml: {}, ha: { nodes: 3 } });
+    expect(entitlementLimit(v, "ha", "nodes")).toBe(3);
+    expect(entitlementLimit(v, "ha", "repos")).toBeUndefined();
+    expect(entitlementLimit(v, "bb-managed", "repos")).toBeUndefined();
+    expect(entitlementLimit(v, "__proto__", "x")).toBeUndefined();
+  });
+
+  it("defaults rid to the id and reports plan and rid in the status", () => {
+    const { rid: _rid, ...noRid } = payload2();
+    const env = { ZERO_LICENSE: mint(noRid) };
+    expect(licenseStatus(env, NOW, KEYS)).toMatchObject({ plan: "team", rid: "lic_t2", licenseId: "lic_t2" });
+    expect(licenseStatus({ ZERO_LICENSE: mint(payload()) }, NOW, KEYS)).toMatchObject({ plan: null, rid: "lic_test" });
+  });
+
+  it("refuses a token whose audience omits the asking component", () => {
+    const token = mint(payload2());
+    expect(verifyLicense(token, NOW, KEYS, { audience: "hub" }).ok).toBe(true);
+    expect(verifyLicense(token, NOW, KEYS, { audience: "brain" })).toMatchObject({ ok: false, reason: "audience-mismatch" });
+    expect(verifyLicense(mint(payload()), NOW, KEYS, { audience: "brain" }).ok).toBe(true);
+    expect(loadLicense({ ZERO_LICENSE: token }, NOW, KEYS, { audience: "runner" }).reason).toBe("audience-mismatch");
+  });
+
+  it("honours nbf within the clock skew and refuses it beyond", () => {
+    expect(verify(mint(payload2({ nbf: "2027-01-15T20:00:00Z" }))).ok).toBe(true);
+    expect(verify(mint(payload2({ nbf: "2027-01-20T00:00:00Z" })))).toMatchObject({ ok: false, reason: "not-yet-valid" });
+  });
+
+  it("keeps grace and read-only behaviour", () => {
+    const token = mint(payload2());
+    expect(verify(token, new Date("2027-12-20T00:00:00Z"))).toMatchObject({ ok: true, state: "grace" });
+    expect(verify(token, new Date("2028-02-01T00:00:00Z"))).toMatchObject({ ok: false, state: "expired" });
+    expect(featureMode("saml", { ZERO_LICENSE: token }, new Date("2028-02-01T00:00:00Z"), KEYS)).toBe("read-only");
+    expect(hasFeature("saml", { ZERO_LICENSE: token }, NOW, KEYS)).toBe(true);
+  });
+
+  it("rejects malformed v2 payloads even when signed", () => {
+    const bad: Record<string, unknown>[] = [
+      { plan: "" }, { aud: [] }, { aud: "cli" }, { aud: [1] }, { nbf: "tomorrow" }, { nbf: "2027-12-01T00:00:00Z" }, { rid: "" }, { rid: 5 },
+      { entitlements: [] }, { entitlements: null }, { entitlements: { saml: [] } }, { entitlements: { saml: { n: 1.5 } } }, { entitlements: { saml: { n: -1 } } }, { entitlements: { saml: { n: "1" } } },
+    ];
+    for (const over of bad) expect(verify(mint({ ...payload2(), ...over })), JSON.stringify(over)).toMatchObject({ ok: false, reason: "malformed" });
+    const { nbf: _n, ...noNbf } = payload2();
+    expect(verify(mint(noNbf)).reason).toBe("malformed");
+    expect(verify(mint({ ...payload2(), v: 3 })).reason).toBe("unsupported-version");
+  });
+
+  it("passes the shared vectors", () => {
+    const file = fileURLToPath(new URL("../test-vectors/license-vectors.json", import.meta.url));
+    const doc = JSON.parse(readFileSync(file, "utf8")) as {
+      defaultNow: string; keys: Record<string, string>; known: string[];
+      cases: { name: string; token: string; now?: string; audience?: string; expect: Record<string, unknown> }[];
+    };
+    expect(doc.known).toEqual([...ENTERPRISE_FEATURES]);
+    expect(doc.cases.length).toBeGreaterThanOrEqual(15);
+    for (const c of doc.cases) {
+      const v = verifyLicense(c.token, new Date(c.now ?? doc.defaultNow), doc.keys, c.audience === undefined ? {} : { audience: c.audience }) as unknown as Record<string, unknown> & { payload: Record<string, unknown> | null };
+      const seen = { ...v, rid: v.payload ? (v.payload.v === 2 ? v.payload.rid : v.payload.id) : null, plan: v.payload?.plan ?? null };
+      for (const [k, want] of Object.entries(c.expect)) expect(seen[k], `${c.name}: ${k}`).toEqual(want);
+    }
+  });
+
+  it("keeps the vectors file in sync with its generator", () => {
+    const gen = fileURLToPath(new URL("../test-vectors/generate.mjs", import.meta.url));
+    expect(() => execFileSync(process.execPath, [gen, "--check"], { stdio: "pipe", timeout: 15_000 })).not.toThrow();
+  });
+});
+
 describe("module hygiene", () => {
   const src = fileURLToPath(new URL(".", import.meta.url));
   const sources = readdirSync(src).filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"));
@@ -294,6 +375,139 @@ describe("issue-license tool", () => {
     } finally {
       unlinkSync(keyFile);
       rmdirSync(dir);
+    }
+  });
+});
+
+describe("issuing and revoking tools", () => {
+  const tools = (n: string) => fileURLToPath(new URL(`../tools/${n}`, import.meta.url));
+  const run = (tool: string, args: string[], env: NodeJS.ProcessEnv = {}) =>
+    spawnSync(process.execPath, [tools(tool), ...args], { encoding: "utf8", timeout: 15_000, env: { ...process.env, ...env } });
+  const setup = () => {
+    const dir = mkdtempSync(join(tmpdir(), "0ent-tools-"));
+    const keyFile = join(dir, "k.pem");
+    writeFileSync(keyFile, pair.privateKey.export({ type: "pkcs8", format: "pem" }), { mode: 0o600 });
+    const write = (name: string, data: unknown) => {
+      const f = join(dir, name);
+      writeFileSync(f, typeof data === "string" ? data : JSON.stringify(data));
+      return f;
+    };
+    return { dir, keyFile, write, done: () => rmSync(dir, { recursive: true, force: true }) };
+  };
+  const customer = { customer: "Acme Test", plan: "team", seats: 10, aud: ["cli", "hub"], entitlements: { saml: {}, ha: { nodes: 3 }, "bb-managed": { repos: 200 } }, term: "annual" };
+
+  it("issues a v2 token from a customer file that the verifier accepts", () => {
+    const t = setup();
+    try {
+      const r = run("issue-license.mjs", ["--key", t.keyFile, "--customer-file", t.write("c.json", customer), "--issued", "2026-12-01T00:00:00Z", "--kid", "t1", "--id", "lic_x"]);
+      expect(r.status, r.stderr).toBe(0);
+      const v = verifyLicense(r.stdout.trim(), NOW, KEYS, { audience: "hub" });
+      expect(v).toMatchObject({ ok: true, state: "valid", features: ["saml", "ha"], unknownFeatures: ["bb-managed"], expires: "2028-01-05T00:00:00Z" });
+      expect(v.payload).toMatchObject({ v: 2, id: "lic_x", rid: "lic_x", plan: "team", nbf: "2026-12-01T00:00:00Z", aud: ["cli", "hub"] });
+      expect(entitlementLimit(v, "ha", "nodes")).toBe(3);
+      expect(r.stdout + r.stderr).not.toContain("PRIVATE KEY");
+    } finally {
+      t.done();
+    }
+  });
+
+  it("issues a monthly term of 35 days and an explicit rid and expiry", () => {
+    const t = setup();
+    try {
+      const month = run("issue-license.mjs", ["--key", t.keyFile, "--customer-file", t.write("m.json", { ...customer, term: "monthly" }), "--issued", "2026-12-01T00:00:00Z", "--kid", "t1"]);
+      expect(verify(month.stdout.trim()).expires).toBe("2027-01-05T00:00:00Z");
+      const exp = run("issue-license.mjs", ["--key", t.keyFile, "--customer-file", t.write("e.json", { ...customer, term: undefined, expires: "2027-06-01T00:00:00Z", rid: "rid_9" }), "--issued", "2026-12-01T00:00:00Z", "--kid", "t1"]);
+      expect(verify(exp.stdout.trim()).payload).toMatchObject({ rid: "rid_9", expires: "2027-06-01T00:00:00Z" });
+    } finally {
+      t.done();
+    }
+  });
+
+  it("still issues v1 tokens, now including ha", () => {
+    const t = setup();
+    try {
+      const r = run("issue-license.mjs", ["--key", t.keyFile, "--customer", "Old Co", "--seats", "3", "--features", "ha,rbac", "--expires", "2027-12-01T00:00:00Z", "--issued", "2026-12-01T00:00:00Z", "--kid", "t1"]);
+      expect(r.status, r.stderr).toBe(0);
+      expect(verify(r.stdout.trim())).toMatchObject({ ok: true, features: ["ha", "rbac"] });
+      expect(verify(r.stdout.trim()).payload?.v).toBe(1);
+    } finally {
+      t.done();
+    }
+  });
+
+  it("rejects bad customer files", () => {
+    const t = setup();
+    try {
+      const bad: Record<string, unknown>[] = [
+        { plan: undefined }, { seats: 0 }, { aud: [] }, { aud: ["nowhere"] }, { entitlements: {} }, { entitlements: { Bad_Name: {} } },
+        { entitlements: { saml: { n: -1 } } }, { entitlements: { saml: 3 } }, { term: "weekly" }, { term: undefined }, { expires: "2027-06-01T00:00:00Z" }, { nbf: "2090-01-01T00:00:00Z" },
+      ];
+      for (const over of bad) {
+        const r = run("issue-license.mjs", ["--key", t.keyFile, "--customer-file", t.write("b.json", { ...customer, ...over }), "--issued", "2026-12-01T00:00:00Z"]);
+        expect(r.status, JSON.stringify(over)).toBe(2);
+        expect(r.stdout).toBe("");
+      }
+    } finally {
+      t.done();
+    }
+  });
+
+  it("never reads a key from the environment and never prints one", () => {
+    const t = setup();
+    try {
+      const pem = pair.privateKey.export({ type: "pkcs8", format: "pem" }).toString();
+      const env = { ZERO_LICENSE_KEY: pem, ZERO_SIGNING_KEY: pem, ZERO_PRIVATE_KEY: pem, ZERO_LICENSE_PRIVATE_KEY: pem };
+      for (const [tool, args] of [["issue-license.mjs", ["--customer-file", t.write("c.json", customer)]], ["sign-revocations.mjs", ["--kid", "t1", "--seq", "1", "--revoke", "a@2027-01-01T00:00:00Z"]]] as const) {
+        const r = run(tool, args as unknown as string[], env);
+        expect(r.status, tool).toBe(2);
+        expect(r.stdout + r.stderr).not.toContain("PRIVATE KEY");
+        expect(readFileSync(tools(tool), "utf8"), tool).not.toMatch(/process\.env/);
+      }
+      expect(readFileSync(tools("license-lib.mjs"), "utf8")).not.toMatch(/process\.env/);
+    } finally {
+      t.done();
+    }
+  });
+
+  it("signs a revocation list that verifies and rejects tampering and other keys", () => {
+    const t = setup();
+    try {
+      const pubFile = t.write("k.pub.b64", `${pub(pair)}\n`);
+      const entries = t.write("r.json", { entries: [{ rid: "lic_b", effective: "2027-03-01T00:00:00Z" }, { rid: "lic_a", effective: "2027-02-01T00:00:00Z" }] });
+      const r = run("sign-revocations.mjs", ["--key", t.keyFile, "--kid", "t1", "--seq", "4", "--entries", entries, "--revoke", "lic_c@2027-04-01T00:00:00Z", "--revoke", "lic_a@2027-05-01T00:00:00Z", "--issued", "2027-01-10T00:00:00Z"]);
+      expect(r.status, r.stderr).toBe(0);
+      const token = r.stdout.trim();
+      const [p] = token.split(".");
+      expect(JSON.parse(Buffer.from(p, "base64url").toString())).toEqual({
+        v: 1, kind: "revocations", kid: "t1", seq: 4, issuedAt: "2027-01-10T00:00:00Z",
+        entries: [{ rid: "lic_a", effective: "2027-02-01T00:00:00Z" }, { rid: "lic_b", effective: "2027-03-01T00:00:00Z" }, { rid: "lic_c", effective: "2027-04-01T00:00:00Z" }],
+      });
+      const ok = run("sign-revocations.mjs", ["--verify", t.write("list.txt", token), "--pub", pubFile]);
+      expect(ok.status, ok.stderr).toBe(0);
+      expect(ok.stdout).toContain("seq 4");
+      const flipped = token.slice(0, 5) + (token[5] === "A" ? "B" : "A") + token.slice(6);
+      expect(run("sign-revocations.mjs", ["--verify", t.write("bad.txt", flipped), "--pub", pubFile]).status).toBe(2);
+      expect(run("sign-revocations.mjs", ["--verify", t.write("list2.txt", token), "--pub", t.write("o.pub", `${pub(other)}\n`)]).status).toBe(2);
+    } finally {
+      t.done();
+    }
+  });
+
+  it("rejects bad revocation input", () => {
+    const t = setup();
+    try {
+      const base = ["--key", t.keyFile, "--kid", "t1"];
+      for (const args of [
+        [...base, "--seq", "0", "--revoke", "a@2027-01-01T00:00:00Z"],
+        [...base, "--seq", "1", "--revoke", "a@tomorrow"],
+        [...base, "--seq", "1", "--revoke", "a"],
+        [...base, "--seq", "1"],
+        ["--kid", "t1", "--seq", "1", "--revoke", "a@2027-01-01T00:00:00Z"],
+      ]) expect(run("sign-revocations.mjs", args).status, args.join(" ")).toBe(2);
+      const empty = run("sign-revocations.mjs", [...base, "--seq", "2", "--entries", t.write("e.json", { entries: [] })]);
+      expect(empty.status, empty.stderr).toBe(0);
+    } finally {
+      t.done();
     }
   });
 });

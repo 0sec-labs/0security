@@ -436,7 +436,7 @@ jobs:
           fail-on: high
           upload: "false"
         env:
-          ZERO_ENTERPRISE: "1"
+          ZERO_NO_EGRESS: "1"
           DO_NOT_TRACK: "1"
           ZERO_SELECTED_PROVIDER: azure
           AZURE_OPENAI_AUTH: entra
@@ -449,12 +449,12 @@ jobs:
         run: 0 findings upload "${{ steps.scan.outputs.sarif }}"
 ```
 
-`ZERO_ENTERPRISE` refuses every `gh` call, and the action uploads with `gh`. The example sets `upload: "false"` and uploads in a later step that does not set `ZERO_ENTERPRISE`. Add `security-events: write` to the job permissions.
+`ZERO_NO_EGRESS` refuses every `gh` call, and the action uploads with `gh`. The example sets `upload: "false"` and uploads in a later step that does not set `ZERO_NO_EGRESS`. Add `security-events: write` to the job permissions.
 
 Keep these boundaries:
 
 - Give the runner's machine identity access to the model, as in [Azure OpenAI](/models/#azure-openai) or an AWS role for [Amazon Bedrock](/models/#amazon-bedrock). No model key is stored in GitHub.
-- `ZERO_ENTERPRISE` keeps every automatic outbound call off, including telemetry and crash reports, except the model endpoint you configured and the destinations you name. `DO_NOT_TRACK` adds a second switch for telemetry. The upload step sends SARIF to GitHub with the job's token. See [Data flow](/data-flow/). A Sentinel can upload its findings the same way from your machine: see [Send findings to GitHub](/sentinels/#send-findings-to-github).
+- `ZERO_NO_EGRESS` keeps every automatic outbound call off, including telemetry and crash reports, except the model endpoint you configured and the destinations you name. `DO_NOT_TRACK` adds a second switch for telemetry. The upload step sends SARIF to GitHub with the job's token. See [Data flow](/data-flow/). A Sentinel can upload its findings the same way from your machine: see [Send findings to GitHub](/sentinels/#send-findings-to-github).
 - Install `cosign` on the runner image, so the installer verifies the release [signature](/self-hosting/#verify-the-signature). Or put a pinned, verified binary in the runner image and skip the install.
 - Only run the job on trusted events. Do not run a self-hosted runner for pull requests from forks.
 
@@ -748,7 +748,7 @@ What you get:
 - The labels are `0security`, the severity, `0-finding-<id>` and any `--jira-label` you add. Issue type defaults to `Task`.
 - Running it again creates only what is new. Before creating, it searches the project for each `0-finding-<id>` label. An issue you closed in Jira still has its label, so it is not reopened or created again. If you remove the label, the finding gets a new issue.
 - `JIRA_PROJECT` and `JIRA_URL` can replace `--jira-project` and `--url`. The token is read only from `JIRA_TOKEN`, sent only in the Authorization header and removed from error messages. A plain `http://` URL is refused unless it is this machine or you pass `--allow-insecure-http`.
-- `ZERO_ENTERPRISE` blocks it. There is no exception setting. `--dry-run` still works.
+- `ZERO_NO_EGRESS` blocks it. There is no exception setting. `--dry-run` still works.
 
 The Jira search index can lag by a few seconds on Cloud. Two runs started at the same moment can create the same issue twice, so run it from one job at a time.
 
@@ -791,7 +791,7 @@ For Data Center, pass `--platform dc`, `--repo PROJECT/repo` and `--url https://
 - With `--checkout <folder>`: the folder is a git clone whose `origin` is the Bitbucket repository, and `git ls-remote origin` works. Git uses your own credentials and never gets `BITBUCKET_TOKEN`.
 - A model provider is configured. This reads local settings and makes no model call.
 - With `BITBUCKET_WEBHOOK_SECRET` set (or `--listen <host:port>` given): the secret has at least 16 characters, and the listen address is this machine or needs a TLS proxy in front.
-- `ZERO_ENTERPRISE` is not set. When it is, every Bitbucket request is refused unless `ZERO_BITBUCKET_URL` names your server.
+- `ZERO_NO_EGRESS` is not set. When it is, every Bitbucket request is refused unless `ZERO_BITBUCKET_URL` names your server.
 
 ### Use a webhook
 
@@ -803,6 +803,8 @@ export BITBUCKET_WEBHOOK_SECRET=...   # at least 16 characters
 ```
 
 Put a TLS proxy in front of the listener and point the webhook at it. On Cloud, turn on **Pull request created** and **Pull request updated**. On Data Center, turn on **Opened** and **Source branch updated**. Set the same secret on the webhook. Bitbucket signs each delivery with it, and `watch` refuses a delivery that does not match. Polling still runs, so a missed delivery is caught on the next poll.
+
+The listener reads a body before it can check the signature, so it limits what anyone who reaches it can do: at most 32 open connections, a body of at most 1 MiB read within 10 seconds, headers within 10 seconds, and 30 requests a minute from one address (more get `429`). Behind a proxy, every request comes from the proxy's address and shares that limit.
 
 ### What a review does
 
@@ -819,7 +821,7 @@ The Code Insights report follows the limits in [Publish to Bitbucket Code Insigh
 
 The scan reads code written by the pull request's author. Run `watch` on a machine that holds nothing you cannot lose, and give the clone read access only. The scan does not see `BITBUCKET_TOKEN` or `BITBUCKET_WEBHOOK_SECRET`, but it does see the model key. Use a key with a spend cap. See [Secrets and untrusted pull requests](#secrets-and-untrusted-pull-requests).
 
-The webhook listener binds the address you give it. Use `127.0.0.1` behind a proxy. `ZERO_ENTERPRISE` makes every Bitbucket request refuse.
+The webhook listener binds the address you give it. Use `127.0.0.1` behind a proxy. `ZERO_NO_EGRESS` makes every Bitbucket request refuse.
 
 ### What is tested
 

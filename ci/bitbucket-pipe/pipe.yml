@@ -33,6 +33,8 @@ variables:
     default: ''
   - name: ZERO_BITBUCKET_URL
     default: ''
+  - name: ZERO_NO_EGRESS
+    default: ''
   - name: ZERO_ENTERPRISE
     default: ''
   - name: OPENAI_API_KEY

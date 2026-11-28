@@ -4,6 +4,21 @@
  */
 import { parse as parseYaml } from "yaml";
 
+/**
+ * `text` cut at the first `marker`. Lockfiles come from the repository being scanned, and a regex such as `/\(.*$/` or
+ * `/\/\/.*$/` does the same work in quadratic time on a long run of markers.
+ */
+const cutAt = (text: string, marker: string): string => { const at = text.indexOf(marker); return at === -1 ? text : text.slice(0, at); };
+/** `line` without a trailing ` # comment`, as `.replace(/\s+#.*$/, "")` gives but in linear time. */
+const stripComment = (line: string): string => {
+  let end = line.search(/\s#/);
+  if (end === -1) return line;
+  while (end > 0 && /\s/.test(line[end - 1]!)) end--;
+  return line.slice(0, end);
+};
+/** `line` without a trailing `\` line continuation and the whitespace before it, as `.replace(/\s*\\$/, "")` gives. */
+const stripContinuation = (line: string): string => (line.endsWith("\\") ? line.slice(0, -1).trimEnd() : line);
+
 export interface Component {
   ecosystem: "npm" | "cargo" | "golang" | "pypi" | "gem" | "composer" | "nuget" | "maven" | "pub" | "hex";
   name: string;
@@ -114,7 +129,9 @@ export function parseNpmLock(source: string): Component[] {
 
 /** `name@1.2.3`, `@scope/name@1.2.3(peer@2)`, `/name@1.2.3`, or the older `/name/1.2.3`. */
 function pnpmKey(raw: string): { name: string; version: string } | undefined {
-  let key = raw.replace(/^\//, "").replace(/\(.*$/, "").replace(/_.*$/, (match) => (match.includes("@") ? "" : match));
+  let key = cutAt(raw.replace(/^\//, ""), "(");
+  const underscore = key.indexOf("_");
+  if (underscore !== -1 && key.includes("@", underscore)) key = key.slice(0, underscore);
   const at = key.lastIndexOf("@");
   if (at > 0) return { name: key.slice(0, at), version: key.slice(at + 1) };
   const slash = key.lastIndexOf("/");
@@ -125,7 +142,7 @@ function pnpmKey(raw: string): { name: string; version: string } | undefined {
 function pnpmDependency(name: string, value: unknown): { name: string; version: string } | undefined {
   const raw = text(value);
   if (!raw || /^(link:|file:|workspace:|https?:|git)/.test(raw)) return undefined;
-  if (/^\d/.test(raw)) return { name, version: raw.replace(/\(.*$/, "").replace(/_.*$/, "") };
+  if (/^\d/.test(raw)) return { name, version: cutAt(cutAt(raw, "("), "_") };
   const parsed = pnpmKey(raw);
   return parsed && /^\d/.test(parsed.version) ? parsed : undefined;
 }
@@ -295,7 +312,7 @@ export function parseGoMod(source: string): Component[] {
   const found: Component[] = [];
   let block = false;
   for (const raw of source.split(/\r?\n/)) {
-    const line = raw.replace(/\/\/.*$/, "").trim();
+    const line = cutAt(raw, "//").trim();
     if (line === "require (") { block = true; continue; }
     if (block && line === ")") { block = false; continue; }
     const match = block ? /^(\S+)\s+(v\S+)$/.exec(line) : /^require\s+(\S+)\s+(v\S+)$/.exec(line);
@@ -332,10 +349,11 @@ export function parsePipfileLock(source: string): Component[] {
 export function parseRequirements(source: string): Component[] {
   const found: Component[] = [];
   // Any index or find-links option other than the public index may serve private packages: mark every package local.
-  const custom = [...source.matchAll(/^\s*(?:-i|--index-url|--extra-index-url|-f|--find-links)(?:\s+|=)(\S+)/gm)].some(match => !isPublicUrl(match[1]!, ["pypi.org"]));
+  // `[ \t]` rather than `\s`: `^\s*` can run across every following blank line, which is quadratic on a file of newlines.
+  const custom = [...source.matchAll(/^[ \t]*(?:-i|--index-url|--extra-index-url|-f|--find-links)(?:[ \t]+|=)(\S+)/gm)].some(match => !isPublicUrl(match[1]!, ["pypi.org"]));
   const local = custom ? { local: "private-registry" as const } : {};
   for (const raw of source.split(/\r?\n/)) {
-    const line = raw.replace(/\s+#.*$/, "").replace(/\s*\\$/, "").split(";")[0]!.trim();
+    const line = stripContinuation(stripComment(raw)).split(";")[0]!.trim();
     const match = /^([A-Za-z0-9][A-Za-z0-9._-]*)(?:\[[^\]]*\])?\s*==\s*([A-Za-z0-9][A-Za-z0-9._+!-]*)$/.exec(line);
     if (match) found.push({ ecosystem: "pypi", name: match[1]!, version: match[2]!, ...local });
   }

@@ -272,11 +272,10 @@ impl_rule! {
                         }
                         // Runtime.getRuntime().exec(cmd)
                         ("exec", Some(r))
-                            if text(r, src).contains("Runtime") =>
+                            if text(r, src).contains("Runtime")
+                                && args.first().is_some_and(|a| is_dynamic(*a)) =>
                         {
-                            if args.first().is_some_and(|a| is_dynamic(*a)) {
-                                report("Runtime.exec() called with dynamic argument — risk of command injection");
-                            }
+                            report("Runtime.exec() called with dynamic argument — risk of command injection");
                         }
                         _ => {}
                     }

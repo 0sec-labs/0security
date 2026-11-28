@@ -959,10 +959,8 @@ impl<'a> Walker<'a> {
                 self.chain_key = outer_key;
                 return;
             }
-            "call_expression" => {
-                if self.call(node, cur, class, ktor) {
-                    return;
-                }
+            "call_expression" if self.call(node, cur, class, ktor) => {
+                return;
             }
             _ => {}
         }

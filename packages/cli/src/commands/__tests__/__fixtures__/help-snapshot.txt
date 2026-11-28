@@ -906,12 +906,17 @@ Options:
 Usage: 0security findings export [options] [ids...]
 
 Export findings, a whole scan or, with no IDs, every finding as json, md, sarif, html, pdf or
-defectdojo
+defectdojo, or as a sheet (a folder) to judge them by hand
 
 Options:
   --scan <id>            Export every finding of this scan instead of selected IDs
-  --format <format>      json, md, sarif, html, pdf or defectdojo (default: "json")
-  -o, --output <file>    Write to a file instead of stdout
+  --format <format>      json, md, sarif, html, pdf, defectdojo or sheet (a folder with review.csv,
+                         findings, run facts and a README; needs -o <folder>) (default: "json")
+  -o, --output <file>    Write to a file instead of stdout; for --format sheet, the folder
+  --source <folder>      With --format sheet: the repository folder, for its commit and relative
+                         paths
+  --overwrite-sheet      With --format sheet: replace the sheet files in a folder that already has
+                         files (other files are left alone)
   --severity <severity>  With no IDs: only this severity
   --category <category>  With no IDs: only this category
   --status <status>      With no IDs: only this status
@@ -1915,7 +1920,7 @@ Options:
   --resolve-from <file>           Maven and Gradle: read the output of mvn dependency:tree (text) or
                                   gradle dependencies that you already ran; repeat for more files.
                                   Nothing runs or downloads, so it works offline and under
-                                  ZERO_ENTERPRISE (default: [])
+                                  ZERO_NO_EGRESS (default: [])
   --maven-settings <file>         With --resolve, pass this settings.xml to mvn (-s): your mirror,
                                   proxy and credentials
   --gradle-init-script <file>     With --resolve, pass this init script to gradle (-I): your mirror
@@ -1994,128 +1999,142 @@ Usage: 0security scan [options] [target]
 Scan a folder or git repository for security bugs; prints the findings as a report
 
 Options:
-  --budget <usd>             Stop when the estimated spend reaches this many USD; partial findings
-                             are kept (default: "5")
-  --format <format>          Report format: json, md, sarif, html, pdf (default: "md")
-  -o, --output <file>        Write the report to a file instead of stdout
-  --fail-on <severity>       Exit 1 when a finding is at or above this severity (critical, high,
-                             medium, low, info)
-  --passes <n>               Scan this many times and merge the findings (a scan misses some issues
-                             that another run finds); the budget is split between them, up to 5
-                             (default: "1")
-  --diff <ref>               Review only the files that differ from this git ref (for example
-                             origin/main), and what they connect to; an empty diff scans nothing
-  --prepass <mode>           auto runs the pattern scanners first when they are installed and gives
-                             their hits to the scan as leads; off skips them (default: "auto")
-  --scanner <id>             Scanner for the pre-pass (foxguard, semgrep, opengrep, gitleaks, trivy,
-                             osv-scanner, checkov); nuclei is only for --target-url; repeat or
-                             separate with commas to use several (default: foxguard). gitleaks,
-                             trivy and osv-scanner must be installed; secret values are redacted
-  --target-url <url>         With --scanner nuclei: test this running app with Nuclei, which you
-                             installed. Needs --scope-file or --acknowledge-host. 0 sends no request
-                             itself; link-local and cloud metadata addresses are always refused
-  --scope-file <file>        With --target-url: a file listing the hosts you may test, one host or
-                             host:port per line
-  --acknowledge-host <host>  With --target-url: type the exact host being tested. A public host is
-                             refused without it
-  --rate-limit <n>           With --target-url: Nuclei requests per second (1 to 150) (default:
-                             "10")
-  --templates <path>         With --target-url: a Nuclei template file or folder to run instead of
-                             the templates Nuclei has installed. 0 never downloads templates
-  --rules <file-or-folder>   Semgrep or OpenGrep rules for the pre-pass (a file or a folder); repeat
-                             for several. Replaces the default rules and needs --scanner semgrep or
-                             opengrep. Rules are never read from the scanned folder unless you name
-                             them
-  --business-context <file>  Operator-owned JSON tags and notes for investigation and work ordering;
-                             keeps technical severity unchanged
-  --repository <name>        Repository name the business context rules are matched against
-                             (default: the git remote of the scanned folder)
-  --context <file>           Give the scan this file (a threat model, notes on who may do what) as
-                             lower-priority background; repeat for several. It can steer what the
-                             scan weighs but cannot change how it works
-  --policy <file-or-folder>  Check the code against these Markdown policies (a file or a folder of
-                             .md files) and report pass or fail for each; repeat for several. Runs
-                             the policy-check skill
-  --org-policy <folder>      An organisation's policy folder: evaluated first, and wins when a
-                             --policy says otherwise or uses the same id; repeat for several
-  --scope <file>             Read the declared scope from the '## Scope' section of this Markdown
-                             file (usually SECURITY.md). Findings that match a vector it lists as
-                             out of scope are labelled, listed apart and left out of the counts,
-                             --fail-on and the exit code; none are removed. In CI pass the base
-                             branch's copy
-  --repo-scope               Read SECURITY.md from the scanned folder as the declared scope. Off by
-                             default: a change under review can edit that file; in CI pass the base
-                             branch's copy with --scope instead
-  --scope-sarif <mode>       With --scope: label (default) writes the scope as result properties;
-                             suppress also marks out-of-scope results suppressed, which GitHub code
-                             scanning then dismisses (default: "label")
-  --repo-context             Also read .0/threat-model.md from the scanned folder as context. Off by
-                             default: a change under review can edit that file; in CI pass the base
-                             branch's copy with --context instead
-  --repo-ignores             Also let the pre-pass scanners read their configuration and ignore
-                             files from the scanned folder (.foxguard.yml, .semgrepignore,
-                             .gitleaks.toml, .gitleaksignore, .trivyignore, osv-scanner.toml,
-                             .checkov.yaml). Off by default: a change under review can use them to
-                             hide findings. Inline suppressions such as nosemgrep always apply
-  --poc-image <image>        Run the proof of concept of each high or critical finding in this
-                             container image, network off, and label the finding script-matched,
-                             script-unmatched or static-only. Must be pinned by digest
-                             (name@sha256:...). Default: the ZERO_POC_IMAGE variable or `0security
-                             config set executedPocImage`; otherwise off. Needs Docker or podman
-  --skill <id>               Skill that holds the scan method (default: "scan")
-  --model <model>            Model for the scan thread (default: gpt-6-luna; ZERO_MODEL or a pinned
-                             provider's default when set)
-  --provider <id>            Explicit model provider for this scan (use with --model)
-  --reasoning <effort>       Reasoning effort for a model that supports it
-  --batches <mode>           auto reviews a large folder in batches, one thread per group of entry
-                             points, and records what each batch covered; on always does; off keeps
-                             one thread (default: "auto")
-  --codeowners <file>        Group batches by an operator-provided CODEOWNERS file as well as build
-                             module; reads no ownership file automatically and never skips unowned
-                             code
-  --batch-size <n>           Entry points one batch reviews (1 to 50); a folder with more than this
-                             many is split under --batches auto (default: "8")
-  --retries <n>              Run a batch again when it fails for a reason that may pass: a dropped
-                             connection, a provider timeout, rate limit or server error (0 to 5; 0
-                             turns it off). A thread that is not a batch is asked once to continue.
-                             The cost of every attempt counts against --budget (default: "2")
-  --coverage-rounds <n>      After a thread ends, send it a follow-up that names the source files it
-                             never opened, up to this many times (0 to 5; 0 turns it off). Each
-                             round counts against --budget (default: "1")
-  --batch-timeout <seconds>  Longest one batch may run before it is cancelled and left pending (the
-                             scan goes on with the next batch); --timeout still limits the whole
-                             scan (default: "900")
-  --concurrency <n>          Batches that run at the same time (1 to 3). With --target-url: Nuclei
-                             templates that run at once (1 to 25, default 5) (default: "1")
-  --resume <scan>            Continue the units an earlier batched scan of this folder did not reach
-                             (a scan id from its report, or latest); refuses when the git HEAD
-                             changed unless --force
-  --force                    With --resume: continue even though the folder's git HEAD changed
-  --coverage [scan]          Print the coverage ledger of a batched scan of this folder (the latest,
-                             or the id given) and exit; --format json for JSON
-  --allow-partial            Exit by the findings alone (0, or 1 with --fail-on) when the scan stops
-                             before it reviews everything; the report still says it is partial
-  --plan                     List the entry points, the batches and a rough cost range for the
-                             folder, then exit; calls no model and writes nothing
-  --tiers <file>             An operator's tier map (YAML or JSON) that sets the budget, batches and
-                             skill for this repository, or skips it. Default:
-                             scan-tiers.yaml|yml|json in the 0 state folder. Never read from the
-                             scanned folder on its own; in CI read it from the base branch
-  --fail-on-skip             Exit 1 when the tier map skips this scan (default: exit 0, with the
-                             skip stated in the report)
-  --known <sarif>            SARIF from other tools: the scan is told what is already known and
-                             looks for what they missed; findings are labelled new or already-known
-                             (confirmedIndependently when the scan analysed it itself). Repeat for
-                             several
-  --only-new                 With --known: leave findings that match a known item out of the report
-  --timeout <seconds>        Maximum seconds for the whole scan; what it reviewed so far is reported
-                             as partial (default: "3600")
-  --engine-url <url>         Attach directly to a running trusted engine
-  --engine-token-env <name>  Environment variable holding the attached engine token
-  --computer <id>            Use a registered remote computer
-  --computers-config <path>  Operator computer connection registry JSON file
-  --db-path <path>           Control database of the local engine to attach to
-  -h, --help                 display help for command
+  --budget <usd>               Stop when the estimated spend reaches this many USD; partial findings
+                               are kept (default: "5")
+  --format <format>            Report format: json, md, sarif, html, pdf (default: "md")
+  -o, --output <file>          Write the report to a file instead of stdout
+  --fail-on <severity>         Exit 1 when a finding is at or above this severity (critical, high,
+                               medium, low, info)
+  --passes <n>                 Scan this many times and merge the findings (a scan misses some
+                               issues that another run finds); the budget is split between them, up
+                               to 5 (default: "1")
+  --diff <ref>                 Review only the files that differ from this git ref (for example
+                               origin/main), and what they connect to; an empty diff scans nothing
+  --prepass <mode>             auto runs the pattern scanners first when they are installed and
+                               gives their hits to the scan as leads; off skips them (default:
+                               "auto")
+  --scanner <id>               Scanner for the pre-pass (foxguard, semgrep, opengrep, gitleaks,
+                               trivy, osv-scanner, checkov); nuclei is only for --target-url; repeat
+                               or separate with commas to use several (default: foxguard). gitleaks,
+                               trivy and osv-scanner must be installed; secret values are redacted
+  --target-url <url>           With --scanner nuclei: test this running app with Nuclei, which you
+                               installed. Needs --scope-file or --acknowledge-host. 0 sends no
+                               request itself; link-local and cloud metadata addresses are always
+                               refused
+  --scope-file <file>          With --target-url: a file listing the hosts you may test, one host or
+                               host:port per line
+  --acknowledge-host <host>    With --target-url: type the exact host being tested. A public host is
+                               refused without it
+  --rate-limit <n>             With --target-url: Nuclei requests per second (1 to 150) (default:
+                               "10")
+  --templates <path>           With --target-url: a Nuclei template file or folder to run instead of
+                               the templates Nuclei has installed. 0 never downloads templates
+  --rules <file-or-folder>     Semgrep or OpenGrep rules for the pre-pass (a file or a folder);
+                               repeat for several. Replaces the default rules and needs --scanner
+                               semgrep or opengrep. Rules are never read from the scanned folder
+                               unless you name them
+  --business-context <file>    Operator-owned JSON tags and notes for investigation and work
+                               ordering; keeps technical severity unchanged
+  --repository <name>          Repository name the business context rules are matched against
+                               (default: the git remote of the scanned folder)
+  --context <file>             Give the scan this file (a threat model, notes on who may do what) as
+                               lower-priority background; repeat for several. It can steer what the
+                               scan weighs but cannot change how it works
+  --policy <file-or-folder>    Check the code against these Markdown policies (a file or a folder of
+                               .md files) and report pass or fail for each; repeat for several. Runs
+                               the policy-check skill
+  --org-policy <folder>        An organisation's policy folder: evaluated first, and wins when a
+                               --policy says otherwise or uses the same id; repeat for several
+  --scope <file>               Read the declared scope from the '## Scope' section of this Markdown
+                               file (usually SECURITY.md). Findings that match a vector it lists as
+                               out of scope are labelled, listed apart and left out of the counts,
+                               --fail-on and the exit code; none are removed. In CI pass the base
+                               branch's copy
+  --repo-scope                 Read SECURITY.md from the scanned folder as the declared scope. Off
+                               by default: a change under review can edit that file; in CI pass the
+                               base branch's copy with --scope instead
+  --scope-sarif <mode>         With --scope: label (default) writes the scope as result properties;
+                               suppress also marks out-of-scope results suppressed, which GitHub
+                               code scanning then dismisses (default: "label")
+  --repo-context               Also read .0/threat-model.md from the scanned folder as context. Off
+                               by default: a change under review can edit that file; in CI pass the
+                               base branch's copy with --context instead
+  --repo-ignores               Also let the pre-pass scanners read their configuration and ignore
+                               files from the scanned folder (.foxguard.yml, .semgrepignore,
+                               .gitleaks.toml, .gitleaksignore, .trivyignore, osv-scanner.toml,
+                               .checkov.yaml). Off by default: a change under review can use them to
+                               hide findings. Inline suppressions such as nosemgrep always apply
+  --evaluation-sheet <folder>  After the scan, write a folder for judging the findings by hand:
+                               review.csv with blank true positive, false positive, unsure and notes
+                               columns, the findings with verdict, fix explanation and
+                               business-context rank, the cost, time, model, scanner versions and
+                               coverage, the exact command and CLI version, and a README that says
+                               it is not an accuracy result. Refuses a non-empty folder
+  --overwrite-sheet            With --evaluation-sheet: replace the sheet files in a folder that
+                               already has files (other files are left alone)
+  --poc-image <image>          Run the proof of concept of each high or critical finding in this
+                               container image, network off, and label the finding script-matched,
+                               script-unmatched or static-only. Must be pinned by digest
+                               (name@sha256:...). Default: the ZERO_POC_IMAGE variable or `0security
+                               config set executedPocImage`; otherwise off. Needs Docker or podman
+  --skill <id>                 Skill that holds the scan method (default: "scan")
+  --model <model>              Model for the scan thread (default: gpt-6-luna; ZERO_MODEL or a
+                               pinned provider's default when set)
+  --provider <id>              Explicit model provider for this scan (use with --model)
+  --reasoning <effort>         Reasoning effort for a model that supports it
+  --batches <mode>             auto reviews a large folder in batches, one thread per group of entry
+                               points, and records what each batch covered; on always does; off
+                               keeps one thread (default: "auto")
+  --codeowners <file>          Group batches by an operator-provided CODEOWNERS file as well as
+                               build module; reads no ownership file automatically and never skips
+                               unowned code
+  --batch-size <n>             Entry points one batch reviews (1 to 50); a folder with more than
+                               this many is split under --batches auto (default: "8")
+  --retries <n>                Run a batch again when it fails for a reason that may pass: a dropped
+                               connection, a provider timeout, rate limit or server error (0 to 5; 0
+                               turns it off). A thread that is not a batch is asked once to
+                               continue. The cost of every attempt counts against --budget (default:
+                               "2")
+  --coverage-rounds <n>        After a thread ends, send it a follow-up that names the source files
+                               it never opened, up to this many times (0 to 5; 0 turns it off). Each
+                               round counts against --budget (default: "1")
+  --batch-timeout <seconds>    Longest one batch may run before it is cancelled and left pending
+                               (the scan goes on with the next batch); --timeout still limits the
+                               whole scan (default: "900")
+  --concurrency <n>            Batches that run at the same time (1 to 8; ZERO_SCAN_MAX_CONCURRENCY
+                               allows up to 16). With --target-url: Nuclei templates that run at
+                               once (1 to 25, default 5) (default: "1")
+  --resume <scan>              Continue the units an earlier batched scan of this folder did not
+                               reach (a scan id from its report, or latest); refuses when the git
+                               HEAD changed unless --force
+  --force                      With --resume: continue even though the folder's git HEAD changed
+  --coverage [scan]            Print the coverage ledger of a batched scan of this folder (the
+                               latest, or the id given) and exit; --format json for JSON
+  --allow-partial              Exit by the findings alone (0, or 1 with --fail-on) when the scan
+                               stops before it reviews everything; the report still says it is
+                               partial
+  --plan                       List the entry points, the batches and a rough cost range for the
+                               folder, then exit; calls no model and writes nothing
+  --tiers <file>               An operator's tier map (YAML or JSON) that sets the budget, batches
+                               and skill for this repository, or skips it. Default:
+                               scan-tiers.yaml|yml|json in the 0 state folder. Never read from the
+                               scanned folder on its own; in CI read it from the base branch
+  --fail-on-skip               Exit 1 when the tier map skips this scan (default: exit 0, with the
+                               skip stated in the report)
+  --known <sarif>              SARIF from other tools: the scan is told what is already known and
+                               looks for what they missed; findings are labelled new or
+                               already-known (confirmedIndependently when the scan analysed it
+                               itself). Repeat for several
+  --only-new                   With --known: leave findings that match a known item out of the
+                               report
+  --timeout <seconds>          Maximum seconds for the whole scan; what it reviewed so far is
+                               reported as partial (default: "3600")
+  --engine-url <url>           Attach directly to a running trusted engine
+  --engine-token-env <name>    Environment variable holding the attached engine token
+  --computer <id>              Use a registered remote computer
+  --computers-config <path>    Operator computer connection registry JSON file
+  --db-path <path>             Control database of the local engine to attach to
+  -h, --help                   display help for command
 
 ### 0security sentinels
 Usage: 0security sentinels [options] [command]

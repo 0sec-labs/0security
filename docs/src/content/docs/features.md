@@ -49,7 +49,7 @@ description: Every command family in 0security with one line each and a link to 
 - Web console: run `0security` for Threads, Findings, Sentinels, Skills, Extensions, Computers and Settings in a browser on your machine. See [Threads](/threads/).
 - Computers: run threads on a VM or an SSH host. See [Computers](/computers/).
 - Server mode: a team workspace in Docker, Helm or Terraform, with OIDC sign-in. See [Server mode and Docker](/server-mode/) and [Self-hosting](/self-hosting/).
-- No-egress and air-gapped use: `ZERO_ENTERPRISE=1` blocks every automatic outbound call, including telemetry and crash reports, except your model endpoint and the destinations you name. See [Data flow](/data-flow/).
+- No-egress and air-gapped use: `ZERO_NO_EGRESS=1` blocks every automatic outbound call, including telemetry and crash reports, except your model endpoint and the destinations you name. See [Data flow](/data-flow/).
 - Configuration: `0security config` sets models, approvals, team and updates, and `config doctor` checks the setup. See [Configuration](/configuration/).
 
 ## Enterprise features

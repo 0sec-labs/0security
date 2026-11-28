@@ -31,7 +31,7 @@ Or let 0 run your own `mvn` or `gradle`:
 0security sbom generate . --resolve --allow-build-tools -o sbom.cdx.json
 ```
 
-`--resolve` runs the project's build scripts and downloads from the repositories the build names. It asks first, and `ZERO_ENTERPRISE` refuses it.
+`--resolve` runs the project's build scripts and downloads from the repositories the build names. It asks first, and `ZERO_NO_EGRESS` refuses it.
 
 ## Check for advisories and malicious packages
 
@@ -145,7 +145,7 @@ The GitHub Action has an `sbom` mode with an optional license preset. See [SBOM 
 | `findings evidence --check-advisories` | `api.osv.dev` | Package URLs. |
 | `sbom check --usage`, `sbom java-usage`, `sbom licenses` without `--resolve` | None | Nothing. |
 
-With `ZERO_ENTERPRISE=1`, the OSV and deps.dev lookups and `--resolve` are refused. `--resolve-from` still works. See [Data flow](/data-flow/) for every destination.
+With `ZERO_NO_EGRESS=1`, the OSV and deps.dev lookups and `--resolve` are refused. `--resolve-from` still works. See [Data flow](/data-flow/) for every destination.
 
 ## What a dependency audit does not do
 

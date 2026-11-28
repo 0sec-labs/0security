@@ -711,13 +711,12 @@ impl<'a> CookieUsage<'a> {
                     }
                 }
             }
-            "assignment_expression" => {
-                // `this.cookie = c` hands the cookie to other code.
+            // `this.cookie = c` hands the cookie to other code.
+            "assignment_expression"
                 if n.child_by_field_name("right")
-                    .is_some_and(|r| r.kind() == "identifier" && text(r, src) == var)
-                {
-                    u.escapes = true;
-                }
+                    .is_some_and(|r| r.kind() == "identifier" && text(r, src) == var) =>
+            {
+                u.escapes = true;
             }
             _ => {}
         });

@@ -74,6 +74,8 @@ spec:
               value: {{ . | quote }}
             {{- end }}
             {{- if .Values.enterprise }}
+            - name: ZERO_NO_EGRESS
+              value: "1"
             - name: ZERO_ENTERPRISE
               value: "1"
             - name: DO_NOT_TRACK

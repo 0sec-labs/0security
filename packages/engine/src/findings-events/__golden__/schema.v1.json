@@ -1,0 +1,124 @@
+{
+  "$id": "urn:0:findings-event:v1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "schema": {
+      "type": "string",
+      "const": "0.findings-event"
+    },
+    "version": {
+      "type": "number",
+      "const": 1
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "type": {
+      "type": "string",
+      "enum": [
+        "finding.open",
+        "finding.fixed",
+        "finding.suppressed"
+      ]
+    },
+    "emittedAt": {
+      "type": "string"
+    },
+    "finding": {
+      "type": "object",
+      "properties": {
+        "fingerprint": {
+          "type": "string",
+          "minLength": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "title": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "severity": {
+          "type": "string",
+          "enum": [
+            "critical",
+            "high",
+            "medium",
+            "low",
+            "info"
+          ]
+        },
+        "category": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "open",
+            "fixed",
+            "suppressed"
+          ]
+        },
+        "location": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "startLine": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            "endLine": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            "target": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "ruleId": {
+          "type": "string"
+        },
+        "tool": {
+          "type": "string"
+        },
+        "cvssScore": {
+          "type": "number"
+        },
+        "cvssVector": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "fingerprint",
+        "id",
+        "title",
+        "description",
+        "severity",
+        "category",
+        "status",
+        "location"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "schema",
+    "version",
+    "id",
+    "type",
+    "emittedAt",
+    "finding"
+  ],
+  "additionalProperties": false
+}

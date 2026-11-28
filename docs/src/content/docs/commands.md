@@ -294,7 +294,7 @@ To test a running app with Nuclei, pass the target and say what you may test. 0 
 0security scan --scanner nuclei --target-url http://127.0.0.1:8080 --scope-file scope.txt
 ```
 
-`scope.txt` lists one host or `host:port` per line. Or type the host with `--acknowledge-host`. A public host needs `--acknowledge-host` with the exact host, and refuses to run without it. Link-local and cloud metadata addresses are always refused. With `ZERO_ENTERPRISE` set, only loopback targets run.
+`scope.txt` lists one host or `host:port` per line. Or type the host with `--acknowledge-host`. A public host needs `--acknowledge-host` with the exact host, and refuses to run without it. Link-local and cloud metadata addresses are always refused. With `ZERO_NO_EGRESS` set, only loopback targets run.
 
 When you give a name, 0 resolves it once, checks every address, and starts Nuclei on that address with the name in the Host header. Findings then show the address.
 
@@ -1240,7 +1240,7 @@ Local and private addresses need no flag. That covers localhost, 10.x, 172.16 to
 
 Link-local and cloud metadata addresses (169.254.x.x, fe80::, fd00:ec2::254) are always refused, even with the flag. Probe resolves the name once, checks every address, and connects to the one it checked. A name that resolves to a private address is treated as private. A name with any public address needs the flag. A redirect to another origin stops the run. Probe sends at most 200 requests at least 200 ms apart to a public host.
 
-The report records the host, the addresses it resolved to and the `--i-own-this` value. The `--format json` report has them in `probeScope`, and each finding carries them in its evidence. `ZERO_ENTERPRISE` does not change this, because you name the target.
+The report records the host, the addresses it resolved to and the `--i-own-this` value. The `--format json` report has them in `probeScope`, and each finding carries them in its evidence. `ZERO_NO_EGRESS` does not change this, because you name the target.
 
 Requests are 300 ms apart and capped at 100 by default. Findings go into the usual reports (`--format md|json|sarif|html|pdf`). With `--save` they also appear in `0security findings list`.
 
@@ -1434,7 +1434,7 @@ The manifest is JSON: `{ "tools": [{ "name": "send_email", "privilege": "network
 
 Without a URL the command uses the open catalog: scenarios chosen by your tools and sources and mixed across difficulty levels, each with its own marker-based success condition. Filter them with `--generator`, `--area` and `--difficulty`, and see what exists with [redteam list](#redteam-list). With `--url` or `ZERO_BRAIN_URL` it asks a hosted generation service instead, with a token in `ZERO_BRAIN_TOKEN`. The output says which one supplied the scenarios. The payloads carry a fresh canary; use the same canary with `redteam honeypot` and `redteam judge`.
 
-Only the shape of your agent is sent: tool names, a coarse privilege and gate for each, and kinds of input. Never source code, paths, prompts, secrets or findings; the request schema rejects every other field. `--dry-run` prints the exact request and sends nothing. `--offline`, `ZERO_OFFLINE` and `ZERO_ENTERPRISE` never contact a service and use the starter set, with a note. Scenarios returned by a service are checked against a strict schema before use, and an empty or invalid reply falls back to the starter set. Run scenarios from a service only against the honeypot or a sandbox, since their text is not yours.
+Only the shape of your agent is sent: tool names, a coarse privilege and gate for each, and kinds of input. Never source code, paths, prompts, secrets or findings; the request schema rejects every other field. `--dry-run` prints the exact request and sends nothing. `--offline`, `ZERO_OFFLINE` and `ZERO_NO_EGRESS` never contact a service and use the starter set, with a note. Scenarios returned by a service are checked against a strict schema before use, and an empty or invalid reply falls back to the starter set. Run scenarios from a service only against the honeypot or a sandbox, since their text is not yours.
 
 | Option | Registered default | Description |
 | --- | --- | --- |
@@ -1653,7 +1653,7 @@ With a `pom.xml`, 0 runs `mvn dependency:tree`. With `build.gradle` or `build.gr
 
 This runs the project's build, so it is off by default. The build tool evaluates the project's build files, which can run arbitrary code, and it downloads from the repositories the project names. 0 prints a warning, then asks for a yes at a terminal. Without a terminal, or in CI, pass `--allow-build-tools` to confirm. Run it only on a project you trust.
 
-0 starts `mvn` or `gradle` from your `PATH`, without a shell, with a 10 minute limit and a 16 MB output limit. It never runs `mvnw` or `gradlew` from the project. The tool gets your `PATH`, `HOME`, `JAVA_HOME`, `MAVEN_*`, `GRADLE_*` and proxy variables, and no other variable, so your API keys stay out of the build. `--resolve-offline` adds `-o` to Maven and `--offline` to Gradle, so only cached artifacts resolve. `ZERO_ENTERPRISE` refuses `--resolve`.
+0 starts `mvn` or `gradle` from your `PATH`, without a shell, with a 10 minute limit and a 16 MB output limit. It never runs `mvnw` or `gradlew` from the project. The tool gets your `PATH`, `HOME`, `JAVA_HOME`, `MAVEN_*`, `GRADLE_*` and proxy variables, and no other variable, so your API keys stay out of the build. `--resolve-offline` adds `-o` to Maven and `--offline` to Gradle, so only cached artifacts resolve. `ZERO_NO_EGRESS` refuses `--resolve`.
 
 If a tool is missing or the build fails, 0 exits with 2 and prints the tool's error lines. Packages only on the Gradle test classpath are marked `excluded`, like Maven test and provided scopes. If a project has no test classpath, 0 warns and keeps the runtime packages.
 
@@ -1671,7 +1671,7 @@ Your own `~/.m2/settings.xml` and Gradle configuration apply by default. To use 
 
 ##### Read a report you already ran
 
-If you cannot run a build tool here, run it elsewhere and give 0 the output. Nothing runs, nothing is downloaded, and `ZERO_ENTERPRISE` allows it.
+If you cannot run a build tool here, run it elsewhere and give 0 the output. Nothing runs, nothing is downloaded, and `ZERO_NO_EGRESS` allows it.
 
 ```bash
 mvn dependency:tree -DoutputType=text -DoutputFile=tree.txt
@@ -1712,7 +1712,7 @@ Hosted model ids passed to provider SDKs are listed with the provider. MCP serve
 
 These fields are not filled: inputs and outputs, quantitative analysis, considerations, data governance and classification, and any provenance or signature check. The result is not a complete AI inventory and does not show compliance with any regulation.
 
-The scan reads files as text and downloads nothing. It never follows a symlink, opens a device or FIFO, loads a model or runs code. It stops at 8000 files or 4000 folders and says so in a `0:ai-note` metadata property. A reference the patterns do not recognise is missed. It works with `ZERO_ENTERPRISE` set.
+The scan reads files as text and downloads nothing. It never follows a symlink, opens a device or FIFO, loads a model or runs code. It stops at 8000 files or 4000 folders and says so in a `0:ai-note` metadata property. A reference the patterns do not recognise is missed. It works with `ZERO_NO_EGRESS` set.
 
 The builtin generator does not read CocoaPods, SwiftPM, C and C++ package managers, operating-system packages or compiled binaries. Use `--generator` for those, and `--generator` with `--image` for container images.
 
@@ -1795,7 +1795,7 @@ Each finding states the values it rests on, such as age, releases, maintainers, 
 
 Private and local packages are skipped and listed as skipped: private or local. That covers scoped npm names outside a short list of well-known public scopes, workspace members, packages the lockfile resolves from another registry or from a path (npm, pnpm, Yarn, Poetry and Pipfile locks, and any `requirements.txt` that sets an index other than pypi.org), and anything you name with `--private` (a name or `@scope/*`, repeatable). Name your own packages so they are not looked up.
 
-Only package names go out, to `https://registry.npmjs.org`, `https://api.npmjs.org` and `https://pypi.org`. It checks at most 200 packages, four at a time, with a 10 second timeout and an 8 MB answer limit. A lookup that fails or is too large is listed as not checked. Under `ZERO_ENTERPRISE` or `ZERO_OFFLINE` nothing is looked up, and the report says `not checked`, never a clean result. Without `--fail-on` registry findings never change the exit code. With it, a finding at or above that severity exits 1. SARIF output includes registry findings. Cargo and Go are not covered.
+Only package names go out, to `https://registry.npmjs.org`, `https://api.npmjs.org` and `https://pypi.org`. It checks at most 200 packages, four at a time, with a 10 second timeout and an 8 MB answer limit. A lookup that fails or is too large is listed as not checked. Under `ZERO_NO_EGRESS` or `ZERO_OFFLINE` nothing is looked up, and the report says `not checked`, never a clean result. Without `--fail-on` registry findings never change the exit code. With it, a finding at or above that severity exits 1. SARIF output includes registry findings. Cargo and Go are not covered.
 
 The network use is the lookup at `https://api.osv.dev`: package URLs go out and nothing else does.
 
@@ -1945,7 +1945,7 @@ Check the rules, MCP and settings files AI coding tools read in a repository for
 0security sbom agent-config .
 ```
 
-This reads `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `.cursor/`, `.claude/`, `.github/` instructions, prompts and agents, `.gemini/`, `.codex/`, `.windsurf/`, `.continue/`, `.clinerules`, `.vscode/mcp.json`, `.mcp.json`, `opencode.json` and `SKILL.md` files as text. It runs nothing, calls no model and makes no network request. It works with `ZERO_ENTERPRISE` set. A file over 1 MB is skipped and listed. A symbolic link is never followed and is reported as a finding. A hard-linked file is not read.
+This reads `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `.cursor/`, `.claude/`, `.github/` instructions, prompts and agents, `.gemini/`, `.codex/`, `.windsurf/`, `.continue/`, `.clinerules`, `.vscode/mcp.json`, `.mcp.json`, `opencode.json` and `SKILL.md` files as text. It runs nothing, calls no model and makes no network request. It works with `ZERO_NO_EGRESS` set. A file over 1 MB is skipped and listed. A symbolic link is never followed and is reported as a finding. A hard-linked file is not read.
 
 Each finding has a rule id, a severity, the file and line, a short snippet and a fix hint. Secrets are shown as their first characters and length, never in full. The wording rule is a heuristic and is marked as one. See [Check agent files in a repository](/extensions/#check-agent-files-in-a-repository) for the rules.
 

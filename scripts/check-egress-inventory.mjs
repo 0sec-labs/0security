@@ -112,7 +112,7 @@ export function checkInventory(root = ROOT) {
   const found = scanOutbound(root);
 
   for (const [file, hits] of found) {
-    if (!registered.has(file)) problems.push(`${file} makes an outbound call (${hits.join(", ")}) but is not in ${INVENTORY}. Add it with its destination, trigger, payload and how ZERO_ENTERPRISE treats it.`);
+    if (!registered.has(file)) problems.push(`${file} makes an outbound call (${hits.join(", ")}) but is not in ${INVENTORY}. Add it with its destination, trigger, payload and how ZERO_NO_EGRESS (alias ZERO_ENTERPRISE) treats it.`);
   }
   for (const file of registered) {
     if (!existsSync(join(root, file))) problems.push(`${INVENTORY} lists ${file}, which does not exist.`);

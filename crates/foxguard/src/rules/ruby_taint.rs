@@ -906,6 +906,8 @@ fn match_source(node: Node<'_>, source: &str, spec: &TaintSpec) -> Option<String
             | NodeMatcher::TypedName { .. }
             // Java-only typed-assignment sink; no-op in source position here.
             | NodeMatcher::TypedAssignTarget { .. }
+            | NodeMatcher::TypedReceiverCall { .. }
+            | NodeMatcher::TypedConstructorSink { .. }
             // Ellipsis-string source `"..."`; no Ruby registry rule uses this
             // source shape, so the Ruby engine does not seed string literals.
             | NodeMatcher::LiteralString { .. }

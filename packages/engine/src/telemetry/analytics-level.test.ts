@@ -40,8 +40,8 @@ describe("resolveAnalyticsLevel — parsing", () => {
 });
 
 describe("the opt-outs", () => {
-  it("are DO_NOT_TRACK and ZERO_ENTERPRISE and nothing else", () => {
-    expect([...ANALYTICS_OPT_OUT_ENV]).toEqual(["DO_NOT_TRACK", "ZERO_ENTERPRISE"]);
+  it("are DO_NOT_TRACK, ZERO_NO_EGRESS and its alias ZERO_ENTERPRISE, and nothing else", () => {
+    expect([...ANALYTICS_OPT_OUT_ENV]).toEqual(["DO_NOT_TRACK", "ZERO_NO_EGRESS", "ZERO_ENTERPRISE"]);
   });
 
   it("DO_NOT_TRACK forces off", () => {

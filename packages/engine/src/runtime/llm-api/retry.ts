@@ -579,6 +579,45 @@ export function retryAfterMsFromHeaders(headers: Headers | undefined): number | 
   return parsed != null ? Math.min(parsed, RETRY_AFTER_CAP_MS) : undefined;
 }
 
+// ── Shared rate-limit cooldown ────────────────────────────────────────────
+//
+// Every session of one engine process shares one provider quota. A 429 means the quota is spent for all of them, not for
+// the one request that saw it, so each request that gets one records how long the provider asked to wait, and every
+// request (of any session) holds back its next attempt until that time has passed. Without this, N concurrent batches each
+// keep sending into a limit that only one of them has noticed.
+
+const cooldowns = new Map<string, number>();
+/** Largest random extra wait when a cooldown ends, so the waiting requests do not all resume in the same millisecond. */
+export const COOLDOWN_RELEASE_JITTER_MS = 750;
+
+/** Record that `key` (a provider) is rate limited for the next `delayMs`. A longer cooldown is never shortened. */
+export function noteRateLimitCooldown(key: string, delayMs: number, now: number = Date.now()): void {
+  if (!(delayMs > 0)) return;
+  const until = now + Math.min(delayMs, RETRY_AFTER_CAP_MS);
+  if (until > (cooldowns.get(key) ?? 0)) cooldowns.set(key, until);
+}
+
+/** Milliseconds left of the cooldown of `key`, 0 when none is active. */
+export function rateLimitCooldownRemainingMs(key: string, now: number = Date.now()): number {
+  const until = cooldowns.get(key);
+  if (until === undefined) return 0;
+  if (until <= now) { cooldowns.delete(key); return 0; }
+  return until - now;
+}
+
+/** Wait until the cooldown of `key` is over (it may be extended while waiting). Rejects with an AbortError when `signal` fires. */
+export async function waitForRateLimitCooldown(key: string, signal: AbortSignal, random: () => number = Math.random): Promise<void> {
+  let waited = false;
+  for (let remaining = rateLimitCooldownRemainingMs(key); remaining > 0; remaining = rateLimitCooldownRemainingMs(key)) {
+    waited = true;
+    await sleepWithAbort(remaining, signal);
+  }
+  if (waited) await sleepWithAbort(Math.round(random() * COOLDOWN_RELEASE_JITTER_MS), signal);
+}
+
+/** Forget every cooldown. Tests only. */
+export function resetRateLimitCooldowns(): void { cooldowns.clear(); }
+
 /** Sleep that rejects with an AbortError if `signal` fires mid-wait (respects the request budget). */
 export function sleepWithAbort(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {

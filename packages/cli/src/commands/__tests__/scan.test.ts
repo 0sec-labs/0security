@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -611,5 +611,71 @@ describe("a console that cannot start", () => {
     expect(stop).toHaveBeenCalled();
     expect(process.exitCode).toBe(1);
     process.exitCode = 0;
+  });
+});
+
+describe("scan --evaluation-sheet", () => {
+  const withSheet = (f: ReturnType<typeof fakes>) => { f.deps.gitHead = vi.fn(async () => "c0ffee"); f.deps.scannerVersion = vi.fn(async id => `${id} 1.2.3`); f.deps.commandLine = () => "0security scan repo --evaluation-sheet sheet"; return f; };
+  it("writes the folder from the stored findings with the run's cost, time, model, scanner versions, commit and command", async () => {
+    const f = withSheet(fakes(finishedSnapshot()));
+    f.deps.prePass = vi.fn(async () => ({ tools: ["foxguard"], leads: [], total: 0 }));
+    const out = join(folder(), "sheet");
+    await runScan(folder(), options({ model: "m1", evaluationSheet: out }), f.deps);
+    expect(process.exitCode).toBeUndefined();
+    const run = JSON.parse(readFileSync(join(out, "run.json"), "utf8"));
+    expect(run).toMatchObject({ source: "scan", model: "m1", costUsd: 0.12, budgetUsd: 5, status: "complete", scanners: [{ id: "foxguard", version: "foxguard 1.2.3" }], repository: { commit: "c0ffee" }, command: "0security scan repo --evaluation-sheet sheet" });
+    expect(typeof run.durationMs).toBe("number");
+    const findings = JSON.parse(readFileSync(join(out, "findings.json"), "utf8")).findings;
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({ severity: "critical", location: { path: "app.js", startLine: 1 }, verdict: "not verified" });
+    expect(readFileSync(join(out, "README.md"), "utf8")).toContain("not an accuracy result");
+    expect(f.err.join("\n")).toContain("Wrote the evaluation sheet (1 finding");
+    // The report on standard output is unchanged.
+    expect(JSON.parse(String(f.out[0])).findings).toHaveLength(1);
+  });
+  it("refuses a non-empty folder before the scan starts, so nothing is spent", async () => {
+    const f = withSheet(fakes(finishedSnapshot()));
+    const out = folder();
+    writeFileSync(join(out, "mine.txt"), "keep");
+    await runScan(folder(), options({ evaluationSheet: out }), f.deps);
+    expect(process.exitCode).toBe(2);
+    expect(f.err.join("\n")).toContain("not empty");
+    expect(f.requests).toHaveLength(0);
+  });
+  it("replaces the sheet files of a non-empty folder only with --overwrite-sheet", async () => {
+    const f = withSheet(fakes(finishedSnapshot()));
+    const out = folder();
+    writeFileSync(join(out, "mine.txt"), "keep");
+    await runScan(folder(), options({ evaluationSheet: out, overwriteSheet: true }), f.deps);
+    expect(process.exitCode).toBeUndefined();
+    expect(readFileSync(join(out, "mine.txt"), "utf8")).toBe("keep");
+    expect(existsSync(join(out, "review.csv"))).toBe(true);
+  });
+  it("refuses a sheet folder inside the scanned folder, and the overwrite flag without a sheet", async () => {
+    const f = withSheet(fakes(finishedSnapshot()));
+    const repo = folder();
+    mkdirSync(join(repo, "sheet"));
+    await runScan(repo, options({ evaluationSheet: join(repo, "sheet") }), f.deps);
+    expect(process.exitCode).toBe(2);
+    expect(f.err.join("\n")).toContain("outside the scanned folder");
+    process.exitCode = undefined;
+    const g = withSheet(fakes(finishedSnapshot()));
+    await runScan(folder(), options({ overwriteSheet: true }), g.deps);
+    expect(process.exitCode).toBe(2);
+    expect(g.err.join("\n")).toContain("--overwrite-sheet needs --evaluation-sheet");
+  });
+  it("writes a sheet for a scan with no findings, and says no model reviewed an empty diff", async () => {
+    const f = withSheet(fakes(finishedSnapshot(), []));
+    const out = join(folder(), "sheet");
+    await runScan(folder(), options({ evaluationSheet: out }), f.deps);
+    expect(JSON.parse(readFileSync(join(out, "findings.json"), "utf8")).count).toBe(0);
+    const g = withSheet(fakes(finishedSnapshot()));
+    g.deps.diffFiles = vi.fn(async () => []);
+    const empty = join(folder(), "sheet");
+    await runScan(folder(), options({ evaluationSheet: empty, diff: "origin/main" }), g.deps);
+    const run = JSON.parse(readFileSync(join(empty, "run.json"), "utf8"));
+    expect(run.model).toBeNull();
+    expect(run.coverage).toBe("Nothing was scanned.");
+    expect(g.requests).toHaveLength(0);
   });
 });

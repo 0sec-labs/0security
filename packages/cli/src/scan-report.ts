@@ -57,6 +57,8 @@ export interface ScanOutcome {
   shallowReview?: string;
   /** Set when the chosen skill kept a folder that would have been batched in one thread: batching and the batch coverage report were off. */
   unbatched?: string;
+  /** The pattern scanners that ran before the model (their ids), for the evaluation sheet. */
+  prepassTools?: readonly string[];
   /** Helper threads the scan thread (or its batch threads) started with spawn_agent. */
   children?: ScanChildren;
   /** Every pass's thread, first to last. */
