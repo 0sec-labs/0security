@@ -804,6 +804,8 @@ export BITBUCKET_WEBHOOK_SECRET=...   # at least 16 characters
 
 Put a TLS proxy in front of the listener and point the webhook at it. On Cloud, turn on **Pull request created** and **Pull request updated**. On Data Center, turn on **Opened** and **Source branch updated**. Set the same secret on the webhook. Bitbucket signs each delivery with it, and `watch` refuses a delivery that does not match. Polling still runs, so a missed delivery is caught on the next poll.
 
+The listener reads a body before it can check the signature, so it limits what anyone who reaches it can do: at most 32 open connections, a body of at most 1 MiB read within 10 seconds, headers within 10 seconds, and 30 requests a minute from one address (more get `429`). Behind a proxy, every request comes from the proxy's address and shares that limit.
+
 ### What a review does
 
 - Skips closed pull requests, drafts and pull requests from forks.
