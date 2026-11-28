@@ -22,7 +22,7 @@ import { runNucleiTarget, type NucleiTargetRun } from "../nuclei-target.js";
 import { checkRulesScanners, resolveRulePaths } from "../scan-rules.js";
 import { applyScope, markKnown, mergePasses, scanExitCode, scanJson, toScanReport, type ScanOutcome } from "../scan-report.js";
 import { followUpText, reviewDepth, reviewScopeFiles, shallowReviewWarning, toolCallText, unopenedFiles } from "../scan-review.js";
-import { coverageReport, DEFAULT_RETRIES, runBatches, type BatchOutcome, type RunBatchesResult } from "../scan-batches.js";
+import { BATCH_CONCURRENCY_CEILING, coverageReport, DEFAULT_MAX_BATCH_CONCURRENCY, DEFAULT_RETRIES, maxBatchConcurrency, runBatches, type BatchOutcome, type RunBatchesResult } from "../scan-batches.js";
 import { classifyFailure, type FailureCause, type ScanFailure } from "../scan-failure.js";
 import { coverageJson, coverageText, DEFAULT_BATCH_SIZE, keepsOneThread, moduleShardOf, ownersOfFile, planBatchedScan, unbatchedNote, type BatchedSetup } from "../scan-batched.js";
 import { childrenOf, childTotals, summarizeChildren } from "../scan-children.js";
@@ -88,7 +88,7 @@ const ROUND_MIN_SECONDS = 20;
 const POLL_WINDOW = 20;
 /** Consecutive failed status requests before the scan gives up on the console (about a minute with the backoff). */
 const MAX_FAILED_POLLS = 12;
-/** Passes that run at the same time: more only crowds the model provider and the console. */
+/** Passes (`--passes`) that run at the same time: each pass reads all of the code, so more only repeats the load. Batches have their own limit, see `maxBatchConcurrency`. */
 const MAX_PARALLEL_PASSES = 3;
 const MAX_PASSES = 5;
 /** What `--policy` and `--org-policy` run. */
@@ -343,7 +343,8 @@ function validate(target: string | undefined, options: ScanOptions): void {
   const batchSize = Number(options.batchSize ?? DEFAULT_BATCH_SIZE);
   if (!Number.isInteger(batchSize) || batchSize < 1 || batchSize > MAX_BATCH_SIZE) throw new UsageError(`--batch-size must be a whole number from 1 to ${MAX_BATCH_SIZE}.`);
   const concurrency = Number(options.concurrency ?? 1);
-  if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > MAX_PARALLEL_PASSES) throw new UsageError(`--concurrency must be a whole number from 1 to ${MAX_PARALLEL_PASSES}.`);
+  const concurrencyLimit = maxBatchConcurrency();
+  if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > concurrencyLimit) throw new UsageError(`--concurrency must be a whole number from 1 to ${concurrencyLimit}${concurrencyLimit < BATCH_CONCURRENCY_CEILING ? `; set ZERO_SCAN_MAX_CONCURRENCY (up to ${BATCH_CONCURRENCY_CEILING}) to allow more` : ""}.`);
   if ((options.batches === "on" || options.resume !== undefined) && passes > 1) throw new UsageError("--passes cannot be combined with batches or --resume; run the scan again to get another pass.");
   if (options.onlyNew && !options.known?.length) throw new UsageError("--only-new needs --known <sarif>.");
   if (options.known?.length && (options.policy?.length || options.orgPolicy?.length)) throw new UsageError("--known is for scans; it cannot be combined with --policy or --org-policy.");
@@ -1117,7 +1118,7 @@ export function registerScanCommand(program: Command, deps: ScanDeps = defaultSc
     .option("--retries <n>", `Run a batch again when it fails for a reason that may pass: a dropped connection, a provider timeout, rate limit or server error (0 to ${MAX_RETRIES}; 0 turns it off). A thread that is not a batch is asked once to continue. The cost of every attempt counts against --budget`, String(DEFAULT_RETRIES))
     .option("--coverage-rounds <n>", `After a thread ends, send it a follow-up that names the source files it never opened, up to this many times (0 to ${MAX_COVERAGE_ROUNDS}; 0 turns it off). Each round counts against --budget`, String(DEFAULT_COVERAGE_ROUNDS))
     .option("--batch-timeout <seconds>", `Longest one batch may run before it is cancelled and left pending (the scan goes on with the next batch); --timeout still limits the whole scan`, String(DEFAULT_BATCH_TIMEOUT_SECONDS))
-    .option("--concurrency <n>", `Batches that run at the same time (1 to ${MAX_PARALLEL_PASSES}). With --target-url: Nuclei templates that run at once (1 to 25, default 5)`, "1")
+    .option("--concurrency <n>", `Batches that run at the same time (1 to ${DEFAULT_MAX_BATCH_CONCURRENCY}; ZERO_SCAN_MAX_CONCURRENCY allows up to ${BATCH_CONCURRENCY_CEILING}). With --target-url: Nuclei templates that run at once (1 to 25, default 5)`, "1")
     .option("--resume <scan>", "Continue the units an earlier batched scan of this folder did not reach (a scan id from its report, or latest); refuses when the git HEAD changed unless --force")
     .option("--force", "With --resume: continue even though the folder's git HEAD changed")
     .option("--coverage [scan]", "Print the coverage ledger of a batched scan of this folder (the latest, or the id given) and exit; --format json for JSON")
