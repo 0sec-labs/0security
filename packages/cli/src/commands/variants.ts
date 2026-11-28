@@ -11,8 +11,8 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { Option, type Command } from "commander";
 import {
-  linesWithin, normalizeAttackCategory, parseRescan, parseVariantReport, variantHuntPrompt, variantRescanPrompt,
-  type Finding, type ParsedVariant, type RescanState, type RootCause,
+  linesWithin, normalizeAttackCategory, parseRescan, parseRootCauseReply, parseVariantReport, variantHuntPrompt, variantRescanPrompt, variantRootCausePrompt,
+  type Finding, type ParsedVariant, type PromptCandidate, type RescanState, type RootCause,
 } from "@0/engine/shared";
 import { listOsecRunDatabasePaths, osecDB, resolveOsecDbPath } from "@0/engine/storage";
 import { consoleTransportOptions, type ConsoleClient, type ConsoleTransportOptions } from "../console-client.js";
@@ -43,6 +43,10 @@ export class VariantBudget {
   get stoppedReason(): string { return this.known ? "overall budget exhausted" : "cost receipt unavailable; further paid work stopped"; }
 }
 const DEFAULT_TIMEOUT_SECONDS = 600;
+/** Candidates one thread judges. */
+export const CANDIDATE_BATCH = 20;
+/** Share of a hunt's spend cap given to the root-cause thread when the seed has none. */
+const DERIVE_SHARE = 0.2;
 /** Findings with this status are the ones a rescan leaves alone (set by a person or a verified fix, never by a rescan). */
 const DONE_STATUS = "fixed";
 
@@ -67,7 +71,21 @@ export interface VariantStore {
   markFixedPendingMerge(parent: VariantParent, variantId: string): void;
 }
 
+/** The tree-wide candidate list for a seed, computed in code. Tests pass a stub; the default uses the code index. */
+export interface CandidateSource {
+  candidates: PromptCandidate[]; total: number; omitted: number; engine: string; strategy: string; notes: string[];
+}
+export type CandidateFinder = (folder: string, parent: VariantParent, rootCause: RootCause) => Promise<CandidateSource>;
+
+export const defaultCandidateFinder: CandidateFinder = async (folder, parent, rootCause) => {
+  const { variantCandidates } = await import("@0/engine/code-index/variant-candidates");
+  const list = await variantCandidates(folder, { ...(parent.path ? { path: parent.path } : {}), ...(parent.startLine ? { startLine: parent.startLine } : {}), ...(parent.endLine ? { endLine: parent.endLine } : {}) }, rootCause);
+  return { candidates: list.candidates.map(c => ({ id: c.id, file: c.file, line: c.line, ...(c.symbol ? { symbol: c.symbol } : {}), entries: c.entries, entriesOmitted: c.entriesOmitted, why: c.why, ...(c.guardHint ? { guardHint: c.guardHint } : {}) })), total: list.total, omitted: list.omitted, engine: list.engine, strategy: list.strategy, notes: list.notes };
+};
+
 export interface VariantDeps extends Pick<ScanDeps, "open" | "err" | "sleep" | "startConsole"> {
+  /** Candidate finder; the default reads the code index. */
+  candidates?: CandidateFinder;
   out(text: string): void;
   store: VariantStore;
   loadParent(id: string, dbPath: string | undefined): VariantParent;
@@ -80,7 +98,14 @@ export interface VariantDeps extends Pick<ScanDeps, "open" | "err" | "sleep" | "
 export interface VariantRunOptions { model?: string; timeout: string; budget: string }
 
 export interface HuntResult {
-  threadId?: string; costUsd?: number; tokens?: number; created: string[]; skipped: number; rootCause?: RootCause; rootCauseSource?: "stored" | "derived"; error?: string;
+  threadId?: string; costUsd?: number; tokens?: number; created: string[]; skipped: number; /** What the code-computed checklist held and how the thread disposed of it. */ checklist?: ChecklistReport; rootCause?: RootCause; rootCauseSource?: "stored" | "derived"; error?: string;
+}
+export interface ChecklistReport {
+  engine: string; strategy: string; total: number; listed: number; omitted: number;
+  /** Threads the checklist was split over. */ batches?: number;
+  verdicts: { variant: number; guarded: number; not_reachable: number; unsure: number }; undisposed: string[];
+  /** Candidate ids of the variants that were stored. */
+  stored: string[]; notes: string[];
 }
 export interface RescanItem { id: string; title: string; state: RescanState | "unchecked"; reasoning?: string }
 export interface RescanResult { threadId?: string; costUsd?: number; tokens?: number; items: RescanItem[]; /** Variants moved from fixed-pending-merge to fixed because the fix pull request was merged. */ settled?: number; error?: string }
@@ -107,30 +132,86 @@ const overlaps = (a: { path?: string; startLine?: number; endLine?: number }, b:
  * Hunt for the same bug elsewhere, seeded from the parent's root cause. A parent with no root cause gets the one the
  * thread derives. A variant that sits on the parent's own lines, or on one already recorded, is not stored again.
  */
-export async function huntVariants(client: ConsoleClient, deps: Pick<VariantDeps, "store" | "err" | "sleep">, folder: string, parent: VariantParent, options: VariantRunOptions, extra: { fixCommit?: string } = {}): Promise<HuntResult> {
+export async function huntVariants(client: ConsoleClient, deps: Pick<VariantDeps, "store" | "err" | "sleep" | "candidates">, folder: string, parent: VariantParent, options: VariantRunOptions, extra: { fixCommit?: string } = {}): Promise<HuntResult> {
   const known = deps.store.variantsOf(parent);
-  const seedCause = parent.rootCause;
-  let thread: PromptThread;
+  let seedCause = parent.rootCause;
+  let tokens: number | undefined;
+  let costUsd: number | undefined;
+  const add = (t: PromptThread) => {
+    if (t.tokens !== undefined) tokens = (tokens ?? 0) + t.tokens;
+    if (t.costUsd !== undefined) costUsd = (costUsd ?? 0) + t.costUsd;
+  };
+  const totals = () => ({ ...(tokens !== undefined ? { tokens } : {}), ...(costUsd !== undefined ? { costUsd } : {}) });
+  const seed = { id: parent.id, title: parent.title, category: parent.category, description: parent.description, ...(parent.path ? { path: parent.path } : {}), ...(parent.startLine ? { startLine: parent.startLine } : {}), ...(parent.endLine ? { endLine: parent.endLine } : {}) };
+  const failure = (error: unknown): HuntResult => ({ ...totals(), created: [], skipped: 0, error: error instanceof Error ? error.message.split("\n")[0]! : String(error) });
   try {
-    thread = await runPromptThread(client, deps, folder, `Variants: ${parent.title}`, variantHuntPrompt(
-      { id: parent.id, title: parent.title, category: parent.category, description: parent.description, ...(parent.path ? { path: parent.path } : {}), ...(parent.startLine ? { startLine: parent.startLine } : {}), ...(parent.endLine ? { endLine: parent.endLine } : {}) },
-      { ...(seedCause ? { rootCause: seedCause } : {}), ...(extra.fixCommit ? { fixCommit: extra.fixCommit } : {}), known: known.map(v => ({ id: v.id, title: v.title, ...(v.path ? { path: v.path } : {}), ...(v.startLine ? { startLine: v.startLine } : {}) })) },
-    ), options);
-  } catch (error) {
-    return { created: [], skipped: 0, error: error instanceof Error ? error.message.split("\n")[0]! : String(error) };
+    // The candidate search needs a root cause. A seed without one gets a short thread that only reads the seed's site and states it.
+    if (!seedCause) {
+      // The whole hunt stays inside one allowance: a fifth of it for this thread, the rest is split over the batches below.
+      const derive = await runPromptThread(client, deps, folder, `Root cause: ${parent.title}`, variantRootCausePrompt(seed), { ...options, budget: String(Number(options.budget) * DERIVE_SHARE) });
+      add(derive);
+      seedCause = parseRootCauseReply(derive.reply);
+      if (seedCause) deps.store.saveRootCause(parent, seedCause);
+    }
+  } catch (error) { return failure(error); }
+  let source: CandidateSource | undefined;
+  if (seedCause) {
+    try { source = await (deps.candidates ?? defaultCandidateFinder)(folder, parent, seedCause); } catch (error) { deps.err(`Candidate search failed (${error instanceof Error ? error.message.split("\n")[0] : String(error)}); the thread will search on its own.`); }
+    if (source && !source.candidates.length) deps.err(`Candidate search found no sites${source.notes.length ? ` (${source.notes.join("; ")})` : ""}; the thread will search on its own.`);
   }
-  const base = { threadId: thread.id, ...(thread.tokens !== undefined ? { tokens: thread.tokens } : {}), ...(thread.costUsd !== undefined ? { costUsd: thread.costUsd } : {}) };
-  if (!thread.reply) return { ...base, created: [], skipped: 0, error: thread.error ?? "the thread returned no answer" };
-  const report = parseVariantReport(thread.reply);
-  const rootCause = seedCause ?? report.rootCause;
-  if (!seedCause && report.rootCause) deps.store.saveRootCause(parent, report.rootCause);
+  const items = source?.candidates ?? [];
+  const knownBlock = known.map(v => ({ id: v.id, title: v.title, ...(v.path ? { path: v.path } : {}), ...(v.startLine ? { startLine: v.startLine } : {}) }));
+  const promptOptions = { ...(seedCause ? { rootCause: seedCause } : {}), ...(extra.fixCommit ? { fixCommit: extra.fixCommit } : {}), known: knownBlock };
+  // A long checklist in one answer is where models drop items or the json block. Judge it in batches, one fresh thread each, in parallel.
+  const batches: PromptCandidate[][] = [];
+  for (let i = 0; i < items.length; i += CANDIDATE_BATCH) batches.push(items.slice(i, i + CANDIDATE_BATCH));
+  if (!batches.length) batches.push([]);
+  interface BatchResult { thread?: PromptThread; report?: ReturnType<typeof parseVariantReport>; error?: string }
+  const batchOptions: VariantRunOptions = { ...options, budget: String(Number(options.budget) * (parent.rootCause ? 1 : 1 - DERIVE_SHARE) / batches.length) };
+  const judge = async (batch: PromptCandidate[], index: number): Promise<BatchResult> => {
+    const candidates = batch.length && source ? { candidates: { items: batch, total: index === 0 ? source.total : batch.length, omitted: index === 0 ? source.omitted : 0 } } : {};
+    let result: BatchResult = {};
+    // One repeat for a batch whose answer holds no verdict at all.
+    for (let attempt = 0; attempt < (batch.length ? 2 : 1); attempt++) {
+      try {
+        const thread = await runPromptThread(client, deps, folder, `Variants${batches.length > 1 ? ` ${index + 1}/${batches.length}` : ""}: ${parent.title}`, variantHuntPrompt(seed, { ...promptOptions, ...candidates }), batchOptions);
+        add(thread);
+        result = { thread, ...(thread.reply ? { report: parseVariantReport(thread.reply, batch) } : { error: thread.error ?? "the thread returned no answer" }) };
+        if (!batch.length || result.report?.dispositions.length || result.report?.variants.length) break;
+      } catch (error) { result = { error: error instanceof Error ? error.message.split("\n")[0]! : String(error) }; }
+    }
+    return result;
+  };
+  const results = await Promise.all(batches.map((batch, i) => judge(batch, i)));
+  const first = results.find(r => r.thread)?.thread;
+  const base = { ...(first ? { threadId: first.id } : {}), ...totals() };
+  const answered = results.filter(r => r.report);
+  if (!answered.length) return { ...base, created: [], skipped: 0, error: results.find(r => r.error)?.error ?? "the thread returned no answer" };
+  const reports = answered.map(r => r.report!);
+  const rootCause = seedCause ?? reports.find(r => r.rootCause)?.rootCause;
+  if (!seedCause && rootCause) deps.store.saveRootCause(parent, rootCause);
   const created: string[] = [];
+  const stored: string[] = [];
+  const dispositions = reports.flatMap(r => r.dispositions);
   let skipped = 0;
-  for (const variant of report.variants) {
+  for (const variant of reports.flatMap(r => r.variants)) {
     if (overlaps(variant, parent) || known.some(k => overlaps(variant, k))) { skipped++; continue; }
-    created.push(deps.store.saveVariant(parent, variant, rootCause));
+    const id = deps.store.saveVariant(parent, variant, rootCause);
+    if (created.includes(id)) continue;
+    created.push(id);
+    if (variant.candidateId) stored.push(variant.candidateId);
   }
-  return { ...base, created, skipped, ...(rootCause ? { rootCause, rootCauseSource: seedCause ? "stored" as const : "derived" as const } : {}), ...(thread.error ? { error: thread.error } : {}) };
+  const problem = results.find(r => r.error)?.error ?? results.find(r => r.thread?.error)?.thread?.error;
+  const noVerdicts = items.length > 0 && !dispositions.length ? "the answer held no verdict for any checklist candidate" : undefined;
+  let checklist: ChecklistReport | undefined;
+  if (items.length && source) {
+    const verdicts = { variant: 0, guarded: 0, not_reachable: 0, unsure: 0 };
+    for (const d of dispositions) verdicts[d.verdict]++;
+    const done = new Set(dispositions.map(d => d.id));
+    checklist = { engine: source.engine, strategy: source.strategy, total: source.total, listed: items.length, omitted: source.omitted, batches: batches.length, verdicts, undisposed: items.filter(c => !done.has(c.id)).map(c => c.id), stored, notes: source.notes };
+  }
+  const error = problem ?? noVerdicts;
+  return { ...base, created, skipped, ...(checklist ? { checklist } : {}), ...(rootCause ? { rootCause, rootCauseSource: parent.rootCause ? "stored" as const : "derived" as const } : {}), ...(error ? { error } : {}) };
 }
 
 /**
@@ -178,9 +259,9 @@ export function variantFinding(parent: Pick<VariantParent, "id" | "category" | "
   const capped = severity !== variant.severity;
   return {
     id, templateId: "variant-hunting", title: variant.title,
-    description: `Unverified variant of ${parent.id}: ${parent.title}\n\nA search thread reported this site from the same root cause. Nobody has confirmed it${capped ? `, so its severity is capped at ${severity} (the thread said ${variant.severity})` : ""}. Run \`findings verify\` on it to confirm or reject it.\n\n${variant.description}${variant.suggestedFix ? `\n\nSuggested fix: ${variant.suggestedFix}` : ""}`,
+    description: `Unverified variant of ${parent.id}: ${parent.title}${variant.candidateId ? ` (hunt candidate ${variant.candidateId})` : ""}\n\nA search thread reported this site from the same root cause. Nobody has confirmed it${capped ? `, so its severity is capped at ${severity} (the thread said ${variant.severity})` : ""}. Run \`findings verify\` on it to confirm or reject it.\n\n${variant.description}${variant.suggestedFix ? `\n\nSuggested fix: ${variant.suggestedFix}` : ""}`,
     severity, confidence: VARIANT_CONFIDENCE, category: normalizeAttackCategory(parent.category).category, status: "discovered",
-    evidence: { request: site, response: variant.evidence, analysis: `Same root cause as ${parent.id}.` },
+    evidence: { request: site, response: variant.evidence, analysis: `Same root cause as ${parent.id}.${variant.candidateId ? ` Hunt candidate ${variant.candidateId}.` : ""}` },
     reviewAnnotation: { path: variant.path, startLine: variant.startLine, ...(variant.endLine ? { endLine: variant.endLine } : {}) },
     ...(rootCause ? { rootCause } : {}), variantOf: parent.id, tool: "variant-hunting", timestamp: now,
   };
@@ -308,6 +389,7 @@ export function renderVariantsReport(report: VariantsReport): string {
   const lines = [`Variants of ${shortFindingId(report.finding)} (${report.mode}) in ${report.folder}`];
   if (report.hunt) {
     const h = report.hunt;
+    if (h.checklist) lines.push(`Checklist (${h.checklist.engine}, ${h.checklist.strategy}): ${h.checklist.listed} listed of ${h.checklist.total}; variant ${h.checklist.verdicts.variant}, guarded ${h.checklist.verdicts.guarded}, not reachable ${h.checklist.verdicts.not_reachable}, unsure ${h.checklist.verdicts.unsure}${h.checklist.undisposed.length ? `, ${h.checklist.undisposed.length} not answered` : ""}.`);
     if (h.error && !h.created.length) lines.push(`Hunt failed: ${h.error}`);
     else lines.push(`Recorded ${h.created.length} variant${h.created.length === 1 ? "" : "s"}${h.skipped ? `, ${h.skipped} already known` : ""}${h.rootCause ? `; root cause ${h.rootCauseSource === "stored" ? "from the finding" : "derived and stored on it"}: ${h.rootCause.bugClass}` : "; no root cause was recorded"}.`);
     for (const id of h.created) lines.push(`  ${shortFindingId(id)}`);

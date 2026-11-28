@@ -27,6 +27,17 @@ content: |
 
   Stay inside the folder. Do not edit any file and do not run the code against anything outside the folder. Put a proposed fix in `suggested_replacement` on the finding.
 
+  ### 0. A candidate checklist replaces steps 1 to 3
+
+  When the task contains numbered `<candidate>` blocks, a program has already searched the whole tree (every handler, job, resolver and helper that reaches the same sink without the guard, the sibling APIs and the sibling operations, grouped by shared helper). Do not redo that search and do not stop at the first few sites. Judge every candidate:
+
+  - Open the code at its `file` and `line`. Follow the call chain from each `reachedFrom` entry to the sink. A `guardHint` says only that a related word appears nearby; check whether it really restricts this request to the caller's own records.
+  - Give exactly one verdict per id, in the json block's `candidates` list: `variant`, `guarded` (with the guard as `file:line` in `guard`), `not_reachable` (say what proves it) or `unsure`. A candidate you do not answer counts as not checked.
+  - A site shows the bug only if the input reaches the sink and the guard of the root cause is missing or does not cover it. Several candidates in one shared helper are one flaw: record each with `variant`, naming the helper in the description.
+  - When the list says some candidates were left out, use the remaining effort on entry points the list can miss (other languages, other layers, a second implementation) and put those under `variants`.
+
+  The rest of this skill (the four verdicts, step 4 and the record format) still applies.
+
   ### 1. Understand the fix
 
   - If you were given a commit or a diff, read it: `git show <commit>` (or the diff text). If you were only given a description of a bug, find the code it describes first.

@@ -141,16 +141,16 @@ const cache = new Map<string, CodeIndex>();
 const CACHE_MAX = 4;
 
 /** The index for a folder, built once per commit and working-tree state. Everything runs locally. */
-export async function getIndex(rootInput: string, limits: BuildLimits = DEFAULT_LIMITS, options: { foxguard?: boolean } = {}): Promise<{ index: CodeIndex; cached: boolean }> {
+export async function getIndex(rootInput: string, limits: BuildLimits = DEFAULT_LIMITS, options: { foxguard?: boolean; missingGuard?: boolean } = {}): Promise<{ index: CodeIndex; cached: boolean }> {
   const root = realpathSync(rootInput);
   const walked = walk(root, limits);
   const commit = git(root, ["rev-parse", "HEAD"])?.trim() ?? "none";
   const fingerprint = fingerprintOf(commit, walked.files, walked.graphOnly);
-  const id = `${root}@${fingerprint}`;
+  const id = `${root}@${fingerprint}${options.missingGuard ? "+guard" : ""}`;
   const hit = cache.get(id);
   if (hit) { cache.delete(id); cache.set(id, hit); return { index: hit, cached: true }; }
   // A Foxguard graph, when its binary supports it, replaces the built-in extractor; the key still follows the commit and tree.
-  const index = (options.foxguard === false ? undefined : await foxguardGraph(root, commit, fingerprint)) ?? await buildFrom(root, walked, commit, fingerprint, limits);
+  const index = (options.foxguard === false ? undefined : await foxguardGraph(root, commit, fingerprint, process.env, { missingGuard: options.missingGuard === true })) ?? await buildFrom(root, walked, commit, fingerprint, limits);
   cache.set(id, index);
   while (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value as string);
   return { index, cached: false };
