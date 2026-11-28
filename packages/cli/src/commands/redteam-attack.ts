@@ -19,6 +19,7 @@ import {
   type AttackerModel, type AttackerStrategy, type AttackResult, type ChatDriver, type OracleSpec, type RedteamVerdict, type Scenario, type TraceEvent,
 } from "@0/engine";
 import { reportFor, CANARY_ENV } from "./redteam.js";
+import { brainEnv } from "./redteam-generate.js";
 import { probeHoneypot, redact, type ProbeSpec, type ProcessHooks } from "./redteam-run.js";
 import { UsageError } from "./output.js";
 
@@ -367,7 +368,7 @@ export async function runRedteamAttack(options: RedteamAttackOptions, deps: Atta
           case "adaptive": strategy = adaptive(model!); break;
           case "refine": strategy = refine(model!); break;
           case "tree": strategy = tree(model!); break;
-          case "brain": strategy = brainAttacker({ deps: { env: deps.env, fetch: deps.fetch }, ...(generatorId ? { generatorId } : {}), strategyId: "crescendo", onNote: note => { notes.push(stripControl(mask(redact(note, canary)))); } }); break;
+          case "brain": strategy = brainAttacker({ deps: { env: brainEnv(deps.env), fetch: deps.fetch }, ...(generatorId ? { generatorId } : {}), strategyId: "crescendo", onNote: note => { notes.push(stripControl(mask(redact(note, canary)))); } }); break;
         }
         driver = deps.makeDriver({ command: options.agent.split("{mcp_config}").join(shellQuote(configPath)), cwd, env, tracePath: traceFile, turnTimeoutMs: Math.min(30_000, maxSeconds * 1000) });
         live = driver;

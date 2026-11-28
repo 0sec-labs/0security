@@ -6,6 +6,7 @@ import { Command } from "commander";
 import { CATALOG, TEMPLATES, scriptedChatDriver, type ChatDriver, type ScriptedCall } from "@0/engine";
 import { attackerBaseUrl, openAiCompatibleModel, readRegularText, registerRedteamAttackCommand, runRedteamAttack, type AttackDeps, type DriverSpec } from "../redteam-attack.js";
 import { UsageError } from "../output.js";
+import { makeTestLicense, testPublicKeys } from "../../web/__fixtures__/test-license.js";
 
 const argAfter = (args: string[], flag: string) => args[args.indexOf(flag) + 1]!;
 const SEND: ScriptedCall = { tool: "send_email", privilege: "network-out" };
@@ -287,6 +288,21 @@ describe("0 redteam attack: model attackers", () => {
     await runRedteamAttack({ ...base, attacker: "adaptive", attackerModel: "m", attackerKeyEnv: "MY_KEY" }, h.deps);
     expect(h.fetches[0]!.url).toBe("http://localhost:9/v1/chat/completions");
     expect((h.fetches[0]!.init.headers as Record<string, string>)["authorization"]).toBe(`Bearer ${KEY}`);
+  });
+
+  it("brain: a license token is the bearer to the brain host only, and is never printed", async () => {
+    const lic = makeTestLicense(["ha"]); Object.assign(testPublicKeys, lic.publicKeys);
+    try {
+      const env = { PATH: "/bin", ...lic.env, ZERO_BRAIN_URL: "https://brain.example.test/next" };
+      const h = harness(obeysTurn2, { env, fetch: async () => new Response(JSON.stringify({ v: 1, task: "next-move", message: move, done: false }), { status: 200 }) });
+      await runRedteamAttack({ ...base, attacker: "brain" }, h.deps);
+      expect([...new Set(h.fetches.map(f => new URL(f.url).host))]).toEqual(["brain.example.test"]);
+      expect((h.fetches[0]!.init.headers as Record<string, string>)["authorization"]).toBe(`Bearer ${lic.token}`);
+      expect([...h.out, ...h.err].join("\n")).not.toContain(lic.token);
+      const none = harness(obeysTurn2, { env: { PATH: "/bin", ZERO_BRAIN_URL: "https://brain.example.test/next" }, fetch: async () => new Response("{}", { status: 500 }) });
+      await runRedteamAttack({ ...base, attacker: "brain" }, none.deps);
+      expect((none.fetches[0]!.init.headers as Record<string, string>)["authorization"]).toBeUndefined();
+    } finally { for (const k of Object.keys(testPublicKeys)) delete testPublicKeys[k]; }
   });
 
   it("brain: uses the server's move, says where it came from, and falls back with a note when offline", async () => {

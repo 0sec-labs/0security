@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createMockBrain, type MockBrain } from "@0/engine";
 import { Command } from "commander";
-import { printable, registerRedteamGenerateCommand, runGenerate, type GenerateDeps } from "../redteam-generate.js";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
+import { makeTestLicense as makeLicense, testPublicKeys } from "../../web/__fixtures__/test-license.js";
+import { brainEnv, printable, registerRedteamGenerateCommand, runGenerate, type GenerateDeps } from "../redteam-generate.js";
 import { UsageError } from "../output.js";
 
 const manifest = JSON.stringify({ tools: [{ name: "send_email", privilege: "network-out", gate: "none" }], sources: [{ kind: "email" }] });
@@ -132,5 +135,72 @@ describe("0 redteam generate", () => {
     await runGenerate({ manifest: "/w.json", url, area: "Payment", dryRun: false }, h.deps);
     expect(h.err.join("\n")).toContain("only filter the open catalog");
     expect(Object.keys((mock.requests[0]!.body as Record<string, unknown>)).sort()).toEqual(["manifest", "task", "v"]);
+  });
+});
+
+const makeTestLicense = (features: string[]) => { const lic = makeLicense(features); Object.assign(testPublicKeys, lic.publicKeys); return lic; };
+
+describe("0 redteam generate with a license token", () => {
+  let mock: MockBrain | undefined;
+  afterEach(async () => { await mock?.close(); mock = undefined; for (const k of Object.keys(testPublicKeys)) delete testPublicKeys[k]; });
+
+  it("sends the license token as the bearer to the configured brain only, and never prints it", async () => {
+    const lic = makeTestLicense(["ha"]);
+    mock = createMockBrain({ token: lic.token }); const url = await mock.start();
+    const h = harness({ ...lic.env, ZERO_BRAIN_URL: url });
+    expect(await runGenerate({ manifest: "/m.json", format: "json", canary: "C-1" }, h.deps)).toBe(0);
+    expect(JSON.parse(h.out.join("")).source).toBe("remote");
+    expect(mock.requests[0]?.authorization).toBe(`Bearer ${lic.token}`);
+    expect(h.fetched).toEqual([url]);
+    expect([...h.out, ...h.err].join("\n")).not.toContain(lic.token);
+  });
+  it("keeps an explicit ZERO_BRAIN_TOKEN over the license", async () => {
+    const lic = makeTestLicense(["ha"]);
+    mock = createMockBrain({ token: "explicit" }); const url = await mock.start();
+    const h = harness({ ...lic.env, ZERO_BRAIN_URL: url, ZERO_BRAIN_TOKEN: "explicit" });
+    await runGenerate({ manifest: "/m.json" }, h.deps);
+    expect(mock.requests[0]?.authorization).toBe("Bearer explicit");
+  });
+  it("never sends the license when no brain URL is set", async () => {
+    const lic = makeTestLicense(["ha"]);
+    const h = harness({ ...lic.env });
+    await runGenerate({ manifest: "/m.json" }, h.deps);
+    expect(h.fetched).toHaveLength(0);
+  });
+  it("falls back to the open catalog with no license and no token", async () => {
+    mock = createMockBrain({ token: "needed" }); const url = await mock.start();
+    const h = harness({ ZERO_BRAIN_URL: url });
+    await runGenerate({ manifest: "/m.json" }, h.deps);
+    expect(h.out.join("")).toContain("source: open-catalog");
+    expect(brainEnv({ ZERO_BRAIN_URL: url })["ZERO_BRAIN_TOKEN"]).toBeUndefined();
+  });
+  it("falls back when the brain refuses the call, without echoing the token", async () => {
+    const lic = makeTestLicense(["ha"]);
+    mock = createMockBrain({ token: "other" }); const url = await mock.start();
+    const h = harness({ ...lic.env, ZERO_BRAIN_URL: url });
+    await runGenerate({ manifest: "/m.json" }, h.deps);
+    expect(h.out.join("")).toContain("source: open-catalog");
+    expect([...h.out, ...h.err].join("\n")).not.toContain(lic.token);
+  });
+  it("does not follow a redirect to another host, so the token never reaches it", async () => {
+    const lic = makeTestLicense(["ha"]);
+    const other = createMockBrain({ token: lic.token }); const otherUrl = await other.start();
+    const redirector = createServer((_req, res) => { res.writeHead(307, { location: otherUrl }); res.end(); });
+    await new Promise<void>(r => redirector.listen(0, "127.0.0.1", () => r()));
+    const url = `http://127.0.0.1:${(redirector.address() as AddressInfo).port}/v1/scenarios`;
+    try {
+      const h = harness({ ...lic.env, ZERO_BRAIN_URL: url });
+      await runGenerate({ manifest: "/m.json" }, h.deps);
+      expect(h.out.join("")).toContain("source: open-catalog");
+      expect(other.requests).toHaveLength(0);
+      expect([...h.out, ...h.err].join("\n")).not.toContain(lic.token);
+    } finally { redirector.close(); await other.close(); }
+  });
+  it("does not send a license when ZERO_ENTERPRISE or offline blocks the brain", async () => {
+    const lic = makeTestLicense(["ha"]);
+    mock = createMockBrain(); const url = await mock.start();
+    await runGenerate({ manifest: "/m.json" }, harness({ ...lic.env, ZERO_BRAIN_URL: url, ZERO_ENTERPRISE: "1" }).deps);
+    await runGenerate({ manifest: "/m.json", offline: true }, harness({ ...lic.env, ZERO_BRAIN_URL: url }).deps);
+    expect(mock.requests).toHaveLength(0);
   });
 });

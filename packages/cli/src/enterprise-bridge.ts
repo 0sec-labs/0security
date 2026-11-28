@@ -1,5 +1,6 @@
 // The only file in packages/cli that imports the key-gated enterprise package (see scripts/check-enterprise-boundary.mjs).
-import { EvidenceKeyError, SamlError, SamlServiceProvider, formatLicenseStatus, featureMode as licenseFeatureMode, hasFeature as licenseHasFeature, licenseStatus, parseIdpMetadata, requireFeature, signEvidenceStatement, type DsseEnvelope, type EnterpriseFeature, type FeatureMode, type LicenseStatus, type SamlIdentity } from "@0/enterprise";
+import { readFileSync } from "node:fs";
+import { EvidenceKeyError, SamlError, SamlServiceProvider, formatLicenseStatus, featureMode as licenseFeatureMode, hasFeature as licenseHasFeature, licenseStatus, loadLicense, parseIdpMetadata, requireFeature, signEvidenceStatement, type DsseEnvelope, type EnterpriseFeature, type FeatureMode, type LicenseStatus, type SamlIdentity } from "@0/enterprise";
 
 export { SamlError, SamlServiceProvider, parseIdpMetadata };
 export type { SamlIdentity };
@@ -77,4 +78,20 @@ export function auditProofRefusal(): string | null {
 export function auditPruneRefusal(): string | null {
   if (!hasFeature("retention")) return requireFeature("retention") ?? "Retention policies need an enterprise license.";
   return null;
+}
+
+/**
+ * The raw license token for the hosted attack generation service, or undefined. Only a token that verifies
+ * (valid or in grace, and for the brain audience when it names one) is returned. The caller must send it to
+ * the configured brain host only and must never print it.
+ */
+export function brainLicenseToken(env: NodeJS.ProcessEnv = process.env, now: Date = new Date()): string | undefined {
+  try {
+    const loaded = loadLicense(env, now, undefined, { audience: "brain" });
+    if (!loaded.ok || loaded.source === "none") return undefined;
+    const token = loaded.source === "env" ? env.ZERO_LICENSE?.trim() : readFileSync(env.ZERO_LICENSE_FILE!.trim(), "utf8").trim();
+    return token || undefined;
+  } catch {
+    return undefined;
+  }
 }
