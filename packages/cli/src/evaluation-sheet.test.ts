@@ -201,6 +201,9 @@ describe("hash, README and run facts", () => {
     for (const part of ["0security scan . --model m", "9.9.9", "abc123", "`m`", "foxguard 1.2.3", "$0.1234", "(budget $0.3)", "61.5 s", "Opened 3 of 3 source files in scope."]) expect(readme).toContain(part);
     expect(JSON.parse(text("run.json"))).toMatchObject({ command: "0security scan . --model m", cliVersion: "9.9.9", repository: { commit: "abc123" }, model: "m", costUsd: 0.1234, durationMs: 61500 });
   });
+  it("does not repeat the scanner name when its version line starts with it", () => {
+    expect(buildSheet([], { ...run, scanners: [{ id: "foxguard", version: "foxguard 0.14.0" }, { id: "trivy", version: "Version: 0.50" }, { id: "gitleaks" }] }).files[0]!.text).toContain("foxguard 0.14.0, trivy Version: 0.50, gitleaks (version not reported)");
+  });
   it("writes not recorded for what a stored sheet does not know", () => {
     const stored = buildSheet([], { source: "stored", generatedAt: "t", command: "0security findings export", cliVersion: "1" });
     expect(stored.files[0]!.text).toContain("Model: not recorded");

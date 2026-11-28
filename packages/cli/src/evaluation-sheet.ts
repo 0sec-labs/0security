@@ -189,7 +189,7 @@ function runJson(run: SheetRun, count: number, findingsSha256: string): Record<s
 }
 
 function readme(run: SheetRun, rows: readonly SheetFinding[], findingsSha256: string): string {
-  const scanners = run.scanners === undefined ? NOT_RECORDED : run.scanners.length ? run.scanners.map(s => `${s.id} ${s.version ?? "(version not reported)"}`).join(", ") : "none ran before the model";
+  const scanners = run.scanners === undefined ? NOT_RECORDED : run.scanners.length ? run.scanners.map(s => !s.version ? `${s.id} (version not reported)` : s.version.toLowerCase().startsWith(s.id.toLowerCase()) ? s.version : `${s.id} ${s.version}`).join(", ") : "none ran before the model";
   return `${[
     "# Evaluation sheet",
     "",

@@ -198,6 +198,8 @@ Add `--allow-partial` when a partial scan should not fail the job. The exit code
 | `--scope-sarif <mode>` | `label` | With --scope: label (default) writes the scope as result properties; suppress also marks out-of-scope results suppressed, which GitHub code scanning then dismisses |
 | `--repo-context` | — | Also read .0/threat-model.md from the scanned folder as context. Off by default: a change under review can edit that file; in CI pass the base branch's copy with --context instead |
 | `--repo-ignores` | — | Also let the pre-pass scanners read their configuration and ignore files from the scanned folder (.foxguard.yml, .semgrepignore, .gitleaks.toml, .gitleaksignore, .trivyignore, osv-scanner.toml, .checkov.yaml). Off by default: a change under review can use them to hide findings. Inline suppressions such as nosemgrep always apply |
+| `--evaluation-sheet <folder>` | — | After the scan, write a folder for judging the findings by hand: review.csv with blank true positive, false positive, unsure and notes columns, the findings with verdict, fix explanation and business-context rank, the cost, time, model, scanner versions and coverage, the exact command and CLI version, and a README that says it is not an accuracy result. Refuses a non-empty folder |
+| `--overwrite-sheet` | — | With --evaluation-sheet: replace the sheet files in a folder that already has files (other files are left alone) |
 | `--poc-image <image>` | — | Run the proof of concept of each high or critical finding in this container image, network off, and label the finding script-matched, script-unmatched or static-only. Must be pinned by digest (name@sha256:...). Default: the ZERO_POC_IMAGE variable or `0security config set executedPocImage`; otherwise off. Needs Docker or podman |
 | `--skill <id>` | `scan` | Skill that holds the scan method |
 | `--model <model>` | — | Model for the scan thread (default: gpt-6-luna; ZERO_MODEL or a pinned provider's default when set) |
@@ -3008,8 +3010,10 @@ Dependency-Track takes SBOMs, not findings. Make a CycloneDX file with [sbom gen
 | Option | Registered default | Description |
 | --- | --- | --- |
 | `--scan <id>` | — | Export every finding of this scan instead of selected IDs |
-| `--format <format>` | `json` | json, md, sarif, html, pdf or defectdojo |
-| `-o, --output <file>` | — | Write to a file instead of stdout |
+| `--format <format>` | `json` | json, md, sarif, html, pdf, defectdojo or sheet (a folder with review.csv, findings, run facts and a README; needs -o &lt;folder&gt;) |
+| `-o, --output <file>` | — | Write to a file instead of stdout; for --format sheet, the folder |
+| `--source <folder>` | — | With --format sheet: the repository folder, for its commit and relative paths |
+| `--overwrite-sheet` | — | With --format sheet: replace the sheet files in a folder that already has files (other files are left alone) |
 | `--severity <severity>` | — | With no IDs: only this severity |
 | `--category <category>` | — | With no IDs: only this category |
 | `--status <status>` | — | With no IDs: only this status |
