@@ -744,11 +744,37 @@ Export saved findings as JSON, Markdown or SARIF:
 0security findings list --format md -o report.md
 ```
 
-Without `-o` the report goes to stdout. `0security findings export` also writes HTML, PDF and a DefectDojo import file (`--format defectdojo`). The app exports the first five formats.
+Without `-o` the report goes to stdout. `0security findings export` also writes HTML, PDF and a DefectDojo import file (`--format defectdojo`), and a folder for judging findings by hand (`--format sheet`). The app exports the first five formats.
 
 A full report carries evidence, proof-of-concept steps and descriptions that can quote source code or secrets. Check it before you share it.
 
 To bring a report into the app, use `0security findings list --import ./report.json --db-path <db>`. Imported findings are marked discovered and unverified.
+
+## Judge findings by hand
+
+To judge a scan's findings yourself, or to compare tools, write an evaluation sheet. It is one folder:
+
+```bash
+0security scan ./repo --evaluation-sheet ./sheet                      # scan, then write the sheet
+0security findings export --scan <scan-id> --format sheet -o ./sheet --source ./repo   # later, from stored findings
+```
+
+| File | What it holds |
+| --- | --- |
+| `review.csv` | One row per finding: id, severity, location, title, category, verification verdict, fix explanation, business-context rank and the description. The columns `true positive`, `false positive`, `unsure` and `notes` are blank for the reviewer. |
+| `findings.json` | The same findings with every field, in the same order. |
+| `run.json` | The exact command, the CLI version, the repository commit, the model, the version of each pattern scanner that ran, the cost, the time, the scan status and the coverage statement. |
+| `README.md` | The same facts in words, and the rule below. |
+
+The sheet is for human judgement. It is not an accuracy result. It does not say how many findings are right or what the scan missed, and one reviewer on one small repository gives an opinion, not a measure of a tool.
+
+Rows are ordered by severity, then path, then line. A finding without a location comes last in its severity and says so. Each row has a short stable id made from what the finding is and where it is. The verdict column says what checked the finding (a reproduction, an executed script, a source check) or `not verified`. A matched script is not proof, because the model wrote it. The business-context rank is the position in the order you declared with `--business-context`; it never changes severity.
+
+Two reviewers can confirm they judged the same output by comparing the list hash, the SHA-256 of `findings.json`. It is in the README, in `run.json` and, shortened, in the last column of every CSV row.
+
+Spreadsheets run formulas, and a finding's title or description comes from a model reading code. Any cell that starts with `=`, `+`, `-`, `@`, a tab or a carriage return gets a leading apostrophe, so it opens as text. The CSV starts with a byte order mark so Excel reads unicode correctly.
+
+Building the sheet calls no model. `scan --evaluation-sheet` checks the folder before the scan starts and refuses a folder that already has files, so a refusal costs nothing. Add `--overwrite-sheet` to replace the four sheet files in such a folder; other files are left alone. The sheet folder must be outside the scanned folder. A sheet rebuilt with `findings export` cannot know the cost, model, scanner versions or coverage, because the findings database does not keep them. It writes `not recorded` for each. The sheet can quote the scanned code; treat it like the repository. For a worked comparison, see [Compare tools on one repository](/compare-tools/).
 
 ## Send findings to GitHub
 
