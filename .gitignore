@@ -45,6 +45,9 @@ services/
 /.0/
 *.bak
 
+# Tool state that ends up in the repository when HOME or XDG_STATE_HOME points here (for example the GitHub CLI's device id)
+.local/
+
 # Scratch files from local experiments that can contain credentials; never commit
 /.redeem_log*.json
 /.tok*
