@@ -38,7 +38,7 @@ We imported leads into 0, ran `findings verify` with the model `gpt-6-luna`, and
 
 - The OWASP Benchmark for Java is synthetic and generated from templates. Its files are not real code.
 - Many files carry cues. Safe cases often contain the word "safe" in a comment or a string literal. We repeated the runs with the comments removed, and with the cue literals replaced. About a quarter of the gain disappears (see below). The cue-free score is the better estimate for real code.
-- Sample A has 304 cases. Sample B has 290 cases. They are two disjoint samples of the same benchmark. An odd and even split of one benchmark is a weak holdout, so do not read sample B as proof that the result carries to other code.
+- Sample A has 304 cases. Sample B has 290 cases. They are two disjoint samples of the same benchmark, and sample B was measured without changing anything after sample A. Both come from one generated benchmark whose cases are near-siblings of each other, so sample B is a weak holdout: do not read it as proof that the result carries to other code.
 - Each configuration ran once. The model is not deterministic, so differences of a few cases are noise.
 - Verification cannot add bugs the scanner missed. Recall can only stay the same or fall.
 - Verification can wrongly dismiss a real finding. It happened about three times per 300 cases. This is why uncertain stays.
