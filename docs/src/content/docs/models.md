@@ -59,10 +59,10 @@ Consumer or per-seat subscription logins are for individual local use only. This
 
 Read the provider's own terms for what your account allows:
 
-- Anthropic: [legal terms and policies](https://www.anthropic.com/legal)
-- OpenAI: [policies](https://openai.com/policies)
-- Amazon Bedrock: [AWS Service Terms](https://aws.amazon.com/service-terms/)
-- Azure OpenAI: [Microsoft legal terms](https://azure.microsoft.com/support/legal/)
+- Anthropic: [Commercial Terms](https://www.anthropic.com/legal/commercial-terms) for API keys, [Consumer Terms](https://www.anthropic.com/legal/consumer-terms) for Claude subscriptions.
+- OpenAI: [Services Agreement](https://openai.com/policies/services-agreement/) for the API and business plans, [Terms of Use](https://openai.com/policies/row-terms-of-use/) for individual ChatGPT accounts. Accounts in the European Economic Area, Switzerland and the UK have their own terms page, linked from the Terms of Use.
+- Amazon Bedrock: [AWS Service Terms](https://aws.amazon.com/service-terms/).
+- Azure OpenAI: [Microsoft Product Terms](https://www.microsoft.com/licensing/terms/) and the [Code of Conduct for Microsoft AI Services](https://learn.microsoft.com/en-us/legal/ai-code-of-conduct).
 
 For a gateway, read the terms of the provider behind it. This page does not interpret any of these terms.
 
