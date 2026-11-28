@@ -2094,8 +2094,9 @@ Options:
   --batch-timeout <seconds>    Longest one batch may run before it is cancelled and left pending
                                (the scan goes on with the next batch); --timeout still limits the
                                whole scan (default: "900")
-  --concurrency <n>            Batches that run at the same time (1 to 3). With --target-url: Nuclei
-                               templates that run at once (1 to 25, default 5) (default: "1")
+  --concurrency <n>            Batches that run at the same time (1 to 8; ZERO_SCAN_MAX_CONCURRENCY
+                               allows up to 16). With --target-url: Nuclei templates that run at
+                               once (1 to 25, default 5) (default: "1")
   --resume <scan>              Continue the units an earlier batched scan of this folder did not
                                reach (a scan id from its report, or latest); refuses when the git
                                HEAD changed unless --force
