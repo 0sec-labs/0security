@@ -1,0 +1,391 @@
+{
+  "fixture": "variants-tenant",
+  "skill": null,
+  "seed": {
+    "path": "src/routes/invoices.ts",
+    "startLine": 15,
+    "endLine": 19,
+    "title": "Any signed-in user can read any tenant's invoice by id",
+    "category": "broken-access-control",
+    "severity": "high",
+    "description": "GET /api/invoices/:id returned any tenant's invoice to any signed-in user because the route loaded the record with the unscoped invoiceRepo.findById(id) and never compared its orgId with the caller's. The fix scoped the lookup to the caller's organisation with invoiceRepo.findForOrg(req.user.orgId, id)."
+  },
+  "cleanPaths": [
+    "src/lib/config.ts",
+    "src/lib/csv.ts",
+    "src/lib/errors.ts",
+    "src/lib/hmac.ts",
+    "src/lib/ids.ts",
+    "src/lib/mailer.ts",
+    "src/lib/password.ts",
+    "src/lib/token.ts",
+    "src/lib/validate.ts",
+    "src/middleware/authenticate.ts",
+    "src/middleware/errorHandler.ts",
+    "src/middleware/requestLog.ts",
+    "src/middleware/requireRole.ts",
+    "src/models/crm.ts",
+    "src/models/finance.ts",
+    "src/models/ops.ts",
+    "src/repositories/crmRepos.ts",
+    "src/repositories/financeRepos.ts",
+    "src/repositories/opsRepos.ts",
+    "src/routes/activities.ts",
+    "src/routes/apiKeys.ts",
+    "src/routes/auth.ts",
+    "src/routes/campaigns.ts",
+    "src/routes/categories.ts",
+    "src/routes/contacts.ts",
+    "src/routes/coupons.ts",
+    "src/routes/customers.ts",
+    "src/routes/deals.ts",
+    "src/routes/documents.ts",
+    "src/routes/expenses.ts",
+    "src/routes/leads.ts",
+    "src/routes/notes.ts",
+    "src/routes/priceLists.ts",
+    "src/routes/products.ts",
+    "src/routes/projects.ts",
+    "src/routes/purchaseOrders.ts",
+    "src/routes/shipments.ts",
+    "src/routes/subscriptions.ts",
+    "src/routes/suppliers.ts",
+    "src/routes/tags.ts",
+    "src/routes/tasks.ts",
+    "src/routes/taxRates.ts",
+    "src/routes/tickets.ts",
+    "src/routes/warehouses.ts",
+    "src/routes/webhookEndpoints.ts",
+    "src/services/invoiceService.ts",
+    "src/services/ticketService.ts"
+  ],
+  "items": [
+    {
+      "id": "vt-contract-service",
+      "path": "src/services/contractService.ts",
+      "startLine": 10,
+      "endLine": 14,
+      "category": "authz",
+      "description": "contractService.get loads a contract by id with contractRepo.findById and never compares its orgId with the caller's; the routes GET /api/contracts/:id and /:id/summary return other tenants' contracts through it",
+      "alsoAt": [
+        {
+          "path": "src/routes/contracts.ts",
+          "startLine": 13,
+          "endLine": 15
+        },
+        {
+          "path": "src/routes/contracts.ts",
+          "startLine": 17,
+          "endLine": 19
+        }
+      ],
+      "oracle": {
+        "mention": [
+          "contract"
+        ],
+        "lineSlack": 3
+      }
+    },
+    {
+      "id": "vt-quote-pdf",
+      "path": "src/routes/quotes.ts",
+      "startLine": 23,
+      "endLine": 28,
+      "category": "authz",
+      "description": "the quote pdf route inlines quoteRepo.findById and renders any tenant's quote, including internal notes, for any signed-in user",
+      "alsoAt": [],
+      "oracle": {
+        "mention": [
+          "quote",
+          "pdf"
+        ],
+        "lineSlack": 3
+      }
+    },
+    {
+      "id": "vt-reminder-job",
+      "path": "src/jobs/reminderJob.ts",
+      "startLine": 6,
+      "endLine": 15,
+      "category": "authz",
+      "description": "the invoice reminder job loads the invoice from the job payload with invoiceRepo.findById and does not compare its orgId with the job's org; POST /api/reminders enqueues it with a caller-supplied invoiceId and the rendered invoice comes back from the job status endpoint and is mailed to a caller-chosen address",
+      "alsoAt": [
+        {
+          "path": "src/routes/reminders.ts",
+          "startLine": 8,
+          "endLine": 15
+        }
+      ],
+      "oracle": {
+        "mention": [
+          "remind",
+          "job",
+          "queue"
+        ],
+        "lineSlack": 3
+      }
+    },
+    {
+      "id": "vt-graphql-subscription",
+      "path": "src/graphql/resolvers.ts",
+      "startLine": 26,
+      "endLine": 29,
+      "category": "authz",
+      "description": "the graphql subscription resolver loads a subscription by id with subscriptionRepo.findById and ignores the caller's org, so POST /graphql returns other tenants' subscription data (plan, seats, amount, card digits)",
+      "alsoAt": [
+        {
+          "path": "src/routes/graphql.ts",
+          "startLine": 7,
+          "endLine": 12
+        }
+      ],
+      "oracle": {
+        "mention": [
+          "graphql",
+          "resolver",
+          "subscription"
+        ],
+        "lineSlack": 3
+      }
+    },
+    {
+      "id": "vt-ws-ticket-subscribe",
+      "path": "src/ws/handlers.ts",
+      "startLine": 28,
+      "endLine": 33,
+      "category": "authz",
+      "description": "the realtime message handler's subscribe to ticket:<id> loads the ticket with ticketRepo.findById and joins the channel without an org or membership check, so any signed-in user receives another tenant's ticket and comments (websocket-style channel subscription)",
+      "alsoAt": [
+        {
+          "path": "src/ws/handlers.ts",
+          "startLine": 23,
+          "endLine": 23
+        }
+      ],
+      "oracle": {
+        "mention": [
+          "websocket",
+          "subscribe",
+          "channel",
+          "realtime",
+          "ticket"
+        ],
+        "lineSlack": 3
+      }
+    },
+    {
+      "id": "vt-import-product",
+      "path": "src/services/importService.ts",
+      "startLine": 22,
+      "endLine": 24,
+      "category": "authz",
+      "description": "the order import preview resolves productId references with productRepo.findById, so a csv naming another tenant's product id returns that product's name, price and unit cost",
+      "alsoAt": [
+        {
+          "path": "src/services/importService.ts",
+          "startLine": 33,
+          "endLine": 34
+        }
+      ],
+      "oracle": {
+        "mention": [
+          "import",
+          "csv",
+          "product"
+        ],
+        "lineSlack": 3
+      }
+    },
+    {
+      "id": "vt-report-shipment",
+      "path": "src/services/reportService.ts",
+      "startLine": 4,
+      "endLine": 6,
+      "category": "authz",
+      "description": "the shipment cost report loads the shipment through shipmentRepo.get(id), which is a plain lookup by id, so GET /api/reports/shipments/:id/costs returns other tenants' carrier cost, billed amount and margin",
+      "alsoAt": [
+        {
+          "path": "src/routes/reports.ts",
+          "startLine": 10,
+          "endLine": 12
+        },
+        {
+          "path": "src/repositories/shipmentRepo.ts",
+          "startLine": 11,
+          "endLine": 13
+        }
+      ],
+      "oracle": {
+        "mention": [
+          "report",
+          "shipment"
+        ],
+        "lineSlack": 3
+      }
+    },
+    {
+      "id": "vt-payment-webhook",
+      "path": "src/integrations/paymentWebhook.ts",
+      "startLine": 18,
+      "endLine": 20,
+      "category": "authz",
+      "description": "the inbound payments webhook accepts any body under a signature that only covers the timestamp, looks the account up but then loads the invoice by the payload's invoiceId with invoiceRepo.findById and marks it paid without comparing its org to the account's, so a replayed signature can settle or read another tenant's invoice",
+      "alsoAt": [],
+      "oracle": {
+        "mention": [
+          "webhook",
+          "inbound",
+          "integration",
+          "payment"
+        ],
+        "lineSlack": 3
+      }
+    }
+  ],
+  "decoys": [
+    {
+      "id": "vt-decoy-payments-inline",
+      "path": "src/routes/payments.ts",
+      "startLine": 10,
+      "endLine": 16,
+      "category": "authz",
+      "description": "findById followed by an inline orgId comparison"
+    },
+    {
+      "id": "vt-decoy-credit-notes",
+      "path": "src/routes/creditNotes.ts",
+      "startLine": 12,
+      "endLine": 17,
+      "category": "authz",
+      "description": "findById followed by assertSameOrg"
+    },
+    {
+      "id": "vt-decoy-refunds-policy",
+      "path": "src/routes/refunds.ts",
+      "startLine": 11,
+      "endLine": 15,
+      "category": "authz",
+      "description": "findById checked by the refund policy object"
+    },
+    {
+      "id": "vt-decoy-invoice-void",
+      "path": "src/routes/invoices.ts",
+      "startLine": 31,
+      "endLine": 36,
+      "category": "authz",
+      "description": "findById followed by assertSameOrg"
+    },
+    {
+      "id": "vt-decoy-invoice-share",
+      "path": "src/routes/invoices.ts",
+      "startLine": 38,
+      "endLine": 42,
+      "category": "authz",
+      "description": "scoped lookup with findForOrg before minting a share token"
+    },
+    {
+      "id": "vt-decoy-internal-invoice",
+      "path": "src/routes/internal.ts",
+      "startLine": 7,
+      "endLine": 11,
+      "category": "authz",
+      "description": "findById behind the service token middleware"
+    },
+    {
+      "id": "vt-decoy-public-invoice",
+      "path": "src/routes/publicInvoice.ts",
+      "startLine": 8,
+      "endLine": 14,
+      "category": "authz",
+      "description": "public link keyed by a signed share token that binds and is verified against the invoice id and org"
+    },
+    {
+      "id": "vt-decoy-reference-currency",
+      "path": "src/routes/reference.ts",
+      "startLine": 10,
+      "endLine": 14,
+      "category": "authz",
+      "description": "findById on global reference data without orgId"
+    },
+    {
+      "id": "vt-decoy-reference-plan",
+      "path": "src/routes/reference.ts",
+      "startLine": 22,
+      "endLine": 26,
+      "category": "authz",
+      "description": "findById on global reference data without orgId"
+    },
+    {
+      "id": "vt-decoy-me",
+      "path": "src/routes/me.ts",
+      "startLine": 6,
+      "endLine": 10,
+      "category": "authz",
+      "description": "lookup by the caller's own user id from the session"
+    },
+    {
+      "id": "vt-decoy-renewal-job",
+      "path": "src/jobs/renewalJob.ts",
+      "startLine": 4,
+      "endLine": 8,
+      "category": "authz",
+      "description": "job re-validates the contract's org against the job org before use"
+    },
+    {
+      "id": "vt-decoy-graphql-customer",
+      "path": "src/graphql/resolvers.ts",
+      "startLine": 16,
+      "endLine": 18,
+      "category": "authz",
+      "description": "resolver goes through the org scoped data loader"
+    },
+    {
+      "id": "vt-decoy-ws-team",
+      "path": "src/ws/handlers.ts",
+      "startLine": 35,
+      "endLine": 39,
+      "category": "authz",
+      "description": "subscribe checks team membership of the session user"
+    },
+    {
+      "id": "vt-decoy-import-customer",
+      "path": "src/services/importService.ts",
+      "startLine": 18,
+      "endLine": 20,
+      "category": "authz",
+      "description": "import step uses findForOrg"
+    },
+    {
+      "id": "vt-decoy-contract-for-org",
+      "path": "src/services/contractService.ts",
+      "startLine": 16,
+      "endLine": 20,
+      "category": "authz",
+      "description": "service method uses findForOrg"
+    },
+    {
+      "id": "vt-decoy-quote-get",
+      "path": "src/routes/quotes.ts",
+      "startLine": 17,
+      "endLine": 21,
+      "category": "authz",
+      "description": "quote read uses findForOrg"
+    },
+    {
+      "id": "vt-decoy-shipment-timeline",
+      "path": "src/services/reportService.ts",
+      "startLine": 18,
+      "endLine": 22,
+      "category": "authz",
+      "description": "report uses the org scoped getForOrg helper"
+    },
+    {
+      "id": "vt-decoy-carrier-webhook",
+      "path": "src/integrations/carrierWebhook.ts",
+      "startLine": 8,
+      "endLine": 21,
+      "category": "authz",
+      "description": "signature covers the body and the shipment is loaded inside the account's org"
+    }
+  ]
+}

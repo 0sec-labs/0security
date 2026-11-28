@@ -1,0 +1,431 @@
+//// FILE: package.json
+{
+  "name": "workspace-api",
+  "version": "2.4.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node dist/server.js",
+    "build": "tsc -p ."
+  },
+  "dependencies": {
+    "express": "^5.1.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0"
+  }
+}
+//// FILE: tsconfig.json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "outDir": "dist",
+    "esModuleInterop": true,
+    "skipLibCheck": true
+  },
+  "include": ["src"]
+}
+//// FILE: src/server.ts
+import { createApp } from "./app";
+import { seed } from "./seed";
+
+if (process.env.NODE_ENV !== "production") seed();
+
+const port = Number(process.env.PORT ?? 4100);
+createApp().listen(port, () => {
+  console.log(`workspace api listening on ${port}`);
+});
+//// FILE: src/app.ts
+import express from "express";
+import { authenticate } from "./middleware/authenticate";
+import { securityRules } from "./middleware/securityRules";
+import { resolveOrg } from "./middleware/resolveOrg";
+import { errorHandler } from "./middleware/errors";
+import { authRouter } from "./routes/auth";
+import { publicRouter } from "./routes/public";
+import { boardsPublicRouter } from "./routes/boardsPublic";
+import { internalRouter } from "./routes/internal";
+import { billingRouter } from "./routes/billing";
+import { adminRouter } from "./routes/admin";
+import { opsRouter } from "./routes/ops";
+import { apiRouter } from "./routes";
+
+export function createApp() {
+  const app = express();
+  app.use(express.json({ limit: "1mb" }));
+
+  app.use("/api/auth", authRouter);
+  app.use("/public", publicRouter);
+  app.use("/public/boards", boardsPublicRouter);
+  app.use("/api/internal", internalRouter);
+
+  const api = express.Router();
+  api.use(authenticate);
+  api.use(securityRules);
+  api.use("/billing", billingRouter);
+  api.use(resolveOrg);
+  api.use("/admin", adminRouter);
+  api.use("/ops", opsRouter);
+  api.use(apiRouter);
+  app.use("/api", api);
+
+  app.use(errorHandler);
+  return app;
+}
+//// FILE: src/config/env.ts
+export const env = {
+  tokenSecret: process.env.TOKEN_SECRET ?? "workspace-dev-secret",
+  serviceToken: process.env.SERVICE_TOKEN ?? "svc-dev-token",
+  uploadRoot: process.env.UPLOAD_ROOT ?? "/tmp/workspace-uploads",
+  shareTtlSeconds: Number(process.env.SHARE_TTL_SECONDS ?? 86400),
+};
+//// FILE: src/config/security.ts
+export type Role = "member" | "manager" | "admin";
+
+export interface UrlRule {
+  prefix: string;
+  roles: Role[];
+}
+
+// Path prefixes that need a minimum role before any handler runs.
+export const urlRules: UrlRule[] = [
+  { prefix: "/api/admin", roles: ["admin"] },
+  { prefix: "/api/billing", roles: ["manager", "admin"] },
+  { prefix: "/api/ops", roles: ["admin"] },
+];
+//// FILE: src/middleware/securityRules.ts
+import type { NextFunction, Request, Response } from "express";
+import { urlRules } from "../config/security";
+import type { AuthedRequest } from "./authenticate";
+
+export function securityRules(req: Request, res: Response, next: NextFunction) {
+  const path = req.originalUrl.split("?")[0];
+  const rule = urlRules.find((candidate) => path.startsWith(candidate.prefix));
+  if (rule && !rule.roles.includes((req as AuthedRequest).user.role)) {
+    return res.status(403).json({ error: "forbidden" });
+  }
+  next();
+}
+//// FILE: src/middleware/authenticate.ts
+import type { NextFunction, Request, Response } from "express";
+import { readToken } from "../lib/tokens";
+import { userRepo } from "../repositories/userRepo";
+import type { User } from "../models/user";
+
+export interface AuthedRequest extends Request {
+  user: User;
+  org: string;
+}
+
+export function authenticate(req: Request, res: Response, next: NextFunction) {
+  const header = req.get("authorization") ?? "";
+  const userId = header.startsWith("Bearer ") ? readToken(header.slice(7)) : null;
+  const user = userId ? userRepo.get(userId) : undefined;
+  if (!user) return res.status(401).json({ error: "unauthenticated" });
+  (req as AuthedRequest).user = user;
+  next();
+}
+//// FILE: src/middleware/resolveOrg.ts
+import type { NextFunction, Request, Response } from "express";
+import type { AuthedRequest } from "./authenticate";
+
+// The active organisation is the caller's own unless a platform admin asks for another one.
+export function resolveOrg(req: Request, res: Response, next: NextFunction) {
+  const authed = req as AuthedRequest;
+  const requested = req.get("x-org-id");
+  if (requested && requested !== authed.user.orgId && authed.user.role !== "admin") {
+    return res.status(403).json({ error: "not a member of that organisation" });
+  }
+  authed.org = requested ?? authed.user.orgId;
+  next();
+}
+//// FILE: src/middleware/requireOrgRole.ts
+import type { NextFunction, Request, Response } from "express";
+import type { Role } from "../config/security";
+import type { AuthedRequest } from "./authenticate";
+
+const rank: Record<Role, number> = { member: 1, manager: 2, admin: 3 };
+
+export function requireOrgRole(minimum: Role) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    const user = (req as AuthedRequest).user;
+    if (rank[user.role] < rank[minimum]) return res.status(403).json({ error: "forbidden" });
+    next();
+  };
+}
+//// FILE: src/middleware/serviceToken.ts
+import { timingSafeEqual } from "node:crypto";
+import type { NextFunction, Request, Response } from "express";
+import { env } from "../config/env";
+
+export function requireServiceToken(req: Request, res: Response, next: NextFunction) {
+  const given = Buffer.from(req.get("x-service-token") ?? "");
+  const wanted = Buffer.from(env.serviceToken);
+  if (given.length !== wanted.length || !timingSafeEqual(given, wanted)) {
+    return res.status(401).json({ error: "service token required" });
+  }
+  next();
+}
+//// FILE: src/middleware/errors.ts
+import type { NextFunction, Request, Response } from "express";
+import { HttpError } from "../lib/http";
+
+export function errorHandler(err: unknown, _req: Request, res: Response, _next: NextFunction) {
+  if (err instanceof HttpError) return res.status(err.status).json({ error: err.message });
+  console.error(err);
+  res.status(500).json({ error: "internal error" });
+}
+//// FILE: src/lib/http.ts
+export class HttpError extends Error {
+  constructor(readonly status: number, message = "error") {
+    super(message);
+  }
+}
+
+export const notFound = () => new HttpError(404, "not found");
+export const forbidden = () => new HttpError(403, "forbidden");
+export const badRequest = (message = "bad request") => new HttpError(400, message);
+//// FILE: src/lib/ids.ts
+let counter = 1000;
+
+export function newId(prefix: string): string {
+  counter += 1;
+  return `${prefix}_${counter.toString(36)}`;
+}
+//// FILE: src/lib/tokens.ts
+import { createHmac, timingSafeEqual } from "node:crypto";
+import { env } from "../config/env";
+
+function mac(value: string): string {
+  return createHmac("sha256", env.tokenSecret).update(value).digest("base64url");
+}
+
+function same(a: string, b: string): boolean {
+  const left = Buffer.from(a);
+  const right = Buffer.from(b);
+  return left.length === right.length && timingSafeEqual(left, right);
+}
+
+export function issueToken(userId: string): string {
+  const body = Buffer.from(userId).toString("base64url");
+  return `${body}.${mac(body)}`;
+}
+
+export function readToken(token: string): string | null {
+  const [body, signature] = token.split(".");
+  if (!body || !signature || !same(signature, mac(body))) return null;
+  return Buffer.from(body, "base64url").toString();
+}
+
+export interface ShareClaim {
+  kind: string;
+  id: string;
+  expiresAt: number;
+}
+
+export function issueShareToken(kind: string, id: string, expiresAt: number): string {
+  const body = Buffer.from(`${kind}:${id}:${expiresAt}`).toString("base64url");
+  return `${body}.${mac(body)}`;
+}
+
+export function readShareToken(token: string): ShareClaim | null {
+  const [body, signature] = token.split(".");
+  if (!body || !signature || !same(signature, mac(body))) return null;
+  const [kind, id, expiresAt] = Buffer.from(body, "base64url").toString().split(":");
+  if (!kind || !id || !Number.isFinite(Number(expiresAt))) return null;
+  return { kind, id, expiresAt: Number(expiresAt) };
+}
+//// FILE: src/lib/sanitize.ts
+const MARKUP_CHARS = /[<>&"']/g;
+
+const ENTITIES: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+
+/** Display-safe short text: markup characters are dropped and the length is capped. */
+export function cleanName(value: string): string {
+  return value.replace(MARKUP_CHARS, "").trim().slice(0, 120);
+}
+
+export function escapeHtml(value: string): string {
+  return value.replace(MARKUP_CHARS, (ch) => ENTITIES[ch]);
+}
+
+/** A single path segment: separators and leading dots cannot survive. */
+export function safeSegment(value: string): string {
+  const flat = value.replace(/[^A-Za-z0-9._-]/g, "_").replace(/^\.+/, "_");
+  return flat.slice(0, 120) || "_";
+}
+//// FILE: src/lib/storage.ts
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { env } from "../config/env";
+
+export const storage = {
+  put(key: string, data: string): string {
+    const target = join(env.uploadRoot, key);
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, data);
+    return key;
+  },
+  read(key: string): string {
+    return readFileSync(join(env.uploadRoot, key), "utf8");
+  },
+};
+//// FILE: src/lib/clock.ts
+export const now = () => new Date().toISOString();
+export const inSeconds = (seconds: number) => Math.floor(Date.now() / 1000) + seconds;
+//// FILE: src/db.ts
+export class Table<T extends { id: string }> {
+  private rows = new Map<string, T>();
+
+  constructor(readonly name: string) {}
+
+  get(id: string): T | undefined {
+    return this.rows.get(id);
+  }
+
+  all(): T[] {
+    return [...this.rows.values()];
+  }
+
+  where(predicate: (row: T) => boolean): T[] {
+    return this.all().filter(predicate);
+  }
+
+  insert(row: T): T {
+    this.rows.set(row.id, row);
+    return row;
+  }
+
+  update(id: string, patch: Partial<T>): T | undefined {
+    const current = this.rows.get(id);
+    if (!current) return undefined;
+    const next = { ...current, ...patch, id } as T;
+    this.rows.set(id, next);
+    return next;
+  }
+
+  remove(id: string): boolean {
+    return this.rows.delete(id);
+  }
+}
+//// FILE: src/models/user.ts
+import type { Role } from "../config/security";
+
+export interface User {
+  id: string;
+  orgId: string;
+  name: string;
+  email: string;
+  role: Role;
+  passcode: string;
+}
+//// FILE: src/models/org.ts
+export interface Org {
+  id: string;
+  name: string;
+  plan: "free" | "team" | "business";
+  seats: number;
+  renewsAt: string;
+  paymentMethodLast4: string;
+}
+//// FILE: src/models/project.ts
+export interface Project {
+  id: string;
+  orgId: string;
+  ownerId: string;
+  name: string;
+  archived: boolean;
+}
+//// FILE: src/models/task.ts
+export interface Task {
+  id: string;
+  orgId: string;
+  projectId: string;
+  ownerId: string;
+  parentId?: string;
+  title: string;
+  notes: string;
+  visibility: "public" | "private";
+  watchers: string[];
+  status: "open" | "done";
+}
+//// FILE: src/models/comment.ts
+export interface Comment {
+  id: string;
+  orgId: string;
+  taskId: string;
+  authorId: string;
+  body: string;
+  createdAt: string;
+}
+//// FILE: src/models/attachment.ts
+export interface Attachment {
+  id: string;
+  orgId: string;
+  taskId: string;
+  uploaderId: string;
+  filename: string;
+  storageKey: string;
+}
+//// FILE: src/models/invoice.ts
+export interface Invoice {
+  id: string;
+  orgId: string;
+  number: string;
+  customer: string;
+  amountCents: number;
+  status: "draft" | "sent" | "paid";
+  lines: Array<{ description: string; amountCents: number }>;
+  internalNote: string;
+}
+//// FILE: src/models/webhook.ts
+export interface Webhook {
+  id: string;
+  orgId: string;
+  url: string;
+  authToken: string;
+  events: string[];
+  active: boolean;
+}
+
+export interface WebhookDelivery {
+  id: string;
+  webhookId: string;
+  event: string;
+  requestHeaders: Record<string, string>;
+  requestBody: string;
+  responseStatus: number;
+}
+//// FILE: src/models/activity.ts
+export interface Activity {
+  id: string;
+  orgId: string;
+  entity: string;
+  entityId: string;
+  actorId: string;
+  action: string;
+  detail: string;
+  at: string;
+}
+//// FILE: src/models/board.ts
+export interface Board {
+  id: string;
+  orgId: string;
+  projectId: string;
+  slug: string;
+  published: boolean;
+}
+//// FILE: src/models/timeEntry.ts
+export interface TimeEntry {
+  id: string;
+  orgId: string;
+  taskId: string;
+  userId: string;
+  minutes: number;
+  note: string;
+}

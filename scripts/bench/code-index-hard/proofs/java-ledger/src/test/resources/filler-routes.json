@@ -1,0 +1,1172 @@
+{
+  "actors": {
+    "crossTenant": [
+      "u-bravo-user1",
+      "u-bravo-mgr",
+      "u-bravo-admin"
+    ],
+    "sameTenantUnprivileged": "u-alpha-user2"
+  },
+  "modules": [
+    {
+      "key": "categories",
+      "style": "A",
+      "base": "/api/categories",
+      "seedId": "cat-a1",
+      "owner": "u-alpha-user1",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "",
+          "kind": "list",
+          "unprivStatus": 200,
+          "unprivContainsSeed": false,
+          "controlActor": "u-alpha-user1"
+        },
+        {
+          "method": "GET",
+          "path": "/{id}",
+          "kind": "item",
+          "unprivStatus": 403,
+          "controlActor": "u-alpha-user1"
+        },
+        {
+          "method": "PUT",
+          "path": "/{id}",
+          "kind": "item",
+          "body": {
+            "name": "Travel",
+            "color": "blue",
+            "archived": false
+          },
+          "unprivStatus": 403,
+          "controlActor": "u-alpha-user1"
+        },
+        {
+          "method": "DELETE",
+          "path": "/{id}",
+          "kind": "item",
+          "unprivStatus": 403,
+          "controlActor": null
+        },
+        {
+          "method": "GET",
+          "path": "/archived",
+          "kind": "list",
+          "unprivStatus": 200,
+          "unprivContainsSeed": false,
+          "controlActor": "u-alpha-user1"
+        }
+      ]
+    },
+    {
+      "key": "tags",
+      "style": "C",
+      "base": "/api/tags",
+      "seedId": "tag-a1",
+      "owner": "u-alpha-user1",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "",
+          "kind": "list",
+          "unprivStatus": 200,
+          "unprivContainsSeed": true,
+          "controlActor": "u-alpha-user1"
+        },
+        {
+          "method": "GET",
+          "path": "/{id}",
+          "kind": "item",
+          "unprivStatus": 200,
+          "controlActor": "u-alpha-user1"
+        },
+        {
+          "method": "PUT",
+          "path": "/{id}",
+          "kind": "item",
+          "body": {
+            "label": "reimbursable",
+            "color": "orange"
+          },
+          "unprivStatus": 403,
+          "controlActor": "u-alpha-user1"
+        },
+        {
+          "method": "DELETE",
+          "path": "/{id}",
+          "kind": "item",
+          "unprivStatus": 403,
+          "controlActor": null
+        },
+        {
+          "method": "POST",
+          "path": "/{id}/attach/ex-a1",
+          "kind": "item",
+          "unprivStatus": 403,
+          "controlActor": "u-alpha-user1"
+        }
+      ]
+    },
+    {
+      "key": "notes",
+      "style": "A",
+      "base": "/api/notes",
+      "seedId": "note-a1",
+      "owner": "u-alpha-user1",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "",
+          "kind": "list",
+          "unprivStatus": 200,
+          "unprivContainsSeed": false,
+          "controlActor": "u-alpha-user1"
+        },
+        {
+          "method": "GET",
+          "path": "/{id}",
+          "kind": "item",
+          "unprivStatus": 403,
+          "controlActor": "u-alpha-user1"
+        },
+        {
+          "method": "PUT",
+          "path": "/{id}",
+          "kind": "item",
+          "body": {
+            "body": "Call the supplier about the invoice",
+            "linkedExpenseId": "ex-a1"
+          },
+          "unprivStatus": 403,
+          "controlActor": "u-alpha-user1"
+        },
+        {
+          "method": "DELETE",
+          "path": "/{id}",
+          "kind": "item",
+          "unprivStatus": 403,
+          "controlActor": null
+        }
+      ]
+    },
+    {
+      "key": "reminders",
+      "style": "B",
+      "base": "/api/reminders",
+      "seedId": "rem-a1",
+      "owner": "u-alpha-user1",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "",
+          "kind": "list",
+          "unprivStatus": 200,
+          "unprivContainsSeed": false,
+          "controlActor": "u-alpha-user1"
+        },
+        {
+          "method": "GET",
+          "path": "/{id}",
+          "kind": "item",
+          "unprivStatus": 403,
+          "controlActor": "u-alpha-user1"
+        },
+        {
+          "method": "PUT",
+          "path": "/{id}",
+          "kind": "item",
+          "body": {
+            "title": "Submit March expenses",
+            "dueOn": "2025-04-02",
+            "done": false
+          },
+          "unprivStatus": 403,
+          "controlActor": "u-alpha-user1"
+        },
+        {
+          "method": "DELETE",
+          "path": "/{id}",
+          "kind": "item",
+          "unprivStatus": 403,
+          "controlActor": null
+        },
+        {
+          "method": "POST",
+          "path": "/{id}/snooze",
+          "kind": "item",
+          "unprivStatus": 403,
+          "controlActor": "u-alpha-user1"
+        }
+      ]
+    },
+    {
+      "key": "saved-filters",
+      "style": "B",
+      "base": "/api/saved-filters",
+      "seedId": "flt-a1",
+      "owner": "u-alpha-user1",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "",
+          "kind": "list",
+          "unprivStatus": 200,
+          "unprivContainsSeed": false,
+          "controlActor": "u-alpha-user1"
+        },
+        {
+          "method": "GET",
+          "path": "/{id}",
+          "kind": "item",
+          "unprivStatus": 403,
+          "controlActor": "u-alpha-user1"
+        },
+        {
+          "method": "PUT",
+          "path": "/{id}",
+          "kind": "item",
+          "body": {
+            "name": "Large expenses",
+            "query": "hotel"
+          },
+          "unprivStatus": 403,
+          "controlActor": "u-alpha-user1"
+        },
+        {
+          "method": "DELETE",
+          "path": "/{id}",
+          "kind": "item",
+          "unprivStatus": 403,
+          "controlActor": null
+        },
+        {
+          "method": "GET",
+          "path": "/{id}/apply",
+          "kind": "item",
+          "unprivStatus": 403,
+          "controlActor": "u-alpha-user1"
+        }
+      ]
+    },
+    {
+      "key": "currencies",
+      "style": "D",
+      "base": "/api/currencies",
+      "seedId": "cur-a1",
+      "owner": "u-alpha-user1",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "",
+          "kind": "list",
+          "unprivStatus": 200,
+          "unprivContainsSeed": true,
+          "controlActor": "u-alpha-user1"
+        },
+        {
+          "method": "GET",
+          "path": "/{id}",
+          "kind": "item",
+          "unprivStatus": 200,
+          "controlActor": "u-alpha-user1"
+        },
+        {
+          "method": "PUT",
+          "path": "/{id}",
+          "kind": "item",
+          "body": {
+            "code": "EUR",
+            "symbol": "EUR",
+            "rateMicros": 1000000
+          },
+          "unprivStatus": 403,
+          "controlActor": "u-alpha-mgr"
+        },
+        {
+          "method": "DELETE",
+          "path": "/{id}",
+          "kind": "item",
+          "unprivStatus": 403,
+          "controlActor": null
+        }
+      ]
+    },
+    {
+      "key": "tax-rates",
+      "style": "D",
+      "base": "/api/tax-rates",
+      "seedId": "tax-a1",
+      "owner": "u-alpha-user1",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "",
+          "kind": "list",
+          "unprivStatus": 200,
+          "unprivContainsSeed": true,
+          "controlActor": "u-alpha-user1"
+        },
+        {
+          "method": "GET",
+          "path": "/{id}",
+          "kind": "item",
+          "unprivStatus": 200,
+          "controlActor": "u-alpha-user1"
+        },
+        {
+          "method": "PUT",
+          "path": "/{id}",
+          "kind": "item",
+          "body": {
+            "name": "Standard",
+            "percentBp": 1900,
+            "region": "DE"
+          },
+          "unprivStatus": 403,
+          "controlActor": "u-alpha-mgr"
+        },
+        {
+          "method": "DELETE",
+          "path": "/{id}",
+          "kind": "item",
+          "unprivStatus": 403,
+          "controlActor": null
+        },
+        {
+          "method": "GET",
+          "path": "/{id}/apply?amountCents=1000",
+          "kind": "item",
+          "unprivStatus": 200,
+          "controlActor": "u-alpha-user1"
+        }
+      ]
+    },
+    {
+      "key": "contracts",
+      "style": "E",
+      "base": "/api/contracts",
+      "seedId": "con-a1",
+      "owner": "u-alpha-mgr",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "",
+          "kind": "list",
+          "unprivStatus": 403,
+          "unprivContainsSeed": false,
+          "controlActor": "u-alpha-mgr"
+        },
+        {
+          "method": "GET",
+          "path": "/{id}",
+          "kind": "item",
+          "unprivStatus": 403,
+          "controlActor": "u-alpha-mgr"
+        },
+        {
+          "method": "PUT",
+          "path": "/{id}",
+          "kind": "item",
+          "body": {
+            "title": "Office lease",
+            "counterparty": "Harbor Properties",
+            "startsOn": "2024-01-01",
+            "endsOn": "2026-12-31",
+            "valueCents": 4800000
+          },
+          "unprivStatus": 403,
+          "controlActor": "u-alpha-mgr"
+        },
+        {
+          "method": "DELETE",
+          "path": "/{id}",
+          "kind": "item",
+          "unprivStatus": 403,
+          "controlActor": null
+        },
+        {
+          "method": "GET",
+          "path": "/expiring",
+          "kind": "list",
+          "unprivStatus": 403,
+          "unprivContainsSeed": false,
+          "controlActor": "u-alpha-mgr"
+        }
+      ]
+    },
+    {
+      "key": "departments",
+      "style": "D",
+      "base": "/api/departments",
+      "seedId": "dep-a1",
+      "owner": "u-alpha-user1",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "",
+          "kind": "list",
+          "unprivStatus": 200,
+          "unprivContainsSeed": true,
+          "controlActor": "u-alpha-user1"
+        },
+        {
+          "method": "GET",
+          "path": "/{id}",
+          "kind": "item",
+          "unprivStatus": 200,
+          "controlActor": "u-alpha-user1"
+        },
+        {
+          "method": "PUT",
+          "path": "/{id}",
+          "kind": "item",
+          "body": {
+            "name": "Operations",
+            "code": "OPS",
+            "headcount": 42
+          },
+          "unprivStatus": 403,
+          "controlActor": "u-alpha-mgr"
+        },
+        {
+          "method": "DELETE",
+          "path": "/{id}",
+          "kind": "item",
+          "unprivStatus": 403,
+          "controlActor": null
+        }
+      ]
+    },
+    {
+      "key": "locations",
+      "style": "D",
+      "base": "/api/locations",
+      "seedId": "loc-a1",
+      "owner": "u-alpha-user1",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "",
+          "kind": "list",
+          "unprivStatus": 200,
+          "unprivContainsSeed": true,
+          "controlActor": "u-alpha-user1"
+        },
+        {
+          "method": "GET",
+          "path": "/{id}",
+          "kind": "item",
+          "unprivStatus": 200,
+          "controlActor": "u-alpha-user1"
+        },
+        {
+          "method": "PUT",
+          "path": "/{id}",
+          "kind": "item",
+          "body": {
+            "name": "Head office",
+            "city": "Hamburg",
+            "country": "DE"
+          },
+          "unprivStatus": 403,
+          "controlActor": "u-alpha-mgr"
+        },
+        {
+          "method": "DELETE",
+          "path": "/{id}",
+          "kind": "item",
+          "unprivStatus": 403,
+          "controlActor": null
+        }
+      ]
+    },
+    {
+      "key": "assets",
+      "style": "C",
+      "base": "/api/assets",
+      "seedId": "ast-a1",
+      "owner": "u-alpha-user1",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "",
+          "kind": "list",
+          "unprivStatus": 200,
+          "unprivContainsSeed": true,
+          "controlActor": "u-alpha-user1"
+        },
+        {
+          "method": "GET",
+          "path": "/{id}",
+          "kind": "item",
+          "unprivStatus": 200,
+          "controlActor": "u-alpha-user1"
+        },
+        {
+          "method": "PUT",
+          "path": "/{id}",
+          "kind": "item",
+          "body": {
+            "label": "Laptop 14 inch",
+            "serialNumber": "LT-88231",
+            "purchasedOn": "2024-09-12",
+            "valueCents": 129900
+          },
+          "unprivStatus": 403,
+          "controlActor": "u-alpha-user1"
+        },
+        {
+          "method": "DELETE",
+          "path": "/{id}",
+          "kind": "item",
+          "unprivStatus": 403,
+          "controlActor": null
+        }
+      ]
+    },
+    {
+      "key": "cards",
+      "style": "A",
+      "base": "/api/cards",
+      "seedId": "crd-a1",
+      "owner": "u-alpha-user1",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "",
+          "kind": "list",
+          "unprivStatus": 200,
+          "unprivContainsSeed": false,
+          "controlActor": "u-alpha-user1"
+        },
+        {
+          "method": "GET",
+          "path": "/{id}",
+          "kind": "item",
+          "unprivStatus": 403,
+          "controlActor": "u-alpha-user1"
+        },
+        {
+          "method": "PUT",
+          "path": "/{id}",
+          "kind": "item",
+          "body": {
+            "nickname": "Travel card",
+            "last4": "4417",
+            "limitCents": 500000,
+            "frozen": false
+          },
+          "unprivStatus": 403,
+          "controlActor": "u-alpha-user1"
+        },
+        {
+          "method": "DELETE",
+          "path": "/{id}",
+          "kind": "item",
+          "unprivStatus": 403,
+          "controlActor": null
+        },
+        {
+          "method": "POST",
+          "path": "/{id}/freeze",
+          "kind": "item",
+          "unprivStatus": 403,
+          "controlActor": "u-alpha-user1"
+        }
+      ]
+    },
+    {
+      "key": "mileage",
+      "style": "A",
+      "base": "/api/mileage",
+      "seedId": "mil-a1",
+      "owner": "u-alpha-user1",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "",
+          "kind": "list",
+          "unprivStatus": 200,
+          "unprivContainsSeed": false,
+          "controlActor": "u-alpha-user1"
+        },
+        {
+          "method": "GET",
+          "path": "/{id}",
+          "kind": "item",
+          "unprivStatus": 403,
+          "controlActor": "u-alpha-user1"
+        },
+        {
+          "method": "PUT",
+          "path": "/{id}",
+          "kind": "item",
+          "body": {
+            "purpose": "Client visit",
+            "tripDate": "2025-03-14",
+            "distanceKm": 86
+          },
+          "unprivStatus": 403,
+          "controlActor": "u-alpha-user1"
+        },
+        {
+          "method": "DELETE",
+          "path": "/{id}",
+          "kind": "item",
+          "unprivStatus": 403,
+          "controlActor": null
+        }
+      ]
+    },
+    {
+      "key": "per-diems",
+      "style": "C",
+      "base": "/api/per-diems",
+      "seedId": "pdm-a1",
+      "owner": "u-alpha-user1",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "",
+          "kind": "list",
+          "unprivStatus": 200,
+          "unprivContainsSeed": true,
+          "controlActor": "u-alpha-user1"
+        },
+        {
+          "method": "GET",
+          "path": "/{id}",
+          "kind": "item",
+          "unprivStatus": 200,
+          "controlActor": "u-alpha-user1"
+        },
+        {
+          "method": "PUT",
+          "path": "/{id}",
+          "kind": "item",
+          "body": {
+            "destination": "Vienna",
+            "days": 3,
+            "rateCents": 6800
+          },
+          "unprivStatus": 403,
+          "controlActor": "u-alpha-user1"
+        },
+        {
+          "method": "DELETE",
+          "path": "/{id}",
+          "kind": "item",
+          "unprivStatus": 403,
+          "controlActor": null
+        }
+      ]
+    },
+    {
+      "key": "reports",
+      "style": "A",
+      "base": "/api/reports",
+      "seedId": "rpt-a1",
+      "owner": "u-alpha-user1",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "",
+          "kind": "list",
+          "unprivStatus": 200,
+          "unprivContainsSeed": false,
+          "controlActor": "u-alpha-user1"
+        },
+        {
+          "method": "GET",
+          "path": "/{id}",
+          "kind": "item",
+          "unprivStatus": 403,
+          "controlActor": "u-alpha-user1"
+        },
+        {
+          "method": "PUT",
+          "path": "/{id}",
+          "kind": "item",
+          "body": {
+            "title": "Quarterly spend",
+            "kind": "spend",
+            "parameters": "quarter=2025Q1"
+          },
+          "unprivStatus": 403,
+          "controlActor": "u-alpha-user1"
+        },
+        {
+          "method": "DELETE",
+          "path": "/{id}",
+          "kind": "item",
+          "unprivStatus": 403,
+          "controlActor": null
+        },
+        {
+          "method": "POST",
+          "path": "/{id}/run",
+          "kind": "item",
+          "unprivStatus": 403,
+          "controlActor": "u-alpha-user1"
+        }
+      ]
+    },
+    {
+      "key": "notifications",
+      "style": "F",
+      "base": "/api/notifications",
+      "seedId": "ntf-a1",
+      "owner": "u-alpha-user1",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "",
+          "kind": "list",
+          "unprivStatus": 200,
+          "unprivContainsSeed": false,
+          "controlActor": "u-alpha-user1"
+        },
+        {
+          "method": "GET",
+          "path": "/{id}",
+          "kind": "item",
+          "unprivStatus": 403,
+          "controlActor": "u-alpha-user1"
+        },
+        {
+          "method": "PUT",
+          "path": "/{id}",
+          "kind": "item",
+          "body": {
+            "subject": "Expense approved",
+            "body": "Your expense was approved.",
+            "read": false
+          },
+          "unprivStatus": 403,
+          "controlActor": "u-alpha-user1"
+        },
+        {
+          "method": "DELETE",
+          "path": "/{id}",
+          "kind": "item",
+          "unprivStatus": 403,
+          "controlActor": null
+        },
+        {
+          "method": "POST",
+          "path": "/{id}/read",
+          "kind": "item",
+          "unprivStatus": 403,
+          "controlActor": "u-alpha-user1"
+        }
+      ]
+    },
+    {
+      "key": "preferences",
+      "style": "F",
+      "base": "/api/preferences",
+      "seedId": "prf-a1",
+      "owner": "u-alpha-user1",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "",
+          "kind": "list",
+          "unprivStatus": 200,
+          "unprivContainsSeed": false,
+          "controlActor": "u-alpha-user1"
+        },
+        {
+          "method": "GET",
+          "path": "/{id}",
+          "kind": "item",
+          "unprivStatus": 403,
+          "controlActor": "u-alpha-user1"
+        },
+        {
+          "method": "PUT",
+          "path": "/{id}",
+          "kind": "item",
+          "body": {
+            "locale": "de-DE",
+            "timezone": "Europe/Berlin",
+            "digest": true
+          },
+          "unprivStatus": 403,
+          "controlActor": "u-alpha-user1"
+        },
+        {
+          "method": "DELETE",
+          "path": "/{id}",
+          "kind": "item",
+          "unprivStatus": 403,
+          "controlActor": null
+        }
+      ]
+    },
+    {
+      "key": "api-keys",
+      "style": "F",
+      "base": "/api/api-keys",
+      "seedId": "key-a1",
+      "owner": "u-alpha-user1",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "",
+          "kind": "list",
+          "unprivStatus": 200,
+          "unprivContainsSeed": false,
+          "controlActor": "u-alpha-user1"
+        },
+        {
+          "method": "GET",
+          "path": "/{id}",
+          "kind": "item",
+          "unprivStatus": 403,
+          "controlActor": "u-alpha-user1"
+        },
+        {
+          "method": "PUT",
+          "path": "/{id}",
+          "kind": "item",
+          "body": {
+            "label": "Expense sync",
+            "prefix": "lk_3f9a",
+            "scope": "expenses:read"
+          },
+          "unprivStatus": 403,
+          "controlActor": "u-alpha-user1"
+        },
+        {
+          "method": "DELETE",
+          "path": "/{id}",
+          "kind": "item",
+          "unprivStatus": 403,
+          "controlActor": null
+        },
+        {
+          "method": "POST",
+          "path": "/{id}/rotate",
+          "kind": "item",
+          "unprivStatus": 403,
+          "controlActor": "u-alpha-user1"
+        }
+      ]
+    },
+    {
+      "key": "audit-entries",
+      "style": "E",
+      "base": "/api/audit-entries",
+      "seedId": "aud-a1",
+      "owner": "u-alpha-mgr",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "",
+          "kind": "list",
+          "unprivStatus": 403,
+          "unprivContainsSeed": false,
+          "controlActor": "u-alpha-mgr"
+        },
+        {
+          "method": "GET",
+          "path": "/{id}",
+          "kind": "item",
+          "unprivStatus": 403,
+          "controlActor": "u-alpha-mgr"
+        }
+      ]
+    },
+    {
+      "key": "templates",
+      "style": "D",
+      "base": "/api/templates",
+      "seedId": "tpl-a1",
+      "owner": "u-alpha-user1",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "",
+          "kind": "list",
+          "unprivStatus": 200,
+          "unprivContainsSeed": true,
+          "controlActor": "u-alpha-user1"
+        },
+        {
+          "method": "GET",
+          "path": "/{id}",
+          "kind": "item",
+          "unprivStatus": 200,
+          "controlActor": "u-alpha-user1"
+        },
+        {
+          "method": "PUT",
+          "path": "/{id}",
+          "kind": "item",
+          "body": {
+            "name": "Monthly summary",
+            "kind": "report",
+            "body": "Total: {{total}}"
+          },
+          "unprivStatus": 403,
+          "controlActor": "u-alpha-mgr"
+        },
+        {
+          "method": "DELETE",
+          "path": "/{id}",
+          "kind": "item",
+          "unprivStatus": 403,
+          "controlActor": null
+        },
+        {
+          "method": "POST",
+          "path": "/{id}/publish",
+          "kind": "item",
+          "unprivStatus": 403,
+          "controlActor": "u-alpha-mgr"
+        }
+      ]
+    },
+    {
+      "key": "policies",
+      "style": "E",
+      "base": "/api/policies",
+      "seedId": "pol-a1",
+      "owner": "u-alpha-mgr",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "",
+          "kind": "list",
+          "unprivStatus": 403,
+          "unprivContainsSeed": false,
+          "controlActor": "u-alpha-mgr"
+        },
+        {
+          "method": "GET",
+          "path": "/{id}",
+          "kind": "item",
+          "unprivStatus": 403,
+          "controlActor": "u-alpha-mgr"
+        },
+        {
+          "method": "PUT",
+          "path": "/{id}",
+          "kind": "item",
+          "body": {
+            "name": "Meal limit",
+            "ruleKind": "per-day",
+            "limitCents": 7500,
+            "active": true
+          },
+          "unprivStatus": 403,
+          "controlActor": "u-alpha-mgr"
+        },
+        {
+          "method": "DELETE",
+          "path": "/{id}",
+          "kind": "item",
+          "unprivStatus": 403,
+          "controlActor": null
+        }
+      ]
+    },
+    {
+      "key": "webhooks",
+      "style": "E",
+      "base": "/api/webhooks",
+      "seedId": "whk-a1",
+      "owner": "u-alpha-mgr",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "",
+          "kind": "list",
+          "unprivStatus": 403,
+          "unprivContainsSeed": false,
+          "controlActor": "u-alpha-mgr"
+        },
+        {
+          "method": "GET",
+          "path": "/{id}",
+          "kind": "item",
+          "unprivStatus": 403,
+          "controlActor": "u-alpha-mgr"
+        },
+        {
+          "method": "PUT",
+          "path": "/{id}",
+          "kind": "item",
+          "body": {
+            "url": "https://hooks.example.test/expenses",
+            "event": "expense.approved",
+            "active": true
+          },
+          "unprivStatus": 403,
+          "controlActor": "u-alpha-mgr"
+        },
+        {
+          "method": "DELETE",
+          "path": "/{id}",
+          "kind": "item",
+          "unprivStatus": 403,
+          "controlActor": null
+        },
+        {
+          "method": "POST",
+          "path": "/{id}/ping",
+          "kind": "item",
+          "unprivStatus": 403,
+          "controlActor": "u-alpha-mgr"
+        }
+      ]
+    },
+    {
+      "key": "budgets",
+      "style": "B",
+      "base": "/api/budgets",
+      "seedId": "bud-a1",
+      "owner": "u-alpha-user1",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "",
+          "kind": "list",
+          "unprivStatus": 200,
+          "unprivContainsSeed": false,
+          "controlActor": "u-alpha-user1"
+        },
+        {
+          "method": "GET",
+          "path": "/{id}",
+          "kind": "item",
+          "unprivStatus": 403,
+          "controlActor": "u-alpha-user1"
+        },
+        {
+          "method": "PUT",
+          "path": "/{id}",
+          "kind": "item",
+          "body": {
+            "name": "Q2 travel",
+            "periodStart": "2025-04-01",
+            "limitCents": 2500000,
+            "spentCents": 640000
+          },
+          "unprivStatus": 403,
+          "controlActor": "u-alpha-user1"
+        },
+        {
+          "method": "DELETE",
+          "path": "/{id}",
+          "kind": "item",
+          "unprivStatus": 403,
+          "controlActor": null
+        },
+        {
+          "method": "GET",
+          "path": "/{id}/remaining",
+          "kind": "item",
+          "unprivStatus": 403,
+          "controlActor": "u-alpha-user1"
+        }
+      ]
+    },
+    {
+      "key": "cost-centers",
+      "style": "D",
+      "base": "/api/cost-centers",
+      "seedId": "cc-a1",
+      "owner": "u-alpha-user1",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "",
+          "kind": "list",
+          "unprivStatus": 200,
+          "unprivContainsSeed": true,
+          "controlActor": "u-alpha-user1"
+        },
+        {
+          "method": "GET",
+          "path": "/{id}",
+          "kind": "item",
+          "unprivStatus": 200,
+          "controlActor": "u-alpha-user1"
+        },
+        {
+          "method": "PUT",
+          "path": "/{id}",
+          "kind": "item",
+          "body": {
+            "code": "CC-100",
+            "name": "Sales travel",
+            "parentCode": "CC-000"
+          },
+          "unprivStatus": 403,
+          "controlActor": "u-alpha-mgr"
+        },
+        {
+          "method": "DELETE",
+          "path": "/{id}",
+          "kind": "item",
+          "unprivStatus": 403,
+          "controlActor": null
+        }
+      ]
+    },
+    {
+      "key": "purchase-orders",
+      "style": "A",
+      "base": "/api/purchase-orders",
+      "seedId": "po-a1",
+      "owner": "u-alpha-user1",
+      "routes": [
+        {
+          "method": "GET",
+          "path": "",
+          "kind": "list",
+          "unprivStatus": 200,
+          "unprivContainsSeed": false,
+          "controlActor": "u-alpha-user1"
+        },
+        {
+          "method": "GET",
+          "path": "/{id}",
+          "kind": "item",
+          "unprivStatus": 403,
+          "controlActor": "u-alpha-user1"
+        },
+        {
+          "method": "PUT",
+          "path": "/{id}",
+          "kind": "item",
+          "body": {
+            "number": "PO-2025-0041",
+            "vendorRef": "ven-a1",
+            "totalCents": 182000,
+            "status": "OPEN"
+          },
+          "unprivStatus": 403,
+          "controlActor": "u-alpha-user1"
+        },
+        {
+          "method": "DELETE",
+          "path": "/{id}",
+          "kind": "item",
+          "unprivStatus": 403,
+          "controlActor": null
+        },
+        {
+          "method": "POST",
+          "path": "/{id}/receive",
+          "kind": "item",
+          "unprivStatus": 403,
+          "controlActor": "u-alpha-user1"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,256 @@
+{
+  "routes": [
+    {
+      "name": "customers",
+      "path": "/api/customers",
+      "id": "cus_a1",
+      "methods": [
+        "GET",
+        "PUT",
+        "DELETE"
+      ]
+    },
+    {
+      "name": "products",
+      "path": "/api/products",
+      "id": "prd_a1",
+      "methods": [
+        "GET",
+        "PUT",
+        "DELETE"
+      ]
+    },
+    {
+      "name": "subscriptions",
+      "path": "/api/subscriptions",
+      "id": "sub_a1",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "name": "tickets",
+      "path": "/api/tickets",
+      "id": "tkt_a1",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "name": "shipments",
+      "path": "/api/shipments",
+      "id": "shp_a1",
+      "methods": [
+        "GET"
+      ]
+    },
+    {
+      "name": "invoices-put",
+      "path": "/api/invoices",
+      "id": "inv_a1",
+      "methods": [
+        "PUT"
+      ]
+    },
+    {
+      "name": "contacts",
+      "path": "/api/contacts",
+      "id": "cnt_a1",
+      "methods": [
+        "GET",
+        "PUT",
+        "DELETE"
+      ]
+    },
+    {
+      "name": "deals",
+      "path": "/api/deals",
+      "id": "dl_a1",
+      "methods": [
+        "GET",
+        "PUT",
+        "DELETE"
+      ]
+    },
+    {
+      "name": "leads",
+      "path": "/api/leads",
+      "id": "ld_a1",
+      "methods": [
+        "GET",
+        "PUT",
+        "DELETE"
+      ]
+    },
+    {
+      "name": "campaigns",
+      "path": "/api/campaigns",
+      "id": "cmp_a1",
+      "methods": [
+        "GET",
+        "PUT",
+        "DELETE"
+      ]
+    },
+    {
+      "name": "activities",
+      "path": "/api/activities",
+      "id": "act_a1",
+      "methods": [
+        "GET",
+        "PUT",
+        "DELETE"
+      ]
+    },
+    {
+      "name": "notes",
+      "path": "/api/notes",
+      "id": "nt_a1",
+      "methods": [
+        "GET",
+        "PUT",
+        "DELETE"
+      ]
+    },
+    {
+      "name": "tags",
+      "path": "/api/tags",
+      "id": "tg_a1",
+      "methods": [
+        "GET",
+        "PUT",
+        "DELETE"
+      ]
+    },
+    {
+      "name": "tasks",
+      "path": "/api/tasks",
+      "id": "tsk_a1",
+      "methods": [
+        "GET",
+        "PUT",
+        "DELETE"
+      ]
+    },
+    {
+      "name": "projects",
+      "path": "/api/projects",
+      "id": "prj_a1",
+      "methods": [
+        "GET",
+        "PUT",
+        "DELETE"
+      ]
+    },
+    {
+      "name": "warehouses",
+      "path": "/api/warehouses",
+      "id": "wh_a1",
+      "methods": [
+        "GET",
+        "PUT",
+        "DELETE"
+      ]
+    },
+    {
+      "name": "suppliers",
+      "path": "/api/suppliers",
+      "id": "sup_a1",
+      "methods": [
+        "GET",
+        "PUT",
+        "DELETE"
+      ]
+    },
+    {
+      "name": "purchaseOrders",
+      "path": "/api/purchase-orders",
+      "id": "po_a1",
+      "methods": [
+        "GET",
+        "PUT",
+        "DELETE"
+      ]
+    },
+    {
+      "name": "documents",
+      "path": "/api/documents",
+      "id": "doc_a1",
+      "methods": [
+        "GET",
+        "PUT",
+        "DELETE"
+      ]
+    },
+    {
+      "name": "expenses",
+      "path": "/api/expenses",
+      "id": "exp_a1",
+      "methods": [
+        "GET",
+        "PUT",
+        "DELETE"
+      ]
+    },
+    {
+      "name": "categories",
+      "path": "/api/categories",
+      "id": "cat_a1",
+      "methods": [
+        "GET",
+        "PUT",
+        "DELETE"
+      ]
+    },
+    {
+      "name": "coupons",
+      "path": "/api/coupons",
+      "id": "cpn_a1",
+      "methods": [
+        "GET",
+        "PUT",
+        "DELETE"
+      ]
+    },
+    {
+      "name": "priceLists",
+      "path": "/api/price-lists",
+      "id": "pl_a1",
+      "methods": [
+        "GET",
+        "PUT",
+        "DELETE"
+      ]
+    },
+    {
+      "name": "taxRates",
+      "path": "/api/tax-rates",
+      "id": "tax_a1",
+      "methods": [
+        "GET",
+        "PUT",
+        "DELETE"
+      ]
+    },
+    {
+      "name": "apiKeys",
+      "path": "/api/api-keys",
+      "id": "key_a1",
+      "methods": [
+        "GET",
+        "PUT",
+        "DELETE"
+      ]
+    },
+    {
+      "name": "webhookEndpoints",
+      "path": "/api/webhook-endpoints",
+      "id": "whe_a1",
+      "methods": [
+        "GET",
+        "PUT",
+        "DELETE"
+      ]
+    }
+  ]
+}
